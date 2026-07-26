@@ -1500,6 +1500,7 @@ async def test_run_accepted_note_edit_threads_metadata_into_preparer() -> None:
         ("synced", None, "file-checksum"),
         ("checksum-missing", None, "old-checksum"),
         ("pending-before-write", "file-checksum", "file-checksum"),
+        ("failed-before-write", "file-checksum", "file-checksum"),
         ("published-checksum-stale", "accepted-checksum", "accepted-checksum"),
     ],
 )
@@ -1524,6 +1525,10 @@ async def test_run_accepted_note_move_carries_previous_path_and_materialized_cle
         note_content.db_version = 2
         note_content.db_checksum = "accepted-checksum"
         note_content.file_write_status = "writing"
+    elif publication_state == "failed-before-write":
+        note_content.db_version = 2
+        note_content.db_checksum = "accepted-checksum"
+        note_content.file_write_status = "failed"
     else:
         note_content.db_version = 2
         note_content.db_checksum = "accepted-checksum"

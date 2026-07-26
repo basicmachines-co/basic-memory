@@ -367,7 +367,7 @@ async def test_move_retires_vacate_marker_after_source_replacement(
 
 @pytest.mark.parametrize(
     "publication_state",
-    ["synced", "pending-before-write", "published-checksum-stale"],
+    ["synced", "pending-before-write", "failed-before-write", "published-checksum-stale"],
 )
 @pytest.mark.parametrize("force_full", [False, True], ids=["observed", "force-full"])
 @pytest.mark.asyncio
@@ -404,10 +404,14 @@ async def test_put_rename_lingering_source_is_not_reindexed(
     materialized_checksum = sha256(source_path.read_bytes()).hexdigest()
     source_checksum = materialized_checksum
 
-    if publication_state in {"pending-before-write", "published-checksum-stale"}:
+    if publication_state in {
+        "pending-before-write",
+        "failed-before-write",
+        "published-checksum-stale",
+    }:
         pending_markdown = (
             source_path.read_text(encoding="utf-8").rstrip()
-            + "\n\nThese accepted bytes reached storage before publication.\n"
+            + "\n\nThese accepted bytes differ from the last published bytes.\n"
         )
         accepted_checksum = sha256(pending_markdown.encode()).hexdigest()
         if publication_state == "published-checksum-stale":
@@ -421,9 +425,11 @@ async def test_put_rename_lingering_source_is_not_reindexed(
             note_content.markdown_content = pending_markdown
             note_content.db_version += 1
             note_content.db_checksum = accepted_checksum
-            note_content.file_write_status = (
-                "writing" if publication_state == "published-checksum-stale" else "pending"
-            )
+            note_content.file_write_status = {
+                "pending-before-write": "pending",
+                "failed-before-write": "failed",
+                "published-checksum-stale": "writing",
+            }[publication_state]
             assert note_content.file_version is not None
             assert note_content.file_version < note_content.db_version
             assert note_content.file_checksum == materialized_checksum

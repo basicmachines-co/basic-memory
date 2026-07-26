@@ -360,7 +360,7 @@ async def resolve_accepted_note_source_checksum(
 ) -> RuntimeFileChecksum:
     """Resolve the exact source bytes when an in-flight publication is ambiguous."""
     observed_file_checksum = None
-    if current_note_content.file_write_status in {"pending", "writing"}:
+    if current_note_content.file_write_status in {"pending", "writing", "failed"}:
         observed_file_checksum = await preparer_factory.load_current_file_checksum(
             project,
             file_path,
