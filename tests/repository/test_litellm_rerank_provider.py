@@ -3,6 +3,7 @@
 import types
 
 import pytest
+from pydantic import BaseModel, ValidationError
 
 from basic_memory.repository.litellm_rerank_provider import LiteLLMRerankProvider
 from basic_memory.repository.semantic_errors import (
@@ -22,6 +23,10 @@ class _TransientProviderError(RuntimeError):
 
 class _BadGatewayError(RuntimeError):
     pass
+
+
+class _SDKRerankResponse(BaseModel):
+    results: list[dict]
 
 
 def _fake_litellm(response, recorder: dict, *, exc: Exception | None = None):
@@ -204,6 +209,22 @@ async def test_bad_gateway_error_is_classified_for_fallback(monkeypatch):
         await provider.rerank("q", ["a"])
 
     assert caught.value.__cause__ is bad_gateway_error
+
+
+@pytest.mark.asyncio
+async def test_sdk_response_validation_error_is_provider_contract_error(monkeypatch):
+    with pytest.raises(ValidationError) as invalid_response:
+        _SDKRerankResponse.model_validate({})
+    monkeypatch.setattr(
+        "basic_memory.repository.litellm_rerank_provider._import_litellm",
+        lambda: _fake_litellm(None, {}, exc=invalid_response.value),
+    )
+    provider = LiteLLMRerankProvider()
+
+    with pytest.raises(RerankProviderContractError, match="invalid response") as caught:
+        await provider.rerank("q", ["a"])
+
+    assert caught.value.__cause__ is invalid_response.value
 
 
 @pytest.mark.asyncio

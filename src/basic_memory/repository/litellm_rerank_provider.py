@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import ValidationError
+
 from basic_memory.repository.litellm_provider import _import_litellm
 from basic_memory.repository.rerank_provider import RerankProvider, validate_rerank_scores
 from basic_memory.repository.semantic_errors import (
@@ -71,6 +73,13 @@ class LiteLLMRerankProvider(RerankProvider):
         except transient_errors as exc:
             raise RerankTransientError(
                 f"Rerank provider is temporarily unavailable for model {self.model_name!r}."
+            ) from exc
+        except ValidationError as exc:
+            # LiteLLM constructs its typed RerankResponse inside the awaited call.
+            # A validation failure therefore describes malformed upstream response
+            # data, not an invalid search request from our caller.
+            raise RerankProviderContractError(
+                f"Rerank provider returned an invalid response for model {self.model_name!r}."
             ) from exc
         # litellm.arerank returns RerankResponse (Cohere response format): `results`
         # is an optional list of TypedDict items with required `index` and
