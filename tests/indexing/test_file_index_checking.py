@@ -59,6 +59,9 @@ class FakeSessionMaker:
     def __call__(self) -> FakeSessionContext:
         return FakeSessionContext(session=self.session)
 
+    def begin(self) -> FakeSessionContext:
+        return FakeSessionContext(session=self.session)
+
 
 @dataclass(slots=True)
 class RecordingChecksumRepository:
@@ -125,10 +128,14 @@ class StubMoveVacateSource:
 
     markers: dict[str, MoveVacateMarker] = field(default_factory=dict)
     calls: list[tuple[str, ...]] = field(default_factory=list)
+    clear_calls: list[tuple[str, str]] = field(default_factory=list)
 
     async def load_vacate_markers(self, file_paths: Sequence[str]) -> dict[str, MoveVacateMarker]:
         self.calls.append(tuple(file_paths))
         return {p: self.markers[p] for p in file_paths if p in self.markers}
+
+    async def clear_vacate_marker(self, file_path: str, file_checksum: str) -> None:
+        self.clear_calls.append((file_path, file_checksum))
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +169,7 @@ class FakeVacateMarkerRow:
 class FakeVacateRepository:
     markers: dict[str, FakeVacateMarkerRow]
     calls: list[tuple[object, tuple[str, ...]]] = field(default_factory=list)
+    clear_calls: list[tuple[object, str, str | None]] = field(default_factory=list)
 
     async def load_vacate_markers(
         self,
@@ -170,6 +178,15 @@ class FakeVacateRepository:
     ) -> dict[str, FakeVacateMarkerRow]:
         self.calls.append((session, tuple(file_paths)))
         return {p: self.markers[p] for p in file_paths if p in self.markers}
+
+    async def clear_vacate(
+        self,
+        session: AsyncSession,
+        *,
+        file_path: str,
+        file_checksum: str | None,
+    ) -> None:
+        self.clear_calls.append((session, file_path, file_checksum))
 
 
 @pytest.mark.asyncio
@@ -421,7 +438,7 @@ async def test_checker_indexes_replacement_note_at_a_vacated_path() -> None:
     The current checksum no longer matches the marker's source checksum, so it is indexed as new
     even though a checksum twin exists — the P1 false-skip Codex flagged.
     """
-    checker, _, _ = _orphan_checker(
+    checker, moved, vacate = _orphan_checker(
         indexed={},
         current={"koncept/note.md": "other-note-checksum"},
         markers={"koncept/note.md": MoveVacateMarker(entity_id=42, checksum="original-checksum")},
@@ -436,6 +453,8 @@ async def test_checker_indexes_replacement_note_at_a_vacated_path() -> None:
     )
 
     assert plan.paths_to_read == ("koncept/note.md",)
+    assert vacate.clear_calls == [("koncept/note.md", "original-checksum")]
+    assert moved.calls == []
 
 
 @pytest.mark.asyncio
@@ -628,11 +647,13 @@ async def test_checker_batches_move_detection_across_create_candidates() -> None
     assert [(d.path, d.status) for d in plan.decisions] == [
         ("a.md", FileIndexDecisionStatus.current),
     ]
-    # One marker query over all three candidates; one entity query over the markers found.
+    # One marker query over all three candidates; the checksum mismatch is retired before the
+    # entity lookup, so only the candidate that can still be gated needs entity facts.
     assert len(vacate.calls) == 1
     assert set(vacate.calls[0]) == {"a.md", "b.md", "c.md"}
+    assert vacate.clear_calls == [("b.md", "mismatch")]
     assert len(moved.calls) == 1
-    assert set(moved.calls[0]) == {1, 2}
+    assert moved.calls[0] == (1,)
 
 
 @pytest.mark.asyncio
@@ -687,4 +708,6 @@ async def test_repository_move_vacate_source_delegates_to_repository() -> None:
     markers = await source.load_vacate_markers(["koncept/note.md", "other.md"])
     assert markers == {"koncept/note.md": MoveVacateMarker(entity_id=42, checksum="ck")}
     assert await source.load_vacate_markers([]) == {}
+    await source.clear_vacate_marker("koncept/note.md", "ck")
     assert repo.calls == [(session, ("koncept/note.md", "other.md"))]
+    assert repo.clear_calls == [(session, "koncept/note.md", "ck")]

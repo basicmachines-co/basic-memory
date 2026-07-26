@@ -46,14 +46,20 @@ class LocalAcceptedNotePreparerFactory:
     session_maker: async_sessionmaker[AsyncSession]
     app_config: BasicMemoryConfig
 
-    def create_note_preparer(self, project: Project) -> AcceptedNoteMutationPreparer:
+    def _create_file_service(self, project: Project) -> tuple[EntityParser, FileService]:
         entity_parser = EntityParser(Path(project.path))
         markdown_processor = MarkdownProcessor(entity_parser, app_config=self.app_config)
-        file_service = FileService(
-            Path(project.path),
-            markdown_processor,
-            app_config=self.app_config,
+        return (
+            entity_parser,
+            FileService(
+                Path(project.path),
+                markdown_processor,
+                app_config=self.app_config,
+            ),
         )
+
+    def create_note_preparer(self, project: Project) -> AcceptedNoteMutationPreparer:
+        entity_parser, file_service = self._create_file_service(project)
         entity_repository = EntityRepository(project_id=project.id)
         return NotePreparation(
             NotePreparationDependencies(
@@ -64,6 +70,17 @@ class LocalAcceptedNotePreparerFactory:
                 app_config=self.app_config,
             )
         )
+
+    async def load_current_file_checksum(
+        self,
+        project: Project,
+        file_path: RuntimeFilePath,
+    ) -> RuntimeFileChecksum | None:
+        """Return the source checksum observed while accepting an ambiguous move."""
+        _, file_service = self._create_file_service(project)
+        if not await file_service.exists(file_path):
+            return None
+        return await file_service.compute_checksum(file_path)
 
 
 LocalAcceptedNoteRepositories = AcceptedNoteRepositories

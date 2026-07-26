@@ -96,14 +96,28 @@ def next_runtime_note_content_version(
 
 def select_accepted_note_source_checksum(
     current_note_content: RuntimeAcceptedNoteContentWriteSource,
+    *,
+    observed_file_checksum: RuntimeFileChecksum | None = None,
 ) -> RuntimeFileChecksum:
     """Select the checksum for source bytes vacated by an accepted path change.
 
     ``accept_write`` deliberately preserves the previously published file fields while the next
-    DB version is pending. Only a synchronized file version proves ``file_checksum`` belongs to
-    the current accepted source; otherwise ``db_checksum`` is the identity of the bytes that a
-    publication may already have written without recording its result.
+    DB version is pending. During ``pending`` or ``writing``, storage may still contain the
+    previously published bytes or may already contain the accepted DB bytes without recording its
+    result. A live checksum matching either known version resolves that ambiguity. Otherwise only
+    a synchronized file version proves ``file_checksum`` belongs to the current accepted source.
     """
+    if (
+        current_note_content.file_write_status in {"pending", "writing"}
+        and observed_file_checksum is not None
+        and observed_file_checksum
+        in {
+            current_note_content.db_checksum,
+            current_note_content.file_checksum,
+        }
+    ):
+        return observed_file_checksum
+
     file_version_is_current = (
         current_note_content.file_write_status == "synced"
         and current_note_content.file_version is not None
@@ -159,10 +173,11 @@ def plan_accepted_note_content_write(
     accepted_file_path: RuntimeFilePath,
     current_note_content: RuntimeAcceptedNoteContentWriteSource | None = None,
     existing_file_path: RuntimeFilePath | None = None,
+    source_file_checksum: RuntimeFileChecksum | None = None,
 ) -> RuntimeAcceptedNoteContentWritePlan:
     """Plan accepted DB versioning and old-file cleanup for a note_content write."""
-    source_checksum = None
-    if current_note_content is not None:
+    source_checksum = source_file_checksum
+    if source_checksum is None and current_note_content is not None:
         source_checksum = select_accepted_note_source_checksum(current_note_content)
     return RuntimeAcceptedNoteContentWritePlan(
         db_version=next_runtime_note_content_version(current_note_content),

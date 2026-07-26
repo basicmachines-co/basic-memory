@@ -135,13 +135,20 @@ class MovedEntitySource(Protocol):
 
 
 class MoveVacateSource(Protocol):
-    """Capability that reports the move-vacate marker recorded for each path."""
+    """Capability that reports and retires move-vacate markers."""
 
     async def load_vacate_markers(
         self,
         file_paths: Sequence[FileIndexPath],
     ) -> Mapping[FileIndexPath, MoveVacateMarker]:
         """Return the vacate marker for each of ``file_paths`` that carries one."""
+
+    async def clear_vacate_marker(
+        self,
+        file_path: FileIndexPath,
+        file_checksum: FileIndexChecksum,
+    ) -> None:
+        """Retire the marker only if it still describes ``file_checksum``."""
 
 
 class MoveVacateMarkerRow(Protocol):
@@ -165,6 +172,15 @@ class MoveVacateRepository(Protocol):
         file_paths: Sequence[str],
     ) -> Mapping[str, MoveVacateMarkerRow]:
         """Return the marker (moved entity id + source checksum) for each marked path."""
+
+    async def clear_vacate(
+        self,
+        session: AsyncSession,
+        *,
+        file_path: str,
+        file_checksum: str | None,
+    ) -> None:
+        """Retire the marker only if its source checksum still matches."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,7 +253,7 @@ class RepositoryMovedEntitySource:
 
 @dataclass(frozen=True, slots=True)
 class RepositoryMoveVacateSource:
-    """Resolve outstanding move-vacate markers via one batched repository lookup."""
+    """Resolve and retire outstanding move-vacate markers."""
 
     session_maker: async_sessionmaker[AsyncSession]
     vacate_repository: MoveVacateRepository
@@ -256,6 +272,19 @@ class RepositoryMoveVacateSource:
             path: MoveVacateMarker(entity_id=row.entity_id, checksum=row.file_checksum)
             for path, row in rows.items()
         }
+
+    async def clear_vacate_marker(
+        self,
+        file_path: FileIndexPath,
+        file_checksum: FileIndexChecksum,
+    ) -> None:
+        """Retire one marker in its own committed transaction."""
+        async with self.session_maker.begin() as session:
+            await self.vacate_repository.clear_vacate(
+                session,
+                file_path=file_path,
+                file_checksum=file_checksum,
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -376,10 +405,10 @@ class FileIndexChecker:
         current checksum. Such a candidate is a move orphan only when its path carries a vacate
         marker AND the object is still the moved note's content: the current checksum equals the
         marker's recorded source checksum, and either the marker's entity now holds that same
-        content at a *different* path or that destination entity has been deleted. Anything else —
-        an edit, a genuine new file, a copy that has no marker, or a path overwritten with a
-        different note's bytes (checksum no longer matches the marker) — indexes normally, so a
-        legitimate replacement is never suppressed.
+        content at a *different* path or that destination entity has been deleted. A path
+        overwritten with different bytes indexes normally and retires the old checksum-backed
+        marker, because observing a different source object proves the moved bytes no longer need
+        cleanup. A genuine new file or copy without a marker also indexes normally.
         """
         decisions = [item.decision for item in inspected]
         if self.moved_entity_source is None or self.move_vacate_source is None:
@@ -402,18 +431,33 @@ class FileIndexChecker:
                 [item.target.path for _, item in candidates]
             )
         )
+        gated_candidates: list[tuple[int, _InspectedTarget, MoveVacateMarker]] = []
+        for index, item in candidates:
+            marker = markers.get(item.target.path)
+            if marker is None:
+                continue
+            if marker.checksum is not None and marker.checksum != item.current_checksum:
+                # Trigger: a different source object now occupies the vacated path.
+                # Why: even if the process died before cleanup was enqueued, the moved bytes are
+                # gone and their marker must not suppress a later legitimate reuse of those bytes.
+                # Outcome: conditionally retire only the checksum we observed, preserving any
+                # concurrent move that refreshed the marker after this read.
+                await self.move_vacate_source.clear_vacate_marker(
+                    item.target.path,
+                    marker.checksum,
+                )
+                continue
+            gated_candidates.append((index, item, marker))
+
         marked_entity_ids = [
-            marker.entity_id for marker in markers.values() if marker.entity_id is not None
+            marker.entity_id for _, _, marker in gated_candidates if marker.entity_id is not None
         ]
         entity_facts = (
             await self.moved_entity_source.load_entity_facts_by_id(marked_entity_ids)
             if marked_entity_ids
             else {}
         )
-        for index, item in candidates:
-            marker = markers.get(item.target.path)
-            if marker is None:
-                continue
+        for index, item, marker in gated_candidates:
             moved_entity = (
                 entity_facts.get(marker.entity_id) if marker.entity_id is not None else None
             )
@@ -434,12 +478,7 @@ class FileIndexChecker:
                 # The recorded entity never actually moved off this path, so a stale/spurious
                 # marker must not lose content.
                 continue
-            if marker.checksum is not None:
-                # Source checksum recorded at move time: the leftover still holds that content, so
-                # a path overwritten with different bytes (checksum changed) is not gated.
-                if marker.checksum != item.current_checksum:
-                    continue
-            elif moved_entity.checksum != item.current_checksum:
+            if marker.checksum is None and moved_entity.checksum != item.current_checksum:
                 # Source checksum was unknown at move time (gap (a)): fall back to confirming the
                 # object is the moved entity's current content before treating it as the leftover.
                 continue

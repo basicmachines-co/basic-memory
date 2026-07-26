@@ -295,13 +295,24 @@ class _CreatePreparer:
 
 
 class _PreparerFactory:
-    def __init__(self, preparer: _CreatePreparer) -> None:
+    def __init__(
+        self,
+        preparer: _CreatePreparer,
+        *,
+        current_file_checksum: str | None = None,
+    ) -> None:
         self.preparer = preparer
+        self.current_file_checksum = current_file_checksum
         self.projects: list[Project] = []
+        self.checksum_calls: list[tuple[Project, str]] = []
 
     def create_note_preparer(self, project: Project) -> _CreatePreparer:
         self.projects.append(project)
         return self.preparer
+
+    async def load_current_file_checksum(self, project: Project, file_path: str) -> str | None:
+        self.checksum_calls.append((project, file_path))
+        return self.current_file_checksum
 
 
 class _ProjectRepository:
@@ -1484,15 +1495,17 @@ async def test_run_accepted_note_edit_threads_metadata_into_preparer() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("publication_state", "expected_source_checksum"),
+    ("publication_state", "current_file_checksum", "expected_source_checksum"),
     [
-        ("synced", "file-checksum"),
-        ("checksum-missing", "old-checksum"),
-        ("published-checksum-stale", "accepted-checksum"),
+        ("synced", None, "file-checksum"),
+        ("checksum-missing", None, "old-checksum"),
+        ("pending-before-write", "file-checksum", "file-checksum"),
+        ("published-checksum-stale", "accepted-checksum", "accepted-checksum"),
     ],
 )
 async def test_run_accepted_note_move_carries_previous_path_and_materialized_cleanup(
     publication_state: str,
+    current_file_checksum: str | None,
     expected_source_checksum: str,
     persistence_calls: tuple[AsyncMock, AsyncMock],
 ) -> None:
@@ -1507,15 +1520,22 @@ async def test_run_accepted_note_move_carries_previous_path_and_materialized_cle
     elif publication_state == "checksum-missing":
         note_content.file_version = None
         note_content.file_checksum = None
-    else:
+    elif publication_state == "published-checksum-stale":
         note_content.db_version = 2
         note_content.db_checksum = "accepted-checksum"
         note_content.file_write_status = "writing"
+    else:
+        note_content.db_version = 2
+        note_content.db_checksum = "accepted-checksum"
+        note_content.file_write_status = "pending"
     project_repository = _ProjectRepository(project)
     entity_lookup_repository = _EntityLookupRepository(by_external_id=entity)
     note_content_lookup_repository = _NoteContentLookupRepository(note_content)
     preparer = _CreatePreparer(prepared, prepared_move=prepared_move)
-    preparer_factory = _PreparerFactory(preparer)
+    preparer_factory = _PreparerFactory(
+        preparer,
+        current_file_checksum=current_file_checksum,
+    )
     pending_entity_repository = _PendingEntityRepository(entity)
     note_content_accept_repository = _NoteContentAcceptRepository(note_content)
     search_repository = _SearchRepository()
@@ -1562,6 +1582,9 @@ async def test_run_accepted_note_move_carries_previous_path_and_materialized_cle
     assert cleanup is not None
     assert cleanup.file_path == "notes/accepted.md"
     assert cleanup.file_checksum == expected_source_checksum
+    assert preparer_factory.checksum_calls == (
+        [] if publication_state == "synced" else [(project, "notes/accepted.md")]
+    )
     assert persistence_calls[0].await_count == 0
     assert persistence_calls[1].await_count == 1
 

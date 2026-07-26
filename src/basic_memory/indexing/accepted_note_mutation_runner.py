@@ -48,6 +48,7 @@ from basic_memory.runtime.storage import (
     NoteExternalId,
     ProjectExternalId,
     ProjectId,
+    RuntimeFileChecksum,
     RuntimeFilePath,
     RuntimeNoteActorKind,
     RuntimeNoteActorName,
@@ -264,6 +265,12 @@ class AcceptedNoteMutationPreparerFactory(Protocol):
 
     def create_note_preparer(self, project: Project) -> AcceptedNoteMutationPreparer: ...
 
+    async def load_current_file_checksum(
+        self,
+        project: Project,
+        file_path: RuntimeFilePath,
+    ) -> RuntimeFileChecksum | None: ...
+
 
 class AcceptedNoteMutationRepositories(Protocol):
     """Repository lookup capability set for accepted-note mutation orchestration."""
@@ -341,6 +348,26 @@ def reject_stale_base_checksum(current_db_checksum: str | None) -> NoReturn:
             kind=AcceptedNoteMutationRejectKind.conflict,
             detail=AcceptedNoteBaseChecksumConflict(db_checksum=current_db_checksum),
         )
+    )
+
+
+async def resolve_accepted_note_source_checksum(
+    *,
+    project: Project,
+    file_path: RuntimeFilePath,
+    current_note_content: NoteContent,
+    preparer_factory: AcceptedNoteMutationPreparerFactory,
+) -> RuntimeFileChecksum:
+    """Resolve the exact source bytes when an in-flight publication is ambiguous."""
+    observed_file_checksum = None
+    if current_note_content.file_write_status in {"pending", "writing"}:
+        observed_file_checksum = await preparer_factory.load_current_file_checksum(
+            project,
+            file_path,
+        )
+    return select_accepted_note_source_checksum(
+        current_note_content,
+        observed_file_checksum=observed_file_checksum,
     )
 
 
@@ -599,13 +626,19 @@ async def _run_accepted_note_update(
             dependencies=dependencies,
             missing_kind=AcceptedNoteMutationRejectKind.conflict,
         )
-        # A PUT replacement may also rename the note. Capture the accepted source bytes before
+        # A PUT replacement may also rename the note. Capture the exact source bytes before
         # persistence mutates the entity and note_content to the destination version so delayed
         # cleanup cannot let a later project index recreate the old path as a ghost.
-        vacated_source = (
-            entity.file_path,
-            select_accepted_note_source_checksum(current_note_content),
-        )
+        if request.data.file_path != entity.file_path:
+            vacated_source = (
+                entity.file_path,
+                await resolve_accepted_note_source_checksum(
+                    project=project,
+                    file_path=entity.file_path,
+                    current_note_content=current_note_content,
+                    preparer_factory=dependencies.preparer_factory,
+                ),
+            )
         # Optimistic-concurrency precondition: the caller sent the db_checksum it
         # last synced; if the accepted row has advanced to a different write,
         # reject with the current checksum so the client rebases instead of
@@ -666,6 +699,7 @@ async def _run_accepted_note_update(
         current_note_content=current_note_content,
         existing_file_path=existing_file_path,
         accepted_file_path=entity.file_path,
+        source_file_checksum=vacated_source[1] if vacated_source is not None else None,
         repositories=dependencies.write_repositories,
     )
     if vacated_source is not None and entity.file_path != vacated_source[0]:
@@ -768,10 +802,6 @@ async def _run_accepted_note_move(
         dependencies=dependencies,
     )
     existing_file_path = entity.file_path
-    # Capture the source checksum before persisting the move mutates note_content to the
-    # destination version. When materialization has not published a file checksum yet, the
-    # accepted DB checksum still identifies the exact Markdown bytes the source write produced.
-    vacated_source_checksum = select_accepted_note_source_checksum(current_note_content)
     # Same-path moves fail fast everywhere by decision (2026-07-14): cloud's
     # pre-unification route returned a 200 no-op, local rejected — the unified
     # runner keeps the rejection so a mistaken identity move surfaces instead
@@ -781,6 +811,16 @@ async def _run_accepted_note_move(
             AcceptedNoteMutationRejectKind.bad_request,
             "Source and destination paths are the same.",
         )
+
+    # Capture the source checksum before persisting the move mutates note_content to the
+    # destination version. For an in-flight publication, observe storage once to distinguish the
+    # last published bytes from accepted bytes written before their result was recorded.
+    vacated_source_checksum = await resolve_accepted_note_source_checksum(
+        project=project,
+        file_path=existing_file_path,
+        current_note_content=current_note_content,
+        preparer_factory=dependencies.preparer_factory,
+    )
 
     await reject_conflicting_accepted_note_file_path(
         session,
@@ -823,14 +863,15 @@ async def _run_accepted_note_move(
         updated_at=now,
         current_note_content=current_note_content,
         existing_file_path=existing_file_path,
+        source_file_checksum=vacated_source_checksum,
         repositories=dependencies.write_repositories,
     )
     # Record that this move vacated the source path, atomically with the move. A later index of the
     # still-present source object then recognizes it as this move's leftover rather than a new note
-    # and skips it (basic-memory-cloud#1601). The accepted DB checksum closes the window where the
-    # source write reached storage but its file checksum did not reach note_content. The repository
-    # is pure per-tenant DB logic, identical for local and cloud, so it is built inline on the
-    # move's own session rather than injected.
+    # and skips it (basic-memory-cloud#1601). In-flight publication states use one observed source
+    # checksum, closing both sides of the before-write/written-before-publish ambiguity. The
+    # repository is pure per-tenant DB logic, identical for local and cloud, so it is built inline
+    # on the move's own session rather than injected.
     await NoteFileVacateRepository(project.id).record_vacate(
         session,
         entity_id=entity.id,

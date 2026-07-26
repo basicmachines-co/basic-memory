@@ -34,6 +34,7 @@ from basic_memory.runtime.note_content import (
 from basic_memory.runtime.storage import (
     ProjectId,
     RuntimeEntityId,
+    RuntimeFileChecksum,
     RuntimeFilePath,
     RuntimeNoteChangeSource,
     RuntimeNoteContentChecksum,
@@ -559,6 +560,7 @@ async def _persist_accepted_note_content_and_search(
     current_note_content: RuntimeAcceptedNoteContentWriteSource | None = None,
     existing_file_path: RuntimeFilePath | None = None,
     accepted_file_path: RuntimeFilePath | None = None,
+    source_file_checksum: RuntimeFileChecksum | None = None,
     repositories: AcceptedNoteWriteRepositories,
 ) -> AcceptedPersistedNoteWrite:
     """Internal content/search phase shared by complete snapshots and moves."""
@@ -568,6 +570,7 @@ async def _persist_accepted_note_content_and_search(
         existing_file_path=existing_file_path,
         accepted_file_path=accepted_file_path or entity.file_path,
         current_note_content=current_note_content,
+        source_file_checksum=source_file_checksum,
     )
     note_content = await accept_note_content_write(
         session,
@@ -661,6 +664,7 @@ async def persist_accepted_note_snapshot(
     current_note_content: RuntimeAcceptedNoteContentWriteSource | None = None,
     existing_file_path: RuntimeFilePath | None = None,
     accepted_file_path: RuntimeFilePath | None = None,
+    source_file_checksum: RuntimeFileChecksum | None = None,
     repositories: AcceptedNoteWriteRepositories,
 ) -> AcceptedPersistedNoteWrite:
     """Persist one complete accepted Markdown snapshot in the caller's transaction."""
@@ -675,6 +679,7 @@ async def persist_accepted_note_snapshot(
         current_note_content=current_note_content,
         existing_file_path=existing_file_path,
         accepted_file_path=accepted_file_path,
+        source_file_checksum=source_file_checksum,
         repositories=repositories,
     )
     await _replace_accepted_note_graph(
@@ -696,6 +701,7 @@ async def persist_accepted_note_move(
     updated_at: datetime,
     current_note_content: RuntimeAcceptedNoteContentWriteSource,
     existing_file_path: RuntimeFilePath,
+    source_file_checksum: RuntimeFileChecksum | None = None,
     repositories: AcceptedNoteWriteRepositories,
 ) -> AcceptedPersistedNoteWrite:
     """Persist the explicitly narrower content/search state for an accepted move."""
@@ -710,6 +716,7 @@ async def persist_accepted_note_move(
         current_note_content=current_note_content,
         existing_file_path=existing_file_path,
         accepted_file_path=prepared.file_path,
+        source_file_checksum=source_file_checksum,
         repositories=repositories,
     )
 

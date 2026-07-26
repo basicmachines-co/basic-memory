@@ -235,6 +235,10 @@ async def test_move_retires_vacate_marker_when_unpublished_source_is_absent(
     assert markers == {}
 
 
+@pytest.mark.parametrize(
+    "retirement_trigger",
+    ["cleanup-worker", "index-observation"],
+)
 @pytest.mark.asyncio
 async def test_move_retires_vacate_marker_after_source_replacement(
     mcp_server,
@@ -243,8 +247,9 @@ async def test_move_retires_vacate_marker_after_source_replacement(
     project_config,
     engine_factory,
     monkeypatch,
+    retirement_trigger: str,
 ):
-    """A cleanup checksum mismatch retires stale move evidence before future path reuse."""
+    """Cleanup or replacement observation retires stale move evidence before path reuse."""
     del app
     source_relative = "source/Move Replacement Lifecycle.md"
     destination_relative = "archive/move-replacement-lifecycle.md"
@@ -306,7 +311,8 @@ async def test_move_retires_vacate_marker_after_source_replacement(
             "# Source Replacement\n\nThis independent file replaced the moved source.",
             encoding="utf-8",
         )
-        await original_cleanup(cleanup_enqueuer, cleanup_request)
+        if retirement_trigger == "cleanup-worker":
+            await original_cleanup(cleanup_enqueuer, cleanup_request)
 
         # Restore normal inline cleanup before deleting the indexed replacement below.
         monkeypatch.setattr(
@@ -314,10 +320,6 @@ async def test_move_retires_vacate_marker_after_source_replacement(
             "enqueue_note_file_delete",
             original_cleanup,
         )
-
-        async with db.scoped_session(session_maker) as session:
-            markers = await vacate_repository.load_vacate_markers(session, [source_relative])
-        assert markers == {}
 
         await run_local_project_index_for_project(
             test_project,
@@ -327,9 +329,11 @@ async def test_move_retires_vacate_marker_after_source_replacement(
         async with db.scoped_session(session_maker) as session:
             replacement = await entity_repository.get_by_file_path(session, source_relative)
             moved = await entity_repository.get_by_file_path(session, destination_relative)
+            markers = await vacate_repository.load_vacate_markers(session, [source_relative])
         assert replacement is not None
         assert moved is not None
         assert replacement.id != moved.id
+        assert markers == {}
         replacement_external_id = replacement.external_id
         moved_entity_id = moved.id
 
@@ -363,7 +367,7 @@ async def test_move_retires_vacate_marker_after_source_replacement(
 
 @pytest.mark.parametrize(
     "publication_state",
-    ["synced", "published-checksum-stale"],
+    ["synced", "pending-before-write", "published-checksum-stale"],
 )
 @pytest.mark.parametrize("force_full", [False, True], ids=["observed", "force-full"])
 @pytest.mark.asyncio
@@ -400,13 +404,15 @@ async def test_put_rename_lingering_source_is_not_reindexed(
     materialized_checksum = sha256(source_path.read_bytes()).hexdigest()
     source_checksum = materialized_checksum
 
-    if publication_state == "published-checksum-stale":
+    if publication_state in {"pending-before-write", "published-checksum-stale"}:
         pending_markdown = (
             source_path.read_text(encoding="utf-8").rstrip()
             + "\n\nThese accepted bytes reached storage before publication.\n"
         )
-        source_path.write_text(pending_markdown, encoding="utf-8")
-        source_checksum = sha256(source_path.read_bytes()).hexdigest()
+        accepted_checksum = sha256(pending_markdown.encode()).hexdigest()
+        if publication_state == "published-checksum-stale":
+            source_path.write_text(pending_markdown, encoding="utf-8")
+            source_checksum = sha256(source_path.read_bytes()).hexdigest()
         async with db.scoped_session(session_maker) as session:
             entity = await entity_repository.get_by_file_path(session, source_relative)
             assert entity is not None
@@ -414,8 +420,10 @@ async def test_put_rename_lingering_source_is_not_reindexed(
             assert note_content is not None
             note_content.markdown_content = pending_markdown
             note_content.db_version += 1
-            note_content.db_checksum = source_checksum
-            note_content.file_write_status = "writing"
+            note_content.db_checksum = accepted_checksum
+            note_content.file_write_status = (
+                "writing" if publication_state == "published-checksum-stale" else "pending"
+            )
             assert note_content.file_version is not None
             assert note_content.file_version < note_content.db_version
             assert note_content.file_checksum == materialized_checksum
