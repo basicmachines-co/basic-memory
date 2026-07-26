@@ -127,13 +127,32 @@ def persistence_calls(monkeypatch: pytest.MonkeyPatch) -> tuple[AsyncMock, Async
     return snapshot, move
 
 
+class _EmptyResult:
+    def scalars(self) -> "_EmptyResult":
+        return self
+
+    def one_or_none(self) -> None:
+        return None
+
+    def all(self) -> list[object]:
+        return []
+
+
 class _MutationSession:
     def __init__(self) -> None:
         self.deleted: list[object] = []
+        self.added: list[object] = []
         self.flush_count = 0
 
     async def delete(self, value: object) -> None:
         self.deleted.append(value)
+
+    def add(self, value: object) -> None:
+        self.added.append(value)
+
+    async def execute(self, query: object) -> _EmptyResult:
+        # No existing note_file_vacate marker for this test; the move records a fresh one via add().
+        return _EmptyResult()
 
     async def flush(self) -> None:
         self.flush_count += 1

@@ -13,7 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db, file_utils
 from basic_memory.indexing.index_file_runner import IndexFileExecutor
-from basic_memory.indexing.note_file_delete_runner import run_note_file_delete
+from basic_memory.indexing.note_file_delete_runner import (
+    MoveVacateClearer,
+    RepositoryMoveVacateClearer,
+    run_note_file_delete,
+)
 from basic_memory.indexing.note_materialization_runner import (
     ContentStoreNoteMaterializationFileWriter,
     RepositoryNoteMaterializationPreflight,
@@ -192,7 +196,10 @@ async def run_recovery_materialization(
         writer=ContentStoreNoteMaterializationFileWriter(storage),
         publisher=RepositoryNoteMaterializationPublisher(session_maker=session_maker),
         status_publisher=RepositoryNoteMaterializationStatusPublisher(session_maker=session_maker),
-        cleanup_enqueuer=InlineNoteFileDeleteEnqueuer(storage),
+        cleanup_enqueuer=InlineNoteFileDeleteEnqueuer(
+            storage,
+            vacate_clearer=RepositoryMoveVacateClearer(session_maker=session_maker),
+        ),
     )
 
 
@@ -401,6 +408,8 @@ class InlineNoteFileDeleteEnqueuer:
     """Execute note-file cleanup immediately in the local runtime."""
 
     storage: LocalNoteContentStorage
+    # Clears the move-vacate marker once a moved note's source object is actually deleted (#1601).
+    vacate_clearer: MoveVacateClearer | None = None
 
     async def enqueue_note_file_delete(self, request: RuntimeNoteFileDeleteJobRequest) -> None:
         # Trigger: a move scheduled old-path cleanup whose old and new paths differ
@@ -423,7 +432,9 @@ class InlineNoteFileDeleteEnqueuer:
                 live_file_path=request.live_file_path,
             )
             return
-        await run_note_file_delete(request, storage=self.storage)
+        await run_note_file_delete(
+            request, storage=self.storage, vacate_clearer=self.vacate_clearer
+        )
 
 
 class RelationResolutionScheduling(Protocol):
@@ -494,7 +505,10 @@ class LocalNoteContentMaterializationProvider:
         if accepted.materialization is None:  # pragma: no cover - guarded by caller
             return accepted
         storage = LocalNoteContentStorage(self.file_service)
-        cleanup_enqueuer = InlineNoteFileDeleteEnqueuer(storage)
+        cleanup_enqueuer = InlineNoteFileDeleteEnqueuer(
+            storage,
+            vacate_clearer=RepositoryMoveVacateClearer(session_maker=self.session_maker),
+        )
         result = await run_note_materialization(
             plan_note_materialization_job_request(accepted.materialization),
             preflight=RepositoryNoteMaterializationPreflight(
@@ -554,7 +568,10 @@ class LocalNoteContentMaterializationProvider:
             return accepted
 
         storage = LocalNoteContentStorage(self.file_service)
-        await InlineNoteFileDeleteEnqueuer(storage).enqueue_note_file_delete(
+        await InlineNoteFileDeleteEnqueuer(
+            storage,
+            vacate_clearer=RepositoryMoveVacateClearer(session_maker=self.session_maker),
+        ).enqueue_note_file_delete(
             plan_note_file_delete_job_request(accepted.file_delete)
         )
         return accepted

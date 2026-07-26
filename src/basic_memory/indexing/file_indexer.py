@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Protocol
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from basic_memory.indexing.file_index_checking import IndexedFileChecksumRow
+from basic_memory.indexing.file_index_checking import IndexedFileChecksumRow, MoveDetectionEntity
 from basic_memory import db
 from basic_memory.indexing.note_content_reconciliation import (
     NoteContentReconciliationAnchor,
@@ -67,6 +67,13 @@ class IndexMarkdownEntityRepository(Protocol):
         session: AsyncSession,
         file_paths: Sequence[Path | str],
     ) -> Sequence[IndexedFileChecksumRow]: ...
+
+    async def find_by_ids(
+        self,
+        session: AsyncSession,
+        ids: list[int],
+    ) -> Sequence[MoveDetectionEntity]:
+        """Return the entities for ``ids`` (move-orphan confirmation)."""
 
 
 class IndexCurrentMarkdownFileIndexer(Protocol):

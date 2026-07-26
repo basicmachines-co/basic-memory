@@ -30,8 +30,11 @@ from basic_memory.indexing.external_file_delete_runner import ExternalFileDelete
 from basic_memory.indexing.file_index_checking import (
     FileIndexChecker,
     RepositoryIndexedFileChecksumSource,
+    RepositoryMovedEntitySource,
+    RepositoryMoveVacateSource,
     StorageCurrentFileChecksumSource,
 )
+from basic_memory.repository.note_file_vacate_repository import NoteFileVacateRepository
 from basic_memory.indexing.index_file_runner import (
     IndexFileObjectMetadata,
     RepositoryCurrentMaterializedNoteSource,
@@ -260,6 +263,14 @@ class LocalWatchEventIndexRuntimeFactory:
             ),
             current_checksum_source=StorageCurrentFileChecksumSource(
                 metadata_source=metadata_source,
+            ),
+            moved_entity_source=RepositoryMovedEntitySource(
+                session_maker=dependencies.session_maker,
+                entity_repository=dependencies.entity_repository,
+            ),
+            move_vacate_source=RepositoryMoveVacateSource(
+                session_maker=dependencies.session_maker,
+                vacate_repository=NoteFileVacateRepository(dependencies.project_id),
             ),
         )
         maintenance_store = RepositoryProjectIndexMaintenanceStore(

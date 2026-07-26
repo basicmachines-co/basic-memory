@@ -10,7 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory.indexing.file_index_checking import (
     CurrentFileMetadataSource,
     FileIndexChecker,
+    MoveVacateMarker,
+    MovedEntityFacts,
     RepositoryIndexedFileChecksumSource,
+    RepositoryMoveVacateSource,
+    RepositoryMovedEntitySource,
     StorageCurrentFileChecksumSource,
 )
 from basic_memory.indexing.file_index_planning import FileIndexDecisionStatus, FileIndexTarget
@@ -98,6 +102,75 @@ class StubCurrentChecksumSource:
     async def load_current_file_checksum(self, file_path: str) -> str | None:
         self.requested_paths.append(file_path)
         return self.checksums_by_path[file_path]
+
+
+@dataclass(slots=True)
+class StubMovedEntitySource:
+    """Loads current (path, checksum) facts for moved entities by id (batched)."""
+
+    facts_by_id: dict[int, MovedEntityFacts] = field(default_factory=dict)
+    calls: list[tuple[int, ...]] = field(default_factory=list)
+
+    async def load_entity_facts_by_id(
+        self, entity_ids: Sequence[int]
+    ) -> dict[int, MovedEntityFacts]:
+        self.calls.append(tuple(entity_ids))
+        return {eid: self.facts_by_id[eid] for eid in entity_ids if eid in self.facts_by_id}
+
+
+@dataclass(slots=True)
+class StubMoveVacateSource:
+    """Returns the move-vacate marker recorded for each of the given paths."""
+
+    markers: dict[str, MoveVacateMarker] = field(default_factory=dict)
+    calls: list[tuple[str, ...]] = field(default_factory=list)
+
+    async def load_vacate_markers(
+        self, file_paths: Sequence[str]
+    ) -> dict[str, MoveVacateMarker]:
+        self.calls.append(tuple(file_paths))
+        return {p: self.markers[p] for p in file_paths if p in self.markers}
+
+
+@dataclass(frozen=True, slots=True)
+class FakeEntity:
+    id: int
+    file_path: str
+    checksum: str | None
+
+
+@dataclass(slots=True)
+class FakeEntityRepository:
+    entities: list[FakeEntity]
+    calls: list[tuple[object, tuple[int, ...]]] = field(default_factory=list)
+
+    async def find_by_ids(
+        self,
+        session: AsyncSession,
+        ids: list[int],
+    ) -> list[FakeEntity]:
+        self.calls.append((session, tuple(ids)))
+        return [entity for entity in self.entities if entity.id in ids]
+
+
+@dataclass(slots=True)
+class FakeVacateMarkerRow:
+    entity_id: int
+    file_checksum: str | None
+
+
+@dataclass(slots=True)
+class FakeVacateRepository:
+    markers: dict[str, FakeVacateMarkerRow]
+    calls: list[tuple[object, tuple[str, ...]]] = field(default_factory=list)
+
+    async def load_vacate_markers(
+        self,
+        session: AsyncSession,
+        file_paths: Sequence[str],
+    ) -> dict[str, FakeVacateMarkerRow]:
+        self.calls.append((session, tuple(file_paths)))
+        return {p: self.markers[p] for p in file_paths if p in self.markers}
 
 
 @pytest.mark.asyncio
@@ -226,3 +299,276 @@ async def test_storage_current_file_checksum_source_treats_file_errors_as_missin
     source = StorageCurrentFileChecksumSource(metadata_source=VanishingMetadataSource())
 
     assert await source.load_current_file_checksum("vanished.md") is None
+
+
+def _orphan_checker(
+    *,
+    indexed: dict[str, str | None],
+    current: dict[str, str | None],
+    markers: dict[str, MoveVacateMarker],
+    entity_facts: dict[int, MovedEntityFacts],
+) -> tuple[FileIndexChecker, StubMovedEntitySource, StubMoveVacateSource]:
+    moved = StubMovedEntitySource(facts_by_id=entity_facts)
+    vacate = StubMoveVacateSource(markers=markers)
+    checker = FileIndexChecker(
+        indexed_checksum_source=StubIndexedChecksumSource(indexed),
+        current_checksum_source=StubCurrentChecksumSource(current),
+        moved_entity_source=moved,
+        move_vacate_source=vacate,
+    )
+    return checker, moved, vacate
+
+
+@pytest.mark.asyncio
+async def test_checker_skips_leftover_source_of_a_move() -> None:
+    """The lingering source object of a move is planned `current`, not re-imported (#1601).
+
+    Gate condition: no DB row owns the path, its content checksum matches the vacate marker's
+    recorded source checksum, and the marker's entity now holds that same content at another path.
+    """
+    checker, moved, vacate = _orphan_checker(
+        indexed={},  # no entity owns the source path -> would create
+        current={"koncept/note.md": "checksum-shared"},
+        markers={"koncept/note.md": MoveVacateMarker(entity_id=42, checksum="checksum-shared")},
+        entity_facts={42: MovedEntityFacts(file_path="arkiv/note.md", checksum="checksum-shared")},
+    )
+
+    plan = await checker.detect(
+        [FileIndexTarget(path="koncept/note.md", observed_checksum="checksum-shared")]
+    )
+
+    assert plan.paths_to_read == ()
+    assert [(d.path, d.status) for d in plan.decisions] == [
+        ("koncept/note.md", FileIndexDecisionStatus.current),
+    ]
+    assert vacate.calls == [("koncept/note.md",)]
+    assert moved.calls == [(42,)]
+
+
+@pytest.mark.asyncio
+async def test_checker_indexes_replacement_note_at_a_vacated_path() -> None:
+    """A vacated path overwritten with a DIFFERENT note's bytes is a legit replacement, not a ghost.
+
+    The current checksum no longer matches the marker's source checksum, so it is indexed as new
+    even though a checksum twin exists — the P1 false-skip Codex flagged.
+    """
+    checker, _, _ = _orphan_checker(
+        indexed={},
+        current={"koncept/note.md": "other-note-checksum"},
+        markers={"koncept/note.md": MoveVacateMarker(entity_id=42, checksum="original-checksum")},
+        # The other note (a real twin) exists, but it is not the marker's entity.
+        entity_facts={42: MovedEntityFacts(file_path="arkiv/note.md", checksum="original-checksum")},
+    )
+
+    plan = await checker.detect(
+        [FileIndexTarget(path="koncept/note.md", observed_checksum="other-note-checksum")]
+    )
+
+    assert plan.paths_to_read == ("koncept/note.md",)
+
+
+@pytest.mark.asyncio
+async def test_checker_skips_leftover_when_marker_checksum_unknown() -> None:
+    """A move accepted before its source was materialized records a null-checksum marker.
+
+    The gap-(a) case (basic-memory-cloud#1601): the source checksum was unknown at move time, so
+    the gate falls back to confirming the object is the moved entity's current content. The
+    lingering source must still be skipped, not minted as a duplicate.
+    """
+    checker, _, _ = _orphan_checker(
+        indexed={},
+        current={"koncept/note.md": "content-ck"},
+        markers={"koncept/note.md": MoveVacateMarker(entity_id=42, checksum=None)},
+        entity_facts={42: MovedEntityFacts(file_path="arkiv/note.md", checksum="content-ck")},
+    )
+
+    plan = await checker.detect(
+        [FileIndexTarget(path="koncept/note.md", observed_checksum="content-ck")]
+    )
+
+    assert plan.paths_to_read == ()
+    assert [(d.path, d.status) for d in plan.decisions] == [
+        ("koncept/note.md", FileIndexDecisionStatus.current),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_checker_indexes_overwrite_of_null_checksum_marker_path() -> None:
+    """A null-checksum marker still does not gate a path overwritten with different content."""
+    checker, _, _ = _orphan_checker(
+        indexed={},
+        current={"koncept/note.md": "different-content"},
+        markers={"koncept/note.md": MoveVacateMarker(entity_id=42, checksum=None)},
+        entity_facts={42: MovedEntityFacts(file_path="arkiv/note.md", checksum="moved-content")},
+    )
+
+    plan = await checker.detect(
+        [FileIndexTarget(path="koncept/note.md", observed_checksum="different-content")]
+    )
+
+    assert plan.paths_to_read == ("koncept/note.md",)
+
+
+@pytest.mark.asyncio
+async def test_checker_indexes_byte_identical_copy_without_marker() -> None:
+    """A byte-identical copy has no vacate marker, so it is indexed as a new note."""
+    checker, _, _ = _orphan_checker(
+        indexed={},
+        current={"notes/copy.md": "shared"},
+        markers={},  # no move vacated this path
+        entity_facts={7: MovedEntityFacts(file_path="notes/original.md", checksum="shared")},
+    )
+
+    plan = await checker.detect(
+        [FileIndexTarget(path="notes/copy.md", observed_checksum="shared")]
+    )
+
+    assert plan.paths_to_read == ("notes/copy.md",)
+
+
+@pytest.mark.asyncio
+async def test_checker_indexes_when_marker_entity_is_gone_or_still_present() -> None:
+    """If the marked entity no longer exists (or never moved), don't drop the object."""
+    # Marker entity gone -> do not skip (would otherwise lose the content).
+    checker, _, _ = _orphan_checker(
+        indexed={},
+        current={"koncept/gone.md": "ck"},
+        markers={"koncept/gone.md": MoveVacateMarker(entity_id=42, checksum="ck")},
+        entity_facts={},  # entity 42 not found
+    )
+    plan = await checker.detect([FileIndexTarget(path="koncept/gone.md", observed_checksum="ck")])
+    assert plan.paths_to_read == ("koncept/gone.md",)
+
+    # Marker entity still owns THIS path (not actually moved away) -> do not skip.
+    checker2, _, _ = _orphan_checker(
+        indexed={},
+        current={"koncept/here.md": "ck"},
+        markers={"koncept/here.md": MoveVacateMarker(entity_id=42, checksum="ck")},
+        entity_facts={42: MovedEntityFacts(file_path="koncept/here.md", checksum="ck")},
+    )
+    plan2 = await checker2.detect([FileIndexTarget(path="koncept/here.md", observed_checksum="ck")])
+    assert plan2.paths_to_read == ("koncept/here.md",)
+
+
+@pytest.mark.asyncio
+async def test_checker_does_not_gate_updates_or_null_checksum_rows() -> None:
+    """An existing row (even one with a null checksum) is an edit/repair, never move-gated.
+
+    A present-but-null indexed checksum is an incomplete row that must still be read, not skipped
+    as a create — the gate keys on row *absence*, not on a null value.
+    """
+    checker, moved, vacate = _orphan_checker(
+        indexed={"notes/edited.md": "old", "notes/pending.md": None},
+        current={"notes/edited.md": "new", "notes/pending.md": "materialized"},
+        markers={
+            "notes/edited.md": MoveVacateMarker(entity_id=1, checksum="new"),
+            "notes/pending.md": MoveVacateMarker(entity_id=2, checksum="materialized"),
+        },
+        entity_facts={
+            1: MovedEntityFacts(file_path="x.md", checksum="new"),
+            2: MovedEntityFacts(file_path="y.md", checksum="materialized"),
+        },
+    )
+
+    plan = await checker.detect(
+        [
+            FileIndexTarget(path="notes/edited.md", observed_checksum="new"),
+            FileIndexTarget(path="notes/pending.md", observed_checksum="materialized"),
+        ]
+    )
+
+    assert set(plan.paths_to_read) == {"notes/edited.md", "notes/pending.md"}
+    # No create candidates -> move detection is never consulted.
+    assert moved.calls == []
+    assert vacate.calls == []
+
+
+@pytest.mark.asyncio
+async def test_checker_batches_move_detection_across_create_candidates() -> None:
+    """Multiple create candidates share one marker query and one entity query (no per-file round-trips)."""
+    checker, moved, vacate = _orphan_checker(
+        indexed={},
+        current={"a.md": "ck-a", "b.md": "ck-b", "c.md": "ck-c"},
+        markers={
+            "a.md": MoveVacateMarker(entity_id=1, checksum="ck-a"),  # orphan -> skip
+            "b.md": MoveVacateMarker(entity_id=2, checksum="mismatch"),  # marker != current -> read
+            # c.md has no marker -> read
+        },
+        entity_facts={
+            1: MovedEntityFacts(file_path="dest-a.md", checksum="ck-a"),
+            2: MovedEntityFacts(file_path="dest-b.md", checksum="ck-b"),
+        },
+    )
+
+    plan = await checker.detect(
+        [
+            FileIndexTarget(path="a.md", observed_checksum="ck-a"),
+            FileIndexTarget(path="b.md", observed_checksum="ck-b"),
+            FileIndexTarget(path="c.md", observed_checksum="ck-c"),
+        ]
+    )
+
+    assert set(plan.paths_to_read) == {"b.md", "c.md"}
+    assert [(d.path, d.status) for d in plan.decisions] == [
+        ("a.md", FileIndexDecisionStatus.current),
+    ]
+    # One marker query over all three candidates; one entity query over the markers found.
+    assert len(vacate.calls) == 1
+    assert set(vacate.calls[0]) == {"a.md", "b.md", "c.md"}
+    assert len(moved.calls) == 1
+    assert set(moved.calls[0]) == {1, 2}
+
+
+@pytest.mark.asyncio
+async def test_checker_gate_inert_without_both_sources() -> None:
+    """The gate never fires unless both sources are configured."""
+    plan = await FileIndexChecker(
+        indexed_checksum_source=StubIndexedChecksumSource({}),
+        current_checksum_source=StubCurrentChecksumSource({"koncept/note.md": "ck"}),
+        move_vacate_source=StubMoveVacateSource(
+            markers={"koncept/note.md": MoveVacateMarker(entity_id=42, checksum="ck")}
+        ),
+        # moved_entity_source omitted
+    ).detect([FileIndexTarget(path="koncept/note.md", observed_checksum="ck")])
+
+    assert plan.paths_to_read == ("koncept/note.md",)
+
+
+@pytest.mark.asyncio
+async def test_repository_moved_entity_source_loads_facts_by_id() -> None:
+    session = object()
+    session_maker = cast(async_sessionmaker[AsyncSession], FakeSessionMaker(session))
+
+    repo = FakeEntityRepository(
+        [
+            FakeEntity(id=1, file_path="arkiv/note.md", checksum="ck-1"),
+            FakeEntity(id=2, file_path="arkiv/other.md", checksum=None),
+        ]
+    )
+    source = RepositoryMovedEntitySource(session_maker=session_maker, entity_repository=repo)
+
+    facts = await source.load_entity_facts_by_id([1, 2, 1])
+    assert facts == {
+        1: MovedEntityFacts(file_path="arkiv/note.md", checksum="ck-1"),
+        2: MovedEntityFacts(file_path="arkiv/other.md", checksum=None),
+    }
+    # One batched query over the deduped ids.
+    assert len(repo.calls) == 1
+    assert set(repo.calls[0][1]) == {1, 2}
+    assert await source.load_entity_facts_by_id([]) == {}
+
+
+@pytest.mark.asyncio
+async def test_repository_move_vacate_source_delegates_to_repository() -> None:
+    session = object()
+    session_maker = cast(async_sessionmaker[AsyncSession], FakeSessionMaker(session))
+    repo = FakeVacateRepository(
+        markers={"koncept/note.md": FakeVacateMarkerRow(entity_id=42, file_checksum="ck")}
+    )
+
+    source = RepositoryMoveVacateSource(session_maker=session_maker, vacate_repository=repo)
+
+    markers = await source.load_vacate_markers(["koncept/note.md", "other.md"])
+    assert markers == {"koncept/note.md": MoveVacateMarker(entity_id=42, checksum="ck")}
+    assert await source.load_vacate_markers([]) == {}
+    assert repo.calls == [(session, ("koncept/note.md", "other.md"))]

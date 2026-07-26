@@ -224,6 +224,52 @@ class NoteContent(Base):
         )
 
 
+class NoteFileVacate(Base):
+    """A source path vacated by a move whose physical object is pending cleanup.
+
+    A ``move_note`` is DB-first: the entity's ``file_path`` flips to the destination while the
+    physical source object is deleted out of band. This row is the durable, index-time-queryable
+    proof that the source path was vacated *by a move* — so the indexer can tell a move's lingering
+    source object (a ghost source: skip re-import) from a legitimate byte-identical copy (index as
+    new). Written atomically with the move; cleared when the source object is deleted
+    (basic-memory-cloud#1601).
+    """
+
+    __tablename__ = "note_file_vacate"
+    __table_args__ = (
+        # One outstanding vacate per source path; the index-time lookup keys on it.
+        UniqueConstraint("project_id", "file_path", name="uix_note_file_vacate_project_file_path"),
+        Index("ix_note_file_vacate_project_id", "project_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)  # pyright: ignore [reportIncompatibleVariableOverride]
+    project_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("project.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # The moved entity now living at the destination; if it is deleted the vacate is moot.
+    entity_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("entity.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    # The vacated source path (project-relative POSIX), the key the indexer checks.
+    file_path: Mapped[str] = mapped_column(String, nullable=False)
+    # Guard for the physical delete; may be None when the source was never materialized.
+    file_checksum: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now().astimezone(),
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return (
+            f"NoteFileVacate(project_id={self.project_id}, entity_id={self.entity_id}, "
+            f"file_path='{self.file_path}')"
+        )
+
+
 class Observation(Base):
     """An observation about an entity.
 

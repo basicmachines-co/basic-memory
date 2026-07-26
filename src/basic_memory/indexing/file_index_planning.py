@@ -102,6 +102,26 @@ def current_file_index_decision(file_path: FileIndexPath) -> FileIndexDecision:
     )
 
 
+def move_orphan_file_index_decision(
+    file_path: FileIndexPath,
+    *,
+    indexed_at: FileIndexPath,
+) -> FileIndexDecision:
+    """Return a no-op decision for a move's still-present source object.
+
+    A move updates the note's entity to the destination path, but the physical source object can
+    linger (deferred or skipped cleanup). Indexing that vacated path finds no entity there and would
+    mint a brand-new note whose permalink collides into ``-1`` — the ghost duplicate
+    (basic-memory-cloud#1601). When the object's content is already indexed at another path, treat
+    it as current (already represented) instead of creating a duplicate.
+    """
+    return FileIndexDecision(
+        path=file_path,
+        status=FileIndexDecisionStatus.current,
+        reason=f"move orphan: content already indexed at {indexed_at}; not creating a duplicate",
+    )
+
+
 def plan_file_index_target_from_observed(
     target: FileIndexTarget,
     *,

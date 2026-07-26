@@ -31,6 +31,7 @@ from basic_memory.indexing.accepted_note_write_runner import (
 )
 from basic_memory.models import Entity, NoteContent, Project
 from basic_memory.repository import NoteContentVersionConflict
+from basic_memory.repository.note_file_vacate_repository import NoteFileVacateRepository
 from basic_memory.services.exceptions import EntityAlreadyExistsError
 from basic_memory.runtime.note_content import (
     RuntimeAcceptedNoteChange,
@@ -805,6 +806,20 @@ async def _run_accepted_note_move(
         current_note_content=current_note_content,
         existing_file_path=existing_file_path,
         repositories=dependencies.write_repositories,
+    )
+    # Record that this move vacated the source path, atomically with the move. A later index of the
+    # still-present source object then recognizes it as this move's leftover rather than a new note
+    # and skips it (basic-memory-cloud#1601). Recorded even when the source checksum is unknown (so
+    # no physical cleanup is scheduled) — the marker's existence is what the gate needs, and the
+    # checksum guard only affects clearing. The repository is pure per-tenant DB logic, identical
+    # for local and cloud, so it is built inline on the move's own session rather than injected.
+    await NoteFileVacateRepository(project.id).record_vacate(
+        session,
+        entity_id=entity.id,
+        file_path=existing_file_path,
+        file_checksum=(
+            current_note_content.file_checksum if current_note_content is not None else None
+        ),
     )
     return plan_accepted_note_write_change(
         status_code=200,
