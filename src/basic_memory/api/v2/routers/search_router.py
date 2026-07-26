@@ -12,6 +12,7 @@ import logfire
 from basic_memory.api.v2.utils import to_search_results
 from basic_memory.repository.semantic_errors import (
     RerankProviderContractError,
+    RerankTransientError,
     SemanticDependenciesMissingError,
     SemanticSearchDisabledError,
 )
@@ -92,9 +93,14 @@ async def search(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except SemanticDependenciesMissingError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RerankTransientError as exc:
+            # Returning raw retrieval order would make pagination inconsistent with
+            # earlier reranked pages. Preserve ordering semantics and make the outage
+            # explicitly retryable instead.
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except RerankProviderContractError as exc:
             # Upstream reranker returned a malformed response — an upstream fault, not a
-            # client error and not a transient blip (those degrade before reaching here).
+            # client error and not a transient outage (those map to a retryable 503).
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

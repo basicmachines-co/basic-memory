@@ -19,4 +19,4 @@ class RerankProviderContractError(RuntimeError):
 
 
 class RerankTransientError(RuntimeError):
-    """Raised when a reranker is temporarily unavailable and retrieval may safely degrade."""
+    """Raised when a reranker is temporarily unavailable and the request should be retried."""

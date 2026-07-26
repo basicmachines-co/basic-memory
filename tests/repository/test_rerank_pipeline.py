@@ -86,12 +86,30 @@ class _BadReranker:
 
 
 class _ExplodingReranker:
-    """Typed transient failure the pipeline should degrade past."""
+    """Typed transient failure the pipeline must surface."""
 
     model_name = "boom"
 
     async def rerank(self, query: str, documents: list[str]) -> list[float]:
         raise RerankTransientError("cross-encoder backend unreachable")
+
+    def runtime_log_attrs(self) -> dict:
+        return {}
+
+
+class _SucceedsThenTransientReranker:
+    """Rerank one page, then model a temporary provider outage."""
+
+    model_name = "flaky"
+
+    def __init__(self):
+        self.calls = 0
+
+    async def rerank(self, query: str, documents: list[str]) -> list[float]:
+        self.calls += 1
+        if self.calls > 1:
+            raise RerankTransientError("cross-encoder backend unreachable")
+        return [0.1, 0.9]
 
     def runtime_log_attrs(self) -> dict:
         return {}
@@ -374,16 +392,30 @@ async def test_rerank_paginate_keeps_expanded_candidates_out_of_stable_prefix():
 
 
 @pytest.mark.asyncio
-async def test_rerank_paginate_degrades_gracefully_on_provider_error():
-    """A reranker exception falls back to retrieval order instead of failing search."""
+async def test_rerank_paginate_surfaces_transient_provider_error():
+    """Transient failures must not silently replace reranked order with retrieval order."""
     repo = _unit_repo()
     repo._rerank_provider = _ExplodingReranker()
     repo._reranker_candidates = 20
     rows = [_row(id=1, title="A"), _row(id=2, title="B")]
 
-    result = await repo._rerank_and_paginate("auth", rows, offset=0, limit=10)
+    with pytest.raises(RerankTransientError, match="backend unreachable"):
+        await repo._rerank_and_paginate("auth", rows, offset=0, limit=10)
 
-    assert [r.id for r in result] == [1, 2]  # unchanged retrieval order
+
+@pytest.mark.asyncio
+async def test_rerank_paginate_does_not_duplicate_results_when_later_page_is_transient():
+    """A later page fails instead of changing order and repeating an earlier result."""
+    repo = _unit_repo()
+    repo._rerank_provider = _SucceedsThenTransientReranker()
+    repo._reranker_candidates = 2
+    rows = [_row(id=1, title="A"), _row(id=2, title="B")]
+
+    first_page = await repo._rerank_and_paginate("auth", rows, offset=0, limit=1)
+
+    assert [row.id for row in first_page] == [2]
+    with pytest.raises(RerankTransientError, match="backend unreachable"):
+        await repo._rerank_and_paginate("auth", rows, offset=1, limit=1)
 
 
 @pytest.mark.asyncio
@@ -643,8 +675,8 @@ async def test_hybrid_search_preserves_candidate_windows(
 
 
 @pytest.mark.asyncio
-async def test_hybrid_search_degrades_on_reranker_error(search_repository):
-    """A failing reranker must not take the whole search down."""
+async def test_hybrid_search_surfaces_transient_reranker_error(search_repository):
+    """Hybrid search must not replace reranked order with raw order during an outage."""
     if not isinstance(search_repository, SQLiteSearchRepository):
         pytest.skip("sqlite-vec repository behavior is local SQLite-only.")
 
@@ -652,13 +684,12 @@ async def test_hybrid_search_degrades_on_reranker_error(search_repository):
     await _index_two_auth_notes(search_repository)
     search_repository._rerank_provider = _ExplodingReranker()
 
-    results = await search_repository.search(
-        search_text="auth session token",
-        retrieval_mode=SearchRetrievalMode.HYBRID,
-        limit=5,
-    )
-    # Falls back to retrieval order; results still returned, no exception.
-    assert {r.permalink for r in results} == {"specs/alpha", "specs/bravo"}
+    with pytest.raises(RerankTransientError, match="backend unreachable"):
+        await search_repository.search(
+            search_text="auth session token",
+            retrieval_mode=SearchRetrievalMode.HYBRID,
+            limit=5,
+        )
 
 
 @pytest.mark.asyncio

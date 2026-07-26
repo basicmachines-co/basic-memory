@@ -35,7 +35,6 @@ from basic_memory.repository.semantic_chunking import (
     split_text_into_chunks,
 )
 from basic_memory.repository.semantic_errors import (
-    RerankTransientError,
     SemanticDependenciesMissingError,
     SemanticSearchDisabledError,
 )
@@ -956,21 +955,13 @@ class SearchRepositoryBase(ABC):
             return ordered_rows[offset:page_end]
 
         documents = [self._rerank_document_text(row) for row in pool]
-        try:
-            scores = validate_rerank_scores(
-                await self._rerank_provider.rerank(query_text, documents),
-                len(pool),
-            )
-        except RerankTransientError as exc:
-            # The provider boundary classifies only recoverable transport/rate-limit
-            # failures as transient. Auth, config, dependency, and contract faults
-            # surface instead of leaving an enabled reranker silently broken.
-            logger.warning(
-                "Reranker failed; returning retrieval order. model={model} error={error}",
-                model=self._rerank_provider.model_name,
-                error=exc,
-            )
-            return ordered_rows[offset:page_end]
+        # A transient provider failure must surface instead of switching this page
+        # back to retrieval order. A prior page may already have returned reranked
+        # order, so degrading here can duplicate one result and omit another.
+        scores = validate_rerank_scores(
+            await self._rerank_provider.rerank(query_text, documents),
+            len(pool),
+        )
 
         order = sorted(range(len(pool)), key=lambda i: scores[i], reverse=True)
         reranked = [replace(pool[i], score=scores[i]) for i in order]

@@ -1,5 +1,7 @@
 """Tests for the reranker provider factory."""
 
+import builtins
+
 import pytest
 from pydantic import ValidationError
 
@@ -50,6 +52,34 @@ def test_fastembed_provider_selected_with_resolved_cache_dir():
     assert provider.cache_dir == "/tmp/fastembed-cache"
 
 
+def test_fastembed_provider_rejects_unsupported_model_at_startup():
+    """An enabled FastEmbed reranker must fail during config loading."""
+    with pytest.raises(ValidationError, match="Unsupported FastEmbed reranker model"):
+        _config(
+            reranker_enabled=True,
+            reranker_provider="fastembed",
+            reranker_model="unsupported/model-typo",
+        )
+
+
+def test_fastembed_provider_rejects_missing_dependency_at_startup(monkeypatch):
+    """An enabled local reranker must report a missing FastEmbed install during config load."""
+    real_import = builtins.__import__
+
+    def import_without_fastembed(name, *args, **kwargs):
+        if name == "fastembed.rerank.cross_encoder":
+            raise ImportError("fastembed is unavailable")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_fastembed)
+
+    with pytest.raises(ValidationError, match="requires the fastembed package"):
+        _config(
+            reranker_enabled=True,
+            reranker_provider="fastembed",
+        )
+
+
 def test_litellm_provider_selected_with_routing():
     config = _config(
         reranker_enabled=True,
@@ -80,8 +110,18 @@ def test_same_config_returns_cached_singleton():
 
 def test_distinct_config_creates_second_provider():
     """A second distinct key builds a new provider (and warns about the reload)."""
-    first = create_rerank_provider(_config(reranker_enabled=True, reranker_model="model-a"))
-    second = create_rerank_provider(_config(reranker_enabled=True, reranker_model="model-b"))
+    first = create_rerank_provider(
+        _config(
+            reranker_enabled=True,
+            reranker_model="Xenova/ms-marco-MiniLM-L-6-v2",
+        )
+    )
+    second = create_rerank_provider(
+        _config(
+            reranker_enabled=True,
+            reranker_model="Xenova/ms-marco-MiniLM-L-12-v2",
+        )
+    )
     assert first is not second
 
 

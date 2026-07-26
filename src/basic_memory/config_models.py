@@ -917,6 +917,8 @@ class BasicMemoryConfig(BaseSettings):
 
         - Reranking runs only on vector/hybrid retrieval, so it needs semantic search;
           accepting reranker_enabled=True without it would silently never rerank.
+        - FastEmbed exposes a finite registered model catalog, so reject typos while
+          loading config instead of deferring them to the first search request.
         - The default model is a local fastembed cross-encoder that litellm cannot
           route, so the litellm provider needs an explicit provider/model model id.
         """
@@ -933,6 +935,24 @@ class BasicMemoryConfig(BaseSettings):
         model = self.reranker_model.strip()
         if not model:
             raise ValueError("reranker_model must not be blank when reranker_enabled=True")
+        if provider == "fastembed":
+            try:
+                from fastembed.rerank.cross_encoder import TextCrossEncoder
+            except ImportError as exc:
+                raise ValueError(
+                    "reranker_provider='fastembed' requires the fastembed package. "
+                    "Install/update basic-memory to include semantic dependencies."
+                ) from exc
+
+            supported_models = {
+                entry["model"] for entry in TextCrossEncoder.list_supported_models()
+            }
+            if self.reranker_model not in supported_models:
+                supported_names = ", ".join(sorted(supported_models))
+                raise ValueError(
+                    f"Unsupported FastEmbed reranker model {self.reranker_model!r}. "
+                    f"Supported models: {supported_names}"
+                )
         if provider == "litellm" and model == DEFAULT_FASTEMBED_RERANK_MODEL:
             raise ValueError(
                 "reranker_provider='litellm' requires an explicit reranker_model in "
