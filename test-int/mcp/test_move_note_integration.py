@@ -179,6 +179,11 @@ async def test_move_note_lingering_source_is_not_reindexed(
         assert moved.id == moved_entity_id
 
 
+@pytest.mark.parametrize(
+    "move_back_before_recovery",
+    [False, True],
+    ids=["cleanup-current-source", "cancel-stale-snapshot"],
+)
 @pytest.mark.asyncio
 async def test_startup_recovery_retries_lost_move_source_cleanup(
     mcp_server,
@@ -187,6 +192,7 @@ async def test_startup_recovery_retries_lost_move_source_cleanup(
     project_config,
     engine_factory,
     monkeypatch,
+    move_back_before_recovery: bool,
 ):
     """A synchronized move converges after its in-memory cleanup enqueue is lost."""
     del app
@@ -195,6 +201,8 @@ async def test_startup_recovery_retries_lost_move_source_cleanup(
     source_path = project_config.home / source_relative
     destination_path = project_config.home / destination_relative
     _, session_maker = engine_factory
+    entity_repository = EntityRepository(project_id=test_project.id)
+    note_content_repository = NoteContentRepository(project_id=test_project.id)
     vacate_repository = NoteFileVacateRepository(project_id=test_project.id)
     original_cleanup = InlineNoteFileDeleteEnqueuer.enqueue_note_file_delete
 
@@ -238,6 +246,52 @@ async def test_startup_recovery_retries_lost_move_source_cleanup(
             [source_relative],
         )
 
+    if move_back_before_recovery:
+        original_lock = NoteFileVacateRepository.lock_recoverable_vacate
+        moved_back = False
+
+        async def move_back_before_recovery_lock(
+            self: NoteFileVacateRepository,
+            session,
+            *,
+            file_path: str,
+            file_checksum: str,
+        ):
+            nonlocal moved_back
+            if not moved_back:
+                # This second committed session models another local server accepting
+                # B -> A after recovery took its initial candidate snapshot.
+                async with db.scoped_session(session_maker) as concurrent_session:
+                    entity = await entity_repository.get_by_file_path(
+                        concurrent_session,
+                        destination_relative,
+                    )
+                    assert entity is not None
+                    note_content = await note_content_repository.get_by_entity_id(
+                        concurrent_session,
+                        entity.id,
+                    )
+                    assert note_content is not None
+                    entity.file_path = source_relative
+                    note_content.file_path = source_relative
+                    await vacate_repository.clear_vacate_path(
+                        concurrent_session,
+                        file_path=source_relative,
+                    )
+                moved_back = True
+            return await original_lock(
+                self,
+                session,
+                file_path=file_path,
+                file_checksum=file_checksum,
+            )
+
+        monkeypatch.setattr(
+            NoteFileVacateRepository,
+            "lock_recoverable_vacate",
+            move_back_before_recovery_lock,
+        )
+
     # Re-enable the real cleanup adapter, matching a fresh process startup.
     monkeypatch.setattr(
         InlineNoteFileDeleteEnqueuer,
@@ -250,10 +304,12 @@ async def test_startup_recovery_retries_lost_move_source_cleanup(
         project_id=test_project.id,
     )
 
-    assert recovered == 1
-    assert not source_path.exists()
+    assert recovered == (0 if move_back_before_recovery else 1)
+    assert source_path.exists() is move_back_before_recovery
     assert destination_path.exists()
     async with db.scoped_session(session_maker) as session:
+        if move_back_before_recovery:
+            assert await entity_repository.get_by_file_path(session, source_relative) is not None
         assert await vacate_repository.load_vacate_markers(session, [source_relative]) == {}
 
 

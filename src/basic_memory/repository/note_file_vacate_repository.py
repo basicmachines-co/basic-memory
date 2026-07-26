@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from sqlalchemy import delete, or_, select
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -157,6 +157,61 @@ class NoteFileVacateRepository(Repository[NoteFileVacate]):
                 )
             )
         return recoverable
+
+    async def lock_recoverable_vacate(
+        self,
+        session: AsyncSession,
+        *,
+        file_path: str,
+        file_checksum: str,
+    ) -> RecoverableVacate | None:
+        """Lock and reload one recovery candidate immediately before storage cleanup.
+
+        The conditional no-op update locks the marker row on both SQLite and
+        Postgres. Locking the destination entity too serializes recovery with an
+        accepted move back onto the vacated path. The caller must keep this
+        transaction open through guarded storage deletion and marker retirement.
+        """
+        path = Path(file_path).as_posix()
+        await session.execute(
+            update(NoteFileVacate)
+            .where(
+                NoteFileVacate.project_id == self.project_id,
+                NoteFileVacate.file_path == path,
+                NoteFileVacate.file_checksum == file_checksum,
+            )
+            .values(file_checksum=NoteFileVacate.file_checksum)
+        )
+        marker = await self._get_marker(session, path)
+        if marker is None or marker.file_checksum != file_checksum:
+            return None
+
+        if marker.entity_id is None:
+            return RecoverableVacate(
+                entity_id=None,
+                file_path=path,
+                file_checksum=file_checksum,
+                live_file_path=None,
+            )
+
+        entity = await session.get(Entity, marker.entity_id, with_for_update=True)
+        if entity is None or entity.project_id != self.project_id:
+            return RecoverableVacate(
+                entity_id=None,
+                file_path=path,
+                file_checksum=file_checksum,
+                live_file_path=None,
+            )
+
+        note_content = await session.get(NoteContent, entity.id)
+        if note_content is None or note_content.file_write_status != "synced":
+            return None
+        return RecoverableVacate(
+            entity_id=entity.id,
+            file_path=path,
+            file_checksum=file_checksum,
+            live_file_path=entity.file_path,
+        )
 
     async def clear_vacate(
         self,

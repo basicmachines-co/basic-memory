@@ -287,6 +287,26 @@ async def _recover_deleted_destination_vacate(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class SessionMoveVacateClearer:
+    """Retire a recovery marker in the transaction that locked its current state."""
+
+    session: AsyncSession
+
+    async def clear_move_vacate(
+        self,
+        *,
+        project_id: int,
+        file_path: RuntimeFilePath,
+        file_checksum: RuntimeFileChecksum | None,
+    ) -> None:
+        await NoteFileVacateRepository(project_id).clear_vacate(
+            self.session,
+            file_path=str(file_path),
+            file_checksum=file_checksum,
+        )
+
+
 async def recover_move_vacates(
     *,
     session_maker: async_sessionmaker[AsyncSession],
@@ -312,42 +332,51 @@ async def recover_move_vacates(
         vacate_count=len(vacates),
     )
     storage = LocalNoteContentStorage(file_service)
-    vacate_clearer = RepositoryMoveVacateClearer(session_maker=session_maker)
-    cleanup_enqueuer = InlineNoteFileDeleteEnqueuer(
-        storage,
-        vacate_clearer=vacate_clearer,
-    )
+    vacate_repository = NoteFileVacateRepository(project_id)
     recovered = 0
-    for vacate in vacates:
+    for candidate in vacates:
         try:
-            if vacate.entity_id is None:
-                # The destination entity no longer exists, so the queue-neutral
-                # cleanup request has no valid entity identity. The durable
-                # marker still carries the checksum needed for the same guarded
-                # storage delete and marker retirement.
-                await _recover_deleted_destination_vacate(
-                    vacate,
-                    project_id=project_id,
-                    storage=storage,
-                    vacate_clearer=vacate_clearer,
+            async with db.scoped_session(session_maker) as session:
+                vacate = await vacate_repository.lock_recoverable_vacate(
+                    session,
+                    file_path=candidate.file_path,
+                    file_checksum=candidate.file_checksum,
                 )
-            else:
-                await cleanup_enqueuer.enqueue_note_file_delete(
-                    RuntimeNoteFileDeleteJobRequest(
+                if vacate is None:
+                    continue
+
+                vacate_clearer = SessionMoveVacateClearer(session)
+                if vacate.entity_id is None:
+                    # The destination entity no longer exists, so the queue-neutral
+                    # cleanup request has no valid entity identity. The durable
+                    # marker still carries the checksum needed for the same guarded
+                    # storage delete and marker retirement.
+                    await _recover_deleted_destination_vacate(
+                        vacate,
                         project_id=project_id,
-                        entity_id=vacate.entity_id,
-                        file_path=vacate.file_path,
-                        file_checksum=vacate.file_checksum,
-                        live_file_path=vacate.live_file_path,
+                        storage=storage,
+                        vacate_clearer=vacate_clearer,
                     )
-                )
+                else:
+                    await InlineNoteFileDeleteEnqueuer(
+                        storage,
+                        vacate_clearer=vacate_clearer,
+                    ).enqueue_note_file_delete(
+                        RuntimeNoteFileDeleteJobRequest(
+                            project_id=project_id,
+                            entity_id=vacate.entity_id,
+                            file_path=vacate.file_path,
+                            file_checksum=vacate.file_checksum,
+                            live_file_path=vacate.live_file_path,
+                        )
+                    )
         except Exception:  # pragma: no cover - defensive startup guard
             # A failed marker stays durable and can be retried on the next startup;
             # one unavailable path must not block cleanup for the rest of the project.
             logger.exception(
                 "Failed to recover move-vacate source cleanup",
                 project_id=project_id,
-                file_path=vacate.file_path,
+                file_path=candidate.file_path,
             )
             continue
         recovered += 1
