@@ -143,3 +143,32 @@ async def test_clear_vacate_clears_null_checksum_marker(session_maker) -> None:
         await session.commit()
     async with session_maker() as session:
         assert set(await repo.load_vacate_markers(session, ["koncept/note.md"])) == set()
+
+
+@pytest.mark.asyncio
+async def test_clear_vacate_path_retires_only_the_live_project_path(session_maker) -> None:
+    """A successful publication supersedes any older marker for its exact project path."""
+    project_one = NoteFileVacateRepository(project_id=1)
+    project_two = NoteFileVacateRepository(project_id=2)
+    async with session_maker() as session:
+        await project_one.record_vacate(
+            session, entity_id=10, file_path="notes/live.md", file_checksum="old"
+        )
+        await project_one.record_vacate(
+            session, entity_id=11, file_path="notes/other.md", file_checksum="other"
+        )
+        await project_two.record_vacate(
+            session, entity_id=20, file_path="notes/live.md", file_checksum="second-project"
+        )
+        await project_one.clear_vacate_path(session, file_path="notes/live.md")
+        await session.commit()
+
+    async with session_maker() as session:
+        project_one_markers = await project_one.load_vacate_markers(
+            session,
+            ["notes/live.md", "notes/other.md"],
+        )
+        project_two_markers = await project_two.load_vacate_markers(session, ["notes/live.md"])
+
+    assert set(project_one_markers) == {"notes/other.md"}
+    assert project_two_markers["notes/live.md"].file_checksum == "second-project"

@@ -122,6 +122,20 @@ class NoteFileVacateRepository(Repository[NoteFileVacate]):
         )
         await session.execute(query)
 
+    async def clear_vacate_path(
+        self,
+        session: AsyncSession,
+        *,
+        file_path: str,
+    ) -> None:
+        """Clear any marker once this path is successfully materialized as a live note."""
+        path = Path(file_path).as_posix()
+        query = delete(NoteFileVacate).where(
+            NoteFileVacate.project_id == self.project_id,
+            NoteFileVacate.file_path == path,
+        )
+        await session.execute(query)
+
     async def _get_marker(
         self,
         session: AsyncSession,

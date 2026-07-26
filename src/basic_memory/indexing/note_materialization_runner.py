@@ -56,6 +56,7 @@ from basic_memory.runtime.storage import (
     RuntimeFilePath,
 )
 from basic_memory.models import Entity, NoteContent
+from basic_memory.repository.note_file_vacate_repository import NoteFileVacateRepository
 
 type NoteMaterializationPreflightOutcome = (
     RuntimePreparedNoteWrite | RuntimeNoteMaterializationResult
@@ -502,6 +503,14 @@ class RepositoryNoteMaterializationPublisher:
                     file_path=written_file.file_path,
                     file_checksum=written_file.file_checksum,
                 )
+
+            # Trigger: this current materialization made its destination path live.
+            # Why: an older lost move cleanup can leave a marker that would suppress later reuse.
+            # Outcome: retire any prior marker for this path; the newly vacated source is separate.
+            await NoteFileVacateRepository(request.project_id).clear_vacate_path(
+                session,
+                file_path=written_file.file_path,
+            )
             entity.mtime = written_file.file_updated_at.timestamp()
             entity.size = len(prepared_write.markdown_content.encode("utf-8"))
             await session.flush()

@@ -24,6 +24,7 @@ from basic_memory.indexing.note_materialization_runner import (
 )
 from basic_memory.indexing.note_content_reconciliation import NoteContentState
 from basic_memory.models import Entity, NoteContent
+from basic_memory.repository.note_file_vacate_repository import NoteFileVacateRepository
 from basic_memory.runtime.cleanup import RuntimeNoteFileDeleteJobRequest
 from basic_memory.runtime.note_content import (
     RuntimeFileConflict,
@@ -522,15 +523,31 @@ async def test_repository_note_materialization_publisher_updates_current_written
     session = FakeRepositorySession(entity=entity, note_content=note_content)
     session_lock = FakeSessionLock()
     repository = RecordingNoteContentRepository()
+    cleared_vacate_paths: list[tuple[AsyncSession, str]] = []
     scoped_session = RecordingScopedSession(
         scoped_session=FakeScopedSession(session),
         opened_session_makers=[],
     )
 
     with pytest.MonkeyPatch.context() as monkeypatch:
+
+        async def record_clear_vacate_path(
+            vacate_repository: NoteFileVacateRepository,
+            current_session: AsyncSession,
+            *,
+            file_path: str,
+        ) -> None:
+            assert vacate_repository.project_id == 7
+            cleared_vacate_paths.append((current_session, file_path))
+
         monkeypatch.setattr(
             "basic_memory.indexing.note_materialization_runner.db.scoped_session",
             scoped_session,
+        )
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_materialization_runner."
+            "NoteFileVacateRepository.clear_vacate_path",
+            record_clear_vacate_path,
         )
         result = await RepositoryNoteMaterializationPublisher(
             session_maker=cast(async_sessionmaker[AsyncSession], object()),
@@ -565,6 +582,7 @@ async def test_repository_note_materialization_publisher_updates_current_written
     assert entity.mtime == written.file_updated_at.timestamp()
     assert entity.size == len(b"# A note\n")
     assert session.flush_count == 1
+    assert cleared_vacate_paths == [(cast(AsyncSession, session), "notes/a.md")]
 
 
 @pytest.mark.asyncio

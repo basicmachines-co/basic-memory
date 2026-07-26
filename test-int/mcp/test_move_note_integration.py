@@ -564,6 +564,126 @@ async def test_deleted_move_lingering_source_is_not_resurrected(
 
 
 @pytest.mark.asyncio
+async def test_move_back_retires_old_destination_marker_before_path_reuse(
+    mcp_server,
+    app,
+    test_project,
+    project_config,
+    engine_factory,
+    monkeypatch,
+):
+    """Publishing a moved-back note supersedes older move evidence for that destination."""
+    del app
+    source_relative = "source/Move Back Lifecycle.md"
+    destination_relative = "archive/move-back-lifecycle.md"
+    source_path = project_config.home / source_relative
+    destination_path = project_config.home / destination_relative
+    _, session_maker = engine_factory
+    entity_repository = EntityRepository(project_id=test_project.id)
+    vacate_repository = NoteFileVacateRepository(project_id=test_project.id)
+    original_cleanup = InlineNoteFileDeleteEnqueuer.enqueue_note_file_delete
+
+    async def leave_move_source_cleanup_pending(
+        self: InlineNoteFileDeleteEnqueuer,
+        request: RuntimeNoteFileDeleteJobRequest,
+    ) -> None:
+        if request.live_file_path is not None:
+            return
+        await original_cleanup(self, request)
+
+    monkeypatch.setattr(
+        InlineNoteFileDeleteEnqueuer,
+        "enqueue_note_file_delete",
+        leave_move_source_cleanup_pending,
+    )
+
+    async with Client(mcp_server) as client:
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Move Back Lifecycle",
+                "directory": "source",
+                "content": "# Move Back Lifecycle\n\nThese original bytes will be reused later.",
+            },
+        )
+        original_source = source_path.read_bytes()
+
+        move_away = await client.call_tool(
+            "move_note",
+            {
+                "project": test_project.name,
+                "identifier": "Move Back Lifecycle",
+                "destination_path": destination_relative,
+            },
+        )
+        assert "✅ Note moved successfully" in move_away.content[0].text
+        assert source_path.exists()
+        assert destination_path.exists()
+
+        edit_result = await client.call_tool(
+            "edit_note",
+            {
+                "project": test_project.name,
+                "identifier": destination_relative,
+                "operation": "append",
+                "content": "\n\nThe moved-back note now has different bytes.",
+            },
+        )
+        assert "# Edited note (append)" in edit_result.content[0].text
+        assert destination_path.read_bytes() != original_source
+
+        # Simulate the first move's physical cleanup completing without its durable marker being
+        # retired. The stale marker must not outlive the next successful publication at this path.
+        source_path.unlink()
+        move_back = await client.call_tool(
+            "move_note",
+            {
+                "project": test_project.name,
+                "identifier": destination_relative,
+                "destination_path": source_relative,
+            },
+        )
+        assert "✅ Note moved successfully" in move_back.content[0].text
+
+        async with db.scoped_session(session_maker) as session:
+            moved_back = await entity_repository.get_by_file_path(session, source_relative)
+            markers = await vacate_repository.load_vacate_markers(
+                session,
+                [source_relative, destination_relative],
+            )
+        assert moved_back is not None
+        moved_external_id = moved_back.external_id
+        assert source_relative not in markers
+        assert destination_relative in markers
+
+        delete_result = await client.call_tool(
+            "delete_note",
+            {
+                "project": test_project.name,
+                "identifier": source_relative,
+            },
+        )
+        assert "true" in delete_result.content[0].text.lower()
+        assert not source_path.exists()
+
+    source_path.write_bytes(original_source)
+    await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        legitimate_reuse = await entity_repository.get_by_file_path(session, source_relative)
+        markers = await vacate_repository.load_vacate_markers(session, [source_relative])
+
+    assert legitimate_reuse is not None
+    assert legitimate_reuse.external_id != moved_external_id
+    assert markers == {}
+
+
+@pytest.mark.asyncio
 async def test_move_note_using_permalink(mcp_server, app, test_project):
     """Test moving a note using its permalink as identifier."""
 
