@@ -187,6 +187,52 @@ async def test_getting_started_no_project_uses_concrete_default_project(client, 
 
 
 @pytest.mark.asyncio
+async def test_getting_started_prefers_constrained_project(monkeypatch):
+    """A single-project server must ignore a conflicting prompt argument."""
+
+    async def fake_list_memory_projects(**_kwargs: object) -> dict[str, object]:
+        return {
+            "projects": [
+                {
+                    "name": "locked",
+                    "external_id": "project-locked",
+                    "is_default": False,
+                },
+                {
+                    "name": "requested",
+                    "external_id": "project-requested",
+                    "is_default": True,
+                },
+            ],
+            "default_project": "requested",
+            "constrained_project": "locked",
+        }
+
+    activity_calls: list[dict[str, object]] = []
+
+    async def fake_recent_activity(**kwargs: object) -> str:
+        activity_calls.append(kwargs)
+        return "# Recent activity\n\nNo recent activity"
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.prompts.getting_started.list_memory_projects",
+        fake_list_memory_projects,
+    )
+    monkeypatch.setattr(
+        "basic_memory.mcp.prompts.getting_started.recent_activity",
+        fake_recent_activity,
+    )
+
+    result = await getting_started(  # pyright: ignore[reportGeneralTypeIssues]
+        project="requested"
+    )
+
+    assert activity_calls == [{"timeframe": "30d", "project_id": "project-locked"}]
+    assert 'write_note(project_id="project-locked"' in result
+    assert "project-requested" not in result
+
+
+@pytest.mark.asyncio
 async def test_getting_started_without_projects_stops_before_note_actions(monkeypatch):
     """A fresh installation must establish a project before advertising note operations."""
 

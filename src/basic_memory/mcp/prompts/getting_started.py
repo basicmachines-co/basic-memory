@@ -38,7 +38,9 @@ def _select_project(
 ) -> ProjectMetadata | None:
     """Select a project only when the listing identifies one unambiguous target."""
     eligible = [project for project in projects if _project_string(project, "external_id")]
-    requested_identifier = requested_project or constrained_project
+    # A single-project server ignores caller-selected project arguments downstream. Keep the
+    # prompt aligned with that enforced route instead of advertising another project's id.
+    requested_identifier = constrained_project or requested_project
 
     if requested_identifier:
         exact_matches = [
