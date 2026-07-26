@@ -40,11 +40,16 @@ from basic_memory.runtime.note_content import (
     RuntimePendingNoteMaterialization,
     plan_accepted_note_response,
     plan_note_materialization_job_request,
+    read_runtime_file_checksum,
 )
 from basic_memory.runtime.note_materialization import RuntimeFileMetadataSource
 from basic_memory.runtime.storage import RuntimeFileChecksum, RuntimeFilePath
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository, NoteContentRepository
+from basic_memory.repository.note_file_vacate_repository import (
+    NoteFileVacateRepository,
+    RecoverableVacate,
+)
 from basic_memory.schemas.response import ObservationResponse, RelationResponse
 from basic_memory.services.file_service import FileService
 
@@ -261,6 +266,91 @@ async def recover_stuck_materializations(
             continue
         if result.status is RuntimeNoteMaterializationStatus.written:
             recovered += 1
+    return recovered
+
+
+async def _recover_deleted_destination_vacate(
+    vacate: RecoverableVacate,
+    *,
+    project_id: int,
+    storage: "LocalNoteContentStorage",
+    vacate_clearer: MoveVacateClearer,
+) -> None:
+    """Resolve one guarded vacate after its destination entity was deleted."""
+    actual_checksum = await read_runtime_file_checksum(storage, vacate.file_path)
+    if actual_checksum == vacate.file_checksum:
+        await storage.delete_file(vacate.file_path)
+    await vacate_clearer.clear_move_vacate(
+        project_id=project_id,
+        file_path=vacate.file_path,
+        file_checksum=vacate.file_checksum,
+    )
+
+
+async def recover_move_vacates(
+    *,
+    session_maker: async_sessionmaker[AsyncSession],
+    file_service: FileService,
+    project_id: int,
+) -> int:
+    """Retry durable move-source cleanup work that an in-process enqueue lost.
+
+    Only checksum-guarded markers with a synchronized or deleted destination are
+    eligible. This keeps the old source intact while destination publication is
+    still pending or failed, then converges it on a later startup after recovery
+    reaches ``synced``.
+    """
+    async with db.scoped_session(session_maker) as session:
+        vacates = await NoteFileVacateRepository(project_id).list_recoverable_vacates(session)
+
+    if not vacates:
+        return 0
+
+    logger.info(
+        "Recovering move-vacate source cleanup",
+        project_id=project_id,
+        vacate_count=len(vacates),
+    )
+    storage = LocalNoteContentStorage(file_service)
+    vacate_clearer = RepositoryMoveVacateClearer(session_maker=session_maker)
+    cleanup_enqueuer = InlineNoteFileDeleteEnqueuer(
+        storage,
+        vacate_clearer=vacate_clearer,
+    )
+    recovered = 0
+    for vacate in vacates:
+        try:
+            if vacate.entity_id is None:
+                # The destination entity no longer exists, so the queue-neutral
+                # cleanup request has no valid entity identity. The durable
+                # marker still carries the checksum needed for the same guarded
+                # storage delete and marker retirement.
+                await _recover_deleted_destination_vacate(
+                    vacate,
+                    project_id=project_id,
+                    storage=storage,
+                    vacate_clearer=vacate_clearer,
+                )
+            else:
+                await cleanup_enqueuer.enqueue_note_file_delete(
+                    RuntimeNoteFileDeleteJobRequest(
+                        project_id=project_id,
+                        entity_id=vacate.entity_id,
+                        file_path=vacate.file_path,
+                        file_checksum=vacate.file_checksum,
+                        live_file_path=vacate.live_file_path,
+                    )
+                )
+        except Exception:  # pragma: no cover - defensive startup guard
+            # A failed marker stays durable and can be retried on the next startup;
+            # one unavailable path must not block cleanup for the rest of the project.
+            logger.exception(
+                "Failed to recover move-vacate source cleanup",
+                project_id=project_id,
+                file_path=vacate.file_path,
+            )
+            continue
+        recovered += 1
     return recovered
 
 

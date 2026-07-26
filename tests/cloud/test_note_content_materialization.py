@@ -16,6 +16,7 @@ from basic_memory.index.note_content_materialization import (
     InlineNoteFileDeleteEnqueuer,
     LocalNoteContentMaterializationProvider,
     LocalNoteContentStorage,
+    recover_move_vacates,
     recover_stuck_materializations,
     run_recovery_materialization,
 )
@@ -25,6 +26,7 @@ from basic_memory.repository.note_content_repository import (
     AcceptedNoteContentWrite,
     NoteContentRepository,
 )
+from basic_memory.repository.note_file_vacate_repository import NoteFileVacateRepository
 from basic_memory.runtime.cleanup import RuntimeNoteFileDeleteJobRequest
 from basic_memory.indexing.models import FileIndexOperation, FileIndexResult
 from basic_memory.runtime.note_content import (
@@ -540,6 +542,72 @@ async def test_recover_stuck_materializations_writes_file_and_marks_synced(
     assert row.file_write_status == "synced"
     assert row.file_checksum is not None
     assert row.file_version == 1
+
+
+@pytest.mark.asyncio
+async def test_move_vacate_recovery_waits_for_destination_then_cleans_source(
+    session_maker,
+    test_project: Project,
+    sample_entity,
+    file_service: FileService,
+) -> None:
+    """A crash-lost move cleanup waits for destination recovery, then converges."""
+    markdown_content = "# Moved across restart\n"
+    source_relative = "old/moved-across-restart.md"
+    source = file_service.base_path / source_relative
+    source.parent.mkdir(parents=True)
+    source.write_bytes(markdown_content.encode())
+    source_checksum = sha256(source.read_bytes()).hexdigest()
+    await _seed_stuck_note_content(
+        session_maker,
+        project_id=test_project.id,
+        entity_id=sample_entity.id,
+        markdown_content=markdown_content,
+        db_version=1,
+        db_checksum=sha256(markdown_content.encode()).hexdigest(),
+        file_write_status="writing",
+    )
+    vacate_repository = NoteFileVacateRepository(project_id=test_project.id)
+    async with db.scoped_session(session_maker) as session:
+        await vacate_repository.record_vacate(
+            session,
+            entity_id=sample_entity.id,
+            file_path=source_relative,
+            file_checksum=source_checksum,
+        )
+
+    # The old source is still the only materialized copy, so cleanup must wait.
+    assert (
+        await recover_move_vacates(
+            session_maker=session_maker,
+            file_service=file_service,
+            project_id=test_project.id,
+        )
+        == 0
+    )
+    assert source.exists()
+
+    assert (
+        await recover_stuck_materializations(
+            session_maker=session_maker,
+            file_service=file_service,
+            project_id=test_project.id,
+        )
+        == 1
+    )
+    assert (
+        await recover_move_vacates(
+            session_maker=session_maker,
+            file_service=file_service,
+            project_id=test_project.id,
+        )
+        == 1
+    )
+
+    assert not source.exists()
+    assert (file_service.base_path / sample_entity.file_path).read_text() == markdown_content
+    async with db.scoped_session(session_maker) as session:
+        assert await vacate_repository.load_vacate_markers(session, [source_relative]) == {}
 
 
 @pytest.mark.asyncio

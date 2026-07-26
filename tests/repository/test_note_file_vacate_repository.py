@@ -7,7 +7,10 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from basic_memory.models.base import Base
-from basic_memory.repository.note_file_vacate_repository import NoteFileVacateRepository
+from basic_memory.repository.note_file_vacate_repository import (
+    NoteFileVacateRepository,
+    RecoverableVacate,
+)
 
 
 @pytest_asyncio.fixture
@@ -61,6 +64,38 @@ async def test_record_vacate_upserts_on_same_path(session_maker) -> None:
         assert marker is not None
         assert marker.entity_id == 11
         assert marker.file_checksum == "def"
+
+
+@pytest.mark.asyncio
+async def test_list_recoverable_vacates_is_project_scoped_and_guarded(session_maker) -> None:
+    """Startup cleanup returns only checksum-backed markers from its project."""
+    project_one = NoteFileVacateRepository(project_id=1)
+    project_two = NoteFileVacateRepository(project_id=2)
+    async with session_maker() as session:
+        await project_one.record_vacate(
+            session, entity_id=10, file_path="notes/ready.md", file_checksum="abc"
+        )
+        await project_one.record_vacate(
+            session, entity_id=11, file_path="notes/unguarded.md", file_checksum=None
+        )
+        await project_two.record_vacate(
+            session, entity_id=20, file_path="notes/other-project.md", file_checksum="xyz"
+        )
+        await session.commit()
+
+    async with session_maker() as session:
+        recoverable = await project_one.list_recoverable_vacates(session)
+
+    # These lightweight repository tests use dangling entity ids, matching a
+    # destination tombstone on backends that enforce ON DELETE SET NULL.
+    assert recoverable == [
+        RecoverableVacate(
+            entity_id=None,
+            file_path="notes/ready.md",
+            file_checksum="abc",
+            live_file_path=None,
+        )
+    ]
 
 
 @pytest.mark.asyncio

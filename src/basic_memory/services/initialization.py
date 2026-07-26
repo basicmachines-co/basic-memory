@@ -58,17 +58,20 @@ async def recover_project_materializations(
     project: Project,
     session_maker: "async_sessionmaker[AsyncSession]",
 ) -> None:
-    """Re-drive note materializations a crash or write error left stuck for one project.
+    """Re-drive note materialization and move cleanup lost across a process exit.
 
     A local note write returns before its markdown file is written; a crash
     between accepting the DB snapshot and writing the file leaves note_content
     stuck in writing/pending (a transient write error leaves it failed) and the
-    source-of-truth file missing. Runs once at
-    startup, before the watch service serves, so the file is (re)written and then
-    picked up by the initial project index. Non-fatal: a recovery failure must not
-    block startup, so it is logged and startup continues.
+    source-of-truth file missing. A moved note can also synchronize its destination
+    before the in-memory source cleanup is lost. Runs once at startup, before the
+    initial index, so both durable states converge. Non-fatal: a recovery failure
+    must not block startup, so it is logged and startup continues.
     """
-    from basic_memory.index.note_content_materialization import recover_stuck_materializations
+    from basic_memory.index.note_content_materialization import (
+        recover_move_vacates,
+        recover_stuck_materializations,
+    )
     from basic_memory.services.file_service import FileService
 
     try:
@@ -80,11 +83,17 @@ async def recover_project_materializations(
             file_service=file_service,
             project_id=project.id,
         )
-        if recovered:
+        recovered_vacates = await recover_move_vacates(
+            session_maker=session_maker,
+            file_service=file_service,
+            project_id=project.id,
+        )
+        if recovered or recovered_vacates:
             logger.info(
-                "Recovered stuck note materializations on startup",
+                "Recovered note materialization state on startup",
                 project=project.name,
-                recovered=recovered,
+                recovered_materializations=recovered,
+                recovered_move_vacates=recovered_vacates,
             )
     except Exception as e:  # pragma: no cover - defensive startup guard
         logger.error(f"Error recovering stuck materializations for project {project.name}: {e}")
@@ -216,9 +225,9 @@ async def initialize_file_indexing(
         active_projects = [p for p in active_projects if p.name not in skip]
         logger.info(f"Skipping projects that are not locally indexable: {skip}")
 
-    # Recover materializations left stuck (writing/pending/failed) before serving.
-    # Runs synchronously here so the source-of-truth files are re-written before the
-    # initial project index scans them; bounded by the count of stuck rows.
+    # Recover materializations left stuck (writing/pending/failed) and source
+    # cleanup whose in-process enqueue was lost. Runs synchronously so the files
+    # converge before the initial project index scans them.
     for project in active_projects:
         await recover_project_materializations(project, session_maker)
 

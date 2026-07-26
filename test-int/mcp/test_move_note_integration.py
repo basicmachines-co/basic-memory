@@ -16,11 +16,15 @@ from basic_memory.index.local_project import (
     LocalProjectIndexRuntimeFactory,
     run_local_project_index_for_project,
 )
-from basic_memory.index.note_content_materialization import InlineNoteFileDeleteEnqueuer
+from basic_memory.index.note_content_materialization import (
+    InlineNoteFileDeleteEnqueuer,
+    recover_move_vacates,
+)
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.repository.note_file_vacate_repository import NoteFileVacateRepository
 from basic_memory.runtime.cleanup import RuntimeNoteFileDeleteJobRequest
+from basic_memory.services.file_service import FileService
 
 
 @pytest.mark.asyncio
@@ -173,6 +177,84 @@ async def test_move_note_lingering_source_is_not_reindexed(
         assert ghost is None
         assert moved is not None
         assert moved.id == moved_entity_id
+
+
+@pytest.mark.asyncio
+async def test_startup_recovery_retries_lost_move_source_cleanup(
+    mcp_server,
+    app,
+    test_project,
+    project_config,
+    engine_factory,
+    monkeypatch,
+):
+    """A synchronized move converges after its in-memory cleanup enqueue is lost."""
+    del app
+    source_relative = "source/Lost Cleanup.md"
+    destination_relative = "archive/lost-cleanup.md"
+    source_path = project_config.home / source_relative
+    destination_path = project_config.home / destination_relative
+    _, session_maker = engine_factory
+    vacate_repository = NoteFileVacateRepository(project_id=test_project.id)
+    original_cleanup = InlineNoteFileDeleteEnqueuer.enqueue_note_file_delete
+
+    async def lose_source_cleanup(
+        self: InlineNoteFileDeleteEnqueuer,
+        request: RuntimeNoteFileDeleteJobRequest,
+    ) -> None:
+        del self, request
+
+    monkeypatch.setattr(
+        InlineNoteFileDeleteEnqueuer,
+        "enqueue_note_file_delete",
+        lose_source_cleanup,
+    )
+
+    async with Client(mcp_server) as client:
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Lost Cleanup",
+                "directory": "source",
+                "content": "# Lost Cleanup\n\nStartup must retry this source deletion.",
+            },
+        )
+        move_result = await client.call_tool(
+            "move_note",
+            {
+                "project": test_project.name,
+                "identifier": "Lost Cleanup",
+                "destination_path": destination_relative,
+            },
+        )
+
+    assert "✅ Note moved successfully" in move_result.content[0].text
+    assert source_path.exists()
+    assert destination_path.exists()
+    async with db.scoped_session(session_maker) as session:
+        assert source_relative in await vacate_repository.load_vacate_markers(
+            session,
+            [source_relative],
+        )
+
+    # Re-enable the real cleanup adapter, matching a fresh process startup.
+    monkeypatch.setattr(
+        InlineNoteFileDeleteEnqueuer,
+        "enqueue_note_file_delete",
+        original_cleanup,
+    )
+    recovered = await recover_move_vacates(
+        session_maker=session_maker,
+        file_service=FileService(project_config.home),
+        project_id=test_project.id,
+    )
+
+    assert recovered == 1
+    assert not source_path.exists()
+    assert destination_path.exists()
+    async with db.scoped_session(session_maker) as session:
+        assert await vacate_repository.load_vacate_markers(session, [source_relative]) == {}
 
 
 @pytest.mark.asyncio
@@ -567,6 +649,16 @@ async def test_deleted_move_lingering_source_is_not_resurrected(
         resurrected = await entity_repository.get_by_file_path(session, source_relative)
 
     assert resurrected is None
+
+    recovered = await recover_move_vacates(
+        session_maker=session_maker,
+        file_service=FileService(project_config.home),
+        project_id=test_project.id,
+    )
+    assert recovered == 1
+    assert not source_path.exists()
+    async with db.scoped_session(session_maker) as session:
+        assert await vacate_repository.load_vacate_markers(session, [source_relative]) == {}
 
 
 @pytest.mark.asyncio

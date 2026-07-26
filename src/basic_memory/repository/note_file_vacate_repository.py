@@ -4,12 +4,12 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from basic_memory.models.knowledge import NoteFileVacate
+from basic_memory.models.knowledge import Entity, NoteContent, NoteFileVacate
 from basic_memory.repository.repository import Repository
 
 
@@ -19,6 +19,16 @@ class VacateMarker:
 
     entity_id: int | None
     file_checksum: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class RecoverableVacate:
+    """A checksum-guarded source cleanup whose destination is safe."""
+
+    entity_id: int | None
+    file_path: str
+    file_checksum: str
+    live_file_path: str | None
 
 
 class NoteFileVacateRepository(Repository[NoteFileVacate]):
@@ -100,6 +110,53 @@ class NoteFileVacateRepository(Repository[NoteFileVacate]):
             )
             for path, entity_id, file_checksum in result.all()
         }
+
+    async def list_recoverable_vacates(
+        self,
+        session: AsyncSession,
+    ) -> list[RecoverableVacate]:
+        """Return guarded vacates whose destination is synchronized or deleted.
+
+        Recovery must not remove the source while destination materialization is
+        pending or failed: those source bytes may still be the only durable copy.
+        A deleted destination has no live entity to protect, while a synchronized
+        destination carries the live path needed for case-alias protection.
+        """
+        query = self._add_project_filter(
+            select(
+                NoteFileVacate.entity_id,
+                NoteFileVacate.file_path,
+                NoteFileVacate.file_checksum,
+                Entity.file_path,
+            )
+            .outerjoin(Entity, Entity.id == NoteFileVacate.entity_id)
+            .outerjoin(NoteContent, NoteContent.entity_id == Entity.id)
+            .where(
+                NoteFileVacate.file_checksum.is_not(None),
+                or_(
+                    Entity.id.is_(None),
+                    NoteContent.file_write_status == "synced",
+                ),
+            )
+            .order_by(NoteFileVacate.file_path)
+        )
+        result = await session.execute(query)
+        recoverable: list[RecoverableVacate] = []
+        for marker_entity_id, file_path, file_checksum, live_file_path in result.all():
+            assert file_checksum is not None
+            recoverable.append(
+                RecoverableVacate(
+                    entity_id=(
+                        int(marker_entity_id)
+                        if marker_entity_id is not None and live_file_path is not None
+                        else None
+                    ),
+                    file_path=str(file_path),
+                    file_checksum=str(file_checksum),
+                    live_file_path=(str(live_file_path) if live_file_path is not None else None),
+                )
+            )
+        return recoverable
 
     async def clear_vacate(
         self,
