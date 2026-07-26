@@ -156,12 +156,31 @@ def test_scope_is_stable_credential_free_and_project_isolated() -> None:
         provider,
         project_id=7,
     )
+    first_socket = build_vector_index_scope(
+        _postgres_config(
+            database_url=(
+                "postgresql+asyncpg://user:secret@/memory?host=%2Fvar%2Frun%2Fpostgresql&port=5432"
+            )
+        ),
+        provider,
+        project_id=7,
+    )
+    other_socket = build_vector_index_scope(
+        _postgres_config(
+            database_url=(
+                "postgresql+asyncpg://user:secret@/memory?host=%2Ftmp%2Fpostgresql&port=5433"
+            )
+        ),
+        provider,
+        project_id=7,
+    )
 
     assert first.namespace == rotated_password.namespace
     assert "secret" not in first.namespace
     assert first.project_id != other_project.project_id
     assert first.namespace != other_user.namespace
     assert first.namespace != other_schema.namespace
+    assert first_socket.namespace != other_socket.namespace
     assert first.embedding_identity == "StubEmbeddingProvider:stub-model:3"
     assert first.dimensions == 3
     assert first.storage_key == rotated_password.storage_key

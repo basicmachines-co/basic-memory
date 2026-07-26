@@ -565,7 +565,7 @@ async def test_ready_commit_failure_retries_same_stable_adapter_key(
                 "project_id": search_repository.project_id,
                 "chunk_key": "entity:115:0",
                 "chunk_text": "ready commit retry",
-                "source_hash": "hash",
+                "source_hash": hashlib.sha256(b"ready commit retry").hexdigest(),
                 "entity_fingerprint": "fingerprint",
                 "embedding_model": search_repository._embedding_model_key(),
                 "vector_index": "recording",

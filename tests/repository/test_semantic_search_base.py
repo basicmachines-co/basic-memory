@@ -1,6 +1,8 @@
 """Tests for semantic search orchestration in SearchRepositoryBase."""
 
 import asyncio
+import hashlib
+from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
 from types import SimpleNamespace
@@ -21,7 +23,12 @@ from basic_memory.repository.semantic_errors import (
     SemanticSearchDisabledError,
     SemanticVectorIndexExtensionError,
 )
-from basic_memory.repository.semantic_vector_index import VectorKey, VectorMatch
+from basic_memory.repository.semantic_vector_index import (
+    VectorIndexScope,
+    VectorKey,
+    VectorMatch,
+    VectorRecord,
+)
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 
@@ -90,6 +97,40 @@ class _ConcreteRepo(SearchRepositoryBase):
         return 1.0 / (1.0 + max(distance, 0.0))
 
 
+class _RecordingVectorIndex:
+    """Protocol-complete adapter that records generation-safe upserts."""
+
+    scope = VectorIndexScope(
+        namespace="basic-memory-test",
+        project_id=1,
+        embedding_identity="stub:4",
+        dimensions=4,
+    )
+
+    def __init__(self) -> None:
+        self.upserted_records: list[VectorRecord] = []
+
+    async def initialize(self) -> None:
+        return None
+
+    async def upsert(self, records: Sequence[VectorRecord]) -> None:
+        self.upserted_records.extend(records)
+
+    async def delete(self, keys: Sequence[VectorKey]) -> None:
+        return None
+
+    async def delete_entity(self, entity_id: int) -> None:
+        return None
+
+    async def search(
+        self,
+        query: Sequence[float],
+        *,
+        limit: int,
+    ) -> list[VectorMatch]:
+        return []
+
+
 @pytest.mark.asyncio
 async def test_vector_match_hydration_batches_large_adapter_results() -> None:
     """Deep vector pages must not create an unbounded SQL bind-parameter list."""
@@ -124,6 +165,82 @@ async def test_vector_match_hydration_batches_large_adapter_results() -> None:
     assert session.execute.await_count == 3
     assert max(len(call.args[1]) for call in session.execute.await_args_list) == 503
     assert [row["entity_id"] for row in hydrated] == list(range(600))
+
+
+@pytest.mark.asyncio
+async def test_embedding_persistence_skips_stale_source_generation(monkeypatch) -> None:
+    """An obsolete embedding job must not overwrite the current adapter record."""
+    repo = _ConcreteRepo()
+    repo._semantic_vector_index_name = "milvus"
+    repo._embedding_provider = SimpleNamespace(model_name="stub", dimensions=4)
+    adapter = _RecordingVectorIndex()
+    repo._semantic_vector_index = adapter
+    current_text = "new chunk text"
+    session = AsyncMock()
+    session.execute.return_value = SimpleNamespace(
+        mappings=lambda: SimpleNamespace(
+            all=lambda: [
+                {
+                    "id": 7,
+                    "entity_id": 41,
+                    "chunk_key": "entity:41:0",
+                    "source_hash": hashlib.sha256(current_text.encode("utf-8")).hexdigest(),
+                }
+            ]
+        )
+    )
+
+    @asynccontextmanager
+    async def fake_scoped_session(_session_maker):
+        yield session
+
+    monkeypatch.setattr(search_repository_base_module.db, "scoped_session", fake_scoped_session)
+
+    await repo._persist_embeddings([(7, "old chunk text")], [[1.0, 0.0, 0.0, 0.0]])
+
+    assert adapter.upserted_records == []
+    assert session.execute.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_embedding_ready_update_requires_source_generation(monkeypatch) -> None:
+    """Ready state must belong to the exact source text that produced the vector."""
+    repo = _ConcreteRepo()
+    repo._semantic_vector_index_name = "milvus"
+    repo._embedding_provider = SimpleNamespace(model_name="stub", dimensions=4)
+    adapter = _RecordingVectorIndex()
+    repo._semantic_vector_index = adapter
+    chunk_text = "current chunk text"
+    source_hash = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()
+    session = AsyncMock()
+    session.execute.side_effect = [
+        SimpleNamespace(
+            mappings=lambda: SimpleNamespace(
+                all=lambda: [
+                    {
+                        "id": 7,
+                        "entity_id": 41,
+                        "chunk_key": "entity:41:0",
+                        "source_hash": source_hash,
+                    }
+                ]
+            )
+        ),
+        SimpleNamespace(),
+    ]
+
+    @asynccontextmanager
+    async def fake_scoped_session(_session_maker):
+        yield session
+
+    monkeypatch.setattr(search_repository_base_module.db, "scoped_session", fake_scoped_session)
+
+    await repo._persist_embeddings([(7, chunk_text)], [[1.0, 0.0, 0.0, 0.0]])
+
+    assert len(adapter.upserted_records) == 1
+    ready_statement, ready_params = session.execute.await_args_list[1].args
+    assert "source_hash = :source_hash_0" in str(ready_statement)
+    assert ready_params["source_hash_0"] == source_hash
 
 
 # --- SQLite SemanticSearchDisabledError ---

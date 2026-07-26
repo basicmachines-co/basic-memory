@@ -137,6 +137,8 @@ async def test_initialize_preserves_manifest_when_storage_is_unchanged(monkeypat
     sql_calls = _sql_calls(session)
     assert not any("DROP TABLE IF EXISTS search_vector_embeddings" in sql for sql in sql_calls)
     assert not any("embedding_status = 'pending'" in sql for sql in sql_calls)
+    table_probe = next(sql for sql in sql_calls if "information_schema.tables" in sql)
+    assert "table_schema = ANY (current_schemas(false))" in table_probe
 
 
 @pytest.mark.asyncio

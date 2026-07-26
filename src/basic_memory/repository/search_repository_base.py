@@ -1,5 +1,6 @@
 """Abstract base class for search repository implementations."""
 
+import hashlib
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Sequence
@@ -327,46 +328,65 @@ class SearchRepositoryBase(ABC):
             return
 
         row_ids = [row_id for row_id, _ in jobs]
-        params = {f"row_id_{index}": row_id for index, row_id in enumerate(row_ids)}
-        placeholders = ", ".join(f":row_id_{index}" for index in range(len(row_ids)))
+        lookup_params = {f"row_id_{index}": row_id for index, row_id in enumerate(row_ids)}
+        lookup_placeholders = ", ".join(f":row_id_{index}" for index in range(len(row_ids)))
         async with db.scoped_session(self.session_maker) as session:
             result = await session.execute(
                 text(
-                    "SELECT id, entity_id, chunk_key FROM search_vector_chunks "
-                    f"WHERE project_id = :project_id AND id IN ({placeholders})"
+                    "SELECT id, entity_id, chunk_key, source_hash FROM search_vector_chunks "
+                    f"WHERE project_id = :project_id AND id IN ({lookup_placeholders})"
                 ),
-                {**params, "project_id": self.project_id},
+                {**lookup_params, "project_id": self.project_id},
             )
-            keys_by_id = {
-                int(row["id"]): VectorKey(
-                    entity_id=int(row["entity_id"]),
-                    chunk_key=str(row["chunk_key"]),
-                )
-                for row in result.mappings().all()
-            }
+            rows_by_id = {int(row["id"]): row for row in result.mappings().all()}
 
-        missing_row_ids = [row_id for row_id in row_ids if row_id not in keys_by_id]
+        missing_row_ids = [row_id for row_id in row_ids if row_id not in rows_by_id]
         if missing_row_ids:
             raise RuntimeError(f"Vector manifest rows disappeared before write: {missing_row_ids}")
 
+        current_jobs: list[tuple[int, str, str, list[float]]] = []
+        for (row_id, chunk_text), embedding in zip(jobs, embeddings, strict=True):
+            expected_source_hash = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()
+            if str(rows_by_id[row_id]["source_hash"]) != expected_source_hash:
+                continue
+            current_jobs.append((row_id, chunk_text, expected_source_hash, embedding))
+        if not current_jobs:
+            return
+
+        params: dict[str, object] = {}
+        generation_predicates: list[str] = []
         records = [
-            VectorRecord(key=keys_by_id[row_id], values=tuple(embedding))
-            for (row_id, _), embedding in zip(jobs, embeddings, strict=True)
+            VectorRecord(
+                key=VectorKey(
+                    entity_id=int(rows_by_id[row_id]["entity_id"]),
+                    chunk_key=str(rows_by_id[row_id]["chunk_key"]),
+                ),
+                values=tuple(embedding),
+            )
+            for row_id, _chunk_text, _source_hash, embedding in current_jobs
         ]
+        for index, (row_id, _chunk_text, source_hash, _embedding) in enumerate(current_jobs):
+            params[f"row_id_{index}"] = row_id
+            params[f"source_hash_{index}"] = source_hash
+            generation_predicates.append(
+                f"(id = :row_id_{index} AND source_hash = :source_hash_{index})"
+            )
         await self._semantic_vector_index.upsert(records)
 
         # Trigger: the adapter write completed successfully.
-        # Why: only SQL rows marked ready may hydrate search matches. If this commit
-        # fails, the adapter's idempotent upsert is retried while the row stays pending.
-        # Outcome: external partial failures fail closed without cross-store transactions.
+        # Why: only SQL rows marked ready may hydrate search matches, and a newer sync
+        # may have replaced a chunk while this job was embedding its previous text.
+        # Outcome: current source generations become ready; stale completions leave the
+        # newer manifest pending for retry.
         async with db.scoped_session(self.session_maker) as session:
             await session.execute(
                 text(
                     "UPDATE search_vector_chunks SET embedding_status = 'ready', "
                     f"updated_at = {self._timestamp_now_expr()} "
-                    f"WHERE project_id = :project_id AND id IN ({placeholders}) "
+                    "WHERE project_id = :project_id "
                     "AND vector_index = :vector_index "
-                    "AND embedding_model = :embedding_model"
+                    "AND embedding_model = :embedding_model "
+                    "AND (" + " OR ".join(generation_predicates) + ")"
                 ),
                 {
                     **params,

@@ -117,7 +117,8 @@ class PgVectorIndex(SemanticVectorIndex):
         exists = await session.execute(
             text(
                 "SELECT 1 FROM information_schema.tables "
-                "WHERE table_name = 'search_vector_embeddings'"
+                "WHERE table_schema = ANY (current_schemas(false)) "
+                "AND table_name = 'search_vector_embeddings'"
             )
         )
         if exists.fetchone() is None:

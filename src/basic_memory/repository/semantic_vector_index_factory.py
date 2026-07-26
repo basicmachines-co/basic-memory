@@ -49,12 +49,18 @@ def semantic_embedding_identity(provider: EmbeddingProvider) -> str:
     return f"{type(provider).__name__}:{embedding_provider_identity(provider)}"
 
 
+def _serialize_query_value(value: str | tuple[str, ...] | None) -> str:
+    """Serialize SQLAlchemy URL query values without dropping repeated fields."""
+    if isinstance(value, tuple):
+        return "|".join(value)
+    return value or ""
+
+
 def _database_namespace(app_config: BasicMemoryConfig) -> str:
     """Derive a stable, credential-free namespace from the authoritative database."""
     if app_config.database_url:
         url = make_url(app_config.database_url)
-        options = url.query.get("options", "")
-        serialized_options = "|".join(options) if isinstance(options, tuple) else str(options)
+        serialized_options = _serialize_query_value(url.query.get("options"))
         search_path_match = re.search(
             r"(?:^|\s)-c\s*search_path=([^\s]+)",
             serialized_options,
@@ -65,6 +71,8 @@ def _database_namespace(app_config: BasicMemoryConfig) -> str:
                 url.get_backend_name(),
                 url.host or "",
                 str(url.port or ""),
+                _serialize_query_value(url.query.get("host")),
+                _serialize_query_value(url.query.get("port")),
                 url.database or "",
                 url.username or "",
                 search_path,
