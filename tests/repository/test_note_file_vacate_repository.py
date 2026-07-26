@@ -89,8 +89,48 @@ async def test_clear_vacate_is_checksum_guarded(session_maker) -> None:
 
 
 @pytest.mark.asyncio
+async def test_clear_vacate_does_not_delete_concurrently_refreshed_marker(session_maker) -> None:
+    """A stale cleanup cannot delete a newer move marker for the same source path."""
+    repo = NoteFileVacateRepository(project_id=1)
+    async with session_maker() as session:
+        await repo.record_vacate(
+            session, entity_id=10, file_path="koncept/note.md", file_checksum="old"
+        )
+        await session.commit()
+
+    async with session_maker() as cleanup_session:
+        # Keep the old marker in this session's identity map, matching the stale read that made
+        # the previous Python check + ORM delete sequence vulnerable.
+        stale_marker = await repo._get_marker(cleanup_session, "koncept/note.md")
+        assert stale_marker is not None
+        assert stale_marker.file_checksum == "old"
+        await cleanup_session.commit()
+
+        async with session_maker() as new_move_session:
+            await repo.record_vacate(
+                new_move_session,
+                entity_id=11,
+                file_path="koncept/note.md",
+                file_checksum="new",
+            )
+            await new_move_session.commit()
+
+        await repo.clear_vacate(
+            cleanup_session,
+            file_path="koncept/note.md",
+            file_checksum="old",
+        )
+        await cleanup_session.commit()
+
+    async with session_maker() as session:
+        markers = await repo.load_vacate_markers(session, ["koncept/note.md"])
+    assert markers["koncept/note.md"].entity_id == 11
+    assert markers["koncept/note.md"].file_checksum == "new"
+
+
+@pytest.mark.asyncio
 async def test_clear_vacate_clears_null_checksum_marker(session_maker) -> None:
-    """A marker recorded with an unknown source checksum is cleared once the file is gone."""
+    """A cleanup with the same unknown checksum clears an unknown-checksum marker."""
     repo = NoteFileVacateRepository(project_id=1)
     async with session_maker() as session:
         await repo.record_vacate(
@@ -99,7 +139,7 @@ async def test_clear_vacate_clears_null_checksum_marker(session_maker) -> None:
         await session.commit()
 
     async with session_maker() as session:
-        await repo.clear_vacate(session, file_path="koncept/note.md", file_checksum="whatever")
+        await repo.clear_vacate(session, file_path="koncept/note.md", file_checksum=None)
         await session.commit()
     async with session_maker() as session:
         assert set(await repo.load_vacate_markers(session, ["koncept/note.md"])) == set()

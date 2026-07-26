@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory.models.knowledge import NoteFileVacate
@@ -92,17 +92,17 @@ class NoteFileVacateRepository(Repository[NoteFileVacate]):
     ) -> None:
         """Clear the marker once its source object has actually been deleted.
 
-        Guarded by checksum: if a newer move (or a re-created file) replaced the marker with a
-        different checksum, leave it — that path is vacated for a *different* content and must stay
-        gated until its own delete runs.
+        The checksum comparison is part of the DELETE statement so a concurrent move cannot
+        refresh the same path between a Python-side check and marker deletion. A newer checksum
+        represents different vacated content and must remain gated until its own cleanup runs.
         """
         path = Path(file_path).as_posix()
-        marker = await self._get_marker(session, path)
-        if marker is None:
-            return
-        if marker.file_checksum is not None and marker.file_checksum != file_checksum:
-            return
-        await session.delete(marker)
+        query = delete(NoteFileVacate).where(
+            NoteFileVacate.project_id == self.project_id,
+            NoteFileVacate.file_path == path,
+            NoteFileVacate.file_checksum == file_checksum,
+        )
+        await session.execute(query)
 
     async def _get_marker(
         self,
