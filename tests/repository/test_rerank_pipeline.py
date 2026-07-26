@@ -280,9 +280,12 @@ async def test_rerank_paginate_noop_paths():
     repo._rerank_provider = None
     assert await repo._rerank_and_paginate("auth", rows, offset=0, limit=10) == rows
 
-    repo._rerank_provider = _FakeReranker({})
-    single = [_row(id=1)]
-    assert await repo._rerank_and_paginate("auth", single, offset=0, limit=10) == single
+    reranker = _FakeReranker({})
+    repo._rerank_provider = reranker
+    assert await repo._rerank_and_paginate("", rows, offset=0, limit=10) == rows
+    assert await repo._rerank_and_paginate("auth", [], offset=0, limit=10) == []
+    assert await repo._rerank_and_paginate("auth", rows, offset=2, limit=10) == []
+    assert reranker.calls == 0
 
 
 @pytest.mark.asyncio
@@ -328,10 +331,37 @@ async def test_rerank_paginate_preserves_pool_before_tail_at_zero_floor():
 
 
 @pytest.mark.asyncio
-async def test_rerank_paginate_skips_provider_on_deep_page():
-    """Deep pages skip the provider and exclude every stable-prefix row."""
+async def test_rerank_paginate_scores_singleton_prefix_and_demotes_tail():
+    """A one-row prefix still calibrates scores before cross-project merging."""
     repo = _unit_repo()
-    reranker = _FakeReranker({"Alpha": 0.9})
+    reranker = _FakeReranker({"Only": 0.4})
+    repo._rerank_provider = reranker
+    repo._reranker_candidates = 2
+    stable_rows = [_row(id=1, title="Only", score=0.5)]
+    expanded_rows = [
+        stable_rows[0],
+        _row(id=2, title="Tail", score=1.3),
+    ]
+
+    result = await repo._rerank_and_paginate(
+        "auth",
+        expanded_rows,
+        offset=0,
+        limit=2,
+        stable_rows=stable_rows,
+    )
+
+    assert reranker.calls == 1
+    assert [row.title for row in result] == ["Only", "Tail"]
+    assert result[0].score == 0.4
+    assert result[1].score is not None and result[1].score < 0.4
+
+
+@pytest.mark.asyncio
+async def test_rerank_paginate_calibrates_tail_scores_on_deep_page():
+    """Deep pages rescore the fixed prefix before returning its calibrated tail."""
+    repo = _unit_repo()
+    reranker = _FakeReranker({"n1": 0.9, "n2": 0.8})
     repo._rerank_provider = reranker
     repo._reranker_candidates = 2
     stable_rows = [_row(id=1, title="n1"), _row(id=2, title="n2")]
@@ -351,8 +381,9 @@ async def test_rerank_paginate_skips_provider_on_deep_page():
         stable_rows=stable_rows,
     )
 
-    assert reranker.calls == 0
+    assert reranker.calls == 1
     assert [r.id for r in result] == [3, 4]
+    assert all(row.score is not None and row.score < 0.8 for row in result)
 
 
 @pytest.mark.asyncio
@@ -672,6 +703,78 @@ async def test_hybrid_search_preserves_candidate_windows(
     assert growing_prefix_results
     assert reranker.calls == 2
     assert candidate_limits == [90, 80]
+
+
+@pytest.mark.asyncio
+async def test_hybrid_search_keeps_deep_tail_stable_as_candidate_window_grows(monkeypatch):
+    """Late dual-source evidence cannot move a row across an earlier tail page."""
+    repo = _unit_repo()
+    repo._semantic_vector_k = 2
+    repo._reranker_candidates = 2
+    reranker = _FakeReranker({"Alpha": 0.9, "Bravo": 0.8})
+    repo._rerank_provider = reranker
+
+    charlie = _row(id=3, title="Charlie")
+    delta = _row(id=4, title="Delta")
+
+    async def fake_fts_search(*args, limit: int, **kwargs) -> list[SearchIndexRow]:
+        assert kwargs["retrieval_mode"] == SearchRetrievalMode.FTS
+        if limit <= 8:
+            return [
+                _row(id=1, title="Alpha", score=10.0),
+                _row(id=2, title="Bravo", score=9.0),
+            ]
+        return [
+            _row(id=1, title="Alpha", score=10.0),
+            _row(id=2, title="Bravo", score=9.0),
+            _row(id=3, title="Charlie", score=8.0),
+            _row(id=4, title="Delta", score=7.0),
+        ]
+
+    async def fake_vector_search(**kwargs) -> list[SearchIndexRow]:
+        candidate_limit = kwargs["candidate_limit"]
+        if candidate_limit <= 8:
+            return [
+                _row(id=1, title="Alpha", score=1.0),
+                _row(id=2, title="Bravo", score=0.9),
+            ]
+        if candidate_limit <= 18:
+            return [
+                _row(id=1, title="Alpha", score=1.0),
+                _row(id=2, title="Bravo", score=0.9),
+                _row(id=4, title="Delta", score=0.95),
+            ]
+        return [
+            _row(id=1, title="Alpha", score=1.0),
+            _row(id=2, title="Bravo", score=0.9),
+            _row(id=3, title="Charlie", score=1.0),
+            _row(id=4, title="Delta", score=0.7),
+        ]
+
+    monkeypatch.setattr(repo, "search", fake_fts_search)
+    monkeypatch.setattr(repo, "_search_vector_only", fake_vector_search)
+
+    async def deep_page(offset: int) -> list[SearchIndexRow]:
+        return await repo._search_hybrid(
+            search_text="auth",
+            permalink=None,
+            permalink_match=None,
+            title=None,
+            note_types=None,
+            after_date=None,
+            search_item_types=None,
+            categories=None,
+            metadata_filters=None,
+            limit=1,
+            offset=offset,
+        )
+
+    first_tail_page = await deep_page(offset=2)
+    second_tail_page = await deep_page(offset=3)
+
+    assert [row.id for row in first_tail_page] == [charlie.id]
+    assert [row.id for row in second_tail_page] == [delta.id]
+    assert reranker.calls == 2
 
 
 @pytest.mark.asyncio

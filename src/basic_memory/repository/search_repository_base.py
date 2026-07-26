@@ -929,9 +929,8 @@ class SearchRepositoryBase(ABC):
         relevance (which replaces ``score``); the requested page is sliced from the
         reordered list.
 
-        Score-scale caveat: pages past ``reranker_candidates`` skip the rerank and
-        keep raw retrieval scores (up to ~1.3 for fused hybrid), so scores are not
-        comparable across that page boundary — only within a page.
+        Every non-empty page rescores the same fixed prefix before slicing so the
+        untouched tail can be demoted onto the reranker's public ``[0, 1]`` scale.
         """
         page_end = offset + limit
         if self._rerank_provider is None or not query_text:
@@ -948,10 +947,10 @@ class SearchRepositoryBase(ABC):
         tail = [row for row in rows if (row.type, row.id) not in pool_keys]
         ordered_rows = pool + tail
 
-        # Skip the provider when it cannot change the requested page: too few prefix
-        # rows or the whole page sits in the untouched tail. Deep pages still slice
-        # the stable prefix-plus-tail sequence so earlier rows cannot reappear.
-        if len(pool) < 2 or offset >= len(pool):
+        # Skip only when there is no prefix to calibrate or the requested page is
+        # empty. Even a singleton prefix or a wholly-tail page needs the prefix's
+        # relevance floor so raw hybrid scores cannot leak into cross-project sorting.
+        if not pool or offset >= len(ordered_rows):
             return ordered_rows[offset:page_end]
 
         documents = [self._rerank_document_text(row) for row in pool]
@@ -1349,25 +1348,31 @@ class SearchRepositoryBase(ABC):
         fts_max = max(fts_abs) if fts_abs else 1.0
 
         fts_scores: dict[SearchIndexKey, float] = {}
-        for row in fts_results:
+        fts_ranks: dict[SearchIndexKey, int] = {}
+        for rank, row in enumerate(fts_results):
             if row.id is None:
                 continue
+            row_key = (row.type, row.id)
             norm = abs(row.score or 0.0) / fts_max if fts_max > 0 else 0.0
             # Gate: FTS scores below threshold contribute zero
             if norm < FTS_GATE_THRESHOLD:
                 norm = 0.0
-            fts_scores[(row.type, row.id)] = norm
-            rows_by_key[(row.type, row.id)] = row
+            fts_scores[row_key] = norm
+            fts_ranks.setdefault(row_key, rank)
+            rows_by_key[row_key] = row
 
         vec_scores: dict[SearchIndexKey, float] = {}
-        for row in vector_results:
+        vec_ranks: dict[SearchIndexKey, int] = {}
+        for rank, row in enumerate(vector_results):
             if row.id is None:
                 continue
+            row_key = (row.type, row.id)
             # Trigger: no re-normalization by vec_max
             # Why: vector similarity is already calibrated [0, 1]; re-normalizing
             # inflates weak matches when the entire result set is mediocre
-            vec_scores[(row.type, row.id)] = row.score or 0.0
-            rows_by_key[(row.type, row.id)] = row
+            vec_scores[row_key] = row.score or 0.0
+            vec_ranks.setdefault(row_key, rank)
+            rows_by_key[row_key] = row
 
         # Fuse: max(v, f) + FUSION_BONUS * min(v, f)
         # Preserves the dominant signal; bonus rewards dual-source agreement.
@@ -1416,6 +1421,25 @@ class SearchRepositoryBase(ABC):
                     _apply_rerank=False,
                     _emit_observability_log=False,
                 )
+                stable_keys = {(row.type, row.id) for row in stable_candidates}
+                expanded_tail = [entry for entry in ranked if entry[0] not in stable_keys]
+
+                # Trigger: deeper pages expand the FTS/vector retrieval windows.
+                # Why: score fusion can strengthen an existing row when its second
+                # signal appears later, moving it across a page already returned.
+                # Outcome: freeze the fixed fused universe, then order newly admitted
+                # rows by their earliest source rank. That rank cannot improve after a
+                # row first appears, so each larger window only appends to the tail.
+                expanded_tail.sort(
+                    key=lambda entry: (
+                        min(
+                            fts_ranks.get(entry[0], candidate_limit),
+                            vec_ranks.get(entry[0], candidate_limit),
+                        ),
+                        entry[0],
+                    )
+                )
+                candidates = stable_candidates + [_materialize(entry) for entry in expanded_tail]
             output = await self._rerank_and_paginate(
                 query_text,
                 candidates,

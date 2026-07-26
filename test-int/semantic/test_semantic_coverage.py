@@ -228,6 +228,54 @@ async def test_postgres_hybrid_preserves_candidate_windows(
     assert reranker.calls == 3
     assert candidate_limits == [890, 80]
 
+    # A larger retrieval window must extend the same sequence rather than
+    # reordering rows already exposed by an earlier deep page.
+    reranker.calls = 0
+    candidate_limits.clear()
+    stable_window = await search_service.search(
+        SearchQuery(
+            text="database migration schema",
+            retrieval_mode=SearchRetrievalMode.HYBRID,
+            entity_types=[SearchItemType.ENTITY],
+            min_similarity=0.0,
+        ),
+        limit=40,
+    )
+
+    assert len(stable_window) == 40
+    assert candidate_limits == [280, 80]
+
+    candidate_limits.clear()
+    third_page = await search_service.search(
+        SearchQuery(
+            text="database migration schema",
+            retrieval_mode=SearchRetrievalMode.HYBRID,
+            entity_types=[SearchItemType.ENTITY],
+            min_similarity=0.0,
+        ),
+        limit=10,
+        offset=20,
+    )
+    assert candidate_limits == [180, 80]
+
+    candidate_limits.clear()
+    fourth_page = await search_service.search(
+        SearchQuery(
+            text="database migration schema",
+            retrieval_mode=SearchRetrievalMode.HYBRID,
+            entity_types=[SearchItemType.ENTITY],
+            min_similarity=0.0,
+        ),
+        limit=10,
+        offset=30,
+    )
+    assert candidate_limits == [280, 80]
+
+    assert [row.permalink for row in third_page] == [row.permalink for row in stable_window[20:30]]
+    assert [row.permalink for row in fourth_page] == [row.permalink for row in stable_window[30:40]]
+    assert reranker.calls == 3
+    assert all(row.score is not None and row.score < 0.05 for row in third_page + fourth_page)
+
 
 @pytest.mark.asyncio
 @pytest.mark.semantic
