@@ -259,6 +259,8 @@ async def test_getting_started_without_projects_stops_before_note_actions(monkey
 
     assert "No Basic Memory projects are available yet" in result
     assert "list_memory_projects()" in result
+    assert 'recent_activity(project_id="...", timeframe="30d")' in result
+    assert "invoke this getting-started prompt" not in result
     assert "write_note(" not in result
     assert "read_note(" not in result
     assert "search_notes(" not in result
@@ -310,6 +312,8 @@ async def test_getting_started_requires_qualified_duplicate_project_selection(mo
     assert 'requested project "notes" did not identify one unique project' in result
     assert "`personal/notes`" in result
     assert "`team/notes`" in result
+    assert 'recent_activity(project_id="...", timeframe="30d")' in result
+    assert "invoke this getting-started prompt" not in result
     assert "write_note(" not in result
     assert "read_note(" not in result
     assert "search_notes(" not in result

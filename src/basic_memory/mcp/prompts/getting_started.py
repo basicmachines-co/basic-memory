@@ -101,8 +101,9 @@ def _selection_guide(
         next_step = dedent(
             """
             No Basic Memory projects are available yet. Ask the user to create or connect a
-            project first. Then call `list_memory_projects()` and invoke this getting-started
-            prompt with the selected project.
+            project first. Then call `list_memory_projects()` and continue with
+            `recent_activity(project_id="...", timeframe="30d")` using the selected project's
+            returned `external_id`.
 
             Do not read, search, or write notes until a concrete project has been selected.
             """
@@ -124,9 +125,10 @@ def _selection_guide(
     project_options = "\n".join(options) if options else "- Call `list_memory_projects()`"
     next_step = dedent(
         """
-        Ask the user which project to use. Once they choose, invoke this getting-started prompt
-        again with that qualified project name. Do not read, search, or write notes until one
-        concrete project has been selected.
+        Ask the user which project to use. Once they choose, continue with
+        `recent_activity(project_id="...", timeframe="30d")` using the `project_id` listed for
+        that choice, and keep that same `project_id` in later note calls. Do not read, search,
+        or write notes until one concrete project has been selected.
         """
     ).strip()
     return (

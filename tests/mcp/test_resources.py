@@ -69,3 +69,11 @@ async def test_project_info_resource_routes_workspace_project(
 
     assert selected_route == "personal/test-project"
     assert info.project_name == test_project.name
+
+
+@pytest.mark.asyncio
+async def test_project_info_resource_routes_local_workspace(client, test_project):
+    """The canonical local URI strips its workspace sentinel before local routing."""
+    info = await project_info(workspace="local", project=test_project.permalink)
+
+    assert info.project_name == test_project.name

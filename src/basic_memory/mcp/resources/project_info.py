@@ -3,7 +3,9 @@
 from fastmcp import Context
 from loguru import logger
 
+from basic_memory.config import ConfigManager, ProjectMode
 from basic_memory.mcp.project_context import get_project_client
+from basic_memory.mcp.project_context_identifiers import canonicalize_project_name
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get
 from basic_memory.schemas import ProjectInfoResponse
@@ -30,7 +32,8 @@ async def project_info(
     - System status (database, watch service, version)
 
     Args:
-        workspace: Workspace permalink from the resource URI.
+        workspace: Workspace permalink from the resource URI. Use ``local`` for
+            a configured local project.
         project: Project permalink from the resource URI.
         context: Optional FastMCP context for performance caching.
 
@@ -39,7 +42,21 @@ async def project_info(
     """
     logger.info("Getting project info")
 
-    qualified_project = f"{workspace}/{project}"
-    async with get_project_client(qualified_project, context) as (client, active_project):
+    project_route = f"{workspace}/{project}"
+    config = ConfigManager().config
+    configured_project = canonicalize_project_name(project, config)
+
+    # Trigger: the canonical resource URI uses the `local` workspace sentinel.
+    # Why: local projects have no workspace route, but every project-info URI now
+    #   has the same workspace/project shape.
+    # Outcome: remove only that sentinel before the shared router resolves the project.
+    if (
+        workspace == "local"
+        and configured_project is not None
+        and config.get_project_mode(configured_project) is ProjectMode.LOCAL
+    ):
+        project_route = configured_project
+
+    async with get_project_client(project_route, context) as (client, active_project):
         response = await call_get(client, f"/v2/projects/{active_project.external_id}/info")
         return ProjectInfoResponse.model_validate(response.json())
