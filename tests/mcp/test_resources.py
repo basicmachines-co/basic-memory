@@ -1,8 +1,15 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from importlib import import_module
+
 import pytest
+from fastmcp import Context
+from httpx import AsyncClient
 
 from basic_memory.mcp.prompts.ai_assistant_guide import ai_assistant_guide
 from basic_memory.mcp.resources.project_info import project_info
 from basic_memory.mcp.server import mcp
+from basic_memory.schemas.project_info import ProjectItem
 
 
 def test_ai_assistant_guide_exists():
@@ -21,16 +28,44 @@ def test_ai_assistant_guide_exists():
 
 @pytest.mark.asyncio
 async def test_project_info_resource_is_registered():
-    """The legacy project-info URI remains available to existing MCP clients."""
+    """Project info is addressed by canonical workspace and project permalinks."""
     assert project_info is not None
     templates = await mcp.list_resource_templates()
+    registered_uris = {str(template.uri_template) for template in templates}
 
-    assert "memory://{project}/info" in {str(template.uri_template) for template in templates}
+    assert "memory://{workspace}/{project}/info" in registered_uris
+    assert "memory://{project}/info" not in registered_uris
 
 
 @pytest.mark.asyncio
-async def test_project_info_resource_reads_project(client, test_project):
-    """The retained resource still resolves and returns project information."""
-    info = await project_info(project=test_project.name)
+async def test_project_info_resource_routes_workspace_project(
+    client: AsyncClient,
+    test_project,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Workspace and project URI segments use the shared qualified-project router."""
+    selected_route: str | None = None
+    active_project = ProjectItem(
+        id=test_project.id,
+        external_id=str(test_project.external_id),
+        name=test_project.name,
+        path=test_project.path,
+        is_default=test_project.is_default,
+    )
 
+    @asynccontextmanager
+    async def project_client(
+        project: str,
+        context: Context | None = None,
+    ) -> AsyncIterator[tuple[AsyncClient, ProjectItem]]:
+        nonlocal selected_route
+        selected_route = project
+        yield client, active_project
+
+    project_info_module = import_module("basic_memory.mcp.resources.project_info")
+    monkeypatch.setattr(project_info_module, "get_project_client", project_client)
+
+    info = await project_info(workspace="personal", project="test-project")
+
+    assert selected_route == "personal/test-project"
     assert info.project_name == test_project.name
