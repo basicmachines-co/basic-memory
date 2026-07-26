@@ -47,15 +47,15 @@ async def getting_started(
     # timeframe-limited, so an established base that is simply quiet looks identical to a
     # brand-new one. Let the model judge from the activity output (which already carries its own
     # empty-state guidance) and branch its own response, rather than asserting emptiness here.
-    activity_text = str(await recent_activity(timeframe="30d", project=project))
+    activity_text = str(await recent_activity(timeframe="30d", project=project)).strip()
 
     # Every example call keeps the project the prompt actually inspected. Omitting project lets
     # the tool fall back to its default/discovery path, which would silently move onboarding into
     # a different project than the one whose activity we just showed.
     project_arg = f'project="{project}", ' if project else ""
 
-    return dedent(
-        f"""
+    introduction = dedent(
+        """
         # Getting started with Basic Memory
 
         Basic Memory gives the user a personal knowledge base: Markdown notes that persist
@@ -63,9 +63,10 @@ async def getting_started(
         Anything saved here is available in future chats and wherever they open this project.
 
         Here is their recent activity:
-
-        {activity_text}
-
+        """
+    ).strip()
+    next_steps = dedent(
+        f"""
         Based on what you see above:
         - **If they have no notes yet**, briefly explain that shared-memory loop and offer to
           save something useful from this conversation as their first note.
@@ -80,3 +81,4 @@ async def getting_started(
           unprompted).
         """
     ).strip()
+    return f"{introduction}\n\n{activity_text}\n\n{next_steps}"

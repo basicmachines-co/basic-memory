@@ -125,6 +125,27 @@ async def test_getting_started_offers_first_note_conditionally(client, test_proj
 
 
 @pytest.mark.asyncio
+async def test_getting_started_preserves_markdown_around_multiline_activity(monkeypatch):
+    """Embedded activity must not turn the surrounding prompt into an indented code block."""
+
+    async def fake_recent_activity(**_kwargs):
+        return "# Recent activity\n\n- Updated [[Project Plan]]"
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.prompts.getting_started.recent_activity",
+        fake_recent_activity,
+    )
+
+    result = await getting_started(project="research")  # pyright: ignore[reportGeneralTypeIssues]
+
+    assert result.startswith("# Getting started with Basic Memory")
+    assert "\nBasic Memory gives the user" in result
+    assert "\nHere is their recent activity:" in result
+    assert "\n# Recent activity\n" in result
+    assert "\nBased on what you see above:" in result
+
+
+@pytest.mark.asyncio
 async def test_getting_started_keeps_selected_project_in_all_examples(client, test_project):
     """Every example call (first-note and continuation) must target the inspected project so
     onboarding never crosses into write_note's default project."""
