@@ -539,9 +539,10 @@ async def test_checker_indexes_byte_identical_copy_without_marker() -> None:
 
 
 @pytest.mark.asyncio
-async def test_checker_indexes_when_marker_entity_is_gone_or_still_present() -> None:
-    """If the marked entity no longer exists (or never moved), don't drop the object."""
-    # Marker entity gone -> do not skip (would otherwise lose the content).
+async def test_checker_handles_dangling_marker_entity_and_entity_still_at_source() -> None:
+    """A dangling destination ID is a tombstone, but an entity still at source is not."""
+    # SQLite can retain the deleted entity ID instead of applying ON DELETE SET NULL. The
+    # checksum-backed marker still proves these exact bytes are the vacated source.
     checker, _, _ = _orphan_checker(
         indexed={},
         current={"koncept/gone.md": "ck"},
@@ -549,7 +550,10 @@ async def test_checker_indexes_when_marker_entity_is_gone_or_still_present() -> 
         entity_facts={},  # entity 42 not found
     )
     plan = await checker.detect([FileIndexTarget(path="koncept/gone.md", observed_checksum="ck")])
-    assert plan.paths_to_read == ("koncept/gone.md",)
+    assert plan.paths_to_read == ()
+    assert [(decision.path, decision.status) for decision in plan.decisions] == [
+        ("koncept/gone.md", FileIndexDecisionStatus.current)
+    ]
 
     # Marker entity still owns THIS path (not actually moved away) -> do not skip.
     checker2, _, _ = _orphan_checker(

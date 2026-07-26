@@ -375,10 +375,11 @@ class FileIndexChecker:
         A create is a candidate only when it would read, no DB row owns the path, and it has a
         current checksum. Such a candidate is a move orphan only when its path carries a vacate
         marker AND the object is still the moved note's content: the current checksum equals the
-        marker's recorded source checksum, and the marker's entity now holds that same content at a
-        *different* path. Anything else — an edit, a genuine new file, a copy that has no marker, or
-        a path overwritten with a different note's bytes (checksum no longer matches the marker) —
-        indexes normally, so a legitimate replacement is never suppressed.
+        marker's recorded source checksum, and either the marker's entity now holds that same
+        content at a *different* path or that destination entity has been deleted. Anything else —
+        an edit, a genuine new file, a copy that has no marker, or a path overwritten with a
+        different note's bytes (checksum no longer matches the marker) — indexes normally, so a
+        legitimate replacement is never suppressed.
         """
         decisions = [item.decision for item in inspected]
         if self.moved_entity_source is None or self.move_vacate_source is None:
@@ -413,11 +414,15 @@ class FileIndexChecker:
             marker = markers.get(item.target.path)
             if marker is None:
                 continue
-            if marker.entity_id is None:
-                # The destination entity was deleted before source cleanup. A checksum-backed
-                # tombstone still proves these exact source bytes were vacated; keep suppressing
-                # resurrection until guarded cleanup clears the marker. A legacy null-checksum
-                # tombstone cannot prove identity, so it remains a normal create candidate.
+            moved_entity = (
+                entity_facts.get(marker.entity_id) if marker.entity_id is not None else None
+            )
+            if moved_entity is None:
+                # SQLite variants do not always apply ON DELETE SET NULL consistently, so a
+                # deleted destination can leave either a null or dangling entity ID. The
+                # transactionally recorded source checksum proves both forms are tombstones for
+                # these exact bytes; keep suppressing resurrection until guarded cleanup clears
+                # the marker. Without that checksum proof, the file remains a normal create.
                 if marker.checksum is None or marker.checksum != item.current_checksum:
                     continue
                 decisions[index] = move_orphan_file_index_decision(
@@ -425,10 +430,9 @@ class FileIndexChecker:
                     indexed_at=None,
                 )
                 continue
-            moved_entity = entity_facts.get(marker.entity_id)
-            if moved_entity is None or moved_entity.file_path == item.target.path:
-                # The recorded entity is gone, or never actually moved off this path — don't drop
-                # the object (a stale/spurious marker must not lose content).
+            if moved_entity.file_path == item.target.path:
+                # The recorded entity never actually moved off this path, so a stale/spurious
+                # marker must not lose content.
                 continue
             if marker.checksum is not None:
                 # Source checksum recorded at move time: the leftover still holds that content, so
