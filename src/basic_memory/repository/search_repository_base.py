@@ -339,6 +339,12 @@ class SearchRepositoryBase(ABC):
                 self._semantic_vector_index_name not in _BUILT_IN_VECTOR_INDEX_NAMES
             )
             lock_external_write = external_vector_index and dialect_name in {"postgresql", "sqlite"}
+            if external_vector_index and dialect_name == "postgresql":
+                # Trigger: a project-wide cleanup can run beside a watcher flush.
+                # Why: row locks do not block a newly prepared chunk from being inserted.
+                # Outcome: every PostgreSQL external write shares the project-row lock
+                # held through cleanup, adapter deletion, and manifest removal.
+                await self._lock_external_vector_project(session, dialect_name=dialect_name)
             if external_vector_index and dialect_name == "sqlite":
                 # SQLite has no SELECT FOR UPDATE. A conditional no-op write takes
                 # the database write lock before extension I/O, serializing a newer
@@ -867,6 +873,31 @@ class SearchRepositoryBase(ABC):
     async def _delete_project_builtin_vector_rows(self, session: AsyncSession) -> None:
         """Delete backend-owned vector rows before their SQL manifest is removed."""
 
+    async def _lock_external_vector_project(
+        self,
+        session: AsyncSession,
+        *,
+        dialect_name: str,
+    ) -> None:
+        """Serialize project-wide cleanup with external adapter writes."""
+        if dialect_name == "postgresql":
+            await session.execute(
+                text("SELECT id FROM project WHERE id = :project_id FOR UPDATE"),
+                {"project_id": self.project_id},
+            )
+            return
+        if dialect_name == "sqlite":
+            # SQLite has no row-level lock. This no-op write acquires its database
+            # write lock before ownership is read and keeps it through adapter I/O.
+            await session.execute(
+                text("UPDATE project SET id = id WHERE id = :project_id"),
+                {"project_id": self.project_id},
+            )
+            return
+        raise SemanticVectorIndexExtensionError(
+            f"External vector cleanup does not support SQL dialect {dialect_name!r}."
+        )
+
     def _assert_manifest_vector_ownership(self, vector_index_names: Iterable[object]) -> None:
         """Reject cleanup that cannot reach every externally owned vector."""
         recorded_indexes = frozenset(str(name) for name in vector_index_names if str(name))
@@ -897,6 +928,7 @@ class SearchRepositoryBase(ABC):
         configured_index = self._semantic_vector_index_name
         async with db.scoped_session(self.session_maker) as session:
             connection = await session.connection()
+            dialect_name = connection.dialect.name
             manifest_exists = await connection.run_sync(
                 lambda sync_connection: inspect(sync_connection).has_table("search_vector_chunks")
             )
@@ -910,6 +942,20 @@ class SearchRepositoryBase(ABC):
                 }
             )
             manifest_has_embedding_status = "embedding_status" in manifest_columns
+
+            external_adapter_available = (
+                configured_index not in _BUILT_IN_VECTOR_INDEX_NAMES
+                and hasattr(self, "_semantic_vector_index")
+            )
+            if external_adapter_available:
+                # Constraint: PostgreSQL row locks do not cover future manifest inserts,
+                # while SQLite releases its write lock at commit. Hold one project-wide
+                # transaction through ownership discovery, adapter I/O, and manifest
+                # deletion so a concurrent flush cannot publish an unowned vector.
+                await self._lock_external_vector_project(
+                    session,
+                    dialect_name=dialect_name,
+                )
 
             entity_ids_by_vector_index: dict[str, list[int]] = {}
             if "vector_index" in manifest_columns:
@@ -957,7 +1003,37 @@ class SearchRepositoryBase(ABC):
                     ),
                     {"project_id": self.project_id},
                 )
+            adapter_entity_ids = entity_ids_by_vector_index.get(configured_index, [])
+            if external_adapter_available:
+                if adapter_entity_ids:
+                    try:
+                        await self._semantic_vector_index.initialize()
+                        for entity_id in adapter_entity_ids:
+                            await self._semantic_vector_index.delete_entity(entity_id)
+                    except Exception as exc:
+                        # Trigger: a configured external adapter cannot initialize or delete.
+                        # Why: reindex and project deletion must not discard the only
+                        # ownership manifest for external data.
+                        # Outcome: strict callers stop for a retry before manifest deletion.
+                        logger.warning(
+                            "Could not clean semantic vector adapter: "
+                            "project_id={project_id} vector_index={vector_index} error={error}",
+                            project_id=self.project_id,
+                            vector_index=self._semantic_vector_index_name,
+                            error=exc,
+                        )
+                        if strict_adapter_cleanup:
+                            raise
+
+                await self._delete_project_builtin_vector_rows(session)
+                await session.execute(
+                    text("DELETE FROM search_vector_chunks WHERE project_id = :project_id"),
+                    {"project_id": self.project_id},
+                )
                 await session.commit()
+                return
+
+            await session.commit()
 
         adapter_entity_ids = entity_ids_by_vector_index.get(configured_index, [])
         if adapter_entity_ids and hasattr(self, "_semantic_vector_index"):
@@ -966,10 +1042,6 @@ class SearchRepositoryBase(ABC):
                 for entity_id in adapter_entity_ids:
                     await self._semantic_vector_index.delete_entity(entity_id)
             except Exception as exc:
-                # Trigger: a configured external adapter cannot initialize or delete.
-                # Why: reindex and project deletion must not discard the only
-                # ownership manifest for external data.
-                # Outcome: strict callers stop for a retry before manifest deletion.
                 logger.warning(
                     "Could not clean semantic vector adapter: "
                     "project_id={project_id} vector_index={vector_index} error={error}",
@@ -977,8 +1049,6 @@ class SearchRepositoryBase(ABC):
                     vector_index=self._semantic_vector_index_name,
                     error=exc,
                 )
-                if strict_adapter_cleanup and configured_index not in _BUILT_IN_VECTOR_INDEX_NAMES:
-                    raise
 
         async with db.scoped_session(self.session_maker) as session:
             await self._delete_project_builtin_vector_rows(session)

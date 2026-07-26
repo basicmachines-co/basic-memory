@@ -266,6 +266,7 @@ async def test_external_postgres_upsert_holds_manifest_lock_through_ready_commit
     session = AsyncMock()
     session.connection.return_value = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
     session.execute.side_effect = [
+        SimpleNamespace(),
         SimpleNamespace(
             mappings=lambda: SimpleNamespace(
                 all=lambda: [
@@ -292,9 +293,12 @@ async def test_external_postgres_upsert_holds_manifest_lock_through_ready_commit
 
     await repo._persist_embeddings([(7, chunk_text)], [[1.0, 0.0, 0.0, 0.0]])
 
-    lock_statement = session.execute.await_args_list[0].args[0]
-    ready_statement = session.execute.await_args_list[1].args[0]
-    assert "FOR UPDATE" in str(lock_statement)
+    project_lock_statement = session.execute.await_args_list[0].args[0]
+    manifest_lock_statement = session.execute.await_args_list[1].args[0]
+    ready_statement = session.execute.await_args_list[2].args[0]
+    assert str(project_lock_statement).startswith("SELECT id FROM project")
+    assert "FOR UPDATE" in str(project_lock_statement)
+    assert "FOR UPDATE" in str(manifest_lock_statement)
     assert "embedding_status = 'ready'" in str(ready_statement)
     assert context_count == 1
     assert session.commit.await_count == 1
@@ -477,20 +481,51 @@ async def test_project_vector_cleanup_handles_legacy_manifest_without_status(mon
 
 
 @pytest.mark.asyncio
-async def test_project_vector_cleanup_uses_available_adapter(monkeypatch):
-    """An available adapter should receive every manifest-owned entity deletion."""
+@pytest.mark.parametrize(
+    ("dialect_name", "project_lock_prefix"),
+    [
+        ("postgresql", "SELECT id FROM project"),
+        ("sqlite", "UPDATE project SET id = id"),
+    ],
+)
+async def test_project_vector_cleanup_uses_available_adapter(
+    monkeypatch,
+    dialect_name,
+    project_lock_prefix,
+):
+    """External cleanup should keep its project lock through manifest removal."""
     repo = _ConcreteRepo()
+    events: list[str] = []
     adapter: Any = SimpleNamespace(
-        initialize=AsyncMock(),
-        delete_entity=AsyncMock(),
+        initialize=AsyncMock(side_effect=lambda: events.append("initialize")),
+        delete_entity=AsyncMock(side_effect=lambda _entity_id: events.append("delete")),
     )
     repo._semantic_vector_index = adapter
     repo._semantic_vector_index_name = "milvus"
     session = AsyncMock()
     connection = AsyncMock()
+    connection.dialect.name = dialect_name
     connection.run_sync.side_effect = [True, {"embedding_status", "vector_index"}]
     session.connection.return_value = connection
-    session.execute.return_value = SimpleNamespace(all=lambda: [(41, "milvus"), (42, "milvus")])
+
+    def execute(statement, _params):
+        sql = str(statement)
+        if sql.startswith(project_lock_prefix):
+            events.append("project_lock")
+            return SimpleNamespace()
+        if sql.startswith("SELECT DISTINCT entity_id, vector_index"):
+            events.append("manifest_read")
+            return SimpleNamespace(all=lambda: [(41, "milvus"), (42, "milvus")])
+        if sql.startswith("UPDATE search_vector_chunks"):
+            events.append("stage")
+            return SimpleNamespace()
+        if sql.startswith("DELETE FROM search_vector_chunks"):
+            events.append("manifest_delete")
+            return SimpleNamespace()
+        raise AssertionError(f"Unexpected SQL: {sql}")
+
+    session.execute.side_effect = execute
+    session.commit.side_effect = lambda: events.append("commit")
 
     @asynccontextmanager
     async def fake_scoped_session(_session_maker):
@@ -505,6 +540,17 @@ async def test_project_vector_cleanup_uses_available_adapter(monkeypatch):
         ((41,), {}),
         ((42,), {}),
     ]
+    assert events == [
+        "project_lock",
+        "manifest_read",
+        "stage",
+        "initialize",
+        "delete",
+        "delete",
+        "manifest_delete",
+        "commit",
+    ]
+    assert session.commit.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -519,9 +565,14 @@ async def test_project_vector_cleanup_preserves_manifest_after_adapter_failure(m
     repo._semantic_vector_index_name = "milvus"
     session = AsyncMock()
     connection = AsyncMock()
+    connection.dialect.name = "postgresql"
     connection.run_sync.side_effect = [True, {"embedding_status", "vector_index"}]
     session.connection.return_value = connection
-    session.execute.return_value = SimpleNamespace(all=lambda: [(41, "milvus")])
+    session.execute.side_effect = [
+        SimpleNamespace(),
+        SimpleNamespace(all=lambda: [(41, "milvus")]),
+        SimpleNamespace(),
+    ]
 
     @asynccontextmanager
     async def fake_scoped_session(_session_maker):
@@ -554,9 +605,14 @@ async def test_strict_project_vector_cleanup_preserves_manifest_after_adapter_fa
     repo._semantic_vector_index_name = "milvus"
     session = AsyncMock()
     connection = AsyncMock()
+    connection.dialect.name = "postgresql"
     connection.run_sync.side_effect = [True, {"embedding_status", "vector_index"}]
     session.connection.return_value = connection
-    session.execute.return_value = SimpleNamespace(all=lambda: [(41, "milvus")])
+    session.execute.side_effect = [
+        SimpleNamespace(),
+        SimpleNamespace(all=lambda: [(41, "milvus")]),
+        SimpleNamespace(),
+    ]
 
     @asynccontextmanager
     async def fake_scoped_session(_session_maker):
