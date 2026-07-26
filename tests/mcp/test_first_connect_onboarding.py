@@ -234,7 +234,7 @@ async def test_getting_started_prefers_constrained_project(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_getting_started_preserves_merged_local_project_route(monkeypatch):
-    """A local+cloud discovery row must keep the configured project route."""
+    """A configured mirror must win over a same-named default-workspace copy."""
 
     async def fake_list_memory_projects(**_kwargs: object) -> dict[str, object]:
         return {
@@ -242,11 +242,19 @@ async def test_getting_started_preserves_merged_local_project_route(monkeypatch)
                 {
                     "name": "main",
                     "qualified_name": "personal/main",
-                    "external_id": "cloud-main",
-                    "source": "local+cloud",
+                    "external_id": "cloud-personal-main",
+                    "source": "cloud",
                     "is_default": True,
                     "workspace_is_default": True,
-                }
+                },
+                {
+                    "name": "main",
+                    "qualified_name": "team/main",
+                    "external_id": "cloud-team-main",
+                    "source": "local+cloud",
+                    "is_default": True,
+                    "workspace_is_default": False,
+                },
             ],
             "default_project": "main",
             "constrained_project": None,
@@ -273,7 +281,8 @@ async def test_getting_started_preserves_merged_local_project_route(monkeypatch)
     assert 'write_note(project="main"' in result
     assert 'read_note(project="main"' in result
     assert 'search_notes(project="main"' in result
-    assert "cloud-main" not in result
+    assert "cloud-personal-main" not in result
+    assert "cloud-team-main" not in result
 
 
 @pytest.mark.asyncio

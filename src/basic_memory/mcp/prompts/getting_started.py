@@ -82,6 +82,16 @@ def _select_project(
     if len(default_matches) == 1:
         return default_matches[0]
 
+    # A local+cloud row represents the configured project route. Preserve that route before
+    # considering cloud workspace defaults when discovery marks both copies as default.
+    configured_defaults = [
+        project
+        for project in default_matches
+        if _project_string(project, "source") == "local+cloud"
+    ]
+    if len(configured_defaults) == 1:
+        return configured_defaults[0]
+
     # Multiple workspaces can each mark a project as their default. The default
     # workspace is the only collision-safe implicit choice across those workspaces.
     workspace_defaults = [
