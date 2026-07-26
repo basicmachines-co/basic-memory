@@ -1147,15 +1147,20 @@ class SearchRepositoryBase(ABC):
 
         ranked_rows.sort(key=lambda item: item.score or 0.0, reverse=True)
         hydrate_ms = (time.perf_counter() - hydrate_start) * 1000
-        _log_vector_summary()
         # Rerank over the wide candidate pool, then slice to the page. Suppressed when
         # hybrid calls this internally (_apply_rerank=False) — hybrid reranks its own
         # fused result; _rerank_and_paginate no-ops back to a plain slice otherwise.
         if _apply_rerank:
-            return await self._rerank_and_paginate(
+            output = await self._rerank_and_paginate(
                 query_text, ranked_rows, offset=offset, limit=limit
             )
-        return ranked_rows[offset : offset + limit]
+        else:
+            output = ranked_rows[offset : offset + limit]
+        # Vector latency owns the optional rerank stage too. Logging before the
+        # awaited provider call hides the feature's dominant cost and can suppress
+        # the slow-query warning entirely.
+        _log_vector_summary()
+        return output
 
     async def _fetch_entity_rows_by_ids(self, entity_ids: list[int]) -> dict[int, SearchIndexRow]:
         """Fetch entity-type search_index rows by their entity_id values."""

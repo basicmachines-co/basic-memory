@@ -420,6 +420,44 @@ async def test_vector_search_applies_reranker(search_repository):
 
 
 @pytest.mark.asyncio
+async def test_vector_slow_query_timing_includes_reranker(search_repository, monkeypatch):
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec repository behavior is local SQLite-only.")
+
+    _enable_semantic(search_repository)
+    await _index_two_auth_notes(search_repository)
+    clock = {"now": 0.0}
+    reranker = _FakeReranker({"Alpha": 0.1, "Bravo": 0.9})
+    original_rerank = reranker.rerank
+
+    async def slow_rerank(query: str, documents: list[str]) -> list[float]:
+        clock["now"] = 3.0
+        return await original_rerank(query, documents)
+
+    search_repository._rerank_provider = reranker
+    monkeypatch.setattr(reranker, "rerank", slow_rerank)
+    monkeypatch.setattr(
+        "basic_memory.repository.search_repository_base.time.perf_counter",
+        lambda: clock["now"],
+    )
+    warning = MagicMock()
+    monkeypatch.setattr(
+        "basic_memory.repository.search_repository_base.logger.warning",
+        warning,
+    )
+
+    await search_repository.search(
+        search_text="auth session token",
+        retrieval_mode=SearchRetrievalMode.VECTOR,
+        limit=5,
+    )
+
+    warning.assert_called_once()
+    assert warning.call_args.args[0].startswith("[SEMANTIC_SLOW_QUERY]")
+    assert warning.call_args.kwargs["total_ms"] == 3000.0
+
+
+@pytest.mark.asyncio
 async def test_hybrid_search_reranks_once(search_repository):
     """Hybrid reranks the fused result exactly once — not again inside its vector leg."""
     if not isinstance(search_repository, SQLiteSearchRepository):
