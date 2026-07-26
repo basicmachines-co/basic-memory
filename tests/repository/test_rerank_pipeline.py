@@ -8,7 +8,7 @@ import pytest
 
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.repository.search_index_row import SearchIndexRow
-from basic_memory.repository.rerank_provider import validate_rerank_scores
+from basic_memory.repository.rerank_provider import demote_tail_scores, validate_rerank_scores
 from basic_memory.repository.search_repository_base import RERANK_POOL_CHUNK_FANOUT
 from basic_memory.repository.semantic_errors import (
     RerankProviderContractError,
@@ -210,6 +210,16 @@ def test_rerank_document_text_truncation():
     assert len(repo._rerank_document_text(row)) == 502
 
 
+def test_demoted_tail_scores_are_stable_as_the_tail_grows():
+    """An existing tail rank keeps its score when later results are fetched."""
+    first_page_scores = demote_tail_scores(floor=0.2, count=2)
+    growing_prefix_scores = demote_tail_scores(floor=0.2, count=5)
+
+    assert growing_prefix_scores[:2] == first_page_scores
+    assert growing_prefix_scores == sorted(growing_prefix_scores, reverse=True)
+    assert all(0.0 < score < 0.2 for score in growing_prefix_scores)
+
+
 def test_candidate_limit_over_fetches_chunks_for_rerank_pool():
     """With reranking active, over-fetch chunks so dedup can't starve the rerank window."""
     repo = _unit_repo()
@@ -349,9 +359,18 @@ async def test_rerank_paginate_keeps_expanded_candidates_out_of_stable_prefix():
         limit=3,
         stable_rows=stable_rows,
     )
+    expanded_result = await repo._rerank_and_paginate(
+        "auth",
+        expanded_rows + [_row(id=5, title="Echo"), _row(id=6, title="Foxtrot")],
+        offset=0,
+        limit=3,
+        stable_rows=stable_rows,
+    )
 
     assert [row.title for row in result] == ["Bravo", "Alpha", "Charlie"]
-    assert reranker.calls == 1
+    assert [row.title for row in expanded_result] == ["Bravo", "Alpha", "Charlie"]
+    assert [row.score for row in expanded_result] == [row.score for row in result]
+    assert reranker.calls == 2
 
 
 @pytest.mark.asyncio

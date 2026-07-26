@@ -34,11 +34,12 @@ def demote_tail_scores(floor: float, count: int) -> list[float]:
     Reranked candidates carry [0, 1] relevance while un-reranked ones still hold
     retrieval scores on a different scale; left as is, a tail candidate could
     numerically outrank a reranked one. Positive floors produce descending scores
-    in ``(0, floor)``. A zero floor must remain zero to preserve the public [0, 1]
-    contract, so callers preserve the reranked-pool-before-tail ordering explicitly
-    instead of relying on a numerically smaller sentinel.
+    in ``(0, floor)`` based only on the row's tail rank, so fetching more rows does
+    not rescale earlier results. A zero floor must remain zero to preserve the public
+    [0, 1] contract, so callers preserve the reranked-pool-before-tail ordering
+    explicitly instead of relying on a numerically smaller sentinel.
     """
-    return [floor * (count - index) / (count + 1) for index in range(count)]
+    return [floor / (index + 2) for index in range(count)]
 
 
 def validate_rerank_scores(scores: Sequence[float | str], expected_count: int) -> list[float]:
