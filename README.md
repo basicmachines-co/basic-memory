@@ -37,7 +37,8 @@ search.
 - **Local-first.** Plain text on your disk. Forever.
 - **Two-way.** AI and humans write to the same files; sync keeps them in step.
 - **A real knowledge graph.** Observations and wikilinks compound into context.
-- **Semantic search.** Find notes by meaning, not just keywords.
+- **Semantic search.** Find notes by meaning, not just keywords, with optional
+  cross-encoder reranking for higher-quality vector and hybrid results.
 - **MCP-native.** Works with every major AI client and IDE.
 - **Progressive tool discovery.** Every tool is tagged with behavior hints
   (read-only, destructive, idempotent) so agents pick the right tool on
@@ -357,6 +358,8 @@ Try a prompt:
 - **Semantic vector search.** Find notes by meaning, not just keywords.
   Hybrid full-text + vector ranking with FastEmbed embeddings, on SQLite or
   Postgres.
+- **Optional search reranking.** Rescore the strongest vector and hybrid
+  candidates with a local FastEmbed cross-encoder or a LiteLLM-backed provider.
 - **Schema system.** Infer, validate, and diff the structure of your
   knowledge base with `schema_infer`, `schema_validate`, `schema_diff`.
 - **Per-project cloud routing.** Route individual projects through the cloud
@@ -373,6 +376,36 @@ Try a prompt:
   and an htop-inspired project dashboard.
 
 Full [CHANGELOG](CHANGELOG.md) for v0.18 → v0.20.
+
+## Optional cross-encoder reranking
+
+Reranking adds a second relevance pass after vector or hybrid retrieval. It is
+disabled by default because it adds inference latency and, for the local
+provider, a first-run model download. Text, title, and permalink searches keep
+their existing ranking.
+
+Enable the default local FastEmbed reranker:
+
+```bash
+export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
+export BASIC_MEMORY_RERANKER_ENABLED=true
+```
+
+The default model is `jinaai/jina-reranker-v1-tiny-en`. To use a hosted
+reranker through LiteLLM instead:
+
+```bash
+export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
+export BASIC_MEMORY_RERANKER_ENABLED=true
+export BASIC_MEMORY_RERANKER_PROVIDER=litellm
+export BASIC_MEMORY_RERANKER_MODEL=cohere/rerank-v3.5
+export COHERE_API_KEY=...
+```
+
+The feature fails fast on invalid configuration and does not silently fall
+back to retrieval order when an enabled provider fails. See the
+[semantic search guide](docs/semantic-search.md#cross-encoder-reranking) for
+provider setup, all settings, tuning, pagination, and failure behavior.
 
 ## Why Basic Memory
 

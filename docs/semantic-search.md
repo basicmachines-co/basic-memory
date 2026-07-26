@@ -322,6 +322,117 @@ Score-based fusion uses the formula `max(vec, fts) + bonus * min(vec, fts)` to p
 | `vector` | Conceptual queries, paraphrase matching, exploratory searches |
 | `hybrid` | General-purpose search combining precision and recall |
 
+## Cross-Encoder Reranking
+
+Reranking is an optional second stage for vector and hybrid search. Initial
+retrieval finds a candidate pool efficiently; a cross-encoder then reads each
+query and candidate together and replaces the leading candidates' scores with
+more precise relevance scores.
+
+Reranking is disabled by default. It requires semantic search and does not
+change `text`, `title`, or `permalink` search behavior.
+
+### Quick Start
+
+Use the default local FastEmbed provider:
+
+```bash
+export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
+export BASIC_MEMORY_RERANKER_ENABLED=true
+```
+
+The first reranked search downloads the model when it is not already cached,
+then loads `jinaai/jina-reranker-v1-tiny-en`. Later searches reuse the
+process-wide model instance and cache.
+
+To use a hosted reranker through LiteLLM:
+
+```bash
+export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
+export BASIC_MEMORY_RERANKER_ENABLED=true
+export BASIC_MEMORY_RERANKER_PROVIDER=litellm
+export BASIC_MEMORY_RERANKER_MODEL=cohere/rerank-v3.5
+export COHERE_API_KEY=...
+```
+
+LiteLLM model names must use explicit `provider/model` routing. Standard
+provider environment variables, such as `COHERE_API_KEY`, work normally. You
+can instead set `BASIC_MEMORY_RERANKER_API_KEY` to pass a credential directly
+to LiteLLM.
+
+### Providers
+
+| Provider | Runs | Default model | Tradeoff |
+|---|---|---|---|
+| `fastembed` | Locally with ONNX | `jinaai/jina-reranker-v1-tiny-en` | No API key or per-query cost; downloads a model on first use and adds local inference latency. |
+| `litellm` | Hosted or self-hosted API | No implicit hosted default | Supports LiteLLM rerank providers such as Cohere, Jina, and Voyage; adds network latency, provider cost, and credential requirements. |
+
+### Configuration Reference
+
+All settings use the `BASIC_MEMORY_` environment prefix:
+
+| Config Field | Environment Variable | Default | Description |
+|---|---|---|---|
+| `reranker_enabled` | `BASIC_MEMORY_RERANKER_ENABLED` | `false` | Enable reranking for vector and hybrid search. Requires semantic search. |
+| `reranker_provider` | `BASIC_MEMORY_RERANKER_PROVIDER` | `fastembed` | `fastembed` for a local ONNX cross-encoder or `litellm` for an API provider. |
+| `reranker_model` | `BASIC_MEMORY_RERANKER_MODEL` | `jinaai/jina-reranker-v1-tiny-en` | Model identifier. LiteLLM requires explicit `provider/model` routing. |
+| `reranker_candidates` | `BASIC_MEMORY_RERANKER_CANDIDATES` | `20` | Number of leading retrieval results rescored on every page. Larger values can improve recall but increase latency and provider usage. |
+| `reranker_max_document_chars` | `BASIC_MEMORY_RERANKER_MAX_DOCUMENT_CHARS` | `0` | Maximum characters sent per candidate. `0` sends the full matched text; a positive cap bounds latency and request size. |
+| `reranker_api_base` | `BASIC_MEMORY_RERANKER_API_BASE` | Unset | Optional custom endpoint for the LiteLLM provider. |
+| `reranker_api_key` | `BASIC_MEMORY_RERANKER_API_KEY` | Unset | Optional credential passed directly to LiteLLM. When unset, LiteLLM resolves provider credentials from its normal environment variables. |
+
+Configuration is validated at startup. Basic Memory rejects unsupported
+providers, blank models, unavailable FastEmbed models or dependencies, a
+LiteLLM model without a provider prefix, and reranking without semantic search.
+
+### Ranking and Pagination Behavior
+
+- Basic Memory reranks the same fixed leading candidate window on every
+  non-empty page. Results outside that window retain retrieval order and are
+  calibrated at or below the reranked floor. When that floor is zero, stable
+  prefix-before-tail ordering breaks the tie.
+- The matched chunk is placed before optional title context in the reranker
+  document. A positive document-character cap therefore preserves the passage
+  that caused the retrieval match.
+- Reranker scores replace retrieval scores for the reranked prefix and remain
+  within the public `[0, 1]` search score range.
+- Multi-project MCP search reranks inside each project's search service, then
+  merges the returned project-owned scores. It does not perform a second global
+  rerank in the MCP process.
+
+These rules keep independently fetched pages stable while still allowing
+larger requests to expand the untouched retrieval tail.
+
+### Failure Behavior
+
+An enabled reranker is part of the requested ranking contract, so Basic Memory
+does not silently return retrieval order when it fails:
+
+- Temporary provider, rate-limit, connection, timeout, or first-download
+  failures return HTTP 503. Retry the search after the provider recovers.
+- Malformed or incomplete provider responses return HTTP 502.
+- Authentication, model, dependency, and permanent configuration failures
+  surface directly instead of being treated as transient.
+- In multi-project search, a retryable failure from any project aborts the
+  aggregate page instead of returning a partial result set whose ordering could
+  change on retry.
+
+### Tuning
+
+Start with the defaults, then tune only if measurements justify it:
+
+- Increase `reranker_candidates` when relevant results enter the retrieval set
+  but remain outside the desired cutoff. This increases local inference time or
+  hosted provider usage.
+- Set `reranker_max_document_chars` to a positive value such as `1000` to
+  bound latency and hosted request size for long notes. The matched chunk comes
+  first, so a modest cap retains the strongest retrieval signal.
+- Keep reranking disabled when retrieval latency matters more than the
+  additional ranking pass.
+
+Changing reranker providers, models, candidate counts, or document caps does
+not change stored embeddings, so it does not require `bm reindex --embeddings`.
+
 ## The Reindex Command
 
 The `bm reindex` command rebuilds search indexes without dropping the database.
