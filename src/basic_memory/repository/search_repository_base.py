@@ -42,6 +42,7 @@ from basic_memory.repository.semantic_errors import (
 from basic_memory.repository.semantic_vector_index import (
     SemanticVectorIndex,
     SemanticVectorIndexReconciler,
+    VectorDeletion,
     VectorKey,
     VectorMatch,
     VectorRecord,
@@ -51,6 +52,7 @@ from basic_memory.repository.semantic_vector_sync import (
     EntityVectorShardPlan as _EntityVectorShardPlan,
     PendingEmbeddingJob as _PendingEmbeddingJob,
     PreparedEntityVectorSync as _PreparedEntityVectorSync,
+    StagedVectorDeletion as _StagedVectorDeletion,
     VectorChunkState,
     VectorSyncBatchResult,
 )
@@ -450,22 +452,14 @@ class SearchRepositoryBase(ABC):
         self,
         session: AsyncSession,
         entity_id: int,
-    ) -> None:
+        *,
+        expected_deletions: Sequence[_StagedVectorDeletion] | None = None,
+    ) -> list[_StagedVectorDeletion]:
         """Stage an entity deletion by making its manifest rows non-searchable."""
-        vector_index_result = await session.execute(
-            text(
-                "SELECT DISTINCT vector_index FROM search_vector_chunks "
-                "WHERE project_id = :project_id AND entity_id = :entity_id"
-            ),
-            {"project_id": self.project_id, "entity_id": entity_id},
-        )
-        self._assert_manifest_vector_ownership(vector_index_result.scalars().all())
-        await session.execute(
-            text(
-                "UPDATE search_vector_chunks SET embedding_status = 'pending' "
-                "WHERE project_id = :project_id AND entity_id = :entity_id"
-            ),
-            {"project_id": self.project_id, "entity_id": entity_id},
+        return await self._stage_vector_deletions(
+            session,
+            entity_id=entity_id,
+            expected_deletions=expected_deletions,
         )
 
     async def _delete_stale_chunks(
@@ -473,29 +467,76 @@ class SearchRepositoryBase(ABC):
         session: AsyncSession,
         stale_ids: list[int],
         entity_id: int,
-    ) -> None:
+        *,
+        expected_deletions: Sequence[_StagedVectorDeletion] | None = None,
+    ) -> list[_StagedVectorDeletion]:
         """Stage stale chunk deletion by making manifest rows non-searchable."""
         if not stale_ids:
-            return
-        params = {f"stale_id_{index}": row_id for index, row_id in enumerate(stale_ids)}
-        placeholders = ", ".join(f":stale_id_{index}" for index in range(len(stale_ids)))
-        vector_index_result = await session.execute(
-            text(
-                "SELECT DISTINCT vector_index FROM search_vector_chunks "
-                f"WHERE project_id = :project_id AND entity_id = :entity_id "
-                f"AND id IN ({placeholders})"
-            ),
-            {**params, "project_id": self.project_id, "entity_id": entity_id},
+            return []
+        return await self._stage_vector_deletions(
+            session,
+            entity_id=entity_id,
+            row_ids=stale_ids,
+            expected_deletions=expected_deletions,
         )
-        self._assert_manifest_vector_ownership(vector_index_result.scalars().all())
-        await session.execute(
+
+    async def _stage_vector_deletions(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+        row_ids: Sequence[int] | None = None,
+        expected_deletions: Sequence[_StagedVectorDeletion] | None = None,
+    ) -> list[_StagedVectorDeletion]:
+        """Durably stage and return the exact manifest generations to delete."""
+        params: dict[str, object] = {
+            "project_id": self.project_id,
+            "entity_id": entity_id,
+        }
+        generation_clause = ""
+        if expected_deletions is not None:
+            if not expected_deletions:
+                return []
+            predicates: list[str] = []
+            for index, deletion in enumerate(expected_deletions):
+                params[f"row_id_{index}"] = deletion.row_id
+                params[f"source_hash_{index}"] = deletion.source_hash
+                params[f"vector_index_{index}"] = deletion.vector_index
+                predicates.append(
+                    f"(id = :row_id_{index} "
+                    f"AND source_hash = :source_hash_{index} "
+                    f"AND vector_index = :vector_index_{index})"
+                )
+            generation_clause = " AND (" + " OR ".join(predicates) + ")"
+        elif row_ids is not None:
+            if not row_ids:
+                return []
+            placeholders: list[str] = []
+            for index, row_id in enumerate(row_ids):
+                params[f"row_id_{index}"] = row_id
+                placeholders.append(f":row_id_{index}")
+            generation_clause = " AND id IN (" + ", ".join(placeholders) + ")"
+
+        result = await session.execute(
             text(
                 "UPDATE search_vector_chunks SET embedding_status = 'pending' "
-                f"WHERE project_id = :project_id AND entity_id = :entity_id "
-                f"AND id IN ({placeholders})"
+                "WHERE project_id = :project_id AND entity_id = :entity_id"
+                + generation_clause
+                + " RETURNING id, chunk_key, source_hash, vector_index"
             ),
-            {**params, "project_id": self.project_id, "entity_id": entity_id},
+            params,
         )
+        staged = [
+            _StagedVectorDeletion(
+                row_id=int(row["id"]),
+                chunk_key=str(row["chunk_key"]),
+                source_hash=str(row["source_hash"]),
+                vector_index=str(row["vector_index"]),
+            )
+            for row in result.mappings().all()
+        ]
+        self._assert_manifest_vector_ownership(deletion.vector_index for deletion in staged)
+        return staged
 
     async def _finalize_prepared_vector_deletions(
         self,
@@ -507,61 +548,96 @@ class SearchRepositoryBase(ABC):
         fails, those rows remain non-searchable and the next sync retries the
         idempotent delete instead of losing cleanup intent.
         """
-        if not prepared.delete_entity_vectors and not prepared.stale_chunk_ids:
+        if not prepared.staged_deletions:
             return
         if not hasattr(self, "_semantic_vector_index"):
             return
 
-        if prepared.delete_entity_vectors:
+        params: dict[str, object] = {
+            "project_id": self.project_id,
+            "entity_id": prepared.entity_id,
+        }
+        predicates: list[str] = []
+        for index, deletion in enumerate(prepared.staged_deletions):
+            params[f"row_id_{index}"] = deletion.row_id
+            params[f"source_hash_{index}"] = deletion.source_hash
+            params[f"vector_index_{index}"] = deletion.vector_index
+            predicates.append(
+                f"(id = :row_id_{index} "
+                f"AND source_hash = :source_hash_{index} "
+                f"AND vector_index = :vector_index_{index})"
+            )
+        generation_clause = " OR ".join(predicates)
+        deletions = [
+            VectorDeletion(
+                key=VectorKey(
+                    entity_id=prepared.entity_id,
+                    chunk_key=deletion.chunk_key,
+                ),
+                source_hash=deletion.source_hash,
+            )
+            for deletion in prepared.staged_deletions
+        ]
+
+        external_vector_index = self._semantic_vector_index_name not in _BUILT_IN_VECTOR_INDEX_NAMES
+        if external_vector_index:
             async with db.scoped_session(self.session_maker) as session:
-                vector_index_result = await session.execute(
-                    text(
-                        "SELECT DISTINCT vector_index FROM search_vector_chunks "
-                        "WHERE project_id = :project_id AND entity_id = :entity_id"
-                    ),
-                    {"project_id": self.project_id, "entity_id": prepared.entity_id},
-                )
-                self._assert_manifest_vector_ownership(vector_index_result.scalars().all())
-            await self._semantic_vector_index.delete_entity(prepared.entity_id)
-            async with db.scoped_session(self.session_maker) as session:
+                connection = await session.connection()
+                if connection.dialect.name == "sqlite":
+                    lock_statement = (
+                        "UPDATE search_vector_chunks SET source_hash = source_hash "
+                        "WHERE project_id = :project_id AND entity_id = :entity_id "
+                        "AND embedding_status = 'pending' AND ("
+                        + generation_clause
+                        + ") RETURNING id, chunk_key, source_hash, vector_index"
+                    )
+                else:
+                    lock_statement = (
+                        "SELECT id, chunk_key, source_hash, vector_index "
+                        "FROM search_vector_chunks "
+                        "WHERE project_id = :project_id AND entity_id = :entity_id "
+                        "AND embedding_status = 'pending' AND ("
+                        + generation_clause
+                        + ") FOR UPDATE"
+                    )
+                result = await session.execute(text(lock_statement), params)
+                rows = result.mappings().all()
+                self._assert_manifest_vector_ownership(row["vector_index"] for row in rows)
+                current_generations = {(int(row["id"]), str(row["source_hash"])) for row in rows}
+                current_deletions = [
+                    deletion
+                    for deletion, staged in zip(
+                        deletions,
+                        prepared.staged_deletions,
+                        strict=True,
+                    )
+                    if (staged.row_id, staged.source_hash) in current_generations
+                ]
+                if not current_deletions:
+                    return
+                await self._semantic_vector_index.delete(current_deletions)
                 await session.execute(
                     text(
                         "DELETE FROM search_vector_chunks "
-                        "WHERE project_id = :project_id AND entity_id = :entity_id"
+                        "WHERE project_id = :project_id AND entity_id = :entity_id "
+                        "AND embedding_status = 'pending' AND (" + generation_clause + ")"
                     ),
-                    {"project_id": self.project_id, "entity_id": prepared.entity_id},
+                    params,
                 )
                 await session.commit()
             return
 
-        row_ids = prepared.stale_chunk_ids
-        params = {f"row_id_{index}": row_id for index, row_id in enumerate(row_ids)}
-        placeholders = ", ".join(f":row_id_{index}" for index in range(len(row_ids)))
-        async with db.scoped_session(self.session_maker) as session:
-            result = await session.execute(
-                text(
-                    "SELECT entity_id, chunk_key, vector_index FROM search_vector_chunks "
-                    f"WHERE project_id = :project_id AND entity_id = :entity_id "
-                    f"AND id IN ({placeholders})"
-                ),
-                {**params, "project_id": self.project_id, "entity_id": prepared.entity_id},
-            )
-            rows = result.mappings().all()
-            self._assert_manifest_vector_ownership(row["vector_index"] for row in rows)
-            keys = [
-                VectorKey(entity_id=int(row["entity_id"]), chunk_key=str(row["chunk_key"]))
-                for row in rows
-            ]
-
-        await self._semantic_vector_index.delete(keys)
+        await self._semantic_vector_index.delete(deletions)
+        if self._semantic_vector_index_name in _BUILT_IN_VECTOR_INDEX_NAMES:
+            return
         async with db.scoped_session(self.session_maker) as session:
             await session.execute(
                 text(
                     "DELETE FROM search_vector_chunks "
-                    f"WHERE project_id = :project_id AND entity_id = :entity_id "
-                    f"AND id IN ({placeholders})"
+                    "WHERE project_id = :project_id AND entity_id = :entity_id "
+                    "AND embedding_status = 'pending' AND (" + generation_clause + ")"
                 ),
-                {**params, "project_id": self.project_id, "entity_id": prepared.entity_id},
+                params,
             )
             await session.commit()
 
@@ -719,7 +795,7 @@ class SearchRepositoryBase(ABC):
         await self._ensure_vector_tables()
 
         async with db.scoped_session(self.session_maker) as session:
-            await self._delete_entity_chunks(session, entity_id)
+            staged_deletions = await self._delete_entity_chunks(session, entity_id)
             await session.commit()
         await self._finalize_prepared_vector_deletions(
             _PreparedEntityVectorSync(
@@ -728,6 +804,7 @@ class SearchRepositoryBase(ABC):
                 source_rows_count=0,
                 embedding_jobs=[],
                 delete_entity_vectors=True,
+                staged_deletions=staged_deletions,
             )
         )
 

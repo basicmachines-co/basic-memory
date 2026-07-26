@@ -246,18 +246,19 @@ class TestDeleteStaleChunks:
     async def test_delete_stale_chunks_builds_correct_params(self):
         repo = _make_repo()
         session = AsyncMock()
-        ownership_result = MagicMock()
-        ownership_result.scalars.return_value.all.return_value = []
-        session.execute.side_effect = [ownership_result, MagicMock()]
+        stage_result = MagicMock()
+        stage_result.mappings.return_value.all.return_value = []
+        session.execute.return_value = stage_result
         stale_ids = [10, 20, 30]
         await repo._delete_stale_chunks(session, stale_ids, entity_id=5)
 
-        assert session.execute.await_count == 2
-        call_args = session.execute.await_args_list[1]
+        session.execute.assert_awaited_once()
+        call_args = session.execute.await_args
+        assert "RETURNING id, chunk_key, source_hash, vector_index" in str(call_args.args[0])
         params = call_args[0][1]
-        assert params["stale_id_0"] == 10
-        assert params["stale_id_1"] == 20
-        assert params["stale_id_2"] == 30
+        assert params["row_id_0"] == 10
+        assert params["row_id_1"] == 20
+        assert params["row_id_2"] == 30
         assert params["project_id"] == repo.project_id
         assert params["entity_id"] == 5
 
@@ -272,12 +273,13 @@ class TestDeleteEntityChunks:
     async def test_delete_entity_chunks_executes_sql(self):
         repo = _make_repo()
         session = AsyncMock()
-        ownership_result = MagicMock()
-        ownership_result.scalars.return_value.all.return_value = []
-        session.execute.side_effect = [ownership_result, MagicMock()]
+        stage_result = MagicMock()
+        stage_result.mappings.return_value.all.return_value = []
+        session.execute.return_value = stage_result
         await repo._delete_entity_chunks(session, entity_id=42)
-        assert session.execute.await_count == 2
-        call_args = session.execute.await_args_list[1]
+        session.execute.assert_awaited_once()
+        call_args = session.execute.await_args
+        assert "RETURNING id, chunk_key, source_hash, vector_index" in str(call_args.args[0])
         params = call_args[0][1]
         assert params["project_id"] == repo.project_id
         assert params["entity_id"] == 42

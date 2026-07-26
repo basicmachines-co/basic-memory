@@ -65,6 +65,17 @@ class PreparedEntityVectorSync:
     queue_start: float | None = None
     delete_entity_vectors: bool = False
     stale_chunk_ids: list[int] = field(default_factory=list)
+    staged_deletions: list[StagedVectorDeletion] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class StagedVectorDeletion:
+    """Manifest generation durably staged for adapter deletion."""
+
+    row_id: int
+    chunk_key: str
+    source_hash: str
+    vector_index: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +99,7 @@ class DeleteEntityVectorPreparePlan:
     sync_start: float
     prepare_start: float
     source_rows_count: int
+    expected_deletions: list[StagedVectorDeletion]
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,6 +112,7 @@ class UpsertEntityVectorPreparePlan:
     source_rows_count: int
     existing_by_key: dict[str, VectorChunkState]
     stale_ids: list[int]
+    stale_deletions: list[StagedVectorDeletion]
     metadata_update_ids: list[int]
     scheduled_records: list[VectorChunkRecord]
     entity_fingerprint: str
@@ -800,6 +813,15 @@ def plan_entity_vector_jobs_prefetched(
             sync_start=sync_start,
             prepare_start=prepare_start,
             source_rows_count=source_rows_count,
+            expected_deletions=[
+                StagedVectorDeletion(
+                    row_id=row.id,
+                    chunk_key=row.chunk_key,
+                    source_hash=row.source_hash,
+                    vector_index=row.vector_index,
+                )
+                for row in existing_rows
+            ],
         )
 
     if not source_rows:
@@ -817,6 +839,16 @@ def plan_entity_vector_jobs_prefetched(
     incoming_chunk_keys = {record["chunk_key"] for record in chunk_records}
     stale_ids = [
         row.id for chunk_key, row in existing_by_key.items() if chunk_key not in incoming_chunk_keys
+    ]
+    stale_deletions = [
+        StagedVectorDeletion(
+            row_id=row.id,
+            chunk_key=row.chunk_key,
+            source_hash=row.source_hash,
+            vector_index=row.vector_index,
+        )
+        for chunk_key, row in existing_by_key.items()
+        if chunk_key not in incoming_chunk_keys
     ]
     orphan_ids = {row.id for row in existing_rows if not row.has_embedding}
 
@@ -897,6 +929,7 @@ def plan_entity_vector_jobs_prefetched(
         source_rows_count=source_rows_count,
         existing_by_key=existing_by_key,
         stale_ids=stale_ids,
+        stale_deletions=stale_deletions,
         metadata_update_ids=metadata_update_ids,
         scheduled_records=scheduled_records,
         entity_fingerprint=current_entity_fingerprint,
@@ -914,7 +947,11 @@ async def apply_entity_vector_prepare_plan(
 ) -> PreparedEntityVectorSync:
     """Apply one planned entity mutation inside the caller-owned transaction."""
     if isinstance(plan, DeleteEntityVectorPreparePlan):
-        await repository._delete_entity_chunks(session, plan.entity_id)
+        staged_deletions = await repository._delete_entity_chunks(
+            session,
+            plan.entity_id,
+            expected_deletions=plan.expected_deletions,
+        )
         return PreparedEntityVectorSync(
             entity_id=plan.entity_id,
             sync_start=plan.sync_start,
@@ -922,11 +959,18 @@ async def apply_entity_vector_prepare_plan(
             embedding_jobs=[],
             prepare_seconds=time.perf_counter() - plan.prepare_start,
             delete_entity_vectors=True,
+            staged_deletions=staged_deletions,
         )
 
     timestamp_expr = repository._timestamp_now_expr()
+    staged_deletions: list[StagedVectorDeletion] = []
     if plan.stale_ids:
-        await repository._delete_stale_chunks(session, plan.stale_ids, plan.entity_id)
+        staged_deletions = await repository._delete_stale_chunks(
+            session,
+            plan.stale_ids,
+            plan.entity_id,
+            expected_deletions=plan.stale_deletions,
+        )
     for row_id in plan.metadata_update_ids:
         await session.execute(
             text(
@@ -970,7 +1014,8 @@ async def apply_entity_vector_prepare_plan(
         remaining_jobs_after_shard=plan.shard_plan.remaining_jobs_after_shard,
         prepare_seconds=prepare_seconds,
         queue_start=time.perf_counter(),
-        stale_chunk_ids=plan.stale_ids,
+        stale_chunk_ids=[deletion.row_id for deletion in staged_deletions],
+        staged_deletions=staged_deletions,
     )
 
 

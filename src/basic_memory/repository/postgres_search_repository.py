@@ -3,6 +3,7 @@
 import asyncio
 import json
 import re
+from collections.abc import Sequence
 from datetime import datetime
 from typing import List, Optional
 
@@ -27,6 +28,7 @@ from basic_memory.repository.search_repository_base import (
 from basic_memory.repository.metadata_filters import parse_metadata_filters
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.semantic_vector_index import SemanticVectorIndex
+from basic_memory.repository.semantic_vector_sync import StagedVectorDeletion
 from basic_memory.repository.semantic_vector_index_factory import (
     build_vector_index_scope,
     resolve_semantic_vector_index_name,
@@ -474,16 +476,29 @@ class PostgresSearchRepository(SearchRepositoryBase):
         self,
         session: AsyncSession,
         entity_id: int,
-    ) -> None:
-        await super()._delete_entity_chunks(session, entity_id)
+        *,
+        expected_deletions: Sequence[StagedVectorDeletion] | None = None,
+    ) -> list[StagedVectorDeletion]:
+        return await super()._delete_entity_chunks(
+            session,
+            entity_id,
+            expected_deletions=expected_deletions,
+        )
 
     async def _delete_stale_chunks(
         self,
         session: AsyncSession,
         stale_ids: list[int],
         entity_id: int,
-    ) -> None:
-        await super()._delete_stale_chunks(session, stale_ids, entity_id)
+        *,
+        expected_deletions: Sequence[StagedVectorDeletion] | None = None,
+    ) -> list[StagedVectorDeletion]:
+        return await super()._delete_stale_chunks(
+            session,
+            stale_ids,
+            entity_id,
+            expected_deletions=expected_deletions,
+        )
 
     def _distance_to_similarity(self, distance: float) -> float:
         """Convert pgvector cosine distance to cosine similarity.

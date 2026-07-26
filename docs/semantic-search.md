@@ -585,16 +585,20 @@ The returned `SemanticVectorIndex` has five asynchronous operations:
 - `initialize()` validates or creates backend storage.
 - `upsert(records)` idempotently writes vectors by `(entity_id, chunk_key)` for each record's
   `source_hash` generation.
-- `delete(keys)` removes stable keys; missing keys are successful no-ops.
+- `delete(records)` removes stable keys only for each record's `source_hash` generation; stale or
+  missing records are successful no-ops.
 - `delete_entity(entity_id)` removes all vectors for one entity in the scope.
 - `search(query, limit)` returns stable keys with normalized cosine similarity in `[0, 1]`.
 
 The adapter never receives a SQLAlchemy session and never calls the embedding provider. Basic
 Memory owns chunking and embedding, while the extension owns vector storage and lookup.
-Each `VectorRecord` carries the SHA-256 source generation that produced its values. Basic Memory
-holds the matching SQL manifest locked across extension adapter I/O and the ready-state transition
-(`FOR UPDATE` on Postgres and a conditional write lock on SQLite), so an older overlapping sync
-cannot overwrite a newer generation under the same stable adapter key.
+The built-in pgvector and sqlite-vec adapters additionally remove each pending SQL manifest row in
+the same database transaction as its vector so no newer generation can enter between those steps.
+Each `VectorRecord` and `VectorDeletion` carries the SHA-256 source generation that produced its
+value. Basic Memory holds the matching SQL manifest locked across extension adapter I/O and the
+ready-state transition or deletion (`FOR UPDATE` on Postgres and a conditional write lock on
+SQLite), so an older overlapping sync cannot overwrite or remove a newer generation under the same
+stable adapter key.
 
 Adapters may also implement the separate `SemanticVectorIndexReconciler` capability. After a
 vector reindex, Basic Memory passes it the complete set of current ready keys so the adapter can

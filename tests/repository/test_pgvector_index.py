@@ -12,6 +12,7 @@ from basic_memory.repository import pgvector_index as pgvector_index_module
 from basic_memory.repository.pgvector_index import PgVectorIndex
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.semantic_vector_index import (
+    VectorDeletion,
     VectorIndexScope,
     VectorKey,
     VectorRecord,
@@ -274,15 +275,20 @@ async def test_delete_stable_keys_and_entity(monkeypatch) -> None:
     index._initialized = True
 
     await index.delete([])
-    await index.delete([key])
+    await index.delete([VectorDeletion(key=key, source_hash="hash")])
     await index.delete_entity(13)
     await index.delete_orphans([key])
 
+    delete_lock = next(call for call in session.calls if "SELECT id, entity_id" in call[0])
+    assert "source_hash = :source_hash_0" in delete_lock[0]
+    assert "embedding_status = 'pending'" in delete_lock[0]
+    assert "FOR UPDATE" in delete_lock[0]
     delete_calls = [call for call in session.calls if "DELETE FROM" in call[0]]
-    assert len(delete_calls) == 3
+    assert len(delete_calls) == 4
     assert delete_calls[0][1] == {"chunk_id_0": 103}
-    assert delete_calls[1][1] == {"project_id": 7, "entity_id": 13}
-    assert delete_calls[2][1] == {
+    assert delete_calls[1][1] == {"chunk_id_0": 103}
+    assert delete_calls[2][1] == {"project_id": 7, "entity_id": 13}
+    assert delete_calls[3][1] == {
         "project_id": 7,
         "embedding_identity": "stub:4",
     }

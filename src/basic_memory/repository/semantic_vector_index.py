@@ -43,6 +43,14 @@ class VectorRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class VectorDeletion:
+    """One source-generation vector value to remove idempotently."""
+
+    key: VectorKey
+    source_hash: str
+
+
+@dataclass(frozen=True, slots=True)
 class VectorMatch:
     """One nearest-neighbour match with normalized cosine similarity."""
 
@@ -69,8 +77,8 @@ class SemanticVectorIndex(Protocol):
         """Insert or replace vectors only for each record's source generation."""
         ...
 
-    async def delete(self, keys: Sequence[VectorKey]) -> None:
-        """Delete vectors by stable key; missing keys are successful no-ops."""
+    async def delete(self, records: Sequence[VectorDeletion]) -> None:
+        """Delete vectors only for each record's source generation."""
         ...
 
     async def delete_entity(self, entity_id: int) -> None:

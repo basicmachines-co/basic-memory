@@ -24,6 +24,7 @@ from basic_memory.repository.semantic_errors import (
     SemanticVectorIndexExtensionError,
 )
 from basic_memory.repository.semantic_vector_index import (
+    VectorDeletion,
     VectorIndexScope,
     VectorKey,
     VectorMatch,
@@ -84,11 +85,18 @@ class _ConcreteRepo(SearchRepositoryBase):
     async def _write_embeddings(self, session, jobs, embeddings):
         pass
 
-    async def _delete_entity_chunks(self, session, entity_id):
-        pass
+    async def _delete_entity_chunks(self, session, entity_id, *, expected_deletions=None):
+        return []
 
-    async def _delete_stale_chunks(self, session, stale_ids, entity_id):
-        pass
+    async def _delete_stale_chunks(
+        self,
+        session,
+        stale_ids,
+        entity_id,
+        *,
+        expected_deletions=None,
+    ):
+        return []
 
     async def _update_timestamp_sql(self):
         return "CURRENT_TIMESTAMP"
@@ -116,7 +124,7 @@ class _RecordingVectorIndex:
     async def upsert(self, records: Sequence[VectorRecord]) -> None:
         self.upserted_records.extend(records)
 
-    async def delete(self, keys: Sequence[VectorKey]) -> None:
+    async def delete(self, records: Sequence[VectorDeletion]) -> None:
         return None
 
     async def delete_entity(self, entity_id: int) -> None:
@@ -632,7 +640,16 @@ async def test_entity_vector_cleanup_preserves_mismatched_external_owner() -> No
     repo._semantic_vector_index_name = "pgvector"
     session = AsyncMock()
     session.execute.return_value = SimpleNamespace(
-        scalars=lambda: SimpleNamespace(all=lambda: ["milvus"])
+        mappings=lambda: SimpleNamespace(
+            all=lambda: [
+                {
+                    "id": 7,
+                    "chunk_key": "entity:41:0",
+                    "source_hash": "hash",
+                    "vector_index": "milvus",
+                }
+            ]
+        )
     )
 
     with pytest.raises(SemanticVectorIndexExtensionError, match="milvus"):
@@ -1040,7 +1057,7 @@ async def test_prepare_window_uses_entity_local_timing_after_shared_reads(monkey
     monkeypatch.setattr(repo, "_fetch_prepare_window_existing_rows", _stub_fetch_existing_rows)
     monkeypatch.setattr(repo, "_prepare_entity_write_scope", _yielding_write_scope)
     monkeypatch.setattr(repo, "_prepare_vector_session", AsyncMock())
-    monkeypatch.setattr(repo, "_delete_entity_chunks", AsyncMock())
+    monkeypatch.setattr(repo, "_delete_entity_chunks", AsyncMock(return_value=[]))
     monkeypatch.setattr(
         search_repository_base_module.time,
         "perf_counter",

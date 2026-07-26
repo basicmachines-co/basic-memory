@@ -16,6 +16,7 @@ from basic_memory.models.search import create_sqlite_search_vector_embeddings
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.semantic_vector_index import (
     SemanticVectorIndex,
+    VectorDeletion,
     VectorIndexScope,
     VectorKey,
     VectorMatch,
@@ -223,18 +224,43 @@ class SQLiteVecIndex(SemanticVectorIndex):
             )
             await session.commit()
 
-    async def delete(self, keys: Sequence[VectorKey]) -> None:
-        if not keys:
+    async def delete(self, records: Sequence[VectorDeletion]) -> None:
+        if not records:
             return
         await self.initialize()
         async with db.scoped_session(self._session_maker) as session:
             await self._ensure_loaded(session)
-            rowids = list((await self._rowids_by_key(session, keys)).values())
+            params: dict[str, object] = {"project_id": self.scope.project_id}
+            predicates: list[str] = []
+            for index, record in enumerate(records):
+                params[f"entity_id_{index}"] = record.key.entity_id
+                params[f"chunk_key_{index}"] = record.key.chunk_key
+                params[f"source_hash_{index}"] = record.source_hash
+                predicates.append(
+                    f"(entity_id = :entity_id_{index} "
+                    f"AND chunk_key = :chunk_key_{index} "
+                    f"AND source_hash = :source_hash_{index} "
+                    "AND embedding_status = 'pending')"
+                )
+            result = await session.execute(
+                text(
+                    "UPDATE search_vector_chunks SET source_hash = source_hash "
+                    "WHERE project_id = :project_id AND ("
+                    + " OR ".join(predicates)
+                    + ") RETURNING id"
+                ),
+                params,
+            )
+            rowids = [int(row_id) for row_id in result.scalars().all()]
             if rowids:
                 params = {f"rowid_{index}": rowid for index, rowid in enumerate(rowids)}
                 placeholders = ", ".join(f":rowid_{index}" for index in range(len(rowids)))
                 await session.execute(
                     text(f"DELETE FROM search_vector_embeddings WHERE rowid IN ({placeholders})"),
+                    params,
+                )
+                await session.execute(
+                    text(f"DELETE FROM search_vector_chunks WHERE id IN ({placeholders})"),
                     params,
                 )
                 await session.commit()

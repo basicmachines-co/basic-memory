@@ -64,11 +64,18 @@ class _TestRepository(SearchRepositoryBase):
     async def _write_embeddings(self, session, jobs, embeddings):
         pass
 
-    async def _delete_entity_chunks(self, session, entity_id):
-        pass
+    async def _delete_entity_chunks(self, session, entity_id, *, expected_deletions=None):
+        return []
 
-    async def _delete_stale_chunks(self, session, stale_ids, entity_id):
-        pass
+    async def _delete_stale_chunks(
+        self,
+        session,
+        stale_ids,
+        entity_id,
+        *,
+        expected_deletions=None,
+    ):
+        return []
 
     def _distance_to_similarity(self, distance: float) -> float:
         return 1.0 / (1.0 + max(distance, 0.0))
@@ -363,6 +370,7 @@ async def test_prepare_window_reports_shared_transaction_failure_for_mutation_pl
             sync_start=0.0,
             prepare_start=0.0,
             source_rows_count=0,
+            expected_deletions=[],
         )
 
     monkeypatch.setattr(semantic_vector_sync.db, "scoped_session", scoped_session)
@@ -430,7 +438,7 @@ async def test_prefetched_prepare_handles_empty_chunks_and_stale_rows(monkeypatc
 
     monkeypatch.setattr(semantic_vector_sync.db, "scoped_session", scoped_session)
     repository = _TestRepository()
-    delete_entity_chunks = AsyncMock()
+    delete_entity_chunks = AsyncMock(return_value=[])
     monkeypatch.setattr(repository, "_prepare_entity_write_scope", write_scope)
     monkeypatch.setattr(repository, "_prepare_vector_session", AsyncMock())
     monkeypatch.setattr(repository, "_delete_entity_chunks", delete_entity_chunks)
@@ -444,7 +452,7 @@ async def test_prefetched_prepare_handles_empty_chunks_and_stale_rows(monkeypatc
     )
 
     assert empty_chunks.embedding_jobs == []
-    delete_entity_chunks.assert_awaited_once_with(session, 1)
+    delete_entity_chunks.assert_awaited_once_with(session, 1, expected_deletions=[])
 
     record = {
         "chunk_key": "new",
@@ -472,7 +480,7 @@ async def test_prefetched_prepare_handles_empty_chunks_and_stale_rows(monkeypatc
         Mock(return_value="CURRENT_TIMESTAMP"),
     )
     monkeypatch.setattr(repository, "_log_vector_shard_plan", Mock())
-    delete_stale_chunks = AsyncMock()
+    delete_stale_chunks = AsyncMock(return_value=[])
     monkeypatch.setattr(repository, "_delete_stale_chunks", delete_stale_chunks)
     monkeypatch.setattr(
         repository,
@@ -487,7 +495,19 @@ async def test_prefetched_prepare_handles_empty_chunks_and_stale_rows(monkeypatc
         existing_rows=[stale_row],
     )
 
-    delete_stale_chunks.assert_awaited_once_with(session, [7], 1)
+    delete_stale_chunks.assert_awaited_once_with(
+        session,
+        [7],
+        1,
+        expected_deletions=[
+            semantic_vector_sync.StagedVectorDeletion(
+                row_id=7,
+                chunk_key="old",
+                source_hash="old-hash",
+                vector_index="",
+            )
+        ],
+    )
 
 
 @pytest.mark.asyncio

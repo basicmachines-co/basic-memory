@@ -79,11 +79,18 @@ class ConcreteSearchRepo(SearchRepositoryBase):
     async def _write_embeddings(self, session, jobs, embeddings):
         pass  # pragma: no cover
 
-    async def _delete_entity_chunks(self, session, entity_id):
-        pass  # pragma: no cover
+    async def _delete_entity_chunks(self, session, entity_id, *, expected_deletions=None):
+        return []  # pragma: no cover
 
-    async def _delete_stale_chunks(self, session, stale_ids, entity_id):
-        pass  # pragma: no cover
+    async def _delete_stale_chunks(
+        self,
+        session,
+        stale_ids,
+        entity_id,
+        *,
+        expected_deletions=None,
+    ):
+        return []  # pragma: no cover
 
     async def _update_timestamp_sql(self):
         return "CURRENT_TIMESTAMP"  # pragma: no cover

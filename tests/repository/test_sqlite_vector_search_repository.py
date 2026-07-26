@@ -20,10 +20,15 @@ from basic_memory.repository import search_repository_base as search_repository_
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.semantic_errors import SemanticVectorIndexExtensionError
 from basic_memory.repository.semantic_vector_index import (
+    VectorDeletion,
     VectorIndexScope,
     VectorKey,
     VectorMatch,
     VectorRecord,
+)
+from basic_memory.repository.semantic_vector_sync import (
+    PreparedEntityVectorSync,
+    StagedVectorDeletion,
 )
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.repository import sqlite_vec_index as sqlite_vec_index_module
@@ -91,9 +96,12 @@ class RecordingVectorIndex:
             raise RuntimeError("adapter write failed")
         self.records.update({record.key: record.values for record in records})
 
-    async def delete(self, keys: Sequence[VectorKey]) -> None:
-        for key in keys:
-            self.records.pop(key, None)
+    async def delete(self, records: Sequence[VectorDeletion]) -> None:
+        self.deleted_entities.extend(sorted({record.key.entity_id for record in records}))
+        if self.fail_delete_entity:
+            raise RuntimeError("adapter delete failed")
+        for record in records:
+            self.records.pop(record.key, None)
 
     async def delete_entity(self, entity_id: int) -> None:
         self.deleted_entities.append(entity_id)
@@ -412,6 +420,69 @@ async def test_sqlite_vec_reconciliation_is_project_scoped(search_repository):
 
 
 @pytest.mark.asyncio
+async def test_sqlite_vec_delete_requires_pending_source_generation(search_repository):
+    """A stale delete cannot remove a same-source vector that is already ready."""
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec deletion behavior is local SQLite-only.")
+
+    _enable_semantic(search_repository)
+    await search_repository.init_search_index()
+    index = cast(SQLiteVecIndex, search_repository._semantic_vector_index)
+    key = VectorKey(entity_id=907, chunk_key="entity:907:0")
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        await index._ensure_loaded(session)
+        await session.execute(
+            text(
+                "INSERT INTO search_vector_chunks ("
+                "id, entity_id, project_id, chunk_key, chunk_text, source_hash, "
+                "entity_fingerprint, embedding_model, vector_index, embedding_status"
+                ") VALUES ("
+                "907, 907, :project_id, :chunk_key, 'text', 'hash', "
+                "'fingerprint', :embedding_model, 'sqlite-vec', 'ready')"
+            ),
+            {
+                "project_id": search_repository.project_id,
+                "chunk_key": key.chunk_key,
+                "embedding_model": search_repository._embedding_model_key(),
+            },
+        )
+        await session.execute(
+            text(
+                "INSERT INTO search_vector_embeddings (rowid, embedding, source_hash) "
+                "VALUES (907, :embedding, 'hash')"
+            ),
+            {"embedding": "[1.0, 0.0, 0.0, 0.0]"},
+        )
+        await session.commit()
+
+    deletion = VectorDeletion(key=key, source_hash="hash")
+    await index.delete([deletion])
+    async with db.scoped_session(search_repository.session_maker) as session:
+        assert (
+            await session.scalar(
+                text("SELECT COUNT(*) FROM search_vector_embeddings WHERE rowid = 907")
+            )
+            == 1
+        )
+        await session.execute(
+            text("UPDATE search_vector_chunks SET embedding_status = 'pending' WHERE id = 907")
+        )
+        await session.commit()
+
+    await index.delete([deletion])
+    async with db.scoped_session(search_repository.session_maker) as session:
+        vector_count = await session.scalar(
+            text("SELECT COUNT(*) FROM search_vector_embeddings WHERE rowid = 907")
+        )
+        manifest_count = await session.scalar(
+            text("SELECT COUNT(*) FROM search_vector_chunks WHERE id = 907")
+        )
+    assert vector_count == 0
+    assert manifest_count == 0
+
+
+@pytest.mark.asyncio
 async def test_sqlite_chunk_upsert_and_delete_lifecycle(search_repository):
     """sync_entity_vectors updates changed chunks and clears vectors when source rows disappear."""
     if not isinstance(search_repository, SQLiteSearchRepository):
@@ -680,6 +751,86 @@ async def test_adapter_delete_failure_stays_pending_until_retry(search_repositor
         assert row_count.scalar_one() == 0
 
     assert adapter.deleted_entities == [112, 112]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("delete_entity_vectors", [False, True])
+async def test_staged_delete_preserves_newer_source_generation(
+    search_repository,
+    delete_entity_vectors,
+):
+    """A stale finalizer must not delete a newer stable-key vector or manifest."""
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("Semantic manifest concurrency is exercised through local SQLite.")
+
+    _enable_semantic(search_repository)
+    adapter = RecordingVectorIndex()
+    search_repository._semantic_vector_index = adapter
+    search_repository._semantic_vector_index_name = "recording"
+    await search_repository.init_search_index()
+    await search_repository.index_item(
+        _entity_row(
+            project_id=search_repository.project_id,
+            row_id=116,
+            entity_id=116,
+            title="Generation Delete Race",
+            permalink="specs/generation-delete-race",
+            content_stems="old semantic generation",
+        )
+    )
+    await search_repository.sync_entity_vectors(116)
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        manifest = await session.execute(
+            text(
+                "SELECT id, chunk_key, source_hash, vector_index "
+                "FROM search_vector_chunks "
+                "WHERE project_id = :project_id AND entity_id = :entity_id"
+            ),
+            {"project_id": search_repository.project_id, "entity_id": 116},
+        )
+        old_row = manifest.mappings().one()
+        await session.execute(
+            text(
+                "UPDATE search_vector_chunks "
+                "SET source_hash = 'new-source-hash', embedding_status = 'ready' "
+                "WHERE id = :row_id"
+            ),
+            {"row_id": old_row["id"]},
+        )
+        await session.commit()
+
+    key = VectorKey(entity_id=116, chunk_key=str(old_row["chunk_key"]))
+    adapter.records[key] = (0.0, 0.0, 0.0, 1.0)
+    await search_repository._finalize_prepared_vector_deletions(
+        PreparedEntityVectorSync(
+            entity_id=116,
+            sync_start=0.0,
+            source_rows_count=0,
+            embedding_jobs=[],
+            delete_entity_vectors=delete_entity_vectors,
+            stale_chunk_ids=[] if delete_entity_vectors else [int(old_row["id"])],
+            staged_deletions=[
+                StagedVectorDeletion(
+                    row_id=int(old_row["id"]),
+                    chunk_key=str(old_row["chunk_key"]),
+                    source_hash=str(old_row["source_hash"]),
+                    vector_index=str(old_row["vector_index"]),
+                )
+            ],
+        )
+    )
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        current = await session.execute(
+            text(
+                "SELECT source_hash, embedding_status FROM search_vector_chunks WHERE id = :row_id"
+            ),
+            {"row_id": old_row["id"]},
+        )
+        assert current.one() == ("new-source-hash", "ready")
+    assert adapter.records[key] == (0.0, 0.0, 0.0, 1.0)
+    assert adapter.deleted_entities == []
 
 
 @pytest.mark.asyncio

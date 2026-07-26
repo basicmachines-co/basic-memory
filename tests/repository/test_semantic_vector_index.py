@@ -17,6 +17,7 @@ from basic_memory.repository.semantic_errors import SemanticVectorIndexExtension
 from basic_memory.repository.semantic_vector_index import (
     SEMANTIC_VECTOR_INDEX_ENTRY_POINT_GROUP,
     SemanticVectorIndex,
+    VectorDeletion,
     VectorIndexScope,
     VectorKey,
     VectorMatch,
@@ -59,7 +60,7 @@ class StubVectorIndex:
     async def upsert(self, records: Sequence[VectorRecord]) -> None:
         return None
 
-    async def delete(self, keys: Sequence[VectorKey]) -> None:
+    async def delete(self, records: Sequence[VectorDeletion]) -> None:
         return None
 
     async def delete_entity(self, entity_id: int) -> None:

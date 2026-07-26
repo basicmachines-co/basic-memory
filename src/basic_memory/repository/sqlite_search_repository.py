@@ -2,6 +2,7 @@
 
 import asyncio
 import re
+from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import List, Optional
@@ -30,6 +31,7 @@ from basic_memory.repository.search_repository_base import SearchRepositoryBase
 from basic_memory.repository.metadata_filters import parse_metadata_filters, build_sqlite_json_path
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.semantic_vector_index import SemanticVectorIndex
+from basic_memory.repository.semantic_vector_sync import StagedVectorDeletion
 from basic_memory.repository.semantic_vector_index_factory import build_vector_index_scope
 from basic_memory.repository.sqlite_vec_index import SQLiteVecIndex
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
@@ -545,16 +547,29 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         self,
         session: AsyncSession,
         entity_id: int,
-    ) -> None:
-        await super()._delete_entity_chunks(session, entity_id)
+        *,
+        expected_deletions: Sequence[StagedVectorDeletion] | None = None,
+    ) -> list[StagedVectorDeletion]:
+        return await super()._delete_entity_chunks(
+            session,
+            entity_id,
+            expected_deletions=expected_deletions,
+        )
 
     async def _delete_stale_chunks(
         self,
         session: AsyncSession,
         stale_ids: list[int],
         entity_id: int,
-    ) -> None:
-        await super()._delete_stale_chunks(session, stale_ids, entity_id)
+        *,
+        expected_deletions: Sequence[StagedVectorDeletion] | None = None,
+    ) -> list[StagedVectorDeletion]:
+        return await super()._delete_stale_chunks(
+            session,
+            stale_ids,
+            entity_id,
+            expected_deletions=expected_deletions,
+        )
 
     async def _delete_project_builtin_vector_rows(self, session: AsyncSession) -> None:
         """Delete sqlite-vec rows atomically with their project manifest."""

@@ -13,6 +13,7 @@ from basic_memory import db
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.semantic_vector_index import (
     SemanticVectorIndex,
+    VectorDeletion,
     VectorIndexScope,
     VectorKey,
     VectorMatch,
@@ -252,13 +253,33 @@ class PgVectorIndex(SemanticVectorIndex):
             )
             await session.commit()
 
-    async def delete(self, keys: Sequence[VectorKey]) -> None:
-        if not keys:
+    async def delete(self, records: Sequence[VectorDeletion]) -> None:
+        if not records:
             return
         await self.initialize()
         async with db.scoped_session(self._session_maker) as session:
-            ids_by_key = await self._chunk_ids_by_key(session, keys)
-            chunk_ids = list(ids_by_key.values())
+            params: dict[str, object] = {"project_id": self.scope.project_id}
+            predicates: list[str] = []
+            for index, record in enumerate(records):
+                params[f"entity_id_{index}"] = record.key.entity_id
+                params[f"chunk_key_{index}"] = record.key.chunk_key
+                params[f"source_hash_{index}"] = record.source_hash
+                predicates.append(
+                    f"(entity_id = :entity_id_{index} "
+                    f"AND chunk_key = :chunk_key_{index} "
+                    f"AND source_hash = :source_hash_{index} "
+                    "AND embedding_status = 'pending')"
+                )
+            result = await session.execute(
+                text(
+                    "SELECT id, entity_id, chunk_key FROM search_vector_chunks "
+                    "WHERE project_id = :project_id AND ("
+                    + " OR ".join(predicates)
+                    + ") FOR UPDATE"
+                ),
+                params,
+            )
+            chunk_ids = [int(row["id"]) for row in result.mappings().all()]
             if chunk_ids:
                 params = {f"chunk_id_{index}": value for index, value in enumerate(chunk_ids)}
                 placeholders = ", ".join(f":chunk_id_{index}" for index in range(len(chunk_ids)))
@@ -266,6 +287,10 @@ class PgVectorIndex(SemanticVectorIndex):
                     text(
                         f"DELETE FROM search_vector_embeddings WHERE chunk_id IN ({placeholders})"
                     ),
+                    params,
+                )
+                await session.execute(
+                    text(f"DELETE FROM search_vector_chunks WHERE id IN ({placeholders})"),
                     params,
                 )
                 await session.commit()
