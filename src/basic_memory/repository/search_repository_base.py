@@ -986,6 +986,7 @@ class SearchRepositoryBase(ABC):
         min_similarity: Optional[float] = None,
         limit: int,
         offset: int,
+        candidate_limit: int | None = None,
         _emit_observability_log: bool = True,
         _apply_rerank: bool = True,
     ) -> List[SearchIndexRow]:
@@ -994,12 +995,16 @@ class SearchRepositoryBase(ABC):
         Returns individual search_index rows (entities, observations, relations)
         ranked by vector similarity. Each observation or relation is a first-class
         result, not collapsed into its parent entity.
+
+        ``candidate_limit`` is supplied only by a composed retrieval stage that
+        already sized the shared candidate pool.
         """
         self._assert_semantic_available()
         await self._ensure_vector_tables()
         assert self._embedding_provider is not None
         query_text = search_text.strip()
-        candidate_limit = self._candidate_limit(limit, offset, query_text)
+        if candidate_limit is None:
+            candidate_limit = self._candidate_limit(limit, offset, query_text)
         query_start = time.perf_counter()
         embed_start = time.perf_counter()
         query_embedding = await self._embedding_provider.embed_query(query_text)
@@ -1284,6 +1289,7 @@ class SearchRepositoryBase(ABC):
             min_similarity=min_similarity,
             limit=candidate_limit,
             offset=0,
+            candidate_limit=candidate_limit,
             _emit_observability_log=False,
             _apply_rerank=False,
         )

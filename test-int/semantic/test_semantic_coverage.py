@@ -38,6 +38,23 @@ from semantic.corpus import (
 PG_FASTEMBED = SearchCombo("postgres-fastembed", DatabaseBackend.POSTGRES, "fastembed", 384)
 
 
+class _RecordingReranker:
+    """Deterministic reranker that records whether hybrid applies the stage once."""
+
+    model_name = "recording-reranker"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def rerank(self, query: str, documents: list[str]) -> list[float]:
+        self.calls += 1
+        document_count = len(documents)
+        return [(document_count - index) / document_count for index in range(document_count)]
+
+    def runtime_log_attrs(self) -> dict[str, object]:
+        return {}
+
+
 @pytest.mark.asyncio
 @pytest.mark.semantic
 @pytest.mark.benchmark
@@ -114,6 +131,57 @@ async def test_postgres_hybrid_search(postgres_engine_factory, tmp_path):
     assert any((r.permalink or "").startswith("bench/database-") for r in results[:5]), (
         "Hybrid search should rank database notes highly"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.semantic
+@pytest.mark.benchmark
+async def test_postgres_hybrid_applies_rerank_candidate_limit_once(
+    postgres_engine_factory,
+    tmp_path,
+    monkeypatch,
+):
+    """Exercise composed hybrid and vector candidate sizing through real Postgres queries."""
+    skip_if_needed(PG_FASTEMBED)
+    if postgres_engine_factory is None:
+        pytest.skip("Postgres engine not available")
+
+    provider = _create_fastembed_provider()
+    search_service = await create_search_service(
+        postgres_engine_factory, PG_FASTEMBED, tmp_path, embedding_provider=provider
+    )
+    await seed_benchmark_notes(search_service, note_count=20)
+
+    repo = cast(Any, search_service.repository)
+    reranker = _RecordingReranker()
+    repo._rerank_provider = reranker
+    repo._reranker_candidates = 100
+
+    candidate_limits: list[int] = []
+    run_vector_query = repo._run_vector_query
+
+    async def record_vector_query(
+        session: Any,
+        query_embedding: list[float],
+        candidate_limit: int,
+    ) -> list[dict[str, Any]]:
+        candidate_limits.append(candidate_limit)
+        return await run_vector_query(session, query_embedding, candidate_limit)
+
+    monkeypatch.setattr(repo, "_run_vector_query", record_vector_query)
+
+    results = await search_service.search(
+        SearchQuery(
+            text="database migration schema",
+            retrieval_mode=SearchRetrievalMode.HYBRID,
+            entity_types=[SearchItemType.ENTITY],
+        ),
+        limit=11,
+    )
+
+    assert results
+    assert reranker.calls == 1
+    assert candidate_limits == [400]
 
 
 @pytest.mark.asyncio
