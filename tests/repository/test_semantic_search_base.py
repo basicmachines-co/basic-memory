@@ -393,6 +393,64 @@ async def test_external_sqlite_upsert_holds_write_lock_through_ready_commit(
     assert adapter.upserted_records[0].source_hash == source_hash
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("dialect_name", "project_lock_prefix"),
+    [
+        ("postgresql", "SELECT id FROM project"),
+        ("sqlite", "UPDATE project SET id = id"),
+    ],
+)
+async def test_external_reconciliation_holds_project_lock_through_orphan_cleanup(
+    monkeypatch,
+    dialect_name,
+    project_lock_prefix,
+) -> None:
+    """External reconciliation must serialize its snapshot and orphan deletion."""
+    repo = _ConcreteRepo()
+    repo._semantic_enabled = True
+    repo._semantic_vector_index_name = "milvus"
+    repo._embedding_provider = SimpleNamespace(model_name="stub", dimensions=4)
+    events: list[str] = []
+    adapter: Any = SimpleNamespace(
+        scope=_RecordingVectorIndex.scope,
+        delete_orphans=AsyncMock(side_effect=lambda _live_keys: events.append("delete_orphans")),
+    )
+    repo._semantic_vector_index = adapter
+    session = AsyncMock()
+    session.connection.return_value = SimpleNamespace(dialect=SimpleNamespace(name=dialect_name))
+
+    def execute(statement, _params):
+        sql = str(statement)
+        if sql.startswith(project_lock_prefix):
+            events.append("project_lock")
+            return SimpleNamespace()
+        if sql.startswith("SELECT entity_id, chunk_key"):
+            events.append("manifest_read")
+            return SimpleNamespace(
+                mappings=lambda: SimpleNamespace(
+                    all=lambda: [{"entity_id": 41, "chunk_key": "entity:41:0"}]
+                )
+            )
+        raise AssertionError(f"Unexpected SQL: {sql}")
+
+    session.execute.side_effect = execute
+    session.commit.side_effect = lambda: events.append("commit")
+
+    @asynccontextmanager
+    async def fake_scoped_session(_session_maker):
+        yield session
+
+    monkeypatch.setattr(search_repository_base_module.db, "scoped_session", fake_scoped_session)
+
+    await repo.reconcile_vector_index()
+
+    assert events == ["project_lock", "manifest_read", "delete_orphans", "commit"]
+    adapter.delete_orphans.assert_awaited_once_with(
+        [VectorKey(entity_id=41, chunk_key="entity:41:0")]
+    )
+
+
 # --- SQLite SemanticSearchDisabledError ---
 
 

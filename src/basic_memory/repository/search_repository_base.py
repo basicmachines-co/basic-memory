@@ -1173,7 +1173,16 @@ class SearchRepositoryBase(ABC):
         if not isinstance(self._semantic_vector_index, SemanticVectorIndexReconciler):
             return
 
+        external_vector_index = self._uses_external_vector_index()
         async with db.scoped_session(self.session_maker) as session:
+            if external_vector_index:
+                # Trigger: reconciliation snapshots the live manifest before asking
+                # an external adapter to delete everything else.
+                # Why: a concurrent watcher could otherwise publish a new vector
+                # after the snapshot and have reconciliation delete that live key.
+                # Outcome: share the project lock with external writes through both
+                # the manifest read and orphan deletion.
+                await self._lock_external_vector_write(session)
             result = await session.execute(
                 text(
                     "SELECT entity_id, chunk_key FROM search_vector_chunks "
@@ -1196,6 +1205,11 @@ class SearchRepositoryBase(ABC):
                 )
                 for row in result.mappings().all()
             ]
+
+            if external_vector_index:
+                await self._semantic_vector_index.delete_orphans(live_keys)
+                await session.commit()
+                return
 
         await self._semantic_vector_index.delete_orphans(live_keys)
 
