@@ -168,6 +168,7 @@ def test_plan_accepted_note_content_write_advances_and_cleans_moved_materialized
             file_checksum="old-file-checksum",
             file_write_status="synced",
         ),
+        source_file_checksum="old-file-checksum",
     )
 
     assert plan == RuntimeAcceptedNoteContentWritePlan(

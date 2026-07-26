@@ -313,15 +313,20 @@ async def test_startup_recovery_retries_lost_move_source_cleanup(
         assert await vacate_repository.load_vacate_markers(session, [source_relative]) == {}
 
 
+@pytest.mark.parametrize(
+    "source_publication_state",
+    ["unpublished", "synced"],
+)
 @pytest.mark.asyncio
-async def test_move_preserves_recreated_source_when_unpublished_source_is_absent(
+async def test_move_preserves_recreated_source_when_source_is_absent(
     mcp_server,
     app,
     test_project,
     project_config,
     engine_factory,
+    source_publication_state: str,
 ):
-    """An absent source does not authorize delayed deletion of a later identical file."""
+    """An absent source never authorizes delayed deletion of a later identical file."""
     del app
     source_relative = "source/Absent Before Move.md"
     destination_relative = "archive/absent-before-move.md"
@@ -351,11 +356,13 @@ async def test_move_preserves_recreated_source_when_unpublished_source_is_absent
             note_content = await note_content_repository.get_by_entity_id(session, entity.id)
             assert note_content is not None
             assert note_content.db_checksum == source_checksum
-            entity.checksum = None
-            note_content.file_checksum = None
+            if source_publication_state == "unpublished":
+                entity.checksum = None
+                note_content.file_checksum = None
 
-        # Reproduce the no-materialized-source side of the publisher race. Absence must remain
-        # absence rather than borrowing the DB checksum as authority to delete this path later.
+        # Reproduce the source disappearing before the move observes it. Absence must remain
+        # absence rather than borrowing either a pending or synchronized DB checksum as authority
+        # to delete this path later.
         source_path.unlink()
         move_result = await client.call_tool(
             "move_note",

@@ -76,7 +76,7 @@ class LocalAcceptedNotePreparerFactory:
         project: Project,
         file_path: RuntimeFilePath,
     ) -> RuntimeFileChecksum | None:
-        """Return the source checksum observed while accepting an ambiguous move."""
+        """Return the source checksum observed while accepting a path change."""
         _, file_service = self._create_file_service(project)
         if not await file_service.exists(file_path):
             return None

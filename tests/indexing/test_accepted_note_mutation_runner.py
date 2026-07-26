@@ -1497,7 +1497,8 @@ async def test_run_accepted_note_edit_threads_metadata_into_preparer() -> None:
 @pytest.mark.parametrize(
     ("publication_state", "current_file_checksum", "expected_source_checksum"),
     [
-        ("synced", None, "file-checksum"),
+        ("synced", "file-checksum", "file-checksum"),
+        ("synced-source-absent", None, None),
         ("checksum-missing", None, None),
         ("pending-before-write", "file-checksum", "file-checksum"),
         ("failed-before-write", "file-checksum", "file-checksum"),
@@ -1516,7 +1517,7 @@ async def test_run_accepted_note_move_carries_previous_path_and_materialized_cle
     prepared_move = _prepared_move()
     entity = _entity(file_path="notes/accepted.md")
     note_content = _note_content(entity)
-    if publication_state == "synced":
+    if publication_state.startswith("synced"):
         note_content.file_write_status = "synced"
     elif publication_state == "checksum-missing":
         note_content.file_version = None
@@ -1590,9 +1591,7 @@ async def test_run_accepted_note_move_carries_previous_path_and_materialized_cle
         assert cleanup is not None
         assert cleanup.file_path == "notes/accepted.md"
         assert cleanup.file_checksum == expected_source_checksum
-    assert preparer_factory.checksum_calls == (
-        [] if publication_state == "synced" else [(project, "notes/accepted.md")]
-    )
+    assert preparer_factory.checksum_calls == [(project, "notes/accepted.md")]
     assert persistence_calls[0].await_count == 0
     assert persistence_calls[1].await_count == 1
 

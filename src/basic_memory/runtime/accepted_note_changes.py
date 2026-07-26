@@ -105,8 +105,9 @@ def select_accepted_note_source_checksum(
     DB version is pending. During ``pending``, ``writing``, ``failed``, or
     ``external_change_detected``, storage may contain either known version or unrelated bytes. A
     live checksum matching either known version resolves that ambiguity. An absent or unexpected
-    object proves neither version owns the path, so cleanup must remain unclaimed. Otherwise only
-    a synchronized file version proves ``file_checksum`` belongs to the current accepted source.
+    object proves neither version owns the path, so cleanup must remain unclaimed. A synchronized
+    file version identifies the expected checksum, but storage observation still proves that those
+    bytes exist at the source path before cleanup ownership is recorded.
     """
     if current_note_content.file_write_status in {
         "pending",
@@ -126,9 +127,13 @@ def select_accepted_note_source_checksum(
         and current_note_content.file_version is not None
         and int(current_note_content.file_version) == int(current_note_content.db_version)
     )
-    if file_version_is_current and current_note_content.file_checksum is not None:
-        return current_note_content.file_checksum
-    return current_note_content.db_checksum
+    if (
+        file_version_is_current
+        and current_note_content.file_checksum is not None
+        and observed_file_checksum == current_note_content.file_checksum
+    ):
+        return observed_file_checksum
+    return None
 
 
 def accepted_note_file_path_conflicts(
