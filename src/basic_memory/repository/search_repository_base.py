@@ -736,18 +736,17 @@ class SearchRepositoryBase(ABC):
                 f"{configured_index!r}. Restore the owning adapter and retry."
             )
 
-    async def delete_project_vector_rows(self, *, strict_adapter_cleanup: bool = False) -> None:
+    async def delete_project_vector_rows(self, *, strict_adapter_cleanup: bool = True) -> None:
         """Delete this project's vectors through the configured storage adapter.
 
         Core enumerates ownership from the SQL manifest because the adapter
         contract intentionally has no project-wide listing or destructive reset.
         A full reindex clears the manifest even when semantic search is disabled,
         so stale ready rows cannot become current if the feature is re-enabled.
-        Adapter cleanup is best-effort because the manifest remains the search
-        authority. Ownership mismatches fail closed because only the manifest
-        identifies the extension that can safely remove previously written vectors.
-        Project deletion opts into strict cleanup so external data ownership is
-        preserved for a retry instead of being discarded after an adapter failure.
+        External adapter cleanup is strict by default because the manifest is the
+        only durable ownership record for remote vectors. Ownership mismatches
+        fail closed because only the owning extension can safely remove previously
+        written vectors.
         """
         configured_index = self._semantic_vector_index_name
         async with db.scoped_session(self.session_maker) as session:
@@ -822,10 +821,9 @@ class SearchRepositoryBase(ABC):
                     await self._semantic_vector_index.delete_entity(entity_id)
             except Exception as exc:
                 # Trigger: a configured external adapter cannot initialize or delete.
-                # Why: reindex may discard derived state, but project deletion must
-                # not discard the only ownership manifest for external data.
-                # Outcome: strict callers stop for a retry; reindex logs the adapter
-                # failure and continues with a non-searchable empty manifest.
+                # Why: reindex and project deletion must not discard the only
+                # ownership manifest for external data.
+                # Outcome: strict callers stop for a retry before manifest deletion.
                 logger.warning(
                     "Could not clean semantic vector adapter: "
                     "project_id={project_id} vector_index={vector_index} error={error}",

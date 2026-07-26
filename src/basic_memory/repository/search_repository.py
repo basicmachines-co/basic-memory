@@ -111,7 +111,7 @@ class SearchRepository(Protocol):
         """Delete DB-first entity vectors through an extension adapter."""
         ...
 
-    async def delete_project_vector_rows(self, *, strict_adapter_cleanup: bool = False) -> None:
+    async def delete_project_vector_rows(self, *, strict_adapter_cleanup: bool = True) -> None:
         """Delete all semantic vector chunks and embeddings for this project."""
         ...
 

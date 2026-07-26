@@ -12,12 +12,17 @@ SEMANTIC_VECTOR_INDEX_ENTRY_POINT_GROUP = "basic_memory.semantic_vector_indexes"
 
 @dataclass(frozen=True, slots=True)
 class VectorIndexScope:
-    """Stable isolation and embedding identity for one project's vectors."""
+    """Stable project storage identity plus the current embedding schema."""
 
     namespace: str
     project_id: int
     embedding_identity: str
     dimensions: int
+
+    @property
+    def storage_key(self) -> tuple[str, int]:
+        """Return the stable isolation key external adapters must use for storage."""
+        return (self.namespace, self.project_id)
 
 
 @dataclass(frozen=True, slots=True)

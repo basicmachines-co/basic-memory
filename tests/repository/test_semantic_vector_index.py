@@ -132,20 +132,39 @@ def test_scope_is_stable_credential_free_and_project_isolated() -> None:
     rotated_password = build_vector_index_scope(
         _postgres_config(
             database_url=(
-                "postgresql+asyncpg://rotated-user:new-secret@db.example.test:5432/memory"
-                "?sslmode=require"
+                "postgresql+asyncpg://user:new-secret@db.example.test:5432/memory?sslmode=require"
             )
         ),
         provider,
         project_id=7,
     )
     other_project = build_vector_index_scope(_postgres_config(), provider, project_id=8)
+    other_user = build_vector_index_scope(
+        _postgres_config(
+            database_url="postgresql+asyncpg://tenant-user:secret@db.example.test:5432/memory"
+        ),
+        provider,
+        project_id=7,
+    )
+    other_schema = build_vector_index_scope(
+        _postgres_config(
+            database_url=(
+                "postgresql+asyncpg://user:secret@db.example.test:5432/memory"
+                "?options=-csearch_path%3Dtenant"
+            )
+        ),
+        provider,
+        project_id=7,
+    )
 
     assert first.namespace == rotated_password.namespace
     assert "secret" not in first.namespace
     assert first.project_id != other_project.project_id
+    assert first.namespace != other_user.namespace
+    assert first.namespace != other_schema.namespace
     assert first.embedding_identity == "StubEmbeddingProvider:stub-model:3"
     assert first.dimensions == 3
+    assert first.storage_key == rotated_password.storage_key
 
 
 def test_missing_configured_extension_fails_without_fallback(monkeypatch) -> None:

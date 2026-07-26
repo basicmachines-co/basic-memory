@@ -461,7 +461,7 @@ bm reindex -p my-project
 - **Dimension change**: After changing `semantic_embedding_dimensions`
 - **LiteLLM role change**: After changing `semantic_embedding_document_input_type` or `semantic_embedding_query_input_type`
 - **Literal prefix change**: After changing `semantic_embedding_document_prefix` or `semantic_embedding_query_prefix`
-- **Vector index change**: After changing `semantic_vector_index` (the normal incremental sync also detects the change, while an explicit reindex completes the migration immediately)
+- **Vector index change**: After completing the external-adapter cleanup procedure below and changing `semantic_vector_index`
 
 The reindex command shows progress with embedded/skipped/error counts:
 
@@ -572,9 +572,13 @@ def create_index(
 ```
 
 `VectorIndexScope` contains a stable, credential-free database namespace, project ID, embedding
-identity, and vector dimensions. Extensions must isolate storage by the complete scope. They own
-their client lifecycle, credentials, collection/index creation, vector persistence, and
-nearest-neighbour implementation.
+identity, and vector dimensions. Extensions must isolate physical storage by
+`scope.storage_key`, which contains only the stable database namespace and project ID.
+`embedding_identity` and `dimensions` describe the current vector schema for validation and
+initialization; adapters must not use those mutable fields to create a second unreachable
+project collection when the embedding configuration changes. Extensions own their client
+lifecycle, credentials, collection/index creation, vector persistence, and nearest-neighbour
+implementation.
 
 The returned `SemanticVectorIndex` has five asynchronous operations:
 
@@ -605,5 +609,10 @@ searchable and the next sync safely retries the idempotent operation. Adapter se
 hydrated only through current, ready manifest rows, so stale or orphaned external matches fail
 closed.
 
-Switching `semantic_vector_index` invalidates existing manifest rows for incremental re-embedding.
-Run `bm reindex --embeddings` after a switch to migrate all eligible content immediately.
+Basic Memory deliberately refuses to mutate manifest rows owned by a different external adapter.
+Before switching `semantic_vector_index`, keep the old adapter configured and use that extension's
+project-scope administrative cleanup to remove the old vectors. Remove the corresponding
+`search_vector_chunks` manifest rows only after the external cleanup succeeds. Then switch the
+configured adapter and run `bm reindex --embeddings` to populate the new store. If configuration
+was switched too early, restore the old adapter first; the ownership check will continue to fail
+closed until cleanup is completed.

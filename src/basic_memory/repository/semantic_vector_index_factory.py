@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from importlib.metadata import entry_points
 from typing import Protocol
 
@@ -52,12 +53,21 @@ def _database_namespace(app_config: BasicMemoryConfig) -> str:
     """Derive a stable, credential-free namespace from the authoritative database."""
     if app_config.database_url:
         url = make_url(app_config.database_url)
+        options = url.query.get("options", "")
+        serialized_options = "|".join(options) if isinstance(options, tuple) else str(options)
+        search_path_match = re.search(
+            r"(?:^|\s)-c\s*search_path=([^\s]+)",
+            serialized_options,
+        )
+        search_path = search_path_match.group(1) if search_path_match else ""
         locator = "|".join(
             [
                 url.get_backend_name(),
                 url.host or "",
                 str(url.port or ""),
                 url.database or "",
+                url.username or "",
+                search_path,
             ]
         )
     else:

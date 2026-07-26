@@ -282,8 +282,8 @@ async def test_project_vector_cleanup_uses_available_adapter(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_project_vector_cleanup_clears_manifest_after_adapter_failure(monkeypatch):
-    """An extension failure should fail closed by removing searchable manifests."""
+async def test_project_vector_cleanup_preserves_manifest_after_adapter_failure(monkeypatch):
+    """A reindex must retain external ownership when its adapter is unavailable."""
     repo = _ConcreteRepo()
     adapter: Any = SimpleNamespace(
         initialize=AsyncMock(side_effect=RuntimeError("adapter unavailable")),
@@ -305,12 +305,15 @@ async def test_project_vector_cleanup_clears_manifest_after_adapter_failure(monk
     monkeypatch.setattr(search_repository_base_module.db, "scoped_session", fake_scoped_session)
     monkeypatch.setattr(search_repository_base_module.logger, "warning", warning)
 
-    await repo.delete_project_vector_rows()
+    with pytest.raises(RuntimeError, match="adapter unavailable"):
+        await repo.delete_project_vector_rows()
 
     adapter.delete_entity.assert_not_awaited()
     warning.assert_called_once()
     statements = [str(call.args[0]) for call in session.execute.await_args_list]
-    assert any(statement.startswith("DELETE FROM search_vector_chunks") for statement in statements)
+    assert not any(
+        statement.startswith("DELETE FROM search_vector_chunks") for statement in statements
+    )
 
 
 @pytest.mark.asyncio
