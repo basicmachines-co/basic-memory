@@ -20,6 +20,10 @@ class _TransientProviderError(RuntimeError):
     pass
 
 
+class _BadGatewayError(RuntimeError):
+    pass
+
+
 def _fake_litellm(response, recorder: dict, *, exc: Exception | None = None):
     async def arerank(**params):
         recorder.update(params)
@@ -32,6 +36,7 @@ def _fake_litellm(response, recorder: dict, *, exc: Exception | None = None):
         Timeout=_TransientProviderError,
         APIConnectionError=_TransientProviderError,
         RateLimitError=_TransientProviderError,
+        BadGatewayError=_BadGatewayError,
         ServiceUnavailableError=_TransientProviderError,
         InternalServerError=_TransientProviderError,
     )
@@ -184,6 +189,21 @@ async def test_transient_provider_error_is_classified_for_fallback(monkeypatch):
         await provider.rerank("q", ["a"])
 
     assert caught.value.__cause__ is transient_error
+
+
+@pytest.mark.asyncio
+async def test_bad_gateway_error_is_classified_for_fallback(monkeypatch):
+    bad_gateway_error = _BadGatewayError("upstream returned 502")
+    monkeypatch.setattr(
+        "basic_memory.repository.litellm_rerank_provider._import_litellm",
+        lambda: _fake_litellm(None, {}, exc=bad_gateway_error),
+    )
+    provider = LiteLLMRerankProvider()
+
+    with pytest.raises(RerankTransientError) as caught:
+        await provider.rerank("q", ["a"])
+
+    assert caught.value.__cause__ is bad_gateway_error
 
 
 @pytest.mark.asyncio

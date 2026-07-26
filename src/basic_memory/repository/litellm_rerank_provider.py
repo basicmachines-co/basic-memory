@@ -62,6 +62,7 @@ class LiteLLMRerankProvider(RerankProvider):
             litellm.Timeout,
             litellm.APIConnectionError,
             litellm.RateLimitError,
+            litellm.BadGatewayError,
             litellm.ServiceUnavailableError,
             litellm.InternalServerError,
         )
