@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol, Self
@@ -14,6 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory import db
 from basic_memory.models import Entity, NoteContent, Project
 from basic_memory.repository import ProjectRepository
+from basic_memory.repository.accepted_note_vector_cleanup import (
+    project_external_vector_index_names,
+)
+from basic_memory.repository.semantic_errors import SemanticVectorIndexExtensionError
 from basic_memory.runtime.cleanup import (
     RuntimeDeleteStatus,
     RuntimeFileDeleteResult,
@@ -88,6 +92,20 @@ class ProjectDeleteRepository(Protocol):
     """Repository capability needed to hard-delete one project."""
 
     async def delete(self, session: AsyncSession, entity_id: int) -> bool: ...
+
+
+class ProjectVectorCleaner(Protocol):
+    """Project-scoped vector cleanup that can join the hard-delete transaction."""
+
+    async def delete_project_vector_rows(
+        self,
+        *,
+        strict_adapter_cleanup: bool = True,
+        session: AsyncSession | None = None,
+    ) -> None: ...
+
+
+type ProjectVectorCleanerFactory = Callable[[int], ProjectVectorCleaner]
 
 
 async def load_project_file_snapshots(
@@ -192,6 +210,7 @@ class RepositoryProjectHardDeleter:
 
     session_maker: async_sessionmaker[AsyncSession]
     project_repository: ProjectDeleteRepository = field(default_factory=ProjectRepository)
+    project_vector_cleaner_factory: ProjectVectorCleanerFactory | None = None
 
     async def hard_delete_project(
         self,
@@ -213,6 +232,28 @@ class RepositoryProjectHardDeleter:
                     project_external_id=request.project_external_id,
                 )
                 return ProjectHardDeleteOutcome.reactivated
+
+            if self.project_vector_cleaner_factory is not None:
+                vector_cleaner = self.project_vector_cleaner_factory(request.project_id)
+                await vector_cleaner.delete_project_vector_rows(
+                    strict_adapter_cleanup=True,
+                    session=session,
+                )
+            else:
+                external_vector_indexes = await project_external_vector_index_names(
+                    session,
+                    project_id=request.project_id,
+                )
+                if external_vector_indexes:
+                    # Trigger: a host constructed the portable hard deleter without
+                    # the extension adapter that owns this project's vectors.
+                    # Why: deleting the project would cascade the only manifest and
+                    # make remote vector cleanup impossible to retry.
+                    # Outcome: fail closed until the host injects project cleanup.
+                    raise SemanticVectorIndexExtensionError(
+                        "Cannot hard-delete a project with externally owned vectors "
+                        f"{sorted(external_vector_indexes)!r} without a project vector cleaner."
+                    )
 
             deleted = await self.project_repository.delete(session, request.project_id)
             return ProjectHardDeleteOutcome.deleted if deleted else ProjectHardDeleteOutcome.missing

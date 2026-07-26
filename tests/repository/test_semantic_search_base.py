@@ -176,10 +176,42 @@ async def test_vector_match_hydration_batches_large_adapter_results() -> None:
 
 
 @pytest.mark.asyncio
+async def test_external_vector_query_overfetches_past_stale_adapter_hits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Stale top-k extension hits must not crowd live manifest rows out."""
+    repo = _ConcreteRepo()
+    repo._semantic_vector_index_name = "milvus"
+
+    def matches(count: int) -> list[VectorMatch]:
+        return [
+            VectorMatch(
+                key=VectorKey(entity_id=entity_id, chunk_key=f"entity:{entity_id}:0"),
+                similarity=0.9,
+            )
+            for entity_id in range(count)
+        ]
+
+    adapter: Any = SimpleNamespace(search=AsyncMock(side_effect=[matches(2), matches(4)]))
+    repo._semantic_vector_index = adapter
+    live_rows = [
+        {"entity_id": 2, "chunk_key": "entity:2:0", "best_similarity": 0.9},
+        {"entity_id": 3, "chunk_key": "entity:3:0", "best_similarity": 0.8},
+    ]
+    hydrate = AsyncMock(side_effect=[[], live_rows])
+    monkeypatch.setattr(repo, "_hydrate_vector_matches", hydrate)
+
+    result = await SearchRepositoryBase._run_vector_query(repo, AsyncMock(), [0.1], 2)
+
+    assert result == live_rows
+    assert [call.kwargs["limit"] for call in adapter.search.await_args_list] == [2, 4]
+
+
+@pytest.mark.asyncio
 async def test_embedding_persistence_skips_stale_source_generation(monkeypatch) -> None:
     """An obsolete embedding job must not overwrite the current adapter record."""
     repo = _ConcreteRepo()
-    repo._semantic_vector_index_name = "milvus"
+    repo._semantic_vector_index_name = "pgvector"
     repo._embedding_provider = SimpleNamespace(model_name="stub", dimensions=4)
     adapter = _RecordingVectorIndex()
     repo._semantic_vector_index = adapter
@@ -214,7 +246,7 @@ async def test_embedding_persistence_skips_stale_source_generation(monkeypatch) 
 async def test_embedding_ready_update_requires_source_generation(monkeypatch) -> None:
     """Ready state must belong to the exact source text that produced the vector."""
     repo = _ConcreteRepo()
-    repo._semantic_vector_index_name = "milvus"
+    repo._semantic_vector_index_name = "pgvector"
     repo._embedding_provider = SimpleNamespace(model_name="stub", dimensions=4)
     adapter = _RecordingVectorIndex()
     repo._semantic_vector_index = adapter
@@ -320,6 +352,7 @@ async def test_external_sqlite_upsert_holds_write_lock_through_ready_commit(
     session = AsyncMock()
     session.connection.return_value = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
     session.execute.side_effect = [
+        SimpleNamespace(),
         SimpleNamespace(
             mappings=lambda: SimpleNamespace(
                 all=lambda: [
@@ -346,10 +379,14 @@ async def test_external_sqlite_upsert_holds_write_lock_through_ready_commit(
 
     await repo._persist_embeddings([(7, chunk_text)], [[1.0, 0.0, 0.0, 0.0]])
 
-    lock_statement = session.execute.await_args_list[0].args[0]
-    ready_statement = session.execute.await_args_list[1].args[0]
-    assert "UPDATE search_vector_chunks SET source_hash = source_hash" in str(lock_statement)
-    assert "RETURNING id, entity_id, chunk_key, source_hash" in str(lock_statement)
+    project_lock_statement = session.execute.await_args_list[0].args[0]
+    manifest_lock_statement = session.execute.await_args_list[1].args[0]
+    ready_statement = session.execute.await_args_list[2].args[0]
+    assert str(project_lock_statement).startswith("UPDATE project SET id = id")
+    assert "UPDATE search_vector_chunks SET source_hash = source_hash" in str(
+        manifest_lock_statement
+    )
+    assert "RETURNING id, entity_id, chunk_key, source_hash" in str(manifest_lock_statement)
     assert "embedding_status = 'ready'" in str(ready_statement)
     assert context_count == 1
     assert session.commit.await_count == 1
@@ -507,6 +544,9 @@ async def test_project_vector_cleanup_uses_available_adapter(
     connection.dialect.name = dialect_name
     connection.run_sync.side_effect = [True, {"embedding_status", "vector_index"}]
     session.connection.return_value = connection
+    marker_session = AsyncMock()
+    marker_session.execute.side_effect = lambda *_args, **_kwargs: events.append("durable_stage")
+    marker_session.commit.side_effect = lambda: events.append("marker_commit")
 
     def execute(statement, _params):
         sql = str(statement)
@@ -526,10 +566,11 @@ async def test_project_vector_cleanup_uses_available_adapter(
 
     session.execute.side_effect = execute
     session.commit.side_effect = lambda: events.append("commit")
+    scoped_sessions = iter([session, marker_session] if dialect_name == "postgresql" else [session])
 
     @asynccontextmanager
     async def fake_scoped_session(_session_maker):
-        yield session
+        yield next(scoped_sessions)
 
     monkeypatch.setattr(search_repository_base_module.db, "scoped_session", fake_scoped_session)
 
@@ -540,16 +581,20 @@ async def test_project_vector_cleanup_uses_available_adapter(
         ((41,), {}),
         ((42,), {}),
     ]
-    assert events == [
+    expected_events = [
         "project_lock",
         "manifest_read",
-        "stage",
         "initialize",
         "delete",
         "delete",
         "manifest_delete",
         "commit",
     ]
+    if dialect_name == "postgresql":
+        expected_events[2:2] = ["durable_stage", "marker_commit"]
+    else:
+        expected_events.insert(2, "stage")
+    assert events == expected_events
     assert session.commit.await_count == 1
 
 
@@ -571,12 +616,13 @@ async def test_project_vector_cleanup_preserves_manifest_after_adapter_failure(m
     session.execute.side_effect = [
         SimpleNamespace(),
         SimpleNamespace(all=lambda: [(41, "milvus")]),
-        SimpleNamespace(),
     ]
+    marker_session = AsyncMock()
+    scoped_sessions = iter([session, marker_session])
 
     @asynccontextmanager
     async def fake_scoped_session(_session_maker):
-        yield session
+        yield next(scoped_sessions)
 
     warning = Mock()
     monkeypatch.setattr(search_repository_base_module.db, "scoped_session", fake_scoped_session)
@@ -586,6 +632,7 @@ async def test_project_vector_cleanup_preserves_manifest_after_adapter_failure(m
         await repo.delete_project_vector_rows()
 
     adapter.delete_entity.assert_not_awaited()
+    marker_session.commit.assert_awaited_once()
     warning.assert_called_once()
     statements = [str(call.args[0]) for call in session.execute.await_args_list]
     assert not any(
@@ -611,18 +658,20 @@ async def test_strict_project_vector_cleanup_preserves_manifest_after_adapter_fa
     session.execute.side_effect = [
         SimpleNamespace(),
         SimpleNamespace(all=lambda: [(41, "milvus")]),
-        SimpleNamespace(),
     ]
+    marker_session = AsyncMock()
+    scoped_sessions = iter([session, marker_session])
 
     @asynccontextmanager
     async def fake_scoped_session(_session_maker):
-        yield session
+        yield next(scoped_sessions)
 
     monkeypatch.setattr(search_repository_base_module.db, "scoped_session", fake_scoped_session)
 
     with pytest.raises(RuntimeError, match="adapter unavailable"):
         await repo.delete_project_vector_rows(strict_adapter_cleanup=True)
 
+    marker_session.commit.assert_awaited_once()
     statements = [str(call.args[0]) for call in session.execute.await_args_list]
     assert not any(
         statement.startswith("DELETE FROM search_vector_chunks") for statement in statements
@@ -748,25 +797,49 @@ async def test_external_entity_cleanup_uses_matching_project_adapter(monkeypatch
     )
     repo._semantic_vector_index = adapter
     repo._semantic_vector_index_name = "milvus"
-    session = AsyncMock()
-    session.execute.side_effect = lambda *_args, **_kwargs: events.append("stage")
-    session.commit.side_effect = lambda: events.append("commit")
+    caller_session = AsyncMock()
+    caller_session.connection.return_value = SimpleNamespace(
+        dialect=SimpleNamespace(name="postgresql")
+    )
+    marker_session = AsyncMock()
+
+    def caller_execute(statement, _params):
+        sql = str(statement)
+        if sql.startswith("SELECT id FROM project"):
+            events.append("project_lock")
+            return SimpleNamespace()
+        if sql.startswith("SELECT DISTINCT vector_index"):
+            events.append("ownership_read")
+            return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: ["milvus"]))
+        raise AssertionError(f"Unexpected caller SQL: {sql}")
+
+    caller_session.execute.side_effect = caller_execute
+    marker_session.execute.side_effect = lambda *_args, **_kwargs: events.append("stage")
+    marker_session.commit.side_effect = lambda: events.append("marker_commit")
 
     @asynccontextmanager
     async def fake_scoped_session(_session_maker):
-        yield session
+        yield marker_session
 
     monkeypatch.setattr(search_repository_base_module.db, "scoped_session", fake_scoped_session)
 
     await repo.delete_external_entity_vectors(
+        caller_session,
         [41, 42],
-        vector_index_names=frozenset({"milvus"}),
     )
 
     adapter.initialize.assert_awaited_once()
     assert adapter.delete_entity.await_args_list == [((41,), {}), ((42,), {})]
-    assert events == ["stage", "commit", "initialize", "delete", "delete"]
-    stage_statement = str(session.execute.await_args.args[0])
+    assert events == [
+        "project_lock",
+        "ownership_read",
+        "stage",
+        "marker_commit",
+        "initialize",
+        "delete",
+        "delete",
+    ]
+    stage_statement = str(marker_session.execute.await_args.args[0])
     assert stage_statement.startswith(
         "UPDATE search_vector_chunks SET embedding_status = 'pending'"
     )
@@ -777,11 +850,19 @@ async def test_external_entity_cleanup_rejects_mismatched_adapter() -> None:
     """A configured adapter must not delete rows owned by another extension."""
     repo = _ConcreteRepo()
     repo._semantic_vector_index_name = "milvus"
+    adapter: Any = SimpleNamespace()
+    repo._semantic_vector_index = adapter
+    session = AsyncMock()
+    session.connection.return_value = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+    session.execute.side_effect = [
+        SimpleNamespace(),
+        SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: ["pinecone"])),
+    ]
 
     with pytest.raises(SemanticVectorIndexExtensionError, match="owned by"):
         await repo.delete_external_entity_vectors(
+            session,
             [41],
-            vector_index_names=frozenset({"pinecone"}),
         )
 
 

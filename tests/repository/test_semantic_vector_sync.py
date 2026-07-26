@@ -375,10 +375,17 @@ async def test_prepare_window_reports_shared_transaction_failure_for_mutation_pl
 
     monkeypatch.setattr(semantic_vector_sync.db, "scoped_session", scoped_session)
     monkeypatch.setattr(repository, "_prepare_vector_session", AsyncMock())
-    monkeypatch.setattr(repository, "_fetch_prepare_window_source_rows", AsyncMock(return_value={}))
+    lock_external_vector_write = AsyncMock()
     monkeypatch.setattr(
-        repository, "_fetch_prepare_window_existing_rows", AsyncMock(return_value={})
+        repository,
+        "_lock_external_vector_write",
+        lock_external_vector_write,
     )
+    fetch_source_rows = AsyncMock(return_value={})
+    fetch_existing_rows = AsyncMock(return_value={})
+    monkeypatch.setattr(repository, "_fetch_prepare_window_source_rows", fetch_source_rows)
+    monkeypatch.setattr(repository, "_fetch_prepare_window_existing_rows", fetch_existing_rows)
+    monkeypatch.setattr(repository, "_uses_external_vector_index", Mock(return_value=True))
     monkeypatch.setattr(repository, "_prepare_entity_write_scope", write_scope)
     monkeypatch.setattr(semantic_vector_sync, "plan_entity_vector_jobs_prefetched", _stub_plan)
     monkeypatch.setattr(
@@ -398,6 +405,9 @@ async def test_prepare_window_reports_shared_transaction_failure_for_mutation_pl
     assert str(prepared[1]) == "write failed"
     assert isinstance(prepared[3], ValueError)
     assert str(prepared[3]) == "planning failed"
+    lock_external_vector_write.assert_awaited_once()
+    assert fetch_source_rows.await_count == 2
+    assert fetch_existing_rows.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -441,6 +451,12 @@ async def test_prefetched_prepare_handles_empty_chunks_and_stale_rows(monkeypatc
     delete_entity_chunks = AsyncMock(return_value=[])
     monkeypatch.setattr(repository, "_prepare_entity_write_scope", write_scope)
     monkeypatch.setattr(repository, "_prepare_vector_session", AsyncMock())
+    lock_external_vector_write = AsyncMock()
+    monkeypatch.setattr(
+        repository,
+        "_lock_external_vector_write",
+        lock_external_vector_write,
+    )
     monkeypatch.setattr(repository, "_delete_entity_chunks", delete_entity_chunks)
     monkeypatch.setattr(repository, "_build_chunk_records", Mock(return_value=[]))
 
@@ -508,6 +524,7 @@ async def test_prefetched_prepare_handles_empty_chunks_and_stale_rows(monkeypatc
             )
         ],
     )
+    assert lock_external_vector_write.await_count == 2
 
 
 @pytest.mark.asyncio

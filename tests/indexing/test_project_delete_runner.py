@@ -2,12 +2,14 @@
 
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+import basic_memory.indexing.project_delete_runner as project_delete_runner_module
 from basic_memory.indexing.project_delete_runner import (
     ProjectDeletePreflightResult,
     ProjectHardDeleteOutcome,
@@ -17,6 +19,7 @@ from basic_memory.indexing.project_delete_runner import (
 )
 from basic_memory.models import Base as BasicMemoryBase
 from basic_memory.models import Entity, NoteContent, Project
+from basic_memory.repository.semantic_errors import SemanticVectorIndexExtensionError
 from basic_memory.runtime.cleanup import (
     RuntimeDeleteStatus,
     RuntimeFileDeleteResult,
@@ -87,13 +90,31 @@ class FakeProjectHardDeleter:
 
 
 class FakeProjectDeleteRepository:
-    def __init__(self, *, deleted: bool) -> None:
+    def __init__(self, *, deleted: bool, events: list[str] | None = None) -> None:
         self.deleted = deleted
         self.entity_ids: list[int] = []
+        self.events = events
 
     async def delete(self, session: AsyncSession, entity_id: int) -> bool:
+        if self.events is not None:
+            self.events.append("project_delete")
         self.entity_ids.append(entity_id)
         return self.deleted
+
+
+class FakeProjectVectorCleaner:
+    def __init__(self, events: list[str]) -> None:
+        self.events = events
+        self.calls: list[tuple[bool, AsyncSession | None]] = []
+
+    async def delete_project_vector_rows(
+        self,
+        *,
+        strict_adapter_cleanup: bool = True,
+        session: AsyncSession | None = None,
+    ) -> None:
+        self.events.append("vector_cleanup")
+        self.calls.append((strict_adapter_cleanup, session))
 
 
 def project_delete_request(
@@ -353,6 +374,51 @@ async def test_repository_project_hard_deleter_uses_injected_project_repository(
 
     assert outcome is ProjectHardDeleteOutcome.missing
     assert repository.entity_ids == [project.id]
+
+
+@pytest.mark.asyncio
+async def test_repository_project_hard_deleter_cleans_vectors_in_delete_transaction(
+    project_delete_session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    project = await create_project_with_note(project_delete_session_maker, is_active=False)
+    events: list[str] = []
+    repository = FakeProjectDeleteRepository(deleted=True, events=events)
+    cleaner = FakeProjectVectorCleaner(events)
+
+    outcome = await RepositoryProjectHardDeleter(
+        session_maker=project_delete_session_maker,
+        project_repository=repository,
+        project_vector_cleaner_factory=lambda _project_id: cleaner,
+    ).hard_delete_project(project_delete_request(project_id=project.id))
+
+    assert outcome is ProjectHardDeleteOutcome.deleted
+    assert events == ["vector_cleanup", "project_delete"]
+    assert len(cleaner.calls) == 1
+    strict_cleanup, cleanup_session = cleaner.calls[0]
+    assert strict_cleanup is True
+    assert cleanup_session is not None
+
+
+@pytest.mark.asyncio
+async def test_repository_project_hard_deleter_rejects_unowned_external_cleanup(
+    project_delete_session_maker: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = await create_project_with_note(project_delete_session_maker, is_active=False)
+    monkeypatch.setattr(
+        project_delete_runner_module,
+        "project_external_vector_index_names",
+        AsyncMock(return_value=frozenset({"milvus"})),
+    )
+
+    with pytest.raises(SemanticVectorIndexExtensionError, match="project vector cleaner"):
+        await RepositoryProjectHardDeleter(
+            session_maker=project_delete_session_maker
+        ).hard_delete_project(project_delete_request(project_id=project.id))
+
+    async with project_delete_session_maker() as session:
+        surviving_project = await session.get(Project, project.id)
+    assert surviving_project is not None
 
 
 @pytest.mark.asyncio

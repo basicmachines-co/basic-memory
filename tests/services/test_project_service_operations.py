@@ -111,7 +111,8 @@ async def test_remove_project_cleans_external_vectors_before_database_delete(
 
         async def delete_after_vector_cleanup(session, entity_id: int) -> bool:
             search_repository.delete_project_vector_rows.assert_awaited_once_with(
-                strict_adapter_cleanup=True
+                strict_adapter_cleanup=True,
+                session=session,
             )
             return await original_delete(session, entity_id)
 
@@ -120,9 +121,51 @@ async def test_remove_project_cleans_external_vectors_before_database_delete(
         await service.remove_project(project_name)
 
     search_repository_factory.assert_called_once_with(project_id)
-    search_repository.delete_project_vector_rows.assert_awaited_once_with(
-        strict_adapter_cleanup=True
+    search_repository.delete_project_vector_rows.assert_awaited_once()
+    assert (
+        search_repository.delete_project_vector_rows.await_args.kwargs["strict_adapter_cleanup"]
+        is True
     )
+    assert search_repository.delete_project_vector_rows.await_args.kwargs["session"] is not None
+
+
+@pytest.mark.asyncio
+async def test_project_reconciliation_cleans_vectors_before_database_delete(
+    project_service: ProjectService,
+) -> None:
+    """Config reconciliation must preserve extension ownership like explicit removal."""
+    project_name = f"reconcile-vector-project-{os.urandom(4).hex()}"
+    search_repository = SimpleNamespace(delete_project_vector_rows=AsyncMock())
+    search_repository_factory = Mock(return_value=search_repository)
+    service = ProjectService(
+        repository=project_service.repository,
+        session_maker=project_service.session_maker,
+        file_service=project_service.file_service,
+        search_repository_factory=search_repository_factory,
+    )
+
+    async with db.scoped_session(service.session_maker) as session:
+        project = await service.repository.create(
+            session,
+            {
+                "name": project_name,
+                "path": f"/tmp/{project_name}",
+                "permalink": project_name,
+                "is_active": True,
+            },
+        )
+        project_id = project.id
+
+    await service.synchronize_projects()
+
+    search_repository_factory.assert_any_call(project_id)
+    search_repository.delete_project_vector_rows.assert_awaited()
+    assert any(
+        call.kwargs["strict_adapter_cleanup"] is True and call.kwargs["session"] is not None
+        for call in search_repository.delete_project_vector_rows.await_args_list
+    )
+    async with db.scoped_session(service.session_maker) as session:
+        assert await service.repository.get_by_name(session, project_name) is None
 
 
 @pytest.mark.asyncio
@@ -160,6 +203,9 @@ async def test_remove_project_composes_vector_cleanup_without_injected_factory(
         create_search_repository.call_args.kwargs["session_maker"] is project_service.session_maker
     )
     assert create_search_repository.call_args.kwargs["project_id"] == project_id
-    search_repository.delete_project_vector_rows.assert_awaited_once_with(
-        strict_adapter_cleanup=True
+    search_repository.delete_project_vector_rows.assert_awaited_once()
+    assert (
+        search_repository.delete_project_vector_rows.await_args.kwargs["strict_adapter_cleanup"]
+        is True
     )
+    assert search_repository.delete_project_vector_rows.await_args.kwargs["session"] is not None

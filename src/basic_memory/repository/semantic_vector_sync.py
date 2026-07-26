@@ -732,7 +732,45 @@ async def prepare_entity_vector_jobs_window(
             async with repository._prepare_entity_write_scope():
                 async with db.scoped_session(repository.session_maker) as session:
                     await repository._prepare_vector_session(session)
-                    for index, plan in mutation_plans:
+                    await repository._lock_external_vector_write(session)
+                    plans_to_apply = mutation_plans
+                    if repository._uses_external_vector_index():
+                        # Trigger: entity deletion can finish after the shared read
+                        # snapshot but before this prepare transaction gets the
+                        # project lock.
+                        # Why: applying that stale plan would recreate a manifest
+                        # for an entity the delete just removed.
+                        # Outcome: external writes re-read and re-plan under the
+                        # shared lock before making any manifest mutation.
+                        mutation_entity_ids = [plan.entity_id for _index, plan in mutation_plans]
+                        locked_source_rows = await repository._fetch_prepare_window_source_rows(
+                            session,
+                            mutation_entity_ids,
+                        )
+                        locked_existing_rows = await repository._fetch_prepare_window_existing_rows(
+                            session,
+                            mutation_entity_ids,
+                        )
+                        plans_to_apply = []
+                        for index, original_plan in mutation_plans:
+                            replanned = plan_entity_vector_jobs_prefetched(
+                                repository,
+                                entity_id=original_plan.entity_id,
+                                source_rows=locked_source_rows.get(
+                                    original_plan.entity_id,
+                                    [],
+                                ),
+                                existing_rows=locked_existing_rows.get(
+                                    original_plan.entity_id,
+                                    [],
+                                ),
+                            )
+                            if isinstance(replanned, PreparedEntityVectorSync):
+                                prepared_by_index[index] = replanned
+                            else:
+                                plans_to_apply.append((index, replanned))
+
+                    for index, plan in plans_to_apply:
                         prepared_by_index[index] = await apply_entity_vector_prepare_plan(
                             repository,
                             session,
@@ -788,7 +826,31 @@ async def prepare_entity_vector_jobs_prefetched(
     async with repository._prepare_entity_write_scope():
         async with db.scoped_session(repository.session_maker) as session:
             await repository._prepare_vector_session(session)
-            prepared = await apply_entity_vector_prepare_plan(repository, session, planned)
+            await repository._lock_external_vector_write(session)
+            locked_plan = planned
+            if repository._uses_external_vector_index():
+                locked_source_rows = await repository._fetch_prepare_window_source_rows(
+                    session,
+                    [entity_id],
+                )
+                locked_existing_rows = await repository._fetch_prepare_window_existing_rows(
+                    session,
+                    [entity_id],
+                )
+                locked_plan = plan_entity_vector_jobs_prefetched(
+                    repository,
+                    entity_id=entity_id,
+                    source_rows=locked_source_rows.get(entity_id, []),
+                    existing_rows=locked_existing_rows.get(entity_id, []),
+                )
+                if isinstance(locked_plan, PreparedEntityVectorSync):
+                    return locked_plan
+
+            prepared = await apply_entity_vector_prepare_plan(
+                repository,
+                session,
+                locked_plan,
+            )
             await session.commit()
         await repository._finalize_prepared_vector_deletions(prepared)
         return prepared

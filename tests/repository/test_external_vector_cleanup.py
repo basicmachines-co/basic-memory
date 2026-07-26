@@ -36,15 +36,14 @@ class _PostgresSession:
 
 class _RecordingExternalCleaner:
     def __init__(self) -> None:
-        self.calls: list[tuple[tuple[int, ...], frozenset[str]]] = []
+        self.calls: list[tuple[AsyncSession, tuple[int, ...]]] = []
 
     async def delete_external_entity_vectors(
         self,
+        session: AsyncSession,
         entity_ids: Sequence[int],
-        *,
-        vector_index_names: frozenset[str],
     ) -> None:
-        self.calls.append((tuple(entity_ids), vector_index_names))
+        self.calls.append((session, tuple(entity_ids)))
 
 
 @pytest.mark.asyncio
@@ -65,7 +64,7 @@ async def test_external_vectors_are_deleted_before_their_manifest() -> None:
         external_vector_cleaner=cleaner,
     )
 
-    assert cleaner.calls == [((41, 42), frozenset({"milvus"}))]
+    assert cleaner.calls == [(cast(AsyncSession, session), (41, 42))]
     assert str(session.executed[-1][0]).lstrip().startswith("DELETE FROM search_vector_chunks")
 
 

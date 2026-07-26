@@ -93,6 +93,16 @@ class ProjectService:
         """
         return self.config_manager.projects
 
+    def _project_search_repository(self, project_id: int) -> SearchRepository:
+        """Build the project-scoped repository that owns semantic vector cleanup."""
+        if self._search_repository_factory is not None:
+            return self._search_repository_factory(project_id)
+        return create_search_repository(
+            session_maker=self.session_maker,
+            project_id=project_id,
+            app_config=self.config_manager.config,
+        )
+
     @property
     def default_project(self) -> Optional[str]:
         """Get the name of the default project.
@@ -353,22 +363,20 @@ class ProjectService:
             if is_default:
                 raise ValueError(f"Cannot remove the default project '{name}'")  # pragma: no cover
 
-        # Trigger: project deletion can remove the only SQL ownership manifest for
-        # vectors stored by an extension such as Milvus.
-        # Why: external storage has no database cascade and cannot reconcile after
-        # the project manifest disappears.
-        # Outcome: delete adapter-owned vectors while project ownership is still known.
-        if self._search_repository_factory is None:
-            search_repository = create_search_repository(
-                session_maker=self.session_maker,
-                project_id=project_id,
-                app_config=self.config_manager.config,
-            )
-        else:
-            search_repository = self._search_repository_factory(project_id)
-        await search_repository.delete_project_vector_rows(strict_adapter_cleanup=True)
+        search_repository = self._project_search_repository(project_id)
 
         async with db.scoped_session(self.session_maker) as session:
+            # Trigger: project deletion can remove the only SQL ownership manifest
+            # for vectors stored by an extension such as Milvus.
+            # Why: the project lock must survive adapter cleanup through both the
+            # manifest and project-row deletes; committing cleanup earlier reopens
+            # a window where a watcher can publish a new unowned vector.
+            # Outcome: vector cleanup and project deletion share one transaction.
+            await search_repository.delete_project_vector_rows(
+                strict_adapter_cleanup=True,
+                session=session,
+            )
+
             # Remove from config if it exists there (may not exist in cloud mode)
             try:
                 self.config_manager.remove_project(name)
@@ -534,6 +542,11 @@ class ProjectService:
                 if name not in config_project_names:
                     logger.info(
                         f"Removing project '{name}' from database (deleted from config, source of truth)"
+                    )
+                    search_repository = self._project_search_repository(project.id)
+                    await search_repository.delete_project_vector_rows(
+                        strict_adapter_cleanup=True,
+                        session=session,
                     )
                     await self.repository.delete(session, project.id)
 

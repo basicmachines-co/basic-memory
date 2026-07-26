@@ -56,8 +56,17 @@ SELECT_PROJECT_INDEX_EXTERNAL_VECTOR_INDEXES_SQL = text("""
     FROM search_vector_chunks
     WHERE project_id = :project_id
       AND entity_id IN :deleted_entity_ids
-      AND vector_index <> 'pgvector'
+      AND vector_index <> ''
+      AND vector_index NOT IN ('pgvector', 'sqlite-vec')
 """).bindparams(bindparam("deleted_entity_ids", expanding=True))
+
+SELECT_PROJECT_EXTERNAL_VECTOR_INDEXES_SQL = text("""
+    SELECT DISTINCT vector_index
+    FROM search_vector_chunks
+    WHERE project_id = :project_id
+      AND vector_index <> ''
+      AND vector_index NOT IN ('pgvector', 'sqlite-vec')
+""")
 
 
 class ProjectIndexExternalVectorCleaner(Protocol):
@@ -65,9 +74,8 @@ class ProjectIndexExternalVectorCleaner(Protocol):
 
     async def delete_external_entity_vectors(
         self,
+        session: AsyncSession,
         entity_ids: Sequence[int],
-        *,
-        vector_index_names: frozenset[str],
     ) -> None: ...
 
 
@@ -87,6 +95,23 @@ async def project_index_vector_table_names(session: AsyncSession) -> frozenset[s
         raise RuntimeError(f"Unsupported project-index database dialect: {dialect_name}")
 
     return frozenset(str(table_name) for table_name in result.scalars())
+
+
+async def project_external_vector_index_names(
+    session: AsyncSession,
+    *,
+    project_id: ProjectId,
+) -> frozenset[str]:
+    """Return externally owned vector indexes recorded for one project."""
+    vector_table_names = await project_index_vector_table_names(session)
+    if "search_vector_chunks" not in vector_table_names:
+        return frozenset()
+
+    result = await session.execute(
+        SELECT_PROJECT_EXTERNAL_VECTOR_INDEXES_SQL,
+        {"project_id": project_id},
+    )
+    return frozenset(str(vector_index) for vector_index in result.scalars())
 
 
 async def delete_project_index_vector_rows(
@@ -117,22 +142,27 @@ async def delete_project_index_vector_rows(
     # Outcome: require the project-scoped adapter to delete those entities before
     # the caller-owned transaction removes built-in vectors and manifest rows.
     if dialect_name == "postgresql":
-        external_result = await session.execute(
-            SELECT_PROJECT_INDEX_EXTERNAL_VECTOR_INDEXES_SQL,
-            delete_params,
-        )
-        external_vector_indexes = frozenset(
-            str(vector_index) for vector_index in external_result.scalars()
-        )
-        if external_vector_indexes:
-            if external_vector_cleaner is None:
+        if external_vector_cleaner is None:
+            external_result = await session.execute(
+                SELECT_PROJECT_INDEX_EXTERNAL_VECTOR_INDEXES_SQL,
+                delete_params,
+            )
+            external_vector_indexes = frozenset(
+                str(vector_index) for vector_index in external_result.scalars()
+            )
+            if external_vector_indexes:
                 raise SemanticVectorIndexExtensionError(
                     "Cannot delete externally indexed entity vectors without a "
                     "project-scoped semantic vector adapter."
                 )
+        else:
+            # The cleaner acquires the same project lock used by every external
+            # manifest prepare/write before it discovers ownership. Keeping that
+            # lock in this caller-owned transaction closes the insert-between-read-
+            # and-delete race through the manifest and entity deletes below.
             await external_vector_cleaner.delete_external_entity_vectors(
+                session,
                 deleted_entity_ids,
-                vector_index_names=external_vector_indexes,
             )
 
     if "search_vector_embeddings" in vector_table_names:

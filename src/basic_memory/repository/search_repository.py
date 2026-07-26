@@ -104,14 +104,18 @@ class SearchRepository(Protocol):
 
     async def delete_external_entity_vectors(
         self,
+        session: AsyncSession,
         entity_ids: Sequence[int],
-        *,
-        vector_index_names: frozenset[str],
     ) -> None:
         """Delete DB-first entity vectors through an extension adapter."""
         ...
 
-    async def delete_project_vector_rows(self, *, strict_adapter_cleanup: bool = True) -> None:
+    async def delete_project_vector_rows(
+        self,
+        *,
+        strict_adapter_cleanup: bool = True,
+        session: AsyncSession | None = None,
+    ) -> None:
         """Delete all semantic vector chunks and embeddings for this project."""
         ...
 
