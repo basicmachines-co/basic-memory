@@ -30,12 +30,12 @@ def upgrade() -> None:
         "note_file_vacate",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("project_id", sa.Integer(), nullable=False),
-        sa.Column("entity_id", sa.Integer(), nullable=False),
+        sa.Column("entity_id", sa.Integer(), nullable=True),
         sa.Column("file_path", sa.String(), nullable=False),
         sa.Column("file_checksum", sa.String(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["project_id"], ["project.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["entity_id"], ["entity.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["entity_id"], ["entity.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint(
             "project_id", "file_path", name="uix_note_file_vacate_project_file_path"

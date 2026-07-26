@@ -107,10 +107,10 @@ async def test_run_note_file_delete_propagates_delete_failures() -> None:
 
 class FakeVacateClearer:
     def __init__(self) -> None:
-        self.cleared: list[tuple[int, str, str]] = []
+        self.cleared: list[tuple[int, str, str | None]] = []
 
     async def clear_move_vacate(
-        self, *, project_id: int, file_path: str, file_checksum: str
+        self, *, project_id: int, file_path: str, file_checksum: str | None
     ) -> None:
         self.cleared.append((project_id, file_path, file_checksum))
 

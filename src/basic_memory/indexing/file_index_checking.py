@@ -93,7 +93,7 @@ class MovedEntityFacts:
 class MoveVacateMarker:
     """The moved entity and source content checksum recorded for a vacated path."""
 
-    entity_id: int
+    entity_id: int | None
     checksum: str | None
 
 
@@ -148,7 +148,7 @@ class MoveVacateMarkerRow(Protocol):
     """Marker fields the repository yields for a vacated path."""
 
     @property
-    def entity_id(self) -> int:
+    def entity_id(self) -> int | None:
         """Return the moved entity id recorded on the marker."""
 
     @property
@@ -374,12 +374,29 @@ class FileIndexChecker:
         markers = await self.move_vacate_source.load_vacate_markers(
             [item.target.path for _, item in candidates]
         )
-        entity_facts = await self.moved_entity_source.load_entity_facts_by_id(
-            [marker.entity_id for marker in markers.values()]
+        marked_entity_ids = [
+            marker.entity_id for marker in markers.values() if marker.entity_id is not None
+        ]
+        entity_facts = (
+            await self.moved_entity_source.load_entity_facts_by_id(marked_entity_ids)
+            if marked_entity_ids
+            else {}
         )
         for index, item in candidates:
             marker = markers.get(item.target.path)
             if marker is None:
+                continue
+            if marker.entity_id is None:
+                # The destination entity was deleted before source cleanup. A checksum-backed
+                # tombstone still proves these exact source bytes were vacated; keep suppressing
+                # resurrection until guarded cleanup clears the marker. A legacy null-checksum
+                # tombstone cannot prove identity, so it remains a normal create candidate.
+                if marker.checksum is None or marker.checksum != item.current_checksum:
+                    continue
+                decisions[index] = move_orphan_file_index_decision(
+                    item.target.path,
+                    indexed_at=None,
+                )
                 continue
             moved_entity = entity_facts.get(marker.entity_id)
             if moved_entity is None or moved_entity.file_path == item.target.path:

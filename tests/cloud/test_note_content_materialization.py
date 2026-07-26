@@ -140,8 +140,22 @@ async def test_inline_delete_skips_old_path_aliasing_live_file(tmp_path) -> None
     old_alias = tmp_path / "notes" / "alias.md"
     os.link(live, old_alias)  # same inode, as a case-only rename produces on APFS/NTFS
     checksum = sha256(content).hexdigest()
+    cleared: list[tuple[int, str, str | None]] = []
 
-    enqueuer = InlineNoteFileDeleteEnqueuer(LocalNoteContentStorage(FileService(tmp_path)))
+    class RecordingVacateClearer:
+        async def clear_move_vacate(
+            self,
+            *,
+            project_id: int,
+            file_path: str,
+            file_checksum: str | None,
+        ) -> None:
+            cleared.append((project_id, file_path, file_checksum))
+
+    enqueuer = InlineNoteFileDeleteEnqueuer(
+        LocalNoteContentStorage(FileService(tmp_path)),
+        vacate_clearer=RecordingVacateClearer(),
+    )
     await enqueuer.enqueue_note_file_delete(
         RuntimeNoteFileDeleteJobRequest(
             project_id=1,
@@ -153,6 +167,7 @@ async def test_inline_delete_skips_old_path_aliasing_live_file(tmp_path) -> None
     )
 
     assert live.exists(), "case-only rename deleted the note's only file"
+    assert cleared == [(1, "notes/alias.md", checksum)]
 
 
 @pytest.mark.asyncio

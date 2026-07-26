@@ -37,7 +37,7 @@ class MoveVacateClearer(Protocol):
         *,
         project_id: ProjectId,
         file_path: RuntimeFilePath,
-        file_checksum: RuntimeFileChecksum,
+        file_checksum: RuntimeFileChecksum | None,
     ) -> None: ...
 
 
@@ -52,7 +52,7 @@ class RepositoryMoveVacateClearer:
         *,
         project_id: ProjectId,
         file_path: RuntimeFilePath,
-        file_checksum: RuntimeFileChecksum,
+        file_checksum: RuntimeFileChecksum | None,
     ) -> None:
         async with db.scoped_session(self.session_maker) as session:
             await NoteFileVacateRepository(project_id).clear_vacate(

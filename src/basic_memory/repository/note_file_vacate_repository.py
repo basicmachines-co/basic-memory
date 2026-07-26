@@ -15,7 +15,7 @@ from basic_memory.repository.repository import Repository
 class VacateMarker:
     """The moved entity and source content checksum recorded for a vacated path."""
 
-    entity_id: int
+    entity_id: int | None
     file_checksum: str | None
 
 
@@ -76,7 +76,10 @@ class NoteFileVacateRepository(Repository[NoteFileVacate]):
         )
         result = await session.execute(query)
         return {
-            str(path): VacateMarker(entity_id=int(entity_id), file_checksum=file_checksum)
+            str(path): VacateMarker(
+                entity_id=None if entity_id is None else int(entity_id),
+                file_checksum=file_checksum,
+            )
             for path, entity_id, file_checksum in result.all()
         }
 
@@ -85,7 +88,7 @@ class NoteFileVacateRepository(Repository[NoteFileVacate]):
         session: AsyncSession,
         *,
         file_path: str,
-        file_checksum: str,
+        file_checksum: str | None,
     ) -> None:
         """Clear the marker once its source object has actually been deleted.
 

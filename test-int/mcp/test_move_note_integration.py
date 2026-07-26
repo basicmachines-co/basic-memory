@@ -253,6 +253,94 @@ async def test_put_rename_lingering_source_is_not_reindexed(
     assert renamed.id == created["id"]
 
 
+@pytest.mark.parametrize("force_full", [False, True], ids=["observed", "force-full"])
+@pytest.mark.asyncio
+async def test_deleted_move_lingering_source_is_not_resurrected(
+    mcp_server,
+    app,
+    test_project,
+    project_config,
+    engine_factory,
+    monkeypatch,
+    force_full: bool,
+):
+    """A move marker survives destination deletion until the lingering source is cleaned."""
+    del app
+    source_relative = "source/Delete After Move.md"
+    destination_relative = "archive/delete-after-move.md"
+    source_path = project_config.home / source_relative
+    destination_path = project_config.home / destination_relative
+    _, session_maker = engine_factory
+    entity_repository = EntityRepository(project_id=test_project.id)
+    vacate_repository = NoteFileVacateRepository(project_id=test_project.id)
+    original_cleanup = InlineNoteFileDeleteEnqueuer.enqueue_note_file_delete
+
+    async def leave_only_move_source_cleanup_pending(
+        self: InlineNoteFileDeleteEnqueuer,
+        request: RuntimeNoteFileDeleteJobRequest,
+    ) -> None:
+        if request.file_path == source_relative:
+            return
+        await original_cleanup(self, request)
+
+    monkeypatch.setattr(
+        InlineNoteFileDeleteEnqueuer,
+        "enqueue_note_file_delete",
+        leave_only_move_source_cleanup_pending,
+    )
+
+    async with Client(mcp_server) as client:
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Delete After Move",
+                "directory": "source",
+                "content": "# Delete After Move\n\nDo not resurrect this deleted note.",
+            },
+        )
+        source_checksum = sha256(source_path.read_bytes()).hexdigest()
+
+        move_result = await client.call_tool(
+            "move_note",
+            {
+                "project": test_project.name,
+                "identifier": "Delete After Move",
+                "destination_path": destination_relative,
+            },
+        )
+        assert "✅ Note moved successfully" in move_result.content[0].text
+        assert source_path.exists()
+        assert destination_path.exists()
+
+        delete_result = await client.call_tool(
+            "delete_note",
+            {
+                "project": test_project.name,
+                "identifier": destination_relative,
+            },
+        )
+        assert "true" in delete_result.content[0].text.lower()
+        assert source_path.exists()
+        assert not destination_path.exists()
+
+    async with db.scoped_session(session_maker) as session:
+        markers = await vacate_repository.load_vacate_markers(session, [source_relative])
+    assert markers[source_relative].entity_id is None
+    assert markers[source_relative].file_checksum == source_checksum
+
+    await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=force_full,
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        resurrected = await entity_repository.get_by_file_path(session, source_relative)
+
+    assert resurrected is None
+
+
 @pytest.mark.asyncio
 async def test_move_note_using_permalink(mcp_server, app, test_project):
     """Test moving a note using its permalink as identifier."""

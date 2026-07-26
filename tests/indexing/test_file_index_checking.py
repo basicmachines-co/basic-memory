@@ -422,6 +422,49 @@ async def test_checker_indexes_overwrite_of_null_checksum_marker_path() -> None:
 
 
 @pytest.mark.asyncio
+async def test_checker_skips_checksum_backed_tombstone_after_moved_entity_delete() -> None:
+    """Deleting the moved entity does not let its still-present source resurrect."""
+    checker, moved, _ = _orphan_checker(
+        indexed={},
+        current={"koncept/deleted.md": "vacated-content"},
+        markers={
+            "koncept/deleted.md": MoveVacateMarker(
+                entity_id=None,
+                checksum="vacated-content",
+            )
+        },
+        entity_facts={},
+    )
+
+    plan = await checker.detect(
+        [FileIndexTarget(path="koncept/deleted.md", observed_checksum="vacated-content")]
+    )
+
+    assert plan.paths_to_read == ()
+    assert [(decision.path, decision.status) for decision in plan.decisions] == [
+        ("koncept/deleted.md", FileIndexDecisionStatus.current)
+    ]
+    assert moved.calls == []
+
+
+@pytest.mark.asyncio
+async def test_checker_does_not_trust_null_checksum_tombstone() -> None:
+    """A tombstone without either an entity or checksum cannot identify the source bytes."""
+    checker, _, _ = _orphan_checker(
+        indexed={},
+        current={"koncept/unknown.md": "current-content"},
+        markers={"koncept/unknown.md": MoveVacateMarker(entity_id=None, checksum=None)},
+        entity_facts={},
+    )
+
+    plan = await checker.detect(
+        [FileIndexTarget(path="koncept/unknown.md", observed_checksum="current-content")]
+    )
+
+    assert plan.paths_to_read == ("koncept/unknown.md",)
+
+
+@pytest.mark.asyncio
 async def test_checker_indexes_byte_identical_copy_without_marker() -> None:
     """A byte-identical copy has no vacate marker, so it is indexed as a new note."""
     checker, _, _ = _orphan_checker(

@@ -105,7 +105,7 @@ def current_file_index_decision(file_path: FileIndexPath) -> FileIndexDecision:
 def move_orphan_file_index_decision(
     file_path: FileIndexPath,
     *,
-    indexed_at: FileIndexPath,
+    indexed_at: FileIndexPath | None,
 ) -> FileIndexDecision:
     """Return a no-op decision for a move's still-present source object.
 
@@ -115,10 +115,15 @@ def move_orphan_file_index_decision(
     (basic-memory-cloud#1601). When the object's content is already indexed at another path, treat
     it as current (already represented) instead of creating a duplicate.
     """
+    reason = (
+        f"move orphan: content already indexed at {indexed_at}; not creating a duplicate"
+        if indexed_at is not None
+        else "move orphan tombstone: deleted note's vacated source is pending cleanup"
+    )
     return FileIndexDecision(
         path=file_path,
         status=FileIndexDecisionStatus.current,
-        reason=f"move orphan: content already indexed at {indexed_at}; not creating a duplicate",
+        reason=reason,
     )
 
 

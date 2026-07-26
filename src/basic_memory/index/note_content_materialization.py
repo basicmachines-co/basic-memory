@@ -431,6 +431,14 @@ class InlineNoteFileDeleteEnqueuer:
                 file_path=request.file_path,
                 live_file_path=request.live_file_path,
             )
+            # No separate source object exists: the old path aliases the live destination, so the
+            # move is already physically complete and its suppression marker must not outlive it.
+            if self.vacate_clearer is not None:
+                await self.vacate_clearer.clear_move_vacate(
+                    project_id=request.project_id,
+                    file_path=request.file_path,
+                    file_checksum=request.file_checksum,
+                )
             return
         await run_note_file_delete(
             request, storage=self.storage, vacate_clearer=self.vacate_clearer

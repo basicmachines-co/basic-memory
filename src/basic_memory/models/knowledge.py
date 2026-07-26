@@ -248,11 +248,12 @@ class NoteFileVacate(Base):
         ForeignKey("project.id", ondelete="CASCADE"),
         nullable=False,
     )
-    # The moved entity now living at the destination; if it is deleted the vacate is moot.
-    entity_id: Mapped[int] = mapped_column(
+    # The moved entity now living at the destination. Preserve the marker as a checksum-backed
+    # tombstone if that entity is deleted before the physical source cleanup finishes.
+    entity_id: Mapped[Optional[int]] = mapped_column(
         Integer,
-        ForeignKey("entity.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("entity.id", ondelete="SET NULL"),
+        nullable=True,
     )
     # The vacated source path (project-relative POSIX), the key the indexer checks.
     file_path: Mapped[str] = mapped_column(String, nullable=False)
