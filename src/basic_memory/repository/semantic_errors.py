@@ -16,3 +16,7 @@ class RerankProviderContractError(RuntimeError):
     provider/config bug) instead of degrading it to un-reranked results the way it
     handles transient reranker failures.
     """
+
+
+class RerankTransientError(RuntimeError):
+    """Raised when a reranker is temporarily unavailable and retrieval may safely degrade."""

@@ -66,8 +66,9 @@ def test_litellm_provider_selected_with_routing():
 
 
 def test_unsupported_provider_raises():
-    with pytest.raises(ValueError, match="Unsupported reranker provider: nope"):
-        create_rerank_provider(_config(reranker_enabled=True, reranker_provider="nope"))
+    """Unknown provider names fail at the configuration boundary."""
+    with pytest.raises(ValidationError, match="reranker_provider must be one of"):
+        _config(reranker_enabled=True, reranker_provider="nope")
 
 
 def test_same_config_returns_cached_singleton():
@@ -121,6 +122,16 @@ def test_litellm_provider_accepts_explicit_model():
     )
     assert isinstance(provider, LiteLLMRerankProvider)
     assert provider.model_name == "cohere/rerank-v3.5"
+
+
+def test_litellm_provider_rejects_unroutable_model_name():
+    """LiteLLM model names include the provider routing prefix."""
+    with pytest.raises(ValidationError, match="requires an explicit reranker_model"):
+        _config(
+            reranker_enabled=True,
+            reranker_provider="litellm",
+            reranker_model="rerank-v3.5",
+        )
 
 
 def test_reset_clears_cache():

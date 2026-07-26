@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
-from basic_memory.repository.rerank_provider import RerankProvider
+from basic_memory.repository.rerank_provider import RerankProvider, validate_rerank_scores
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 
 if TYPE_CHECKING:
@@ -72,9 +72,10 @@ class FastEmbedRerankProvider(RerankProvider):
         # TextCrossEncoder.rerank is sync/CPU-bound and yields one raw logit per doc
         # in input order; run it off the event loop and squash to [0, 1] so callers
         # get a bounded relevance on the same scale as API-based rerankers.
-        return await asyncio.to_thread(
+        scores = await asyncio.to_thread(
             lambda: [_sigmoid(float(score)) for score in model.rerank(query, documents)]
         )
+        return validate_rerank_scores(scores, len(documents))
 
 
 def _sigmoid(x: float) -> float:

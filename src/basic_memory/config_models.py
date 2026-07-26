@@ -56,9 +56,8 @@ class DatabaseBackend(str, Enum):
     POSTGRES = "postgres"
 
 
-# Default reranker model — a local fastembed cross-encoder. jina-reranker-v1-tiny-en
-# benchmarks higher recall@5 than ms-marco-MiniLM at equal-or-lower latency (LoCoMo).
-# litellm cannot route this name, so the litellm provider requires an explicit override.
+# Default reranker model — a small local fastembed cross-encoder.
+# LiteLLM cannot route this name, so the litellm provider requires an explicit override.
 DEFAULT_FASTEMBED_RERANK_MODEL = "jinaai/jina-reranker-v1-tiny-en"
 
 
@@ -928,16 +927,23 @@ class BasicMemoryConfig(BaseSettings):
                 "reranker_enabled=True requires semantic_search_enabled=True "
                 "(reranking operates on vector/hybrid search results)."
             )
-        if (
-            self.reranker_provider.strip().lower() == "litellm"
-            and self.reranker_model == DEFAULT_FASTEMBED_RERANK_MODEL
-        ):
+        provider = self.reranker_provider.strip().lower()
+        if provider not in {"fastembed", "litellm"}:
+            raise ValueError("reranker_provider must be one of: fastembed, litellm")
+        if provider == "litellm" and self.reranker_model == DEFAULT_FASTEMBED_RERANK_MODEL:
             raise ValueError(
                 "reranker_provider='litellm' requires an explicit reranker_model in "
                 "'provider/model' form (e.g. 'cohere/rerank-v3.5'); the default "
                 f"{DEFAULT_FASTEMBED_RERANK_MODEL!r} is a local fastembed model "
                 "litellm cannot route."
             )
+        if provider == "litellm":
+            provider_name, separator, model_name = self.reranker_model.strip().partition("/")
+            if not separator or not provider_name or not model_name:
+                raise ValueError(
+                    "reranker_provider='litellm' requires an explicit reranker_model in "
+                    "'provider/model' form (e.g. 'cohere/rerank-v3.5')."
+                )
         return self
 
     @model_validator(mode="after")

@@ -13,8 +13,11 @@ from __future__ import annotations
 from typing import Any
 
 from basic_memory.repository.litellm_provider import _import_litellm
-from basic_memory.repository.rerank_provider import RerankProvider
-from basic_memory.repository.semantic_errors import RerankProviderContractError
+from basic_memory.repository.rerank_provider import RerankProvider, validate_rerank_scores
+from basic_memory.repository.semantic_errors import (
+    RerankProviderContractError,
+    RerankTransientError,
+)
 
 
 class LiteLLMRerankProvider(RerankProvider):
@@ -55,7 +58,19 @@ class LiteLLMRerankProvider(RerankProvider):
         if self._api_base is not None:
             params["api_base"] = self._api_base
 
-        response = await litellm.arerank(**params)
+        transient_errors = (
+            litellm.Timeout,
+            litellm.APIConnectionError,
+            litellm.RateLimitError,
+            litellm.ServiceUnavailableError,
+            litellm.InternalServerError,
+        )
+        try:
+            response = await litellm.arerank(**params)
+        except transient_errors as exc:
+            raise RerankTransientError(
+                f"Rerank provider is temporarily unavailable for model {self.model_name!r}."
+            ) from exc
         # litellm.arerank returns RerankResponse (Cohere response format): `results`
         # is an optional list of TypedDict items with required `index` and
         # `relevance_score` keys. A missing/empty list is a contract break, not a
@@ -93,4 +108,4 @@ class LiteLLMRerankProvider(RerankProvider):
             raise RerankProviderContractError(
                 f"Rerank response covered {len(seen)} of {len(documents)} documents."
             )
-        return scores
+        return validate_rerank_scores(scores, len(documents))

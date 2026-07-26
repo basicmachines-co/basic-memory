@@ -8,8 +8,10 @@ import pytest
 
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.repository.rerank_provider import validate_rerank_scores
 from basic_memory.repository.semantic_errors import (
     RerankProviderContractError,
+    RerankTransientError,
     SemanticDependenciesMissingError,
 )
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
@@ -83,12 +85,12 @@ class _BadReranker:
 
 
 class _ExplodingReranker:
-    """Transient failure: a plain error the pipeline should degrade past."""
+    """Typed transient failure the pipeline should degrade past."""
 
     model_name = "boom"
 
     async def rerank(self, query: str, documents: list[str]) -> list[float]:
-        raise RuntimeError("cross-encoder backend unreachable")
+        raise RerankTransientError("cross-encoder backend unreachable")
 
     def runtime_log_attrs(self) -> dict:
         return {}
@@ -107,6 +109,12 @@ class _PermanentFaultReranker:
 
     def runtime_log_attrs(self) -> dict:
         return {}
+
+
+def test_validate_rerank_scores_rejects_non_numeric_value():
+    """Provider contract validation rejects values that cannot become finite floats."""
+    with pytest.raises(RerankProviderContractError, match="is not a number"):
+        validate_rerank_scores(["not-a-score"], expected_count=1)
 
 
 def _entity_row(*, project_id: int, row_id: int, title: str, permalink: str, content: str):
@@ -257,6 +265,23 @@ async def test_rerank_paginate_reorders_rescore_and_demotes_tail():
 
 
 @pytest.mark.asyncio
+async def test_rerank_paginate_preserves_pool_before_tail_at_zero_floor():
+    repo = _unit_repo()
+    repo._rerank_provider = _FakeReranker({"Alpha": 0.0, "Bravo": 0.9})
+    repo._reranker_candidates = 2
+    rows = [
+        _row(id=1, title="Alpha"),
+        _row(id=2, title="Bravo"),
+        _row(id=3, title="Charlie"),
+    ]
+
+    result = await repo._rerank_and_paginate("auth", rows, offset=0, limit=3)
+
+    assert [row.title for row in result] == ["Bravo", "Alpha", "Charlie"]
+    assert [row.score for row in result] == [0.9, 0.0, 0.0]
+
+
+@pytest.mark.asyncio
 async def test_rerank_paginate_skips_provider_on_deep_page():
     """A page entirely past the rerank pool must not spend a (possibly paid) call."""
     repo = _unit_repo()
@@ -300,6 +325,7 @@ async def test_rerank_paginate_misaligned_scores_raise():
     [
         RerankProviderContractError("incomplete rerank response"),
         SemanticDependenciesMissingError("fastembed missing"),
+        RuntimeError("unexpected provider failure"),
     ],
 )
 async def test_rerank_paginate_surfaces_permanent_faults(exc):

@@ -6,18 +6,11 @@ FTS ranking left just below the top-k cutoff. Mirrors ``embedding_provider`` so
 the same provider families and config shape apply to a different pipeline stage.
 """
 
+import math
+from collections.abc import Sequence
 from typing import Any, Protocol
 
-from basic_memory.repository.semantic_errors import (
-    RerankProviderContractError,
-    SemanticDependenciesMissingError,
-)
-
-# Permanent reranker faults every rerank call site must surface rather than degrade
-# past: missing dependencies and provider-contract breaks are config/provider bugs
-# that would otherwise leave reranking silently broken with no signal. Shared so the
-# repository pipeline and the MCP merged-pool rerank cannot drift on this taxonomy.
-PERMANENT_RERANK_ERRORS = (SemanticDependenciesMissingError, RerankProviderContractError)
+from basic_memory.repository.semantic_errors import RerankProviderContractError
 
 
 def build_rerank_document(title: str | None, body: str | None, max_chars: int) -> str:
@@ -36,15 +29,39 @@ def build_rerank_document(title: str | None, body: str | None, max_chars: int) -
 
 
 def demote_tail_scores(floor: float, count: int) -> list[float]:
-    """Scores in ``(0, floor)``, descending, for candidates left out of a rerank pool.
+    """Return bounded tail scores at or below the reranked floor.
 
     Reranked candidates carry [0, 1] relevance while un-reranked ones still hold
     retrieval scores on a different scale; left as is, a tail candidate could
-    numerically outrank a reranked one. Pinning the tail strictly below the
-    reranked floor keeps one monotonic, comparable ordering without a second
-    provider call.
+    numerically outrank a reranked one. Positive floors produce descending scores
+    in ``(0, floor)``. A zero floor must remain zero to preserve the public [0, 1]
+    contract, so callers preserve the reranked-pool-before-tail ordering explicitly
+    instead of relying on a numerically smaller sentinel.
     """
     return [floor * (count - index) / (count + 1) for index in range(count)]
+
+
+def validate_rerank_scores(scores: Sequence[float | str], expected_count: int) -> list[float]:
+    """Return finite scores in ``[0, 1]`` or raise a provider contract error."""
+    if len(scores) != expected_count:
+        raise RerankProviderContractError(
+            f"Reranker returned {len(scores)} scores for {expected_count} documents."
+        )
+
+    validated: list[float] = []
+    for index, score in enumerate(scores):
+        try:
+            value = float(score)
+        except (TypeError, ValueError) as exc:
+            raise RerankProviderContractError(
+                f"Reranker score at index {index} is not a number: {score!r}."
+            ) from exc
+        if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+            raise RerankProviderContractError(
+                f"Reranker score at index {index} must be finite and in [0, 1], got {value!r}."
+            )
+        validated.append(value)
+    return validated
 
 
 class RerankProvider(Protocol):

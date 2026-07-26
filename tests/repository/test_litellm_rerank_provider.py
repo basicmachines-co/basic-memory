@@ -5,7 +5,10 @@ import types
 import pytest
 
 from basic_memory.repository.litellm_rerank_provider import LiteLLMRerankProvider
-from basic_memory.repository.semantic_errors import RerankProviderContractError
+from basic_memory.repository.semantic_errors import (
+    RerankProviderContractError,
+    RerankTransientError,
+)
 
 
 class _Response:
@@ -13,12 +16,25 @@ class _Response:
         self.results = results
 
 
-def _fake_litellm(response, recorder: dict) -> types.SimpleNamespace:
+class _TransientProviderError(RuntimeError):
+    pass
+
+
+def _fake_litellm(response, recorder: dict, *, exc: Exception | None = None):
     async def arerank(**params):
         recorder.update(params)
+        if exc is not None:
+            raise exc
         return response
 
-    return types.SimpleNamespace(arerank=arerank)
+    return types.SimpleNamespace(
+        arerank=arerank,
+        Timeout=_TransientProviderError,
+        APIConnectionError=_TransientProviderError,
+        RateLimitError=_TransientProviderError,
+        ServiceUnavailableError=_TransientProviderError,
+        InternalServerError=_TransientProviderError,
+    )
 
 
 @pytest.mark.asyncio
@@ -139,6 +155,48 @@ async def test_missing_results_raises(monkeypatch, results):
     provider = LiteLLMRerankProvider()
     with pytest.raises(RerankProviderContractError, match="no results"):
         await provider.rerank("q", ["a", "b"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_score", [-0.1, 1.1, float("nan"), float("inf")])
+async def test_invalid_relevance_score_raises(monkeypatch, bad_score):
+    response = _Response([{"index": 0, "relevance_score": bad_score}])
+    monkeypatch.setattr(
+        "basic_memory.repository.litellm_rerank_provider._import_litellm",
+        lambda: _fake_litellm(response, {}),
+    )
+    provider = LiteLLMRerankProvider()
+
+    with pytest.raises(RerankProviderContractError, match=r"finite and in \[0, 1\]"):
+        await provider.rerank("q", ["a"])
+
+
+@pytest.mark.asyncio
+async def test_transient_provider_error_is_classified_for_fallback(monkeypatch):
+    transient_error = _TransientProviderError("provider unavailable")
+    monkeypatch.setattr(
+        "basic_memory.repository.litellm_rerank_provider._import_litellm",
+        lambda: _fake_litellm(None, {}, exc=transient_error),
+    )
+    provider = LiteLLMRerankProvider()
+
+    with pytest.raises(RerankTransientError) as caught:
+        await provider.rerank("q", ["a"])
+
+    assert caught.value.__cause__ is transient_error
+
+
+@pytest.mark.asyncio
+async def test_unknown_provider_error_surfaces(monkeypatch):
+    permanent_error = RuntimeError("invalid credentials or model")
+    monkeypatch.setattr(
+        "basic_memory.repository.litellm_rerank_provider._import_litellm",
+        lambda: _fake_litellm(None, {}, exc=permanent_error),
+    )
+    provider = LiteLLMRerankProvider()
+
+    with pytest.raises(RuntimeError, match="invalid credentials or model"):
+        await provider.rerank("q", ["a"])
 
 
 @pytest.mark.asyncio

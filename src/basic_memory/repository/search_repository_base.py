@@ -20,10 +20,10 @@ from basic_memory.repository.embedding_provider import (
     embedding_provider_identity,
 )
 from basic_memory.repository.rerank_provider import (
-    PERMANENT_RERANK_ERRORS,
     RerankProvider,
     build_rerank_document,
     demote_tail_scores,
+    validate_rerank_scores,
 )
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.semantic_chunking import (
@@ -35,7 +35,7 @@ from basic_memory.repository.semantic_chunking import (
     split_text_into_chunks,
 )
 from basic_memory.repository.semantic_errors import (
-    RerankProviderContractError,
+    RerankTransientError,
     SemanticDependenciesMissingError,
     SemanticSearchDisabledError,
 )
@@ -886,14 +886,14 @@ class SearchRepositoryBase(ABC):
 
     @staticmethod
     def _demote_tail(tail: list[SearchIndexRow], floor: float) -> list[SearchIndexRow]:
-        """Rescore un-reranked tail rows into ``(0, floor)`` preserving their order.
+        """Rescore un-reranked tail rows at or below the floor, preserving their order.
 
         The reranked pool carries [0, 1] relevance scores while the tail still holds
         raw retrieval scores on a different scale ([0, 1.3] for fused hybrid). Left as
-        is, a tail row could outrank a reranked row numerically — corrupting the public
-        score column and any downstream re-sort (e.g. cross-project merge). Pinning the
-        tail strictly below the reranked floor keeps the whole page monotonic and in
-        [0, 1] without a second provider call.
+        is, a tail row could outrank a reranked row numerically. Positive floors put
+        the tail strictly below the pool; a zero floor yields zeroes because no smaller
+        score exists in the public [0, 1] range. The returned pool-plus-tail sequence,
+        rather than a later score-only sort, owns that tie-breaking invariant.
         """
         return [
             replace(row, score=score)
@@ -939,29 +939,20 @@ class SearchRepositoryBase(ABC):
         tail = rows[self._reranker_candidates :]
         documents = [self._rerank_document_text(row) for row in pool]
         try:
-            scores = await self._rerank_provider.rerank(query_text, documents)
-        except PERMANENT_RERANK_ERRORS:
-            # Permanent faults — missing reranker deps, or a provider that broke its
-            # response contract (e.g. an incomplete rerank response). Surface these like
-            # the embedding path does; masking them would leave a permanently broken
-            # reranker silently returning un-reranked results with no signal.
-            raise
-        except Exception as exc:
-            # Transient faults — timeout, connection reset, provider outage. Reranking is
-            # an opt-in enhancement, so a blip must not turn good FTS/vector results into a
-            # hard search outage; degrade to retrieval order for this query.
+            scores = validate_rerank_scores(
+                await self._rerank_provider.rerank(query_text, documents),
+                len(pool),
+            )
+        except RerankTransientError as exc:
+            # The provider boundary classifies only recoverable transport/rate-limit
+            # failures as transient. Auth, config, dependency, and contract faults
+            # surface instead of leaving an enabled reranker silently broken.
             logger.warning(
                 "Reranker failed; returning retrieval order. model={model} error={error}",
                 model=self._rerank_provider.model_name,
                 error=exc,
             )
             return rows[offset:page_end]
-        # Fail fast on a length mismatch: that is a provider bug, not a transient fault,
-        # and must not be papered over by truncating or zero-filling.
-        if len(scores) != len(pool):
-            raise RerankProviderContractError(
-                f"Reranker returned {len(scores)} scores for {len(pool)} documents."
-            )
 
         order = sorted(range(len(pool)), key=lambda i: scores[i], reverse=True)
         reranked = [replace(pool[i], score=scores[i]) for i in order]

@@ -6,7 +6,10 @@ import sys
 import pytest
 
 from basic_memory.repository.fastembed_rerank_provider import FastEmbedRerankProvider
-from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
+from basic_memory.repository.semantic_errors import (
+    RerankProviderContractError,
+    SemanticDependenciesMissingError,
+)
 
 
 class _StubCrossEncoder:
@@ -81,6 +84,25 @@ async def test_rerank_sigmoid_handles_extreme_logits(monkeypatch):
     scores = await provider.rerank("q", ["a", "b"])
     assert scores[0] == pytest.approx(0.0, abs=1e-6)
     assert scores[1] == pytest.approx(1.0, abs=1e-6)
+
+
+@pytest.mark.asyncio
+async def test_rerank_rejects_missing_model_scores(monkeypatch):
+    module = type(sys)("fastembed.rerank.cross_encoder")
+
+    class _Incomplete:
+        def __init__(self, **kwargs):
+            pass
+
+        def rerank(self, query, documents):
+            yield 0.5
+
+    setattr(module, "TextCrossEncoder", _Incomplete)
+    monkeypatch.setitem(sys.modules, "fastembed.rerank.cross_encoder", module)
+
+    provider = FastEmbedRerankProvider(model_name="stub-reranker")
+    with pytest.raises(RerankProviderContractError, match="1 scores for 2 documents"):
+        await provider.rerank("q", ["a", "b"])
 
 
 @pytest.mark.asyncio
