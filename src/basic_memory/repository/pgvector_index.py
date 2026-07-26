@@ -58,15 +58,21 @@ class PgVectorIndex(SemanticVectorIndex):
 
                 existing_dimensions = await self._existing_dimensions(session)
                 storage_missing = existing_dimensions is None
+                source_hash_missing = (
+                    existing_dimensions is not None
+                    and not await self._has_source_hash_column(session)
+                )
                 dimensions_changed = (
                     existing_dimensions is not None and existing_dimensions != self.scope.dimensions
                 )
-                if dimensions_changed:
+                if dimensions_changed or source_hash_missing:
                     logger.warning(
-                        "Embedding dimension mismatch: table has {existing}, "
-                        "provider expects {expected}. Recreating vector storage.",
+                        "Vector storage schema mismatch: table dimensions={existing}, "
+                        "provider dimensions={expected}, source_hash_missing={source_hash_missing}. "
+                        "Recreating vector storage.",
                         existing=existing_dimensions,
                         expected=self.scope.dimensions,
+                        source_hash_missing=source_hash_missing,
                     )
                     await session.execute(text("DROP TABLE IF EXISTS search_vector_embeddings"))
 
@@ -78,6 +84,7 @@ class PgVectorIndex(SemanticVectorIndex):
                             project_id INTEGER NOT NULL,
                             embedding vector({self.scope.dimensions}) NOT NULL,
                             embedding_dims INTEGER NOT NULL,
+                            source_hash TEXT NOT NULL,
                             updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                         )
                     """)
@@ -102,7 +109,7 @@ class PgVectorIndex(SemanticVectorIndex):
                 # Why: SQL manifest rows can otherwise remain `ready` after their vectors
                 # disappeared, causing incremental sync to skip them forever.
                 # Outcome: the normal sync pipeline re-embeds every affected chunk.
-                if storage_missing or dimensions_changed:
+                if storage_missing or dimensions_changed or source_hash_missing:
                     await session.execute(
                         text(
                             "UPDATE search_vector_chunks SET embedding_status = 'pending' "
@@ -133,6 +140,16 @@ class PgVectorIndex(SemanticVectorIndex):
         )
         value = result.scalar_one_or_none()
         return int(value) if value is not None else None
+
+    async def _has_source_hash_column(self, session: AsyncSession) -> bool:
+        result = await session.execute(
+            text(
+                "SELECT 1 FROM pg_attribute "
+                "WHERE attrelid = 'search_vector_embeddings'::regclass "
+                "AND attname = 'source_hash'"
+            )
+        )
+        return result.scalar_one_or_none() is not None
 
     async def _chunk_ids_by_key(
         self,
@@ -171,30 +188,64 @@ class PgVectorIndex(SemanticVectorIndex):
         await self.initialize()
 
         async with db.scoped_session(self._session_maker) as session:
-            ids_by_key = await self._chunk_ids_by_key(session, [record.key for record in records])
-            missing = [record.key for record in records if record.key not in ids_by_key]
+            keys = [record.key for record in records]
+            params: dict[str, object] = {"project_id": self.scope.project_id}
+            predicates: list[str] = []
+            for index, key in enumerate(keys):
+                params[f"entity_id_{index}"] = key.entity_id
+                params[f"chunk_key_{index}"] = key.chunk_key
+                predicates.append(
+                    f"(entity_id = :entity_id_{index} AND chunk_key = :chunk_key_{index})"
+                )
+            result = await session.execute(
+                text(
+                    "SELECT id, entity_id, chunk_key, source_hash "
+                    "FROM search_vector_chunks "
+                    "WHERE project_id = :project_id AND ("
+                    + " OR ".join(predicates)
+                    + ") FOR UPDATE"
+                ),
+                params,
+            )
+            manifest_by_key = {
+                VectorKey(
+                    entity_id=int(row["entity_id"]),
+                    chunk_key=str(row["chunk_key"]),
+                ): (int(row["id"]), str(row["source_hash"]))
+                for row in result.mappings().all()
+            }
+            missing = [key for key in keys if key not in manifest_by_key]
             if missing:
                 raise RuntimeError(f"Vector manifest rows are missing for keys: {missing!r}")
 
-            params: dict[str, object] = {"project_id": self.scope.project_id}
+            current_records = [
+                record for record in records if manifest_by_key[record.key][1] == record.source_hash
+            ]
+            if not current_records:
+                return
+
+            params = {"project_id": self.scope.project_id}
             values: list[str] = []
-            for index, record in enumerate(records):
-                params[f"chunk_id_{index}"] = ids_by_key[record.key]
+            for index, record in enumerate(current_records):
+                params[f"chunk_id_{index}"] = manifest_by_key[record.key][0]
                 params[f"embedding_{index}"] = self._format_vector(record.values)
                 params[f"dimensions_{index}"] = len(record.values)
+                params[f"source_hash_{index}"] = record.source_hash
                 values.append(
                     f"(:chunk_id_{index}, :project_id, "
-                    f"CAST(:embedding_{index} AS vector), :dimensions_{index}, NOW())"
+                    f"CAST(:embedding_{index} AS vector), :dimensions_{index}, "
+                    f":source_hash_{index}, NOW())"
                 )
             await session.execute(
                 text(f"""
                     INSERT INTO search_vector_embeddings (
-                        chunk_id, project_id, embedding, embedding_dims, updated_at
+                        chunk_id, project_id, embedding, embedding_dims, source_hash, updated_at
                     ) VALUES {", ".join(values)}
                     ON CONFLICT (chunk_id) DO UPDATE SET
                         project_id = EXCLUDED.project_id,
                         embedding = EXCLUDED.embedding,
                         embedding_dims = EXCLUDED.embedding_dims,
+                        source_hash = EXCLUDED.source_hash,
                         updated_at = NOW()
                 """),
                 params,
@@ -245,6 +296,7 @@ class PgVectorIndex(SemanticVectorIndex):
                     "AND chunks.project_id = :project_id "
                     "AND chunks.vector_index = 'pgvector' "
                     "AND chunks.embedding_model = :embedding_identity "
+                    "AND chunks.source_hash = embeddings.source_hash "
                     "AND chunks.embedding_status = 'ready')"
                 ),
                 {
@@ -277,6 +329,7 @@ class PgVectorIndex(SemanticVectorIndex):
                     "AND c.vector_index = 'pgvector' "
                     "AND c.embedding_status = 'ready' "
                     "AND c.embedding_model = :embedding_identity "
+                    "AND e.source_hash = c.source_hash "
                     "ORDER BY e.embedding <=> CAST(:query AS vector), "
                     "c.entity_id ASC, c.chunk_key ASC "
                     "LIMIT :limit"

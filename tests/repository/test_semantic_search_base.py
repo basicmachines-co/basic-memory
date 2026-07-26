@@ -243,6 +243,107 @@ async def test_embedding_ready_update_requires_source_generation(monkeypatch) ->
     assert ready_params["source_hash_0"] == source_hash
 
 
+@pytest.mark.asyncio
+async def test_external_postgres_upsert_holds_manifest_lock_through_ready_commit(
+    monkeypatch,
+) -> None:
+    """External writes and ready publication share one manifest-lock transaction."""
+    repo = _ConcreteRepo()
+    repo._semantic_vector_index_name = "milvus"
+    repo._embedding_provider = SimpleNamespace(model_name="stub", dimensions=4)
+    adapter = _RecordingVectorIndex()
+    repo._semantic_vector_index = adapter
+    chunk_text = "current chunk text"
+    source_hash = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()
+    session = AsyncMock()
+    session.connection.return_value = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+    session.execute.side_effect = [
+        SimpleNamespace(
+            mappings=lambda: SimpleNamespace(
+                all=lambda: [
+                    {
+                        "id": 7,
+                        "entity_id": 41,
+                        "chunk_key": "entity:41:0",
+                        "source_hash": source_hash,
+                    }
+                ]
+            )
+        ),
+        SimpleNamespace(),
+    ]
+    context_count = 0
+
+    @asynccontextmanager
+    async def fake_scoped_session(_session_maker):
+        nonlocal context_count
+        context_count += 1
+        yield session
+
+    monkeypatch.setattr(search_repository_base_module.db, "scoped_session", fake_scoped_session)
+
+    await repo._persist_embeddings([(7, chunk_text)], [[1.0, 0.0, 0.0, 0.0]])
+
+    lock_statement = session.execute.await_args_list[0].args[0]
+    ready_statement = session.execute.await_args_list[1].args[0]
+    assert "FOR UPDATE" in str(lock_statement)
+    assert "embedding_status = 'ready'" in str(ready_statement)
+    assert context_count == 1
+    assert session.commit.await_count == 1
+    assert adapter.upserted_records[0].source_hash == source_hash
+
+
+@pytest.mark.asyncio
+async def test_external_sqlite_upsert_holds_write_lock_through_ready_commit(
+    monkeypatch,
+) -> None:
+    """SQLite external writes use one write-lock transaction through publication."""
+    repo = _ConcreteRepo()
+    repo._semantic_vector_index_name = "milvus"
+    repo._embedding_provider = SimpleNamespace(model_name="stub", dimensions=4)
+    adapter = _RecordingVectorIndex()
+    repo._semantic_vector_index = adapter
+    chunk_text = "current chunk text"
+    source_hash = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()
+    session = AsyncMock()
+    session.connection.return_value = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+    session.execute.side_effect = [
+        SimpleNamespace(
+            mappings=lambda: SimpleNamespace(
+                all=lambda: [
+                    {
+                        "id": 7,
+                        "entity_id": 41,
+                        "chunk_key": "entity:41:0",
+                        "source_hash": source_hash,
+                    }
+                ]
+            )
+        ),
+        SimpleNamespace(),
+    ]
+    context_count = 0
+
+    @asynccontextmanager
+    async def fake_scoped_session(_session_maker):
+        nonlocal context_count
+        context_count += 1
+        yield session
+
+    monkeypatch.setattr(search_repository_base_module.db, "scoped_session", fake_scoped_session)
+
+    await repo._persist_embeddings([(7, chunk_text)], [[1.0, 0.0, 0.0, 0.0]])
+
+    lock_statement = session.execute.await_args_list[0].args[0]
+    ready_statement = session.execute.await_args_list[1].args[0]
+    assert "UPDATE search_vector_chunks SET source_hash = source_hash" in str(lock_statement)
+    assert "RETURNING id, entity_id, chunk_key, source_hash" in str(lock_statement)
+    assert "embedding_status = 'ready'" in str(ready_statement)
+    assert context_count == 1
+    assert session.commit.await_count == 1
+    assert adapter.upserted_records[0].source_hash == source_hash
+
+
 # --- SQLite SemanticSearchDisabledError ---
 
 

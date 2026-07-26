@@ -152,6 +152,9 @@ def create_sqlite_search_vector_embeddings(dimensions: int) -> DDL:
     return DDL(
         f"""
 CREATE VIRTUAL TABLE IF NOT EXISTS search_vector_embeddings
-USING vec0(embedding float[{dimensions}])
+USING vec0(
+    embedding float[{dimensions}],
+    +source_hash text
+)
 """
     )

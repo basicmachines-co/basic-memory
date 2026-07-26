@@ -103,14 +103,17 @@ def test_vector_contract_values_and_dimension_validation() -> None:
         dimensions=3,
     )
     key = VectorKey(entity_id=11, chunk_key="entity:11:0")
-    record = VectorRecord(key=key, values=(1.0, 0.0, 0.0))
+    record = VectorRecord(key=key, source_hash="hash", values=(1.0, 0.0, 0.0))
 
     assert isinstance(StubVectorIndex(scope), SemanticVectorIndex)
     validate_vector_dimensions(scope, [record])
     validate_query_dimensions(scope, [1.0, 0.0, 0.0])
 
     with pytest.raises(ValueError, match="expected 3, got 2"):
-        validate_vector_dimensions(scope, [VectorRecord(key=key, values=(1.0, 0.0))])
+        validate_vector_dimensions(
+            scope,
+            [VectorRecord(key=key, source_hash="hash", values=(1.0, 0.0))],
+        )
     with pytest.raises(ValueError, match="expected 3, got 1"):
         validate_query_dimensions(scope, [1.0])
 

@@ -511,7 +511,7 @@ Vector and hybrid modes return individual observations and relations as first-cl
 
 - **Vector storage**: [sqlite-vec](https://github.com/asg017/sqlite-vec) virtual table
 - **Table creation**: At runtime when semantic search is first used — no migration needed
-- **Embedding table**: `search_vector_embeddings` using `vec0(embedding float[N])` where N is the configured dimensions
+- **Embedding table**: `search_vector_embeddings` using `vec0(embedding float[N], +source_hash text)` where N is the configured dimensions
 - **Chunk metadata**: `search_vector_chunks` table stores chunk text, keys, and source hashes
 
 The sqlite-vec extension is loaded per-connection. Vector tables are created lazily on first use.
@@ -583,13 +583,18 @@ implementation.
 The returned `SemanticVectorIndex` has five asynchronous operations:
 
 - `initialize()` validates or creates backend storage.
-- `upsert(records)` idempotently writes vectors by `(entity_id, chunk_key)`.
+- `upsert(records)` idempotently writes vectors by `(entity_id, chunk_key)` for each record's
+  `source_hash` generation.
 - `delete(keys)` removes stable keys; missing keys are successful no-ops.
 - `delete_entity(entity_id)` removes all vectors for one entity in the scope.
 - `search(query, limit)` returns stable keys with normalized cosine similarity in `[0, 1]`.
 
 The adapter never receives a SQLAlchemy session and never calls the embedding provider. Basic
 Memory owns chunking and embedding, while the extension owns vector storage and lookup.
+Each `VectorRecord` carries the SHA-256 source generation that produced its values. Basic Memory
+holds the matching SQL manifest locked across extension adapter I/O and the ready-state transition
+(`FOR UPDATE` on Postgres and a conditional write lock on SQLite), so an older overlapping sync
+cannot overwrite a newer generation under the same stable adapter key.
 
 Adapters may also implement the separate `SemanticVectorIndexReconciler` capability. After a
 vector reindex, Basic Memory passes it the complete set of current ready keys so the adapter can
@@ -604,10 +609,11 @@ store. Each row records the selected `vector_index`, embedding identity, stable 
 `embedding_status` of `pending` or `ready`.
 
 Writes and deletes commit `pending` before calling the adapter. A successful adapter operation then
-makes the manifest row ready or removes it. If the external operation fails, the pending row is not
-searchable and the next sync safely retries the idempotent operation. Adapter search results are
-hydrated only through current, ready manifest rows, so stale or orphaned external matches fail
-closed.
+makes the manifest row ready or removes it. Vector writes are generation checked inside built-in
+adapter transactions; extension writes retain the manifest lock across adapter I/O. If the external
+operation fails, the pending row is not searchable and the next sync safely retries the idempotent
+operation. Adapter search results are hydrated only through current, ready manifest rows, so stale
+or orphaned external matches fail closed.
 
 Basic Memory deliberately refuses to mutate manifest rows owned by a different external adapter.
 Before switching `semantic_vector_index`, keep the old adapter configured and use that extension's

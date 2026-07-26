@@ -35,9 +35,10 @@ class VectorKey:
 
 @dataclass(frozen=True, slots=True)
 class VectorRecord:
-    """One vector value to insert or replace idempotently."""
+    """One source-generation vector value to insert or replace idempotently."""
 
     key: VectorKey
+    source_hash: str
     values: tuple[float, ...]
 
 
@@ -65,7 +66,7 @@ class SemanticVectorIndex(Protocol):
         ...
 
     async def upsert(self, records: Sequence[VectorRecord]) -> None:
-        """Insert or replace vectors by stable key."""
+        """Insert or replace vectors only for each record's source generation."""
         ...
 
     async def delete(self, keys: Sequence[VectorKey]) -> None:

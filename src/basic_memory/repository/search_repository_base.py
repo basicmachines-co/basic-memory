@@ -331,71 +331,120 @@ class SearchRepositoryBase(ABC):
         lookup_params = {f"row_id_{index}": row_id for index, row_id in enumerate(row_ids)}
         lookup_placeholders = ", ".join(f":row_id_{index}" for index in range(len(row_ids)))
         async with db.scoped_session(self.session_maker) as session:
-            result = await session.execute(
-                text(
+            connection = await session.connection()
+            dialect_name = connection.dialect.name
+            external_vector_index = (
+                self._semantic_vector_index_name not in _BUILT_IN_VECTOR_INDEX_NAMES
+            )
+            lock_external_write = external_vector_index and dialect_name in {"postgresql", "sqlite"}
+            if external_vector_index and dialect_name == "sqlite":
+                # SQLite has no SELECT FOR UPDATE. A conditional no-op write takes
+                # the database write lock before extension I/O, serializing a newer
+                # manifest generation behind this adapter write and ready commit.
+                lookup_statement = (
+                    "UPDATE search_vector_chunks SET source_hash = source_hash "
+                    f"WHERE project_id = :project_id AND id IN ({lookup_placeholders}) "
+                    "RETURNING id, entity_id, chunk_key, source_hash"
+                )
+            else:
+                lock_clause = (
+                    " FOR UPDATE" if external_vector_index and dialect_name == "postgresql" else ""
+                )
+                lookup_statement = (
                     "SELECT id, entity_id, chunk_key, source_hash FROM search_vector_chunks "
                     f"WHERE project_id = :project_id AND id IN ({lookup_placeholders})"
-                ),
+                    f"{lock_clause}"
+                )
+            result = await session.execute(
+                text(lookup_statement),
                 {**lookup_params, "project_id": self.project_id},
             )
             rows_by_id = {int(row["id"]): row for row in result.mappings().all()}
 
-        missing_row_ids = [row_id for row_id in row_ids if row_id not in rows_by_id]
-        if missing_row_ids:
-            raise RuntimeError(f"Vector manifest rows disappeared before write: {missing_row_ids}")
+            missing_row_ids = [row_id for row_id in row_ids if row_id not in rows_by_id]
+            if missing_row_ids:
+                raise RuntimeError(
+                    f"Vector manifest rows disappeared before write: {missing_row_ids}"
+                )
 
-        current_jobs: list[tuple[int, str, str, list[float]]] = []
-        for (row_id, chunk_text), embedding in zip(jobs, embeddings, strict=True):
-            expected_source_hash = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()
-            if str(rows_by_id[row_id]["source_hash"]) != expected_source_hash:
-                continue
-            current_jobs.append((row_id, chunk_text, expected_source_hash, embedding))
-        if not current_jobs:
-            return
+            current_jobs: list[tuple[int, str, str, list[float]]] = []
+            for (row_id, chunk_text), embedding in zip(jobs, embeddings, strict=True):
+                expected_source_hash = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()
+                if str(rows_by_id[row_id]["source_hash"]) != expected_source_hash:
+                    continue
+                current_jobs.append((row_id, chunk_text, expected_source_hash, embedding))
+            if not current_jobs:
+                return
 
-        params: dict[str, object] = {}
-        generation_predicates: list[str] = []
-        records = [
-            VectorRecord(
-                key=VectorKey(
-                    entity_id=int(rows_by_id[row_id]["entity_id"]),
-                    chunk_key=str(rows_by_id[row_id]["chunk_key"]),
-                ),
-                values=tuple(embedding),
-            )
-            for row_id, _chunk_text, _source_hash, embedding in current_jobs
-        ]
-        for index, (row_id, _chunk_text, source_hash, _embedding) in enumerate(current_jobs):
-            params[f"row_id_{index}"] = row_id
-            params[f"source_hash_{index}"] = source_hash
-            generation_predicates.append(
-                f"(id = :row_id_{index} AND source_hash = :source_hash_{index})"
-            )
+            params: dict[str, object] = {}
+            generation_predicates: list[str] = []
+            records = [
+                VectorRecord(
+                    key=VectorKey(
+                        entity_id=int(rows_by_id[row_id]["entity_id"]),
+                        chunk_key=str(rows_by_id[row_id]["chunk_key"]),
+                    ),
+                    source_hash=source_hash,
+                    values=tuple(embedding),
+                )
+                for row_id, _chunk_text, source_hash, embedding in current_jobs
+            ]
+            for index, (row_id, _chunk_text, source_hash, _embedding) in enumerate(current_jobs):
+                params[f"row_id_{index}"] = row_id
+                params[f"source_hash_{index}"] = source_hash
+                generation_predicates.append(
+                    f"(id = :row_id_{index} AND source_hash = :source_hash_{index})"
+                )
+
+            if lock_external_write:
+                # Constraint: extension adapters use stable logical keys outside
+                # the authoritative SQL database. Hold its manifest lock across
+                # adapter I/O so a newer prepare cannot advance this generation
+                # before the external write and ready transition complete.
+                await self._semantic_vector_index.upsert(records)
+                await self._mark_embedding_jobs_ready(
+                    session,
+                    params=params,
+                    generation_predicates=generation_predicates,
+                )
+                await session.commit()
+                return
+
+        # Built-in adapters share the authoritative database. They verify and lock
+        # each record's source_hash inside the same transaction as their vector write.
         await self._semantic_vector_index.upsert(records)
-
-        # Trigger: the adapter write completed successfully.
-        # Why: only SQL rows marked ready may hydrate search matches, and a newer sync
-        # may have replaced a chunk while this job was embedding its previous text.
-        # Outcome: current source generations become ready; stale completions leave the
-        # newer manifest pending for retry.
         async with db.scoped_session(self.session_maker) as session:
-            await session.execute(
-                text(
-                    "UPDATE search_vector_chunks SET embedding_status = 'ready', "
-                    f"updated_at = {self._timestamp_now_expr()} "
-                    "WHERE project_id = :project_id "
-                    "AND vector_index = :vector_index "
-                    "AND embedding_model = :embedding_model "
-                    "AND (" + " OR ".join(generation_predicates) + ")"
-                ),
-                {
-                    **params,
-                    "project_id": self.project_id,
-                    "vector_index": self._semantic_vector_index_name,
-                    "embedding_model": self._embedding_model_key(),
-                },
+            await self._mark_embedding_jobs_ready(
+                session,
+                params=params,
+                generation_predicates=generation_predicates,
             )
             await session.commit()
+
+    async def _mark_embedding_jobs_ready(
+        self,
+        session: AsyncSession,
+        *,
+        params: dict[str, object],
+        generation_predicates: list[str],
+    ) -> None:
+        """Publish only the source generations written by the adapter."""
+        await session.execute(
+            text(
+                "UPDATE search_vector_chunks SET embedding_status = 'ready', "
+                f"updated_at = {self._timestamp_now_expr()} "
+                "WHERE project_id = :project_id "
+                "AND vector_index = :vector_index "
+                "AND embedding_model = :embedding_model "
+                "AND (" + " OR ".join(generation_predicates) + ")"
+            ),
+            {
+                **params,
+                "project_id": self.project_id,
+                "vector_index": self._semantic_vector_index_name,
+                "embedding_model": self._embedding_model_key(),
+            },
+        )
 
     async def _delete_entity_chunks(
         self,

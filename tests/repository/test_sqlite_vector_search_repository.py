@@ -582,7 +582,7 @@ async def test_ready_commit_failure_retries_same_stable_adapter_key(
         nonlocal context_count
         context_count += 1
         async with original_scoped_session(session_maker) as session:
-            if context_count == 2:
+            if context_count == 1:
 
                 async def fail_commit() -> None:
                     raise RuntimeError("ready commit failed")

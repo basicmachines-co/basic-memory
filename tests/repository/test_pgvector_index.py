@@ -53,12 +53,14 @@ class FakeSession:
         *,
         table_exists: bool = False,
         dimensions: int | None = None,
+        has_source_hash: bool = True,
         chunk_rows: list[dict[str, object]] | None = None,
         search_rows: list[dict[str, object]] | None = None,
         fail_extension: bool = False,
     ) -> None:
         self.table_exists = table_exists
         self.dimensions = dimensions
+        self.has_source_hash = has_source_hash
         self.chunk_rows = chunk_rows or []
         self.search_rows = search_rows or []
         self.fail_extension = fail_extension
@@ -76,6 +78,8 @@ class FakeSession:
             raise RuntimeError("extension unavailable")
         if "information_schema.tables" in sql:
             return FakeResult(fetchone=(1,) if self.table_exists else None)
+        if "attname = 'source_hash'" in sql:
+            return FakeResult(scalar=1 if self.has_source_hash else None)
         if "SELECT atttypmod" in sql:
             return FakeResult(scalar=self.dimensions)
         if "SELECT id, entity_id, chunk_key" in sql:
@@ -155,6 +159,20 @@ async def test_initialize_rebuilds_dimension_mismatch_and_invalidates_manifest(m
 
 
 @pytest.mark.asyncio
+async def test_initialize_rebuilds_storage_without_source_generation(monkeypatch) -> None:
+    session = FakeSession(table_exists=True, dimensions=4, has_source_hash=False)
+    _install_session(monkeypatch, session)
+    index = PgVectorIndex(MagicMock(), _scope())
+
+    await index.initialize()
+
+    sql_calls = _sql_calls(session)
+    assert any("DROP TABLE IF EXISTS search_vector_embeddings" in sql for sql in sql_calls)
+    assert any("source_hash TEXT NOT NULL" in sql for sql in sql_calls)
+    assert any("embedding_status = 'pending'" in sql for sql in sql_calls)
+
+
+@pytest.mark.asyncio
 async def test_initialize_reports_missing_pgvector_extension(monkeypatch) -> None:
     session = FakeSession(fail_extension=True)
     _install_session(monkeypatch, session)
@@ -170,8 +188,18 @@ async def test_upsert_resolves_stable_keys_and_writes_one_batch(monkeypatch) -> 
     key_b = VectorKey(entity_id=11, chunk_key="entity:11:1")
     session = FakeSession(
         chunk_rows=[
-            {"id": 101, "entity_id": 11, "chunk_key": key_a.chunk_key},
-            {"id": 102, "entity_id": 11, "chunk_key": key_b.chunk_key},
+            {
+                "id": 101,
+                "entity_id": 11,
+                "chunk_key": key_a.chunk_key,
+                "source_hash": "hash-a",
+            },
+            {
+                "id": 102,
+                "entity_id": 11,
+                "chunk_key": key_b.chunk_key,
+                "source_hash": "hash-b",
+            },
         ]
     )
     _install_session(monkeypatch, session)
@@ -180,8 +208,8 @@ async def test_upsert_resolves_stable_keys_and_writes_one_batch(monkeypatch) -> 
 
     await index.upsert(
         [
-            VectorRecord(key=key_a, values=(1.0, 0.0, 0.0, 0.0)),
-            VectorRecord(key=key_b, values=(0.0, 1.0, 0.0, 0.0)),
+            VectorRecord(key=key_a, source_hash="hash-a", values=(1.0, 0.0, 0.0, 0.0)),
+            VectorRecord(key=key_b, source_hash="hash-b", values=(0.0, 1.0, 0.0, 0.0)),
         ]
     )
 
@@ -191,11 +219,38 @@ async def test_upsert_resolves_stable_keys_and_writes_one_batch(monkeypatch) -> 
         "chunk_id_0": 101,
         "embedding_0": "[1,0,0,0]",
         "dimensions_0": 4,
+        "source_hash_0": "hash-a",
         "chunk_id_1": 102,
         "embedding_1": "[0,1,0,0]",
         "dimensions_1": 4,
+        "source_hash_1": "hash-b",
     }
     assert session.commit_count == 1
+
+
+@pytest.mark.asyncio
+async def test_upsert_skips_stale_source_generation(monkeypatch) -> None:
+    key = VectorKey(entity_id=11, chunk_key="entity:11:0")
+    session = FakeSession(
+        chunk_rows=[
+            {
+                "id": 101,
+                "entity_id": 11,
+                "chunk_key": key.chunk_key,
+                "source_hash": "new-hash",
+            }
+        ]
+    )
+    _install_session(monkeypatch, session)
+    index = PgVectorIndex(MagicMock(), _scope())
+    index._initialized = True
+
+    await index.upsert([VectorRecord(key=key, source_hash="old-hash", values=(1.0, 0.0, 0.0, 0.0))])
+
+    lock_call = next(call for call in session.calls if "SELECT id, entity_id" in call[0])
+    assert "FOR UPDATE" in lock_call[0]
+    assert not any("INSERT INTO" in sql for sql, _params in session.calls)
+    assert session.commit_count == 0
 
 
 @pytest.mark.asyncio
@@ -207,7 +262,7 @@ async def test_upsert_rejects_missing_manifest_key(monkeypatch) -> None:
     index._initialized = True
 
     with pytest.raises(RuntimeError, match="manifest rows are missing"):
-        await index.upsert([VectorRecord(key=key, values=(1.0, 0.0, 0.0, 0.0))])
+        await index.upsert([VectorRecord(key=key, source_hash="hash", values=(1.0, 0.0, 0.0, 0.0))])
 
 
 @pytest.mark.asyncio

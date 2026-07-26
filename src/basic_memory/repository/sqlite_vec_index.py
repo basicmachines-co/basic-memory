@@ -102,18 +102,21 @@ class SQLiteVecIndex(SemanticVectorIndex):
                 storage_missing = not vector_sql
                 expected_dimensions = f"float[{self.scope.dimensions}]"
                 dimensions_changed = bool(vector_sql and expected_dimensions not in vector_sql)
-                if dimensions_changed:
+                source_hash_missing = bool(vector_sql and "+source_hash text" not in vector_sql)
+                if dimensions_changed or source_hash_missing:
                     logger.warning(
-                        "Embedding dimension mismatch (expected {dimensions}); "
-                        "recreating sqlite-vec storage",
+                        "SQLite vector storage schema mismatch "
+                        "(expected dimensions={dimensions}, "
+                        "source_hash_missing={source_hash_missing}); recreating storage",
                         dimensions=self.scope.dimensions,
+                        source_hash_missing=source_hash_missing,
                     )
                     await session.execute(text("DROP TABLE IF EXISTS search_vector_embeddings"))
 
                 await session.execute(create_sqlite_search_vector_embeddings(self.scope.dimensions))
                 # Missing or dimension-rebuilt vec storage has no vectors, so ready
                 # manifests must become pending before incremental sync inspects them.
-                if storage_missing or dimensions_changed:
+                if storage_missing or dimensions_changed or source_hash_missing:
                     await session.execute(
                         text(
                             "UPDATE search_vector_chunks SET embedding_status = 'pending' "
@@ -159,12 +162,45 @@ class SQLiteVecIndex(SemanticVectorIndex):
         await self.initialize()
         async with db.scoped_session(self._session_maker) as session:
             await self._ensure_loaded(session)
-            rowids_by_key = await self._rowids_by_key(session, [record.key for record in records])
-            missing = [record.key for record in records if record.key not in rowids_by_key]
-            if missing:
-                raise RuntimeError(f"Vector manifest rows are missing for keys: {missing!r}")
+            params: dict[str, object] = {"project_id": self.scope.project_id}
+            predicates: list[str] = []
+            records_by_key = {record.key: record for record in records}
+            for index, record in enumerate(records):
+                params[f"entity_id_{index}"] = record.key.entity_id
+                params[f"chunk_key_{index}"] = record.key.chunk_key
+                params[f"source_hash_{index}"] = record.source_hash
+                predicates.append(
+                    f"(entity_id = :entity_id_{index} "
+                    f"AND chunk_key = :chunk_key_{index} "
+                    f"AND source_hash = :source_hash_{index})"
+                )
 
-            rowids = [rowids_by_key[record.key] for record in records]
+            # SQLite has no SELECT FOR UPDATE. This conditional no-op write
+            # acquires the database write lock and verifies the source generation
+            # before vec0 rows can be replaced in the same transaction.
+            result = await session.execute(
+                text(
+                    "UPDATE search_vector_chunks SET source_hash = source_hash "
+                    "WHERE project_id = :project_id AND ("
+                    + " OR ".join(predicates)
+                    + ") RETURNING id, entity_id, chunk_key"
+                ),
+                params,
+            )
+            rowids_by_key = {
+                VectorKey(
+                    entity_id=int(row["entity_id"]),
+                    chunk_key=str(row["chunk_key"]),
+                ): int(row["id"])
+                for row in result.mappings().all()
+            }
+            current_records = [
+                records_by_key[key] for key in rowids_by_key if key in records_by_key
+            ]
+            if not current_records:
+                return
+
+            rowids = [rowids_by_key[record.key] for record in current_records]
             params = {f"rowid_{index}": rowid for index, rowid in enumerate(rowids)}
             placeholders = ", ".join(f":rowid_{index}" for index in range(len(rowids)))
             await session.execute(
@@ -173,15 +209,16 @@ class SQLiteVecIndex(SemanticVectorIndex):
             )
             await session.execute(
                 text(
-                    "INSERT INTO search_vector_embeddings (rowid, embedding) "
-                    "VALUES (:rowid, :embedding)"
+                    "INSERT INTO search_vector_embeddings (rowid, embedding, source_hash) "
+                    "VALUES (:rowid, :embedding, :source_hash)"
                 ),
                 [
                     {
                         "rowid": rowids_by_key[record.key],
                         "embedding": json.dumps(record.values),
+                        "source_hash": record.source_hash,
                     }
-                    for record in records
+                    for record in current_records
                 ],
             )
             await session.commit()
@@ -249,6 +286,8 @@ class SQLiteVecIndex(SemanticVectorIndex):
                     "WHERE project_id = :project_id AND NOT ("
                     "vector_index = 'sqlite-vec' "
                     "AND embedding_model = :embedding_identity "
+                    "AND search_vector_embeddings.source_hash = "
+                    "search_vector_chunks.source_hash "
                     "AND embedding_status = 'ready'))"
                 ),
                 {
@@ -273,13 +312,14 @@ class SQLiteVecIndex(SemanticVectorIndex):
             await self._ensure_loaded(session)
             result = await session.execute(
                 text(
-                    "WITH vector_matches AS ("
-                    " SELECT rowid, distance FROM search_vector_embeddings "
+                    "WITH vector_matches AS MATERIALIZED ("
+                    " SELECT rowid, distance, source_hash FROM search_vector_embeddings "
                     " WHERE embedding MATCH :query AND k = :vector_k"
                     ") "
                     "SELECT c.entity_id, c.chunk_key, vector_matches.distance "
                     "FROM vector_matches "
                     "JOIN search_vector_chunks c ON c.id = vector_matches.rowid "
+                    "AND c.source_hash = vector_matches.source_hash "
                     "WHERE c.project_id = :project_id "
                     "AND c.vector_index = 'sqlite-vec' "
                     "AND c.embedding_status = 'ready' "
