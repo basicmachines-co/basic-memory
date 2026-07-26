@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory.models.knowledge import NoteFileVacate
@@ -41,20 +43,36 @@ class NoteFileVacateRepository(Repository[NoteFileVacate]):
         """Record (or refresh) the outstanding vacate for one source path.
 
         One marker per ``(project, path)``: a fresh move onto the same source path replaces the
-        prior marker rather than colliding with the unique constraint.
+        prior marker rather than colliding with the unique constraint. The upsert is one statement
+        so concurrent cleanup cannot delete a row between a read and ORM update.
         """
         path = Path(file_path).as_posix()
-        existing = await self._get_marker(session, path)
-        if existing is not None:
-            existing.entity_id = entity_id
-            existing.file_checksum = file_checksum
-            return
-        session.add(
-            NoteFileVacate(
-                project_id=self.project_id,
-                entity_id=entity_id,
-                file_path=path,
-                file_checksum=file_checksum,
+        values = {
+            "project_id": self.project_id,
+            "entity_id": entity_id,
+            "file_path": path,
+            "file_checksum": file_checksum,
+        }
+        dialect_name = session.bind.dialect.name if session.bind is not None else None
+        match dialect_name:
+            case "postgresql":
+                statement = pg_insert(NoteFileVacate).values(**values)
+            case "sqlite":
+                statement = sqlite_insert(NoteFileVacate).values(**values)
+            case _:
+                raise ValueError(
+                    f"Unsupported database dialect for move-vacate upsert: {dialect_name}"
+                )
+        await session.execute(
+            statement.on_conflict_do_update(
+                index_elements=[
+                    NoteFileVacate.project_id,
+                    NoteFileVacate.file_path,
+                ],
+                set_={
+                    "entity_id": entity_id,
+                    "file_checksum": file_checksum,
+                },
             )
         )
 

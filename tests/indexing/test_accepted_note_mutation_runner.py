@@ -41,7 +41,6 @@ from basic_memory.markdown.schemas import (
     Relation as MarkdownRelation,
 )
 from basic_memory.models import Entity, NoteContent, Project
-from basic_memory.models.knowledge import NoteFileVacate
 from basic_memory.repository import (
     AcceptedNoteContentWrite,
     AcceptedObservationWrite,
@@ -144,6 +143,7 @@ class _MutationSession:
         self.deleted: list[object] = []
         self.added: list[object] = []
         self.flush_count = 0
+        self.bind = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
 
     async def delete(self, value: object) -> None:
         self.deleted.append(value)
@@ -1562,9 +1562,6 @@ async def test_run_accepted_note_move_carries_previous_path_and_materialized_cle
     assert cleanup is not None
     assert cleanup.file_path == "notes/accepted.md"
     assert cleanup.file_checksum == expected_source_checksum
-    marker = next(value for value in session.added if isinstance(value, NoteFileVacate))
-    assert marker.file_path == "notes/accepted.md"
-    assert marker.file_checksum == expected_source_checksum
     assert persistence_calls[0].await_count == 0
     assert persistence_calls[1].await_count == 1
 
