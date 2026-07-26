@@ -360,7 +360,12 @@ async def resolve_accepted_note_source_checksum(
 ) -> RuntimeFileChecksum | None:
     """Resolve source bytes only when storage or synchronized state proves ownership."""
     observed_file_checksum = None
-    if current_note_content.file_write_status in {"pending", "writing", "failed"}:
+    if current_note_content.file_write_status in {
+        "pending",
+        "writing",
+        "failed",
+        "external_change_detected",
+    }:
         observed_file_checksum = await preparer_factory.load_current_file_checksum(
             project,
             file_path,
@@ -817,8 +822,8 @@ async def _run_accepted_note_move(
         )
 
     # Capture the source checksum before persisting the move mutates note_content to the
-    # destination version. For an in-flight publication, observe storage once to distinguish the
-    # last published bytes from accepted bytes written before their result was recorded.
+    # destination version. For ambiguous publication state, observe storage once to distinguish
+    # known source bytes from an unrelated external file.
     vacated_source_checksum = await resolve_accepted_note_source_checksum(
         project=project,
         file_path=existing_file_path,

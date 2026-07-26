@@ -463,7 +463,13 @@ async def test_move_retires_vacate_marker_after_source_replacement(
 
 @pytest.mark.parametrize(
     "publication_state",
-    ["synced", "pending-before-write", "failed-before-write", "published-checksum-stale"],
+    [
+        "synced",
+        "pending-before-write",
+        "failed-before-write",
+        "published-checksum-stale",
+        "external-change-restored-published",
+    ],
 )
 @pytest.mark.parametrize("force_full", [False, True], ids=["observed", "force-full"])
 @pytest.mark.asyncio
@@ -504,6 +510,7 @@ async def test_put_rename_lingering_source_is_not_reindexed(
         "pending-before-write",
         "failed-before-write",
         "published-checksum-stale",
+        "external-change-restored-published",
     }:
         pending_markdown = (
             source_path.read_text(encoding="utf-8").rstrip()
@@ -525,6 +532,7 @@ async def test_put_rename_lingering_source_is_not_reindexed(
                 "pending-before-write": "pending",
                 "failed-before-write": "failed",
                 "published-checksum-stale": "writing",
+                "external-change-restored-published": "external_change_detected",
             }[publication_state]
             assert note_content.file_version is not None
             assert note_content.file_version < note_content.db_version

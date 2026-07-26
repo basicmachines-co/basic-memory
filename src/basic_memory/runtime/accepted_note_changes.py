@@ -102,14 +102,18 @@ def select_accepted_note_source_checksum(
     """Select the checksum for source bytes vacated by an accepted path change.
 
     ``accept_write`` deliberately preserves the previously published file fields while the next
-    DB version is pending. During ``pending``, ``writing``, or ``failed``, storage may still
-    contain the previously published bytes or may already contain the accepted DB bytes without
-    recording its result. A live checksum matching either known version resolves that ambiguity.
-    An absent or unexpected object proves neither version owns the path, so cleanup must remain
-    unclaimed. Otherwise only a synchronized file version proves ``file_checksum`` belongs to the
-    current accepted source.
+    DB version is pending. During ``pending``, ``writing``, ``failed``, or
+    ``external_change_detected``, storage may contain either known version or unrelated bytes. A
+    live checksum matching either known version resolves that ambiguity. An absent or unexpected
+    object proves neither version owns the path, so cleanup must remain unclaimed. Otherwise only
+    a synchronized file version proves ``file_checksum`` belongs to the current accepted source.
     """
-    if current_note_content.file_write_status in {"pending", "writing", "failed"}:
+    if current_note_content.file_write_status in {
+        "pending",
+        "writing",
+        "failed",
+        "external_change_detected",
+    }:
         if observed_file_checksum in {
             current_note_content.db_checksum,
             current_note_content.file_checksum,
