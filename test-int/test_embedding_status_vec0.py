@@ -146,6 +146,9 @@ async def test_embedding_status_reads_real_vec0_table(engine_factory, test_proje
         ]
     )
     async with db.scoped_session(session_maker) as session:
+        # sqlite-vec is loaded per connection. Windows may hand this assertion a
+        # different pooled connection than the adapter used for the upsert.
+        await search_repo._ensure_sqlite_vec_loaded(session)
         stale_count = await session.execute(text("SELECT COUNT(*) FROM search_vector_embeddings"))
         assert stale_count.scalar_one() == 0
 
