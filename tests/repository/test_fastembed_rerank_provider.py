@@ -183,6 +183,8 @@ async def test_missing_dependency_raises_actionable_error(monkeypatch):
     ],
 )
 async def test_transient_model_download_error_is_classified(monkeypatch, load_error):
+    monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
+    monkeypatch.delenv("TRANSFORMERS_OFFLINE", raising=False)
     module = type(sys)("fastembed.rerank.cross_encoder")
 
     class _DownloadFailure:
@@ -194,6 +196,28 @@ async def test_transient_model_download_error_is_classified(monkeypatch, load_er
 
     provider = FastEmbedRerankProvider(model_name="stub-reranker")
     with pytest.raises(RerankTransientError, match="model download failed temporarily"):
+        await provider.rerank("auth", ["auth doc"])
+    assert provider._model is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("offline_env", ["HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"])
+async def test_offline_cache_miss_remains_permanent(monkeypatch, offline_env):
+    monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
+    monkeypatch.delenv("TRANSFORMERS_OFFLINE", raising=False)
+    monkeypatch.setenv(offline_env, "1")
+    module = type(sys)("fastembed.rerank.cross_encoder")
+    load_error = ValueError("Could not load model stub-reranker from any source.")
+
+    class _OfflineCacheMiss:
+        def __init__(self, **kwargs):
+            raise load_error
+
+    setattr(module, "TextCrossEncoder", _OfflineCacheMiss)
+    monkeypatch.setitem(sys.modules, "fastembed.rerank.cross_encoder", module)
+
+    provider = FastEmbedRerankProvider(model_name="stub-reranker")
+    with pytest.raises(ValueError, match="Could not load model"):
         await provider.rerank("auth", ["auth doc"])
     assert provider._model is None
 

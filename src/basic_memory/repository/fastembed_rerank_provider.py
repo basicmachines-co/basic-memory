@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import os
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
@@ -21,6 +22,7 @@ if TYPE_CHECKING:
 
 
 _TRANSIENT_DOWNLOAD_STATUS_CODES = frozenset({408, 425, 429})
+_TRUE_ENV_VALUES = frozenset({"1", "ON", "YES", "TRUE"})
 
 
 def _is_transient_model_load_error(
@@ -37,7 +39,18 @@ def _is_transient_model_load_error(
         )
     # FastEmbed retries Hugging Face/GCS downloads internally and, after exhausting
     # both sources, replaces the transport cause with this model-specific ValueError.
-    return str(exc) == f"Could not load model {model_name} from any source."
+    if str(exc) != f"Could not load model {model_name} from any source.":
+        return False
+
+    # Trigger: Hugging Face offline mode turns an absent cache entry into the same
+    # exhausted-source ValueError as a temporary download failure.
+    # Why: an explicitly offline process cannot recover by retrying the model load.
+    # Outcome: preserve the permanent configuration/cache error for the caller.
+    offline_mode = any(
+        os.environ.get(name, "").strip().upper() in _TRUE_ENV_VALUES
+        for name in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE")
+    )
+    return not offline_mode
 
 
 class FastEmbedRerankProvider(RerankProvider):
