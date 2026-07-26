@@ -411,7 +411,7 @@ async def test_put_rename_lingering_source_is_not_reindexed(
         )
         accepted_checksum = sha256(pending_markdown.encode()).hexdigest()
         if publication_state == "published-checksum-stale":
-            source_path.write_text(pending_markdown, encoding="utf-8")
+            source_path.write_bytes(pending_markdown.encode())
             source_checksum = sha256(source_path.read_bytes()).hexdigest()
         async with db.scoped_session(session_maker) as session:
             entity = await entity_repository.get_by_file_path(session, source_relative)
