@@ -29,6 +29,29 @@ async def _execute(project_service: ProjectService, query, params=None):
         return await project_service.repository.execute_query(session, query, params or {})
 
 
+async def _create_embeddings_stub(project_service: ProjectService) -> None:
+    """Create portable built-in storage for status tests."""
+    await _execute(
+        project_service,
+        text(
+            "CREATE TABLE IF NOT EXISTS search_vector_embeddings ("
+            "chunk_id INTEGER PRIMARY KEY, source_hash TEXT NOT NULL)"
+        ),
+        {},
+    )
+
+
+async def _drop_embeddings_stub(project_service: ProjectService) -> None:
+    """Remove portable built-in storage created by a status test."""
+    await _execute(project_service, text("DROP TABLE IF EXISTS search_vector_embeddings"), {})
+
+
+async def _scalar_regular_query(session, query, params=None):
+    """Execute a vector count against the portable regular-table test double."""
+    result = await session.execute(query, params or {})
+    return result.scalar()
+
+
 @pytest.mark.asyncio
 async def test_embedding_status_semantic_disabled(project_service: ProjectService, test_project):
     """When semantic search is disabled, return minimal status with zero counts."""
@@ -177,14 +200,23 @@ async def test_embedding_status_entities_without_chunks(
     project_service: ProjectService, test_graph, test_project
 ):
     """When entities have search_index rows but no chunks, recommend reindex."""
-    with patch.object(
-        type(project_service),
-        "config_manager",
-        new_callable=lambda: property(
-            lambda self: _config_manager_with(semantic_search_enabled=True)
+    await _create_embeddings_stub(project_service)
+    with (
+        patch.object(
+            type(project_service),
+            "config_manager",
+            new_callable=lambda: property(
+                lambda self: _config_manager_with(semantic_search_enabled=True)
+            ),
+        ),
+        patch.object(
+            project_service.repository,
+            "scalar_vec_query",
+            side_effect=_scalar_regular_query,
         ),
     ):
         status = await project_service.get_embedding_status(test_project.id)
+    await _drop_embeddings_stub(project_service)
 
     assert status.semantic_search_enabled is True
     assert status.vector_tables_exist is True
@@ -199,7 +231,7 @@ async def test_embedding_status_entities_without_chunks(
 async def test_embedding_status_orphaned_chunks(
     project_service: ProjectService, test_graph, test_project
 ):
-    """When a manifest row is pending, recommend reindex."""
+    """A ready manifest row without its physical vector must recommend reindex."""
     # Get a real entity_id from the test graph
     entity_result = await _execute(
         project_service,
@@ -213,30 +245,39 @@ async def test_embedding_status_orphaned_chunks(
         entity_id=entity_id,
         project_id=test_project.id,
         chunk_key="chunk-1",
-        embedding_status="pending",
     )
+    await _create_embeddings_stub(project_service)
 
-    with patch.object(
-        type(project_service),
-        "config_manager",
-        new_callable=lambda: property(
-            lambda self: _config_manager_with(semantic_search_enabled=True)
+    with (
+        patch.object(
+            type(project_service),
+            "config_manager",
+            new_callable=lambda: property(
+                lambda self: _config_manager_with(semantic_search_enabled=True)
+            ),
+        ),
+        patch.object(
+            project_service.repository,
+            "scalar_vec_query",
+            side_effect=_scalar_regular_query,
         ),
     ):
         status = await project_service.get_embedding_status(test_project.id)
+    await _drop_embeddings_stub(project_service)
 
     assert status.vector_tables_exist is True
     assert status.total_chunks == 1
+    assert status.total_embeddings == 0
     assert status.orphaned_chunks == 1
     assert status.reindex_recommended is True
     assert "need vector indexing" in (status.reindex_reason or "")
 
 
 @pytest.mark.asyncio
-async def test_embedding_status_counts_only_current_ready_manifest_rows(
+async def test_embedding_status_external_index_counts_only_current_ready_manifest_rows(
     project_service: ProjectService, test_graph, test_project
 ):
-    """Status is backend-neutral and treats pending or mismatched rows as stale."""
+    """External indexes remain manifest-only because their storage is not inspectable."""
     entity_result = await _execute(
         project_service,
         text("SELECT id FROM entity WHERE project_id = :project_id LIMIT 1"),
@@ -249,12 +290,14 @@ async def test_embedding_status_counts_only_current_ready_manifest_rows(
         entity_id=entity_id,
         project_id=test_project.id,
         chunk_key="ready",
+        vector_index="milvus",
     )
     await _insert_manifest_chunk(
         project_service,
         entity_id=entity_id,
         project_id=test_project.id,
         chunk_key="pending",
+        vector_index="milvus",
         embedding_status="pending",
     )
     await _insert_manifest_chunk(
@@ -262,7 +305,7 @@ async def test_embedding_status_counts_only_current_ready_manifest_rows(
         entity_id=entity_id,
         project_id=test_project.id,
         chunk_key="wrong-index",
-        vector_index="milvus",
+        vector_index="pgvector",
     )
     await _insert_manifest_chunk(
         project_service,
@@ -272,19 +315,25 @@ async def test_embedding_status_counts_only_current_ready_manifest_rows(
         embedding_identity="OtherProvider:other:384",
     )
 
-    with patch.object(
-        type(project_service),
-        "config_manager",
-        new_callable=lambda: property(
-            lambda self: _config_manager_with(semantic_search_enabled=True)
+    with (
+        patch.object(
+            type(project_service),
+            "config_manager",
+            new_callable=lambda: property(
+                lambda self: _config_manager_with(semantic_search_enabled=True)
+            ),
         ),
-    ):
-        with patch.object(
+        patch(
+            "basic_memory.services.project_service.resolve_semantic_vector_index_name",
+            return_value="milvus",
+        ),
+        patch.object(
             project_service.repository,
             "scalar_vec_query",
             side_effect=AssertionError("status must not query vector storage"),
-        ):
-            status = await project_service.get_embedding_status(test_project.id)
+        ),
+    ):
+        status = await project_service.get_embedding_status(test_project.id)
 
     assert status.semantic_search_enabled is True
     assert status.vector_tables_exist is True
@@ -296,28 +345,24 @@ async def test_embedding_status_counts_only_current_ready_manifest_rows(
 
 
 @pytest.mark.asyncio
-async def test_embedding_status_healthy(project_service: ProjectService, test_graph, test_project):
-    """When all entities have embeddings, no reindex recommended."""
-    # Clear any leftover data from prior tests
-    await _execute(project_service, text("DELETE FROM search_vector_chunks"), {})
-
-    # Insert a current, ready manifest row for every search_index entity.
+async def test_embedding_status_reports_missing_builtin_storage(
+    project_service: ProjectService,
+    test_graph,
+    test_project,
+):
+    """A surviving ready manifest must not hide a lost built-in storage table."""
+    await _drop_embeddings_stub(project_service)
     entity_result = await _execute(
         project_service,
-        text("SELECT DISTINCT entity_id FROM search_index WHERE project_id = :project_id"),
+        text("SELECT id FROM entity WHERE project_id = :project_id LIMIT 1"),
         {"project_id": test_project.id},
     )
-    entity_ids = [row[0] for row in entity_result.fetchall()]
-
-    chunk_id = 1
-    for eid in entity_ids:
-        await _insert_manifest_chunk(
-            project_service,
-            entity_id=eid,
-            project_id=test_project.id,
-            chunk_key=f"chunk-{chunk_id}",
-        )
-        chunk_id += 1
+    await _insert_manifest_chunk(
+        project_service,
+        entity_id=entity_result.scalar(),
+        project_id=test_project.id,
+        chunk_key="ready-without-storage",
+    )
 
     with patch.object(
         type(project_service),
@@ -327,6 +372,107 @@ async def test_embedding_status_healthy(project_service: ProjectService, test_gr
         ),
     ):
         status = await project_service.get_embedding_status(test_project.id)
+
+    assert status.vector_tables_exist is False
+    assert status.reindex_recommended is True
+    assert "Vector storage not initialized" in (status.reindex_reason or "")
+
+
+@pytest.mark.asyncio
+async def test_embedding_status_handles_sqlite_vec_unavailable(
+    project_service: ProjectService,
+    test_graph,
+    test_project,
+):
+    """Ready manifests must not look healthy when sqlite-vec cannot load."""
+    if _is_postgres():
+        pytest.skip("sqlite-vec unavailable handling is SQLite-specific.")
+
+    entity_result = await _execute(
+        project_service,
+        text("SELECT id FROM entity WHERE project_id = :project_id LIMIT 1"),
+        {"project_id": test_project.id},
+    )
+    await _insert_manifest_chunk(
+        project_service,
+        entity_id=entity_result.scalar(),
+        project_id=test_project.id,
+        chunk_key="ready-without-extension",
+    )
+    await _create_embeddings_stub(project_service)
+
+    with (
+        patch.object(
+            type(project_service),
+            "config_manager",
+            new_callable=lambda: property(
+                lambda self: _config_manager_with(semantic_search_enabled=True)
+            ),
+        ),
+        patch.object(
+            project_service.repository,
+            "scalar_vec_query",
+            return_value=None,
+        ),
+    ):
+        status = await project_service.get_embedding_status(test_project.id)
+    await _drop_embeddings_stub(project_service)
+
+    assert status.semantic_search_enabled is True
+    assert status.vector_tables_exist is False
+    assert status.reindex_recommended is True
+    assert "sqlite-vec is unavailable" in (status.reindex_reason or "")
+
+
+@pytest.mark.asyncio
+async def test_embedding_status_healthy(project_service: ProjectService, test_graph, test_project):
+    """When all entities have embeddings, no reindex recommended."""
+    # Clear any leftover data from prior tests
+    await _execute(project_service, text("DELETE FROM search_vector_chunks"), {})
+    await _create_embeddings_stub(project_service)
+
+    # Insert a current ready manifest row and matching physical vector for every entity.
+    entity_result = await _execute(
+        project_service,
+        text("SELECT DISTINCT entity_id FROM search_index WHERE project_id = :project_id"),
+        {"project_id": test_project.id},
+    )
+    entity_ids = [row[0] for row in entity_result.fetchall()]
+
+    chunk_id = 1
+    for eid in entity_ids:
+        inserted_chunk_id = await _insert_manifest_chunk(
+            project_service,
+            entity_id=eid,
+            project_id=test_project.id,
+            chunk_key=f"chunk-{chunk_id}",
+        )
+        await _execute(
+            project_service,
+            text(
+                "INSERT INTO search_vector_embeddings (chunk_id, source_hash) "
+                "VALUES (:chunk_id, 'hash')"
+            ),
+            {"chunk_id": inserted_chunk_id},
+        )
+        chunk_id += 1
+
+    with (
+        patch.object(
+            type(project_service),
+            "config_manager",
+            new_callable=lambda: property(
+                lambda self: _config_manager_with(semantic_search_enabled=True)
+            ),
+        ),
+        patch.object(
+            project_service.repository,
+            "scalar_vec_query",
+            side_effect=_scalar_regular_query,
+        ),
+    ):
+        status = await project_service.get_embedding_status(test_project.id)
+    await _drop_embeddings_stub(project_service)
 
     assert status.vector_tables_exist is True
     assert status.total_chunks > 0
@@ -349,6 +495,7 @@ async def test_embedding_status_excludes_stale_entity_ids(
     # Include 'id' column — required NOT NULL on Postgres (regular table),
     # ignored on SQLite (FTS5 virtual table where id is UNINDEXED).
     stale_entity_id = 999999
+    await _create_embeddings_stub(project_service)
     await _execute(
         project_service,
         text(
@@ -361,14 +508,22 @@ async def test_embedding_status_excludes_stale_entity_ids(
         {"id": stale_entity_id, "eid": stale_entity_id, "pid": test_project.id},
     )
 
-    with patch.object(
-        type(project_service),
-        "config_manager",
-        new_callable=lambda: property(
-            lambda self: _config_manager_with(semantic_search_enabled=True)
+    with (
+        patch.object(
+            type(project_service),
+            "config_manager",
+            new_callable=lambda: property(
+                lambda self: _config_manager_with(semantic_search_enabled=True)
+            ),
+        ),
+        patch.object(
+            project_service.repository,
+            "scalar_vec_query",
+            side_effect=_scalar_regular_query,
         ),
     ):
         status = await project_service.get_embedding_status(test_project.id)
+    await _drop_embeddings_stub(project_service)
 
     # The stale entity_id should NOT be counted in total_indexed_entities.
     # Count real entities that have search_index rows (the stale one should be excluded).
@@ -419,19 +574,20 @@ async def _insert_manifest_chunk(
     vector_index: str | None = None,
     embedding_identity: str | None = None,
     embedding_status: str = "ready",
-) -> None:
+) -> int:
     """Insert one manifest row with explicit backend and readiness identity."""
     config = _config_manager_with(semantic_search_enabled=True).config
     active_vector_index = resolve_semantic_vector_index_name(config, config.database_backend)
     active_embedding_identity = configured_embedding_provider_identity(config)
-    await _execute(
+    result = await _execute(
         project_service,
         text(
             "INSERT INTO search_vector_chunks "
             "(entity_id, project_id, chunk_key, chunk_text, source_hash, "
             "entity_fingerprint, embedding_model, vector_index, embedding_status) "
             "VALUES (:entity_id, :project_id, :chunk_key, 'test text', 'hash', "
-            "'fingerprint', :embedding_identity, :vector_index, :embedding_status)"
+            "'fingerprint', :embedding_identity, :vector_index, :embedding_status) "
+            "RETURNING id"
         ),
         {
             "entity_id": entity_id,
@@ -442,3 +598,4 @@ async def _insert_manifest_chunk(
             "embedding_status": embedding_status,
         },
     )
+    return int(result.scalar_one())

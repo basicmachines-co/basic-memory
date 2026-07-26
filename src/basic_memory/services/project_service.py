@@ -12,7 +12,9 @@ from typing import TYPE_CHECKING, Dict, Optional, Sequence
 
 from loguru import logger
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError as SAOperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.sql.base import Executable
 
 from basic_memory import db
 from basic_memory.models import Project
@@ -1083,27 +1085,35 @@ class ProjectService:
         is_postgres = config.database_backend == DatabaseBackend.POSTGRES
         vector_index = resolve_semantic_vector_index_name(config, config.database_backend)
         embedding_identity = configured_embedding_provider_identity(config)
+        uses_builtin_vector_storage = vector_index in {"pgvector", "sqlite-vec"}
 
-        # --- Check vector manifest existence ---
-        # The SQL manifest is authoritative even when vector values live outside
-        # the database, so status never probes backend-specific storage tables.
+        # --- Check vector manifest and built-in storage existence ---
+        # External adapters expose no portable storage-inspection contract, so
+        # their status remains manifest-only. The built-ins are SQL-backed and
+        # must prove that the physical vector table still exists.
         if is_postgres:
             table_check_sql = text(
-                "SELECT COUNT(*) FROM information_schema.tables "
-                "WHERE table_name = 'search_vector_chunks'"
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_name IN ('search_vector_chunks', 'search_vector_embeddings')"
             )
         else:
             table_check_sql = text(
-                "SELECT COUNT(*) FROM sqlite_master "
-                "WHERE type = 'table' AND name = 'search_vector_chunks'"
+                "SELECT name FROM sqlite_master "
+                "WHERE type = 'table' "
+                "AND name IN ('search_vector_chunks', 'search_vector_embeddings')"
             )
 
         async with db.scoped_session(self.session_maker) as session:
             table_result = await self.repository.execute_query(session, table_check_sql, {})
-            vector_tables_exist = (table_result.scalar() or 0) == 1
+            existing_vector_tables = {str(name) for name in table_result.scalars().all()}
+            manifest_exists = "search_vector_chunks" in existing_vector_tables
+            storage_exists = "search_vector_embeddings" in existing_vector_tables
+            vector_tables_exist = manifest_exists and (
+                storage_exists or not uses_builtin_vector_storage
+            )
 
-            manifest_schema_current = vector_tables_exist
-            if vector_tables_exist and not is_postgres:
+            manifest_schema_current = manifest_exists
+            if manifest_exists and not is_postgres:
                 columns_result = await self.repository.execute_query(
                     session,
                     text("PRAGMA table_info(search_vector_chunks)"),
@@ -1116,7 +1126,7 @@ class ProjectService:
                     "embedding_status",
                 }.issubset(manifest_columns)
 
-            if not manifest_schema_current:
+            if not manifest_schema_current or not vector_tables_exist:
                 # Count distinct entities in search index for the recommendation message
                 si_result = await self.repository.execute_query(
                     session,
@@ -1128,6 +1138,17 @@ class ProjectService:
                 )
                 total_indexed_entities = si_result.scalar() or 0
 
+                if manifest_exists and not manifest_schema_current:
+                    reindex_reason = (
+                        "Vector manifest schema is outdated — run: bm reindex --embeddings"
+                    )
+                elif manifest_schema_current:
+                    reindex_reason = "Vector storage not initialized — run: bm reindex --embeddings"
+                else:
+                    reindex_reason = (
+                        "Vector manifest not initialized — run: bm reindex --embeddings"
+                    )
+
                 return EmbeddingStatus(
                     semantic_search_enabled=True,
                     embedding_provider=provider,
@@ -1138,11 +1159,7 @@ class ProjectService:
                     total_indexed_entities=total_indexed_entities,
                     vector_tables_exist=False,
                     reindex_recommended=True,
-                    reindex_reason=(
-                        "Vector manifest schema is outdated — run: bm reindex --embeddings"
-                        if vector_tables_exist
-                        else "Vector manifest not initialized — run: bm reindex --embeddings"
-                    ),
+                    reindex_reason=reindex_reason,
                 )
 
             # --- Count queries (manifest exists) ---
@@ -1150,6 +1167,9 @@ class ProjectService:
             # that remain in derived search tables (search_index, search_vector_chunks)
             entity_exists = (
                 "AND entity_id IN (SELECT id FROM entity WHERE project_id = :project_id)"
+            )
+            chunk_entity_exists = (
+                "AND c.entity_id IN (SELECT id FROM entity WHERE project_id = :project_id)"
             )
 
             si_result = await self.repository.execute_query(
@@ -1172,6 +1192,11 @@ class ProjectService:
                 "AND embedding_model = :embedding_identity "
                 "AND embedding_status = 'ready'"
             )
+            current_ready_chunk = (
+                "c.vector_index = :vector_index "
+                "AND c.embedding_model = :embedding_identity "
+                "AND c.embedding_status = 'ready'"
+            )
 
             chunks_result = await self.repository.execute_query(
                 session,
@@ -1193,25 +1218,91 @@ class ProjectService:
             )
             total_entities_with_chunks = entities_with_chunks_result.scalar() or 0
 
-            embeddings_result = await self.repository.execute_query(
-                session,
-                text(
-                    "SELECT COUNT(*) FROM search_vector_chunks "
-                    f"WHERE project_id = :project_id AND {current_ready} {entity_exists}"
-                ),
-                manifest_params,
-            )
-            total_embeddings = embeddings_result.scalar() or 0
+            if uses_builtin_vector_storage:
+                physical_id = "e.chunk_id" if is_postgres else "e.rowid"
+                embeddings_sql = text(
+                    "SELECT COUNT(*) FROM search_vector_chunks c "
+                    f"JOIN search_vector_embeddings e ON {physical_id} = c.id "
+                    "AND e.source_hash = c.source_hash "
+                    f"WHERE c.project_id = :project_id AND {current_ready_chunk} "
+                    f"{chunk_entity_exists}"
+                )
+                orphaned_sql = text(
+                    "SELECT COUNT(*) FROM search_vector_chunks c "
+                    f"LEFT JOIN search_vector_embeddings e ON {physical_id} = c.id "
+                    "AND e.source_hash = c.source_hash "
+                    "WHERE c.project_id = :project_id "
+                    f"AND (NOT ({current_ready_chunk}) OR {physical_id} IS NULL) "
+                    f"{chunk_entity_exists}"
+                )
 
-            orphaned_result = await self.repository.execute_query(
-                session,
-                text(
-                    "SELECT COUNT(*) FROM search_vector_chunks "
-                    f"WHERE project_id = :project_id AND NOT ({current_ready}) {entity_exists}"
-                ),
-                manifest_params,
-            )
-            orphaned_chunks = orphaned_result.scalar() or 0
+                async def _physical_vector_count(query: Executable) -> int:
+                    if is_postgres:
+                        result = await self.repository.execute_query(
+                            session,
+                            query,
+                            manifest_params,
+                        )
+                        return result.scalar() or 0
+                    count = await self.repository.scalar_vec_query(
+                        session,
+                        query,
+                        manifest_params,
+                    )
+                    if count is None:
+                        raise SAOperationalError(
+                            str(query),
+                            {},
+                            Exception("no such module: vec0"),
+                        )
+                    return count
+
+                try:
+                    total_embeddings = await _physical_vector_count(embeddings_sql)
+                    orphaned_chunks = await _physical_vector_count(orphaned_sql)
+                except SAOperationalError as exc:
+                    # Trigger: sqlite_master can list vec0 storage even though this
+                    # Python runtime cannot load the sqlite-vec extension.
+                    # Why: ready manifest rows do not prove vectors are searchable.
+                    # Outcome: surface the missing dependency and require a rebuild.
+                    if is_postgres or "no such module: vec0" not in str(exc).lower():
+                        raise
+                    return EmbeddingStatus(
+                        semantic_search_enabled=True,
+                        embedding_provider=provider,
+                        embedding_model=model,
+                        embedding_dimensions=dimensions,
+                        embedding_document_prefix_set=document_prefix_set,
+                        embedding_query_prefix_set=query_prefix_set,
+                        total_indexed_entities=total_indexed_entities,
+                        vector_tables_exist=False,
+                        reindex_recommended=True,
+                        reindex_reason=(
+                            "SQLite vector tables exist but sqlite-vec is unavailable in this "
+                            "Python environment — install/update basic-memory, then run: "
+                            "bm reindex --embeddings"
+                        ),
+                    )
+            else:
+                embeddings_result = await self.repository.execute_query(
+                    session,
+                    text(
+                        "SELECT COUNT(*) FROM search_vector_chunks "
+                        f"WHERE project_id = :project_id AND {current_ready} {entity_exists}"
+                    ),
+                    manifest_params,
+                )
+                total_embeddings = embeddings_result.scalar() or 0
+
+                orphaned_result = await self.repository.execute_query(
+                    session,
+                    text(
+                        "SELECT COUNT(*) FROM search_vector_chunks "
+                        f"WHERE project_id = :project_id AND NOT ({current_ready}) {entity_exists}"
+                    ),
+                    manifest_params,
+                )
+                orphaned_chunks = orphaned_result.scalar() or 0
 
             # --- Reindex recommendation logic (priority order) ---
             reindex_recommended = False

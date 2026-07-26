@@ -1,12 +1,12 @@
-"""Integration regression test for manifest-backed status with a real vec0 table.
+"""Integration regression test for built-in storage status with a real vec0 table.
 
 Regression for #658: after a successful `bm reindex --embeddings`, `bm project info`
 still reported "sqlite-vec is unavailable", "Indexed 0/N", and "Chunks 0", and
 recommended an unnecessary reindex.
 
-Status now reads the authoritative SQL manifest instead of reopening backend-specific
-vector storage. This test builds and writes a real vec0 table, then proves a fresh project
-status connection can report the ready manifest without loading sqlite-vec.
+Status loads sqlite-vec on the same connection used to inspect the physical table. This
+test builds and writes a real vec0 table, then proves a fresh status connection can verify
+the ready manifest and its matching vector without a false unavailable result.
 """
 
 import os
@@ -194,7 +194,7 @@ async def test_embedding_status_reads_real_vec0_table(engine_factory, test_proje
         status = await project_service.get_embedding_status(project_id)
 
     assert status.semantic_search_enabled is True
-    # Status reads the ready manifest, so it never needs to reopen the vec0 table.
+    # Status reloads sqlite-vec on this fresh connection and verifies the physical row.
     assert status.vector_tables_exist is True
     assert status.reindex_recommended is False
     assert status.reindex_reason is None
