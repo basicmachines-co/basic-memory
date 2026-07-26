@@ -7,12 +7,37 @@ import math
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
+from requests import exceptions as requests_exceptions
 
 from basic_memory.repository.rerank_provider import RerankProvider, validate_rerank_scores
-from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
+from basic_memory.repository.semantic_errors import (
+    RerankProviderContractError,
+    RerankTransientError,
+    SemanticDependenciesMissingError,
+)
 
 if TYPE_CHECKING:
     from fastembed.rerank.cross_encoder import TextCrossEncoder  # pragma: no cover
+
+
+_TRANSIENT_DOWNLOAD_STATUS_CODES = frozenset({408, 425, 429})
+
+
+def _is_transient_model_load_error(
+    exc: requests_exceptions.RequestException | ValueError,
+    model_name: str,
+) -> bool:
+    """Classify recoverable first-download failures without hiding model/config errors."""
+    if isinstance(exc, (requests_exceptions.ConnectionError, requests_exceptions.Timeout)):
+        return True
+    if isinstance(exc, requests_exceptions.HTTPError):
+        status_code = exc.response.status_code if exc.response is not None else None
+        return status_code in _TRANSIENT_DOWNLOAD_STATUS_CODES or (
+            status_code is not None and status_code >= 500
+        )
+    # FastEmbed retries Hugging Face/GCS downloads internally and, after exhausting
+    # both sources, replaces the transport cause with this model-specific ValueError.
+    return str(exc) == f"Could not load model {model_name} from any source."
 
 
 class FastEmbedRerankProvider(RerankProvider):
@@ -61,7 +86,14 @@ class FastEmbedRerankProvider(RerankProvider):
             return self._model
         async with self._model_lock:
             if self._model is None:
-                self._model = await asyncio.to_thread(self._create_model)
+                try:
+                    self._model = await asyncio.to_thread(self._create_model)
+                except (requests_exceptions.RequestException, ValueError) as exc:
+                    if not _is_transient_model_load_error(exc, self.model_name):
+                        raise
+                    raise RerankTransientError(
+                        f"FastEmbed reranker model download failed temporarily: {self.model_name}"
+                    ) from exc
                 logger.info("FastEmbed reranker loaded: model_name={model}", model=self.model_name)
             return self._model
 
@@ -80,6 +112,8 @@ class FastEmbedRerankProvider(RerankProvider):
 
 def _sigmoid(x: float) -> float:
     """Map a cross-encoder logit to a [0, 1] relevance, clamping to avoid overflow."""
+    if not math.isfinite(x):
+        raise RerankProviderContractError(f"Reranker returned a non-finite logit: {x!r}")
     # exp(710+) overflows a float; clamp well before that — the tails are ~0/~1 anyway.
     x = max(-30.0, min(30.0, x))
     return 1.0 / (1.0 + math.exp(-x))

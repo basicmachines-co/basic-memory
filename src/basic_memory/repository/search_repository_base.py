@@ -868,12 +868,19 @@ class SearchRepositoryBase(ABC):
         not a hard guarantee — a single note dominating the entire nearest-neighbour set
         can still yield fewer unique rows (a pathological corpus shape).
         """
-        candidate_limit = max(self._semantic_vector_k, (limit + offset) * 10)
-        if self._should_rerank(query_text):
-            candidate_limit = max(
-                candidate_limit, self._reranker_candidates * RERANK_POOL_CHUNK_FANOUT
+        if self._should_rerank(query_text) and offset < self._reranker_candidates:
+            # Trigger: the requested page intersects the reranked pool.
+            # Why: including offset in this window lets later pages discover new
+            # documents that the reranker can promote ahead of page-one results,
+            # causing duplicates or skips across otherwise identical page sizes.
+            # Outcome: every page intersecting the pool reranks the same retrieval
+            # window; page size still controls how much tail headroom is available.
+            return max(
+                self._semantic_vector_k,
+                limit * 10,
+                self._reranker_candidates * RERANK_POOL_CHUNK_FANOUT,
             )
-        return candidate_limit
+        return max(self._semantic_vector_k, (limit + offset) * 10)
 
     def _rerank_document_text(self, row: SearchIndexRow) -> str:
         """Build the document text handed to the cross-encoder for one candidate.

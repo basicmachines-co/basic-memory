@@ -4,10 +4,12 @@ import builtins
 import sys
 
 import pytest
+from requests import Response, exceptions as requests_exceptions
 
 from basic_memory.repository.fastembed_rerank_provider import FastEmbedRerankProvider
 from basic_memory.repository.semantic_errors import (
     RerankProviderContractError,
+    RerankTransientError,
     SemanticDependenciesMissingError,
 )
 
@@ -36,6 +38,12 @@ def _install_stub(monkeypatch) -> None:
     setattr(module, "TextCrossEncoder", _StubCrossEncoder)
     monkeypatch.setitem(sys.modules, "fastembed.rerank.cross_encoder", module)
     _StubCrossEncoder.init_count = 0
+
+
+def _http_error(status_code: int) -> requests_exceptions.HTTPError:
+    response = Response()
+    response.status_code = status_code
+    return requests_exceptions.HTTPError(f"HTTP {status_code}", response=response)
 
 
 @pytest.mark.asyncio
@@ -84,6 +92,26 @@ async def test_rerank_sigmoid_handles_extreme_logits(monkeypatch):
     scores = await provider.rerank("q", ["a", "b"])
     assert scores[0] == pytest.approx(0.0, abs=1e-6)
     assert scores[1] == pytest.approx(1.0, abs=1e-6)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("logit", [float("nan"), float("inf"), float("-inf")])
+async def test_rerank_rejects_non_finite_logits(monkeypatch, logit):
+    module = type(sys)("fastembed.rerank.cross_encoder")
+
+    class _NonFinite:
+        def __init__(self, **kwargs):
+            pass
+
+        def rerank(self, query, documents):
+            yield logit
+
+    setattr(module, "TextCrossEncoder", _NonFinite)
+    monkeypatch.setitem(sys.modules, "fastembed.rerank.cross_encoder", module)
+
+    provider = FastEmbedRerankProvider(model_name="stub-reranker")
+    with pytest.raises(RerankProviderContractError, match="non-finite logit"):
+        await provider.rerank("q", ["a"])
 
 
 @pytest.mark.asyncio
@@ -141,6 +169,65 @@ async def test_missing_dependency_raises_actionable_error(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", _raising_import)
     provider = FastEmbedRerankProvider(model_name="stub-reranker")
     with pytest.raises(SemanticDependenciesMissingError):
+        await provider.rerank("auth", ["auth doc"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "load_error",
+    [
+        requests_exceptions.Timeout("download timed out"),
+        requests_exceptions.ConnectionError("connection reset"),
+        _http_error(503),
+        ValueError("Could not load model stub-reranker from any source."),
+    ],
+)
+async def test_transient_model_download_error_is_classified(monkeypatch, load_error):
+    module = type(sys)("fastembed.rerank.cross_encoder")
+
+    class _DownloadFailure:
+        def __init__(self, **kwargs):
+            raise load_error
+
+    setattr(module, "TextCrossEncoder", _DownloadFailure)
+    monkeypatch.setitem(sys.modules, "fastembed.rerank.cross_encoder", module)
+
+    provider = FastEmbedRerankProvider(model_name="stub-reranker")
+    with pytest.raises(RerankTransientError, match="model download failed temporarily"):
+        await provider.rerank("auth", ["auth doc"])
+    assert provider._model is None
+
+
+@pytest.mark.asyncio
+async def test_unsupported_model_error_remains_permanent(monkeypatch):
+    module = type(sys)("fastembed.rerank.cross_encoder")
+
+    class _UnsupportedModel:
+        def __init__(self, **kwargs):
+            raise ValueError("Model unknown is not supported in TextCrossEncoder.")
+
+    setattr(module, "TextCrossEncoder", _UnsupportedModel)
+    monkeypatch.setitem(sys.modules, "fastembed.rerank.cross_encoder", module)
+
+    provider = FastEmbedRerankProvider(model_name="unknown")
+    with pytest.raises(ValueError, match="not supported"):
+        await provider.rerank("auth", ["auth doc"])
+
+
+@pytest.mark.asyncio
+async def test_download_auth_error_remains_permanent(monkeypatch):
+    module = type(sys)("fastembed.rerank.cross_encoder")
+    auth_error = _http_error(401)
+
+    class _Unauthorized:
+        def __init__(self, **kwargs):
+            raise auth_error
+
+    setattr(module, "TextCrossEncoder", _Unauthorized)
+    monkeypatch.setitem(sys.modules, "fastembed.rerank.cross_encoder", module)
+
+    provider = FastEmbedRerankProvider(model_name="private-model")
+    with pytest.raises(requests_exceptions.HTTPError):
         await provider.rerank("auth", ["auth doc"])
 
 

@@ -227,6 +227,23 @@ def test_candidate_limit_over_fetches_chunks_for_rerank_pool():
     assert repo._candidate_limit(limit=1, offset=0, query_text="") == 10  # no query → no bump
 
 
+def test_candidate_limit_is_stable_across_pages_that_intersect_rerank_pool():
+    """Offset pagination must rerank the same candidate window on every pool page."""
+    repo = _unit_repo()
+    repo._semantic_vector_k = 5
+    repo._reranker_candidates = 20
+    repo._rerank_provider = _FakeReranker({})
+
+    first_page_limit = repo._candidate_limit(limit=10, offset=0, query_text="auth")
+
+    assert first_page_limit == 100
+    assert repo._candidate_limit(limit=10, offset=10, query_text="auth") == first_page_limit
+    assert repo._candidate_limit(limit=10, offset=19, query_text="auth") == first_page_limit
+    # Once the requested page is entirely beyond the rerank pool, normal
+    # offset-aware retrieval sizing resumes.
+    assert repo._candidate_limit(limit=10, offset=20, query_text="auth") == 300
+
+
 @pytest.mark.asyncio
 async def test_rerank_paginate_noop_paths():
     repo = _unit_repo()
