@@ -571,7 +571,5 @@ class LocalNoteContentMaterializationProvider:
         await InlineNoteFileDeleteEnqueuer(
             storage,
             vacate_clearer=RepositoryMoveVacateClearer(session_maker=self.session_maker),
-        ).enqueue_note_file_delete(
-            plan_note_file_delete_job_request(accepted.file_delete)
-        )
+        ).enqueue_note_file_delete(plan_note_file_delete_job_request(accepted.file_delete))
         return accepted

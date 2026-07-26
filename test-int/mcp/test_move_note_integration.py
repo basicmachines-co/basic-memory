@@ -5,9 +5,21 @@ Tests the complete move note workflow: MCP client -> MCP server -> FastAPI -> da
 """
 
 import json
+from hashlib import sha256
 
 import pytest
 from fastmcp import Client
+
+from basic_memory import db
+from basic_memory.index.local_project import (
+    LocalProjectIndexRuntimeFactory,
+    run_local_project_index_for_project,
+)
+from basic_memory.index.note_content_materialization import InlineNoteFileDeleteEnqueuer
+from basic_memory.repository.entity_repository import EntityRepository
+from basic_memory.repository.note_content_repository import NoteContentRepository
+from basic_memory.repository.note_file_vacate_repository import NoteFileVacateRepository
+from basic_memory.runtime.cleanup import RuntimeNoteFileDeleteJobRequest
 
 
 @pytest.mark.asyncio
@@ -68,6 +80,98 @@ async def test_move_note_basic_operation(mcp_server, app, test_project):
 
         # Should return "Note Not Found" message
         assert "Note Not Found" in read_original.content[0].text
+
+
+@pytest.mark.parametrize("force_full", [False, True], ids=["observed", "force-full"])
+@pytest.mark.asyncio
+async def test_move_note_lingering_source_is_not_reindexed(
+    mcp_server,
+    app,
+    test_project,
+    project_config,
+    engine_factory,
+    monkeypatch,
+    force_full: bool,
+):
+    """A move-vacated source is skipped even across the unpublished-checksum race."""
+    del app
+    source_relative = "source/Move Orphan Race.md"
+    destination_relative = "archive/move-orphan-race.md"
+    source_path = project_config.home / source_relative
+    _, session_maker = engine_factory
+    entity_repository = EntityRepository(project_id=test_project.id)
+    note_content_repository = NoteContentRepository(project_id=test_project.id)
+    vacate_repository = NoteFileVacateRepository(project_id=test_project.id)
+
+    async with Client(mcp_server) as client:
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Move Orphan Race",
+                "directory": "source",
+                "content": "# Move Orphan Race\n\nThis source object must never become a ghost.",
+            },
+        )
+
+        source_checksum = sha256(source_path.read_bytes()).hexdigest()
+        async with db.scoped_session(session_maker) as session:
+            entity = await entity_repository.get_by_file_path(session, source_relative)
+            assert entity is not None
+            note_content = await note_content_repository.get_by_entity_id(session, entity.id)
+            assert note_content is not None
+            assert note_content.db_checksum == source_checksum
+            moved_entity_id = entity.id
+
+            # Reproduce a write that reached storage before its publisher recorded checksums.
+            entity.checksum = None
+            note_content.file_checksum = None
+
+        async def leave_source_cleanup_pending(
+            self: InlineNoteFileDeleteEnqueuer,
+            request: RuntimeNoteFileDeleteJobRequest,
+        ) -> None:
+            del self, request
+
+        # The enqueue boundary is the only failure injection; move, materialization, repositories,
+        # storage, and the subsequent project index all run through their real integration paths.
+        monkeypatch.setattr(
+            InlineNoteFileDeleteEnqueuer,
+            "enqueue_note_file_delete",
+            leave_source_cleanup_pending,
+        )
+
+        move_result = await client.call_tool(
+            "move_note",
+            {
+                "project": test_project.name,
+                "identifier": "Move Orphan Race",
+                "destination_path": destination_relative,
+            },
+        )
+        assert "✅ Note moved successfully" in move_result.content[0].text
+        assert source_path.exists()
+
+        async with db.scoped_session(session_maker) as session:
+            markers = await vacate_repository.load_vacate_markers(
+                session,
+                [source_relative],
+            )
+        assert markers[source_relative].file_checksum == source_checksum
+
+        await run_local_project_index_for_project(
+            test_project,
+            runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+            force_full=force_full,
+        )
+
+        async with db.scoped_session(session_maker) as session:
+            ghost = await entity_repository.get_by_file_path(session, source_relative)
+            moved = await entity_repository.get_by_file_path(session, destination_relative)
+
+        assert ghost is None
+        assert moved is not None
+        assert moved.id == moved_entity_id
 
 
 @pytest.mark.asyncio

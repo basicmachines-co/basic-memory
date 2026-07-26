@@ -279,7 +279,8 @@ class FileIndexChecker:
         if not targets:
             return FileIndexPlan(paths_to_read=(), decisions=())
 
-        if not any(target.observed_checksum is not None for target in targets):
+        legacy_targets = not any(target.observed_checksum is not None for target in targets)
+        if legacy_targets and (self.moved_entity_source is None or self.move_vacate_source is None):
             return plan_legacy_file_index_targets(targets)
 
         indexed_checksum_by_path = await self.indexed_checksum_source.load_indexed_file_checksums(
@@ -287,10 +288,22 @@ class FileIndexChecker:
         )
         inspected: list[_InspectedTarget] = []
         for target in targets:
-            decision, current_checksum = await self.inspect_target(
-                target,
-                indexed_checksum=indexed_checksum_by_path.get(target.path),
-            )
+            if not legacy_targets:
+                decision, current_checksum = await self.inspect_target(
+                    target,
+                    indexed_checksum=indexed_checksum_by_path.get(target.path),
+                )
+            else:
+                # Forced-full and legacy batches still read every non-orphan target. Load current
+                # metadata only so the move-orphan safety gate can recognize a lingering source.
+                decision = FileIndexDecision(
+                    path=target.path,
+                    status=FileIndexDecisionStatus.read,
+                    reason=f"legacy target requires indexing: {target.path}",
+                )
+                current_checksum = await self.current_checksum_source.load_current_file_checksum(
+                    target.path
+                )
             inspected.append(
                 _InspectedTarget(
                     target=target,

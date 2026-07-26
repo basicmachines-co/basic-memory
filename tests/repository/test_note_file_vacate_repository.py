@@ -77,7 +77,9 @@ async def test_clear_vacate_is_checksum_guarded(session_maker) -> None:
         await repo.clear_vacate(session, file_path="koncept/note.md", file_checksum="WRONG")
         await session.commit()
     async with session_maker() as session:
-        assert set(await repo.load_vacate_markers(session, ["koncept/note.md"])) == {"koncept/note.md"}
+        assert set(await repo.load_vacate_markers(session, ["koncept/note.md"])) == {
+            "koncept/note.md"
+        }
 
     async with session_maker() as session:
         await repo.clear_vacate(session, file_path="koncept/note.md", file_checksum="def")

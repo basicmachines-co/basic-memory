@@ -632,9 +632,7 @@ async def _run_accepted_note_update(
                 or current_head_in_storage
             )
             if not relay_supersede:
-                reject_stale_base_checksum(
-                    current_db_checksum=current_note_content.db_checksum
-                )
+                reject_stale_base_checksum(current_db_checksum=current_note_content.db_checksum)
         try:
             prepared_write = await prepare_accepted_note_replace(
                 preparer,
@@ -754,6 +752,14 @@ async def _run_accepted_note_move(
         dependencies=dependencies,
     )
     existing_file_path = entity.file_path
+    # Capture the source checksum before persisting the move mutates note_content to the
+    # destination version. When materialization has not published a file checksum yet, the
+    # accepted DB checksum still identifies the exact Markdown bytes the source write produced.
+    vacated_source_checksum = (
+        current_note_content.file_checksum
+        if current_note_content.file_checksum is not None
+        else current_note_content.db_checksum
+    )
     # Same-path moves fail fast everywhere by decision (2026-07-14): cloud's
     # pre-unification route returned a 200 no-op, local rejected — the unified
     # runner keeps the rejection so a mistaken identity move surfaces instead
@@ -809,17 +815,15 @@ async def _run_accepted_note_move(
     )
     # Record that this move vacated the source path, atomically with the move. A later index of the
     # still-present source object then recognizes it as this move's leftover rather than a new note
-    # and skips it (basic-memory-cloud#1601). Recorded even when the source checksum is unknown (so
-    # no physical cleanup is scheduled) — the marker's existence is what the gate needs, and the
-    # checksum guard only affects clearing. The repository is pure per-tenant DB logic, identical
-    # for local and cloud, so it is built inline on the move's own session rather than injected.
+    # and skips it (basic-memory-cloud#1601). The accepted DB checksum closes the window where the
+    # source write reached storage but its file checksum did not reach note_content. The repository
+    # is pure per-tenant DB logic, identical for local and cloud, so it is built inline on the
+    # move's own session rather than injected.
     await NoteFileVacateRepository(project.id).record_vacate(
         session,
         entity_id=entity.id,
         file_path=existing_file_path,
-        file_checksum=(
-            current_note_content.file_checksum if current_note_content is not None else None
-        ),
+        file_checksum=vacated_source_checksum,
     )
     return plan_accepted_note_write_change(
         status_code=200,

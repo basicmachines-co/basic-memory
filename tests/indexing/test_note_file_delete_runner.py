@@ -109,7 +109,9 @@ class FakeVacateClearer:
     def __init__(self) -> None:
         self.cleared: list[tuple[int, str, str]] = []
 
-    async def clear_move_vacate(self, *, project_id: int, file_path: str, file_checksum: str) -> None:
+    async def clear_move_vacate(
+        self, *, project_id: int, file_path: str, file_checksum: str
+    ) -> None:
         self.cleared.append((project_id, file_path, file_checksum))
 
 

@@ -125,9 +125,7 @@ class StubMoveVacateSource:
     markers: dict[str, MoveVacateMarker] = field(default_factory=dict)
     calls: list[tuple[str, ...]] = field(default_factory=list)
 
-    async def load_vacate_markers(
-        self, file_paths: Sequence[str]
-    ) -> dict[str, MoveVacateMarker]:
+    async def load_vacate_markers(self, file_paths: Sequence[str]) -> dict[str, MoveVacateMarker]:
         self.calls.append(tuple(file_paths))
         return {p: self.markers[p] for p in file_paths if p in self.markers}
 
@@ -357,7 +355,9 @@ async def test_checker_indexes_replacement_note_at_a_vacated_path() -> None:
         current={"koncept/note.md": "other-note-checksum"},
         markers={"koncept/note.md": MoveVacateMarker(entity_id=42, checksum="original-checksum")},
         # The other note (a real twin) exists, but it is not the marker's entity.
-        entity_facts={42: MovedEntityFacts(file_path="arkiv/note.md", checksum="original-checksum")},
+        entity_facts={
+            42: MovedEntityFacts(file_path="arkiv/note.md", checksum="original-checksum")
+        },
     )
 
     plan = await checker.detect(
@@ -419,9 +419,7 @@ async def test_checker_indexes_byte_identical_copy_without_marker() -> None:
         entity_facts={7: MovedEntityFacts(file_path="notes/original.md", checksum="shared")},
     )
 
-    plan = await checker.detect(
-        [FileIndexTarget(path="notes/copy.md", observed_checksum="shared")]
-    )
+    plan = await checker.detect([FileIndexTarget(path="notes/copy.md", observed_checksum="shared")])
 
     assert plan.paths_to_read == ("notes/copy.md",)
 
