@@ -29,6 +29,17 @@ def _project_string(project: ProjectMetadata, field: str) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+def _project_route_argument(project: ProjectMetadata) -> tuple[str, str] | None:
+    """Return the tool argument that preserves the discovered project's route."""
+    if _project_string(project, "source") == "local+cloud":
+        project_name = _project_string(project, "name")
+        if project_name:
+            return "project", project_name
+
+    project_id = _project_string(project, "external_id")
+    return ("project_id", project_id) if project_id else None
+
+
 def _select_project(
     projects: list[ProjectMetadata],
     *,
@@ -118,17 +129,18 @@ def _selection_guide(
     options = []
     for project in projects:
         name = _project_string(project, "qualified_name") or _project_string(project, "name")
-        project_id = _project_string(project, "external_id")
-        if name and project_id:
-            options.append(f'- `{name}` (`project_id="{project_id}"`)')
+        route_argument = _project_route_argument(project)
+        if name and route_argument:
+            argument_name, argument_value = route_argument
+            options.append(f'- `{name}` (`{argument_name}="{argument_value}"`)')
 
     project_options = "\n".join(options) if options else "- Call `list_memory_projects()`"
     next_step = dedent(
         """
         Ask the user which project to use. Once they choose, continue with
-        `recent_activity(project_id="...", timeframe="30d")` using the `project_id` listed for
-        that choice, and keep that same `project_id` in later note calls. Do not read, search,
-        or write notes until one concrete project has been selected.
+        `recent_activity(...)` using the route argument listed for that choice, and keep that
+        same argument in later note calls. Do not read, search, or write notes until one concrete
+        project has been selected.
         """
     ).strip()
     return (
@@ -181,19 +193,24 @@ async def getting_started(
     if selected_project is None:
         return _selection_guide(projects, requested_project=project)
 
-    project_id = _project_string(selected_project, "external_id")
-    if project_id is None:
-        raise ValueError("Selected project is missing external_id")
+    route_argument = _project_route_argument(selected_project)
+    if route_argument is None:
+        raise ValueError("Selected project is missing a tool route")
+    argument_name, argument_value = route_argument
 
     # Show current activity, but do NOT decide "empty" from it: recent_activity is
     # timeframe-limited, so an established base that is simply quiet looks identical to a
     # brand-new one. Let the model judge from the activity output (which already carries its own
     # empty-state guidance) and branch its own response, rather than asserting emptiness here.
-    activity_text = str(await recent_activity(timeframe="30d", project_id=project_id)).strip()
+    if argument_name == "project":
+        activity = await recent_activity(timeframe="30d", project=argument_value)
+    else:
+        activity = await recent_activity(timeframe="30d", project_id=argument_value)
+    activity_text = str(activity).strip()
 
-    # Every example call keeps the exact project the prompt inspected. Names can collide across
-    # cloud workspaces, while the external id remains a stable routing authority.
-    project_arg = f'project_id="{project_id}", '
+    # Every example call keeps the exact route the prompt inspected. Cloud-only rows use their
+    # collision-safe external id; merged local+cloud rows retain the configured project route.
+    project_arg = f'{argument_name}="{argument_value}", '
 
     introduction = dedent(
         """

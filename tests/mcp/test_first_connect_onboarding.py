@@ -233,6 +233,50 @@ async def test_getting_started_prefers_constrained_project(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_getting_started_preserves_merged_local_project_route(monkeypatch):
+    """A local+cloud discovery row must keep the configured project route."""
+
+    async def fake_list_memory_projects(**_kwargs: object) -> dict[str, object]:
+        return {
+            "projects": [
+                {
+                    "name": "main",
+                    "qualified_name": "personal/main",
+                    "external_id": "cloud-main",
+                    "source": "local+cloud",
+                    "is_default": True,
+                    "workspace_is_default": True,
+                }
+            ],
+            "default_project": "main",
+            "constrained_project": None,
+        }
+
+    activity_calls: list[dict[str, object]] = []
+
+    async def fake_recent_activity(**kwargs: object) -> str:
+        activity_calls.append(kwargs)
+        return "# Recent activity\n\nNo recent activity"
+
+    monkeypatch.setattr(
+        "basic_memory.mcp.prompts.getting_started.list_memory_projects",
+        fake_list_memory_projects,
+    )
+    monkeypatch.setattr(
+        "basic_memory.mcp.prompts.getting_started.recent_activity",
+        fake_recent_activity,
+    )
+
+    result = await getting_started()  # pyright: ignore[reportGeneralTypeIssues]
+
+    assert activity_calls == [{"timeframe": "30d", "project": "main"}]
+    assert 'write_note(project="main"' in result
+    assert 'read_note(project="main"' in result
+    assert 'search_notes(project="main"' in result
+    assert "cloud-main" not in result
+
+
+@pytest.mark.asyncio
 async def test_getting_started_without_projects_stops_before_note_actions(monkeypatch):
     """A fresh installation must establish a project before advertising note operations."""
 
@@ -277,6 +321,7 @@ async def test_getting_started_requires_qualified_duplicate_project_selection(mo
                     "name": "notes",
                     "qualified_name": "personal/notes",
                     "external_id": "project-personal",
+                    "source": "local+cloud",
                     "is_default": False,
                     "workspace_is_default": True,
                 },
@@ -284,6 +329,7 @@ async def test_getting_started_requires_qualified_duplicate_project_selection(mo
                     "name": "notes",
                     "qualified_name": "team/notes",
                     "external_id": "project-team",
+                    "source": "cloud",
                     "is_default": False,
                     "workspace_is_default": False,
                 },
@@ -312,7 +358,9 @@ async def test_getting_started_requires_qualified_duplicate_project_selection(mo
     assert 'requested project "notes" did not identify one unique project' in result
     assert "`personal/notes`" in result
     assert "`team/notes`" in result
-    assert 'recent_activity(project_id="...", timeframe="30d")' in result
+    assert 'project="notes"' in result
+    assert 'project_id="project-team"' in result
+    assert "`recent_activity(...)`" in result
     assert "invoke this getting-started prompt" not in result
     assert "write_note(" not in result
     assert "read_note(" not in result
