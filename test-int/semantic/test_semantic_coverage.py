@@ -150,7 +150,7 @@ async def test_postgres_hybrid_preserves_candidate_windows(
     search_service = await create_search_service(
         postgres_engine_factory, PG_FASTEMBED, tmp_path, embedding_provider=provider
     )
-    await seed_benchmark_notes(search_service, note_count=20)
+    await seed_benchmark_notes(search_service, note_count=120)
 
     repo = cast(Any, search_service.repository)
     repo._rerank_provider = None
@@ -211,7 +211,22 @@ async def test_postgres_hybrid_preserves_candidate_windows(
 
     assert growing_prefix_results
     assert reranker.calls == 2
-    assert candidate_limits == [80]
+    assert candidate_limits == [90, 80]
+
+    candidate_limits.clear()
+    large_page_with_probe = await search_service.search(
+        SearchQuery(
+            text="database migration schema",
+            retrieval_mode=SearchRetrievalMode.HYBRID,
+            entity_types=[SearchItemType.ENTITY],
+            min_similarity=0.0,
+        ),
+        limit=101,
+    )
+
+    assert len(large_page_with_probe) == 101
+    assert reranker.calls == 3
+    assert candidate_limits == [890, 80]
 
 
 @pytest.mark.asyncio

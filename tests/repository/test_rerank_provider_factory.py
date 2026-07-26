@@ -134,6 +134,17 @@ def test_litellm_provider_rejects_unroutable_model_name():
         )
 
 
+@pytest.mark.parametrize("provider", ["fastembed", "litellm"])
+def test_enabled_provider_rejects_blank_model(provider):
+    """Every enabled provider needs a model before its first search."""
+    with pytest.raises(ValidationError, match="reranker_model must not be blank"):
+        _config(
+            reranker_enabled=True,
+            reranker_provider=provider,
+            reranker_model=" \t ",
+        )
+
+
 def test_reset_clears_cache():
     config = _config(reranker_enabled=True, reranker_provider="fastembed")
     first = create_rerank_provider(config)

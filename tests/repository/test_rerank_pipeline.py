@@ -226,8 +226,8 @@ def test_candidate_limit_over_fetches_chunks_for_rerank_pool():
     assert repo._candidate_limit(limit=1, offset=0, query_text="") == 10  # no query → no bump
 
 
-def test_candidate_limit_is_stable_across_reranked_pagination_requests():
-    """Offset and growing-prefix pagination must rerank one candidate window."""
+def test_candidate_limit_expands_only_for_results_beyond_rerank_pool():
+    """The fixed rerank window grows only enough to supply the requested tail."""
     repo = _unit_repo()
     repo._semantic_vector_k = 5
     repo._reranker_candidates = 20
@@ -238,10 +238,11 @@ def test_candidate_limit_is_stable_across_reranked_pagination_requests():
     assert first_page_limit == 20 * RERANK_POOL_CHUNK_FANOUT
     assert repo._candidate_limit(limit=20, offset=0, query_text="auth") == first_page_limit
     assert repo._candidate_limit(limit=10, offset=10, query_text="auth") == first_page_limit
-    assert repo._candidate_limit(limit=10, offset=19, query_text="auth") == first_page_limit
-    # Once the requested page is entirely beyond the rerank pool, normal
-    # offset-aware retrieval sizing resumes.
-    assert repo._candidate_limit(limit=10, offset=20, query_text="auth") == 300
+    assert repo._candidate_limit(limit=21, offset=0, query_text="auth") == 90
+    assert repo._candidate_limit(limit=10, offset=19, query_text="auth") == 170
+    assert repo._candidate_limit(limit=10, offset=20, query_text="auth") == 180
+    # Large first pages still retrieve their untouched tail and pagination probe.
+    assert repo._candidate_limit(limit=101, offset=0, query_text="auth") == 890
 
 
 @pytest.mark.asyncio
@@ -300,17 +301,57 @@ async def test_rerank_paginate_preserves_pool_before_tail_at_zero_floor():
 
 @pytest.mark.asyncio
 async def test_rerank_paginate_skips_provider_on_deep_page():
-    """A page entirely past the rerank pool must not spend a (possibly paid) call."""
+    """Deep pages skip the provider and exclude every stable-prefix row."""
     repo = _unit_repo()
     reranker = _FakeReranker({"Alpha": 0.9})
     repo._rerank_provider = reranker
     repo._reranker_candidates = 2
-    rows = [_row(id=i, title=f"n{i}") for i in range(5)]
+    stable_rows = [_row(id=1, title="n1"), _row(id=2, title="n2")]
+    expanded_rows = [
+        _row(id=3, title="newly strengthened"),
+        stable_rows[0],
+        stable_rows[1],
+        _row(id=4, title="n4"),
+        _row(id=5, title="n5"),
+    ]
 
-    result = await repo._rerank_and_paginate("auth", rows, offset=2, limit=2)
+    result = await repo._rerank_and_paginate(
+        "auth",
+        expanded_rows,
+        offset=2,
+        limit=2,
+        stable_rows=stable_rows,
+    )
 
     assert reranker.calls == 0
-    assert [r.id for r in result] == [2, 3]  # plain retrieval slice
+    assert [r.id for r in result] == [3, 4]
+
+
+@pytest.mark.asyncio
+async def test_rerank_paginate_keeps_expanded_candidates_out_of_stable_prefix():
+    """A larger tail retrieval cannot replace candidates in the reranked prefix."""
+    repo = _unit_repo()
+    reranker = _FakeReranker({"Alpha": 0.1, "Bravo": 0.9, "Charlie": 1.0})
+    repo._rerank_provider = reranker
+    repo._reranker_candidates = 2
+    stable_rows = [_row(id=1, title="Alpha"), _row(id=2, title="Bravo")]
+    expanded_rows = [
+        _row(id=3, title="Charlie"),
+        stable_rows[0],
+        stable_rows[1],
+        _row(id=4, title="Delta"),
+    ]
+
+    result = await repo._rerank_and_paginate(
+        "auth",
+        expanded_rows,
+        offset=0,
+        limit=3,
+        stable_rows=stable_rows,
+    )
+
+    assert [row.title for row in result] == ["Bravo", "Alpha", "Charlie"]
+    assert reranker.calls == 1
 
 
 @pytest.mark.asyncio
@@ -417,6 +458,44 @@ async def test_vector_search_applies_reranker(search_repository):
     scores = [r.score for r in results if r.score is not None]
     assert scores == sorted(scores, reverse=True)
     assert reranker.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_vector_search_expands_tail_from_stable_rerank_pool(
+    search_repository,
+    monkeypatch,
+):
+    """Vector retrieval keeps its fixed prefix when a request also needs tail rows."""
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec repository behavior is local SQLite-only.")
+
+    _enable_semantic(search_repository)
+    await _index_two_auth_notes(search_repository)
+    search_repository._semantic_vector_k = 5
+    search_repository._reranker_candidates = 2
+    search_repository._rerank_provider = _FakeReranker({"Alpha": 0.1, "Bravo": 0.9})
+
+    candidate_limits: list[int] = []
+    run_vector_query = search_repository._run_vector_query
+
+    async def record_vector_query(
+        session: Any,
+        query_embedding: list[float],
+        candidate_limit: int,
+    ) -> list[dict[str, Any]]:
+        candidate_limits.append(candidate_limit)
+        return await run_vector_query(session, query_embedding, candidate_limit)
+
+    monkeypatch.setattr(search_repository, "_run_vector_query", record_vector_query)
+
+    results = await search_repository.search(
+        search_text="auth session token",
+        retrieval_mode=SearchRetrievalMode.VECTOR,
+        limit=3,
+    )
+
+    assert [row.permalink for row in results] == ["specs/bravo", "specs/alpha"]
+    assert candidate_limits == [18, 8]
 
 
 @pytest.mark.asyncio
@@ -541,7 +620,7 @@ async def test_hybrid_search_preserves_candidate_windows(
 
     assert growing_prefix_results
     assert reranker.calls == 2
-    assert candidate_limits == [80]
+    assert candidate_limits == [90, 80]
 
 
 @pytest.mark.asyncio

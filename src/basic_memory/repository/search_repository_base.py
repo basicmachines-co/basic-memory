@@ -857,6 +857,13 @@ class SearchRepositoryBase(ABC):
         """Return whether a configured reranker should run for this query."""
         return self._rerank_provider is not None and bool(query_text)
 
+    def _rerank_candidate_limit(self) -> int:
+        """Return the fixed chunk window that owns reranker-prefix membership."""
+        return max(
+            self._semantic_vector_k,
+            self._reranker_candidates * RERANK_POOL_CHUNK_FANOUT,
+        )
+
     def _candidate_limit(self, limit: int, offset: int, query_text: str) -> int:
         """Size the retrieval candidate *chunk* pool for vector/hybrid search.
 
@@ -868,17 +875,15 @@ class SearchRepositoryBase(ABC):
         not a hard guarantee — a single note dominating the entire nearest-neighbour set
         can still yield fewer unique rows (a pathological corpus shape).
         """
-        if self._should_rerank(query_text) and offset < self._reranker_candidates:
-            # Trigger: the requested page intersects the reranked pool.
-            # Why: changing either offset or a growing-prefix limit lets later pages
-            # discover documents that the reranker can promote ahead of page-one
-            # results, causing duplicates or skips.
-            # Outcome: every request intersecting the pool reranks one retrieval
-            # window determined only by the configured reranker capacity.
-            return max(
-                self._semantic_vector_k,
-                self._reranker_candidates * RERANK_POOL_CHUNK_FANOUT,
-            )
+        if self._should_rerank(query_text):
+            # Trigger: the requested window extends beyond the fixed reranked prefix.
+            # Why: a bounded prefix alone can under-fill large pages and hide the
+            # semantic pagination probe even when more matches exist.
+            # Outcome: keep prefix membership fixed while adding chunk headroom only
+            # for the untouched tail that this request must return.
+            rerank_candidate_limit = self._rerank_candidate_limit()
+            tail_size = max(0, limit + offset - self._reranker_candidates)
+            return rerank_candidate_limit + tail_size * 10
         return max(self._semantic_vector_k, (limit + offset) * 10)
 
     def _rerank_document_text(self, row: SearchIndexRow) -> str:
@@ -913,6 +918,7 @@ class SearchRepositoryBase(ABC):
         *,
         offset: int,
         limit: int,
+        stable_rows: list[SearchIndexRow] | None = None,
     ) -> list[SearchIndexRow]:
         """Rerank the top candidates, then return the requested ``[offset:offset+limit]`` page.
 
@@ -929,20 +935,26 @@ class SearchRepositoryBase(ABC):
         comparable across that page boundary — only within a page.
         """
         page_end = offset + limit
-        # Skip the provider entirely when reranking cannot change the requested page:
-        # no reranker, no query, too few rows, or the whole page sits past the rerank
-        # pool (a deep page — reranking it would rescore rows we never return, and for
-        # a paid API that is wasted spend).
-        if (
-            self._rerank_provider is None
-            or not query_text
-            or len(rows) < 2
-            or offset >= self._reranker_candidates
-        ):
+        if self._rerank_provider is None or not query_text:
             return rows[offset:page_end]
 
-        pool = rows[: self._reranker_candidates]
-        tail = rows[self._reranker_candidates :]
+        # Trigger: pagination needs more rows than the fixed rerank retrieval window.
+        # Why: an expanded retrieval may introduce or strengthen raw candidates, but
+        # letting them replace the original prefix causes duplicates and skips.
+        # Outcome: the fixed window owns prefix membership; the expanded result only
+        # supplies new, de-duplicated tail rows.
+        pool_source = stable_rows if stable_rows is not None else rows
+        pool = pool_source[: self._reranker_candidates]
+        pool_keys = {(row.type, row.id) for row in pool}
+        tail = [row for row in rows if (row.type, row.id) not in pool_keys]
+        ordered_rows = pool + tail
+
+        # Skip the provider when it cannot change the requested page: too few prefix
+        # rows or the whole page sits in the untouched tail. Deep pages still slice
+        # the stable prefix-plus-tail sequence so earlier rows cannot reappear.
+        if len(pool) < 2 or offset >= len(pool):
+            return ordered_rows[offset:page_end]
+
         documents = [self._rerank_document_text(row) for row in pool]
         try:
             scores = validate_rerank_scores(
@@ -958,7 +970,7 @@ class SearchRepositoryBase(ABC):
                 model=self._rerank_provider.model_name,
                 error=exc,
             )
-            return rows[offset:page_end]
+            return ordered_rows[offset:page_end]
 
         order = sorted(range(len(pool)), key=lambda i: scores[i], reverse=True)
         reranked = [replace(pool[i], score=scores[i]) for i in order]
@@ -1155,8 +1167,33 @@ class SearchRepositoryBase(ABC):
         # hybrid calls this internally (_apply_rerank=False) — hybrid reranks its own
         # fused result; _rerank_and_paginate no-ops back to a plain slice otherwise.
         if _apply_rerank:
+            stable_rows = ranked_rows
+            if self._should_rerank(query_text):
+                stable_candidate_limit = self._rerank_candidate_limit()
+                if candidate_limit > stable_candidate_limit:
+                    stable_rows = await self._search_vector_only(
+                        search_text=search_text,
+                        permalink=permalink,
+                        permalink_match=permalink_match,
+                        title=title,
+                        note_types=note_types,
+                        after_date=after_date,
+                        search_item_types=search_item_types,
+                        categories=categories,
+                        metadata_filters=metadata_filters,
+                        min_similarity=min_similarity,
+                        limit=stable_candidate_limit,
+                        offset=0,
+                        candidate_limit=stable_candidate_limit,
+                        _emit_observability_log=False,
+                        _apply_rerank=False,
+                    )
             output = await self._rerank_and_paginate(
-                query_text, ranked_rows, offset=offset, limit=limit
+                query_text,
+                ranked_rows,
+                offset=offset,
+                limit=limit,
+                stable_rows=stable_rows,
             )
         else:
             output = ranked_rows[offset : offset + limit]
@@ -1243,6 +1280,9 @@ class SearchRepositoryBase(ABC):
         min_similarity: Optional[float] = None,
         limit: int,
         offset: int,
+        _candidate_limit_override: int | None = None,
+        _apply_rerank: bool = True,
+        _emit_observability_log: bool = True,
     ) -> List[SearchIndexRow]:
         """Fuse FTS and vector results using score-based fusion.
 
@@ -1252,9 +1292,14 @@ class SearchRepositoryBase(ABC):
         """
         self._assert_semantic_available()
         query_text = search_text.strip()
-        rerank_enabled = self._should_rerank(query_text)
+        rerank_configured = self._should_rerank(query_text)
+        rerank_enabled = _apply_rerank and rerank_configured
         query_start = time.perf_counter()
-        candidate_limit = self._candidate_limit(limit, offset, query_text)
+        candidate_limit = (
+            _candidate_limit_override
+            if _candidate_limit_override is not None
+            else self._candidate_limit(limit, offset, query_text)
+        )
         fts_start = time.perf_counter()
         # allow_relaxed: question-form queries rarely AND-match, and a dead FTS
         # branch silently degrades hybrid to vector-only ranking. Fusion plus
@@ -1293,7 +1338,7 @@ class SearchRepositoryBase(ABC):
             # Why: the disabled path historically expands the vector leg again to
             # preserve recall when many vector chunks collapse into a few search rows.
             # Outcome: avoid double expansion only when reranking is actually active.
-            candidate_limit=candidate_limit if rerank_enabled else None,
+            candidate_limit=candidate_limit if rerank_configured else None,
             _emit_observability_log=False,
             _apply_rerank=False,
         )
@@ -1360,14 +1405,38 @@ class SearchRepositoryBase(ABC):
         # materializing only the requested page.
         if rerank_enabled:
             candidates = [_materialize(entry) for entry in ranked]
+            stable_candidates = candidates
+            stable_candidate_limit = self._rerank_candidate_limit()
+            if candidate_limit > stable_candidate_limit:
+                stable_candidates = await self._search_hybrid(
+                    search_text=search_text,
+                    permalink=permalink,
+                    permalink_match=permalink_match,
+                    title=title,
+                    note_types=note_types,
+                    after_date=after_date,
+                    search_item_types=search_item_types,
+                    categories=categories,
+                    metadata_filters=metadata_filters,
+                    min_similarity=min_similarity,
+                    limit=stable_candidate_limit,
+                    offset=0,
+                    _candidate_limit_override=stable_candidate_limit,
+                    _apply_rerank=False,
+                    _emit_observability_log=False,
+                )
             output = await self._rerank_and_paginate(
-                query_text, candidates, offset=offset, limit=limit
+                query_text,
+                candidates,
+                offset=offset,
+                limit=limit,
+                stable_rows=stable_candidates,
             )
         else:
             output = [_materialize(entry) for entry in ranked[offset : offset + limit]]
         fusion_ms = (time.perf_counter() - fusion_start) * 1000
         total_ms = (time.perf_counter() - query_start) * 1000
-        if total_ms > 2500:
+        if _emit_observability_log and total_ms > 2500:
             logger.warning(
                 "[SEMANTIC_SLOW_QUERY] Semantic query timing: project_id={project_id} "
                 "retrieval_mode={retrieval_mode} query_length={query_length} "

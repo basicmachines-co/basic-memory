@@ -930,7 +930,10 @@ class BasicMemoryConfig(BaseSettings):
         provider = self.reranker_provider.strip().lower()
         if provider not in {"fastembed", "litellm"}:
             raise ValueError("reranker_provider must be one of: fastembed, litellm")
-        if provider == "litellm" and self.reranker_model == DEFAULT_FASTEMBED_RERANK_MODEL:
+        model = self.reranker_model.strip()
+        if not model:
+            raise ValueError("reranker_model must not be blank when reranker_enabled=True")
+        if provider == "litellm" and model == DEFAULT_FASTEMBED_RERANK_MODEL:
             raise ValueError(
                 "reranker_provider='litellm' requires an explicit reranker_model in "
                 "'provider/model' form (e.g. 'cohere/rerank-v3.5'); the default "
@@ -938,7 +941,7 @@ class BasicMemoryConfig(BaseSettings):
                 "litellm cannot route."
             )
         if provider == "litellm":
-            provider_name, separator, model_name = self.reranker_model.strip().partition("/")
+            provider_name, separator, model_name = model.partition("/")
             if not separator or not provider_name or not model_name:
                 raise ValueError(
                     "reranker_provider='litellm' requires an explicit reranker_model in "
