@@ -951,6 +951,7 @@ async def test_persist_accepted_note_snapshot_persists_content_search_and_graph(
         current_note_content=current_note_content,
         existing_file_path="notes/old.md",
         accepted_file_path="notes/new.md",
+        source_file_checksum="db-checksum",
         repositories=_repository_provider(
             note_content_repository=content_repository,
             search_repository=search_repository,
