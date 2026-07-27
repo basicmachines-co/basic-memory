@@ -20,6 +20,13 @@ Semantic search dependencies (fastembed, sqlite-vec, openai) are included in the
 pip install basic-memory
 ```
 
+Milvus support is a first-party optional extra, so its heavier client dependencies are installed
+only when requested:
+
+```bash
+pip install "basic-memory[milvus]"
+```
+
 You can always override with `BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true|false`.
 
 ### Platform Compatibility
@@ -99,7 +106,11 @@ All settings are fields on `BasicMemoryConfig` and can be set via environment va
 | Config Field | Env Var | Default | Description |
 |---|---|---|---|
 | `semantic_search_enabled` | `BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED` | Auto (`true` when semantic deps are available) | Enable semantic search. Required before vector/hybrid modes work. |
-| `semantic_vector_index` | `BASIC_MEMORY_SEMANTIC_VECTOR_INDEX` | `"pgvector"` | Postgres vector storage adapter. `"pgvector"` is built in; other names resolve through the `basic_memory.semantic_vector_indexes` Python entry-point group. SQLite always uses its built-in `sqlite-vec` adapter. |
+| `semantic_vector_index` | `BASIC_MEMORY_SEMANTIC_VECTOR_INDEX` | `"pgvector"` | Postgres vector storage adapter. `"pgvector"` is built in, `"milvus"` is available through the `basic-memory[milvus]` extra, and other names resolve through the `basic_memory.semantic_vector_indexes` Python entry-point group. SQLite always uses its built-in `sqlite-vec` adapter. |
+| `milvus_uri` | `BASIC_MEMORY_MILVUS_URI` | Unset | Milvus, Milvus Lite, or Zilliz Cloud connection URI. Required when `semantic_vector_index="milvus"`. |
+| `milvus_token` | `BASIC_MEMORY_MILVUS_TOKEN` | Unset | Optional Milvus or Zilliz Cloud authentication token. |
+| `milvus_collection_prefix` | `BASIC_MEMORY_MILVUS_COLLECTION_PREFIX` | `"basic_memory"` | Prefix for deterministic project-isolated Milvus collections. |
+| `milvus_database` | `BASIC_MEMORY_MILVUS_DATABASE` | `"default"` | Milvus database name. |
 | `semantic_embedding_provider` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER` | `"fastembed"` | Embedding provider: `"fastembed"` (local), `"openai"` (API), or `"litellm"` (multi-provider API, **experimental** — advanced users only). |
 | `semantic_embedding_model` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL` | `"bge-small-en-v1.5"` | Model identifier. Auto-adjusted per provider if left at default. |
 | `semantic_embedding_api_base` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_API_BASE` | Unset | Optional custom endpoint for the LiteLLM provider, including local or self-hosted OpenAI-compatible servers. |
@@ -526,19 +537,37 @@ The sqlite-vec extension is loaded per-connection. Vector tables are created laz
 
 The Alembic migration creates the dimension-independent chunks table. The embeddings table and HNSW index are deferred to runtime because they depend on the configured vector dimensions.
 
-## Pluggable Vector Indexes
+## Milvus and Pluggable Vector Indexes
 
 Postgres deployments can replace pgvector storage and nearest-neighbour lookup without
-replacing Basic Memory's SQL repositories or embedding providers:
+replacing Basic Memory's SQL repositories or embedding providers. Milvus is the first-party
+optional provider:
+
+```bash
+pip install "basic-memory[milvus]"
+```
 
 ```bash
 export BASIC_MEMORY_SEMANTIC_VECTOR_INDEX=milvus
+export BASIC_MEMORY_MILVUS_URI=http://localhost:19530
+export BASIC_MEMORY_MILVUS_TOKEN=root:Milvus  # optional
 ```
 
-The named extension must be installed in the same Python environment as Basic Memory. A
-configured extension that is missing, duplicated, invalid, or returns an incompatible adapter
-fails explicitly at startup. Basic Memory does not silently fall back to pgvector, because doing
-so would split vectors across stores while appearing healthy.
+Zilliz Cloud uses the same URI and token settings. On macOS or Linux, the optional extra also
+includes Milvus Lite; set `BASIC_MEMORY_MILVUS_URI` to a local `.db` path. Milvus Lite does not
+support Windows, but Windows installations can connect to Milvus Standalone, Milvus Distributed,
+or Zilliz Cloud.
+
+Each project receives one deterministic collection derived from the stable database namespace
+and project ID. Collection identity deliberately excludes the embedding model and dimensions. If
+an existing collection uses another dimension or an incompatible schema, Basic Memory preserves
+it and fails initialization instead of deleting shared vectors during a rolling deployment.
+Coordinate the exact collection migration, then run `bm reindex --embeddings`.
+
+Other provider names still resolve through the extension entry-point contract. A configured
+extension that is missing, duplicated, invalid, or returns an incompatible adapter fails
+explicitly at startup. Basic Memory does not silently fall back to pgvector, because doing so
+would split vectors across stores while appearing healthy.
 
 SQLite remains automatic in this version: local SQLite databases always select `sqlite-vec`, even
 if `semantic_vector_index` is set. The selector controls Postgres-backed runtimes only.
@@ -550,7 +579,7 @@ A separately distributed package registers one factory under the
 
 ```toml
 [project.entry-points."basic_memory.semantic_vector_indexes"]
-milvus = "basic_memory_milvus:create_index"
+qdrant = "acme_basic_memory_qdrant:create_index"
 ```
 
 The factory receives an explicit scope and the validated Basic Memory configuration:

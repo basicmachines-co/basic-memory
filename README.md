@@ -84,6 +84,13 @@ Pick the path that fits you. Both run the same product on the same Markdown.
 uv tool install basic-memory
 ```
 
+For Postgres deployments that store semantic vectors in Milvus, install the
+first-party optional extra instead:
+
+```bash
+uv tool install "basic-memory[milvus]"
+```
+
 [**Configure your client ↓**](#connect-your-ai-client)
 
 </td>
