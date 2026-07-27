@@ -87,6 +87,19 @@ def test_redact_config_scrubs_reranker_api_base_credentials():
     )
 
 
+def test_redact_config_scrubs_milvus_uri_credentials():
+    raw = {
+        "milvus_uri": (
+            "https://provider-user:provider-password@milvus.example.com"
+            "?token=query-secret&timeout=30"
+        ),
+    }
+
+    result = _redact_config(raw)
+
+    assert result["milvus_uri"] == ("https://***@milvus.example.com?token=%2A%2A%2A&timeout=30")
+
+
 def test_redact_config_passes_through_safe_fields():
     raw = {"default_project": "main", "log_level": "INFO", "env": "dev"}
     result = _redact_config(raw)
@@ -219,10 +232,13 @@ def test_diagnostics_redacts_reranker_credentials(tmp_path):
     assert "timeout=30" in result
 
 
-def test_diagnostics_redacts_milvus_token(tmp_path):
+def test_diagnostics_redacts_milvus_credentials(tmp_path):
     """Milvus and Zilliz credentials must never appear in diagnostic output."""
     config_data = {
-        "milvus_uri": "https://milvus.example.com",
+        "milvus_uri": (
+            "https://provider-user:provider-password@milvus.example.com"
+            "?token=query-secret&timeout=30"
+        ),
         "milvus_token": "milvus-super-secret",
         "projects": {},
     }
@@ -233,6 +249,10 @@ def test_diagnostics_redacts_milvus_token(tmp_path):
 
     assert "milvus-super-secret" not in result
     assert "milvus_token" not in result
+    config_json = result.split("```json\n", 1)[1].split("\n```", 1)[0]
+    assert json.loads(config_json)["milvus_uri"] == (
+        "https://***@milvus.example.com?token=%2A%2A%2A&timeout=30"
+    )
 
 
 def test_diagnostics_config_missing(tmp_path):

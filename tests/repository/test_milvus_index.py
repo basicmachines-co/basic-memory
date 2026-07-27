@@ -471,14 +471,14 @@ async def test_reconciliation_deletes_orphans_incrementally(
 
 
 @pytest.mark.asyncio
-async def test_search_normalizes_milvus_cosine_scores_and_orders_ties(
+async def test_search_clamps_milvus_cosine_scores_and_orders_ties(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
     gateway = FakeGateway(dimensions=scope.dimensions)
     gateway.matches = [
         MilvusStoredMatch(entity_id=3, chunk_key="c", score=-1.0),
-        MilvusStoredMatch(entity_id=2, chunk_key="b", score=0.0),
+        MilvusStoredMatch(entity_id=2, chunk_key="b", score=0.1),
         MilvusStoredMatch(entity_id=1, chunk_key="a", score=1.0),
         MilvusStoredMatch(entity_id=0, chunk_key="z", score=2.0),
     ]
@@ -486,7 +486,7 @@ async def test_search_normalizes_milvus_cosine_scores_and_orders_ties(
 
     matches = await index.search([1.0, 0.0, 0.0], limit=4)
 
-    assert [match.similarity for match in matches] == [1.0, 1.0, 0.5, 0.0]
+    assert [match.similarity for match in matches] == [1.0, 1.0, 0.1, 0.0]
     assert [match.key.entity_id for match in matches] == [0, 1, 2, 3]
     assert gateway.searches == [(collection_name(settings, scope), [1.0, 0.0, 0.0], 4)]
 

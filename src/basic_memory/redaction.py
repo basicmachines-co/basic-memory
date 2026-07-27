@@ -23,6 +23,7 @@ SECRET_FIELDS = frozenset(
 URL_FIELDS = frozenset(
     {
         "database_url",
+        "milvus_uri",
         "reranker_api_base",
         "semantic_embedding_api_base",
     }

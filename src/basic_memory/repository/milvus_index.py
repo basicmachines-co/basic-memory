@@ -42,8 +42,8 @@ def collection_name(settings: MilvusSettings, scope: VectorIndexScope) -> str:
 
 
 def _normalize_cosine_score(score: float) -> float:
-    """Map Milvus COSINE similarity from [-1, 1] into Basic Memory's [0, 1]."""
-    return max(0.0, min(1.0, (score + 1.0) / 2.0))
+    """Clamp Milvus COSINE similarity to Basic Memory's shared score range."""
+    return max(0.0, min(1.0, score))
 
 
 class MilvusVectorIndex(SemanticVectorIndex, SemanticVectorIndexReconciler):
