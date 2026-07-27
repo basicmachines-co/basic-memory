@@ -48,6 +48,39 @@ After activation, run Python scripts as `python ...`. For one-off commands where
    - Use `pr-review-loop` after opening, pushing, updating the PR body in a meaningful way, or when the user asks whether the PR is ready.
    - Do not treat PR creation as the end of the task when the user expects review follow-through.
 
+## Scope Discipline
+
+Codex feedback is adversarial input, not authority to redefine the pull request. Before changing
+code for a review finding:
+
+1. Restate the PR's `Why`, acceptance criteria, and behavior being protected.
+2. Trace or reproduce the concrete failure against the current head.
+3. Classify the finding:
+   - **In-scope blocker**: any regression introduced by the branch, or a direct violation of the
+     stated behavior, acceptance criteria, security boundary, data integrity, or a required
+     check. Fix it in the current PR.
+   - **Sidequest / gold-plating**: speculative hardening, a broader concurrency model, unrelated
+     cleanup, a new abstraction, or an improvement that is not required for the stated outcome.
+     Push back with evidence and keep it out of the branch.
+   - **Fast follow**: a real and material concern that deserves work but is separable from the
+     current outcome. Keep the current PR focused and track it independently.
+
+Narrow PR wording never makes a branch-introduced regression a fast follow. Treat every
+regression caused by the current branch as an in-scope blocker, even when the `Why` or acceptance
+criteria omitted the affected behavior.
+
+Do not accept a `P1`, `P2`, or other severity label at face value. Severity must follow from a
+reproducible impact and the product contract. In particular, do not add locks, leases, retries,
+migrations, or generalized frameworks merely to close every theoretical interleaving when the
+documented behavior permits eventual consistency.
+
+For out-of-scope feedback, reply on the review thread with the scope boundary and supporting
+evidence. If the concern is independently critical or otherwise worth scheduling, open a
+fast-follow issue when the user has already authorized issue creation; otherwise provide the
+proposed issue title/body and ask. Link the PR and review comment, state the concrete impact, and
+give the follow-up its own acceptance criteria. Do not mix the follow-up implementation into the
+current product branch.
+
 ## PR Description Standard
 
 Every PR body should include these ideas, using headings that fit the repo's style:
@@ -66,9 +99,13 @@ Apply `pr-review-loop` as part of normal PR work:
 
 - After opening a ready PR, check Codex state and CI.
 - If Codex shows eyes, keep monitoring; eyes is pending, not approval.
-- If Codex leaves feedback, address it immediately while tests continue when possible.
-- If the feedback is right, patch, run focused validation, push, and restart the loop on the new head.
-- If the feedback is wrong or out of scope, reply with evidence and keep the loop moving.
+- If Codex leaves feedback, classify its scope immediately while tests continue when possible.
+- If the feedback is correct and in scope, patch, run focused validation, push, and restart the
+  loop on the new head.
+- If the feedback is wrong, speculative, gold-plating, or out of scope, push back with evidence,
+  resolve the thread after replying, and keep the loop moving.
+- If a separate concern is critical, create or propose a fast-follow issue instead of expanding
+  the current PR.
 - The loop completes only when required checks pass and Codex has approved the latest head with a thumbs-up, unless the user explicitly overrides the gate.
 
 Do not merge, declare merge-ready, or move on as though finished until the loop state is explicit:
