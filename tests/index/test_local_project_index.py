@@ -65,6 +65,7 @@ from basic_memory.repository.note_content_repository import (
     NoteContentRepository,
 )
 from basic_memory.repository.relation_repository import (
+    PendingRelationSearchRefresh,
     ResolvedRelationWrite,
     ResolvedRelationWriteResult,
 )
@@ -2610,6 +2611,21 @@ class RuntimeFactoryRelationRepository:
             affected_entity_ids=frozenset(write.from_id for write in writes),
             duplicate_relation_ids=(),
         )
+
+    async def list_pending_search_refreshes(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int | None = None,
+    ) -> Sequence[PendingRelationSearchRefresh]:
+        return ()
+
+    async def clear_pending_search_refreshes(
+        self,
+        session: AsyncSession,
+        refresh_ids: Sequence[int],
+    ) -> None:
+        return None
 
 
 class RuntimeFactoryLinkResolver:

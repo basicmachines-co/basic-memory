@@ -10,6 +10,7 @@ from basic_memory.models.knowledge import (
     Relation,
 )
 from basic_memory.models.project import Project
+from basic_memory.models.relation_search_refresh import RelationSearchRefresh
 
 __all__ = [
     "Base",
@@ -18,6 +19,7 @@ __all__ = [
     "NoteFileVacate",
     "Observation",
     "Relation",
+    "RelationSearchRefresh",
     "Project",
     "basic_memory",
 ]

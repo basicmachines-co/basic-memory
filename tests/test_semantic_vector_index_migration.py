@@ -192,7 +192,7 @@ def test_upgrade_repairs_sqlite_state_from_duplicate_vector_revision(
         "created_at",
     }
     assert "ix_note_file_vacate_project_id" in indexes
-    assert version == ("p9k0l1m2n3o4",)
+    assert version == ("q0l1m2n3o4p5",)
 
 
 def test_downgrade_removes_manifest_state(monkeypatch) -> None:

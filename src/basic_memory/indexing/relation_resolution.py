@@ -16,6 +16,7 @@ from basic_memory.indexing.accepted_note_search import accepted_search_content_f
 from basic_memory.indexing.models import IndexFileJobStatus
 from basic_memory.models import Entity
 from basic_memory.repository.relation_repository import (
+    PendingRelationSearchRefresh,
     ResolvedRelationWrite,
     ResolvedRelationWriteResult,
 )
@@ -84,6 +85,21 @@ class RelationResolutionRelationRepository(Protocol):
         writes: Sequence[ResolvedRelationWrite],
     ) -> ResolvedRelationWriteResult:
         """Apply canonical targets and remove duplicate edges as one batch."""
+
+    async def list_pending_search_refreshes(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: EntityId | None = None,
+    ) -> Sequence[PendingRelationSearchRefresh]:
+        """Return durable relation-search refresh work."""
+
+    async def clear_pending_search_refreshes(
+        self,
+        session: AsyncSession,
+        refresh_ids: Sequence[int],
+    ) -> None:
+        """Retire successfully completed relation-search refresh work."""
 
 
 class RelationResolutionEntityRepository(Protocol):
@@ -256,7 +272,6 @@ class RepositoryRelationResolutionRuntime:
                 )
             write_result = await self.relation_repository.apply_resolved_targets(session, writes)
 
-        affected_entity_ids: AffectedEntityIds = set(write_result.affected_entity_ids)
         if write_result.duplicate_relation_ids:
             with logfire.span(
                 "indexing.relation.resolve_conflicts",
@@ -268,9 +283,16 @@ class RepositoryRelationResolutionRuntime:
                     relation_ids=write_result.duplicate_relation_ids,
                 )
 
-        if affected_entity_ids:
-            sorted_affected_entity_ids = sorted(affected_entity_ids)
-            async with db.scoped_session(self.session_maker) as session:
+        async with db.scoped_session(self.session_maker) as session:
+            pending_refreshes = await self.relation_repository.list_pending_search_refreshes(
+                session,
+                entity_id=entity_id,
+            )
+            affected_entity_ids: AffectedEntityIds = {
+                refresh.entity_id for refresh in pending_refreshes
+            }
+            if affected_entity_ids:
+                sorted_affected_entity_ids = sorted(affected_entity_ids)
                 source_entities = await self.entity_repository.find_by_ids(
                     session,
                     sorted_affected_entity_ids,
@@ -280,6 +302,7 @@ class RepositoryRelationResolutionRuntime:
                     sorted_affected_entity_ids,
                 )
 
+        if affected_entity_ids:
             # Trigger: an accepted note has not reached a synchronized Markdown projection.
             # Why: relation repair must refresh its search row without racing the async file
             # materializer, while synchronized notes still need missing files to surface.
@@ -289,6 +312,11 @@ class RepositoryRelationResolutionRuntime:
                 sorted(source_entities, key=lambda entity: entity.id),
                 content_by_entity_id=content_by_entity_id,
             )
+            async with db.scoped_session(self.session_maker) as session:
+                await self.relation_repository.clear_pending_search_refreshes(
+                    session,
+                    [refresh.id for refresh in pending_refreshes],
+                )
 
         return affected_entity_ids
 

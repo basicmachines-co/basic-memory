@@ -429,10 +429,17 @@ class SearchService:
         )
         try:
             with logfire.span("search.index_entity_data", entity_id=entity.id):
+                replacement_content = content
+                if entity.is_markdown and replacement_content is None:
+                    # Trigger: synchronized and legacy notes source search text from storage.
+                    # Why: a transient read failure must preserve the last valid projection.
+                    # Outcome: storage errors remain visible before any search rows are deleted.
+                    replacement_content = await self.file_service.read_entity_content(entity)
+
                 await self.repository.delete_by_entity_id(entity_id=entity.id)
 
                 if entity.is_markdown:
-                    await self.index_entity_markdown(entity, content)
+                    await self.index_entity_markdown(entity, replacement_content)
                 else:
                     await self.index_entity_file(entity)
 
