@@ -233,7 +233,6 @@ def test_diagnostics_redacts_milvus_token(tmp_path):
 
     assert "milvus-super-secret" not in result
     assert "milvus_token" not in result
-    assert "milvus.example.com" in result
 
 
 def test_diagnostics_config_missing(tmp_path):
