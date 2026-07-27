@@ -11,6 +11,9 @@ on:
   # Outcome: each branch push runs the test suite once, including PR updates.
   push:
 
+permissions:
+  contents: read
+
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   # Branch builds (PRs arrive as push events — this workflow has no
