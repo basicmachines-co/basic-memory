@@ -14,6 +14,7 @@ from basic_memory.repository.prefixing_provider import (
     normalize_embedding_prefix,
     prefixing_embedding_identity,
 )
+from typing import Any
 
 # Cache key fields are limited to values that change the *identity* of the loaded
 # provider instance (provider, model_name, explicit LiteLLM endpoint/key routing,
@@ -229,7 +230,7 @@ def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvide
         if cached_provider := _EMBEDDING_PROVIDER_CACHE.get(cache_key):
             return cached_provider
 
-    extra_kwargs: dict = {}
+    extra_kwargs: dict[str, Any] = {}
     if app_config.semantic_embedding_dimensions is not None:
         extra_kwargs["dimensions"] = app_config.semantic_embedding_dimensions
 

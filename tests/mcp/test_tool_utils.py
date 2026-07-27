@@ -46,7 +46,7 @@ def mock_response(monkeypatch):
 
 class _Client:
     def __init__(self):
-        self.calls: list[tuple[str, tuple, dict]] = []
+        self.calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = []
         self._responses: dict[str, object] = {}
 
     def set_response(self, method: str, response):

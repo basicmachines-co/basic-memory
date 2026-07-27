@@ -1,7 +1,7 @@
 """Claude projects import service for Basic Memory."""
 
 import logging
-from typing import Any, Dict, Optional
+from typing import override, Any, Dict, Optional
 
 from basic_memory.markdown.schemas import EntityFrontmatter, EntityMarkdown
 from basic_memory.importers.base import Importer
@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 class ClaudeProjectsImporter(Importer[ProjectImportResult]):
     """Service for importing Claude projects."""
 
+    @override
     def handle_error(  # pragma: no cover
         self, message: str, error: Optional[Exception] = None
     ) -> ProjectImportResult:
@@ -27,6 +28,7 @@ class ClaudeProjectsImporter(Importer[ProjectImportResult]):
             prompts=0,
         )
 
+    @override
     async def import_data(
         self, source_data, destination_folder: str, **kwargs: Any
     ) -> ProjectImportResult:

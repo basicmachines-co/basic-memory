@@ -4,7 +4,7 @@ These prompts help users search and explore their knowledge base.
 """
 
 from textwrap import dedent
-from typing import Annotated, Optional
+from typing import Any, Annotated, Optional
 
 from loguru import logger
 from pydantic import Field
@@ -71,7 +71,7 @@ async def search_prompt(
     """)
 
 
-def _format_search_results(results: list[dict], query: str) -> str:
+def _format_search_results(results: list[dict[str, Any]], query: str) -> str:
     """Format search result dicts into readable markdown."""
     if not results:
         return f"No results found for '{query}'."

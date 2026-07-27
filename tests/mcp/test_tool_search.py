@@ -6,7 +6,7 @@ import pytest
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 from pydantic import TypeAdapter
 
@@ -719,7 +719,7 @@ async def test_search_notes_sets_retrieval_mode_for_semantic_types(monkeypatch, 
     ):
         return StubProject(), identifier, False
 
-    captured_payload: dict = {}
+    captured_payload: dict[str, Any] = {}
 
     class MockSearchClient:
         def __init__(self, *args, **kwargs):
@@ -771,7 +771,7 @@ async def test_search_notes_passes_metadata_filters(monkeypatch):
     ):
         return StubProject(), identifier, False
 
-    captured_payload: dict = {}
+    captured_payload: dict[str, Any] = {}
 
     class MockSearchClient:
         def __init__(self, *args, **kwargs):
@@ -817,7 +817,7 @@ async def test_search_notes_filter_only_metadata(monkeypatch):
     async def fake_get_project_client(*args, **kwargs):
         yield (object(), StubProject())
 
-    captured_payload: dict = {}
+    captured_payload: dict[str, Any] = {}
 
     class MockSearchClient:
         def __init__(self, *args, **kwargs):
@@ -860,7 +860,7 @@ async def test_search_notes_filter_only_tags(monkeypatch):
     async def fake_get_project_client(*args, **kwargs):
         yield (object(), StubProject())
 
-    captured_payload: dict = {}
+    captured_payload: dict[str, Any] = {}
 
     class MockSearchClient:
         def __init__(self, *args, **kwargs):
@@ -972,7 +972,7 @@ async def test_search_notes_passes_min_similarity(monkeypatch):
     ):
         return StubProject(), identifier, False
 
-    captured_payload: dict = {}
+    captured_payload: dict[str, Any] = {}
 
     class MockSearchClient:
         def __init__(self, *args, **kwargs):
@@ -1019,7 +1019,7 @@ async def test_search_notes_defaults_to_hybrid_when_semantic_enabled(monkeypatch
     ):
         return StubProject(), identifier, False
 
-    captured_payload: dict = {}
+    captured_payload: dict[str, Any] = {}
 
     class MockSearchClient:
         def __init__(self, *args, **kwargs):
@@ -1081,7 +1081,7 @@ async def test_search_notes_defaults_to_fts_when_semantic_disabled(monkeypatch):
     ):
         return StubProject(), identifier, False
 
-    captured_payload: dict = {}
+    captured_payload: dict[str, Any] = {}
 
     class MockSearchClient:
         def __init__(self, *args, **kwargs):
@@ -1143,7 +1143,7 @@ async def test_search_notes_explicit_text_stays_fts_when_semantic_enabled(monkey
     ):
         return StubProject(), identifier, False
 
-    captured_payload: dict = {}
+    captured_payload: dict[str, Any] = {}
 
     class MockSearchClient:
         def __init__(self, *args, **kwargs):
@@ -1203,7 +1203,7 @@ async def test_search_notes_defaults_to_hybrid_when_container_not_initialized(mo
     ):
         return StubProject(), identifier, False
 
-    captured_payload: dict = {}
+    captured_payload: dict[str, Any] = {}
 
     class MockSearchClient:
         def __init__(self, *args, **kwargs):
@@ -1269,7 +1269,7 @@ async def test_search_notes_defaults_to_fts_when_container_not_initialized_and_s
     ):
         return StubProject(), identifier, False
 
-    captured_payload: dict = {}
+    captured_payload: dict[str, Any] = {}
 
     class MockSearchClient:
         def __init__(self, *args, **kwargs):
@@ -1338,7 +1338,7 @@ async def test_search_notes_defaults_entity_types_to_entity(monkeypatch):
     ):
         return StubProject(), identifier, False
 
-    captured_payload: dict = {}
+    captured_payload: dict[str, Any] = {}
 
     class MockSearchClient:
         def __init__(self, *args, **kwargs):
@@ -1382,7 +1382,7 @@ async def test_search_notes_explicit_entity_types_overrides_default(monkeypatch)
     ):
         return StubProject(), identifier, False
 
-    captured_payload: dict = {}
+    captured_payload: dict[str, Any] = {}
 
     class MockSearchClient:
         def __init__(self, *args, **kwargs):
@@ -1430,7 +1430,7 @@ async def test_search_notes_note_types_lowercased(monkeypatch):
     ):
         return StubProject(), identifier, False
 
-    captured_payload: dict = {}
+    captured_payload: dict[str, Any] = {}
 
     class MockSearchClient:
         def __init__(self, *args, **kwargs):
@@ -1473,7 +1473,7 @@ async def test_search_notes_tag_prefix_converts_to_tags_filter(monkeypatch):
     async def fake_get_project_client(*args, **kwargs):
         yield (object(), StubProject())
 
-    captured_payload: dict = {}
+    captured_payload: dict[str, Any] = {}
 
     class MockSearchClient:
         def __init__(self, *args, **kwargs):
@@ -1514,7 +1514,7 @@ async def test_search_notes_tag_prefix_merges_with_explicit_tags(monkeypatch):
     async def fake_get_project_client(*args, **kwargs):
         yield (object(), StubProject())
 
-    captured_payload: dict = {}
+    captured_payload: dict[str, Any] = {}
 
     class MockSearchClient:
         def __init__(self, *args, **kwargs):
@@ -1555,7 +1555,7 @@ async def test_search_notes_multiple_tag_prefixes(monkeypatch):
     async def fake_get_project_client(*args, **kwargs):
         yield (object(), StubProject())
 
-    captured_payload: dict = {}
+    captured_payload: dict[str, Any] = {}
 
     class MockSearchClient:
         def __init__(self, *args, **kwargs):
@@ -1596,7 +1596,7 @@ async def test_search_notes_tag_prefix_with_remaining_text(monkeypatch):
     async def fake_get_project_client(*args, **kwargs):
         yield (object(), StubProject())
 
-    captured_payload: dict = {}
+    captured_payload: dict[str, Any] = {}
 
     class MockSearchClient:
         def __init__(self, *args, **kwargs):
@@ -2002,7 +2002,7 @@ async def test_search_notes_metadata_filters_aliases_note_type(monkeypatch):
     ):
         return StubProject(), identifier, False
 
-    captured_payload: dict = {}
+    captured_payload: dict[str, Any] = {}
 
     class MockSearchClient:
         def __init__(self, *args, **kwargs):
@@ -2047,7 +2047,7 @@ async def test_search_notes_metadata_filters_preserves_non_aliased_keys(monkeypa
     ):
         return StubProject(), identifier, False
 
-    captured_payload: dict = {}
+    captured_payload: dict[str, Any] = {}
 
     class MockSearchClient:
         def __init__(self, *args, **kwargs):

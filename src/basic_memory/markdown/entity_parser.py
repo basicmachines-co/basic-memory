@@ -104,7 +104,7 @@ def _coerce_to_string(value: Any) -> str:
     return str(value)
 
 
-def normalize_frontmatter_metadata(metadata: dict) -> dict:
+def normalize_frontmatter_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     """Normalize all values in frontmatter metadata dict.
 
     Converts date/datetime objects to ISO format strings to prevent

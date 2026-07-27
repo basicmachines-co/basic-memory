@@ -20,6 +20,7 @@ from basic_memory.importers import Importer
 from basic_memory.schemas.importer import (
     ChatImportResult,
     EntityImportResult,
+    ImportResult,
     ProjectImportResult,
 )
 
@@ -165,9 +166,12 @@ async def import_memory_json(
     return result
 
 
-async def import_file(
-    importer: Importer, file: UploadFile, destination_directory: str, max_bytes: int
-):
+async def import_file[ImportResultT: ImportResult](
+    importer: Importer[ImportResultT],
+    file: UploadFile,
+    destination_directory: str,
+    max_bytes: int,
+) -> ImportResultT:
     """Helper function to import a file using an importer instance.
 
     Args:

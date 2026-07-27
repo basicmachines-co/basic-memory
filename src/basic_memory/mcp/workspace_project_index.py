@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Optional, Sequence, cast
+from typing import Any, TYPE_CHECKING, Optional, Sequence, cast
 from uuid import UUID
 
 from basic_memory.schemas.cloud import WorkspaceInfo
@@ -169,7 +169,7 @@ def workspace_project_index_from_state(raw: object) -> WorkspaceProjectIndex | N
     )
 
 
-def workspace_project_index_to_state(index: WorkspaceProjectIndex) -> dict:
+def workspace_project_index_to_state(index: WorkspaceProjectIndex) -> dict[str, Any]:
     """Serialize a workspace project index for MCP context state."""
     return {
         "workspaces": [workspace.model_dump() for workspace in index.workspaces],

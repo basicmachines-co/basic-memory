@@ -18,6 +18,7 @@ from basic_memory.runtime.storage import (
     StorageObjectIdentity,
     StorageObjectVersion,
 )
+from typing import override
 
 
 def storage_event(
@@ -61,6 +62,7 @@ class ProjectOperationContext:
 class RecordingIndexRunner(StorageEventIndexOperationRunner[ProjectOperationContext]):
     calls: list[tuple[str, str]] = field(default_factory=list)
 
+    @override
     async def index_file(
         self,
         context: ProjectOperationContext,
@@ -75,6 +77,7 @@ class RecordingDeleteResourcesFactory(
 ):
     calls: list[str] = field(default_factory=list)
 
+    @override
     async def create_delete_resources(self, context: ProjectOperationContext) -> str:
         self.calls.append(context.project_name)
         return f"{context.project_name}-resources"
@@ -84,6 +87,7 @@ class RecordingDeleteResourcesFactory(
 class RecordingDeleteRunner(StorageEventDeleteOperationRunner[ProjectOperationContext, str, str]):
     calls: list[tuple[str, str, str]] = field(default_factory=list)
 
+    @override
     async def delete_file(
         self,
         context: ProjectOperationContext,
@@ -101,6 +105,7 @@ class RecordingOperationObserver(StorageEventOperationObserver[ProjectOperationC
     deleted: list[tuple[str, str]] = field(default_factory=list)
     failed: list[tuple[str, str]] = field(default_factory=list)
 
+    @override
     async def skip_event(
         self,
         context: ProjectOperationContext,
@@ -110,6 +115,7 @@ class RecordingOperationObserver(StorageEventOperationObserver[ProjectOperationC
             raise AssertionError("skip operation missing reason")
         self.skipped.append((context.project_name, operation.skip_reason))
 
+    @override
     async def delete_file_completed(
         self,
         context: ProjectOperationContext,
@@ -118,6 +124,7 @@ class RecordingOperationObserver(StorageEventOperationObserver[ProjectOperationC
     ) -> None:
         self.deleted.append((operation.require_relative_path(), result))
 
+    @override
     async def event_failed(
         self,
         context: ProjectOperationContext,

@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import override, Any, Dict, List, Optional
 
 from basic_memory.markdown.schemas import EntityFrontmatter, EntityMarkdown
 from basic_memory.importers.base import Importer
@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 class ClaudeConversationsImporter(Importer[ChatImportResult]):
     """Service for importing Claude conversations."""
 
+    @override
     def handle_error(  # pragma: no cover
         self, message: str, error: Optional[Exception] = None
     ) -> ChatImportResult:
@@ -28,6 +29,7 @@ class ClaudeConversationsImporter(Importer[ChatImportResult]):
             messages=0,
         )
 
+    @override
     async def import_data(
         self, source_data, destination_folder: str, **kwargs: Any
     ) -> ChatImportResult:

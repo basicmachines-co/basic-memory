@@ -285,7 +285,10 @@ async def engine_factory(
     postgres_container,
     postgres_engine,
     tmp_path,
-) -> AsyncGenerator[tuple, None]:
+) -> AsyncGenerator[
+    tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    None,
+]:
     """Create engine and session factory for the configured database backend."""
     from basic_memory.models.search import CREATE_SEARCH_INDEX
     from basic_memory import db

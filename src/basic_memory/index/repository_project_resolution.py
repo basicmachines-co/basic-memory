@@ -1,7 +1,7 @@
 """Repository-backed storage-event project resolution."""
 
 from dataclasses import dataclass
-from typing import Protocol
+from typing import override, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -33,6 +33,7 @@ class RepositoryStorageEventProjectResolver(StorageEventProjectResolver):
     session_maker: async_sessionmaker[AsyncSession]
     resolution_logger: StorageEventProjectResolutionLogger
 
+    @override
     async def resolve_project(self, project_path: ProjectPath) -> ProjectRuntimeReference | None:
         project = await self.find_project_by_bucket_prefix(project_path)
         if project is None:

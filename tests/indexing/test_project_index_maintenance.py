@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator, Iterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from types import SimpleNamespace
-from typing import cast
+from typing import override, cast
 
 import basic_memory.indexing.project_index_maintenance as project_index_maintenance_module
 import basic_memory.repository.accepted_note_vector_cleanup as accepted_note_vector_cleanup_module
@@ -1093,6 +1093,7 @@ async def test_repository_project_index_maintenance_store_logs_failed_post_commi
 class FailingUpdateProjectIndexSession(FakeProjectIndexSession):
     """Fail the batch on its first UPDATE, simulating an intra-batch rollback."""
 
+    @override
     async def execute(
         self,
         statement: object,

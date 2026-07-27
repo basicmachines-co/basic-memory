@@ -22,6 +22,7 @@ from basic_memory.schemas.project_info import (
 
 # Importing registers project subcommands on the shared app instance.
 import basic_memory.cli.commands.project as project_cmd  # noqa: F401
+from typing import Any
 
 
 @pytest.fixture
@@ -34,7 +35,7 @@ def write_config(tmp_path, monkeypatch):
     """Write config.json under a temporary HOME and return the file path."""
     from basic_memory import config as config_module
 
-    def _write(config_data: dict) -> Path:
+    def _write(config_data: dict[str, Any]) -> Path:
         config_module._CONFIG_CACHE = None
         config_module._CONFIG_MTIME = None
         config_module._CONFIG_SIZE = None

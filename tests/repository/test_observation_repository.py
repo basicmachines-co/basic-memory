@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.exc import IntegrityError
 
 from basic_memory import db
@@ -97,7 +97,9 @@ async def test_find_by_context(
 
 
 @pytest.mark.asyncio
-async def test_delete_observations(session_maker: async_sessionmaker, repo, test_project: Project):
+async def test_delete_observations(
+    session_maker: async_sessionmaker[AsyncSession], repo, test_project: Project
+):
     """Test deleting observations by entity_id."""
     # Create test entity
     async with db.scoped_session(session_maker) as session:
@@ -139,7 +141,7 @@ async def test_delete_observations(session_maker: async_sessionmaker, repo, test
 
 @pytest.mark.asyncio
 async def test_delete_observation_by_id(
-    session_maker: async_sessionmaker, repo, test_project: Project
+    session_maker: async_sessionmaker[AsyncSession], repo, test_project: Project
 ):
     """Test deleting a single observation by its ID."""
     # Create test entity
@@ -177,7 +179,7 @@ async def test_delete_observation_by_id(
 
 @pytest.mark.asyncio
 async def test_delete_observation_by_content(
-    session_maker: async_sessionmaker, repo, test_project: Project
+    session_maker: async_sessionmaker[AsyncSession], repo, test_project: Project
 ):
     """Test deleting observations by content."""
     # Create test entity
@@ -220,7 +222,9 @@ async def test_delete_observation_by_content(
 
 
 @pytest.mark.asyncio
-async def test_find_by_category(session_maker: async_sessionmaker, repo, test_project: Project):
+async def test_find_by_category(
+    session_maker: async_sessionmaker[AsyncSession], repo, test_project: Project
+):
     """Test finding observations by their category."""
     # Create test entity
     async with db.scoped_session(session_maker) as session:
@@ -284,7 +288,7 @@ async def test_find_by_category(session_maker: async_sessionmaker, repo, test_pr
 
 @pytest.mark.asyncio
 async def test_observation_categories(
-    session_maker: async_sessionmaker, repo, test_project: Project
+    session_maker: async_sessionmaker[AsyncSession], repo, test_project: Project
 ):
     """Test retrieving distinct observation categories."""
     # Create test entity
@@ -355,7 +359,7 @@ async def test_find_by_category_with_empty_db(repo, session_maker):
 
 @pytest.mark.asyncio
 async def test_find_by_category_case_sensitivity(
-    session_maker: async_sessionmaker, repo, test_project: Project
+    session_maker: async_sessionmaker[AsyncSession], repo, test_project: Project
 ):
     """Test how category search handles case sensitivity."""
     async with db.scoped_session(session_maker) as session:
@@ -395,7 +399,7 @@ async def test_find_by_category_case_sensitivity(
 
 @pytest.mark.asyncio
 async def test_observation_permalink_truncates_long_content(
-    session_maker: async_sessionmaker, repo, test_project: Project
+    session_maker: async_sessionmaker[AsyncSession], repo, test_project: Project
 ):
     """Test that observation permalinks truncate long content.
 
@@ -452,7 +456,7 @@ async def test_observation_permalink_truncates_long_content(
 
 @pytest.mark.asyncio
 async def test_observation_permalink_short_content_unchanged(
-    session_maker: async_sessionmaker, repo, test_project: Project
+    session_maker: async_sessionmaker[AsyncSession], repo, test_project: Project
 ):
     """Test that short observation content is not unnecessarily truncated."""
     async with db.scoped_session(session_maker) as session:
@@ -489,7 +493,7 @@ async def test_observation_permalink_short_content_unchanged(
 
 @pytest.mark.asyncio
 async def test_observation_permalink_disambiguates_truncated_content(
-    session_maker: async_sessionmaker, repo, test_project: Project
+    session_maker: async_sessionmaker[AsyncSession], repo, test_project: Project
 ):
     """Regression test for issue #909: shared 200-char prefixes must not collide.
 

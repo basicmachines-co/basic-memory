@@ -37,6 +37,7 @@ from basic_memory.picoschema.validator import validate_note
 from basic_memory.picoschema.inference import infer_schema, NoteData, ObservationData, RelationData
 from basic_memory.picoschema.diff import diff_schema
 from basic_memory.utils import generate_permalink
+from typing import Any
 
 # Note: No prefix here -- it's added during registration as /v2/{project_id}/schema
 router = APIRouter(tags=["schema"])
@@ -75,7 +76,7 @@ def _entity_to_note_data(entity: Entity) -> NoteData:
     )
 
 
-def _entity_frontmatter(entity: Entity) -> dict:
+def _entity_frontmatter(entity: Entity) -> dict[str, Any]:
     """Build a frontmatter dict from an entity's database metadata.
 
     Used for the notes being validated — their type and schema ref are
@@ -90,7 +91,7 @@ def _entity_frontmatter(entity: Entity) -> dict:
 async def _schema_frontmatter_from_file(
     file_service: FileServiceV2ExternalDep,
     entity: Entity,
-) -> dict:
+) -> dict[str, Any]:
     """Read a schema entity's frontmatter directly from its file.
 
     Schema definitions (field declarations, validation mode) are the source
@@ -163,7 +164,7 @@ async def validate_schema(
         frontmatter = _entity_frontmatter(entity)
         schema_ref = frontmatter.get("schema")
 
-        async def search_fn(query: str) -> list[dict]:
+        async def search_fn(query: str) -> list[dict[str, Any]]:
             entities = await _find_schema_entities(
                 session,
                 entity_repository,
@@ -310,7 +311,7 @@ async def diff_schema_endpoint(
     fields, and cardinality changes.
     """
 
-    async def search_fn(query: str) -> list[dict]:
+    async def search_fn(query: str) -> list[dict[str, Any]]:
         entities = await _find_schema_entities(session, entity_repository, query)
         return [await _schema_frontmatter_from_file(file_service, e) for e in entities]
 
@@ -373,7 +374,7 @@ async def _validate_note_entities(
         frontmatter = _entity_frontmatter(entity)
         schema_ref = frontmatter.get("schema")
 
-        async def search_fn(query: str) -> list[dict]:
+        async def search_fn(query: str) -> list[dict[str, Any]]:
             found = await _find_schema_entities(
                 session,
                 entity_repository,

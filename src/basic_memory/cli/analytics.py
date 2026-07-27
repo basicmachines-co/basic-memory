@@ -16,7 +16,7 @@ import json
 import os
 import threading
 import urllib.request
-from typing import Optional
+from typing import Any, Optional
 
 import basic_memory
 
@@ -60,7 +60,7 @@ EVENT_CLOUD_LOGIN_SUCCESS = "cli-cloud-login-success"
 EVENT_CLOUD_LOGIN_SUB_REQUIRED = "cli-cloud-login-sub-required"
 
 
-def track(event_name: str, data: Optional[dict] = None) -> None:
+def track(event_name: str, data: Optional[dict[str, Any]] = None) -> None:
     """Send an analytics event to Umami. Non-blocking, silent on failure.
 
     Parameters

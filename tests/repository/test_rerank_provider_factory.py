@@ -13,6 +13,7 @@ from basic_memory.repository.rerank_provider_factory import (
     create_rerank_provider,
     reset_rerank_provider_cache,
 )
+from typing import Any, override
 
 
 def _config(**overrides) -> BasicMemoryConfig:
@@ -217,11 +218,12 @@ def test_concurrent_race_returns_winning_provider(monkeypatch):
     """
     winner = object()
 
-    class _RacyCache(dict):
+    class _RacyCache(dict[str, Any]):
         def __init__(self):
             super().__init__()
             self._gets = 0
 
+        @override
         def get(self, key, default=None):
             # First check (outside lock) misses so we build; second check (in lock)
             # finds the winner another thread inserted mid-flight.

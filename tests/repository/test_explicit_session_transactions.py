@@ -11,9 +11,10 @@ from basic_memory.repository.note_content_repository import NoteContentRepositor
 from basic_memory.repository.observation_repository import ObservationRepository
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.repository.relation_repository import RelationRepository
+from typing import Any
 
 
-def _entity_payload(project_id: int, title: str, file_path: str) -> dict:
+def _entity_payload(project_id: int, title: str, file_path: str) -> dict[str, Any]:
     """Build the minimal entity payload used by transaction tests."""
     return {
         "project_id": project_id,
@@ -27,7 +28,7 @@ def _entity_payload(project_id: int, title: str, file_path: str) -> dict:
     }
 
 
-def _note_content_payload(entity_id: int) -> dict:
+def _note_content_payload(entity_id: int) -> dict[str, Any]:
     """Build the minimal note_content payload used by transaction tests."""
     return {
         "entity_id": entity_id,

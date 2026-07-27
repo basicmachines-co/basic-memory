@@ -23,6 +23,7 @@ from basic_memory.services.initialization import (
     initialize_file_indexing,
     reconcile_projects_with_config,
 )
+from typing import override
 
 
 @pytest.mark.asyncio
@@ -236,6 +237,7 @@ async def test_initialize_file_indexing_releases_startup_after_recovery(
     recovery_complete = asyncio.Event()
 
     class RecoveryAwareWatchService(_FakeWatchService):
+        @override
         async def run(self) -> None:
             assert recovery_complete.is_set()
 

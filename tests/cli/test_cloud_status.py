@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.cloud.api_client import CloudAPIError
+from typing import Any
 
 
 # --- status command integration tests ---
@@ -19,7 +20,7 @@ class _FakeTokens:
     """Provides canned token data for CLIAuth stubs."""
 
     @classmethod
-    def valid(cls) -> dict:
+    def valid(cls) -> dict[str, Any]:
         return {
             "access_token": "fake-access-token",
             "refresh_token": "rt_test",
@@ -27,7 +28,7 @@ class _FakeTokens:
         }
 
     @classmethod
-    def expired(cls) -> dict:
+    def expired(cls) -> dict[str, Any]:
         return {
             "access_token": "fake-access-token",
             "refresh_token": "rt_test",

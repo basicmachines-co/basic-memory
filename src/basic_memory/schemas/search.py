@@ -131,7 +131,7 @@ class SearchResult(BaseModel):
     file_path: str
     updated_at: Optional[datetime] = None
 
-    metadata: Optional[dict] = None
+    metadata: Optional[dict[str, Any]] = None
 
     # IDs for v2 API consistency
     entity_id: Optional[int] = None  # Entity ID (always present for entities)

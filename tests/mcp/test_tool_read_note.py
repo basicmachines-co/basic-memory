@@ -10,6 +10,7 @@ from basic_memory import db
 from basic_memory.mcp.tools import write_note, read_note
 from basic_memory.mcp.tools.read_note import _parse_opening_frontmatter
 from tests.mcp.conftest import ContextState, ctx
+from typing import override
 
 
 def test_parse_opening_frontmatter_handles_crlf():
@@ -56,6 +57,7 @@ async def test_read_note_title_search_fallback_fetches_by_permalink(monkeypatch,
     direct_identifier = memory_url_path("Fallback Title Note")
 
     class SelectiveKnowledgeClient(OriginalKnowledgeClient):
+        @override
         async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
             # Fail on the direct identifier to force fallback to title search
             if identifier == direct_identifier:
@@ -108,6 +110,7 @@ async def test_read_note_returns_related_results_when_text_search_finds_matches(
 
     # Ensure direct resolution doesn't short-circuit the fallback logic.
     class FailingKnowledgeClient(OriginalKnowledgeClient):
+        @override
         async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
             raise RuntimeError("force fallback")
 
@@ -168,6 +171,7 @@ async def test_read_note_forwards_pagination_to_fallback_search(monkeypatch, app
         return {"results": [], "current_page": page, "page_size": page_size}
 
     class FailingKnowledgeClient(OriginalKnowledgeClient):
+        @override
         async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
             raise RuntimeError("force fallback")
 
@@ -208,6 +212,7 @@ async def test_read_note_title_fallback_finds_exact_match_on_later_page(
     direct_identifier = memory_url_path("Paged Title Note")
 
     class SelectiveKnowledgeClient(OriginalKnowledgeClient):
+        @override
         async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
             # Fail on the direct identifier to force fallback to title search
             if identifier == direct_identifier:
@@ -252,6 +257,7 @@ async def test_read_note_title_fallback_finds_exact_match_with_small_page_size(
     direct_identifier = memory_url_path("Foo Bar")
 
     class SelectiveKnowledgeClient(OriginalKnowledgeClient):
+        @override
         async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
             # Fail on the direct identifier to force fallback to title search
             if identifier == direct_identifier:
@@ -315,6 +321,7 @@ async def test_read_note_title_fallback_pages_past_higher_ranked_fuzzy_titles(
     direct_identifier = memory_url_path("Deep Page Note")
 
     class SelectiveKnowledgeClient(OriginalKnowledgeClient):
+        @override
         async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
             # Fail on the direct identifier to force fallback to title search
             if identifier == direct_identifier:
@@ -362,6 +369,7 @@ async def test_read_note_title_lookup_stops_at_page_cap(monkeypatch, app, test_p
         return {"results": [], "current_page": page, "page_size": page_size}
 
     class FailingKnowledgeClient(OriginalKnowledgeClient):
+        @override
         async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
             raise RuntimeError("force fallback")
 
@@ -402,6 +410,7 @@ async def test_read_note_related_results_list_full_search_page(monkeypatch, app,
         return {"results": candidates, "current_page": 1, "page_size": 10}
 
     class FailingKnowledgeClient(OriginalKnowledgeClient):
+        @override
         async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
             raise RuntimeError("force fallback")
 
@@ -437,6 +446,7 @@ async def test_read_note_title_fallback_requires_exact_title_match(monkeypatch, 
     OriginalKnowledgeClient = clients_mod.KnowledgeClient
 
     class StrictFailingKnowledgeClient(OriginalKnowledgeClient):
+        @override
         async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
             if strict:
                 raise RuntimeError("force strict direct lookup failure")
@@ -951,6 +961,7 @@ async def test_read_note_memory_url_fallback_uses_search_tool_normalization(
     search_calls: list[tuple[str, str, str | None]] = []
 
     class SelectiveKnowledgeClient(OriginalKnowledgeClient):
+        @override
         async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
             if strict and identifier.endswith("test/memory-url-fallback-note"):
                 raise RuntimeError("force direct lookup failure")

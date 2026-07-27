@@ -1,9 +1,10 @@
 from pathlib import Path
 
 import yaml
+from typing import Any
 
 
-def _semantic_pr_action_inputs() -> dict:
+def _semantic_pr_action_inputs() -> dict[str, Any]:
     workflow = yaml.safe_load(Path(".github/workflows/pr-title.yml").read_text(encoding="utf-8"))
     steps = workflow["jobs"]["main"]["steps"]
     action_step = next(

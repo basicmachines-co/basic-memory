@@ -7,10 +7,11 @@ from contextlib import contextmanager
 import pytest
 
 from basic_memory.schemas.search import SearchQuery
+from typing import Any
 
 
 def _capture_spans():
-    spans: list[tuple[str, dict]] = []
+    spans: list[tuple[str, dict[str, Any]]] = []
 
     @contextmanager
     def fake_span(name: str, **attrs):
@@ -48,7 +49,7 @@ async def test_search_service_delegates_relaxed_retry(search_service, monkeypatc
     import logfire
 
     spans, fake_span = _capture_spans()
-    calls: list[dict] = []
+    calls: list[dict[str, Any]] = []
 
     async def fake_repository_search(**kwargs):
         calls.append(kwargs)

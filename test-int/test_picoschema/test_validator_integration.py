@@ -15,6 +15,7 @@ from test_picoschema.helpers import (
     EDGE_CASES_DIR,
     SCHEMAS_DIR,
 )
+from typing import Any
 
 
 class TestValidNotesPassValidation:
@@ -140,7 +141,7 @@ class TestResolverIntegration:
         filepath = EDGE_CASES_DIR / "inline-and-type.md"
         frontmatter = parse_frontmatter(filepath)
 
-        async def mock_search(query: str) -> list[dict]:
+        async def mock_search(query: str) -> list[dict[str, Any]]:
             if query == "Person":
                 return [parse_frontmatter(SCHEMAS_DIR / "Person.md")]
             return []
@@ -156,7 +157,7 @@ class TestResolverIntegration:
         filepath = EDGE_CASES_DIR / "explicit-overrides-type.md"
         frontmatter = parse_frontmatter(filepath)
 
-        async def mock_search(query: str) -> list[dict]:
+        async def mock_search(query: str) -> list[dict[str, Any]]:
             if query == "Meeting":
                 return [parse_frontmatter(SCHEMAS_DIR / "Meeting.md")]
             if query == "Person":
@@ -172,7 +173,7 @@ class TestResolverIntegration:
         filepath = VALID_DIR / "no-schema-note.md"
         frontmatter = parse_frontmatter(filepath)
 
-        async def mock_search(query: str) -> list[dict]:
+        async def mock_search(query: str) -> list[dict[str, Any]]:
             return []
 
         schema = await resolve_schema(frontmatter, mock_search)

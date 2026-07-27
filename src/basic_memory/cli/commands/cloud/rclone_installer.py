@@ -35,7 +35,7 @@ def get_platform() -> str:
         raise RcloneInstallError(f"Unsupported platform: {system}")
 
 
-def run_command(command: list[str], check: bool = True) -> subprocess.CompletedProcess:
+def run_command(command: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
     """Run a command with proper error handling."""
     try:
         console.print(f"[dim]Running: {' '.join(command)}[/dim]")

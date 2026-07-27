@@ -5,7 +5,7 @@ import hashlib
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -1392,7 +1392,7 @@ async def test_run_vector_query_caps_k_at_sqlite_vec_limit(search_repository, mo
     await search_repository.init_search_index()
 
     index = cast(SQLiteVecIndex, search_repository._semantic_vector_index)
-    captured_params: list[dict] = []
+    captured_params: list[dict[str, Any]] = []
     session = AsyncMock()
 
     async def capturing_execute(stmt, params=None):

@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Protocol
+from typing import override, Any, Protocol
 
 from loguru import logger
 from sqlalchemy import Select
@@ -126,10 +126,11 @@ class LocalIndexEntityRepository(
     @property
     def project_id(self) -> ProjectId | None: ...
 
-    def select(self, *entities: Any) -> Select:
+    def select(self, *entities: Any) -> Select[Any]:
         """Project-scoped SELECT builder used for stat-only watermark scans."""
         ...
 
+    @override
     async def get_by_file_path(
         self,
         session: AsyncSession,
@@ -138,12 +139,14 @@ class LocalIndexEntityRepository(
         load_relations: bool = True,
     ) -> Entity | None: ...
 
+    @override
     async def get_by_file_paths(
         self,
         session: AsyncSession,
         file_paths: Sequence[Path | str],
     ) -> Sequence[IndexedFileChecksumRow]: ...
 
+    @override
     async def find_by_ids(
         self,
         session: AsyncSession,
@@ -163,6 +166,7 @@ class LocalIndexEntityRepository(
         entity_data: dict[str, object] | Entity,
     ) -> Entity | None: ...
 
+    @override
     async def delete_by_fields(
         self,
         session: AsyncSession,
@@ -237,6 +241,7 @@ class LocalIndexFileBatchIndexer(IndexFileBatchIndexer[IndexInputFile]):
 
     batch_runtime: IndexBatchRuntime[Entity, IndexInputFile]
 
+    @override
     async def index_files(
         self,
         files: Mapping[str, IndexInputFile],
@@ -266,6 +271,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
     search_service: IndexEntitySearchWriter
     note_content_reconciler: IndexMarkdownNoteContentReconciler
 
+    @override
     async def index_file(
         self,
         file_path: RuntimeFilePath,

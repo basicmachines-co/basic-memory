@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Dict, Literal, Optional, List
+from typing import override, TYPE_CHECKING, Any, ClassVar, Dict, Literal, Optional, List
 
 from loguru import logger
 from pydantic import AliasChoices, BaseModel, Field, model_validator
@@ -877,6 +877,7 @@ class BasicMemoryConfig(BaseSettings):
 
         return Path(self.projects[name].path)
 
+    @override
     def model_post_init(self, __context: Any) -> None:
         """Ensure configuration is valid after initialization."""
         # Skip default-project seeding only for cloud/stateless deployments, where

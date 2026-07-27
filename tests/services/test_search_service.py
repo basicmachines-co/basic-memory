@@ -9,6 +9,7 @@ from basic_memory import db
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.schemas.search import SearchQuery, SearchItemType, SearchRetrievalMode
 from basic_memory.services.search_service import _strip_nul
+from typing import Any
 
 
 async def _create_entity(session_maker, entity_repo, data):
@@ -559,7 +560,7 @@ async def test_boolean_operators_detection(search_service):
 @pytest.mark.asyncio
 async def test_plain_multiterm_fts_enables_repository_relaxed_fallback(search_service, monkeypatch):
     """Plain multi-term FTS should let the repository render relaxed backend syntax."""
-    calls: list[dict] = []
+    calls: list[dict[str, Any]] = []
 
     now = datetime.now().astimezone()
     fallback_row = SearchIndexRow(
@@ -596,7 +597,7 @@ async def test_plain_cjk_multiterm_fts_enables_repository_relaxed_fallback(
     search_service, monkeypatch
 ):
     """Whitespace-separated CJK terms need backend prefix relaxed rendering."""
-    calls: list[dict] = []
+    calls: list[dict[str, Any]] = []
 
     now = datetime.now().astimezone()
     fallback_row = SearchIndexRow(
@@ -633,7 +634,7 @@ async def test_plain_cjk_multiterm_count_enables_repository_relaxed_fallback(
     search_service, monkeypatch
 ):
     """Count should use the same backend relaxed fallback as search."""
-    calls: list[dict] = []
+    calls: list[dict[str, Any]] = []
 
     async def fake_count(**kwargs):
         calls.append(kwargs)

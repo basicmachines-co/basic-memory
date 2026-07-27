@@ -6,7 +6,7 @@ from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
-from typing import Any, Protocol, TYPE_CHECKING
+from typing import override, Any, Protocol, TYPE_CHECKING
 
 from basic_memory.indexing.embedding_index_planning import (
     EmbeddingIndexJobRequest,
@@ -848,6 +848,7 @@ class StorageIndexFileWriter(IndexFileWriter):
 
     storage: IndexFrontmatterStorage
 
+    @override
     async def write_frontmatter(
         self, update: IndexFrontmatterUpdate
     ) -> IndexFrontmatterWriteResult:

@@ -62,7 +62,7 @@ class Repository[T: Base]:
         }
         return model_data
 
-    def _add_project_filter(self, query: Select) -> Select:
+    def _add_project_filter[RowT: tuple[Any, ...]](self, query: Select[RowT]) -> Select[RowT]:
         """Add project_id filter to query if applicable.
 
         Args:
@@ -165,7 +165,7 @@ class Repository[T: Base]:
         logger.debug(f"Added {len(models)} {self.Model.__name__} records")
         return len(models)
 
-    def select(self, *entities: Any) -> Select:
+    def select(self, *entities: Any) -> Select[Any]:
         """Create a new SELECT statement.
 
         Returns:

@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from basic_memory.hooks._uuid7 import uuid7
+from typing import Any
 
 ENVELOPE_VERSION = 1
 
@@ -73,7 +74,9 @@ class Envelope(BaseModel):
     actor: str = ACTOR_RUNTIME  # "runtime" | "user" | routine name
     caused_by: str | None = None  # id of the triggering event, when known
     promotion_status: str = PROMOTION_RAW
-    payload: dict = Field(default_factory=dict)  # bounded lifecycle metadata only
+    payload: dict[str, Any] = Field(
+        default_factory=dict[str, Any]
+    )  # bounded lifecycle metadata only
 
     @field_validator("envelope_version")
     @classmethod
@@ -118,7 +121,7 @@ def create_envelope(
     ts: str | None = None,
     actor: str = ACTOR_RUNTIME,
     caused_by: str | None = None,
-    payload: dict | None = None,
+    payload: dict[str, Any] | None = None,
 ) -> Envelope:
     """Factory: build a producer envelope from normalized hook inputs.
 

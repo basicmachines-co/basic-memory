@@ -11,6 +11,7 @@ from basic_memory.cli.app import app
 from basic_memory.cli.commands.cloud.rclone_commands import RcloneError, TransferPlan
 from basic_memory.config import ProjectEntry, ProjectMode
 from basic_memory.schemas.cloud import WorkspaceInfo
+from typing import Any
 
 runner = CliRunner()
 
@@ -204,7 +205,7 @@ def test_cloud_sync_blocks_organization_workspace(monkeypatch, config_manager):
 def test_cloud_sync_allows_personal_workspace(monkeypatch, config_manager):
     """Personal workspaces keep the one-way mirror sync available."""
     project_sync_command = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
-    routing: dict = {}
+    routing: dict[str, Any] = {}
 
     config = config_manager.load_config()
     config.cloud_api_key = "bmc_test"
@@ -476,7 +477,7 @@ def test_cloud_pull_aborts_on_conflict_by_default(monkeypatch, config_manager):
     """Pull refuses to clobber: it lists conflicts and exits without transferring."""
     module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
     plan = TransferPlan(new=["new.md"], conflicts=["notes/dup.md"], dest_only=[], errors=[])
-    recorder: dict = {}
+    recorder: dict[str, Any] = {}
     _stub_transfer_env(monkeypatch, module, plan=plan, recorder=recorder)
 
     result = runner.invoke(app, ["cloud", "pull", "--name", "research"])
@@ -492,7 +493,7 @@ def test_cloud_pull_clean_transfers(monkeypatch, config_manager):
     """With no conflicts, pull proceeds and reports success."""
     module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
     plan = TransferPlan(new=["new.md"], conflicts=[], dest_only=["local-only.md"], errors=[])
-    recorder: dict = {}
+    recorder: dict[str, Any] = {}
     _stub_transfer_env(monkeypatch, module, plan=plan, recorder=recorder)
 
     result = runner.invoke(app, ["cloud", "pull", "--name", "research"])
@@ -510,7 +511,7 @@ def test_cloud_pull_keep_cloud_resolves_conflict(monkeypatch, config_manager):
     """An explicit --on-conflict strategy lets pull proceed through conflicts."""
     module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
     plan = TransferPlan(new=[], conflicts=["notes/dup.md"], dest_only=[], errors=[])
-    recorder: dict = {}
+    recorder: dict[str, Any] = {}
     _stub_transfer_env(monkeypatch, module, plan=plan, recorder=recorder)
 
     result = runner.invoke(
@@ -525,7 +526,7 @@ def test_cloud_pull_aborts_on_compare_errors(monkeypatch, config_manager):
     """If rclone cannot read/hash files, pull aborts before transferring."""
     module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
     plan = TransferPlan(new=[], conflicts=[], dest_only=[], errors=["bad.md"])
-    recorder: dict = {}
+    recorder: dict[str, Any] = {}
     _stub_transfer_env(monkeypatch, module, plan=plan, recorder=recorder)
 
     result = runner.invoke(app, ["cloud", "pull", "--name", "research"])
@@ -539,7 +540,7 @@ def test_cloud_push_aborts_on_conflict_by_default(monkeypatch, config_manager):
     """Push aborts on conflicts like a rejected git push (pull first)."""
     module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
     plan = TransferPlan(new=["new.md"], conflicts=["notes/dup.md"], dest_only=[], errors=[])
-    recorder: dict = {}
+    recorder: dict[str, Any] = {}
     _stub_transfer_env(monkeypatch, module, plan=plan, recorder=recorder)
 
     result = runner.invoke(app, ["cloud", "push", "--name", "research"])
@@ -553,7 +554,7 @@ def test_cloud_push_keep_local_resolves_conflict(monkeypatch, config_manager):
     """Push with --on-conflict keep-local overwrites cloud and reports the direction."""
     module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
     plan = TransferPlan(new=[], conflicts=["notes/dup.md"], dest_only=[], errors=[])
-    recorder: dict = {}
+    recorder: dict[str, Any] = {}
     _stub_transfer_env(monkeypatch, module, plan=plan, recorder=recorder)
 
     result = runner.invoke(
@@ -571,7 +572,7 @@ def test_cloud_push_allows_organization_workspace(monkeypatch, config_manager):
 
     org_ws = _workspace("team-tenant", "organization", "acme", is_default=False)
     plan = TransferPlan(new=["new.md"], conflicts=[], dest_only=[], errors=[])
-    recorder: dict = {}
+    recorder: dict[str, Any] = {}
     _stub_transfer_env(monkeypatch, module, plan=plan, recorder=recorder, workspace=org_ws)
 
     result = runner.invoke(app, ["cloud", "push", "--name", "research"])
@@ -588,7 +589,7 @@ def test_cloud_pull_workspace_override_routes_through_workspace_remote(monkeypat
 
     org_ws = _workspace("team-tenant", "organization", "acme", is_default=False)
     plan = TransferPlan(new=["new.md"], conflicts=[], dest_only=[], errors=[])
-    recorder: dict = {}
+    recorder: dict[str, Any] = {}
 
     # _get_workspace_for_project must receive the override and return the org workspace.
     def _resolve(_name, _config, *, workspace_override=None):
@@ -611,7 +612,7 @@ def test_cloud_push_errors_when_workspace_remote_not_set_up(monkeypatch, config_
 
     org_ws = _workspace("team-tenant", "organization", "acme", is_default=False)
     plan = TransferPlan(new=["new.md"], conflicts=[], dest_only=[], errors=[])
-    recorder: dict = {}
+    recorder: dict[str, Any] = {}
     _stub_transfer_env(monkeypatch, module, plan=plan, recorder=recorder, workspace=org_ws)
     # Override: this workspace has not been set up yet.
     monkeypatch.setattr(module, "rclone_remote_exists", lambda _remote: False)
@@ -737,7 +738,7 @@ def _stub_prune_env(
 def test_cloud_prune_dry_run_previews_without_deleting(monkeypatch, config_manager):
     """--dry-run lists the matching cloud files and never deletes."""
     module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
-    recorder: dict = {}
+    recorder: dict[str, Any] = {}
     _stub_prune_env(
         monkeypatch, module, matches=["secret.env", "secrets/leak.md"], recorder=recorder
     )
@@ -756,7 +757,7 @@ def test_cloud_prune_dry_run_previews_without_deleting(monkeypatch, config_manag
 def test_cloud_prune_confirmation_declined_deletes_nothing(monkeypatch, config_manager):
     """Answering 'n' at the prompt cancels cleanly without deleting."""
     module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
-    recorder: dict = {}
+    recorder: dict[str, Any] = {}
     _stub_prune_env(monkeypatch, module, matches=["secret.env"], recorder=recorder)
 
     result = runner.invoke(app, ["cloud", "prune", "--name", "research"], input="n\n")
@@ -769,7 +770,7 @@ def test_cloud_prune_confirmation_declined_deletes_nothing(monkeypatch, config_m
 def test_cloud_prune_confirmation_accepted_deletes(monkeypatch, config_manager):
     """Answering 'y' at the prompt runs the deletion."""
     module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
-    recorder: dict = {}
+    recorder: dict[str, Any] = {}
     _stub_prune_env(monkeypatch, module, matches=["secret.env"], recorder=recorder)
 
     result = runner.invoke(app, ["cloud", "prune", "--name", "research"], input="y\n")
@@ -784,7 +785,7 @@ def test_cloud_prune_confirmation_accepted_deletes(monkeypatch, config_manager):
 def test_cloud_prune_routes_to_non_default_personal_workspace(monkeypatch, config_manager):
     """Prune must not fall back to a same-named project in the default workspace."""
     module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
-    recorder: dict = {}
+    recorder: dict[str, Any] = {}
     workspace = _workspace("personal-alt-tenant", "personal", "personal-alt")
     _stub_prune_env(
         monkeypatch,
@@ -806,7 +807,7 @@ def test_cloud_prune_routes_to_non_default_personal_workspace(monkeypatch, confi
 def test_cloud_prune_yes_skips_confirmation(monkeypatch, config_manager):
     """--yes deletes without prompting (no stdin supplied)."""
     module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
-    recorder: dict = {}
+    recorder: dict[str, Any] = {}
     _stub_prune_env(monkeypatch, module, matches=["secret.env"], recorder=recorder)
 
     result = runner.invoke(app, ["cloud", "prune", "--name", "research", "--yes"])
@@ -819,7 +820,7 @@ def test_cloud_prune_yes_skips_confirmation(monkeypatch, config_manager):
 def test_cloud_prune_nothing_to_delete(monkeypatch, config_manager):
     """An empty preview exits successfully without prompting or deleting."""
     module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
-    recorder: dict = {}
+    recorder: dict[str, Any] = {}
     _stub_prune_env(monkeypatch, module, matches=[], recorder=recorder)
 
     result = runner.invoke(app, ["cloud", "prune", "--name", "research"])
@@ -937,7 +938,7 @@ def _stub_setup_env(monkeypatch, core, *, remote_exists=False, recorder=None):
 def test_cloud_setup_workspace_configures_named_remote(monkeypatch):
     """`bm cloud setup --workspace acme` provisions the acme tenant's own remote."""
     core = importlib.import_module("basic_memory.cli.commands.cloud.core_commands")
-    recorder: dict = {}
+    recorder: dict[str, Any] = {}
     _stub_setup_env(monkeypatch, core, remote_exists=False, recorder=recorder)
 
     result = runner.invoke(app, ["cloud", "setup", "--workspace", "acme"])
@@ -949,7 +950,7 @@ def test_cloud_setup_workspace_configures_named_remote(monkeypatch):
 def test_cloud_setup_aborts_when_remote_exists_without_force(monkeypatch):
     """Setup refuses to overwrite an existing remote, and mints nothing (the #922 footgun)."""
     core = importlib.import_module("basic_memory.cli.commands.cloud.core_commands")
-    recorder: dict = {}
+    recorder: dict[str, Any] = {}
     _stub_setup_env(monkeypatch, core, remote_exists=True, recorder=recorder)
 
     result = runner.invoke(app, ["cloud", "setup", "--workspace", "acme"])
@@ -966,7 +967,7 @@ def test_cloud_setup_aborts_when_remote_exists_without_force(monkeypatch):
 def test_cloud_setup_force_overwrites_existing_remote(monkeypatch):
     """--force reconfigures an existing remote."""
     core = importlib.import_module("basic_memory.cli.commands.cloud.core_commands")
-    recorder: dict = {}
+    recorder: dict[str, Any] = {}
     _stub_setup_env(monkeypatch, core, remote_exists=True, recorder=recorder)
 
     result = runner.invoke(app, ["cloud", "setup", "--workspace", "acme", "--force"])
@@ -980,7 +981,7 @@ def test_cloud_setup_default_workspace_aborts_when_remote_exists(monkeypatch):
     """The original footgun: `bm cloud setup` (no --workspace) must not clobber
     the shared basic-memory-cloud remote without --force."""
     core = importlib.import_module("basic_memory.cli.commands.cloud.core_commands")
-    recorder: dict = {}
+    recorder: dict[str, Any] = {}
     _stub_setup_env(monkeypatch, core, remote_exists=True, recorder=recorder)
 
     result = runner.invoke(app, ["cloud", "setup"])  # no --workspace → basic-memory-cloud

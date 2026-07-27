@@ -17,7 +17,7 @@ search_router_module = importlib.import_module("basic_memory.api.v2.routers.sear
 @pytest.mark.asyncio
 async def test_search_router_wraps_request_in_manual_operation(monkeypatch) -> None:
     router = cast(Any, search_router_module)
-    operations: list[tuple[str, dict]] = []
+    operations: list[tuple[str, dict[str, Any]]] = []
 
     class FakeSearchService:
         async def search(self, query, *, limit, offset):

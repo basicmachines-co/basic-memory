@@ -2,7 +2,7 @@
 
 from datetime import timezone
 from pathlib import PurePosixPath
-from typing import Annotated, List, Union, Optional, Literal
+from typing import Any, Annotated, List, Union, Optional, Literal
 
 from loguru import logger
 from fastmcp import Context
@@ -72,7 +72,7 @@ async def recent_activity(
     project_id: Optional[str] = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
-) -> str | list[dict]:
+) -> str | list[dict[str, Any]]:
     """Get recent activity for a specific project or across all projects.
 
     Project Resolution:
@@ -151,7 +151,7 @@ async def recent_activity(
         raise ValueError(f"page_size must be <= 100, got {page_size}")
 
     # Build common parameters for API calls
-    params: dict = {
+    params: dict[str, Any] = {
         "page": page,
         "page_size": page_size,
         "max_related": 10,
@@ -245,7 +245,7 @@ async def recent_activity(
                         most_active_project = project_info.name
 
         if output_format == "json":
-            rows: list[dict] = []
+            rows: list[dict[str, Any]] = []
             for project_name, project_activity in projects_activity.items():
                 rows.extend(_extract_recent_rows(project_activity.activity, project_name))
             return rows
@@ -344,7 +344,7 @@ async def recent_activity(
 
 
 async def _get_project_activity(
-    client, project_info: ProjectItem, params: dict, depth: int
+    client, project_info: ProjectItem, params: dict[str, Any], depth: int
 ) -> ProjectActivity:
     """Get activity data for a single project.
 
@@ -398,9 +398,9 @@ async def _get_project_activity(
 
 def _extract_recent_rows(
     activity_data: GraphContext, project_name: Optional[str] = None
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Flatten GraphContext into a list of recent rows."""
-    rows: list[dict] = []
+    rows: list[dict[str, Any]] = []
     for result in activity_data.results:
         primary = result.primary_result
         row = {
@@ -417,7 +417,7 @@ def _extract_recent_rows(
 
 
 def _format_discovery_output(
-    projects_activity: dict, summary: ActivityStats, timeframe: str, guidance: str
+    projects_activity: dict[str, Any], summary: ActivityStats, timeframe: str, guidance: str
 ) -> str:
     """Format discovery mode output as human-readable text."""
     lines = [f"## Recent Activity Summary ({timeframe})"]

@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from basic_memory import utils
+from typing import Any
 
 
 def test_setup_logging_uses_shared_log_file_off_windows(monkeypatch, tmp_path) -> None:
@@ -123,7 +124,7 @@ def test_setup_logging_honors_basic_memory_config_dir(monkeypatch, tmp_path) -> 
 def test_setup_logging_test_env_uses_stderr_only(monkeypatch) -> None:
     """Test mode should add one stderr sink and return before other branches run."""
     added_sinks: list[object] = []
-    configured_calls: list[dict] = []
+    configured_calls: list[dict[str, Any]] = []
 
     monkeypatch.setenv("BASIC_MEMORY_ENV", "test")
     monkeypatch.setattr(utils.logger, "remove", lambda *args, **kwargs: None)

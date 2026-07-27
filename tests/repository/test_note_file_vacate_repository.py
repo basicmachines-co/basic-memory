@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from basic_memory.models.base import Base
 from basic_memory.repository.note_file_vacate_repository import (
@@ -14,7 +14,7 @@ from basic_memory.repository.note_file_vacate_repository import (
 
 
 @pytest_asyncio.fixture
-async def session_maker() -> AsyncIterator[async_sessionmaker]:
+async def session_maker() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     engine = create_async_engine("sqlite+aiosqlite://")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

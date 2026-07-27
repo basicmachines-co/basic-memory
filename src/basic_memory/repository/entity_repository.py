@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Sequence, Union, Any
+from typing import override, List, Optional, Sequence, Union, Any
 
 
 from loguru import logger
@@ -377,6 +377,7 @@ class EntityRepository(Repository[Entity]):
         """
         return await self.delete_by_fields(session, file_path=Path(file_path).as_posix())
 
+    @override
     def get_load_options(self) -> List[LoaderOption]:
         """Get SQLAlchemy loader options for eager loading relationships."""
         return [

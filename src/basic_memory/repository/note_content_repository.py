@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Mapping, Optional, Sequence, cast
+from typing import override, Any, Mapping, Optional, Sequence, cast
 
 from sqlalchemy import select, update
 from sqlalchemy.engine import CursorResult
@@ -138,6 +138,7 @@ class NoteContentRepository(Repository[NoteContent]):
         result = await session.execute(query)
         return result.scalars().first()
 
+    @override
     async def create(
         self, session: AsyncSession, data: Mapping[str, Any] | NoteContent
     ) -> NoteContent:

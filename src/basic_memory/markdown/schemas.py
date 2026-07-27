@@ -1,7 +1,7 @@
 """Schema models for entity markdown files."""
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, List, Optional
+from typing import override, TYPE_CHECKING, Any, List, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -14,6 +14,7 @@ class Observation(BaseModel):
     tags: Optional[List[str]] = None
     context: Optional[str] = None
 
+    @override
     def __str__(self) -> str:
         obs_string = f"- [{self.category}] {self.content}"
         if self.context:
@@ -28,6 +29,7 @@ class Relation(BaseModel):
     target: str
     context: Optional[str] = None
 
+    @override
     def __str__(self) -> str:
         rel_string = f"- {self.type} [[{self.target}]]"
         if self.context:

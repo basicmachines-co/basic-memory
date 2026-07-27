@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import override, Protocol
 
 import yaml
 from loguru import logger
@@ -106,6 +106,7 @@ class LocalProjectIndexMoveContentUpdater(ProjectIndexMoveContentUpdater):
     entity_service: LocalMoveEntityService
     file_service: FileService
 
+    @override
     async def plan_moved_file_content(
         self,
         session: AsyncSession,
@@ -144,6 +145,7 @@ class LocalProjectIndexMoveContentUpdater(ProjectIndexMoveContentUpdater):
             markdown_content=planned_content,
         )
 
+    @override
     async def write_moved_file_content(
         self,
         moved_file: ProjectIndexMovedFile,

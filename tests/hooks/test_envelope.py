@@ -15,10 +15,11 @@ from basic_memory.hooks.envelope import (
     envelope_to_json,
     idempotency_key,
 )
+from typing import Any
 
 
 def _envelope(**overrides):
-    kwargs: dict = {
+    kwargs: dict[str, Any] = {
         "source": "claude-code",
         "event": COMPACTION_IMMINENT,
         "session_id": "session-1",

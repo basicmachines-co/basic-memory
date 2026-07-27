@@ -9,7 +9,7 @@ import time
 import webbrowser
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator, Callable
-from typing import AsyncContextManager
+from typing import Any, AsyncContextManager
 
 import httpx
 from rich.console import Console
@@ -65,7 +65,7 @@ class CLIAuth:
 
         return code_verifier, code_challenge
 
-    async def request_device_authorization(self) -> dict | None:
+    async def request_device_authorization(self) -> dict[str, Any] | None:
         """Request device authorization from WorkOS with PKCE."""
         device_auth_url = f"{self.authkit_domain}/oauth2/device_authorization"
 
@@ -94,7 +94,7 @@ class CLIAuth:
             console.print(f"[red]Device authorization error: {e}[/red]")
             return None
 
-    def display_user_instructions(self, device_response: dict) -> None:
+    def display_user_instructions(self, device_response: dict[str, Any]) -> None:
         """Display user instructions for device authorization."""
         user_code = device_response["user_code"]
         verification_uri = device_response["verification_uri"]
@@ -118,7 +118,7 @@ class CLIAuth:
 
         console.print("\n[dim]Waiting for you to complete authentication in your browser...[/dim]")
 
-    async def poll_for_token(self, device_code: str, interval: int = 5) -> dict | None:
+    async def poll_for_token(self, device_code: str, interval: int = 5) -> dict[str, Any] | None:
         """Poll the token endpoint until user completes authentication."""
         token_url = f"{self.authkit_domain}/oauth2/token"
 
@@ -179,7 +179,7 @@ class CLIAuth:
 
         await asyncio.sleep(seconds)
 
-    def save_tokens(self, tokens: dict) -> None:
+    def save_tokens(self, tokens: dict[str, Any]) -> None:
         """Save tokens to project root as .bm-auth.json."""
         token_data = {
             "access_token": tokens["access_token"],
@@ -196,7 +196,7 @@ class CLIAuth:
 
         console.print(f"[green]Tokens saved to {self.token_file}[/green]")
 
-    def load_tokens(self) -> dict | None:
+    def load_tokens(self) -> dict[str, Any] | None:
         """Load tokens from .bm-auth.json file."""
         if not self.token_file.exists():
             return None
@@ -207,13 +207,13 @@ class CLIAuth:
         except (OSError, json.JSONDecodeError):
             return None
 
-    def is_token_valid(self, tokens: dict) -> bool:
+    def is_token_valid(self, tokens: dict[str, Any]) -> bool:
         """Check if stored token is still valid."""
         expires_at = tokens.get("expires_at", 0)
         # Add 60 second buffer for clock skew
         return time.time() < (expires_at - 60)
 
-    async def refresh_token(self, refresh_token: str) -> dict | None:
+    async def refresh_token(self, refresh_token: str) -> dict[str, Any] | None:
         """Refresh access token using refresh token."""
         token_url = f"{self.authkit_domain}/oauth2/token"
 

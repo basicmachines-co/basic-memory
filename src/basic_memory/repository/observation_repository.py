@@ -1,7 +1,7 @@
 """Repository for managing Observation objects."""
 
 from dataclasses import dataclass
-from typing import Dict, List, Sequence
+from typing import override, Dict, List, Sequence
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +38,7 @@ class ObservationRepository(Repository[Observation]):
         """
         super().__init__(Observation, project_id=project_id)
 
+    @override
     def get_load_options(self) -> List[LoaderOption]:
         """Eager-load parent entity to prevent N+1 if obs.entity is accessed."""
         return [selectinload(Observation.entity)]

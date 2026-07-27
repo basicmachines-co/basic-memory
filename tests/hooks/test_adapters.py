@@ -7,11 +7,12 @@ import pytest
 
 from basic_memory.hooks.adapters import for_harness
 from basic_memory.hooks.envelope import COMPACTION_IMMINENT, SESSION_STARTED
+from typing import Any
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
-def load_fixture(name: str) -> dict:
+def load_fixture(name: str) -> dict[str, Any]:
     return json.loads((FIXTURES_DIR / name).read_text(encoding="utf-8"))
 
 

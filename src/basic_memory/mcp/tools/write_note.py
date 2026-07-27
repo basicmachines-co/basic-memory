@@ -2,7 +2,7 @@
 
 import textwrap
 from pathlib import Path
-from typing import Annotated, List, Union, Optional, Literal
+from typing import Any, Annotated, List, Union, Optional, Literal
 
 import logfire
 from loguru import logger
@@ -79,11 +79,11 @@ async def write_note(
     project_id: Optional[str] = None,
     tags: list[str] | str | None = None,
     note_type: str = "note",
-    metadata: Annotated[dict | None, BeforeValidator(coerce_dict)] = None,
+    metadata: Annotated[dict[str, Any] | None, BeforeValidator(coerce_dict)] = None,
     overwrite: bool | None = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
-) -> str | dict:
+) -> str | dict[str, Any]:
     """Write a markdown note to the knowledge base.
 
     Creates a markdown note with semantic observations and relations.

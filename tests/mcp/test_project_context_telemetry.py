@@ -11,12 +11,13 @@ import pytest
 from basic_memory.config import ProjectEntry
 from basic_memory.schemas.cloud import WorkspaceInfo
 from tests.mcp.conftest import ContextState, ctx
+from typing import Any
 
 project_context = importlib.import_module("basic_memory.mcp.project_context")
 
 
 def _capture_spans():
-    spans: list[tuple[str, dict]] = []
+    spans: list[tuple[str, dict[str, Any]]] = []
 
     @contextmanager
     def fake_span(name: str, **attrs):

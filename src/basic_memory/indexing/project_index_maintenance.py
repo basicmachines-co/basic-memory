@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Protocol
+from typing import override, Protocol
 
 from loguru import logger
 from sqlalchemy import RowMapping, bindparam, case, column, delete, select, table, text, update
@@ -86,6 +86,7 @@ class TrustPlannedProjectIndexDeleteVerifier(ProjectIndexDeletePathVerifier):
     a probing verifier instead.
     """
 
+    @override
     async def confirm_deleted_paths(self, paths: Sequence[str]) -> frozenset[str]:
         return frozenset(paths)
 
@@ -888,6 +889,7 @@ class StoreProjectIndexMaintenanceRunner(ProjectIndexMaintenanceRunner):
     move_store: RepositoryProjectIndexMaintenanceStore
     delete_store: RepositoryProjectIndexMaintenanceStore
 
+    @override
     async def run_move_batches(
         self,
         *,
@@ -900,6 +902,7 @@ class StoreProjectIndexMaintenanceRunner(ProjectIndexMaintenanceRunner):
             move_store=self.move_store,
         )
 
+    @override
     async def run_delete_batches(
         self,
         *,

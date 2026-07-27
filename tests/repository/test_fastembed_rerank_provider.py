@@ -14,11 +14,12 @@ from basic_memory.repository.semantic_errors import (
     RerankTransientError,
     SemanticDependenciesMissingError,
 )
+from typing import Any
 
 
 class _StubCrossEncoder:
     init_count = 0
-    last_init_kwargs: dict = {}
+    last_init_kwargs: dict[str, Any] = {}
 
     def __init__(self, model_name: str, cache_dir: str | None = None, threads: int | None = None):
         _StubCrossEncoder.last_init_kwargs = {

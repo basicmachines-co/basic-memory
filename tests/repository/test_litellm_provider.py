@@ -16,6 +16,7 @@ from basic_memory.repository.embedding_provider_factory import (
 )
 from basic_memory.repository.litellm_provider import LiteLLMEmbeddingProvider
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
+from typing import Any
 
 
 def _make_embedding_response(inputs: list[str], dim: int = 3):
@@ -34,7 +35,7 @@ def _make_embedding_response(inputs: list[str], dim: int = 3):
 
 def _install_litellm_stub(monkeypatch, dim: int = 3):
     """Install a fake litellm module and return the mock aembedding callable."""
-    calls: list[dict] = []
+    calls: list[dict[str, Any]] = []
 
     async def _aembedding(**kwargs):
         calls.append(kwargs)

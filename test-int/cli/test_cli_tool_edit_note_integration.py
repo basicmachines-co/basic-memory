@@ -5,11 +5,14 @@ import json
 from typer.testing import CliRunner
 
 from basic_memory.cli.main import app as cli_app
+from typing import Any
 
 runner = CliRunner()
 
 
-def _write_note(title: str, folder: str, content: str, project: str | None = None) -> dict:
+def _write_note(
+    title: str, folder: str, content: str, project: str | None = None
+) -> dict[str, Any]:
     args = [
         "tool",
         "write-note",
@@ -28,7 +31,7 @@ def _write_note(title: str, folder: str, content: str, project: str | None = Non
     return json.loads(result.stdout)
 
 
-def _read_note(identifier: str, project: str | None = None) -> dict:
+def _read_note(identifier: str, project: str | None = None) -> dict[str, Any]:
     args = ["tool", "read-note", identifier]
     if project:
         args.extend(["--project", project])

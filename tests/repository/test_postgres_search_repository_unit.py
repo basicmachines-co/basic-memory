@@ -23,6 +23,7 @@ from basic_memory.repository.semantic_errors import (
     SemanticSearchDisabledError,
     SemanticVectorIndexExtensionError,
 )
+from typing import Any
 
 
 # --- Helpers ---------------------------------------------------------------
@@ -442,7 +443,7 @@ async def test_postgres_batch_sync_tracks_prepare_and_queue_wait(monkeypatch):
             synced_entity_ids.add(job.entity_id)
         return (3.0, 1.0)
 
-    completion_records: list[dict] = []
+    completion_records: list[dict[str, Any]] = []
 
     def _capture_log(**kwargs):
         completion_records.append(kwargs)
@@ -528,7 +529,7 @@ async def test_postgres_batch_sync_tracks_deferred_oversized_entities(monkeypatc
             runtime.write_seconds += 0.25
         return (1.5, 0.75)
 
-    completion_records: list[dict] = []
+    completion_records: list[dict[str, Any]] = []
 
     def _capture_log(**kwargs):
         completion_records.append(kwargs)

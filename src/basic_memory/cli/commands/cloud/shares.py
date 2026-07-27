@@ -14,7 +14,7 @@ helper, matching the `snapshot.py` command group.
 
 import asyncio
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urlencode
 from uuid import UUID
 
@@ -175,7 +175,7 @@ def _parse_expires_at(value: str) -> str:
     return dt.isoformat()
 
 
-def _print_share_details(data: dict) -> None:
+def _print_share_details(data: dict[str, Any]) -> None:
     """Print a single share's fields in the snapshot-style detail layout."""
     console.print(f"  Token: {data.get('token', 'unknown')}")
     console.print(f"  URL: [blue underline]{data.get('share_url', '-')}[/blue underline]")
@@ -220,7 +220,7 @@ def create(
     # Validate --expires-at before any async/API work so a parse error surfaces
     # a single clean message and exits, rather than being re-wrapped by the broad
     # handler below as "Unexpected error: 1" (typer.Exit subclasses Exception).
-    payload: dict = {
+    payload: dict[str, Any] = {
         "project_name": project,
         "note_permalink": permalink,
     }
@@ -416,7 +416,7 @@ def update(
                 )
                 raise typer.Exit(1)
 
-            payload: dict = {}
+            payload: dict[str, Any] = {}
             if enable:
                 payload["enabled"] = True
             if disable:

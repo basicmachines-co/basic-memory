@@ -1,6 +1,6 @@
 """Build context tool for Basic Memory MCP server."""
 
-from typing import Annotated, Optional, Literal
+from typing import Any, Annotated, Optional, Literal
 
 import logfire
 from loguru import logger
@@ -177,7 +177,7 @@ async def build_context(
     ] = 10,
     output_format: Literal["json", "text"] = "json",
     context: Context | None = None,
-) -> dict | str:
+) -> dict[str, Any] | str:
     """Get context needed to continue a discussion within a specific project.
 
     This tool enables natural continuation of discussions by loading relevant context

@@ -3,7 +3,7 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import FrozenInstanceError, dataclass
 from datetime import timedelta
-from typing import cast
+from typing import override, cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -250,6 +250,7 @@ class StubEntityIndexer:
 class MissingFileEntityIndexer(StubEntityIndexer):
     """Model SearchService's disk fallback for entities without accepted content."""
 
+    @override
     async def index_entities(
         self,
         entities: Sequence[Entity],
@@ -650,6 +651,7 @@ async def test_resolve_relations_skips_ambiguous_target_without_aborting_pass() 
             super().__init__(targets)
             self.ambiguous = ambiguous
 
+        @override
         async def resolve_link(
             self,
             link_text: str,

@@ -4,7 +4,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import cast
+from typing import Any
 
 import typer
 from loguru import logger
@@ -280,7 +280,7 @@ def _normalize_project_visibility(visibility: str | None) -> ProjectVisibility:
 
     normalized = visibility.strip().lower()
     if normalized in {"workspace", "shared", "private"}:
-        return cast(ProjectVisibility, normalized)
+        return normalized
 
     raise ValueError("Invalid visibility. Expected one of: workspace, shared, private.")
 
@@ -581,7 +581,7 @@ def list_projects(
             attached_row_by_permalink[permalink] = _select_attached_row_key(permalink, entry)
 
         # --- Build unified project list ---
-        project_rows: list[dict] = []
+        project_rows: list[dict[str, Any]] = []
         sorted_row_keys = sorted(
             row_names_by_key,
             key=lambda key: (row_names_by_key[key], key[0] or ""),
@@ -1515,7 +1515,7 @@ def display_project_info(
             )
 
             # --- Assemble dashboard ---
-            parts: list = [columns, ""]
+            parts: list[Table | Group | str] = [columns, ""]
             if cloud_section is not None:
                 parts.extend([cloud_section, ""])
             if bars_section:

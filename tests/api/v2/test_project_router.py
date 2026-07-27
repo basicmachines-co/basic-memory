@@ -11,6 +11,7 @@ from basic_memory.config import ProjectEntry
 from basic_memory.models import Project
 from basic_memory.schemas.project_info import ProjectItem, ProjectStatusResponse
 from basic_memory.schemas.v2 import ProjectResolveResponse
+from typing import Any
 
 
 def _project_item(project: ProjectItem | None) -> ProjectItem:
@@ -38,7 +39,7 @@ async def _get_default_project(project_repository, session_maker):
         return await project_repository.get_default_project(session)
 
 
-async def _update_project(project_repository, session_maker, project_id: int, data: dict):
+async def _update_project(project_repository, session_maker, project_id: int, data: dict[str, Any]):
     async with db.scoped_session(session_maker) as session:
         return await project_repository.update(session, project_id, data)
 

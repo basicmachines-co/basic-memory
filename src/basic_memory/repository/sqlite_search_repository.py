@@ -5,7 +5,7 @@ import re
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, override, List, Optional
 
 import logfire
 from loguru import logger
@@ -102,6 +102,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 self._entity_columns = {row[1] for row in result.fetchall()}
         return self._entity_columns
 
+    @override
     async def init_search_index(self):
         """Create FTS5 virtual table for search if it doesn't exist.
 
@@ -370,6 +371,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
 
         return term
 
+    @override
     def _prepare_search_term(self, term: str, is_prefix: bool = True) -> str:
         """Prepare a search term for FTS5 query.
 
@@ -462,6 +464,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
     # Abstract hook implementations (vector/semantic, SQLite-specific)
     # ------------------------------------------------------------------
 
+    @override
     async def _ensure_vector_tables(self) -> None:
         self._assert_semantic_available()
         if not hasattr(self, "_semantic_vector_index"):
@@ -528,6 +531,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         logger.debug(f"SQLite vector tables ready (dimensions={self._vector_dimensions})")
         self._vector_tables_initialized = True
 
+    @override
     async def _prepare_vector_session(self, session: AsyncSession) -> None:
         """Load sqlite-vec extension for the session."""
         await self._ensure_sqlite_vec_loaded(session)
@@ -535,14 +539,16 @@ class SQLiteSearchRepository(SearchRepositoryBase):
     # sqlite-vec hard limit for knn k parameter
     SQLITE_VEC_MAX_K = 4096
 
+    @override
     async def _run_vector_query(
         self,
         session: AsyncSession,
         query_embedding: list[float],
         candidate_limit: int,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         return await super()._run_vector_query(session, query_embedding, candidate_limit)
 
+    @override
     async def _delete_entity_chunks(
         self,
         session: AsyncSession,
@@ -556,6 +562,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             expected_deletions=expected_deletions,
         )
 
+    @override
     async def _delete_stale_chunks(
         self,
         session: AsyncSession,
@@ -571,6 +578,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             expected_deletions=expected_deletions,
         )
 
+    @override
     async def _delete_project_builtin_vector_rows(self, session: AsyncSession) -> None:
         """Delete sqlite-vec rows atomically with their project manifest."""
         table_result = await session.execute(
@@ -613,6 +621,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             await session.commit()
         self._vector_tables_initialized = False
 
+    @override
     def _distance_to_similarity(self, distance: float) -> float:
         """Convert L2 distance to cosine similarity for normalized embeddings.
 
@@ -622,6 +631,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         return max(0.0, 1.0 - (distance * distance) / 2.0)
 
     @asynccontextmanager
+    @override
     async def _prepare_entity_write_scope(self):
         """SQLite keeps the shared read window, but funnels prepare writes through one lock."""
         # Trigger: the shared prepare window fans out per entity after batched reads.
@@ -632,6 +642,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         async with self._sqlite_prepare_write_lock:
             yield
 
+    @override
     def _prepare_window_existing_rows_sql(self, placeholders: str) -> str:
         """Use the authoritative SQL manifest for adapter-independent readiness."""
         return super()._prepare_window_existing_rows_sql(placeholders)
@@ -640,6 +651,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
     # Index / bulk index overrides (FTS-only, no vector side-effects)
     # ------------------------------------------------------------------
 
+    @override
     async def index_item(self, search_index_row: SearchIndexRow) -> None:
         """Index a single row in FTS only.
 
@@ -647,6 +659,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         """
         await super().index_item(search_index_row)
 
+    @override
     async def bulk_index_items(self, search_index_rows: List[SearchIndexRow]) -> None:
         """Index multiple rows in FTS only."""
         await super().bulk_index_items(search_index_rows)
@@ -669,8 +682,8 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
         categories: Optional[List[str]] = None,
-        metadata_filters: Optional[dict] = None,
-    ) -> tuple[str, str, dict, str]:
+        metadata_filters: Optional[dict[str, Any]] = None,
+    ) -> tuple[str, str, dict[str, Any], str]:
         """Build SQLite FTS FROM/WHERE params shared by search and count."""
         conditions = []
         match_conditions = []
@@ -876,6 +889,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         where_clause = " AND ".join(conditions) if conditions else "1=1"
         return from_clause, where_clause, params, order_by_clause
 
+    @override
     async def search(
         self,
         search_text: Optional[str] = None,
@@ -886,7 +900,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
         categories: Optional[List[str]] = None,
-        metadata_filters: Optional[dict] = None,
+        metadata_filters: Optional[dict[str, Any]] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
         limit: int = 10,
@@ -1020,6 +1034,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
 
         return results
 
+    @override
     async def count(
         self,
         search_text: Optional[str] = None,
@@ -1030,7 +1045,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
         categories: Optional[List[str]] = None,
-        metadata_filters: Optional[dict] = None,
+        metadata_filters: Optional[dict[str, Any]] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
         allow_relaxed: bool = False,

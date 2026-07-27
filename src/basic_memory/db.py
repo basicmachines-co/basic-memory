@@ -4,7 +4,7 @@ import sys
 from contextlib import asynccontextmanager, suppress
 from enum import Enum, auto
 from pathlib import Path
-from typing import AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Optional
 
 from basic_memory.config import BasicMemoryConfig, ConfigManager, DatabaseBackend
 from alembic import command
@@ -21,9 +21,15 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import AsyncAdaptedQueuePool, NullPool
 
+
 # -----------------------------------------------------------------------------
 # Windows event loop policy
 # -----------------------------------------------------------------------------
+def _install_event_loop_policy(policy: Any) -> None:
+    """Install the Python 3.12-3.15 process-wide compatibility policy."""
+    asyncio.set_event_loop_policy(policy)  # ty: ignore[deprecated]
+
+
 # On Windows, the default ProactorEventLoop has known rough edges with aiosqlite
 # during shutdown/teardown (threads posting results to a loop that's closing),
 # which can manifest as:
@@ -34,7 +40,13 @@ from sqlalchemy.pool import AsyncAdaptedQueuePool, NullPool
 # asyncio.create_subprocess_shell() (like sync_service._quick_count_files) must
 # detect Windows and use fallback implementations.
 if sys.platform == "win32":  # pragma: no cover
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    # Constraint: Basic Memory supports Python 3.12-3.15, where the policy API
+    # remains the only process-wide way to cover every independently owned loop
+    # entrypoint. Replace this compatibility seam with loop factories before 3.16.
+    # The factory is a Windows-only asyncio export, so resolve it only after the
+    # runtime platform guard (also keeps all-platform static analysis portable).
+    windows_selector_policy = getattr(asyncio, "WindowsSelectorEventLoopPolicy")
+    _install_event_loop_policy(windows_selector_policy())
 
 
 def maybe_install_uvloop(config: BasicMemoryConfig) -> bool:
@@ -69,7 +81,10 @@ def maybe_install_uvloop(config: BasicMemoryConfig) -> bool:
         logger.warning("uvloop not available - using default event loop for Postgres backend")
         return False
 
-    asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+    # Constraint: CLI commands and FastMCP/AnyIO own several separate loop
+    # entrypoints. A single policy install keeps all of them on uvloop through
+    # Python 3.15; migrate those entrypoints to loop factories before 3.16.
+    _install_event_loop_policy(uvloop.EventLoopPolicy())
     logger.info("Installed uvloop event-loop policy for Postgres backend")
     return True
 
@@ -128,7 +143,7 @@ class DatabaseType(Enum):
 
 def get_scoped_session_factory(
     session_maker: async_sessionmaker[AsyncSession],
-) -> async_scoped_session:
+) -> async_scoped_session[AsyncSession]:
     """Create a scoped session factory scoped to current task."""
     return async_scoped_session(session_maker, scopefunc=asyncio.current_task)
 

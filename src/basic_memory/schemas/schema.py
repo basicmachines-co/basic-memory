@@ -7,6 +7,7 @@ for API serialization.
 """
 
 from pydantic import BaseModel, Field
+from typing import Any
 
 
 # --- Validation Response Models ---
@@ -97,7 +98,7 @@ class InferenceReport(BaseModel):
     note_type: str
     notes_analyzed: int
     field_frequencies: list[FieldFrequencyResponse] = Field(default_factory=list)
-    suggested_schema: dict = Field(
+    suggested_schema: dict[str, Any] = Field(
         default_factory=dict,
         description="Ready-to-use Picoschema YAML dict",
     )

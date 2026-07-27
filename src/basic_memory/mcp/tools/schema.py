@@ -4,7 +4,7 @@ Provides tools for schema validation, inference, and drift detection through the
 These tools call the schema API endpoints via the typed SchemaClient.
 """
 
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from loguru import logger
 from fastmcp import Context
@@ -254,7 +254,7 @@ async def schema_validate(
     project_id: Optional[str] = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
-) -> ValidationReport | str | dict:
+) -> ValidationReport | str | dict[str, Any]:
     """Validate notes against their resolved schema.
 
     Validates a specific note (by identifier), all notes of a given type, or —
@@ -393,7 +393,7 @@ async def schema_infer(
     project_id: Optional[str] = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
-) -> str | dict:
+) -> str | dict[str, Any]:
     """Analyze existing notes and suggest a schema definition.
 
     Examines observation categories and relation types across all notes
@@ -520,7 +520,7 @@ async def schema_diff(
     project_id: Optional[str] = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
-) -> str | dict:
+) -> str | dict[str, Any]:
     """Detect drift between a schema definition and actual note usage.
 
     Compares the existing schema for a note type against how notes of

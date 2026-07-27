@@ -9,7 +9,7 @@ with human-friendly formatting.
 """
 
 import json
-from typing import Annotated, Optional
+from typing import Any, Annotated, Optional
 
 import typer
 from loguru import logger
@@ -46,7 +46,7 @@ def _resolve_project_name(project: Optional[str]) -> Optional[str]:
 # --- Rendering helpers ---
 
 
-def _render_validate_table(data: dict) -> None:
+def _render_validate_table(data: dict[str, Any]) -> None:
     """Render a validation report dict as a Rich table."""
     note_type = data.get("note_type")
     title_label = note_type or "all"
@@ -83,7 +83,7 @@ def _render_validate_table(data: dict) -> None:
     )
 
 
-def _render_infer_table(data: dict) -> None:
+def _render_infer_table(data: dict[str, Any]) -> None:
     """Render an inference report dict as a Rich table."""
     note_type = data.get("note_type", "")
     notes_analyzed = data.get("notes_analyzed", 0)
@@ -125,7 +125,7 @@ def _render_infer_table(data: dict) -> None:
         console.print(json.dumps(suggested_schema, indent=2))
 
 
-def _render_diff_output(data: dict) -> None:
+def _render_diff_output(data: dict[str, Any]) -> None:
     """Render a drift report dict as Rich output."""
     note_type = data.get("note_type", "")
     new_fields = data.get("new_fields", [])

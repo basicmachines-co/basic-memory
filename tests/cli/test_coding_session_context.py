@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 
 from basic_memory.cli.commands import hook as hook_module
 from basic_memory.cli.main import app as cli_app
+from typing import Any
 
 runner = CliRunner()
 
@@ -152,7 +153,7 @@ def test_coding_profile_uses_dedicated_schema_for_both_harnesses() -> None:
 def test_coding_recall_filters_by_repository_and_merges_codex_sessions() -> None:
     queries: list[dict[str, object]] = []
 
-    async def fake_query(project: str | None, **filters: object) -> dict:
+    async def fake_query(project: str | None, **filters: object) -> dict[str, Any]:
         queries.append({"project": project, **filters})
         if filters.get("note_types") == ["coding_session"]:
             return {"results": [{"title": "Coding", "permalink": "sessions/coding"}]}

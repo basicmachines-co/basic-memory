@@ -14,6 +14,7 @@ from pathlib import Path
 from statistics import mean
 
 from basic_memory.repository.search_index_row import SearchIndexRow
+from typing import Any
 
 
 # --- Relevance helpers ---
@@ -42,7 +43,7 @@ class QualityMetrics:
     hits_at_1: int = 0
     hits_at_5: int = 0
     reciprocal_rank_sum: float = 0.0
-    per_query: list[dict] = field(default_factory=list)
+    per_query: list[dict[str, Any]] = field(default_factory=list)
     # Timing data: per-query latencies in seconds
     latencies: list[float] = field(default_factory=list)
 
@@ -81,7 +82,7 @@ class QualityMetrics:
     def avg_latency_ms(self) -> float:
         return mean(self.latencies) * 1000 if self.latencies else 0.0
 
-    def as_dict(self) -> dict:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "combo": self.combo,
             "suite": self.suite,

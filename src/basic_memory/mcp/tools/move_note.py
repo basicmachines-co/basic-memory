@@ -2,7 +2,7 @@
 
 from pathlib import Path, PureWindowsPath
 from textwrap import dedent
-from typing import Annotated, Optional, Literal
+from typing import Any, Annotated, Optional, Literal
 
 from loguru import logger
 from fastmcp import Context
@@ -384,7 +384,7 @@ async def move_note(
     project_id: Optional[str] = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
-) -> str | dict:
+) -> str | dict[str, Any]:
     """Move a note or directory to a new location within the same project.
 
     Moves a note or directory from one location to another within the project,

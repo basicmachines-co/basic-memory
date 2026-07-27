@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import override, Any, cast
 
 import mcp.types as mt
 from fastmcp import Context
@@ -17,6 +17,7 @@ ClientInfoState = dict[str, str | None]
 class MCPClientInfoMiddleware(Middleware):
     """Persist sanitized initialize clientInfo in FastMCP session state."""
 
+    @override
     async def on_initialize(
         self,
         context: MiddlewareContext[mt.InitializeRequest],

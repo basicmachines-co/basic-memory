@@ -30,6 +30,7 @@ from basic_memory.cli.commands.cloud.rclone_commands import (
     project_transfer,
     supports_create_empty_src_dirs,
 )
+from typing import Any
 
 
 class _RunResult:
@@ -41,7 +42,7 @@ class _RunResult:
 
 class _Runner:
     def __init__(self, *, returncode: int = 0, stdout: str = "", stderr: str = ""):
-        self.calls: list[tuple[list[str], dict]] = []
+        self.calls: list[tuple[list[str], dict[str, Any]]] = []
         self._returncode = returncode
         self._stdout = stdout
         self._stderr = stderr

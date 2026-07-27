@@ -1,5 +1,5 @@
 from textwrap import dedent
-from typing import Annotated, Optional, Literal
+from typing import Any, Annotated, Optional, Literal
 
 from loguru import logger
 from fastmcp import Context
@@ -202,7 +202,7 @@ async def delete_note(
     project_id: Optional[str] = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
-) -> bool | str | dict:
+) -> bool | str | dict[str, Any]:
     """Delete a note or directory from the knowledge base.
 
     Permanently removes a note or directory from the specified project. For single notes,

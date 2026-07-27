@@ -24,6 +24,7 @@ from basic_memory.runtime.storage import (
     StorageObjectIdentity,
     StorageObjectVersion,
 )
+from typing import override
 
 
 def storage_event(
@@ -57,6 +58,7 @@ class RecordingProjectResolver(StorageEventProjectResolver):
     projects_by_path: dict[str, ProjectRuntimeReference]
     requested_paths: list[str] = field(default_factory=list)
 
+    @override
     async def resolve_project(self, project_path: str) -> ProjectRuntimeReference | None:
         self.requested_paths.append(project_path)
         return self.projects_by_path.get(project_path)
@@ -96,6 +98,7 @@ class RecordingProcessorFactory(StorageEventOperationProcessorFactory):
     fail_relative_path: str | None = None
     processors: list[RecordingStorageEventProcessor] = field(default_factory=list)
 
+    @override
     def processor_for_project(
         self,
         project: ProjectRuntimeReference,
@@ -126,6 +129,7 @@ class RecordingBucketContextResolver(StorageEventBucketContextResolver[BucketRun
     contexts_by_bucket: dict[StorageBucketName, BucketRuntimeContext]
     requested_buckets: list[tuple[StorageBucketName, int]] = field(default_factory=list)
 
+    @override
     async def resolve_bucket_context(
         self,
         bucket_name: StorageBucketName,
@@ -144,6 +148,7 @@ class RecordingBucketContextProcessor(StorageEventBucketContextProcessor[BucketR
     calls: list[tuple[StorageBucketName, str, tuple[str, ...]]] = field(default_factory=list)
     failures: list[tuple[StorageBucketName, int, str]] = field(default_factory=list)
 
+    @override
     async def process_bucket_context_events(
         self,
         bucket_name: StorageBucketName,
@@ -157,6 +162,7 @@ class RecordingBucketContextProcessor(StorageEventBucketContextProcessor[BucketR
             raise RuntimeError("bucket context failed")
         return RuntimeJobCounts(processed=len(events))
 
+    @override
     async def bucket_failed(
         self,
         bucket_name: StorageBucketName,

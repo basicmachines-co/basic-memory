@@ -3,7 +3,7 @@
 Encapsulates all /v2/projects/{project_id}/memory/* endpoints.
 """
 
-from typing import Optional
+from typing import Any, Optional
 
 from httpx import AsyncClient
 
@@ -68,7 +68,7 @@ class MemoryClient:
         """
         from basic_memory.mcp.tools.utils import call_get
 
-        params: dict = {
+        params: dict[str, Any] = {
             "depth": depth,
             "page": page,
             "page_size": page_size,
@@ -120,7 +120,7 @@ class MemoryClient:
         """
         from basic_memory.mcp.tools.utils import call_get
 
-        params: dict = {
+        params: dict[str, Any] = {
             "timeframe": timeframe,
             "depth": depth,
             "page": page,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from basic_memory import __version__, telemetry
 from basic_memory.config import init_api_logging, init_cli_logging, init_mcp_logging
+from typing import Any
 
 
 class FakeLogfire:
@@ -15,14 +16,14 @@ class FakeLogfire:
 
     def __init__(self, *, fail_on_send_to_logfire: bool = False) -> None:
         self.fail_on_send_to_logfire = fail_on_send_to_logfire
-        self.configure_calls: list[dict] = []
+        self.configure_calls: list[dict[str, Any]] = []
 
     def configure(self, **kwargs) -> None:
         self.configure_calls.append(kwargs)
         if self.fail_on_send_to_logfire and "send_to_logfire" in kwargs:
             raise TypeError("send_to_logfire not supported")
 
-    def loguru_handler(self) -> dict:
+    def loguru_handler(self) -> dict[str, Any]:
         return {"sink": "fake-logfire", "level": "INFO"}
 
 
@@ -85,8 +86,8 @@ def test_configure_telemetry_clears_handler_when_disabled(monkeypatch) -> None:
 
 
 def test_init_logging_functions_configure_telemetry_and_logging(monkeypatch) -> None:
-    telemetry_calls: list[dict] = []
-    setup_calls: list[dict] = []
+    telemetry_calls: list[dict[str, Any]] = []
+    setup_calls: list[dict[str, Any]] = []
 
     class StubConfig:
         logfire_enabled = True

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -264,7 +264,7 @@ class _EditPreparer:
                 str | None,
                 int,
                 bool,
-                dict | None,
+                dict[str, Any] | None,
                 AsyncSession | None,
             ]
         ] = []
@@ -280,7 +280,7 @@ class _EditPreparer:
         find_text: str | None = None,
         expected_replacements: int = 1,
         replace_subsections: bool = True,
-        metadata: dict | None = None,
+        metadata: dict[str, Any] | None = None,
         session: AsyncSession | None = None,
     ) -> PreparedEntityWrite:
         self.calls.append(

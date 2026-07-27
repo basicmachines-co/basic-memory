@@ -1,7 +1,7 @@
 """Repository for managing Relation objects."""
 
 from dataclasses import dataclass
-from typing import Sequence, List, Optional, Any, cast
+from typing import override, Sequence, List, Optional, Any, cast
 
 from sqlalchemy import and_, case, delete, select, update
 from sqlalchemy.engine import CursorResult
@@ -388,5 +388,6 @@ class RelationRepository(Repository[Relation]):
         # the unique (from_id, to_name, relation_type) constraint from aborting.
         await self.add_all_ignore_duplicates(session, rows)
 
+    @override
     def get_load_options(self) -> List[LoaderOption]:
         return [selectinload(Relation.from_entity), selectinload(Relation.to_entity)]

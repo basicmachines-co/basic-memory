@@ -10,6 +10,7 @@ from pathlib import Path
 import yaml
 
 from basic_memory.picoschema.inference import ObservationData, RelationData
+from typing import Any
 
 
 # --- Fixture Paths ---
@@ -27,7 +28,7 @@ DRIFT_PEOPLE_DIR = FIXTURES_ROOT / "drift" / "people"
 # --- Frontmatter Parsing ---
 
 
-def parse_frontmatter(filepath: Path) -> dict:
+def parse_frontmatter(filepath: Path) -> dict[str, Any]:
     """Extract YAML frontmatter from a markdown file."""
     text = filepath.read_text(encoding="utf-8")
     match = re.match(r"^---\n(.*?)\n---", text, re.DOTALL)

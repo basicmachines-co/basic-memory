@@ -27,4 +27,8 @@ def running_on_uvloop() -> bool:
         import uvloop
     except ImportError:
         return False
-    return isinstance(asyncio.get_event_loop_policy(), uvloop.EventLoopPolicy)
+    # Constraint: on supported Python 3.12-3.13 this helper runs before a loop
+    # exists, so the active policy is the only observable uvloop signal. Python
+    # 3.14+ skips this helper in alembic/env.py; remove it with the policy seam.
+    policy = asyncio.get_event_loop_policy()  # ty: ignore[deprecated]
+    return isinstance(policy, uvloop.EventLoopPolicy)

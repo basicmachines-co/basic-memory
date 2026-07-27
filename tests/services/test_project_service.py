@@ -16,6 +16,7 @@ from basic_memory.schemas import (
 )
 from basic_memory.services.project_service import ProjectService
 from basic_memory.config import ConfigManager, DatabaseBackend
+from typing import Any
 
 
 async def _get_project(project_service: ProjectService, name: str) -> Project | None:
@@ -33,7 +34,7 @@ async def _find_projects(project_service: ProjectService) -> list[Project]:
         return list(await project_service.repository.find_all(session))
 
 
-async def _create_project(project_service: ProjectService, data: dict) -> Project:
+async def _create_project(project_service: ProjectService, data: dict[str, Any]) -> Project:
     async with db.scoped_session(project_service.session_maker) as session:
         return await project_service.repository.create(session, data)
 

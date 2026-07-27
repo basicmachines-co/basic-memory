@@ -10,6 +10,7 @@ from basic_memory.repository.semantic_errors import (
     RerankProviderContractError,
     RerankTransientError,
 )
+from typing import Any
 
 
 class _Response:
@@ -26,10 +27,10 @@ class _BadGatewayError(RuntimeError):
 
 
 class _SDKRerankResponse(BaseModel):
-    results: list[dict]
+    results: list[dict[str, Any]]
 
 
-def _fake_litellm(response, recorder: dict, *, exc: Exception | None = None):
+def _fake_litellm(response, recorder: dict[str, Any], *, exc: Exception | None = None):
     async def arerank(**params):
         recorder.update(params)
         if exc is not None:
@@ -50,7 +51,7 @@ def _fake_litellm(response, recorder: dict, *, exc: Exception | None = None):
 @pytest.mark.asyncio
 async def test_rerank_realigns_out_of_order_indexed_results(monkeypatch):
     """Rerank responses are indexed and may arrive out of order; realign to input."""
-    recorder: dict = {}
+    recorder: dict[str, Any] = {}
     response = _Response(
         [
             {"index": 2, "relevance_score": 0.9},
@@ -73,7 +74,7 @@ async def test_rerank_realigns_out_of_order_indexed_results(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_rerank_forwards_routing_params(monkeypatch):
-    recorder: dict = {}
+    recorder: dict[str, Any] = {}
     response = _Response(
         [{"index": 0, "relevance_score": 0.7}, {"index": 1, "relevance_score": 0.2}]
     )

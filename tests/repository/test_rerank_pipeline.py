@@ -37,7 +37,7 @@ class _StubEmbeddingProvider:
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         return [self._vectorize(t) for t in texts]
 
-    def runtime_log_attrs(self) -> dict:
+    def runtime_log_attrs(self) -> dict[str, Any]:
         return {}
 
     @staticmethod
@@ -71,7 +71,7 @@ class _FakeReranker:
             scores.append(score)
         return scores
 
-    def runtime_log_attrs(self) -> dict:
+    def runtime_log_attrs(self) -> dict[str, Any]:
         return {}
 
 
@@ -81,7 +81,7 @@ class _BadReranker:
     async def rerank(self, query: str, documents: list[str]) -> list[float]:
         return []  # deliberately misaligned (no exception)
 
-    def runtime_log_attrs(self) -> dict:
+    def runtime_log_attrs(self) -> dict[str, Any]:
         return {}
 
 
@@ -93,7 +93,7 @@ class _ExplodingReranker:
     async def rerank(self, query: str, documents: list[str]) -> list[float]:
         raise RerankTransientError("cross-encoder backend unreachable")
 
-    def runtime_log_attrs(self) -> dict:
+    def runtime_log_attrs(self) -> dict[str, Any]:
         return {}
 
 
@@ -111,7 +111,7 @@ class _SucceedsThenTransientReranker:
             raise RerankTransientError("cross-encoder backend unreachable")
         return [0.1, 0.9]
 
-    def runtime_log_attrs(self) -> dict:
+    def runtime_log_attrs(self) -> dict[str, Any]:
         return {}
 
 
@@ -126,7 +126,7 @@ class _PermanentFaultReranker:
     async def rerank(self, query: str, documents: list[str]) -> list[float]:
         raise self._exc
 
-    def runtime_log_attrs(self) -> dict:
+    def runtime_log_attrs(self) -> dict[str, Any]:
         return {}
 
 

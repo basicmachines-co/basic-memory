@@ -14,6 +14,7 @@ Frequency thresholds:
 
 from collections import Counter
 from dataclasses import dataclass, field
+from typing import Any
 
 
 # --- Result Data Model ---
@@ -40,7 +41,7 @@ class InferenceResult:
     note_type: str
     notes_analyzed: int
     field_frequencies: list[FieldFrequency]
-    suggested_schema: dict  # Ready-to-use Picoschema YAML dict
+    suggested_schema: dict[str, Any]  # Ready-to-use Picoschema YAML dict
     suggested_required: list[str]
     suggested_optional: list[str]
     excluded: list[str]  # Below threshold
@@ -290,12 +291,12 @@ def _build_picoschema_dict(
     frequencies: list[FieldFrequency],
     required_threshold: float,
     optional_threshold: float,
-) -> dict:
+) -> dict[str, Any]:
     """Build a Picoschema YAML dict from field frequencies.
 
     Only includes fields at or above the optional threshold.
     """
-    schema: dict = {}
+    schema: dict[str, Any] = {}
 
     for freq in frequencies:
         if freq.percentage < optional_threshold:

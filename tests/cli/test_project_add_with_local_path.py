@@ -13,6 +13,7 @@ from basic_memory.schemas.project_info import ProjectStatusResponse
 
 # Importing registers project subcommands on the shared app instance.
 import basic_memory.cli.commands.project as project_cmd  # noqa: F401
+from typing import Any
 
 
 def _workspace(
@@ -94,7 +95,7 @@ def mock_api_client(monkeypatch):
         },
     }
 
-    calls: list[dict] = []
+    calls: list[dict[str, Any]] = []
 
     async def fake_create_project(self, project_data):
         calls.append(project_data)

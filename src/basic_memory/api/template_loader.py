@@ -6,7 +6,7 @@ formatting needs.
 """
 
 import textwrap
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Optional, Callable, Protocol
 from pathlib import Path
 import json
 import datetime
@@ -16,6 +16,18 @@ from loguru import logger
 
 # Get the base path of the templates directory
 TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
+
+
+class CompiledTemplate(Protocol):
+    """Callable interface used by compiled Handlebars templates."""
+
+    def __call__(
+        self,
+        context: dict[str, Any],
+        /,
+        *,
+        helpers: dict[str, Callable[..., Any]],
+    ) -> str: ...
 
 
 # Custom helpers for Handlebars
@@ -215,11 +227,11 @@ class TemplateLoader:
             template_dir: Optional custom template directory path
         """
         self.template_dir = Path(template_dir) if template_dir else TEMPLATES_DIR
-        self.template_cache: Dict[str, Callable] = {}
+        self.template_cache: Dict[str, CompiledTemplate] = {}
         self.compiler = pybars.Compiler()
 
         # Set up standard helpers
-        self.helpers = {
+        self.helpers: dict[str, Callable[..., Any]] = {
             "date": _date_helper,
             "default": _default_helper,
             "capitalize": _capitalize_helper,
@@ -234,7 +246,7 @@ class TemplateLoader:
 
         logger.debug(f"Initialized template loader with directory: {self.template_dir}")
 
-    def get_template(self, template_path: str) -> Callable:
+    def get_template(self, template_path: str) -> CompiledTemplate:
         """Get a template by path, using cache if available.
 
         Args:

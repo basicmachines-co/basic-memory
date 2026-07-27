@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import override, Any
 
 from sqlalchemy import Select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -962,6 +962,7 @@ async def test_run_local_project_index_resolves_relations_after_inline_fanout() 
     maintenance_runner = RecordingMaintenanceRunner()
 
     class EventBatchEnqueuer(RecordingBatchEnqueuer):
+        @override
         async def enqueue_index_file_batch(self, request: RuntimeIndexFileBatchJobRequest) -> None:
             events.append("batch")
             await super().enqueue_index_file_batch(request)
@@ -2494,7 +2495,7 @@ class RecordingMarkdownFileIndexer:
 class RuntimeFactoryEntityRepository:
     project_id: int | None = 12
 
-    def select(self, *entities: Any) -> Select:
+    def select(self, *entities: Any) -> Select[Any]:
         # Runtime-factory composition tests never run a watermark scan, so the
         # stat-projection query builder is unused here.
         raise NotImplementedError

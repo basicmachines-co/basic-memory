@@ -1,7 +1,7 @@
 """Tests for role-specific literal embedding text prefixes."""
 
 import hashlib
-from typing import Any
+from typing import override, Any
 
 import pytest
 
@@ -22,14 +22,17 @@ class _RecordingEmbeddingProvider(EmbeddingProvider):
         self.document_calls: list[list[str]] = []
         self.query_calls: list[str] = []
 
+    @override
     async def embed_query(self, text: str) -> list[float]:
         self.query_calls.append(text)
         return [1.0, 0.0, 0.0]
 
+    @override
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         self.document_calls.append(texts)
         return [[0.0, 1.0, 0.0] for _ in texts]
 
+    @override
     def runtime_log_attrs(self) -> dict[str, Any]:
         return {"provider_batch_size": 7}
 

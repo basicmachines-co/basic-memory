@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from collections.abc import Iterator, Sequence
-from typing import Any
+from typing import override, Any
 
 import pytest
 
@@ -118,6 +118,7 @@ class BlockingMutationRepository(FakeRepository):
         if not self.release_mutation.wait(timeout=5):
             raise TimeoutError("test did not release the Milvus mutation")
 
+    @override
     def upsert(
         self,
         collection_name: str,
@@ -126,6 +127,7 @@ class BlockingMutationRepository(FakeRepository):
         self._block_mutation()
         super().upsert(collection_name, records)
 
+    @override
     def delete_records(
         self,
         collection_name: str,
@@ -134,10 +136,12 @@ class BlockingMutationRepository(FakeRepository):
         self._block_mutation()
         super().delete_records(collection_name, records)
 
+    @override
     def delete_entity(self, collection_name: str, entity_id: int) -> None:
         self._block_mutation()
         super().delete_entity(collection_name, entity_id)
 
+    @override
     def delete_ids(self, collection_name: str, record_ids: Sequence[str]) -> None:
         self._block_mutation()
         super().delete_ids(collection_name, record_ids)

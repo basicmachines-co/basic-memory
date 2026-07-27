@@ -8,13 +8,14 @@ from types import SimpleNamespace
 
 import logfire
 import pytest
+from typing import Any
 
 async_client_module = importlib.import_module("basic_memory.mcp.async_client")
 
 
 @pytest.mark.asyncio
 async def test_resolve_cloud_token_emits_failure_span(monkeypatch) -> None:
-    spans: list[tuple[str, dict]] = []
+    spans: list[tuple[str, dict[str, Any]]] = []
     error_messages: list[str] = []
 
     class FakeAuth:

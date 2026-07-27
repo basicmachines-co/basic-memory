@@ -12,6 +12,7 @@ from semantic.litellm_live_harness import (
     evaluate_case,
     load_custom_cases,
 )
+from typing import override
 
 
 class FakeProvider:
@@ -32,6 +33,7 @@ class FakeProvider:
 class WrongRankingProvider(FakeProvider):
     """Provider double that ranks the distractor document higher."""
 
+    @override
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         assert len(texts) == 2
         return [[0.0, 1.0], [1.0, 0.0]]

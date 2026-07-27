@@ -23,11 +23,12 @@ from basic_memory.schemas.project_index import (
 
 # Importing registers subcommands on the shared app instance.
 import basic_memory.cli.commands.project as project_cmd  # noqa: F401
+from typing import Any
 
 runner = CliRunner()
 
 
-def _parse_json_output(output: str) -> dict:
+def _parse_json_output(output: str) -> dict[str, Any]:
     """Extract and parse the JSON object from CLI output.
 
     The CliRunner may capture log lines before the JSON payload.
@@ -417,7 +418,7 @@ def test_schema_diff_json(mock_mcp, mock_config_cls):
 def write_config(tmp_path, monkeypatch):
     """Write config.json under a temporary HOME and return the file path."""
 
-    def _write(config_data: dict):
+    def _write(config_data: dict[str, Any]):
         from basic_memory import config as config_module
 
         config_module._CONFIG_CACHE = None

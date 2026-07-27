@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock
 from uuid import UUID
 
@@ -191,7 +191,7 @@ class _CreatePreparer:
                 str | None,
                 int,
                 bool,
-                dict | None,
+                dict[str, Any] | None,
                 AsyncSession | None,
             ]
         ] = []
@@ -241,7 +241,7 @@ class _CreatePreparer:
         find_text: str | None = None,
         expected_replacements: int = 1,
         replace_subsections: bool = True,
-        metadata: dict | None = None,
+        metadata: dict[str, Any] | None = None,
         session: AsyncSession | None = None,
     ) -> PreparedEntityWrite:
         self.edit_calls.append(

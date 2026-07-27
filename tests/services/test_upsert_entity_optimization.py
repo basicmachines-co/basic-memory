@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, TYPE_CHECKING
 from unittest.mock import AsyncMock
 
 import pytest
@@ -26,13 +27,16 @@ from basic_memory.markdown.schemas import (
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services.entity_service import EntityService
 
+if TYPE_CHECKING:
+    from loguru import Record
+
 # --- Helpers ---
 
 
 def _make_markdown(
     title: str = "Test Entity",
-    observations: list | None = None,
-    relations: list | None = None,
+    observations: list[MarkdownObservation] | None = None,
+    relations: list[MarkdownRelation] | None = None,
 ) -> EntityMarkdown:
     frontmatter = EntityFrontmatter(metadata={"title": title, "type": "note"})
     return EntityMarkdown(
@@ -131,7 +135,7 @@ async def test_create_or_update_entity_uses_lightweight_exact_resolution(
         content="# Create Or Update",
     )
     sentinel_entity = SimpleNamespace(file_path="notes/existing.md")
-    resolve_calls: list[tuple[str, dict]] = []
+    resolve_calls: list[tuple[str, dict[str, Any]]] = []
 
     async def fake_resolve_link(link_text: str, **kwargs):
         resolve_calls.append((link_text, kwargs))
@@ -173,7 +177,7 @@ async def test_upsert_with_relations_uses_lightweight_exact_resolution(
             content="# Lightweight Source",
         )
     )
-    resolve_calls: list[tuple[str, dict]] = []
+    resolve_calls: list[tuple[str, dict[str, Any]]] = []
 
     async def fake_resolve_link(link_text: str, **kwargs):
         resolve_calls.append((link_text, kwargs))
@@ -333,7 +337,7 @@ async def test_resolve_failure_is_logged_and_degrades_to_forward_reference(
 
     monkeypatch.setattr(entity_service.link_resolver, "resolve_link", failing_resolve_link)
 
-    records: list[dict] = []
+    records: list[Record] = []
     sink_id = logger.add(lambda message: records.append(message.record), level="WARNING")
     try:
         markdown = _make_markdown(
@@ -489,7 +493,7 @@ async def test_edit_entity_uses_lightweight_identifier_resolution(
         )
     )
     original_resolve_link = entity_service.link_resolver.resolve_link
-    resolve_calls: list[tuple[str, dict]] = []
+    resolve_calls: list[tuple[str, dict[str, Any]]] = []
 
     async def spy_resolve_link(link_text: str, **kwargs):
         resolve_calls.append((link_text, kwargs))

@@ -7,6 +7,7 @@ from contextlib import contextmanager
 
 import logfire
 import pytest
+from typing import Any
 
 build_context_module = importlib.import_module("basic_memory.mcp.tools.build_context")
 edit_note_module = importlib.import_module("basic_memory.mcp.tools.edit_note")
@@ -18,7 +19,7 @@ write_note_module = importlib.import_module("basic_memory.mcp.tools.write_note")
 class _NoopSpan:
     """Minimal stand-in for a live logfire span during tests."""
 
-    def set_attributes(self, attrs: dict) -> None:
+    def set_attributes(self, attrs: dict[str, Any]) -> None:
         pass
 
     def set_attribute(self, key: str, value) -> None:
@@ -26,7 +27,7 @@ class _NoopSpan:
 
 
 def _recording_spans():
-    spans: list[tuple[str, dict]] = []
+    spans: list[tuple[str, dict[str, Any]]] = []
 
     @contextmanager
     def fake_span(name: str, **attrs):
@@ -36,7 +37,9 @@ def _recording_spans():
     return spans, fake_span
 
 
-def _contains_span_attrs(spans: list[tuple[str, dict]], name: str, expected: dict) -> bool:
+def _contains_span_attrs(
+    spans: list[tuple[str, dict[str, Any]]], name: str, expected: dict[str, Any]
+) -> bool:
     return any(
         span_name == name and expected.items() <= attrs.items() for span_name, attrs in spans
     )

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Protocol
+from typing import Generic, Protocol, TypeVar
 from uuid import UUID
 
 from basic_memory.runtime.note_content_deletes import (
@@ -204,12 +204,15 @@ def plan_accepted_note_content_write(
     )
 
 
+_PayloadT_co = TypeVar("_PayloadT_co", covariant=True)
+
+
 @dataclass(frozen=True, slots=True)
-class RuntimeAcceptedNoteChange[PayloadT]:
+class RuntimeAcceptedNoteChange(Generic[_PayloadT_co]):
     """Accepted note response plus any post-commit runtime follow-up work."""
 
     status_code: int
-    payload: PayloadT
+    payload: _PayloadT_co
     materialization: RuntimePendingNoteMaterialization | None = None
     file_delete: RuntimePendingNoteFileDelete | None = None
 

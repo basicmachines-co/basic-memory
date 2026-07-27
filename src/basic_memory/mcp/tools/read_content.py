@@ -8,7 +8,7 @@ Files are read directly without any knowledge graph processing.
 import base64
 import io
 
-from typing import Annotated, Optional
+from typing import Any, Annotated, Optional
 
 from loguru import logger
 from PIL import Image as PILImage
@@ -176,7 +176,7 @@ async def read_content(
     project: Optional[str] = None,
     project_id: Optional[str] = None,
     context: Context | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Read a file's raw content by path or permalink.
 
     This tool provides direct access to file content in the knowledge base,

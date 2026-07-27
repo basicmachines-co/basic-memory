@@ -5,7 +5,7 @@ and manage project context during conversations.
 """
 
 import os
-from typing import Literal
+from typing import Any, Literal
 
 from fastmcp import Context
 from loguru import logger
@@ -55,7 +55,7 @@ def _merge_projects(
     cloud_workspace_tenant_id: str | None = None,
     cloud_workspace_slug: str | None = None,
     cloud_workspace_is_default: bool = False,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Merge local and cloud project lists by permalink.
 
     Returns a sorted list of dicts with unified project metadata.
@@ -77,7 +77,7 @@ def _merge_projects(
             names_by_permalink[permalink] = project.name
             cloud_by_permalink[permalink] = project
 
-    merged: list[dict] = []
+    merged: list[dict[str, Any]] = []
     for permalink in sorted(names_by_permalink):
         name = names_by_permalink[permalink]
         local_proj = local_by_permalink.get(permalink)
@@ -208,7 +208,7 @@ def _merge_workspace_projects(
     cloud_entries: tuple[WorkspaceProjectEntry, ...],
     *,
     config: BasicMemoryConfig | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Merge local projects with cloud projects from every accessible workspace."""
     local_by_permalink: dict[str, ProjectItem] = {}
     if local_list:
@@ -235,7 +235,7 @@ def _merge_workspace_projects(
         )
 
     cloud_permalinks = {entry.project.permalink for entry in cloud_entries}
-    merged: list[dict] = []
+    merged: list[dict[str, Any]] = []
 
     for entry in sorted(
         cloud_entries,
@@ -303,7 +303,7 @@ def _merge_workspace_projects(
     return merged
 
 
-def _format_project_list_text(merged: list[dict]) -> str:
+def _format_project_list_text(merged: list[dict[str, Any]]) -> str:
     """Format merged project list as human-readable text."""
     result = "Available projects:\n"
 
@@ -344,10 +344,10 @@ def _format_project_list_text(merged: list[dict]) -> str:
 
 
 def _format_project_list_json(
-    merged: list[dict],
+    merged: list[dict[str, Any]],
     default_project: str | None,
     constrained_project: str | None,
-) -> dict:
+) -> dict[str, Any]:
     """Format merged project list as structured JSON."""
     return {
         "projects": merged,
@@ -370,7 +370,7 @@ def _format_project_list_json(
 async def list_memory_projects(
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
-) -> str | dict:
+) -> str | dict[str, Any]:
     """List all available projects with their status.
 
     Shows projects from both local and cloud sources when cloud credentials
@@ -556,7 +556,7 @@ async def create_memory_project(
     workspace: str | None = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
-) -> str | dict:
+) -> str | dict[str, Any]:
     """Create a new Basic Memory project.
 
     Creates a new project with the specified name and path. The project directory

@@ -20,6 +20,7 @@ from basic_memory.repository.postgres_search_repository import (
 from basic_memory.repository.semantic_errors import SemanticSearchDisabledError
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
+from typing import override
 
 
 pytestmark = pytest.mark.postgres
@@ -75,9 +76,11 @@ class StubLiteLLMEmbeddingProvider(LiteLLMEmbeddingProvider):
             query_input_type=query_input_type,
         )
 
+    @override
     async def embed_query(self, text: str) -> list[float]:
         return StubEmbeddingProvider._vectorize(text)
 
+    @override
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         return [StubEmbeddingProvider._vectorize(text) for text in texts]
 

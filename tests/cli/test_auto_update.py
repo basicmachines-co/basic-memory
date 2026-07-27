@@ -267,7 +267,7 @@ def test_mcp_silent_mode_suppresses_subprocess_output(monkeypatch, tmp_path):
         lambda: (True, "9.9.9"),
     )
 
-    captured_kwargs: list[dict] = []
+    captured_kwargs: list[dict[str, Any]] = []
 
     def _fake_run_subprocess(command, **kwargs):
         captured_kwargs.append(kwargs)

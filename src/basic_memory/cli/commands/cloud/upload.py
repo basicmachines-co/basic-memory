@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 from contextlib import AbstractAsyncContextManager
-from typing import Callable
+from typing import Callable, Protocol
 
 import aiofiles
 import httpx
@@ -15,6 +15,20 @@ from basic_memory.mcp.async_client import get_client
 ARCHIVE_EXTENSIONS = {".zip", ".tar", ".gz", ".bz2", ".xz", ".7z", ".rar", ".tgz", ".tbz2"}
 
 
+class PutFile(Protocol):
+    """Callable contract for injected WebDAV uploads."""
+
+    async def __call__(
+        self,
+        client: httpx.AsyncClient,
+        remote_path: str,
+        /,
+        *,
+        content: bytes,
+        headers: dict[str, str],
+    ) -> httpx.Response: ...
+
+
 async def upload_path(
     local_path: Path,
     project_name: str,
@@ -23,7 +37,7 @@ async def upload_path(
     dry_run: bool = False,
     *,
     client_cm_factory: Callable[[], AbstractAsyncContextManager[httpx.AsyncClient]] | None = None,
-    put_func: Callable | None = None,
+    put_func: PutFile | None = None,
 ) -> bool:
     """
     Upload a file or directory to cloud project via WebDAV.

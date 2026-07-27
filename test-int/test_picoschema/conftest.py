@@ -18,6 +18,7 @@ from test_picoschema.helpers import (
     DRIFT_PEOPLE_DIR,
     parse_frontmatter,
 )
+from typing import Any
 
 
 @pytest.fixture
@@ -56,30 +57,30 @@ def drift_people_dir() -> Path:
 
 
 @pytest.fixture
-def person_schema_frontmatter(schemas_dir) -> dict:
+def person_schema_frontmatter(schemas_dir) -> dict[str, Any]:
     """Load Person schema frontmatter from fixture."""
     return parse_frontmatter(schemas_dir / "Person.md")
 
 
 @pytest.fixture
-def book_schema_frontmatter(schemas_dir) -> dict:
+def book_schema_frontmatter(schemas_dir) -> dict[str, Any]:
     """Load Book schema frontmatter from fixture."""
     return parse_frontmatter(schemas_dir / "Book.md")
 
 
 @pytest.fixture
-def meeting_schema_frontmatter(schemas_dir) -> dict:
+def meeting_schema_frontmatter(schemas_dir) -> dict[str, Any]:
     """Load Meeting schema frontmatter from fixture."""
     return parse_frontmatter(schemas_dir / "Meeting.md")
 
 
 @pytest.fixture
-def software_project_schema_frontmatter(schemas_dir) -> dict:
+def software_project_schema_frontmatter(schemas_dir) -> dict[str, Any]:
     """Load SoftwareProject schema frontmatter from fixture."""
     return parse_frontmatter(schemas_dir / "SoftwareProject.md")
 
 
 @pytest.fixture
-def strict_schema_frontmatter(schemas_dir) -> dict:
+def strict_schema_frontmatter(schemas_dir) -> dict[str, Any]:
     """Load StrictSchema frontmatter from fixture."""
     return parse_frontmatter(schemas_dir / "StrictSchema.md")

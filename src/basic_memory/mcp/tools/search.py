@@ -575,7 +575,7 @@ async def _search_all_projects(
     status: str | None,
     min_similarity: float | None,
     context: Context | None,
-) -> dict | str:
+) -> dict[str, Any] | str:
     """Search every accessible project when the caller explicitly opts in."""
     requested_page = max(page, 1)
     requested_page_size = max(page_size, 1)
@@ -789,7 +789,7 @@ async def search_notes(
         ),
     ] = None,
     context: Context | None = None,
-) -> dict | str:
+) -> dict[str, Any] | str:
     """Search across all content in the knowledge base with comprehensive syntax support.
 
     This tool searches the knowledge base using full-text search, pattern matching,

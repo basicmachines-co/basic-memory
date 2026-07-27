@@ -50,7 +50,7 @@ class SearchRepository(Protocol):
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
         categories: Optional[List[str]] = None,
-        metadata_filters: Optional[dict] = None,
+        metadata_filters: Optional[dict[str, Any]] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
         limit: int = 10,
@@ -71,7 +71,7 @@ class SearchRepository(Protocol):
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
         categories: Optional[List[str]] = None,
-        metadata_filters: Optional[dict] = None,
+        metadata_filters: Optional[dict[str, Any]] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
         allow_relaxed: bool = False,
@@ -136,7 +136,7 @@ class SearchRepository(Protocol):
         """Sync semantic vector chunks for a batch of entities."""
         ...
 
-    async def execute_query(self, query, params: dict) -> Result:
+    async def execute_query(self, query, params: dict[str, Any]) -> Result[Any]:
         """Execute a raw SQL query."""
         ...
 

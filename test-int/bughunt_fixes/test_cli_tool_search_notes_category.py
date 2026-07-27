@@ -11,11 +11,12 @@ import json
 from typer.testing import CliRunner
 
 from basic_memory.cli.main import app as cli_app
+from typing import Any
 
 runner = CliRunner()
 
 
-def _write_note(title: str, folder: str, content: str) -> dict:
+def _write_note(title: str, folder: str, content: str) -> dict[str, Any]:
     result = runner.invoke(
         cli_app,
         [

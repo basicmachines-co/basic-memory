@@ -19,6 +19,7 @@ from dataclasses import dataclass, field as dataclass_field
 
 from basic_memory.picoschema.inference import ObservationData, RelationData
 from basic_memory.picoschema.parser import SchemaDefinition, SchemaField
+from typing import Any
 
 
 # --- Result Data Model ---
@@ -56,7 +57,7 @@ def validate_note(
     schema: SchemaDefinition,
     observations: list[ObservationData],
     relations: list[RelationData],
-    frontmatter: dict | None = None,
+    frontmatter: dict[str, Any] | None = None,
 ) -> ValidationResult:
     """Validate a note against a schema definition.
 
@@ -261,7 +262,7 @@ def _validate_enum_field(
 
 def _validate_frontmatter_field(
     schema_field: SchemaField,
-    frontmatter: dict,
+    frontmatter: dict[str, Any],
 ) -> FieldResult:
     """Validate a single frontmatter key against a schema field declaration.
 

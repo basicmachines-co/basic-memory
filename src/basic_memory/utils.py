@@ -8,7 +8,7 @@ import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Protocol, Union, runtime_checkable, List, Optional
+from typing import override, Any, Protocol, Union, runtime_checkable, List, Optional
 
 from loguru import logger
 from unidecode import unidecode
@@ -63,6 +63,7 @@ def normalize_project_path(path: str) -> str:
 class PathLike(Protocol):
     """Protocol for objects that can be used as paths."""
 
+    @override
     def __str__(self) -> str: ...
 
 

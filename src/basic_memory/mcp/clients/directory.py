@@ -3,7 +3,7 @@
 Encapsulates all /v2/projects/{project_id}/directory/* endpoints.
 """
 
-from typing import Optional
+from typing import Any, Optional
 
 from httpx import AsyncClient
 
@@ -65,7 +65,7 @@ class DirectoryClient:
         """
         from basic_memory.mcp.tools.utils import call_get
 
-        params: dict = {
+        params: dict[str, Any] = {
             "dir_name": dir_name,
             "depth": depth,
             "page": page,

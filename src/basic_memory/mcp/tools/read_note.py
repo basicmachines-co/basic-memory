@@ -1,7 +1,7 @@
 """Read note tool for Basic Memory MCP server."""
 
 from textwrap import dedent
-from typing import Annotated, Optional, Literal, cast
+from typing import Any, Annotated, Optional, Literal, cast
 
 import logfire
 import yaml
@@ -38,7 +38,7 @@ def _is_exact_title_match(identifier: str, title: str) -> bool:
     return identifier.strip().casefold() == title.strip().casefold()
 
 
-def _parse_opening_frontmatter(content: str) -> tuple[str, dict | None]:
+def _parse_opening_frontmatter(content: str) -> tuple[str, dict[str, Any] | None]:
     """Parse opening YAML frontmatter and return (body, frontmatter).
 
     Mirrors CLI behavior: only parses a frontmatter block at the very top.
@@ -108,7 +108,7 @@ async def read_note(
     output_format: Literal["text", "json"] = "text",
     include_frontmatter: bool = False,
     context: Context | None = None,
-) -> str | dict:
+) -> str | dict[str, Any]:
     """Return the raw markdown for a note, or guidance text if no match is found.
 
     Finds and retrieves a note by its title, permalink, or content search,
@@ -259,7 +259,7 @@ async def read_note(
             knowledge_client = KnowledgeClient(client, active_project.external_id)
             resource_client = ResourceClient(client, active_project.external_id)
 
-            async def _read_json_payload(entity_id: str) -> dict:
+            async def _read_json_payload(entity_id: str) -> dict[str, Any]:
                 with logfire.span(
                     "mcp.read_note.shape_response",
                     domain="mcp",
@@ -278,7 +278,7 @@ async def read_note(
                         "frontmatter": parsed_frontmatter,
                     }
 
-            def _empty_json_payload() -> dict:
+            def _empty_json_payload() -> dict[str, Any]:
                 return {
                     "title": None,
                     "permalink": None,

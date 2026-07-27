@@ -5,7 +5,7 @@ import json
 import re
 from collections.abc import Sequence
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, override, List, Optional
 
 import logfire
 from loguru import logger
@@ -37,7 +37,7 @@ from basic_memory.repository.pgvector_index import PgVectorIndex
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 
-def _strip_nul_from_row(row_data: dict) -> dict:
+def _strip_nul_from_row(row_data: dict[str, Any]) -> dict[str, Any]:
     """Strip NUL bytes from all string values in a row dict.
 
     Secondary defense: PostgreSQL text columns cannot store \\x00.
@@ -120,6 +120,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             self._semantic_vector_index_name = effective_name
             self._semantic_vector_index = vector_index
 
+    @override
     async def init_search_index(self):
         """Create Postgres table with tsvector column and GIN indexes.
 
@@ -134,6 +135,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         if self._semantic_enabled:
             await self._ensure_vector_tables()
 
+    @override
     async def index_item(self, search_index_row: SearchIndexRow) -> None:
         """Index or update a single item using UPSERT.
 
@@ -196,6 +198,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
     # tsquery preparation (backend-specific)
     # ------------------------------------------------------------------
 
+    @override
     def _prepare_search_term(self, term: str, is_prefix: bool = True) -> str:
         """Prepare a search term for tsquery format.
 
@@ -319,6 +322,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
     # Abstract hook implementations (vector/semantic, Postgres-specific)
     # ------------------------------------------------------------------
 
+    @override
     async def _ensure_vector_tables(self) -> None:
         self._assert_semantic_available()
         if not hasattr(self, "_semantic_vector_index"):
@@ -384,18 +388,21 @@ class PostgresSearchRepository(SearchRepositoryBase):
             logger.debug(f"Postgres vector tables ready (dimensions={self._vector_dimensions})")
             self._vector_tables_initialized = True
 
+    @override
     async def _run_vector_query(
         self,
         session: AsyncSession,
         query_embedding: list[float],
         candidate_limit: int,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         return await super()._run_vector_query(session, query_embedding, candidate_limit)
 
+    @override
     def _vector_prepare_window_size(self) -> int:
         """Use a bounded config-driven prepare window for Postgres vector sync."""
         return self._semantic_postgres_prepare_concurrency
 
+    @override
     async def _upsert_scheduled_chunk_records(
         self,
         session: AsyncSession,
@@ -472,6 +479,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             for record in scheduled_records
         ]
 
+    @override
     async def _delete_entity_chunks(
         self,
         session: AsyncSession,
@@ -485,6 +493,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             expected_deletions=expected_deletions,
         )
 
+    @override
     async def _delete_stale_chunks(
         self,
         session: AsyncSession,
@@ -500,6 +509,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             expected_deletions=expected_deletions,
         )
 
+    @override
     def _distance_to_similarity(self, distance: float) -> float:
         """Convert pgvector cosine distance to cosine similarity.
 
@@ -508,6 +518,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         """
         return max(0.0, 1.0 - distance)
 
+    @override
     def _timestamp_now_expr(self) -> str:
         return "NOW()"
 
@@ -515,6 +526,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
     # Index / bulk index overrides (Postgres UPSERT)
     # ------------------------------------------------------------------
 
+    @override
     async def bulk_index_items(self, search_index_rows: List[SearchIndexRow]) -> None:
         """Index multiple items in a single batch operation using UPSERT.
 
@@ -608,8 +620,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
         categories: Optional[List[str]] = None,
-        metadata_filters: Optional[dict] = None,
-    ) -> tuple[str, str, dict, str, str]:
+        metadata_filters: Optional[dict[str, Any]] = None,
+    ) -> tuple[str, str, dict[str, Any], str, str]:
         """Build Postgres FTS FROM/WHERE params shared by search and count."""
         conditions = []
         params = {}
@@ -795,6 +807,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
 
         return from_clause, where_clause, params, order_by_clause, score_expr
 
+    @override
     async def search(
         self,
         search_text: Optional[str] = None,
@@ -805,7 +818,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
         categories: Optional[List[str]] = None,
-        metadata_filters: Optional[dict] = None,
+        metadata_filters: Optional[dict[str, Any]] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
         limit: int = 10,
@@ -885,7 +898,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
 
         use_savepoint = session is not None or allow_relaxed
 
-        async def execute_rows(active_session: AsyncSession, query_params: dict):
+        async def execute_rows(active_session: AsyncSession, query_params: dict[str, Any]):
             # PostgreSQL leaves a transaction unusable after invalid tsquery syntax.
             # Scope retryable or caller-owned attempts to a savepoint so a relaxed
             # retry—and any caller continuing to use its session—starts healthy.
@@ -960,6 +973,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
 
         return results
 
+    @override
     async def count(
         self,
         search_text: Optional[str] = None,
@@ -970,7 +984,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         after_date: Optional[datetime] = None,
         search_item_types: Optional[List[SearchItemType]] = None,
         categories: Optional[List[str]] = None,
-        metadata_filters: Optional[dict] = None,
+        metadata_filters: Optional[dict[str, Any]] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
         allow_relaxed: bool = False,
@@ -1011,7 +1025,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         sql = f"SELECT COUNT(*) FROM {from_clause} WHERE {where_clause}"
         logger.trace(f"Count {sql} params: {params}")
 
-        async def execute_count(active_session: AsyncSession, query_params: dict) -> int:
+        async def execute_count(active_session: AsyncSession, query_params: dict[str, Any]) -> int:
             if allow_relaxed:
                 async with active_session.begin_nested():
                     result = await active_session.execute(text(sql), query_params)

@@ -187,7 +187,7 @@ PROFILES: dict[Harness, HarnessProfile] = {
 # --- Hook stdin ---
 
 
-def _read_stdin_payload() -> dict:
+def _read_stdin_payload() -> dict[str, Any]:
     """Parse the harness's hook JSON from stdin; junk normalizes to {}.
 
     Interactive invocations (a human typing `bm hook session-start`) have no
@@ -205,7 +205,7 @@ def _read_stdin_payload() -> dict:
 # --- Harness settings resolution (ported from the plugin hook scripts) ---
 
 
-def _read_claude_block(path: Path) -> tuple[dict | None, bool]:
+def _read_claude_block(path: Path) -> tuple[dict[str, Any] | None, bool]:
     """Read one Claude settings block and preserve malformed-file presence."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -237,7 +237,7 @@ def _claude_project_dir(directory: Path) -> Path:
         current = current.parent
 
 
-def load_claude_settings(directory: Path) -> tuple[dict, bool]:
+def load_claude_settings(directory: Path) -> tuple[dict[str, Any], bool]:
     """Merge basicMemory blocks: user-level settings.json, then project settings.
 
     Precedence (lowest to highest): ``~/.claude/settings.json``, then the
@@ -249,7 +249,7 @@ def load_claude_settings(directory: Path) -> tuple[dict, bool]:
     evaluation so a later source cannot rebuild routing from incomplete
     settings.
     """
-    merged: dict = {"captureEvents": DEFAULT_CAPTURE_EVENTS}
+    merged: dict[str, Any] = {"captureEvents": DEFAULT_CAPTURE_EVENTS}
     found = False
     home = Path.home()
     sources: list[tuple[Path, tuple[str, ...]]] = [(home, ("settings.json",))]
@@ -271,7 +271,7 @@ def load_claude_settings(directory: Path) -> tuple[dict, bool]:
     return merged, found
 
 
-def _read_codex_block(path: Path) -> tuple[dict | None, bool]:
+def _read_codex_block(path: Path) -> tuple[dict[str, Any] | None, bool]:
     """Read one Codex settings block and preserve malformed-file presence."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -323,7 +323,7 @@ def _codex_default_capture_folder(directory: Path) -> str:
     return f"codex/{repo_dir}"
 
 
-def load_codex_settings(directory: Path) -> tuple[dict, bool]:
+def load_codex_settings(directory: Path) -> tuple[dict[str, Any], bool]:
     """Merge user and project Codex settings, then resolve checkout defaults.
 
     Precedence (lowest to highest): ``~/.codex/basic-memory.json``, then the
@@ -333,7 +333,7 @@ def load_codex_settings(directory: Path) -> tuple[dict, bool]:
     configured and fails closed for the whole evaluation so a later source
     cannot rebuild routing from incomplete settings.
     """
-    defaults: dict = {
+    defaults: dict[str, Any] = {
         "checkpointOnCompact": CODEX_DEFAULT_CHECKPOINT_ON_COMPACT,
         "captureEvents": DEFAULT_CAPTURE_EVENTS,
         "captureFolder": _codex_default_capture_folder(directory),
@@ -367,13 +367,13 @@ def load_codex_settings(directory: Path) -> tuple[dict, bool]:
     return merged, found
 
 
-def load_harness_settings(harness: Harness, directory: Path) -> tuple[dict, bool]:
+def load_harness_settings(harness: Harness, directory: Path) -> tuple[dict[str, Any], bool]:
     if harness is Harness.claude:
         return load_claude_settings(directory)
     return load_codex_settings(directory)
 
 
-def _shared_project_refs(cfg: dict, primary_project: str) -> tuple[list[str], bool]:
+def _shared_project_refs(cfg: dict[str, Any], primary_project: str) -> tuple[list[str], bool]:
     """Resolve the shared/team read set: secondaryProjects + teamProjects keys.
 
     Dedup, preserve order, cap at MAX_SHARED. These are read-only recall
@@ -409,7 +409,7 @@ def _mapping_dir(project_dir: Optional[Path], event_cwd: str) -> Path:
 def _capture_envelope(
     event: NormalizedHookEvent,
     envelope_event: str,
-    cfg: dict,
+    cfg: dict[str, Any],
     mapping_dir: Path,
     capture_folder: str,
 ) -> None:
@@ -460,7 +460,7 @@ def _project_query_kwargs(project_ref: str) -> dict[str, str]:
     return {"project_id": project_id} if project_id else {"project": project or project_ref}
 
 
-async def _query(project_ref: str | None, **filters: Any) -> dict | None:
+async def _query(project_ref: str | None, **filters: Any) -> dict[str, Any] | None:
     """One best-effort structured search; any failure reads as 'no data'."""
     # Deferred: importing basic_memory.mcp.tools loads the whole tool stack (#886).
     from basic_memory.mcp.tools import search_notes
@@ -479,10 +479,10 @@ async def _query(project_ref: str | None, **filters: Any) -> dict | None:
 
 @dataclass
 class _BriefContext:
-    tasks: dict | None
-    decisions: dict | None
-    sessions: dict | None
-    shared: dict[str, dict | None]
+    tasks: dict[str, Any] | None
+    decisions: dict[str, Any] | None
+    sessions: dict[str, Any] | None
+    shared: dict[str, dict[str, Any] | None]
 
 
 async def _gather_context(
@@ -528,16 +528,16 @@ async def _gather_context(
     )
 
 
-def _rows(result: dict | None) -> list[dict]:
+def _rows(result: dict[str, Any] | None) -> list[dict[str, Any]]:
     return (result or {}).get("results") or []
 
 
-def _merge_search_results(results: list[dict | None]) -> dict | None:
+def _merge_search_results(results: list[dict[str, Any] | None]) -> dict[str, Any] | None:
     """Merge bounded recall queries while preserving their priority order."""
     if all(result is None for result in results):
         return None
 
-    merged: list[dict] = []
+    merged: list[dict[str, Any]] = []
     seen: set[str] = set()
     for result in results:
         for row in _rows(result):
@@ -551,7 +551,7 @@ def _merge_search_results(results: list[dict | None]) -> dict | None:
     return {"results": merged}
 
 
-def _label(result: dict) -> str:
+def _label(result: dict[str, Any]) -> str:
     name = result.get("title") or result.get("file_path") or "(untitled)"
     ref = result.get("permalink") or result.get("file_path") or ""
     return f"- {name}" + (f" — {ref}" if ref else "")
@@ -589,7 +589,7 @@ def _fence(data_lines: list[str]) -> tuple[str, list[str]]:
 
 def _build_brief(
     profile: HarnessProfile,
-    cfg: dict,
+    cfg: dict[str, Any],
     configured: bool,
     checkpoint_prompt: str | None = None,
 ) -> str:
@@ -875,7 +875,7 @@ def _pull_request_context(directory: str) -> PullRequestContext | None:
         return None
 
 
-def _coding_context(cfg: dict, directory: str) -> CodingContext:
+def _coding_context(cfg: dict[str, Any], directory: str) -> CodingContext:
     repository = cfg.get("repository")
     if not isinstance(repository, str) or not repository.strip():
         raise RuntimeError("coding session profile requires basicMemory.repository; rerun bm-setup")

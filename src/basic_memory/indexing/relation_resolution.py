@@ -291,6 +291,8 @@ class RepositoryRelationResolutionRuntime:
             affected_entity_ids: AffectedEntityIds = {
                 refresh.entity_id for refresh in pending_refreshes
             }
+            source_entities: Sequence[Entity] = ()
+            note_contents: Sequence[RelationResolutionNoteContent] = ()
             if affected_entity_ids:
                 sorted_affected_entity_ids = sorted(affected_entity_ids)
                 source_entities = await self.entity_repository.find_by_ids(

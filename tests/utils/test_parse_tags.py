@@ -1,6 +1,6 @@
 """Tests for parse_tags utility function."""
 
-from typing import Any, List, Union, cast
+from typing import override, Any, List, Union, cast
 
 import pytest
 
@@ -53,6 +53,7 @@ def test_parse_tags_special_case() -> None:
 
     # Test with custom object that has __str__ method
     class TagObject:
+        @override
         def __str__(self) -> str:
             return "tag1,tag2"
 

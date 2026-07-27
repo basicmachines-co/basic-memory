@@ -8,12 +8,14 @@ from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.markdown.schemas import EntityFrontmatter, EntityMarkdown
 from basic_memory.schemas.importer import ImportResult
 from basic_memory.services.file_service import FileService
+from typing import override
 
 
 # Create a concrete implementation of the abstract class for testing
 class ConcreteTestImporter(Importer[ImportResult]):
     """Test implementation of Importer base class."""
 
+    @override
     async def import_data(self, source_data, destination_folder: str, **kwargs):
         """Implement the abstract method for testing."""
         try:
@@ -27,6 +29,7 @@ class ConcreteTestImporter(Importer[ImportResult]):
         except Exception as e:
             return self.handle_error("Test import failed", e)
 
+    @override
     def handle_error(self, message: str, error=None) -> ImportResult:
         """Implement the abstract handle_error method."""
         import logging

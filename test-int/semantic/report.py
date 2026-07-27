@@ -17,9 +17,10 @@ from pathlib import Path
 from rich.console import Console
 from rich.table import Table
 from rich.text import Text
+from typing import Any
 
 
-def load_benchmarks(path: Path) -> list[dict]:
+def load_benchmarks(path: Path) -> list[dict[str, Any]]:
     """Load benchmark records from a JSONL file."""
     records = []
     with path.open("r", encoding="utf-8") as f:
@@ -68,7 +69,7 @@ SORT_KEYS = {
 }
 
 
-def build_table(records: list[dict], title: str = "Semantic Search Benchmarks") -> Table:
+def build_table(records: list[dict[str, Any]], title: str = "Semantic Search Benchmarks") -> Table:
     """Build a rich Table from benchmark records."""
     table = Table(title=title, show_lines=False)
     table.add_column("Combo", style="cyan", no_wrap=True)
@@ -98,10 +99,10 @@ def build_table(records: list[dict], title: str = "Semantic Search Benchmarks") 
     return table
 
 
-def build_summary_table(records: list[dict]) -> Table:
+def build_summary_table(records: list[dict[str, Any]]) -> Table:
     """Build a summary table comparing combos across suites."""
     # Group by combo
-    combos: dict[str, dict[str, dict]] = {}
+    combos: dict[str, dict[str, dict[str, Any]]] = {}
     for rec in records:
         m = rec["metrics"]
         key = m["combo"]

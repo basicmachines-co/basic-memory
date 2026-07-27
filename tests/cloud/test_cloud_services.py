@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import override, Any, cast
 from uuid import uuid4
 
 import pytest
@@ -130,11 +130,11 @@ class FakeDirectoryFileDeleteEnqueuer:
 class FakeReadRepairFileReader:
     def __init__(self, markdown_content: str) -> None:
         self.markdown_content = markdown_content
-        self.targets: list[NoteContentReadRepairTarget] = []
+        self.targets: list[NoteContentReadRepairTarget[Any, Any]] = []
 
     async def read_note_content_repair_file(
         self,
-        target: NoteContentReadRepairTarget,
+        target: NoteContentReadRepairTarget[Any, Any],
     ) -> NoteContentReadRepairFile:
         self.targets.append(target)
         return NoteContentReadRepairFile(
@@ -794,6 +794,7 @@ async def test_directory_delete_service_refreshes_surviving_relation_sources(
             self.refreshed.append(list(entity_ids))
 
     class StoreWithSurvivingSources(FakeDirectoryDeleteStore):
+        @override
         async def delete_directory_entities(
             self,
             session: AsyncSession,

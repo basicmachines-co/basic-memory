@@ -233,7 +233,7 @@ class SearchRepositoryBase(ABC):
         session: AsyncSession,
         query_embedding: list[float],
         candidate_limit: int,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """Query the configured adapter and hydrate only live, ready manifest rows."""
         if candidate_limit <= 0:
             return []
@@ -272,7 +272,7 @@ class SearchRepositoryBase(ABC):
         self,
         session: AsyncSession,
         matches: list[VectorMatch],
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """Resolve adapter matches through the authoritative ready manifest."""
         if not matches:
             return []
@@ -1535,7 +1535,7 @@ class SearchRepositoryBase(ABC):
         after_date: Optional[datetime],
         search_item_types: Optional[List[SearchItemType]],
         categories: Optional[List[str]],
-        metadata_filters: Optional[dict],
+        metadata_filters: Optional[dict[str, Any]],
         retrieval_mode: SearchRetrievalMode,
         min_similarity: Optional[float] = None,
         limit: int,
@@ -1743,7 +1743,7 @@ class SearchRepositoryBase(ABC):
         after_date: Optional[datetime],
         search_item_types: Optional[List[SearchItemType]],
         categories: Optional[List[str]],
-        metadata_filters: Optional[dict],
+        metadata_filters: Optional[dict[str, Any]],
         min_similarity: Optional[float] = None,
         limit: int,
         offset: int,
@@ -2021,7 +2021,7 @@ class SearchRepositoryBase(ABC):
         after_date: Optional[datetime],
         search_item_types: Optional[List[SearchItemType]],
         categories: Optional[List[str]],
-        metadata_filters: Optional[dict],
+        metadata_filters: Optional[dict[str, Any]],
         min_similarity: Optional[float] = None,
         limit: int,
         offset: int,

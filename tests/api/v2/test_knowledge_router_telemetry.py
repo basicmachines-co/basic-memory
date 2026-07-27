@@ -19,7 +19,7 @@ knowledge_router_module = importlib.import_module("basic_memory.api.v2.routers.k
 
 
 def _capture_spans():
-    spans: list[tuple[str, dict]] = []
+    spans: list[tuple[str, dict[str, Any]]] = []
 
     @contextmanager
     def fake_span(name: str, **attrs):
@@ -49,7 +49,7 @@ def _fake_entity(*, external_id: str = "entity-123", file_path: str = "notes/tes
     )
 
 
-def _assert_only_root_span(spans: list[tuple[str, dict]], expected_name: str) -> None:
+def _assert_only_root_span(spans: list[tuple[str, dict[str, Any]]], expected_name: str) -> None:
     assert [name for name, _ in spans] == [expected_name]
 
 

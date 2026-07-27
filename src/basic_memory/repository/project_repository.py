@@ -1,7 +1,7 @@
 """Repository for managing projects in Basic Memory."""
 
 from pathlib import Path
-from typing import Optional, Sequence, Union
+from typing import Any, override, Optional, Sequence, Union
 
 
 from loguru import logger
@@ -182,6 +182,7 @@ class ProjectRepository(Repository[Project]):
             return target_project
         return None  # pragma: no cover
 
+    @override
     async def delete(self, session: AsyncSession, entity_id: int) -> bool:
         """Delete a project and its derived search rows in one transaction.
 
@@ -258,7 +259,7 @@ class ProjectRepository(Repository[Project]):
         return True
 
     async def scalar_vec_query(
-        self, session: AsyncSession, query: Executable, params: Optional[dict] = None
+        self, session: AsyncSession, query: Executable, params: Optional[dict[str, Any]] = None
     ) -> Optional[int]:
         """Run a scalar COUNT query that reads the sqlite-vec vec0 table.
 

@@ -1,6 +1,6 @@
 """Edit note tool for Basic Memory MCP server."""
 
-from typing import TYPE_CHECKING, Annotated, Literal, Optional
+from typing import Any, TYPE_CHECKING, Annotated, Literal, Optional
 
 import logfire
 from httpx import HTTPStatusError
@@ -391,10 +391,10 @@ async def edit_note(
     ] = None,
     expected_replacements: Optional[int] = None,
     replace_subsections: Optional[bool] = None,
-    metadata: Annotated[Optional[dict], BeforeValidator(coerce_dict)] = None,
+    metadata: Annotated[Optional[dict[str, Any]], BeforeValidator(coerce_dict)] = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
-) -> str | dict:
+) -> str | dict[str, Any]:
     """Edit an existing markdown note in the knowledge base.
 
     Makes targeted changes to existing notes without rewriting the entire content.

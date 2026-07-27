@@ -4,7 +4,7 @@ import hashlib
 import uuid
 from datetime import datetime
 from basic_memory.utils import ensure_timezone_aware
-from typing import Optional
+from typing import Any, override, Optional
 
 from sqlalchemy import (
     BigInteger,
@@ -69,7 +69,7 @@ class Entity(Base):
     external_id: Mapped[str] = mapped_column(String, unique=True, default=lambda: str(uuid.uuid4()))
     title: Mapped[str] = mapped_column(String)
     note_type: Mapped[str] = mapped_column(String)
-    entity_metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    entity_metadata: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
     content_type: Mapped[str] = mapped_column(String)
 
     # Project reference
@@ -142,6 +142,7 @@ class Entity(Base):
         """Check if the entity is a markdown file."""
         return self.content_type == RUNTIME_MARKDOWN_CONTENT_TYPE
 
+    @override
     def __getattribute__(self, name):
         """Override attribute access to ensure datetime fields are timezone-aware."""
         value = super().__getattribute__(name)
@@ -152,6 +153,7 @@ class Entity(Base):
 
         return value
 
+    @override
     def __repr__(self) -> str:
         return f"Entity(id={self.id}, external_id='{self.external_id}', name='{self.title}', type='{self.note_type}', checksum='{self.checksum}')"
 
@@ -217,6 +219,7 @@ class NoteContent(Base):
 
     entity = relationship("Entity", back_populates="note_content")
 
+    @override
     def __repr__(self) -> str:  # pragma: no cover
         return (
             f"NoteContent(entity_id={self.entity_id}, external_id='{self.external_id}', "
@@ -264,6 +267,7 @@ class NoteFileVacate(Base):
         default=lambda: datetime.now().astimezone(),
     )
 
+    @override
     def __repr__(self) -> str:  # pragma: no cover
         return (
             f"NoteFileVacate(project_id={self.project_id}, entity_id={self.entity_id}, "
@@ -322,6 +326,7 @@ class Observation(Base):
             f"{self.entity.permalink}/observations/{self.category}/{content_for_permalink}"
         )
 
+    @override
     def __repr__(self) -> str:  # pragma: no cover
         return f"Observation(id={self.id}, entity_id={self.entity_id}, content='{self.content}')"
 
@@ -371,5 +376,6 @@ class Relation(Base):
             return generate_permalink(f"{from_permalink}/{self.relation_type}/{to_permalink}")
         return generate_permalink(f"{from_permalink}/{self.relation_type}/{self.to_name}")
 
+    @override
     def __repr__(self) -> str:
         return f"Relation(id={self.id}, from_id={self.from_id}, to_id={self.to_id}, to_name={self.to_name}, type='{self.relation_type}')"  # pragma: no cover

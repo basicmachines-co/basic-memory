@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
 from types import SimpleNamespace
-from typing import Any
+from typing import override, Any
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -51,12 +51,15 @@ class _ConcreteRepo(SearchRepositoryBase):
         self.session_maker = None
         self.project_id = 1
 
+    @override
     async def init_search_index(self):
         pass
 
+    @override
     def _prepare_search_term(self, term, is_prefix=True):
         return term
 
+    @override
     async def search(
         self,
         search_text: str | None = None,
@@ -76,18 +79,23 @@ class _ConcreteRepo(SearchRepositoryBase):
     ) -> list[SearchIndexRow]:
         return []
 
+    @override
     async def _ensure_vector_tables(self):
         pass
 
+    @override
     async def _run_vector_query(self, session, query_embedding, candidate_limit):
         return []
 
+    @override
     async def _write_embeddings(self, session, jobs, embeddings):
         pass
 
+    @override
     async def _delete_entity_chunks(self, session, entity_id, *, expected_deletions=None):
         return []
 
+    @override
     async def _delete_stale_chunks(
         self,
         session,
@@ -101,6 +109,7 @@ class _ConcreteRepo(SearchRepositoryBase):
     async def _update_timestamp_sql(self):
         return "CURRENT_TIMESTAMP"
 
+    @override
     def _distance_to_similarity(self, distance: float) -> float:
         return 1.0 / (1.0 + max(distance, 0.0))
 
@@ -1187,7 +1196,7 @@ async def test_sync_entity_vectors_batch_tracks_prepare_and_queue_wait_seconds(m
             synced_entity_ids.add(job.entity_id)
         return (3.0, 1.0)
 
-    logged_completion: list[dict] = []
+    logged_completion: list[dict[str, Any]] = []
 
     def _capture_log(**kwargs):
         logged_completion.append(kwargs)
@@ -1298,8 +1307,8 @@ async def test_sync_entity_vectors_batch_records_entity_granularity_histograms(m
             synced_entity_ids.add(job.entity_id)
         return (2.0, 1.0)
 
-    histogram_calls: list[tuple[str, float, dict]] = []
-    counter_calls: list[tuple[str, float, dict]] = []
+    histogram_calls: list[tuple[str, float, dict[str, Any]]] = []
+    counter_calls: list[tuple[str, float, dict[str, Any]]] = []
     perf_counter_values = iter([0.0, 3.0, 4.5, 6.0])
 
     class _FakeHistogram:
@@ -1372,7 +1381,7 @@ async def test_sync_entity_vectors_batch_logs_resolved_fastembed_runtime_setting
             for entity_id in entity_ids
         ]
 
-    info_calls: list[tuple[str, dict]] = []
+    info_calls: list[tuple[str, dict[str, Any]]] = []
 
     def _capture_info(message: str, **kwargs):
         info_calls.append((message, kwargs))

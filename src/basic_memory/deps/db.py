@@ -58,7 +58,10 @@ async def get_session_maker(engine_factory: EngineFactoryDep) -> async_sessionma
     return session_maker
 
 
-SessionMakerDep = Annotated[async_sessionmaker, Depends(get_session_maker)]
+SessionMakerDep = Annotated[
+    async_sessionmaker[AsyncSession],
+    Depends(get_session_maker),
+]
 
 
 async def get_session(session_maker: SessionMakerDep) -> AsyncGenerator[AsyncSession, None]:

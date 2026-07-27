@@ -18,6 +18,7 @@ Syntax reference:
 
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 
 # --- Data Model ---
@@ -197,7 +198,7 @@ def _parse_enum_string(value: str) -> tuple[list[str], str | None]:
 # --- Main Parser ---
 
 
-def parse_picoschema(yaml_dict: dict) -> list[SchemaField]:
+def parse_picoschema(yaml_dict: dict[str, Any]) -> list[SchemaField]:
     """Parse a Picoschema YAML dict into a list of SchemaField objects.
 
     This is the core parser that converts YAML frontmatter schema definitions
@@ -277,7 +278,7 @@ def parse_picoschema(yaml_dict: dict) -> list[SchemaField]:
     return fields
 
 
-def parse_schema_note(frontmatter: dict) -> SchemaDefinition:
+def parse_schema_note(frontmatter: dict[str, Any]) -> SchemaDefinition:
     """Parse a full schema note's frontmatter into a SchemaDefinition.
 
     A schema note has type: schema and contains:

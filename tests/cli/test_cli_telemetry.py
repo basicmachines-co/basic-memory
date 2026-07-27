@@ -26,7 +26,7 @@ class FakeContext:
 
 
 def test_app_callback_registers_command_operation(monkeypatch) -> None:
-    operations: list[tuple[str, dict]] = []
+    operations: list[tuple[str, dict[str, Any]]] = []
     resource = object()
 
     monkeypatch.setattr(cli_app, "init_cli_logging", lambda: None)

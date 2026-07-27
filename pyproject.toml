@@ -110,8 +110,13 @@ markers = [
 ]
 
 [tool.ruff]
+extend-exclude = ["*.md"]
 line-length = 100
 target-version = "py312"
+
+[tool.ruff.lint]
+# Ruff 0.16 expanded its defaults; preserve the repository's established lint baseline.
+select = ["E4", "E7", "E9", "F"]
 
 [dependency-groups]
 dev = [
@@ -123,13 +128,13 @@ dev = [
     "pytest-mock>=3.12.0",
     "pytest-asyncio>=0.24.0",
     "pytest-xdist>=3.0.0",
-    "ruff>=0.1.6",
+    "ruff>=0.16.0",
     "freezegun>=1.5.5",
     "testcontainers[postgres]>=4.0.0",
     "psycopg>=3.2.0",
     "pyright>=1.1.408",
     "pytest-testmon>=2.2.0",
-    "ty>=0.0.18",
+    "ty>=0.0.64",
     "cst-lsp>=0.1.3",
     "libcst>=1.8.6",
     "pytest-timeout>=2.4.0",
@@ -145,19 +150,8 @@ style = "pep440"
 bump = true
 fallback-version = "0.0.0"
 
-[tool.pyright]
-include = ["src/"]
-exclude = ["**/__pycache__"]
-ignore = ["test/"]
-defineConstant = { DEBUG = true }
-reportMissingImports = "error"
-reportMissingTypeStubs = false
-reportUnusedImport = "none"
-pythonVersion = "3.12"
-
-[tool.ty.terminal]
-# Keep advisory diagnostics visible without treating them as type errors.
-error-on-warning = false
+[tool.ty.rules]
+all = "error"
 
 
 

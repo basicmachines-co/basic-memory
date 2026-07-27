@@ -25,7 +25,7 @@ from basic_memory.runtime.vector_sync import EntityVectorSync
 # --- Background Task Machinery ---
 
 
-def _log_task_failure(completed: asyncio.Task) -> None:
+def _log_task_failure(completed: asyncio.Task[object]) -> None:
     if completed.cancelled():
         return
     try:

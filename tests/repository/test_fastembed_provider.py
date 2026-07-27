@@ -9,6 +9,7 @@ import pytest
 
 from basic_memory.repository.fastembed_provider import FastEmbedEmbeddingProvider
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
+from typing import Any
 
 
 class _StubVector:
@@ -21,8 +22,8 @@ class _StubVector:
 
 class _StubTextEmbedding:
     init_count = 0
-    last_init_kwargs: dict = {}
-    last_embed_kwargs: dict = {}
+    last_init_kwargs: dict[str, Any] = {}
+    last_embed_kwargs: dict[str, Any] = {}
 
     def __init__(
         self,

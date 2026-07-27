@@ -8,10 +8,11 @@ import logfire
 import pytest
 
 from basic_memory.schemas import Entity as EntitySchema
+from typing import Any
 
 
 def _capture_spans():
-    spans: list[tuple[str, dict]] = []
+    spans: list[tuple[str, dict[str, Any]]] = []
 
     @contextmanager
     def fake_span(name: str, **attrs):
@@ -21,7 +22,7 @@ def _capture_spans():
     return spans, fake_span
 
 
-def _span_names(spans: list[tuple[str, dict]]) -> list[str]:
+def _span_names(spans: list[tuple[str, dict[str, Any]]]) -> list[str]:
     return [name for name, _ in spans]
 
 

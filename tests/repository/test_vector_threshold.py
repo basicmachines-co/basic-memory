@@ -3,7 +3,7 @@
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Optional, cast
+from typing import override, Any, Optional, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -45,12 +45,15 @@ class ConcreteSearchRepo(SearchRepositoryBase):
 
     # --- Abstract method stubs (not exercised by these tests) ---
 
+    @override
     async def init_search_index(self):
         pass  # pragma: no cover
 
+    @override
     def _prepare_search_term(self, term, is_prefix=True):
         return term  # pragma: no cover
 
+    @override
     async def search(
         self,
         search_text: Optional[str] = None,
@@ -70,18 +73,23 @@ class ConcreteSearchRepo(SearchRepositoryBase):
     ) -> list[SearchIndexRow]:
         return []  # pragma: no cover
 
+    @override
     async def _ensure_vector_tables(self):
         pass  # pragma: no cover
 
+    @override
     async def _run_vector_query(self, session, query_embedding, candidate_limit):
         return []  # pragma: no cover
 
+    @override
     async def _write_embeddings(self, session, jobs, embeddings):
         pass  # pragma: no cover
 
+    @override
     async def _delete_entity_chunks(self, session, entity_id, *, expected_deletions=None):
         return []  # pragma: no cover
 
+    @override
     async def _delete_stale_chunks(
         self,
         session,
@@ -95,11 +103,12 @@ class ConcreteSearchRepo(SearchRepositoryBase):
     async def _update_timestamp_sql(self):
         return "CURRENT_TIMESTAMP"  # pragma: no cover
 
+    @override
     def _distance_to_similarity(self, distance: float) -> float:
         return 1.0 / (1.0 + max(distance, 0.0))
 
 
-def _make_vector_rows(scores: list[float]) -> list[dict]:
+def _make_vector_rows(scores: list[float]) -> list[dict[str, Any]]:
     """Build fake vector query rows with controlled distances.
 
     Distance = (1/score) - 1 inverts the similarity formula:
@@ -341,7 +350,7 @@ async def test_matched_chunk_text_populated_on_vector_results():
     assert results[1].matched_chunk_text == "chunk text for entity:1:0"
 
 
-def _make_multi_chunk_vector_rows(si_id: int, scores: list[float]) -> list[dict]:
+def _make_multi_chunk_vector_rows(si_id: int, scores: list[float]) -> list[dict[str, Any]]:
     """Build multiple fake vector chunks for a single search_index row.
 
     Each chunk gets a unique chunk_index within the same si_id.

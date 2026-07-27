@@ -32,7 +32,7 @@ def _hook_probe_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(hook_module, "_supports_hook", lambda binary: True)
 
 
-def _search_result(*titles: str) -> dict:
+def _search_result(*titles: str) -> dict[str, Any]:
     return {
         "results": [
             {"title": title, "permalink": f"notes/{title.lower().replace(' ', '-')}"}
@@ -60,7 +60,7 @@ def claude_project(tmp_path: Path) -> Path:
     return project
 
 
-def _write_claude_settings(project: Path, block: dict) -> None:
+def _write_claude_settings(project: Path, block: dict[str, Any]) -> None:
     (project / ".claude" / "settings.json").write_text(
         json.dumps({"basicMemory": block}), encoding="utf-8"
     )
@@ -127,7 +127,7 @@ def _init_git_repo(project: Path) -> None:
     subprocess.run(["git", "init"], cwd=project, check=True, capture_output=True)
 
 
-def _inbox_envelopes(bm_home: Path) -> list[dict]:
+def _inbox_envelopes(bm_home: Path) -> list[dict[str, Any]]:
     inbox_dir = bm_home / "inbox"
     return [
         json.loads(path.read_text(encoding="utf-8")) for path in sorted(inbox_dir.glob("*.json"))
@@ -1217,7 +1217,7 @@ def _codex_hooks_path() -> Path:
     return Path.home() / ".codex" / "hooks.json"
 
 
-def _read_json(path: Path) -> dict:
+def _read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -1552,7 +1552,7 @@ def test_install_skips_stale_basic_memory_and_uses_uvx(monkeypatch: pytest.Monke
 
 
 def test_supports_hook_true_on_zero_exit(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured: dict = {}
+    captured: dict[str, Any] = {}
 
     def fake_run(cmd, **kwargs):
         captured["cmd"] = cmd

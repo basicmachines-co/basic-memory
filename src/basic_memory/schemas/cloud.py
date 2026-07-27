@@ -1,6 +1,6 @@
 """Schemas for cloud-related API responses."""
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -52,8 +52,10 @@ class CloudProjectCreateResponse(BaseModel):
     message: str = Field(..., description="Status message about the project creation")
     status: str = Field(..., description="Status of the creation (success or error)")
     default: bool = Field(..., description="True if the project was set as the default")
-    old_project: dict | None = Field(None, description="Information about the previous project")
-    new_project: dict | None = Field(
+    old_project: dict[str, Any] | None = Field(
+        None, description="Information about the previous project"
+    )
+    new_project: dict[str, Any] | None = Field(
         None, description="Information about the newly created project"
     )
 

@@ -11,12 +11,13 @@ import logfire
 import pytest
 
 from basic_memory.repository.search_index_row import SearchIndexRow
+from typing import Any
 
 utils_module = importlib.import_module("basic_memory.api.v2.utils")
 
 
 def _capture_spans():
-    spans: list[tuple[str, dict]] = []
+    spans: list[tuple[str, dict[str, Any]]] = []
 
     @contextmanager
     def fake_span(name: str, **attrs):

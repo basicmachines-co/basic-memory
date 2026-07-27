@@ -86,7 +86,7 @@ async def test_search_uses_dynamic_default_search_type(
     """ChatGPT adapter should not hardcode search_type so search_notes can pick defaults."""
     import basic_memory.mcp.tools.chatgpt_tools as chatgpt_tools
 
-    captured_kwargs: dict = {}
+    captured_kwargs: dict[str, Any] = {}
 
     async def fake_search_notes_fn(*args, **kwargs):
         captured_kwargs.update(kwargs)
@@ -108,7 +108,7 @@ async def test_search_delegates_to_search_notes_without_project_iteration(
     """ChatGPT search is only a compatibility wrapper around search_notes."""
     import basic_memory.mcp.tools.chatgpt_tools as chatgpt_tools
 
-    captured_kwargs: dict = {}
+    captured_kwargs: dict[str, Any] = {}
 
     async def fake_search_notes_fn(*args, **kwargs):
         captured_kwargs.update(kwargs)

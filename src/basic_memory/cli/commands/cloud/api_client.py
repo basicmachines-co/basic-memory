@@ -1,7 +1,7 @@
 """Cloud API client utilities."""
 
 from collections.abc import AsyncIterator
-from typing import Optional
+from typing import Any, Optional
 from contextlib import asynccontextmanager
 from typing import AsyncContextManager, Callable
 
@@ -21,7 +21,10 @@ class CloudAPIError(Exception):
     """Exception raised for cloud API errors."""
 
     def __init__(
-        self, message: str, status_code: Optional[int] = None, detail: Optional[dict] = None
+        self,
+        message: str,
+        status_code: Optional[int] = None,
+        detail: Optional[dict[str, Any]] = None,
     ):
         super().__init__(message)
         self.status_code = status_code
@@ -79,8 +82,8 @@ async def _default_http_client(timeout: float) -> AsyncIterator[httpx.AsyncClien
 async def make_api_request(
     method: str,
     url: str,
-    headers: Optional[dict] = None,
-    json_data: Optional[dict] = None,
+    headers: Optional[dict[str, Any]] = None,
+    json_data: Optional[dict[str, Any]] = None,
     timeout: float = 30.0,
     *,
     auth: CLIAuth | None = None,

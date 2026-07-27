@@ -565,7 +565,9 @@ class SearchService:
         )
         return batch_result
 
-    async def reindex_vectors(self, progress_callback=None, force_full: bool = False) -> dict:
+    async def reindex_vectors(
+        self, progress_callback=None, force_full: bool = False
+    ) -> dict[str, Any]:
         """Rebuild vector embeddings for all entities.
 
         Args:

@@ -14,15 +14,16 @@ data access layer.
 from collections.abc import Callable, Awaitable
 
 from basic_memory.picoschema.parser import SchemaDefinition, parse_picoschema, parse_schema_note
+from typing import Any
 
 
 # Type alias for the search function dependency.
 # Given a query string, returns a list of frontmatter dicts from matching schema notes.
-type SchemaSearchFn = Callable[[str], Awaitable[list[dict]]]
+type SchemaSearchFn = Callable[[str], Awaitable[list[dict[str, Any]]]]
 
 
 async def resolve_schema(
-    note_frontmatter: dict,
+    note_frontmatter: dict[str, Any],
     search_fn: SchemaSearchFn,
 ) -> SchemaDefinition | None:
     """Resolve the schema for a note based on its frontmatter.
@@ -74,7 +75,9 @@ async def resolve_schema(
     return None
 
 
-def _schema_from_inline(schema_dict: dict, frontmatter: dict) -> SchemaDefinition:
+def _schema_from_inline(
+    schema_dict: dict[str, Any], frontmatter: dict[str, Any]
+) -> SchemaDefinition:
     """Build a SchemaDefinition from an inline schema dict.
 
     For inline schemas, we derive metadata from the note's own frontmatter

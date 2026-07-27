@@ -25,7 +25,7 @@ class SearchIndexRow:
     updated_at: datetime
 
     permalink: Optional[str] = None
-    metadata: Optional[dict] = None
+    metadata: Optional[dict[str, Any]] = None
 
     # assigned in result
     score: Optional[float] = None

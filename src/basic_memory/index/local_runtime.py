@@ -67,6 +67,7 @@ from basic_memory.runtime.storage import (
 )
 from basic_memory.services import FileService
 from basic_memory.services.exceptions import FileOperationError
+from typing import override
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +77,7 @@ class LocalStorageEventProjectResolver(StorageEventProjectResolver):
     project: ProjectRuntimeReference
     project_prefix: ProjectPath
 
+    @override
     async def resolve_project(self, project_path: ProjectPath) -> ProjectRuntimeReference | None:
         if project_path != self.project_prefix:
             return None
@@ -239,6 +241,7 @@ class LocalStorageEventOperationProcessorFactory(StorageEventOperationProcessorF
 
     runtime: InlineStorageEventIndexRuntime
 
+    @override
     def processor_for_project(
         self,
         project: ProjectRuntimeReference,

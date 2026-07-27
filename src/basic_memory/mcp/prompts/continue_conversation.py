@@ -5,7 +5,7 @@ providing context from previous interactions to maintain continuity.
 """
 
 from textwrap import dedent
-from typing import Annotated, Optional
+from typing import Any, Annotated, Optional
 
 from loguru import logger
 from pydantic import Field
@@ -107,7 +107,7 @@ async def continue_conversation(
     return prompt
 
 
-def _format_continuation_results(results: list[dict], topic: str) -> str:
+def _format_continuation_results(results: list[dict[str, Any]], topic: str) -> str:
     """Format search result dicts for conversation continuation context."""
     if not results:
         return f"No previous context found for '{topic}'."

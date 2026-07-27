@@ -8,11 +8,12 @@ import logfire
 import pytest
 
 from basic_memory.mcp.server import lifespan, mcp
+from typing import Any
 
 
 @pytest.mark.asyncio
 async def test_mcp_lifespan_wraps_startup_and_shutdown(config_manager, monkeypatch) -> None:
-    spans: list[tuple[str, dict]] = []
+    spans: list[tuple[str, dict[str, Any]]] = []
 
     @contextmanager
     def fake_span(name: str, **attrs):

@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import override, cast
 
 import pytest
 from watchfiles import Change
@@ -52,6 +52,7 @@ class RecordingProjectResolver(StorageEventProjectResolver):
     project_path: str
     requested_paths: list[str] = field(default_factory=list)
 
+    @override
     async def resolve_project(self, project_path: str) -> ProjectRuntimeReference | None:
         self.requested_paths.append(project_path)
         if project_path != self.project_path:
@@ -87,6 +88,7 @@ class RecordingProcessor:
 class RecordingProcessorFactory(StorageEventOperationProcessorFactory):
     processor: RecordingProcessor
 
+    @override
     def processor_for_project(
         self,
         project: ProjectRuntimeReference,

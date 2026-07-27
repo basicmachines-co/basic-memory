@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from typing import cast
+from typing import override, cast
 
 import pytest
 
@@ -23,6 +23,7 @@ async def test_handle_changes_isolated_contains_one_project_failure(
     handled: list[str] = []
 
     class FailingWatchService(WatchService):
+        @override
         async def handle_changes(self, project, changes) -> None:  # type: ignore[override]
             handled.append(project.name)
             if project.name == "boom":

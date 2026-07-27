@@ -13,9 +13,10 @@ from basic_memory.repository.note_content_repository import (
     NoteContentVersionConflict,
 )
 from basic_memory.repository.project_repository import ProjectRepository
+from typing import Any
 
 
-def build_note_content_payload(entity_id: int) -> dict:
+def build_note_content_payload(entity_id: int) -> dict[str, Any]:
     """Build a minimal payload for note_content writes."""
     return {
         "entity_id": entity_id,

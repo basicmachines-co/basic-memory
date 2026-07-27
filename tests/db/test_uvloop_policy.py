@@ -21,11 +21,12 @@ from basic_memory.db import maybe_install_uvloop
 @pytest.fixture
 def restore_event_loop_policy():
     """Save/restore the global event-loop policy around a test."""
-    original = asyncio.get_event_loop_policy()
+    # These tests deliberately pin the Python 3.12-3.15 compatibility seam.
+    original = asyncio.get_event_loop_policy()  # ty: ignore[deprecated]
     try:
         yield
     finally:
-        asyncio.set_event_loop_policy(original)
+        asyncio.set_event_loop_policy(original)  # ty: ignore[deprecated]
 
 
 def _postgres_config() -> BasicMemoryConfig:
@@ -48,18 +49,21 @@ def test_installs_uvloop_for_postgres_backend(restore_event_loop_policy):
     installed = maybe_install_uvloop(_postgres_config())
 
     assert installed is True
-    assert isinstance(asyncio.get_event_loop_policy(), uvloop.EventLoopPolicy)
+    assert isinstance(
+        asyncio.get_event_loop_policy(),  # ty: ignore[deprecated]
+        uvloop.EventLoopPolicy,
+    )
 
 
 def test_no_uvloop_for_sqlite_backend(restore_event_loop_policy):
     """SQLite users keep the default loop - the helper is a no-op."""
-    before = asyncio.get_event_loop_policy()
+    before = asyncio.get_event_loop_policy()  # ty: ignore[deprecated]
 
     installed = maybe_install_uvloop(_sqlite_config())
 
     assert installed is False
     # Policy must be unchanged for the default (SQLite) path.
-    assert asyncio.get_event_loop_policy() is before
+    assert asyncio.get_event_loop_policy() is before  # ty: ignore[deprecated]
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="uvloop is not available on Windows")
@@ -76,8 +80,8 @@ def test_uvloop_unavailable_is_a_safe_noop(restore_event_loop_policy, monkeypatc
 
     monkeypatch.setattr(builtins, "__import__", _fail_uvloop_import)
 
-    before = asyncio.get_event_loop_policy()
+    before = asyncio.get_event_loop_policy()  # ty: ignore[deprecated]
     installed = maybe_install_uvloop(_postgres_config())
 
     assert installed is False
-    assert asyncio.get_event_loop_policy() is before
+    assert asyncio.get_event_loop_policy() is before  # ty: ignore[deprecated]

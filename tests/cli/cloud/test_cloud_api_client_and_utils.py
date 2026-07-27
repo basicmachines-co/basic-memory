@@ -16,6 +16,7 @@ from basic_memory.cli.commands.cloud.cloud_utils import (
     project_exists,
 )
 from basic_memory.config import ProjectMode
+from typing import Any
 
 
 @pytest.mark.asyncio
@@ -176,7 +177,7 @@ async def test_create_cloud_project_accepts_visibility_override(config_home, con
     config.cloud_host = "https://cloud.example.test"
     config_manager.save_config(config)
 
-    seen_payload: dict | None = None
+    seen_payload: dict[str, Any] | None = None
 
     async def api_request(**kwargs):
         nonlocal seen_payload

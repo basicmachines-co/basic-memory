@@ -9,6 +9,7 @@ import httpx
 import logfire
 import pytest
 from mcp.server.fastmcp.exceptions import ToolError
+from typing import Any
 
 knowledge_client_module = importlib.import_module("basic_memory.mcp.clients.knowledge")
 search_client_module = importlib.import_module("basic_memory.mcp.clients.search")
@@ -16,7 +17,7 @@ utils_module = importlib.import_module("basic_memory.mcp.tools.utils")
 
 
 def _capture_spans():
-    spans: list[tuple[str, dict]] = []
+    spans: list[tuple[str, dict[str, Any]]] = []
 
     @contextmanager
     def fake_span(name: str, **attrs):
@@ -26,7 +27,7 @@ def _capture_spans():
             def set_attribute(self, key: str, value) -> None:
                 attrs[key] = value
 
-            def set_attributes(self, new_attrs: dict) -> None:
+            def set_attributes(self, new_attrs: dict[str, Any]) -> None:
                 attrs.update(new_attrs)
 
         yield FakeSpan()

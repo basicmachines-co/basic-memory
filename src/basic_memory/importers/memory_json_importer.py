@@ -1,7 +1,7 @@
 """Memory JSON import service for Basic Memory."""
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import override, Any, Dict, List, Optional
 
 from basic_memory.markdown.schemas import EntityFrontmatter, EntityMarkdown, Observation, Relation
 from basic_memory.importers.base import Importer
@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 class MemoryJsonImporter(Importer[EntityImportResult]):
     """Service for importing memory.json format data."""
 
+    @override
     def handle_error(  # pragma: no cover
         self, message: str, error: Optional[Exception] = None
     ) -> EntityImportResult:
@@ -27,6 +28,7 @@ class MemoryJsonImporter(Importer[EntityImportResult]):
             skipped_entities=0,
         )
 
+    @override
     async def import_data(
         self, source_data, destination_folder: str = "", **kwargs: Any
     ) -> EntityImportResult:
