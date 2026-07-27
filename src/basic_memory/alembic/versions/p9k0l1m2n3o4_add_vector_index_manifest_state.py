@@ -1,7 +1,7 @@
 """Add vector index identity and readiness to the semantic manifest.
 
-Revision ID: o8j9k0l1m2n3
-Revises: n7i8j9k0l1m2
+Revision ID: p9k0l1m2n3o4
+Revises: o8j9k0l1m2n3
 Create Date: 2026-07-21 00:00:00.000000
 
 """
@@ -12,8 +12,8 @@ from alembic import op
 from sqlalchemy import inspect
 
 
-revision: str = "o8j9k0l1m2n3"
-down_revision: Union[str, None] = "n7i8j9k0l1m2"
+revision: str = "p9k0l1m2n3o4"
+down_revision: Union[str, None] = "o8j9k0l1m2n3"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

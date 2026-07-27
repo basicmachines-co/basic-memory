@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from basic_memory.alembic.versions import (
-    o8j9k0l1m2n3_add_vector_index_manifest_state as migration,
+    p9k0l1m2n3o4_add_vector_index_manifest_state as migration,
 )
 
 
