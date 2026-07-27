@@ -98,10 +98,10 @@ Memory's durable graph**, rather than a memory layer of its own. See
   by release tooling) and the script invokes
   `basic-memory hook <event> --harness claude` in-process with the hook JSON
   on stdin. `BM_BIN` overrides the uv-managed environment for development.
-  The brief/checkpoint logic lives in the released package; opt-in
-  `captureEvents: true` additionally records redacted event envelopes to a
-  local inbox. uv is the required prerequisite; the first run fetches from
-  PyPI, later runs use uv's cache.
+  The brief/checkpoint logic lives in the released package; lifecycle envelopes
+  containing bounded metadata are captured by default and can be disabled with
+  `captureEvents: false`. uv is the required prerequisite; the first run fetches
+  from PyPI, later runs use uv's cache.
 - **SessionStart hook now nudges toward `/basic-memory:bm-setup` on first run** — when
   no `basicMemory` config block is present in either settings file. The nudge
   survives a failed/empty task query (so a brand-new user with no project yet still
@@ -109,6 +109,9 @@ Memory's durable graph**, rather than a memory layer of its own. See
 
 ### Removed (clean break)
 
+- Hook-specific secret scanning and the `redactKeys` / `redactPaths` settings.
+  Lifecycle envelopes now stay small by construction instead of carrying a
+  general-purpose redaction subsystem.
 - The six bundled skills (`placement`, `knowledge-capture`, `knowledge-organize`,
   `continue-conversation`, `research`, `edit-note`). Equivalent, framework-agnostic
   workflows live in the top-level [`skills/`](../../skills) package

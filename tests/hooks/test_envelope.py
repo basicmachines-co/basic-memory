@@ -67,22 +67,10 @@ def test_create_envelope_defaults_ts_to_now() -> None:
     assert "T" in envelope.ts
 
 
-def test_create_envelope_redacts_payload_recursively() -> None:
+def test_create_envelope_preserves_bounded_payload() -> None:
     envelope = _envelope(payload={"nested": {"password": "p" * 30}, "note": "safe"})
 
-    assert envelope.payload["nested"]["password"] == "[REDACTED]"
-    assert envelope.payload["note"] == "safe"
-
-
-def test_create_envelope_redacts_cwd_under_denied_path() -> None:
-    # cwd is a user path; a session under a configured redactPaths dir must not
-    # persist the raw path into the inbox WAL.
-    envelope = _envelope(
-        cwd="/srv/clients/acme/repo",
-        extra_redact_paths=["/srv/clients/"],
-    )
-
-    assert envelope.cwd == "[REDACTED_PATH]"
+    assert envelope.payload == {"nested": {"password": "p" * 30}, "note": "safe"}
 
 
 def test_create_envelope_keeps_ordinary_cwd() -> None:
@@ -113,7 +101,6 @@ def test_idempotency_key_differs_across_minutes_and_inputs() -> None:
 
 
 def test_idempotency_key_is_metadata_only() -> None:
-    # Redaction changes the payload, never the identity.
     plain = _envelope(payload={"note": "hello"})
     secret = _envelope(payload={"password": "x" * 30})
 

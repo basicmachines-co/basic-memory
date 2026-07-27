@@ -5,7 +5,7 @@ Memory's floor is 3.12, so this tiny generator fills the gap. Swap it for
 ``uuid.uuid7()`` when the floor rises.
 
 The 48-bit millisecond timestamp prefix means UUIDv7 strings sort
-lexicographically into chronological order — the projector processes
+lexicographically into chronological order — the archive sweep processes
 ``sorted(glob)`` with no mtime/stat dependence.
 """
 

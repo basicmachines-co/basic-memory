@@ -7,9 +7,6 @@ from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 
-SEMANTIC_VECTOR_INDEX_ENTRY_POINT_GROUP = "basic_memory.semantic_vector_indexes"
-
-
 @dataclass(frozen=True, slots=True)
 class VectorIndexScope:
     """Stable project storage identity plus the current embedding schema."""

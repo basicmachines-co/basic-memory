@@ -5,8 +5,8 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from basic_memory.hooks import inbox
-from basic_memory.hooks.envelope import SESSION_STARTED, create_envelope
 from basic_memory.hooks.archive import flush
+from basic_memory.hooks.envelope import SESSION_STARTED, create_envelope
 from basic_memory.hooks.project_ref import split_project_ref
 
 

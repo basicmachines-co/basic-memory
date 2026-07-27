@@ -636,8 +636,8 @@ def test_codex_compact_checkpoint_prompt_survives_unreachable_memory(
 # --- session-start / pre-compact: envelope capture gate ---
 
 
-def test_capture_events_true_boolean_writes_envelope(bm_home: Path, claude_project: Path) -> None:
-    _write_claude_settings(claude_project, {"primaryProject": "demo", "captureEvents": True})
+def test_claude_capture_events_defaults_on(bm_home: Path, claude_project: Path) -> None:
+    _write_claude_settings(claude_project, {"primaryProject": "demo"})
     with patch(
         "basic_memory.mcp.tools.search_notes", new_callable=AsyncMock, return_value=SEARCH_EMPTY
     ):
@@ -660,13 +660,11 @@ def test_capture_events_true_boolean_writes_envelope(bm_home: Path, claude_proje
     assert envelope["payload"]["capture_folder"] == "sessions"
 
 
-def test_codex_capture_events_defaults_on_and_preserves_legacy_redaction(
-    bm_home: Path, tmp_path: Path
-) -> None:
+def test_codex_capture_events_defaults_on(bm_home: Path, tmp_path: Path) -> None:
     project = tmp_path / "codex-proj"
     (project / ".codex").mkdir(parents=True)
     (project / ".codex" / "basic-memory.json").write_text(
-        json.dumps({"basicMemory": {"primaryProject": "demo", "redactKeys": ["trigger"]}}),
+        json.dumps({"basicMemory": {"primaryProject": "demo"}}),
         encoding="utf-8",
     )
     with patch(
@@ -683,16 +681,35 @@ def test_codex_capture_events_defaults_on_and_preserves_legacy_redaction(
     assert len(envelopes) == 1
     assert envelopes[0]["source"] == "codex"
     assert envelopes[0]["payload"]["capture_folder"] == "codex"
-    assert envelopes[0]["payload"]["trigger"] == "[REDACTED]"
+    assert envelopes[0]["payload"]["trigger"] == "startup"
+
+
+def test_claude_capture_events_can_be_disabled(bm_home: Path, claude_project: Path) -> None:
+    _write_claude_settings(
+        claude_project,
+        {"primaryProject": "demo", "captureEvents": False},
+    )
+    with patch(
+        "basic_memory.mcp.tools.search_notes",
+        new_callable=AsyncMock,
+        return_value=SEARCH_EMPTY,
+    ):
+        result = runner.invoke(
+            cli_app,
+            ["hook", "session-start", "--project-dir", str(claude_project)],
+            input=_payload(claude_project),
+        )
+
+    assert result.exit_code == 0
+    assert not (bm_home / "inbox").exists()
 
 
 @pytest.mark.parametrize("gate_value", ["true", "false", 1, "yes", {"on": True}])
 def test_capture_events_fails_closed_on_non_boolean(
     bm_home: Path, claude_project: Path, gate_value
 ) -> None:
-    # A privacy gate must fail closed: only the JSON boolean true enables
-    # capture. A hand-edited string like "false" is truthy in Python and must
-    # never switch recording on.
+    # Only the JSON boolean true enables capture. A hand-edited string like
+    # "false" is truthy in Python and must not switch recording on.
     _write_claude_settings(claude_project, {"primaryProject": "demo", "captureEvents": gate_value})
     with patch(
         "basic_memory.mcp.tools.search_notes", new_callable=AsyncMock, return_value=SEARCH_EMPTY
@@ -765,11 +782,9 @@ def test_pre_compact_writes_checkpoint_note(
     assert "tool noise" not in content
 
 
-def test_pre_compact_redacts_secrets_in_checkpoint(
+def test_pre_compact_preserves_transcript_text(
     bm_home: Path, claude_project: Path, tmp_path: Path
 ) -> None:
-    """Regression: transcript excerpts pass the secret floor before landing in
-    the checkpoint note or its title (#997)."""
     lines = [
         {
             "message": {"role": "user", "content": "deploy with AKIAIOSFODNN7EXAMPLE please"},
@@ -789,37 +804,8 @@ def test_pre_compact_redacts_secrets_in_checkpoint(
     assert result.exit_code == 0
     assert mock_write.await_args is not None
     kwargs = mock_write.await_args.kwargs
-    assert "AKIAIOSFODNN7EXAMPLE" not in kwargs["content"]
-    assert "AKIAIOSFODNN7EXAMPLE" not in kwargs["title"]
-
-
-def test_pre_compact_redacts_cwd_under_denied_path(
-    bm_home: Path, claude_project: Path, tmp_path: Path
-) -> None:
-    """Regression: a session under a configured redactPaths dir must not leak the
-    raw cwd into the checkpoint frontmatter or body (#997)."""
-    _write_claude_settings(
-        claude_project,
-        {"primaryProject": "demo", "redactPaths": ["/srv/clients/"]},
-    )
-    transcript = _transcript(tmp_path)
-    mock_write = AsyncMock(return_value={"action": "created"})
-    with patch("basic_memory.mcp.tools.write_note", mock_write):
-        result = runner.invoke(
-            cli_app,
-            ["hook", "pre-compact", "--project-dir", str(claude_project)],
-            input=_payload(
-                "/srv/clients/acme/repo",
-                transcript_path=str(transcript),
-                trigger="auto",
-            ),
-        )
-
-    assert result.exit_code == 0
-    assert mock_write.await_args is not None
-    kwargs = mock_write.await_args.kwargs
-    assert "/srv/clients/acme/repo" not in kwargs["content"]  # body
-    assert kwargs["metadata"]["cwd"] == "[REDACTED_PATH]"  # frontmatter
+    assert "AKIAIOSFODNN7EXAMPLE" in kwargs["content"]
+    assert "AKIAIOSFODNN7EXAMPLE" in kwargs["title"]
 
 
 def test_pre_compact_checkpoint_handles_yaml_special_cwd(
@@ -1199,7 +1185,7 @@ def test_status_defaults_when_nothing_configured(
     assert "last flush: never" in result.stdout
     assert "primary project: (not set)" in result.stdout
     assert "checkpoint on compact: off" in result.stdout
-    assert "capture events: off" in result.stdout
+    assert "capture events: on" in result.stdout
     assert "uv: (not found)" in result.stdout
 
 
@@ -1876,7 +1862,7 @@ def test_claude_settings_ignore_malformed_files(tmp_path: Path) -> None:
 
     merged, found = hook_module.load_claude_settings(project)
 
-    assert merged == {}
+    assert merged == {"captureEvents": True}
     assert found is False
 
 
@@ -1889,7 +1875,7 @@ def test_claude_settings_non_dict_block_is_ignored(tmp_path: Path) -> None:
 
     merged, found = hook_module.load_claude_settings(project)
 
-    assert merged == {}
+    assert merged == {"captureEvents": True}
     assert found is False
 
 
@@ -2020,8 +2006,6 @@ def test_codex_settings_merge_user_then_project_with_checkout_folder(tmp_path: P
                     "primaryProject": "user-wide",
                     "recallTimeframe": "9d",
                     "captureEvents": True,
-                    "redactKeys": ["token", "shared-secret"],
-                    "redactPaths": ["/shared/private"],
                 }
             }
         ),
@@ -2035,8 +2019,6 @@ def test_codex_settings_merge_user_then_project_with_checkout_folder(tmp_path: P
             {
                 "basicMemory": {
                     "primaryProject": "project-level",
-                    "redactKeys": ["token", "repo-secret"],
-                    "redactPaths": [],
                 }
             }
         ),
@@ -2051,8 +2033,6 @@ def test_codex_settings_merge_user_then_project_with_checkout_folder(tmp_path: P
     assert merged["checkpointOnCompact"] is True
     assert merged["captureEvents"] is True
     assert merged["captureFolder"] == "codex/widgets"
-    assert merged["redactKeys"] == ["token", "shared-secret", "repo-secret"]
-    assert merged["redactPaths"] == ["/shared/private"]
 
 
 def test_codex_project_settings_override_user_capture_defaults(tmp_path: Path) -> None:
@@ -2100,36 +2080,6 @@ def test_codex_project_settings_can_disable_user_checkpoint_setting(tmp_path: Pa
 
     assert found is True
     assert merged["checkpointOnCompact"] is False
-
-
-def test_codex_settings_ignore_legacy_checkpoint_privacy_review(tmp_path: Path) -> None:
-    project = tmp_path / "proj"
-    (project / ".codex").mkdir(parents=True)
-    (project / ".codex" / "basic-memory.json").write_text(
-        json.dumps(
-            {
-                "basicMemory": {
-                    "checkpointPrivacyReview": True,
-                    "redactKeys": ["token"],
-                    "redactPaths": ["/private"],
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    merged, found = hook_module.load_codex_settings(project)
-
-    assert found is True
-    assert "checkpointPrivacyReview" not in merged
-    assert merged["redactKeys"] == ["token"]
-    assert merged["redactPaths"] == ["/private"]
-
-
-def test_string_list_guards_config_types() -> None:
-    assert hook_module._string_list(None) == []
-    assert hook_module._string_list("not-a-list") == []
-    assert hook_module._string_list(["ok", 3, "fine"]) == ["ok", "fine"]
 
 
 def test_mapping_dir_fallback_order(tmp_path: Path) -> None:

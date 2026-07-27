@@ -1,14 +1,14 @@
-"""Contract and discovery tests for pluggable semantic vector indexes."""
+"""Contract and composition tests for semantic vector indexes."""
 
 from __future__ import annotations
 
 import builtins
 from collections.abc import Sequence
-from dataclasses import dataclass
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import ValidationError
 
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.repository.embedding_provider import EmbeddingProvider
@@ -16,10 +16,8 @@ from basic_memory.repository.postgres_search_repository import PostgresSearchRep
 from basic_memory.repository.search_repository import create_search_repository
 from basic_memory.repository.semantic_errors import (
     SemanticDependenciesMissingError,
-    SemanticVectorIndexExtensionError,
 )
 from basic_memory.repository.semantic_vector_index import (
-    SEMANTIC_VECTOR_INDEX_ENTRY_POINT_GROUP,
     SemanticVectorIndex,
     VectorDeletion,
     VectorIndexScope,
@@ -79,22 +77,13 @@ class StubVectorIndex:
         return []
 
 
-@dataclass(frozen=True)
-class StubEntryPoint:
-    value: str
-    loaded: object
-
-    def load(self) -> object:
-        return self.loaded
-
-
 def _postgres_config(**overrides: object) -> BasicMemoryConfig:
     values: dict[str, object] = {
         "env": "test",
         "database_backend": DatabaseBackend.POSTGRES,
         "database_url": "postgresql+asyncpg://user:secret@db.example.test:5432/memory",
         "semantic_search_enabled": True,
-        "semantic_vector_index": "test-extension",
+        "semantic_vector_index": "pgvector",
     }
     values.update(overrides)
     return BasicMemoryConfig(**values)
@@ -125,15 +114,17 @@ def test_vector_contract_values_and_dimension_validation() -> None:
 
 def test_selector_defaults_to_pgvector_and_sqlite_remains_automatic() -> None:
     default_config = BasicMemoryConfig(env="test")
-    extension_config = _postgres_config()
+    postgres_config = _postgres_config()
 
     assert default_config.semantic_vector_index == "pgvector"
     assert (
         resolve_semantic_vector_index_name(default_config, DatabaseBackend.POSTGRES) == "pgvector"
     )
     assert (
-        resolve_semantic_vector_index_name(extension_config, DatabaseBackend.SQLITE) == "sqlite-vec"
+        resolve_semantic_vector_index_name(postgres_config, DatabaseBackend.SQLITE) == "sqlite-vec"
     )
+    with pytest.raises(ValidationError, match="semantic_vector_index"):
+        _postgres_config(semantic_vector_index="test-extension")
 
 
 def test_scope_is_stable_credential_free_and_project_isolated() -> None:
@@ -196,25 +187,6 @@ def test_scope_is_stable_credential_free_and_project_isolated() -> None:
     assert first.storage_key == rotated_password.storage_key
 
 
-def test_missing_configured_extension_fails_without_fallback(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "basic_memory.repository.semantic_vector_index_factory.entry_points",
-        lambda **_kwargs: (),
-    )
-
-    with pytest.raises(
-        SemanticVectorIndexExtensionError,
-        match="configured but no extension is installed",
-    ):
-        create_semantic_vector_index(
-            session_maker=MagicMock(),
-            project_id=7,
-            app_config=_postgres_config(),
-            database_backend=DatabaseBackend.POSTGRES,
-            embedding_provider=StubEmbeddingProvider(),
-        )
-
-
 def test_milvus_without_optional_dependencies_reports_install_extra(monkeypatch) -> None:
     config = _postgres_config(
         semantic_vector_index="milvus",
@@ -243,110 +215,6 @@ def test_milvus_without_optional_dependencies_reports_install_extra(monkeypatch)
             session_maker=MagicMock(),
             project_id=7,
             app_config=config,
-            database_backend=DatabaseBackend.POSTGRES,
-            embedding_provider=StubEmbeddingProvider(),
-        )
-
-
-def test_extension_factory_receives_explicit_scope_and_config(monkeypatch) -> None:
-    captured: dict[str, object] = {}
-
-    def factory(*, scope: VectorIndexScope, app_config: BasicMemoryConfig) -> StubVectorIndex:
-        captured.update(scope=scope, app_config=app_config)
-        return StubVectorIndex(scope)
-
-    monkeypatch.setattr(
-        "basic_memory.repository.semantic_vector_index_factory.entry_points",
-        lambda **kwargs: (
-            (
-                StubEntryPoint(
-                    value="test_extension:create_index",
-                    loaded=factory,
-                ),
-            )
-            if kwargs
-            == {
-                "group": SEMANTIC_VECTOR_INDEX_ENTRY_POINT_GROUP,
-                "name": "test-extension",
-            }
-            else ()
-        ),
-    )
-    config = _postgres_config()
-
-    name, index = create_semantic_vector_index(
-        session_maker=MagicMock(),
-        project_id=7,
-        app_config=config,
-        database_backend=DatabaseBackend.POSTGRES,
-        embedding_provider=StubEmbeddingProvider(),
-    )
-
-    assert name == "test-extension"
-    assert isinstance(index, StubVectorIndex)
-    assert captured["app_config"] is config
-    assert captured["scope"] == index.scope
-
-
-@pytest.mark.parametrize(
-    ("entry_points", "message"),
-    [
-        (
-            (
-                StubEntryPoint("first:create", lambda **_kwargs: None),
-                StubEntryPoint("second:create", lambda **_kwargs: None),
-            ),
-            "Multiple semantic vector index extensions",
-        ),
-        ((StubEntryPoint("invalid:value", object()),), "must load a callable factory"),
-        (
-            (StubEntryPoint("incompatible:create", lambda **_kwargs: object()),),
-            "returned an incompatible adapter",
-        ),
-    ],
-)
-def test_invalid_extension_registration_fails_explicitly(
-    monkeypatch,
-    entry_points: tuple[StubEntryPoint, ...],
-    message: str,
-) -> None:
-    monkeypatch.setattr(
-        "basic_memory.repository.semantic_vector_index_factory.entry_points",
-        lambda **_kwargs: entry_points,
-    )
-
-    with pytest.raises(SemanticVectorIndexExtensionError, match=message):
-        create_semantic_vector_index(
-            session_maker=MagicMock(),
-            project_id=7,
-            app_config=_postgres_config(),
-            database_backend=DatabaseBackend.POSTGRES,
-            embedding_provider=StubEmbeddingProvider(),
-        )
-
-
-def test_extension_cannot_replace_the_required_scope(monkeypatch) -> None:
-    wrong_scope = VectorIndexScope(
-        namespace="other-installation",
-        project_id=999,
-        embedding_identity="other-model",
-        dimensions=3,
-    )
-    monkeypatch.setattr(
-        "basic_memory.repository.semantic_vector_index_factory.entry_points",
-        lambda **_kwargs: (
-            StubEntryPoint(
-                "wrong-scope:create",
-                lambda **_factory_kwargs: StubVectorIndex(wrong_scope),
-            ),
-        ),
-    )
-
-    with pytest.raises(SemanticVectorIndexExtensionError, match="wrong scope"):
-        create_semantic_vector_index(
-            session_maker=MagicMock(),
-            project_id=7,
-            app_config=_postgres_config(),
             database_backend=DatabaseBackend.POSTGRES,
             embedding_provider=StubEmbeddingProvider(),
         )

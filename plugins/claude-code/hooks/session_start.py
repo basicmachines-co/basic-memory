@@ -4,7 +4,7 @@
 # dependencies = ["basic-memory>=0.22.1"]
 # ///
 """SessionStart hook — the entire hook. All logic (settings resolution, the
-context brief, opt-in envelope capture) lives in the released basic-memory
+context brief, lifecycle-envelope capture) lives in the released basic-memory
 package behind `basic-memory hook session-start`; this script is only the
 launcher, and uv resolves the dependency floor declared above.
 scripts/update_versions.py bumps that floor at release time.

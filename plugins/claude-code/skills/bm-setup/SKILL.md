@@ -111,15 +111,12 @@ Ask only what you can't infer. Cover:
    task schemas, so I can find them precisely later — okay?" (See "Seed the
    schemas" below.)
 
-6. **Lifecycle-event capture.** "Should I also keep a local, redacted trail of
-   SessionStart and PreCompact events for diagnostics?" Default to **off**.
-   Explain that the normal session brief and PreCompact checkpoint work either
-   way; enabling this adds envelopes to a local inbox until `bm hook flush`
-   archives them locally. It never creates knowledge-graph notes. Only the JSON
-   boolean `true` enables capture.
-   - If enabled, optionally ask for repo-specific `redactKeys` (additional payload
-     keys) and `redactPaths` (working directories or path-bearing content). The
-     built-in redaction floor still applies when these lists are empty.
+6. **Lifecycle-event capture.** "The plugin keeps a local trail of SessionStart
+   and PreCompact events for diagnostics by default. Keep that on?" Default to
+   **on**. Explain that the normal session brief and PreCompact checkpoint work
+   either way; capture adds bounded lifecycle metadata to a local inbox until
+   `bm hook flush` archives it locally. It never creates knowledge-graph notes.
+   Persist the JSON boolean `false` only when the user opts out.
    - Capture stays local and personal. It never writes directly to team projects.
 
 7. **How active should I be? (output style)** "Want me to proactively capture —
@@ -210,9 +207,7 @@ Build the `basicMemory` block from the interview:
     "preCompactCapture": "extractive",
     "sessionProfile": "coding",
     "repository": "owner/name",
-    "captureEvents": false,
-    "redactKeys": [],
-    "redactPaths": [],
+    "captureEvents": true,
     "placementConventions": "<learned or suggested summary, or null>",
     "teamProjects": {}
   },
@@ -229,9 +224,7 @@ Only include `outputStyle` if the user opted in. Ask whether this is a **team
 default** (write/merge into `.claude/settings.json`, suggest committing it) or
 **personal** (`.claude/settings.local.json`). **Merge** into any existing file —
 read it, add/replace only the keys above, preserve everything else. Use compact,
-valid JSON. Always persist `captureEvents` as a JSON boolean. Empty `redactKeys`
-and `redactPaths` lists may be omitted; when present, they must be JSON arrays of
-strings.
+valid JSON. Always persist `captureEvents` as a JSON boolean.
 
 Writing the `basicMemory` block is also what stops the SessionStart hook's first-run
 nudge — the config's presence is the signal that setup has run.
@@ -264,8 +257,8 @@ ref before closing — don't let the next session's brief come up empty.
 Confirm what you did in a few lines: the project mapping, the session profile
 (and confirmed repository for a coding setup), which schemas were seeded vs.
 already present, whether placement was learned or suggested, the smoke-test
-result, whether lifecycle-event capture is enabled, any extra redaction controls,
-the shared hook inbox/flush state, and whether the output style is on.
+result, whether lifecycle-event capture is enabled, the shared hook inbox/flush
+state, and whether the output style is on.
 
 Then handle activation based on the output style:
 - **Output style enabled** → it's fixed at session start, so the full capture

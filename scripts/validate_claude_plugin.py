@@ -41,8 +41,7 @@ REQUIRED_SKILLS = (
 REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
     "bm-setup": (
         "captureEvents",
-        "redactKeys",
-        "redactPaths",
+        '"captureEvents": true',
         "sessionProfile",
         "coding-session.md",
         "hook status --harness claude",
@@ -202,6 +201,14 @@ def validate_claude_plugin(plugin_dir: Path) -> None:
     ):
         if required_text not in readme:
             raise SystemExit(f"README.md: missing schema ownership text {required_text!r}")
+
+    settings = read_json(plugin_dir / "settings.example.json")
+    basic_memory_settings = settings.get("basicMemory", {})
+    if basic_memory_settings.get("captureEvents") is not True:
+        raise SystemExit("settings.example.json: captureEvents must default to true")
+    for retired_key in ("redactKeys", "redactPaths"):
+        if retired_key in basic_memory_settings:
+            raise SystemExit(f"settings.example.json: retired key {retired_key!r}")
 
     print(f"validated Claude Code plugin in {plugin_dir}")
 

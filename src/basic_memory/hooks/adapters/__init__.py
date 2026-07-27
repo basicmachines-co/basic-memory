@@ -1,7 +1,7 @@
 """Per-harness hook stdin adapters.
 
 Each harness speaks its own hook JSON dialect; an adapter normalizes it into
-``NormalizedHookEvent`` so everything downstream (envelope, projector, CLI) is
+``NormalizedHookEvent`` so everything downstream (envelope, archive, CLI) is
 harness-agnostic. Adding a harness means adding one small module here plus its
 recorded fixtures — nothing else changes.
 """

@@ -1,11 +1,10 @@
-"""Composition-root factory for built-in and extension vector indexes."""
+"""Composition-root factory for supported semantic vector indexes."""
 
 from __future__ import annotations
 
 import hashlib
 import re
-from importlib.metadata import entry_points
-from typing import Protocol
+from typing import Literal, assert_never
 
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -17,34 +16,21 @@ from basic_memory.repository.embedding_provider import (
 )
 from basic_memory.repository.semantic_errors import (
     SemanticDependenciesMissingError,
-    SemanticVectorIndexExtensionError,
 )
 from basic_memory.repository.semantic_vector_index import (
-    SEMANTIC_VECTOR_INDEX_ENTRY_POINT_GROUP,
     SemanticVectorIndex,
     VectorIndexScope,
 )
 
 
-class SemanticVectorIndexFactory(Protocol):
-    """Factory signature exposed to separately installed extension packages."""
-
-    def __call__(
-        self,
-        *,
-        scope: VectorIndexScope,
-        app_config: BasicMemoryConfig,
-    ) -> SemanticVectorIndex: ...
-
-
 def resolve_semantic_vector_index_name(
     app_config: BasicMemoryConfig,
     database_backend: DatabaseBackend,
-) -> str:
+) -> Literal["sqlite-vec", "pgvector", "milvus"]:
     """Resolve the effective index while preserving sqlite-vec for local SQLite."""
     if database_backend == DatabaseBackend.SQLITE:
         return "sqlite-vec"
-    return app_config.semantic_vector_index.strip().lower()
+    return app_config.semantic_vector_index
 
 
 def semantic_embedding_identity(provider: EmbeddingProvider) -> str:
@@ -101,28 +87,6 @@ def build_vector_index_scope(
     )
 
 
-def _load_extension_factory(name: str) -> SemanticVectorIndexFactory:
-    matches = list(entry_points(group=SEMANTIC_VECTOR_INDEX_ENTRY_POINT_GROUP, name=name))
-    if not matches:
-        raise SemanticVectorIndexExtensionError(
-            f"Semantic vector index '{name}' is configured but no extension is installed. "
-            f"Install a package that provides the '{name}' entry point in "
-            f"'{SEMANTIC_VECTOR_INDEX_ENTRY_POINT_GROUP}'."
-        )
-    if len(matches) > 1:
-        providers = ", ".join(sorted(entry_point.value for entry_point in matches))
-        raise SemanticVectorIndexExtensionError(
-            f"Multiple semantic vector index extensions provide '{name}': {providers}."
-        )
-
-    loaded = matches[0].load()
-    if not callable(loaded):
-        raise SemanticVectorIndexExtensionError(
-            f"Semantic vector index entry point '{name}' must load a callable factory."
-        )
-    return loaded
-
-
 def _create_milvus_index(
     scope: VectorIndexScope,
     app_config: BasicMemoryConfig,
@@ -150,7 +114,7 @@ def create_semantic_vector_index(
     database_backend: DatabaseBackend,
     embedding_provider: EmbeddingProvider,
 ) -> tuple[str, SemanticVectorIndex]:
-    """Create the selected first-party adapter or load one external extension."""
+    """Create the vector adapter selected by the validated application config."""
     name = resolve_semantic_vector_index_name(app_config, database_backend)
     scope = build_vector_index_scope(app_config, embedding_provider, project_id)
 
@@ -165,14 +129,4 @@ def create_semantic_vector_index(
     if name == "milvus":
         return name, _create_milvus_index(scope, app_config)
 
-    factory = _load_extension_factory(name)
-    index = factory(scope=scope, app_config=app_config)
-    if not isinstance(index, SemanticVectorIndex):
-        raise SemanticVectorIndexExtensionError(
-            f"Semantic vector index extension '{name}' returned an incompatible adapter."
-        )
-    if index.scope != scope:
-        raise SemanticVectorIndexExtensionError(
-            f"Semantic vector index extension '{name}' returned an adapter for the wrong scope."
-        )
-    return name, index
+    assert_never(name)

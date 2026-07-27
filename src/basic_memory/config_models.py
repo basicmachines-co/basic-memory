@@ -243,15 +243,13 @@ class BasicMemoryConfig(BaseSettings):
         default_factory=_default_semantic_search_enabled,
         description="Enable semantic search (vector/hybrid retrieval). Works on both SQLite and Postgres backends. Requires semantic dependencies (included by default).",
     )
-    semantic_vector_index: str = Field(
+    semantic_vector_index: Literal["pgvector", "milvus"] = Field(
         default="pgvector",
         description=(
-            "Semantic vector index backend for Postgres deployments. 'pgvector' is built in, "
-            "'milvus' is available through the optional basic-memory[milvus] extra, and other "
-            "names resolve through the basic_memory.semantic_vector_indexes entry-point group. "
-            "SQLite continues to use sqlite-vec."
+            "Semantic vector index backend for Postgres deployments. Use 'pgvector' or "
+            "'milvus' through the optional basic-memory[milvus] extra. SQLite continues "
+            "to use sqlite-vec."
         ),
-        min_length=1,
     )
     milvus_uri: str | None = Field(
         default=None,

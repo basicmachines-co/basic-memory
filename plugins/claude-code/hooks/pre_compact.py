@@ -4,7 +4,7 @@
 # dependencies = ["basic-memory>=0.22.1"]
 # ///
 """PreCompact hook — the entire hook. All logic (settings resolution, the
-extractive checkpoint note, opt-in envelope capture) lives in the released
+extractive checkpoint note, lifecycle-envelope capture) lives in the released
 basic-memory package behind `basic-memory hook pre-compact`; this script is
 only the launcher, and uv resolves the dependency floor declared above.
 scripts/update_versions.py bumps that floor at release time.

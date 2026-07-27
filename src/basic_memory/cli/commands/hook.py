@@ -13,8 +13,8 @@ Contracts:
     existing Codex configuration has not been reinstalled yet.
   - Codex checkpoint prompting defaults on. An explicit JSON boolean ``false``
     disables it; malformed values and malformed config fail closed.
-  - Codex event capture defaults on. An explicit JSON boolean ``false`` turns
-    it off, while malformed values and malformed config fail closed.
+  - Lifecycle-event capture defaults on for both harnesses. An explicit JSON
+    boolean ``false`` turns it off, while malformed values fail closed.
   - Graph-derived brief content is fenced and labeled as reference data, not
     instructions — the prompt-injection boundary.
 
@@ -54,8 +54,7 @@ from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.hooks.adapters import NormalizedHookEvent, for_harness
 
 # Envelope event names, duplicated as literals would invite drift; the
-# envelope module itself is imported lazily (it pulls detect-secrets) inside
-# the capture path (#886: keep CLI import time lean).
+# envelope module itself is imported lazily to keep CLI import time lean.
 SESSION_STARTED = "session_started"
 COMPACTION_IMMINENT = "compaction_imminent"
 
@@ -76,8 +75,8 @@ QUERY_TIMEOUT_SECONDS = 10.0
 # Cap how many shared projects we read per session — bounds latency and output.
 MAX_SHARED = 6
 CODING_SESSION_PROFILE = "coding"
+DEFAULT_CAPTURE_EVENTS = True
 CODEX_DEFAULT_CHECKPOINT_ON_COMPACT = True
-CODEX_DEFAULT_CAPTURE_EVENTS = True
 CODEX_CHECKPOINT_PROMPT = (
     "Basic Memory checkpoint required after compaction. Use the "
     "`codex:bm-checkpoint` skill now to write one deliberate, durable handoff "
@@ -240,7 +239,7 @@ def load_claude_settings(directory: Path) -> tuple[dict, bool]:
     pin its own mapping, which wins. ``found`` reports whether any file
     declared a block — the first-run sentinel for the setup nudge.
     """
-    merged: dict = {}
+    merged: dict = {"captureEvents": DEFAULT_CAPTURE_EVENTS}
     found = False
     home = Path.home()
     sources: list[tuple[Path, tuple[str, ...]]] = [(home, ("settings.json",))]
@@ -316,12 +315,11 @@ def load_codex_settings(directory: Path) -> tuple[dict, bool]:
     checkpoint prompting are enabled when omitted. The default folder is
     namespaced by the Git repository directory. Any malformed source counts as
     configured and fails closed for the whole evaluation so a later source
-    cannot rebuild routing from incomplete settings. Existing redaction lists
-    continue to accumulate only for local lifecycle-envelope capture.
+    cannot rebuild routing from incomplete settings.
     """
     defaults: dict = {
         "checkpointOnCompact": CODEX_DEFAULT_CHECKPOINT_ON_COMPACT,
-        "captureEvents": CODEX_DEFAULT_CAPTURE_EVENTS,
+        "captureEvents": DEFAULT_CAPTURE_EVENTS,
         "captureFolder": _codex_default_capture_folder(directory),
     }
     merged = dict(defaults)
@@ -348,18 +346,7 @@ def load_codex_settings(directory: Path) -> tuple[dict, bool]:
                 "checkpointOnCompact": False,
                 "captureEvents": False,
             }, True
-        cumulative_redactions: dict[str, list[str]] = {}
-        for key in ("redactKeys", "redactPaths"):
-            values = [*_string_list(merged.get(key)), *_string_list(block.get(key))]
-            if values:
-                cumulative_redactions[key] = list(dict.fromkeys(values))
         merged.update(block)
-        merged.update(cumulative_redactions)
-
-    # This legacy option imposed an extra model-authored checkpoint scan.
-    # Ignore it so existing config cannot restore that gate. Redaction lists
-    # remain available only to the separate lifecycle-envelope capture path.
-    merged.pop("checkpointPrivacyReview", None)
 
     return merged, found
 
@@ -368,13 +355,6 @@ def load_harness_settings(harness: Harness, directory: Path) -> tuple[dict, bool
     if harness is Harness.claude:
         return load_claude_settings(directory)
     return load_codex_settings(directory)
-
-
-def _string_list(value: Any) -> list[str]:
-    """Guard config JSON types: only a list of strings passes through."""
-    if not isinstance(value, list):
-        return []
-    return [item for item in value if isinstance(item, str)]
 
 
 def _shared_project_refs(cfg: dict, primary_project: str) -> tuple[list[str], bool]:
@@ -407,11 +387,10 @@ def _mapping_dir(project_dir: Optional[Path], event_cwd: str) -> Path:
     return Path.cwd()
 
 
-# --- Envelope capture (opt-in, fail-closed gate) ---
+# --- Envelope capture ---
 
 
 def _capture_envelope(
-    profile: HarnessProfile,
     event: NormalizedHookEvent,
     envelope_event: str,
     cfg: dict,
@@ -421,16 +400,13 @@ def _capture_envelope(
     """Capture one lifecycle event into the inbox WAL when enabled.
 
     Trigger: ``captureEvents`` is the JSON boolean ``true`` — strict identity,
-    never truthiness. Why: a privacy gate must fail closed; a hand-edited
-    string like "false" (truthy in Python) must not enable recording.
-    Outcome: envelope built, floor-redacted, appended; failures are best-effort
-    (stderr) so the brief/checkpoint still runs.
+    never truthiness. Why: a hand-edited string like "false" must not enable
+    recording. Outcome: append bounded lifecycle metadata; failures remain
+    best-effort so the brief or checkpoint still runs.
     """
     if cfg.get("captureEvents") is not True:
         return
     try:
-        # Deferred: the envelope module pulls detect-secrets; loading it on
-        # every CLI start would slow all commands (#886).
         from basic_memory.hooks.envelope import create_envelope
         from basic_memory.hooks.inbox import write_envelope
 
@@ -451,8 +427,6 @@ def _capture_envelope(
             project_hint=str(cfg.get("primaryProject") or "").strip(),
             turn_id=event.turn_id,
             payload=payload,
-            extra_redact_keys=_string_list(cfg.get("redactKeys")),
-            extra_redact_paths=_string_list(cfg.get("redactPaths")),
         )
         write_envelope(envelope)
     except Exception as exc:
@@ -907,7 +881,6 @@ def _checkpoint_note(
     primary: str,
     working_directory: str,
     coding_context: CodingContext | None,
-    extra_redact_paths: list[str],
 ) -> tuple[str, str, dict[str, Any]]:
     """Build the pre-compaction checkpoint note (title, body, frontmatter).
 
@@ -919,22 +892,7 @@ def _checkpoint_note(
     a hand-built frontmatter block and, via fail-open, silently drop the
     checkpoint. ``type`` is supplied to write_note separately (``note_type``).
     """
-    # Transcript text is lifted verbatim into the graph (title, summary, and
-    # observations), so it must pass the same secret floor as inbox payloads
-    # (#997: redact obvious secrets before writing artifacts). Redact once at
-    # extraction — every downstream use draws from the redacted strings.
-    # Deferred import: redaction pulls detect-secrets, too heavy for CLI start (#886).
-    from basic_memory.hooks.redaction import Redactor
-
-    # One ruleset for the whole checkpoint: every turn and the cwd share the
-    # same deny rules, so compile the patterns once rather than per string.
-    redactor = Redactor.build(extra_redact_paths=extra_redact_paths)
-
-    user_messages = [redactor.redact_text(text) for role, text in conversation if role == "user"]
-    # cwd is a user path too: a session under a configured redactPaths (or a
-    # default deny dir) must not leak the raw path into the note frontmatter or
-    # body. Redact once so both draw from the scrubbed string.
-    safe_cwd = redactor.redact_text(working_directory)
+    user_messages = [text for role, text in conversation if role == "user"]
     opening = user_messages[0]
     recent_user = user_messages[-3:]
 
@@ -951,7 +909,7 @@ def _checkpoint_note(
         "started": iso,
         "ended": iso,
         "project": primary,
-        "cwd": safe_cwd,
+        "cwd": working_directory,
     }
     if event.session_id:
         metadata[profile.session_id_key] = event.session_id
@@ -963,25 +921,20 @@ def _checkpoint_note(
         metadata["model"] = event.model
     metadata["capture"] = "extractive"
 
-    safe_coding_context: dict[str, str] | None = None
+    checkpoint_coding_context: dict[str, str] | None = None
     if coding_context is not None:
         # Trigger: coding sessions require repo_root == cwd to be comparable identity.
         # Why: git emits repo_root with forward slashes on every platform, while the
         # event cwd arrives in native form — on Windows that's C:\Users vs C:/Users.
         # Outcome: store the coding note's cwd in the same POSIX form as repo_root.
-        # (Redaction ran first; the [redacted-path] sentinel has no separators and
-        # passes through as_posix unchanged.)
-        metadata["cwd"] = Path(safe_cwd).as_posix()
-        safe_coding_context = {
-            "repository": redactor.redact_text(coding_context.repository),
-            "repo_root": redactor.redact_text(coding_context.repo_root),
-            "branch": redactor.redact_text(coding_context.branch),
-            # A commit SHA is public repository identity, but its hex shape trips
-            # high-entropy secret detection. Preserve it so coding checkpoints
-            # remain queryable by the exact revision they describe.
+        metadata["cwd"] = Path(working_directory).as_posix()
+        checkpoint_coding_context = {
+            "repository": coding_context.repository,
+            "repo_root": coding_context.repo_root,
+            "branch": coding_context.branch,
             "git_sha": coding_context.git_sha,
         }
-        metadata.update(safe_coding_context)
+        metadata.update(checkpoint_coding_context)
         if coding_context.pull_request is not None:
             pull_request = coding_context.pull_request
             metadata.update(
@@ -989,11 +942,11 @@ def _checkpoint_note(
                     # PR numbers are identifiers, not quantities. Keeping them as strings
                     # also makes exact metadata queries portable across SQLite and Postgres.
                     "pull_request_number": str(pull_request.number),
-                    "pull_request_title": redactor.redact_text(pull_request.title),
-                    "pull_request_url": redactor.redact_text(pull_request.url),
+                    "pull_request_title": pull_request.title,
+                    "pull_request_url": pull_request.url,
                     "pull_request_state": pull_request.state,
-                    "pull_request_base": redactor.redact_text(pull_request.base_branch),
-                    "pull_request_head": redactor.redact_text(pull_request.head_branch),
+                    "pull_request_base": pull_request.base_branch,
+                    "pull_request_head": pull_request.head_branch,
                 }
             )
 
@@ -1006,19 +959,19 @@ def _checkpoint_note(
         "resume._",
         "",
         "## Summary",
-        f"Working in `{safe_cwd}`.",
+        f"Working in `{working_directory}`.",
         f"- Opening request: {_clip(opening, 300)}",
         "",
         "## Recent thread",
         *[f"- {_clip(message, 200)}" for message in recent_user],
     ]
-    if safe_coding_context is not None:
+    if checkpoint_coding_context is not None:
         body += [
             "",
             "## Repository",
-            f"- Repository: `{safe_coding_context['repository']}`",
-            f"- Branch: `{safe_coding_context['branch']}`",
-            f"- Git SHA: `{safe_coding_context['git_sha']}`",
+            f"- Repository: `{checkpoint_coding_context['repository']}`",
+            f"- Branch: `{checkpoint_coding_context['branch']}`",
+            f"- Git SHA: `{checkpoint_coding_context['git_sha']}`",
         ]
         if coding_context is not None and coding_context.pull_request is not None:
             body.append(
@@ -1065,7 +1018,7 @@ def _session_start(harness: Harness, project_dir: Optional[Path]) -> None:
     cfg, configured = load_harness_settings(harness, mapping_dir)
     capture_folder = str(cfg.get("captureFolder") or profile.default_capture_folder).strip()
 
-    _capture_envelope(profile, event, SESSION_STARTED, cfg, mapping_dir, capture_folder)
+    _capture_envelope(event, SESSION_STARTED, cfg, mapping_dir, capture_folder)
 
     primary = str(cfg.get("primaryProject") or "").strip()
     checkpoint_prompt = (
@@ -1092,7 +1045,7 @@ def _pre_compact(harness: Harness, project_dir: Optional[Path]) -> None:
 
     # Capture before the checkpoint gates: capture is dumb, and an unmapped or
     # transcript-less session is still trace worth keeping in the WAL.
-    _capture_envelope(profile, event, COMPACTION_IMMINENT, cfg, mapping_dir, capture_folder)
+    _capture_envelope(event, COMPACTION_IMMINENT, cfg, mapping_dir, capture_folder)
 
     primary = str(cfg.get("primaryProject") or "").strip()
     # Trigger: no project pinned. Why: a checkpoint must land somewhere
@@ -1125,7 +1078,6 @@ def _pre_compact(harness: Harness, project_dir: Optional[Path]) -> None:
         primary,
         working_directory,
         coding_context,
-        _string_list(cfg.get("redactPaths")),
     )
 
     # Deferred import (#886); same internal write path as `bm tool write-note`.
@@ -1200,7 +1152,6 @@ def flush(
     ),
 ) -> None:
     """Archive pending lifecycle envelopes locally; never write graph notes."""
-    # Deferred: the archive sweep pulls the envelope stack (detect-secrets) (#886).
     from basic_memory.hooks.archive import flush as run_flush
 
     result = run_with_cleanup(run_flush(older_than_days=older_than_days))

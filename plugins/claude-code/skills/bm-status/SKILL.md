@@ -26,7 +26,7 @@ This is a quick diagnostic — gather the facts and lay them out; don't over-inv
      (default `sessions`), `rememberFolder` (default `bm-remember`),
      `preCompactCapture` mode (default `extractive`), `sessionProfile` (default
      `general`), `repository` (coding profile only), `captureEvents` (default
-     `false`), `redactKeys`, and `redactPaths`.
+     `true`).
    - From the **root** settings object (not `basicMemory`): whether `outputStyle` is
      `basic-memory` — i.e. whether the capture reflexes are on.
 
@@ -73,8 +73,6 @@ you couldn't determine, rather than failing the whole report):
 - Session profile:   <general | coding>
 - Repository:        <owner/name or none>
 - Event capture:     <enabled | disabled>
-- Redact keys:       <configured count or none>
-- Redact paths:      <configured count or none>
 - Shared hook inbox: <path or unavailable>
 - Shared pending envelopes: <count or unavailable>
 - Shared archived envelopes: <count or unavailable>

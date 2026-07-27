@@ -91,11 +91,11 @@ local checkout. Two disclosures:
 - **Network fetch on first run.** uv downloads `basic-memory` from PyPI at a
   pinned minimum version (bumped by release tooling); later runs use uv's
   cache.
-- **Event capture is opt-in and off by default.** Setting `captureEvents: true`
-  (the JSON boolean — strings never enable it) records redacted lifecycle-event
-  envelopes to a local inbox under your Basic Memory home. Inspect with
-  `basic-memory hook status`, archive locally with `basic-memory hook flush`.
-  The lifecycle trace never becomes a graph note.
+- **Event capture is on by default.** Setting `captureEvents: false` disables
+  lifecycle-event envelopes. Other values fail closed. Envelopes contain bounded
+  lifecycle metadata and live in a local inbox under your Basic Memory home.
+  Inspect with `basic-memory hook status`, archive locally with
+  `basic-memory hook flush`. The lifecycle trace never becomes a graph note.
 
 Every failure path exits 0 — the hooks stay invisible rather than disrupt a
 session.
@@ -151,9 +151,7 @@ settings (or select it via `/config`).
 | `preCompactCapture` | `extractive` | How checkpoints are produced |
 | `sessionProfile` | `general` | `coding` makes checkpoints schema-backed `coding_session` notes with required Git identity |
 | `repository` | _(none)_ | User-confirmed stable repository identifier (`owner/name`); required for the `coding` profile |
-| `captureEvents` | `false` | Opt-in: record redacted lifecycle-event envelopes to the local inbox (see `basic-memory hook status` / `flush`). Only the JSON boolean `true` enables it. |
-| `redactKeys` | `[]` | Additional payload keys to redact before an event enters the local inbox |
-| `redactPaths` | `[]` | Additional paths to redact from working-directory and path-bearing capture content |
+| `captureEvents` | `true` | Record bounded lifecycle-event envelopes to the local inbox (see `basic-memory hook status` / `flush`). Set the JSON boolean `false` to disable it; other values fail closed. |
 
 The plugin seeds schemas for notes the Claude integration writes directly:
 `decision`, `task`, and the session type relevant to the selected profile. A

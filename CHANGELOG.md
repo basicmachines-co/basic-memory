@@ -7,15 +7,22 @@
 - **#997**: Added the `bm hook` harness front door (SPEC-55). Lifecycle verbs
   (`session-start`, `pre-compact`) move the plugin hook logic into the package
   behind per-harness stdin adapters, with the session brief fenced as reference
-  data. Opt-in envelope capture (`captureEvents: true`, fail-closed) records
-  redacted lifecycle events into a local inbox WAL, projected deterministically
-  by `bm hook flush`; `bm hook status` shows the surface. `bm hook install` /
+  data. Default-on envelope capture records bounded lifecycle metadata into a
+  local inbox WAL, and `bm hook flush` archives it locally; `bm hook status`
+  shows the surface. `captureEvents: false` disables capture. `bm hook install` /
   `bm hook remove` wire the hooks into user-level harness config for standalone
   users with ownership-tagged, surgical merging. The Claude Code and Codex
   plugin hooks are now zero-logic PEP 723 uv scripts (`uv run --script`) that
   invoke `basic-memory hook` in-process; their dependency floor is bumped by
   release tooling, and `BM_BIN` overrides the uv-managed environment for
   development.
+
+### Maintenance
+
+- Removed the hook-specific redaction subsystem, its `detect-secrets`
+  dependency, and the retired lifecycle projector compatibility module.
+- Kept Milvus as a first-party optional vector backend while removing the
+  unused Python entry-point registry for separately packaged vector adapters.
 
 ## v0.22.1 (2026-06-12)
 

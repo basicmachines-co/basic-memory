@@ -7,7 +7,7 @@ carry into core, extended with the 2026-07-15 revision fields: ``id`` (UUIDv7),
 
 Envelopes are trace, not memory: they remain ``promotion_status: raw`` and are
 archived locally rather than promoted into the graph. The idempotency key is
-computed from metadata only, so redaction never changes identity.
+computed from metadata only, so bounded payload changes never change identity.
 """
 
 from __future__ import annotations
@@ -18,7 +18,6 @@ from datetime import datetime, timezone
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from basic_memory.hooks._uuid7 import uuid7
-from basic_memory.hooks.redaction import Redactor
 
 ENVELOPE_VERSION = 1
 
@@ -74,7 +73,7 @@ class Envelope(BaseModel):
     actor: str = ACTOR_RUNTIME  # "runtime" | "user" | routine name
     caused_by: str | None = None  # id of the triggering event, when known
     promotion_status: str = PROMOTION_RAW
-    payload: dict = Field(default_factory=dict)  # redacted summary only
+    payload: dict = Field(default_factory=dict)  # bounded lifecycle metadata only
 
     @field_validator("envelope_version")
     @classmethod
@@ -120,31 +119,18 @@ def create_envelope(
     actor: str = ACTOR_RUNTIME,
     caused_by: str | None = None,
     payload: dict | None = None,
-    extra_redact_keys: list[str] | None = None,
-    extra_redact_paths: list[str] | None = None,
 ) -> Envelope:
     """Factory: build a producer envelope from normalized hook inputs.
 
     Keyword-only to prevent positional-order mistakes when callers construct
-    envelopes from heterogeneous payload shapes. Both the payload and the ``cwd``
-    pass through the Stage-1 redaction floor here, at the factory — no envelope
-    built through this path can carry unredacted payload values or a denied
-    workspace path into the inbox. ``project_hint`` is a project name, not a
-    path, so it is left intact as capture-time diagnostic context.
+    envelopes from heterogeneous payload shapes. Callers keep payloads bounded
+    to lifecycle metadata; the factory validates the stable envelope contract
+    before it enters the inbox.
     """
     if event not in V0_EVENTS:
         raise ValueError(f"Unknown event {event!r}; v0 supports: {sorted(V0_EVENTS)}")
 
     resolved_ts = ts or datetime.now(timezone.utc).isoformat(timespec="seconds")
-    # One ruleset for both the payload and the cwd: they share the same deny
-    # rules, so compiling once avoids re-expanding paths and recompiling patterns.
-    redactor = Redactor.build(
-        extra_redact_keys=extra_redact_keys, extra_redact_paths=extra_redact_paths
-    )
-    safe_payload = redactor.redact_payload(payload or {})
-    # cwd is a user path: a session under a configured redactPaths (or a default
-    # deny dir) must not persist the raw path in the inbox WAL.
-    safe_cwd = redactor.redact_text(cwd)
 
     return Envelope(
         id=str(uuid7()),
@@ -153,12 +139,12 @@ def create_envelope(
         source_session_id=session_id,
         source_turn_id=turn_id,
         ts=resolved_ts,
-        cwd=safe_cwd,
+        cwd=cwd,
         project_hint=project_hint,
         actor=actor,
         caused_by=caused_by,
         idempotency_key=idempotency_key(source, session_id, event, resolved_ts),
-        payload=safe_payload,
+        payload=dict(payload or {}),
     )
 
 
