@@ -74,6 +74,7 @@ from basic_memory.runtime.jobs import (
     RuntimeProjectIndexJobRequest,
 )
 from basic_memory.runtime.projects import ProjectRuntimeReference
+from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.schemas.search import SearchItemType, SearchQuery
 from basic_memory.services import FileService
 from basic_memory.services.exceptions import FileOperationError
@@ -2567,17 +2568,12 @@ class RuntimeFactorySearchIndex:
     async def sync_entity_vectors_batch(
         self,
         entity_ids: list[int],
-    ) -> "RuntimeFactoryVectorBatchResult":
-        return RuntimeFactoryVectorBatchResult(entities_synced=len(entity_ids))
-
-
-# Not frozen: EmbeddingIndexBatchSummary declares plain (writable) attribute members.
-@dataclass(slots=True)
-class RuntimeFactoryVectorBatchResult:
-    entities_synced: int
-    entities_skipped: int = 0
-    entities_failed: int = 0
-    entities_deferred: int = 0
+    ) -> VectorSyncBatchResult:
+        return VectorSyncBatchResult(
+            entities_total=len(entity_ids),
+            entities_synced=len(entity_ids),
+            entities_failed=0,
+        )
 
 
 class RuntimeFactoryRelationRepository:

@@ -27,7 +27,7 @@ from basic_memory.utils import FilePath
 from loguru import logger
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class FrontmatterUpdateResult:
     """Final content emitted by a frontmatter rewrite without a follow-up reread."""
 

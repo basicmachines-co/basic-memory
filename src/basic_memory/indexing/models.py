@@ -96,7 +96,7 @@ class IndexFrontmatterUpdate:
     metadata: dict[str, Any]
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class IndexFrontmatterWriteResult:
     """Typed result for a frontmatter write performed during indexing."""
 
@@ -825,8 +825,11 @@ class IndexFileWriter(Protocol):
 class IndexFrontmatterStorageResult(Protocol):
     """Storage write result shape needed by the indexing writer adapter."""
 
-    checksum: str
-    content: str
+    @property
+    def checksum(self) -> str: ...
+
+    @property
+    def content(self) -> str: ...
 
 
 class IndexFrontmatterStorage(Protocol):

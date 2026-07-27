@@ -6,8 +6,11 @@ from typing import Any, Protocol, runtime_checkable
 class EmbeddingProvider(Protocol):
     """Contract for semantic embedding providers."""
 
-    model_name: str
-    dimensions: int
+    @property
+    def model_name(self) -> str: ...
+
+    @property
+    def dimensions(self) -> int: ...
 
     async def embed_query(self, text: str) -> list[float]:
         """Embed a single query string."""

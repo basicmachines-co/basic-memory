@@ -41,6 +41,10 @@ ENV/
 *.swp
 *.swo
 
+# Codex project metadata; all runtime state and nested worktrees stay local.
+/.codex/*
+!/.codex/basic-memory.json
+
 # macOS
 .DS_Store
 .coverage.*

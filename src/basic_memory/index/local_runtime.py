@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from loguru import logger
 
+from basic_memory.file_utils import FileError
 from basic_memory.index.inline_operations import (
     InlineStorageEventIndexRuntime,
     InlineStorageEventOperationProcessor,
@@ -32,7 +33,6 @@ from basic_memory.indexing.file_index_checking import (
     RepositoryIndexedFileChecksumSource,
     RepositoryMovedEntitySource,
     RepositoryMoveVacateSource,
-    StorageCurrentFileChecksumSource,
 )
 from basic_memory.repository.note_file_vacate_repository import NoteFileVacateRepository
 from basic_memory.indexing.index_file_runner import (
@@ -66,6 +66,7 @@ from basic_memory.runtime.storage import (
     RuntimeStorageEventOperation,
 )
 from basic_memory.services import FileService
+from basic_memory.services.exceptions import FileOperationError
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,7 +103,16 @@ class LocalStorageFileMetadataSource:
         self,
         file_path: RuntimeFilePath,
     ) -> RuntimeFileChecksum | None:
-        current_metadata = await self.load_current_file_metadata(file_path)
+        try:
+            current_metadata = await self.load_current_file_metadata(file_path)
+        except (FileError, FileOperationError) as exc:
+            # The file can vanish between exists() and checksum. Only that concrete
+            # disappearance is a missing target; permission and transient I/O failures
+            # must fail indexing instead of silently leaving stale derived state.
+            cause = exc.__cause__ if exc.__cause__ is not None else exc.__context__
+            if isinstance(cause, FileNotFoundError):
+                return None
+            raise
         return current_metadata.checksum if current_metadata is not None else None
 
 
@@ -262,9 +272,7 @@ class LocalWatchEventIndexRuntimeFactory:
                 session_maker=dependencies.session_maker,
                 entity_repository=dependencies.entity_repository,
             ),
-            current_checksum_source=StorageCurrentFileChecksumSource(
-                metadata_source=metadata_source,
-            ),
+            current_checksum_source=metadata_source,
             moved_entity_source=RepositoryMovedEntitySource(
                 session_maker=dependencies.session_maker,
                 entity_repository=dependencies.entity_repository,

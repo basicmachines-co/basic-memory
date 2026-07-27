@@ -64,7 +64,8 @@ class SemanticVectorIndex(Protocol):
     implementations own only vector persistence and nearest-neighbour lookup.
     """
 
-    scope: VectorIndexScope
+    @property
+    def scope(self) -> VectorIndexScope: ...
 
     async def initialize(self) -> None:
         """Create or validate backend storage for the configured scope."""
@@ -96,7 +97,8 @@ class SemanticVectorIndex(Protocol):
 class SemanticVectorIndexReconciler(Protocol):
     """Optional cleanup capability for removing vectors absent from the live manifest."""
 
-    scope: VectorIndexScope
+    @property
+    def scope(self) -> VectorIndexScope: ...
 
     async def delete_orphans(self, live_keys: Sequence[VectorKey]) -> None:
         """Delete scoped vectors whose stable keys are not in ``live_keys``."""

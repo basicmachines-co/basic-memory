@@ -28,8 +28,7 @@ def capture_logs() -> Iterator[list[Record]]:
         logger.remove(sink_id)
 
 
-# Not frozen: OrphanIndexedEntity declares plain (writable) attribute members.
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class FakeEntity:
     id: int
 

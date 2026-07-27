@@ -92,8 +92,11 @@ LocalAcceptedNoteRepositories = AcceptedNoteRepositories
 class LocalCurrentNoteEntity(Protocol):
     """Entity fields needed to refresh current markdown before route mutation."""
 
-    file_path: str
-    content_type: str
+    @property
+    def file_path(self) -> str: ...
+
+    @property
+    def content_type(self) -> str: ...
 
 
 class LocalCurrentNoteEntityRepository(Protocol):

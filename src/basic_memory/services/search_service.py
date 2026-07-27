@@ -22,10 +22,10 @@ from basic_memory.repository import EntityRepository
 from basic_memory.repository.search_repository import (
     SearchIndexRow,
     SearchRepository,
-    VectorSyncBatchResult,
 )
 from basic_memory.repository.search_query import relaxed_query_words
 from basic_memory.schemas.search import SearchQuery, SearchItemType, SearchRetrievalMode
+from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.services import FileService
 
 # Maximum size for content_stems field to stay under Postgres's 8KB index row limit.
@@ -539,11 +539,11 @@ class SearchService:
                 + sum(result.entities_skipped for result in repository_results)
                 - len(unknown_ids)
             ),
-            failed_entity_ids=[
+            failed_entity_ids=tuple(
                 failed_entity_id
                 for result in repository_results
                 for failed_entity_id in result.failed_entity_ids
-            ],
+            ),
             chunks_total=sum(result.chunks_total for result in repository_results),
             chunks_skipped=sum(result.chunks_skipped for result in repository_results),
             embedding_jobs_total=sum(result.embedding_jobs_total for result in repository_results),

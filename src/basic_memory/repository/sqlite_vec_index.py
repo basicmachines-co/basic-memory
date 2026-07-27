@@ -15,7 +15,6 @@ from basic_memory import db
 from basic_memory.models.search import create_sqlite_search_vector_embeddings
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.semantic_vector_index import (
-    SemanticVectorIndex,
     VectorDeletion,
     VectorIndexScope,
     VectorKey,
@@ -29,7 +28,7 @@ from basic_memory.repository.semantic_vector_index import (
 SQLITE_VEC_MAX_K = 4096
 
 
-class SQLiteVecIndex(SemanticVectorIndex):
+class SQLiteVecIndex:
     """Persist and query semantic vectors in SQLite with sqlite-vec."""
 
     def __init__(

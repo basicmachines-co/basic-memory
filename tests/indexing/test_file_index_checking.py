@@ -7,38 +7,15 @@ from typing import cast
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from basic_memory.file_utils import FileError
 from basic_memory.indexing.file_index_checking import (
-    CurrentFileMetadataSource,
     FileIndexChecker,
     MoveVacateMarker,
     MovedEntityFacts,
     RepositoryIndexedFileChecksumSource,
     RepositoryMoveVacateSource,
     RepositoryMovedEntitySource,
-    StorageCurrentFileChecksumSource,
 )
 from basic_memory.indexing.file_index_planning import FileIndexDecisionStatus, FileIndexTarget
-from basic_memory.services.exceptions import FileOperationError
-
-
-@dataclass(frozen=True, slots=True)
-class StubCurrentMetadata:
-    checksum: str
-
-
-@dataclass(slots=True)
-class StubCurrentMetadataSource:
-    calls: list[str] = field(default_factory=list)
-
-    async def load_current_file_metadata(
-        self,
-        file_path: str,
-    ) -> StubCurrentMetadata | None:
-        self.calls.append(file_path)
-        if file_path == "missing.md":
-            return None
-        return StubCurrentMetadata(checksum="etag-current")
 
 
 @dataclass(slots=True)
@@ -293,55 +270,6 @@ async def test_repository_indexed_file_checksum_source_maps_repository_rows() ->
         "notes/b.md": None,
     }
     assert repository.calls == [(session, ("notes/a.md", "notes/b.md"))]
-
-
-@pytest.mark.asyncio
-async def test_storage_current_file_checksum_source_loads_metadata_checksum() -> None:
-    stub_source = StubCurrentMetadataSource()
-    metadata_source: CurrentFileMetadataSource = stub_source
-    source = StorageCurrentFileChecksumSource(metadata_source=metadata_source)
-
-    assert await source.load_current_file_checksum("note.md") == "etag-current"
-    assert await source.load_current_file_checksum("missing.md") is None
-    assert stub_source.calls == ["note.md", "missing.md"]
-
-
-@pytest.mark.asyncio
-async def test_storage_current_file_checksum_source_treats_file_errors_as_missing() -> None:
-    class VanishingMetadataSource:
-        async def load_current_file_metadata(self, file_path: str) -> StubCurrentMetadata | None:
-            raise FileOperationError(f"file vanished: {file_path}") from FileNotFoundError(
-                file_path
-            )
-
-    source = StorageCurrentFileChecksumSource(metadata_source=VanishingMetadataSource())
-
-    assert await source.load_current_file_checksum("vanished.md") is None
-
-
-@pytest.mark.asyncio
-async def test_storage_current_file_checksum_source_treats_checksum_race_as_missing() -> None:
-    class VanishingMetadataSource:
-        async def load_current_file_metadata(self, file_path: str) -> StubCurrentMetadata | None:
-            raise FileError(f"checksum target vanished: {file_path}") from FileNotFoundError(
-                file_path
-            )
-
-    source = StorageCurrentFileChecksumSource(metadata_source=VanishingMetadataSource())
-
-    assert await source.load_current_file_checksum("vanished.md") is None
-
-
-@pytest.mark.asyncio
-async def test_storage_current_file_checksum_source_propagates_non_missing_failures() -> None:
-    class UnreadableMetadataSource:
-        async def load_current_file_metadata(self, file_path: str) -> StubCurrentMetadata | None:
-            raise FileError(f"permission denied: {file_path}") from PermissionError(file_path)
-
-    source = StorageCurrentFileChecksumSource(metadata_source=UnreadableMetadataSource())
-
-    with pytest.raises(FileError, match="permission denied"):
-        await source.load_current_file_checksum("unreadable.md")
 
 
 def _orphan_checker(

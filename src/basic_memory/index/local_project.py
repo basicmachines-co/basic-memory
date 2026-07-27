@@ -47,7 +47,6 @@ from basic_memory.indexing.file_index_checking import (
     RepositoryIndexedFileChecksumSource,
     RepositoryMovedEntitySource,
     RepositoryMoveVacateSource,
-    StorageCurrentFileChecksumSource,
 )
 from basic_memory.repository.note_file_vacate_repository import NoteFileVacateRepository
 from basic_memory.indexing.models import (
@@ -463,13 +462,7 @@ LocalProjectIndexObservation = ProjectIndexObservation
 
 
 class LocalProjectIndexRuntimeProvider(Protocol):
-    """Minimal factory shape needed to run a local project-index request.
-
-    A structural seam so callers in higher layers (e.g. services/initialization,
-    which declares its own matching InitialProjectIndexRuntimeFactory Protocol)
-    can supply a runtime factory without importing the concrete
-    LocalProjectIndexRuntimeFactory from this module.
-    """
+    """Minimal factory shape needed to run a local project-index request."""
 
     async def runtime_for_project(self, project: Project) -> LocalProjectIndexRuntime: ...
 
@@ -589,9 +582,7 @@ class LocalProjectIndexRuntimeFactory:
                 session_maker=dependencies.session_maker,
                 entity_repository=dependencies.entity_repository,
             ),
-            current_checksum_source=StorageCurrentFileChecksumSource(
-                metadata_source=metadata_source,
-            ),
+            current_checksum_source=metadata_source,
             moved_entity_source=RepositoryMovedEntitySource(
                 session_maker=dependencies.session_maker,
                 entity_repository=dependencies.entity_repository,

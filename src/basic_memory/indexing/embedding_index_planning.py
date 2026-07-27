@@ -13,12 +13,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.indexing.progress import (
-    VectorSyncBatchSummary,
     VectorSyncProgress,
     apply_vector_sync_batch_result,
     initialize_vector_sync_progress,
 )
 from basic_memory.runtime.storage import ProjectId
+from basic_memory.runtime.vector_sync import EntityVectorSync, VectorSyncBatchResult
 
 if TYPE_CHECKING:  # pragma: no cover
     from loguru import Logger
@@ -49,7 +49,7 @@ class VectorSyncExecutor(Protocol):
         self,
         entity_ids: list[EntityId],
         progress_callback: VectorSyncBatchProgressCallback | None = None,
-    ) -> VectorSyncBatchSummary:
+    ) -> VectorSyncBatchResult:
         """Refresh vector chunks for one batch of entities."""
 
 
@@ -220,28 +220,13 @@ class EmbeddingIndexPlan:
         return len(self.entity_ids)
 
 
-class EmbeddingIndexBatchSummary(Protocol):
-    """Vector sync counts produced by the concrete search backend."""
-
-    entities_synced: int
-    entities_skipped: int
-    entities_failed: int
-    entities_deferred: int
-
-
-class EmbeddingVectorSync(Protocol):
-    """Capability that refreshes vectors for one entity."""
-
-    async def sync_entity_vectors(self, entity_id: int) -> object: ...
-
-
 class EmbeddingBatchVectorSync(Protocol):
     """Capability that refreshes vectors for a batch of entities."""
 
     async def sync_entity_vectors_batch(
         self,
         entity_ids: list[int],
-    ) -> EmbeddingIndexBatchSummary: ...
+    ) -> VectorSyncBatchResult: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -346,7 +331,7 @@ def plan_embedding_index_batch_jobs(
 async def run_embedding_index(
     request: EmbeddingIndexJobRequest,
     *,
-    vector_sync: EmbeddingVectorSync,
+    vector_sync: EntityVectorSync,
 ) -> EmbeddingIndexResult:
     """Run one embedding index request through a concrete vector sync backend."""
     await vector_sync.sync_entity_vectors(request.entity_id)
@@ -374,7 +359,7 @@ async def run_embedding_index_batch(
 
 def summarize_embedding_index_batch_result(
     plan: EmbeddingIndexPlan,
-    batch_result: EmbeddingIndexBatchSummary,
+    batch_result: VectorSyncBatchResult,
 ) -> EmbeddingIndexBatchResult:
     """Combine a deduped embedding plan with backend vector sync counts."""
     return EmbeddingIndexBatchResult(

@@ -42,9 +42,14 @@ TIGRIS_CONSISTENCY_HEADERS = [
 
 
 class RunResult(Protocol):
-    returncode: int
-    stdout: str
-    stderr: str
+    @property
+    def returncode(self) -> int: ...
+
+    @property
+    def stdout(self) -> str: ...
+
+    @property
+    def stderr(self) -> str: ...
 
 
 RunFunc = Callable[..., RunResult]

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 from requests import exceptions as requests_exceptions
 
-from basic_memory.repository.rerank_provider import RerankProvider, validate_rerank_scores
+from basic_memory.repository.rerank_provider import validate_rerank_scores
 from basic_memory.repository.semantic_errors import (
     RerankProviderContractError,
     RerankTransientError,
@@ -59,7 +59,7 @@ def _is_transient_model_load_error(
     return not offline_mode
 
 
-class FastEmbedRerankProvider(RerankProvider):
+class FastEmbedRerankProvider:
     """Local ONNX cross-encoder reranker backed by FastEmbed.
 
     Shares the FastEmbed model cache with the embedding provider — reranker

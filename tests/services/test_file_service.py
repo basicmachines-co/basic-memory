@@ -1,6 +1,7 @@
 """Tests for file operations service."""
 
 import os
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
@@ -195,6 +196,8 @@ async def test_update_frontmatter_checksum_matches_windows_crlf_persisted_bytes(
     )
 
     assert result.checksum == await file_service.compute_checksum(test_path)
+    with pytest.raises(FrozenInstanceError):
+        setattr(result, "checksum", "changed")
 
 
 @pytest.mark.asyncio

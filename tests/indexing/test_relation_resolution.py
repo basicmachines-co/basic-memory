@@ -67,8 +67,7 @@ class FakeSession:
         pass
 
 
-# Not frozen: UnresolvedRelation declares plain (writable) attribute members.
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class FakeRelation:
     id: int
     from_id: int
@@ -76,8 +75,7 @@ class FakeRelation:
     relation_type: str = "related_to"
 
 
-# Not frozen: ResolvedRelationTarget declares plain (writable) attribute members.
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class FakeResolvedEntity:
     id: int
     title: str
@@ -626,9 +624,7 @@ async def test_resolve_relations_skips_ambiguous_target_without_aborting_pass() 
             assert isinstance(session, FakeSession)
             self.calls.append((link_text, strict))
             if link_text in self.ambiguous:
-                raise AmbiguousIdentifierError(
-                    link_text, [("dup-a", "a.md"), ("dup-b", "b.md")]
-                )
+                raise AmbiguousIdentifierError(link_text, [("dup-a", "a.md"), ("dup-b", "b.md")])
             return self.targets.get(link_text)
 
     repo = StubRelationRepository(

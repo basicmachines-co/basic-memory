@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from typing import Protocol
 
 from basic_memory.runtime.cleanup import (
-    RuntimeNoteFileDeleteJobRequest,
+    RuntimeNoteFileDeleteEnqueuer,
     plan_note_file_delete_job_request,
 )
 from basic_memory.runtime.note_content import (
@@ -37,12 +37,6 @@ class AcceptedNoteMaterializationEnqueuer(Protocol):
         self,
         request: RuntimeNoteMaterializationJobRequest,
     ) -> None: ...
-
-
-class AcceptedNoteFileDeleteEnqueuer(Protocol):
-    """Capability that enqueues materialized-note file cleanup."""
-
-    async def enqueue_note_file_delete(self, request: RuntimeNoteFileDeleteJobRequest) -> None: ...
 
 
 class AcceptedNoteMaterializationFailureMarker(Protocol):
@@ -94,7 +88,7 @@ async def enqueue_accepted_note_write_jobs(
     *,
     materialization_enqueuer: AcceptedNoteMaterializationEnqueuer,
     failure_marker: AcceptedNoteMaterializationFailureMarker,
-    file_delete_enqueuer: AcceptedNoteFileDeleteEnqueuer,
+    file_delete_enqueuer: RuntimeNoteFileDeleteEnqueuer,
 ) -> AcceptedNoteEnqueueResult:
     """Queue writeback and any separate delete cleanup for an accepted note write."""
     result = await enqueue_accepted_note_materialization(
@@ -116,7 +110,7 @@ async def enqueue_accepted_note_write_jobs(
 async def enqueue_accepted_note_file_delete(
     accepted: RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload],
     *,
-    file_delete_enqueuer: AcceptedNoteFileDeleteEnqueuer,
+    file_delete_enqueuer: RuntimeNoteFileDeleteEnqueuer,
 ) -> AcceptedNoteEnqueueResult:
     """Queue file cleanup for an already-committed accepted note delete."""
     return await enqueue_accepted_note_file_delete_request(
@@ -132,7 +126,7 @@ async def enqueue_accepted_note_file_delete_request(
     status_code: int,
     payload: RuntimeNoteContentResponsePayload,
     file_delete: RuntimePendingNoteFileDelete,
-    file_delete_enqueuer: AcceptedNoteFileDeleteEnqueuer,
+    file_delete_enqueuer: RuntimeNoteFileDeleteEnqueuer,
 ) -> AcceptedNoteEnqueueResult:
     """Queue one accepted note file cleanup request and update response state on failure."""
     try:

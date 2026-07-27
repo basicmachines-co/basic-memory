@@ -9,7 +9,7 @@ from sqlalchemy import text
 
 from basic_memory import db
 from basic_memory.repository import EntityRepository
-from basic_memory.repository.search_repository_base import VectorSyncBatchResult
+from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.repository.semantic_errors import (
     SemanticDependenciesMissingError,
     SemanticSearchDisabledError,

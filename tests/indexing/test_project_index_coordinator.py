@@ -28,10 +28,10 @@ from basic_memory.runtime.jobs import (
     RuntimeProjectIndexJobRequest,
 )
 from basic_memory.runtime.projects import ProjectRuntimeReference
+from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 
 
-# Not frozen: ProjectIndexRequestSource declares plain (writable) attribute members.
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class ProjectIndexSource:
     project_id: int
     project_external_id: str
@@ -111,15 +111,6 @@ class StaticProjectIndexBatchEnqueuer:
         return self.result
 
 
-# Not frozen: EmbeddingIndexBatchSummary declares plain (writable) attribute members.
-@dataclass(slots=True)
-class RecordingEmbeddingBatchSummary:
-    entities_synced: int
-    entities_skipped: int = 0
-    entities_failed: int = 0
-    entities_deferred: int = 0
-
-
 @dataclass(slots=True)
 class RecordingEmbeddingVectorSync:
     entity_batches: list[list[int]] = field(default_factory=list)
@@ -127,9 +118,13 @@ class RecordingEmbeddingVectorSync:
     async def sync_entity_vectors_batch(
         self,
         entity_ids: list[int],
-    ) -> RecordingEmbeddingBatchSummary:
+    ) -> VectorSyncBatchResult:
         self.entity_batches.append(entity_ids)
-        return RecordingEmbeddingBatchSummary(entities_synced=len(entity_ids))
+        return VectorSyncBatchResult(
+            entities_total=len(entity_ids),
+            entities_synced=len(entity_ids),
+            entities_failed=0,
+        )
 
 
 def test_project_index_request_serializes_existing_payload_metadata() -> None:

@@ -83,7 +83,7 @@ class ReadEverythingChecker:
         )
 
 
-class CurrentFileMetadataSource:
+class RecordingIndexFileMetadataSource:
     def __init__(self) -> None:
         self.paths: list[str] = []
 
@@ -195,7 +195,7 @@ class RecordingInlineResultRecorder:
 def inline_runtime(
     *,
     checker: ReadEverythingChecker | None = None,
-    metadata_source: CurrentFileMetadataSource | None = None,
+    metadata_source: RecordingIndexFileMetadataSource | None = None,
     file_indexer: RecordingFileIndexer | None = None,
     delete_entities: RecordingDeleteEntities | None = None,
     delete_objects: RecordingDeleteObjects | None = None,
@@ -204,7 +204,7 @@ def inline_runtime(
     return InlineStorageEventIndexRuntime(
         project=project_reference(),
         checker=checker or ReadEverythingChecker(),
-        metadata_source=metadata_source or CurrentFileMetadataSource(),
+        metadata_source=metadata_source or RecordingIndexFileMetadataSource(),
         materialized_note_source=EmptyMaterializedNoteSource(),
         file_indexer=file_indexer or RecordingFileIndexer(),
         delete_entities=delete_entities or RecordingDeleteEntities(None),
@@ -215,7 +215,7 @@ def inline_runtime(
 
 async def test_inline_processor_indexes_storage_event_with_index_file_runner() -> None:
     checker = ReadEverythingChecker()
-    metadata_source = CurrentFileMetadataSource()
+    metadata_source = RecordingIndexFileMetadataSource()
     file_indexer = RecordingFileIndexer()
     recorder = RecordingInlineResultRecorder()
     processor = InlineStorageEventOperationProcessor(

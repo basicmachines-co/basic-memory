@@ -15,9 +15,5 @@ class RelationResolutionScheduler(Protocol):
     def schedule_relation_resolution(self, *, project_id: int) -> None: ...
 
 
-class EntityVectorSyncSearchService(Protocol):
-    async def sync_entity_vectors(self, entity_id: int) -> object: ...
-
-
 class SearchReindexService(Protocol):
     async def reindex_all(self) -> object: ...

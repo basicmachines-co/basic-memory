@@ -33,8 +33,7 @@ from basic_memory.indexing.forward_reference_resolution import (
 )
 
 
-# Not frozen: UnresolvedRelation declares plain (writable) attribute members.
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class StubUnresolvedRelation:
     id: int
     from_id: int

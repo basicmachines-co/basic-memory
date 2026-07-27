@@ -12,7 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory import db
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.semantic_vector_index import (
-    SemanticVectorIndex,
     VectorDeletion,
     VectorIndexScope,
     VectorKey,
@@ -23,7 +22,7 @@ from basic_memory.repository.semantic_vector_index import (
 )
 
 
-class PgVectorIndex(SemanticVectorIndex):
+class PgVectorIndex:
     """Persist and query semantic vectors in PostgreSQL with pgvector."""
 
     def __init__(

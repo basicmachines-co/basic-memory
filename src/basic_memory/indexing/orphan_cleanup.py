@@ -14,7 +14,8 @@ from basic_memory.runtime.storage import RuntimeFilePath
 class OrphanIndexedEntity(Protocol):
     """Minimal entity shape needed when removing stale indexed files."""
 
-    id: int
+    @property
+    def id(self) -> int: ...
 
 
 class OrphanEntityRepository[EntityT: OrphanIndexedEntity](Protocol):

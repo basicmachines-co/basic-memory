@@ -39,17 +39,27 @@ class RelationResolutionRuntime(Protocol):
 class UnresolvedRelation(Protocol):
     """Unresolved relation fields required by the resolver."""
 
-    id: int
-    from_id: int
-    to_name: str
-    relation_type: str
+    @property
+    def id(self) -> int: ...
+
+    @property
+    def from_id(self) -> int: ...
+
+    @property
+    def to_name(self) -> str: ...
+
+    @property
+    def relation_type(self) -> str: ...
 
 
 class ResolvedRelationTarget(Protocol):
     """Entity fields needed to complete an unresolved relation."""
 
-    id: int
-    title: str
+    @property
+    def id(self) -> int: ...
+
+    @property
+    def title(self) -> str: ...
 
 
 class RelationResolutionRelationRepository(Protocol):
@@ -97,9 +107,14 @@ class BatchRelationResolutionEntityRepository(Protocol):
 class RelationResolutionNoteContent(Protocol):
     """Accepted note-content fields needed for a state-aware search refresh."""
 
-    entity_id: EntityId
-    markdown_content: str
-    file_write_status: str
+    @property
+    def entity_id(self) -> EntityId: ...
+
+    @property
+    def markdown_content(self) -> str: ...
+
+    @property
+    def file_write_status(self) -> str: ...
 
 
 class BatchRelationResolutionNoteContentRepository(Protocol):

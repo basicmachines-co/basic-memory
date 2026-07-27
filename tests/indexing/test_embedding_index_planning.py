@@ -19,13 +19,7 @@ from basic_memory.indexing.embedding_index_planning import (
     summarize_embedding_index_batch_result,
     vector_sync_perf_counter,
 )
-
-
-class BatchResult:
-    entities_synced = 2
-    entities_skipped = 1
-    entities_failed = 0
-    entities_deferred = 1
+from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 
 
 class SingleVectorSync:
@@ -40,9 +34,15 @@ class BatchVectorSync:
     def __init__(self) -> None:
         self.synced_entity_ids: list[list[int]] = []
 
-    async def sync_entity_vectors_batch(self, entity_ids: list[int]) -> BatchResult:
+    async def sync_entity_vectors_batch(self, entity_ids: list[int]) -> VectorSyncBatchResult:
         self.synced_entity_ids.append(entity_ids)
-        return BatchResult()
+        return VectorSyncBatchResult(
+            entities_total=2,
+            entities_synced=2,
+            entities_failed=0,
+            entities_skipped=1,
+            entities_deferred=1,
+        )
 
 
 def test_embedding_index_job_request_matches_project_queue_identity() -> None:
@@ -191,7 +191,15 @@ def test_embedding_index_batch_result_summarizes_plan_and_sync_counts() -> None:
         ]
     )
 
-    assert summarize_embedding_index_batch_result(plan, BatchResult()) == (
+    batch_result = VectorSyncBatchResult(
+        entities_total=2,
+        entities_synced=2,
+        entities_failed=0,
+        entities_skipped=1,
+        entities_deferred=1,
+    )
+
+    assert summarize_embedding_index_batch_result(plan, batch_result) == (
         EmbeddingIndexBatchResult(
             total_entities=3,
             unique_entities=2,
@@ -202,6 +210,8 @@ def test_embedding_index_batch_result_summarizes_plan_and_sync_counts() -> None:
             reason="entity embedding batch indexed: 2 entities",
         )
     )
+    with pytest.raises(FrozenInstanceError):
+        setattr(batch_result, "entities_synced", 3)
 
 
 def test_embedding_index_batch_result_handles_empty_batches() -> None:

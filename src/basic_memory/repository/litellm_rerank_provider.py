@@ -15,14 +15,14 @@ from typing import Any
 from pydantic import ValidationError
 
 from basic_memory.repository.litellm_provider import _import_litellm
-from basic_memory.repository.rerank_provider import RerankProvider, validate_rerank_scores
+from basic_memory.repository.rerank_provider import validate_rerank_scores
 from basic_memory.repository.semantic_errors import (
     RerankProviderContractError,
     RerankTransientError,
 )
 
 
-class LiteLLMRerankProvider(RerankProvider):
+class LiteLLMRerankProvider:
     """Reranker provider backed by the litellm SDK."""
 
     def __init__(

@@ -14,8 +14,6 @@ from basic_memory.repository.milvus_repository import (
     create_repository,
 )
 from basic_memory.repository.semantic_vector_index import (
-    SemanticVectorIndex,
-    SemanticVectorIndexReconciler,
     VectorDeletion,
     VectorIndexScope,
     VectorKey,
@@ -46,7 +44,7 @@ def _normalize_cosine_score(score: float) -> float:
     return max(0.0, min(1.0, score))
 
 
-class MilvusVectorIndex(SemanticVectorIndex, SemanticVectorIndexReconciler):
+class MilvusVectorIndex:
     """Persist and query one Basic Memory project's vectors in Milvus."""
 
     def __init__(

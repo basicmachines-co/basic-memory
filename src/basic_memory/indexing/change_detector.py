@@ -50,8 +50,11 @@ class ChangeDetectionStore(Protocol):
 class ChangeDetectionMoveCandidate(Protocol):
     """Indexed entity shape needed to prove a storage object was moved."""
 
-    file_path: FileIndexPath
-    checksum: FileIndexChecksum | None
+    @property
+    def file_path(self) -> FileIndexPath: ...
+
+    @property
+    def checksum(self) -> FileIndexChecksum | None: ...
 
 
 class ChangeDetectionEntityRepository(IndexedFileChecksumRepository, Protocol):

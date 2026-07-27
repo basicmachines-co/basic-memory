@@ -19,13 +19,26 @@ _BULLET_PATTERN = re.compile(r"^[\-\*]\s+")
 class SemanticSourceRow(Protocol):
     """Search row fields needed to build semantic chunks."""
 
-    id: int
-    type: str
-    title: str | None
-    permalink: str | None
-    content_snippet: str | None
-    category: str | None
-    relation_type: str | None
+    @property
+    def id(self) -> int: ...
+
+    @property
+    def type(self) -> str: ...
+
+    @property
+    def title(self) -> str | None: ...
+
+    @property
+    def permalink(self) -> str | None: ...
+
+    @property
+    def content_snippet(self) -> str | None: ...
+
+    @property
+    def category(self) -> str | None: ...
+
+    @property
+    def relation_type(self) -> str | None: ...
 
 
 class VectorChunkRecord(TypedDict):

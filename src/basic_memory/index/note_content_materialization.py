@@ -6,12 +6,13 @@ import asyncio
 from collections.abc import Coroutine, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, replace
-from typing import Any, Protocol
+from typing import Any
 
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db, file_utils
+from basic_memory.index.schedulers import RelationResolutionScheduler
 from basic_memory.indexing.index_file_runner import IndexFileExecutor
 from basic_memory.indexing.note_file_delete_runner import (
     MoveVacateClearer,
@@ -564,12 +565,6 @@ class InlineNoteFileDeleteEnqueuer:
         )
 
 
-class RelationResolutionScheduling(Protocol):
-    """Capability to back-resolve forward references after a write is indexed."""
-
-    def schedule_relation_resolution(self, *, project_id: int) -> None: ...
-
-
 @dataclass(frozen=True, slots=True)
 class LocalNoteContentMaterializationProvider:
     """Run accepted-note materialization inline for the local runtime."""
@@ -579,7 +574,7 @@ class LocalNoteContentMaterializationProvider:
     file_indexer: IndexFileExecutor | None = None
     test_mode: bool = False
     materialization_workers: int = 4
-    relation_resolution_scheduler: RelationResolutionScheduling | None = None
+    relation_resolution_scheduler: RelationResolutionScheduler | None = None
 
     async def materialize_write_change(
         self,

@@ -211,7 +211,7 @@ async def test_vector_sync_handles_final_flush_errors_and_orphan_runtime(
         continue_on_error=True,
     )
 
-    assert failed_result.failed_entity_ids == [1]
+    assert failed_result.failed_entity_ids == (1,)
 
     strict_repository = _batch_repository(
         monkeypatch,
@@ -242,7 +242,7 @@ async def test_vector_sync_handles_final_flush_errors_and_orphan_runtime(
         continue_on_error=True,
     )
 
-    assert orphan_result.failed_entity_ids == [1]
+    assert orphan_result.failed_entity_ids == (1,)
 
 
 def test_vector_shard_planning_and_logging_edges(monkeypatch) -> None:

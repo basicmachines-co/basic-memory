@@ -961,7 +961,7 @@ async def test_sync_entity_vectors_batch_flushes_at_configured_threshold(monkeyp
     assert result.entities_total == 3
     assert result.entities_synced == 3
     assert result.entities_failed == 0
-    assert result.failed_entity_ids == []
+    assert result.failed_entity_ids == ()
     assert result.embedding_jobs_total == 3
     assert result.prepare_seconds_total == pytest.approx(0.0)
     assert result.queue_wait_seconds_total == pytest.approx(0.0)
@@ -1085,7 +1085,7 @@ async def test_sync_entity_vectors_batch_continue_on_error(monkeypatch):
     assert result.entities_total == 3
     assert result.entities_synced == 1
     assert result.entities_failed == 2
-    assert result.failed_entity_ids == [2, 3]
+    assert result.failed_entity_ids == (2, 3)
 
 
 @pytest.mark.asyncio

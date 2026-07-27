@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
-from typing import Self
+from typing import Protocol, Self
 
 from basic_memory.runtime.note_content import (
     RuntimeDeletedNoteEntityDeleteSource,
@@ -213,6 +213,12 @@ class RuntimeNoteFileDeleteJobRequest:
         routing_headers = dict(headers or {})
         routing_headers["project_id"] = str(self.project_id)
         return routing_headers
+
+
+class RuntimeNoteFileDeleteEnqueuer(Protocol):
+    """Capability that enqueues materialized-note file cleanup."""
+
+    async def enqueue_note_file_delete(self, request: RuntimeNoteFileDeleteJobRequest) -> None: ...
 
 
 def plan_note_file_delete_job_request(

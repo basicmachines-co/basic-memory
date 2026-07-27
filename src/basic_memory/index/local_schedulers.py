@@ -15,14 +15,12 @@ from typing import Any, Coroutine
 from loguru import logger
 
 from basic_memory.index.project_indexing import ProjectIndexRunner
-from basic_memory.index.schedulers import (
-    EntityVectorSyncSearchService,
-    SearchReindexService,
-)
+from basic_memory.index.schedulers import SearchReindexService
 from basic_memory.indexing.relation_resolution import (
     RelationResolutionRuntime,
     resolve_project_relations,
 )
+from basic_memory.runtime.vector_sync import EntityVectorSync
 
 # --- Background Task Machinery ---
 
@@ -88,7 +86,7 @@ async def drain_background_tasks() -> None:
 
 @dataclass(frozen=True, slots=True)
 class LocalEntityVectorSyncScheduler:
-    search_service: EntityVectorSyncSearchService
+    search_service: EntityVectorSync
     test_mode: bool
 
     def schedule_entity_vector_sync(self, *, entity_id: int, project_id: int) -> None:

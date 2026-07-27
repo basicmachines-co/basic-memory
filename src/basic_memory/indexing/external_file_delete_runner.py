@@ -37,7 +37,8 @@ class ExternalFileDeleteEntities(Protocol):
 class ExternalFileDeleteEntityRepository(Protocol):
     """Repository capability used by storage-event external delete adapters."""
 
-    project_id: ProjectId | None
+    @property
+    def project_id(self) -> ProjectId | None: ...
 
     async def get_by_file_path(
         self,

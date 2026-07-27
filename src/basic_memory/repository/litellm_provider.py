@@ -18,7 +18,6 @@ import math
 import os
 from typing import Any
 
-from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 
 
@@ -104,7 +103,7 @@ def _import_litellm() -> Any:
     return litellm
 
 
-class LiteLLMEmbeddingProvider(EmbeddingProvider):
+class LiteLLMEmbeddingProvider:
     """Embedding provider backed by the litellm SDK."""
 
     def __init__(

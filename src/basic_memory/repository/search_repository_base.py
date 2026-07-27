@@ -54,8 +54,8 @@ from basic_memory.repository.semantic_vector_sync import (
     PreparedEntityVectorSync as _PreparedEntityVectorSync,
     StagedVectorDeletion as _StagedVectorDeletion,
     VectorChunkState,
-    VectorSyncBatchResult,
 )
+from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 # --- Semantic search constants ---

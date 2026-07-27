@@ -6,9 +6,6 @@ enqueuer. The core service owns request acceptance and response shaping.
 
 from __future__ import annotations
 
-from contextlib import AbstractAsyncContextManager
-from typing import Protocol
-
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -22,12 +19,6 @@ from basic_memory.indexing.directory_delete_runner import (
     finish_directory_delete_acceptance,
     normalize_directory_delete_path,
 )
-
-
-class DirectoryDeleteSessionMaker(Protocol):
-    """Session factory capability needed by directory-delete acceptance."""
-
-    def __call__(self) -> AbstractAsyncContextManager[AsyncSession]: ...
 
 
 class DirectoryDeleteServiceError(Exception):

@@ -20,7 +20,7 @@ from basic_memory.models import Entity as EntityModel, Project
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.repository.project_repository import ProjectRepository
-from basic_memory.repository.search_repository_base import VectorSyncBatchResult
+from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.runtime.note_content import NOTE_CONTENT_BASE_CHECKSUM_HEADER
 from basic_memory.schemas import DeleteEntitiesResponse
 from basic_memory.schemas.response import DirectoryMoveResult, DirectoryDeleteResult
@@ -136,9 +136,7 @@ async def test_resolve_identifier_not_found(client: AsyncClient, v2_project_url)
 
 
 @pytest.mark.asyncio
-async def test_resolve_identifier_ambiguous_title_returns_409(
-    client: AsyncClient, v2_project_url
-):
+async def test_resolve_identifier_ambiguous_title_returns_409(client: AsyncClient, v2_project_url):
     """A strict resolve of a title shared by multiple notes returns 409 (#1148).
 
     Covers the router's AmbiguousIdentifierError -> 409 transport contract: the resolver raising

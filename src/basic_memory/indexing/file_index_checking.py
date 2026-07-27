@@ -8,7 +8,6 @@ from typing import Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from basic_memory.file_utils import FileError
 from basic_memory.indexing.file_index_planning import (
     FileIndexChecksum,
     FileIndexDecision,
@@ -22,7 +21,6 @@ from basic_memory.indexing.file_index_planning import (
     plan_file_index_target_from_observed,
     plan_legacy_file_index_targets,
 )
-from basic_memory.services.exceptions import FileOperationError
 
 
 class IndexedFileChecksumSource(Protocol):
@@ -61,24 +59,6 @@ class IndexedFileChecksumRepository(Protocol):
         file_paths: Sequence[FileIndexPath],
     ) -> Sequence[IndexedFileChecksumRow]:
         """Return rows whose first two fields are file path and checksum."""
-
-
-class CurrentFileMetadata(Protocol):
-    """Storage metadata shape needed for file-index current checksum checks."""
-
-    @property
-    def checksum(self) -> FileIndexChecksum:
-        """Return the current storage checksum."""
-
-
-class CurrentFileMetadataSource(Protocol):
-    """Capability that loads current storage metadata for one file path."""
-
-    async def load_current_file_metadata(
-        self,
-        file_path: FileIndexPath,
-    ) -> CurrentFileMetadata | None:
-        """Return current storage metadata for one file, or None when missing."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,31 +178,6 @@ class RepositoryIndexedFileChecksumSource:
         async with self.session_maker() as session:
             rows = await self.entity_repository.get_by_file_paths(session, file_paths)
         return {str(row[0]): None if row[1] is None else str(row[1]) for row in rows}
-
-
-@dataclass(frozen=True, slots=True)
-class StorageCurrentFileChecksumSource:
-    """Load current file checksums from storage metadata."""
-
-    metadata_source: CurrentFileMetadataSource
-
-    async def load_current_file_checksum(
-        self,
-        file_path: FileIndexPath,
-    ) -> FileIndexChecksum | None:
-        """Return the current storage checksum for one file."""
-        try:
-            current_metadata = await self.metadata_source.load_current_file_metadata(file_path)
-        except (FileError, FileOperationError) as exc:
-            # A local checksum read wraps the race where a file vanishes after exists() as
-            # FileError. Only that concrete disappearance is a missing target; permission and
-            # transient I/O failures must fail the indexing job instead of silently leaving stale
-            # database/search state.
-            cause = exc.__cause__ if exc.__cause__ is not None else exc.__context__
-            if isinstance(cause, FileNotFoundError):
-                return None
-            raise
-        return current_metadata.checksum if current_metadata is not None else None
 
 
 @dataclass(frozen=True, slots=True)

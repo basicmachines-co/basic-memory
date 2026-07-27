@@ -22,7 +22,8 @@ from basic_memory.indexing.note_content_reconciler import NoteContentReconcileFi
 class IndexedNoteContentEntity(Protocol):
     """Minimal entity identity needed after a batch index write."""
 
-    id: int
+    @property
+    def id(self) -> int: ...
 
 
 class IndexedNoteContentFileInfo(Protocol):

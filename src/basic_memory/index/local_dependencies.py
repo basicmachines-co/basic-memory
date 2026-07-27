@@ -16,7 +16,6 @@ from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.file_utils import FileMetadata, ParseError, compute_checksum, remove_frontmatter
 from basic_memory.indexing.batch_indexer import BatchIndexer
-from basic_memory.indexing.embedding_index_planning import EmbeddingIndexBatchSummary
 from basic_memory.indexing.file_batch_runner import IndexFileBatchIndexer
 from basic_memory.indexing.file_index_checking import (
     IndexedFileChecksumRepository,
@@ -70,6 +69,7 @@ from basic_memory.repository.accepted_note_vector_cleanup import (
 )
 from basic_memory.repository.search_repository import create_search_repository
 from basic_memory.runtime.storage import ProjectId, RuntimeFilePath
+from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.services import EntityService, FileService
 from basic_memory.services.exceptions import FileOperationError
 from basic_memory.services.link_resolver import LinkResolver
@@ -123,7 +123,8 @@ class LocalIndexEntityRepository(
 ):
     """Entity repository capabilities needed by local event/project indexing."""
 
-    project_id: ProjectId | None
+    @property
+    def project_id(self) -> ProjectId | None: ...
 
     def select(self, *entities: Any) -> Select:
         """Project-scoped SELECT builder used for stat-only watermark scans."""
@@ -180,13 +181,14 @@ class LocalIndexSearchService(
     async def sync_entity_vectors_batch(
         self,
         entity_ids: list[int],
-    ) -> EmbeddingIndexBatchSummary: ...
+    ) -> VectorSyncBatchResult: ...
 
 
 class LocalIndexEntityService(Protocol):
     """Entity service capabilities needed by local index maintenance adapters."""
 
-    app_config: BasicMemoryConfig | None
+    @property
+    def app_config(self) -> BasicMemoryConfig | None: ...
 
     async def resolve_permalink(
         self,

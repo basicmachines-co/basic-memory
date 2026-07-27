@@ -37,14 +37,29 @@ from basic_memory.runtime.storage import (
 class ProjectIndexRequestSource(Protocol):
     """Minimal source shape for project-index requests."""
 
-    project_id: ProjectId
-    project_external_id: ProjectExternalId
-    project_name: ProjectName | None
-    project_permalink: ProjectPermalink | None
-    project_path: ProjectPath
-    force_full: bool
-    search: bool
-    embeddings: bool
+    @property
+    def project_id(self) -> ProjectId: ...
+
+    @property
+    def project_external_id(self) -> ProjectExternalId: ...
+
+    @property
+    def project_name(self) -> ProjectName | None: ...
+
+    @property
+    def project_permalink(self) -> ProjectPermalink | None: ...
+
+    @property
+    def project_path(self) -> ProjectPath: ...
+
+    @property
+    def force_full(self) -> bool: ...
+
+    @property
+    def search(self) -> bool: ...
+
+    @property
+    def embeddings(self) -> bool: ...
 
 
 class ProjectIndexObservedFileSource(Protocol):

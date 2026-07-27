@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Protocol, cast
+from typing import cast
 
 from pydantic import (
     BaseModel,
@@ -15,18 +15,9 @@ from pydantic import (
     model_validator,
 )
 
+from basic_memory.runtime.vector_sync import VectorSyncBatchResult
+
 type EntityId = int
-
-
-class VectorSyncBatchSummary(Protocol):
-    """Fields needed to fold one vector sync batch into durable progress."""
-
-    entities_synced: int
-    entities_failed: int
-    failed_entity_ids: list[EntityId]
-    embedding_jobs_total: int
-    embed_seconds_total: float
-    write_seconds_total: float
 
 
 class CheckpointModel(BaseModel):
@@ -161,7 +152,7 @@ def initialize_vector_sync_progress(
 
 def apply_vector_sync_batch_result(
     progress_state: VectorSyncProgress,
-    batch_result: VectorSyncBatchSummary,
+    batch_result: VectorSyncBatchResult,
     *,
     next_index: int,
     elapsed_seconds: float,

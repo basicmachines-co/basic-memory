@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
-from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 
 if TYPE_CHECKING:
@@ -35,7 +34,7 @@ _MISSING_ARTIFACT_ERROR_MARKERS = (
 )
 
 
-class FastEmbedEmbeddingProvider(EmbeddingProvider):
+class FastEmbedEmbeddingProvider:
     """Local ONNX embedding provider backed by FastEmbed."""
 
     _MODEL_ALIASES = {

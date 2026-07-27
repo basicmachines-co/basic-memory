@@ -68,7 +68,8 @@ def validate_rerank_scores(scores: Sequence[float | str], expected_count: int) -
 class RerankProvider(Protocol):
     """Contract for cross-encoder reranking providers."""
 
-    model_name: str
+    @property
+    def model_name(self) -> str: ...
 
     async def rerank(self, query: str, documents: list[str]) -> list[float]:
         """Return a relevance score in ``[0, 1]`` per document, aligned to input order.

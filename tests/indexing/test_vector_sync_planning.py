@@ -18,6 +18,7 @@ from basic_memory.indexing.embedding_index_planning import (
     VectorSyncBatchProgressCallback,
     run_vector_sync,
 )
+from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 
 if TYPE_CHECKING:
     from loguru import Record
@@ -35,22 +36,10 @@ def capture_logs() -> Iterator[list[Record]]:
 
 
 @dataclass(slots=True)
-class BatchSummary:
-    """Minimal batch result for exercising portable vector-sync execution."""
-
-    entities_synced: int
-    entities_failed: int = 0
-    failed_entity_ids: list[int] = field(default_factory=list)
-    embedding_jobs_total: int = 0
-    embed_seconds_total: float = 0.0
-    write_seconds_total: float = 0.0
-
-
-@dataclass(slots=True)
 class RecordingVectorSync:
     """Fake vector sync adapter that records chunk calls."""
 
-    results: list[BatchSummary]
+    results: list[VectorSyncBatchResult]
     progress_events: list[tuple[int, int, int]] = field(default_factory=list)
     calls: list[list[int]] = field(default_factory=list)
 
@@ -58,7 +47,7 @@ class RecordingVectorSync:
         self,
         entity_ids: list[int],
         progress_callback: VectorSyncBatchProgressCallback | None = None,
-    ) -> BatchSummary:
+    ) -> VectorSyncBatchResult:
         self.calls.append(list(entity_ids))
         if progress_callback is not None:
             for entity_id, index, total_count in self.progress_events:
@@ -253,10 +242,11 @@ async def test_run_vector_sync_resumes_from_chunk_boundary_and_reports_progress(
 ) -> None:
     vector_sync = RecordingVectorSync(
         results=[
-            BatchSummary(
+            VectorSyncBatchResult(
+                entities_total=25,
                 entities_synced=25,
                 entities_failed=1,
-                failed_entity_ids=[125],
+                failed_entity_ids=(125,),
                 embedding_jobs_total=50,
                 embed_seconds_total=3.0,
                 write_seconds_total=1.0,
@@ -322,7 +312,13 @@ async def test_run_vector_sync_logs_periodic_batch_progress(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     vector_sync = RecordingVectorSync(
-        results=[BatchSummary(entities_synced=3)],
+        results=[
+            VectorSyncBatchResult(
+                entities_total=3,
+                entities_synced=3,
+                entities_failed=0,
+            )
+        ],
         progress_events=[(1, 1, 3)],
     )
     monkeypatch.setattr(

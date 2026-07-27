@@ -1,7 +1,5 @@
 """Tests for portable indexing progress checkpoint models."""
 
-from dataclasses import dataclass, field
-
 import pytest
 from pydantic import ValidationError
 
@@ -11,19 +9,7 @@ from basic_memory.indexing.progress import (
     apply_vector_sync_batch_result,
     initialize_vector_sync_progress,
 )
-
-
-# Not frozen: VectorSyncBatchSummary declares plain (writable) attribute members.
-@dataclass(slots=True)
-class BatchSummary:
-    """Small fake proving progress updates only need a narrow batch protocol."""
-
-    entities_synced: int
-    entities_failed: int
-    failed_entity_ids: list[int] = field(default_factory=list)
-    embedding_jobs_total: int = 0
-    embed_seconds_total: float = 0.0
-    write_seconds_total: float = 0.0
+from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 
 
 def test_vector_sync_progress_checkpoint_state_shape_is_stable() -> None:
@@ -115,7 +101,11 @@ def test_vector_sync_progress_checkpoint_write_reruns_dedupe_and_clamp() -> None
     progress = VectorSyncProgress(entity_ids=[11, 22], next_index=1)
     apply_vector_sync_batch_result(
         progress,
-        BatchSummary(entities_synced=1, entities_failed=0),
+        VectorSyncBatchResult(
+            entities_total=1,
+            entities_synced=1,
+            entities_failed=0,
+        ),
         next_index=5,
         elapsed_seconds=1.0,
     )
@@ -190,10 +180,11 @@ def test_apply_vector_sync_batch_result_updates_progress_and_reports_new_failure
 
     new_failed_entity_ids = apply_vector_sync_batch_result(
         progress,
-        BatchSummary(
+        VectorSyncBatchResult(
+            entities_total=4,
             entities_synced=2,
             entities_failed=2,
-            failed_entity_ids=[22, 33],
+            failed_entity_ids=(22, 33),
             embedding_jobs_total=6,
             embed_seconds_total=2.0,
             write_seconds_total=0.75,

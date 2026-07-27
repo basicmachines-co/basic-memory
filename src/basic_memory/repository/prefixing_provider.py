@@ -41,7 +41,7 @@ def prefixing_embedding_identity(
     )
 
 
-class PrefixingEmbeddingProvider(EmbeddingProvider):
+class PrefixingEmbeddingProvider:
     """Apply document/query text prefixes before delegating to an embedding provider."""
 
     def __init__(

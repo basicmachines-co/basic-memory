@@ -29,7 +29,7 @@ from basic_memory.indexing.note_content_reconciliation import (
     plan_note_content_materialization_status,
 )
 from basic_memory.runtime.cleanup import (
-    RuntimeNoteFileDeleteJobRequest,
+    RuntimeNoteFileDeleteEnqueuer,
     plan_note_file_delete_job_request,
 )
 from basic_memory.runtime.note_content import (
@@ -197,12 +197,6 @@ class NoteMaterializationStatusPublisher(Protocol):
         request: RuntimeNoteMaterializationJobRequest,
         publication: NoteMaterializationStatusPublication,
     ) -> None: ...
-
-
-class NoteFileDeleteEnqueuer(Protocol):
-    """Capability that enqueues cleanup for old materialized note files."""
-
-    async def enqueue_note_file_delete(self, request: RuntimeNoteFileDeleteJobRequest) -> None: ...
 
 
 class NoteMaterializationSessionLock(Protocol):
@@ -572,7 +566,7 @@ async def run_note_materialization(
     writer: NoteMaterializationFileWriter,
     publisher: NoteMaterializationPublisher,
     status_publisher: NoteMaterializationStatusPublisher,
-    cleanup_enqueuer: NoteFileDeleteEnqueuer,
+    cleanup_enqueuer: RuntimeNoteFileDeleteEnqueuer,
 ) -> RuntimeNoteMaterializationResult:
     """Run one queue-neutral materialized-note write."""
     preflight_result = await preflight.prepare_note_materialization(request)
@@ -686,7 +680,7 @@ def cleanup_file_for_orphaned_write(
 
 
 async def enqueue_cleanup_file(
-    cleanup_enqueuer: NoteFileDeleteEnqueuer,
+    cleanup_enqueuer: RuntimeNoteFileDeleteEnqueuer,
     *,
     cleanup_file: RuntimePendingNoteFileDelete | None,
 ) -> bool:

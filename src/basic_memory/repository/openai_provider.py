@@ -6,11 +6,10 @@ import asyncio
 import os
 from typing import Any
 
-from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 
 
-class OpenAIEmbeddingProvider(EmbeddingProvider):
+class OpenAIEmbeddingProvider:
     """Embedding provider backed by OpenAI's embeddings API."""
 
     def __init__(
