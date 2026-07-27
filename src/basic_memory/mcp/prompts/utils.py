@@ -133,7 +133,7 @@ def format_prompt_context(context: PromptContext) -> str:
                 sections.append(section)
 
         if context_item.related_results:
-            section += dedent(
+            related_section = dedent(
                 """   
                 ## Related Context
                 """
@@ -153,8 +153,8 @@ def format_prompt_context(context: PromptContext) -> str:
                         f'You can view this file with: `read_file("{related.file_path}")`'
                     )
 
-                section += section_content
-                sections.append(section)
+                related_section += section_content
+            sections.append(related_section)
 
     # Add all sections
     summary += "\n".join(sections)

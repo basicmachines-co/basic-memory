@@ -120,6 +120,42 @@ def test_prompt_context_with_file_path_no_permalink():
     assert "read_file" in result
 
 
+def test_prompt_context_with_related_results_but_no_primary_results():
+    """Related context remains renderable when an item has no primary result."""
+    from basic_memory.mcp.prompts.utils import (
+        format_prompt_context,
+        PromptContext,
+        PromptContextItem,
+    )
+    from basic_memory.schemas.memory import EntitySummary
+
+    related_entity = EntitySummary(
+        external_id="550e8400-e29b-41d4-a716-446655440000",
+        entity_id=1,
+        type="entity",
+        title="Related File",
+        permalink=None,
+        file_path="related_file.pdf",
+        created_at=datetime.now(timezone.utc),
+    )
+    context = PromptContext(
+        topic="Test Topic",
+        timeframe="1d",
+        results=[
+            PromptContextItem(
+                primary_results=[],
+                related_results=[related_entity],
+            )
+        ],
+    )
+
+    result = format_prompt_context(context)
+
+    assert "## Related Context" in result
+    assert "Related File" in result
+    assert 'read_file("related_file.pdf")' in result
+
+
 # Recent activity prompt tests
 
 
