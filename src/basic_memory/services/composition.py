@@ -12,6 +12,7 @@ from basic_memory.indexing.relation_resolution import RepositoryRelationResoluti
 from basic_memory.markdown import EntityParser
 from basic_memory.repository import (
     EntityRepository,
+    NoteContentRepository,
     ObservationRepository,
     ProjectRepository,
     RelationRepository,
@@ -164,6 +165,7 @@ def build_default_project_runtime_bundle(
         session_maker=session_maker,
         relation_repository=relation_resolution_repository,
         entity_repository=entity_repository,
+        note_content_repository=NoteContentRepository(project_id=project_id),
         link_resolver=link_resolver,
         entity_indexer=search_service,
     )

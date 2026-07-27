@@ -60,7 +60,10 @@ from basic_memory.indexing.relation_resolution import (
 )
 from basic_memory.models import Entity, Project, Relation
 from basic_memory.repository import EntityRepository
-from basic_memory.repository.note_content_repository import NoteContentRepository
+from basic_memory.repository.note_content_repository import (
+    AcceptedNoteContentWrite,
+    NoteContentRepository,
+)
 from basic_memory.repository.relation_repository import (
     ResolvedRelationWrite,
     ResolvedRelationWriteResult,
@@ -1712,6 +1715,110 @@ permalink: concept/entity-c
     assert {row.to_id for row in relation_search_rows} == {entity_a.id, entity_b.id, entity_c.id}
 
 
+async def test_local_relation_resolution_refreshes_pending_source_without_markdown_file(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    search_service,
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Accepted content keeps relation repair independent of async file materialization."""
+    del config_manager
+
+    source_path = project_config.home / "pending-source.md"
+    source_path.write_text(
+        "# Pending Source\n\n- relates_to [[Pending Target]]\n",
+        encoding="utf-8",
+    )
+    initial = await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert initial.enqueued_files == 1
+
+    accepted_markdown = (
+        source_path.read_text(encoding="utf-8")
+        + "\nAccepted search content before materialization.\n"
+    )
+    accepted_checksum = sha256(accepted_markdown.encode("utf-8")).hexdigest()
+    accepted_at = datetime.now(timezone.utc)
+    note_content_repository = NoteContentRepository(test_project.id)
+
+    async with db.scoped_session(session_maker) as session:
+        source = await entity_repository.get_by_file_path(session, "pending-source.md")
+        assert source is not None
+        current_note_content = await note_content_repository.get_by_entity_id(
+            session,
+            source.id,
+        )
+        assert current_note_content is not None
+
+        target = await entity_repository.add(
+            session,
+            Entity(
+                permalink=f"{test_project.permalink}/pending-target",
+                title="Pending Target",
+                note_type="note",
+                file_path="pending-target.md",
+                checksum="target-checksum",
+                content_type="text/markdown",
+                created_at=accepted_at,
+                updated_at=accepted_at,
+            ),
+        )
+        await entity_repository.update(
+            session,
+            source.id,
+            {
+                "checksum": accepted_checksum,
+                "updated_at": accepted_at,
+            },
+        )
+        await note_content_repository.accept_write(
+            session,
+            AcceptedNoteContentWrite(
+                entity_id=source.id,
+                markdown_content=accepted_markdown,
+                db_version=current_note_content.db_version + 1,
+                db_checksum=accepted_checksum,
+                last_source="test",
+                updated_at=accepted_at,
+            ),
+        )
+        source_id = source.id
+        target_id = target.id
+
+    # The accepted database state is durable, but its Markdown projection is
+    # intentionally absent when relation resolution refreshes the source.
+    source_path.unlink()
+    runtime = await LocalProjectIndexRuntimeFactory().runtime_for_project(test_project)
+    assert isinstance(runtime.completion_relation_runtime, RepositoryRelationResolutionRuntime)
+
+    affected = await runtime.completion_relation_runtime.resolve_relations()
+
+    assert affected == {source_id}
+    search_results = await search_service.search(
+        SearchQuery(text="Accepted search content before materialization")
+    )
+    assert [result.entity_id for result in search_results] == [source_id]
+
+    async with db.scoped_session(session_maker) as session:
+        resolved_source = await entity_repository.find_by_id(session, source_id)
+        relation_search_rows = await search_service.repository.search(
+            search_item_types=[SearchItemType.RELATION],
+            session=session,
+        )
+
+    assert resolved_source is not None
+    assert [relation.to_id for relation in resolved_source.outgoing_relations] == [target_id]
+    source_relation_rows = [row for row in relation_search_rows if row.entity_id == source_id]
+    assert len(source_relation_rows) == 1
+    assert source_relation_rows[0].to_id == target_id
+
+
 async def test_local_project_index_deduplicates_relations_by_type(
     test_project: Project,
     project_config,
@@ -2449,7 +2556,12 @@ class RuntimeFactorySearchIndex:
     async def index_entity(self, entity: Entity) -> None:
         return None
 
-    async def index_entities(self, entities: Sequence[Entity]) -> None:
+    async def index_entities(
+        self,
+        entities: Sequence[Entity],
+        *,
+        content_by_entity_id: Mapping[int, str],
+    ) -> None:
         return None
 
     async def sync_entity_vectors_batch(

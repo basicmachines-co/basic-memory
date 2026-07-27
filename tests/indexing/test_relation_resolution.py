@@ -1,6 +1,6 @@
 """Tests for portable relation resolution orchestration."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import FrozenInstanceError, dataclass
 from datetime import timedelta
 from typing import cast
@@ -152,6 +152,30 @@ class StubEntityRepository:
         return [self.entities[entity_id] for entity_id in ids if entity_id in self.entities]
 
 
+@dataclass(slots=True)
+class FakeNoteContent:
+    entity_id: int
+    markdown_content: str
+    file_write_status: str
+
+
+class StubNoteContentRepository:
+    def __init__(self, note_contents: Sequence[FakeNoteContent]) -> None:
+        self.note_contents = {
+            note_content.entity_id: note_content for note_content in note_contents
+        }
+
+    async def find_by_ids(
+        self,
+        session: AsyncSession,
+        ids: list[int],
+    ) -> list[FakeNoteContent]:
+        assert isinstance(session, FakeSession)
+        return [
+            self.note_contents[entity_id] for entity_id in ids if entity_id in self.note_contents
+        ]
+
+
 class StubLinkResolver:
     def __init__(self, targets: dict[str, FakeResolvedEntity]) -> None:
         self.targets = targets
@@ -173,24 +197,53 @@ class StubEntityIndexer:
     def __init__(self) -> None:
         self.indexed_entities: list[Entity] = []
         self.indexed_batches: list[tuple[Entity, ...]] = []
+        self.indexed_content_batches: list[dict[int, str]] = []
 
     async def index_entity(self, entity: Entity) -> None:
         self.indexed_entities.append(entity)
 
-    async def index_entities(self, entities: Sequence[Entity]) -> None:
+    async def index_entities(
+        self,
+        entities: Sequence[Entity],
+        *,
+        content_by_entity_id: Mapping[int, str],
+    ) -> None:
         self.indexed_batches.append(tuple(entities))
+        self.indexed_content_batches.append(dict(content_by_entity_id))
         self.indexed_entities.extend(entities)
+
+
+class MissingFileEntityIndexer(StubEntityIndexer):
+    """Model SearchService's disk fallback for entities without accepted content."""
+
+    async def index_entities(
+        self,
+        entities: Sequence[Entity],
+        *,
+        content_by_entity_id: Mapping[int, str],
+    ) -> None:
+        missing_entity_ids = [
+            entity.id for entity in entities if entity.id not in content_by_entity_id
+        ]
+        if missing_entity_ids:
+            raise FileNotFoundError(f"Missing Markdown for entities {missing_entity_ids}")
+        await super().index_entities(
+            entities,
+            content_by_entity_id=content_by_entity_id,
+        )
 
 
 def build_repository_runtime(
     relation_repository: StubRelationRepository,
     link_resolver: StubLinkResolver,
     entity_indexer: StubEntityIndexer,
+    note_contents: Sequence[FakeNoteContent] = (),
 ) -> RepositoryRelationResolutionRuntime:
     return RepositoryRelationResolutionRuntime(
         session_maker=cast(async_sessionmaker[AsyncSession], FakeSession),
         relation_repository=relation_repository,
         entity_repository=StubEntityRepository(),
+        note_content_repository=StubNoteContentRepository(note_contents),
         link_resolver=link_resolver,
         entity_indexer=entity_indexer,
     )
@@ -495,6 +548,53 @@ async def test_repository_runtime_batches_resolution_and_entity_refresh_sessions
         )
     ]
     assert FakeSession.created_count == 2
+
+
+@pytest.mark.asyncio
+async def test_repository_runtime_refreshes_pending_source_from_accepted_content() -> None:
+    repo = StubRelationRepository([[FakeRelation(id=1, from_id=10, to_name="Target A")]])
+    entity_indexer = MissingFileEntityIndexer()
+    runtime = build_repository_runtime(
+        relation_repository=repo,
+        link_resolver=StubLinkResolver({"Target A": FakeResolvedEntity(id=20, title="Target A")}),
+        entity_indexer=entity_indexer,
+        note_contents=[
+            FakeNoteContent(
+                entity_id=10,
+                markdown_content=(
+                    "---\ntitle: Source A\n---\n\n# Source A\n\nAccepted before materialization."
+                ),
+                file_write_status="pending",
+            )
+        ],
+    )
+
+    affected = await runtime.resolve_relations()
+
+    assert affected == {10}
+    assert entity_indexer.indexed_content_batches == [
+        {10: "# Source A\n\nAccepted before materialization."}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_repository_runtime_preserves_missing_file_error_for_synced_source() -> None:
+    repo = StubRelationRepository([[FakeRelation(id=1, from_id=10, to_name="Target A")]])
+    runtime = build_repository_runtime(
+        relation_repository=repo,
+        link_resolver=StubLinkResolver({"Target A": FakeResolvedEntity(id=20, title="Target A")}),
+        entity_indexer=MissingFileEntityIndexer(),
+        note_contents=[
+            FakeNoteContent(
+                entity_id=10,
+                markdown_content="# Source A\n\nAlready materialized.",
+                file_write_status="synced",
+            )
+        ],
+    )
+
+    with pytest.raises(FileNotFoundError, match=r"entities \[10\]"):
+        await runtime.resolve_relations()
 
 
 @pytest.mark.asyncio

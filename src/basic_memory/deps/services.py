@@ -41,6 +41,7 @@ from basic_memory.index.local_notes import (
     LocalDirectoryDeleteRelationCleanupRefresher,
     LocalDirectoryFileDeleteEnqueuer,
 )
+from basic_memory.repository import NoteContentRepository
 from basic_memory.repository.accepted_note_repositories import AcceptedNoteRepositories
 from basic_memory.repository.search_repository import create_search_repository
 from basic_memory.index.local_project import (
@@ -429,10 +430,14 @@ async def get_relation_resolution_scheduler(
 ) -> RelationResolutionScheduler:
     # Build the project-scoped resolution runtime. It owns its own sessions via
     # session_maker, so it is safe to run from a detached background task.
+    project_id = entity_repository.project_id
+    if project_id is None:
+        raise RuntimeError("Relation resolution requires a project-scoped entity repository")
     runtime = RepositoryRelationResolutionRuntime(
         session_maker=session_maker,
         relation_repository=relation_repository,
         entity_repository=entity_repository,
+        note_content_repository=NoteContentRepository(project_id=project_id),
         link_resolver=link_resolver,
         entity_indexer=search_service,
     )

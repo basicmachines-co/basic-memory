@@ -57,6 +57,7 @@ from basic_memory.indexing.external_file_delete_runner import (
     RepositoryExternalFileDeleteEntities,
 )
 from basic_memory.models import Entity, Project
+from basic_memory.repository import NoteContentRepository
 from basic_memory.runtime.projects import ProjectRuntimeReference
 from basic_memory.runtime.storage import (
     ProjectPath,
@@ -313,6 +314,9 @@ class LocalWatchEventIndexRuntimeFactory:
                     session_maker=dependencies.session_maker,
                     relation_repository=dependencies.relation_repository,
                     entity_repository=dependencies.entity_repository,
+                    note_content_repository=NoteContentRepository(
+                        project_id=dependencies.project_id
+                    ),
                     link_resolver=dependencies.link_resolver,
                     entity_indexer=dependencies.search_service,
                 ),

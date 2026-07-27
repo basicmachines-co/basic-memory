@@ -12,13 +12,14 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
+from basic_memory.indexing.accepted_note_search import accepted_search_content_from_markdown
 from basic_memory.indexing.models import IndexFileJobStatus
-from basic_memory.services.exceptions import AmbiguousIdentifierError
 from basic_memory.models import Entity
 from basic_memory.repository.relation_repository import (
     ResolvedRelationWrite,
     ResolvedRelationWriteResult,
 )
+from basic_memory.services.exceptions import AmbiguousIdentifierError
 
 type EntityId = int
 type AffectedEntityIds = set[EntityId]
@@ -93,6 +94,25 @@ class BatchRelationResolutionEntityRepository(Protocol):
         """Return source entities by database id."""
 
 
+class RelationResolutionNoteContent(Protocol):
+    """Accepted note-content fields needed for a state-aware search refresh."""
+
+    entity_id: EntityId
+    markdown_content: str
+    file_write_status: str
+
+
+class BatchRelationResolutionNoteContentRepository(Protocol):
+    """Repository capability for loading accepted content for affected sources."""
+
+    async def find_by_ids(
+        self,
+        session: AsyncSession,
+        ids: list[EntityId],
+    ) -> Sequence[RelationResolutionNoteContent]:
+        """Return accepted note content by source entity id."""
+
+
 class RelationResolutionLinkResolver(Protocol):
     """Capability for resolving a relation target by link text."""
 
@@ -116,8 +136,24 @@ class RelationResolutionEntityIndexer(Protocol):
 class BatchRelationResolutionEntityIndexer(Protocol):
     """Capability for refreshing a batch of derived entity search rows."""
 
-    async def index_entities(self, entities: Sequence[Entity]) -> None:
+    async def index_entities(
+        self,
+        entities: Sequence[Entity],
+        *,
+        content_by_entity_id: Mapping[EntityId, str],
+    ) -> None:
         """Refresh derived index rows for a group of entities."""
+
+
+def accepted_search_content_for_pending_notes(
+    note_contents: Sequence[RelationResolutionNoteContent],
+) -> dict[EntityId, str]:
+    """Return accepted search content while Markdown projections are not synchronized."""
+    return {
+        note_content.entity_id: accepted_search_content_from_markdown(note_content.markdown_content)
+        for note_content in note_contents
+        if note_content.file_write_status != "synced"
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +163,7 @@ class RepositoryRelationResolutionRuntime:
     session_maker: async_sessionmaker[AsyncSession]
     relation_repository: RelationResolutionRelationRepository
     entity_repository: BatchRelationResolutionEntityRepository
+    note_content_repository: BatchRelationResolutionNoteContentRepository
     link_resolver: RelationResolutionLinkResolver
     entity_indexer: BatchRelationResolutionEntityIndexer
 
@@ -217,13 +254,25 @@ class RepositoryRelationResolutionRuntime:
                 )
 
         if affected_entity_ids:
+            sorted_affected_entity_ids = sorted(affected_entity_ids)
             async with db.scoped_session(self.session_maker) as session:
                 source_entities = await self.entity_repository.find_by_ids(
                     session,
-                    sorted(affected_entity_ids),
+                    sorted_affected_entity_ids,
                 )
+                note_contents = await self.note_content_repository.find_by_ids(
+                    session,
+                    sorted_affected_entity_ids,
+                )
+
+            # Trigger: an accepted note has not reached a synchronized Markdown projection.
+            # Why: relation repair must refresh its search row without racing the async file
+            # materializer, while synchronized notes still need missing files to surface.
+            # Outcome: pending sources use accepted DB content; all others retain disk fallback.
+            content_by_entity_id = accepted_search_content_for_pending_notes(note_contents)
             await self.entity_indexer.index_entities(
-                sorted(source_entities, key=lambda entity: entity.id)
+                sorted(source_entities, key=lambda entity: entity.id),
+                content_by_entity_id=content_by_entity_id,
             )
 
         return affected_entity_ids

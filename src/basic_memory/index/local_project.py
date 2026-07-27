@@ -80,6 +80,7 @@ from basic_memory.indexing.relation_resolution import (
     resolve_project_index_completion_relations,
 )
 from basic_memory.models import Entity, Project
+from basic_memory.repository import NoteContentRepository
 from basic_memory.runtime.jobs import (
     RuntimeIndexFileBatchJobRequest,
     RuntimeJobId,
@@ -649,6 +650,7 @@ class LocalProjectIndexRuntimeFactory:
                 session_maker=dependencies.session_maker,
                 relation_repository=dependencies.relation_repository,
                 entity_repository=dependencies.entity_repository,
+                note_content_repository=NoteContentRepository(project_id=dependencies.project_id),
                 link_resolver=dependencies.link_resolver,
                 entity_indexer=dependencies.search_service,
             ),

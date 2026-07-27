@@ -3,7 +3,7 @@
 import asyncio
 import ast
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, List, Optional, Set, Dict
@@ -398,15 +398,25 @@ class SearchService:
         else:
             await self.index_entity_data(entity, content)
 
-    async def index_entities(self, entities: Sequence[Entity]) -> None:
+    async def index_entities(
+        self,
+        entities: Sequence[Entity],
+        *,
+        content_by_entity_id: Mapping[int, str],
+    ) -> None:
         """Refresh a group of entity search rows through one batch entry point.
 
         Index writes stay sequential because local SQLite connections cannot
         safely run these mutations concurrently. Callers still avoid reopening
         repository sessions and dispatching one indexing API call per entity.
+        Accepted content bypasses the disk read while its Markdown projection
+        remains pending.
         """
         for entity in entities:
-            await self.index_entity_data(entity)
+            await self.index_entity_data(
+                entity,
+                content=content_by_entity_id.get(entity.id),
+            )
 
     async def index_entity_data(
         self,
