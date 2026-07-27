@@ -219,6 +219,23 @@ def test_diagnostics_redacts_reranker_credentials(tmp_path):
     assert "timeout=30" in result
 
 
+def test_diagnostics_redacts_milvus_token(tmp_path):
+    """Milvus and Zilliz credentials must never appear in diagnostic output."""
+    config_data = {
+        "milvus_uri": "https://milvus.example.com",
+        "milvus_token": "milvus-super-secret",
+        "projects": {},
+    }
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps(config_data))
+
+    result = basic_memory_diagnostics()
+
+    assert "milvus-super-secret" not in result
+    assert "milvus_token" not in result
+    assert "milvus.example.com" in result
+
+
 def test_diagnostics_config_missing(tmp_path):
     """When config file does not exist, output should say so."""
     config_file = tmp_path / "config.json"

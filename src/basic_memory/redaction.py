@@ -12,6 +12,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 SECRET_FIELDS = frozenset(
     {
         "cloud_api_key",
+        "milvus_token",
         "reranker_api_key",
         "semantic_embedding_api_key",
     }

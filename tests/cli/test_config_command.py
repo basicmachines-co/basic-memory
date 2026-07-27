@@ -249,6 +249,16 @@ def test_config_get_never_prints_reranker_api_key(runner, write_config):
     assert "reranker_api_key = ********" in result.output
 
 
+def test_config_get_never_prints_milvus_token(runner, write_config):
+    write_config(_base_config(milvus_token="milvus-super-secret"))
+
+    result = runner.invoke(app, ["config", "get", "milvus_token"])
+
+    assert result.exit_code == 0, result.output
+    assert "milvus-super-secret" not in result.output
+    assert "milvus_token = ********" in result.output
+
+
 def test_config_list_never_prints_cloud_api_key(runner, write_config):
     write_config(_base_config(cloud_api_key="bmc_super_secret_token"))
 
@@ -258,6 +268,17 @@ def test_config_list_never_prints_cloud_api_key(runner, write_config):
     assert "bmc_super_secret_token" not in result.output
     rows = {row["key"]: row for row in json.loads(result.output)}
     assert rows["cloud_api_key"]["value"] == "********"
+
+
+def test_config_list_never_prints_milvus_token(runner, write_config):
+    write_config(_base_config(milvus_token="milvus-super-secret"))
+
+    result = runner.invoke(app, ["config", "list", "--json"])
+
+    assert result.exit_code == 0, result.output
+    assert "milvus-super-secret" not in result.output
+    rows = {row["key"]: row for row in json.loads(result.output)}
+    assert rows["milvus_token"]["value"] == "********"
 
 
 def test_config_list_redacts_reranker_credentials(runner, write_config):
