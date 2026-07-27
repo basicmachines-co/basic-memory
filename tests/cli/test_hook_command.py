@@ -1855,18 +1855,18 @@ def test_claude_settings_precedence_and_local_overrides(tmp_path: Path) -> None:
     assert merged["recallTimeframe"] == "9d"  # user-level survives unless overridden
 
 
-def test_claude_settings_ignore_malformed_files(tmp_path: Path) -> None:
+def test_claude_settings_malformed_file_fails_closed(tmp_path: Path) -> None:
     project = tmp_path / "proj"
     (project / ".claude").mkdir(parents=True)
     (project / ".claude" / "settings.json").write_text("{broken", encoding="utf-8")
 
     merged, found = hook_module.load_claude_settings(project)
 
-    assert merged == {"captureEvents": True}
-    assert found is False
+    assert merged == {"captureEvents": False}
+    assert found is True
 
 
-def test_claude_settings_non_dict_block_is_ignored(tmp_path: Path) -> None:
+def test_claude_settings_non_dict_block_fails_closed(tmp_path: Path) -> None:
     project = tmp_path / "proj"
     (project / ".claude").mkdir(parents=True)
     (project / ".claude" / "settings.json").write_text(
@@ -1875,8 +1875,32 @@ def test_claude_settings_non_dict_block_is_ignored(tmp_path: Path) -> None:
 
     merged, found = hook_module.load_claude_settings(project)
 
-    assert merged == {"captureEvents": True}
-    assert found is False
+    assert merged == {"captureEvents": False}
+    assert found is True
+
+
+def test_claude_settings_malformed_project_invalidates_user_fallback(tmp_path: Path) -> None:
+    home = Path.home()
+    (home / ".claude").mkdir(parents=True, exist_ok=True)
+    (home / ".claude" / "settings.json").write_text(
+        json.dumps(
+            {
+                "basicMemory": {
+                    "primaryProject": "user-wide",
+                    "captureEvents": True,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    project = tmp_path / "proj"
+    (project / ".claude").mkdir(parents=True)
+    (project / ".claude" / "settings.json").write_text("{broken", encoding="utf-8")
+
+    merged, found = hook_module.load_claude_settings(project)
+
+    assert merged == {"captureEvents": False}
+    assert found is True
 
 
 def test_codex_settings_broken_file_counts_as_configured(tmp_path: Path) -> None:

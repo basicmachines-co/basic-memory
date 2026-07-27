@@ -205,13 +205,20 @@ def _read_stdin_payload() -> dict:
 # --- Harness settings resolution (ported from the plugin hook scripts) ---
 
 
-def _read_claude_block(path: Path) -> dict | None:
+def _read_claude_block(path: Path) -> tuple[dict | None, bool]:
+    """Read one Claude settings block and preserve malformed-file presence."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None, False
     except (OSError, json.JSONDecodeError):
-        return None
-    block = data.get("basicMemory") if isinstance(data, dict) else None
-    return block if isinstance(block, dict) else None
+        return None, True
+    if not isinstance(data, dict):
+        return None, True
+    if "basicMemory" not in data:
+        return None, False
+    block = data["basicMemory"]
+    return (block if isinstance(block, dict) else None), True
 
 
 def _claude_project_dir(directory: Path) -> Path:
@@ -237,7 +244,10 @@ def load_claude_settings(directory: Path) -> tuple[dict, bool]:
     nearest project ``.claude/settings.json`` and ``.claude/settings.local.json``.
     A single user-level block can cover every project; any project can still
     pin its own mapping, which wins. ``found`` reports whether any file
-    declared a block — the first-run sentinel for the setup nudge.
+    declared a block or was malformed — the first-run sentinel for the setup
+    nudge. Any malformed source fails closed for capture for the whole
+    evaluation so a later source cannot rebuild routing from incomplete
+    settings.
     """
     merged: dict = {"captureEvents": DEFAULT_CAPTURE_EVENTS}
     found = False
@@ -248,10 +258,16 @@ def load_claude_settings(directory: Path) -> tuple[dict, bool]:
         sources.append((project, ("settings.json", "settings.local.json")))
     for base, names in sources:
         for name in names:
-            block = _read_claude_block(base / ".claude" / name)
-            if block is not None:
-                found = True
-                merged.update(block)
+            block, present = _read_claude_block(base / ".claude" / name)
+            if not present:
+                continue
+            found = True
+            if block is None:
+                # Trigger: a configured source exists but cannot be trusted.
+                # Why: its unreadable value may be an explicit capture opt-out.
+                # Outcome: discard every route and disable capture for this event.
+                return {"captureEvents": False}, True
+            merged.update(block)
     return merged, found
 
 
