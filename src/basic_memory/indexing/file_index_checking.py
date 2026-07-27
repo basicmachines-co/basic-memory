@@ -310,6 +310,14 @@ class FileIndexChecker:
     # ghost from a legitimate byte-identical copy (which has no marker and stays a new file).
     moved_entity_source: MovedEntitySource | None = None
     move_vacate_source: MoveVacateSource | None = None
+    # The move-vacate marker stores the moved note's *content* checksum. When storage freshness
+    # keys on a different checksum domain than note content (e.g. cloud indexes by S3 ETag but
+    # note content is SHA-256), the gate must compare the marker against the current object's
+    # content checksum, not the freshness checksum, or the marker never matches and every orphan
+    # is either ignored or wrongly retired (basic-memory-cloud#1601). Left unset when the two
+    # domains coincide (local uses one SHA-256 checksum everywhere), in which case the gate falls
+    # back to the freshness `current_checksum` and behavior is unchanged.
+    move_orphan_checksum_source: CurrentFileChecksumSource | None = None
 
     async def detect(self, targets: Sequence[FileIndexTarget]) -> FileIndexPlan:
         """Return the file paths whose current storage object still needs indexing."""
@@ -431,12 +439,23 @@ class FileIndexChecker:
                 [item.target.path for _, item in candidates]
             )
         )
-        gated_candidates: list[tuple[int, _InspectedTarget, MoveVacateMarker]] = []
+        # The marker records the moved note's content checksum. Compare it against the object's
+        # content checksum (from move_orphan_checksum_source when the freshness domain differs),
+        # falling back to the freshness checksum when the two domains coincide. The moved-entity
+        # checksum below stays in the freshness/entity domain, so gap-(a) keeps using current.
+        gated_candidates: list[
+            tuple[int, _InspectedTarget, MoveVacateMarker, FileIndexChecksum | None]
+        ] = []
         for index, item in candidates:
             marker = markers.get(item.target.path)
             if marker is None:
                 continue
-            if marker.checksum is not None and marker.checksum != item.current_checksum:
+            content_checksum = (
+                await self.move_orphan_checksum_source.load_current_file_checksum(item.target.path)
+                if self.move_orphan_checksum_source is not None
+                else item.current_checksum
+            )
+            if marker.checksum is not None and marker.checksum != content_checksum:
                 # Trigger: a different source object now occupies the vacated path.
                 # Why: even if the process died before cleanup was enqueued, the moved bytes are
                 # gone and their marker must not suppress a later legitimate reuse of those bytes.
@@ -447,17 +466,17 @@ class FileIndexChecker:
                     marker.checksum,
                 )
                 continue
-            gated_candidates.append((index, item, marker))
+            gated_candidates.append((index, item, marker, content_checksum))
 
         marked_entity_ids = [
-            marker.entity_id for _, _, marker in gated_candidates if marker.entity_id is not None
+            marker.entity_id for _, _, marker, _ in gated_candidates if marker.entity_id is not None
         ]
         entity_facts = (
             await self.moved_entity_source.load_entity_facts_by_id(marked_entity_ids)
             if marked_entity_ids
             else {}
         )
-        for index, item, marker in gated_candidates:
+        for index, item, marker, content_checksum in gated_candidates:
             moved_entity = (
                 entity_facts.get(marker.entity_id) if marker.entity_id is not None else None
             )
@@ -467,7 +486,7 @@ class FileIndexChecker:
                 # transactionally recorded source checksum proves both forms are tombstones for
                 # these exact bytes; keep suppressing resurrection until guarded cleanup clears
                 # the marker. Without that checksum proof, the file remains a normal create.
-                if marker.checksum is None or marker.checksum != item.current_checksum:
+                if marker.checksum is None or marker.checksum != content_checksum:
                     continue
                 decisions[index] = move_orphan_file_index_decision(
                     item.target.path,
@@ -481,6 +500,7 @@ class FileIndexChecker:
             if marker.checksum is None and moved_entity.checksum != item.current_checksum:
                 # Source checksum was unknown at move time (gap (a)): fall back to confirming the
                 # object is the moved entity's current content before treating it as the leftover.
+                # Both sides are the entity/freshness domain, so this uses current, not content.
                 continue
             decisions[index] = move_orphan_file_index_decision(
                 item.target.path, indexed_at=moved_entity.file_path

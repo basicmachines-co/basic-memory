@@ -432,6 +432,44 @@ async def test_checker_skips_leftover_source_of_a_move() -> None:
 
 
 @pytest.mark.asyncio
+async def test_checker_gate_uses_content_checksum_source_when_domains_differ() -> None:
+    """The gate compares the marker against a distinct content-checksum source when set (#1601).
+
+    Cloud freshness keys on the S3 ETag while note content (and the marker) use a SHA-256 content
+    checksum. With move_orphan_checksum_source wired, the gate must compare the marker against the
+    content checksum, not the ETag freshness checksum — otherwise the marker never matches and the
+    leftover source is wrongly retired and re-indexed as a ghost.
+    """
+    content_source = StubCurrentChecksumSource({"koncept/note.md": "sha-content"})
+    moved = StubMovedEntitySource(
+        facts_by_id={42: MovedEntityFacts(file_path="arkiv/note.md", checksum="etag-freshness")}
+    )
+    vacate = StubMoveVacateSource(
+        markers={"koncept/note.md": MoveVacateMarker(entity_id=42, checksum="sha-content")}
+    )
+    checker = FileIndexChecker(
+        indexed_checksum_source=StubIndexedChecksumSource({}),
+        # Freshness domain (ETag) differs from the marker's content checksum on purpose.
+        current_checksum_source=StubCurrentChecksumSource({"koncept/note.md": "etag-freshness"}),
+        moved_entity_source=moved,
+        move_vacate_source=vacate,
+        move_orphan_checksum_source=content_source,
+    )
+
+    plan = await checker.detect(
+        [FileIndexTarget(path="koncept/note.md", observed_checksum="etag-freshness")]
+    )
+
+    assert plan.paths_to_read == ()
+    assert [(d.path, d.status) for d in plan.decisions] == [
+        ("koncept/note.md", FileIndexDecisionStatus.current),
+    ]
+    # The gate consulted the content source and did NOT retire the marker on a domain mismatch.
+    assert content_source.requested_paths == ["koncept/note.md"]
+    assert vacate.clear_calls == []
+
+
+@pytest.mark.asyncio
 async def test_checker_indexes_replacement_note_at_a_vacated_path() -> None:
     """A vacated path overwritten with a DIFFERENT note's bytes is a legit replacement, not a ghost.
 
