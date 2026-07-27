@@ -1,4 +1,4 @@
-"""Synchronous PyMilvus boundary used from worker threads."""
+"""Synchronous PyMilvus repository used from worker threads."""
 
 from __future__ import annotations
 
@@ -51,8 +51,8 @@ class MilvusStoredMatch:
     score: float
 
 
-class MilvusGateway(Protocol):
-    """Narrow blocking client capability consumed by the async index."""
+class MilvusRepository(Protocol):
+    """Narrow blocking repository capability consumed by the async index."""
 
     def collection_dimensions(self, collection_name: str) -> int | None: ...
 
@@ -109,8 +109,8 @@ def _require_sequence(value: object, context: str) -> Sequence[object]:
     raise RuntimeError(f"Milvus returned an invalid {context} payload.")
 
 
-class PyMilvusGateway:
-    """Typed, explicit resource boundary around the synchronous Milvus client."""
+class PyMilvusRepository:
+    """Typed, explicit repository around the synchronous Milvus client."""
 
     def __init__(self, settings: MilvusSettings) -> None:
         self._timeout = settings.timeout_seconds
@@ -403,6 +403,6 @@ class PyMilvusGateway:
         self._client.close()
 
 
-def create_gateway(settings: MilvusSettings) -> MilvusGateway:
-    """Create the concrete gateway at the first-party provider boundary."""
-    return PyMilvusGateway(settings)
+def create_repository(settings: MilvusSettings) -> MilvusRepository:
+    """Create the concrete repository at the first-party provider boundary."""
+    return PyMilvusRepository(settings)

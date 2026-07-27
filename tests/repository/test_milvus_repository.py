@@ -1,4 +1,4 @@
-"""PyMilvus client boundary tests."""
+"""PyMilvus repository tests."""
 
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ from pymilvus import DataType
 from pymilvus.exceptions import MilvusException
 
 from basic_memory.repository.milvus_config import MilvusSettings
-from basic_memory.repository.milvus_gateway import (
+from basic_memory.repository.milvus_repository import (
     MilvusStoredRecord,
-    PyMilvusGateway,
-    create_gateway,
+    PyMilvusRepository,
+    create_repository,
 )
 
 
@@ -193,15 +193,15 @@ def client(monkeypatch: pytest.MonkeyPatch) -> FakeClient:
         return fake
 
     monkeypatch.setattr(
-        "basic_memory.repository.milvus_gateway.MilvusClient",
+        "basic_memory.repository.milvus_repository.MilvusClient",
         create_client,
     )
     return fake
 
 
 @pytest.fixture
-def gateway(client: FakeClient) -> PyMilvusGateway:
-    return PyMilvusGateway(
+def repository(client: FakeClient) -> PyMilvusRepository:
+    return PyMilvusRepository(
         MilvusSettings(
             uri="http://localhost:19530",
             token="secret",
@@ -210,15 +210,15 @@ def gateway(client: FakeClient) -> PyMilvusGateway:
     )
 
 
-def test_gateway_applies_finite_deadline_to_every_remote_operation(
-    gateway: PyMilvusGateway,
+def test_repository_applies_finite_deadline_to_every_remote_operation(
+    repository: PyMilvusRepository,
     client: FakeClient,
 ) -> None:
     client.has_collection_result = True
 
-    assert gateway.collection_dimensions("vectors") == 4
-    assert gateway.create_collection("vectors", 4)
-    gateway.upsert(
+    assert repository.collection_dimensions("vectors") == 4
+    assert repository.create_collection("vectors", 4)
+    repository.upsert(
         "vectors",
         [
             MilvusStoredRecord(
@@ -230,11 +230,11 @@ def test_gateway_applies_finite_deadline_to_every_remote_operation(
             )
         ],
     )
-    gateway.delete_records("vectors", [("abc", "source-a")])
-    gateway.delete_entity("vectors", 7)
-    assert list(gateway.iter_ids("vectors")) == ["one", "two"]
-    gateway.delete_ids("vectors", ["abc"])
-    assert gateway.search("vectors", [1.0, 0.0], 5)
+    repository.delete_records("vectors", [("abc", "source-a")])
+    repository.delete_entity("vectors", 7)
+    assert list(repository.iter_ids("vectors")) == ["one", "two"]
+    repository.delete_ids("vectors", ["abc"])
+    assert repository.search("vectors", [1.0, 0.0], 5)
 
     assert client.connection_options["timeout"] == 12.5
     assert {operation for operation, _timeout in client.operation_timeouts} == {
@@ -252,13 +252,13 @@ def test_gateway_applies_finite_deadline_to_every_remote_operation(
 
 
 def test_collection_dimensions_reports_missing_and_valid_collection(
-    gateway: PyMilvusGateway,
+    repository: PyMilvusRepository,
     client: FakeClient,
 ) -> None:
-    assert gateway.collection_dimensions("vectors") is None
+    assert repository.collection_dimensions("vectors") is None
 
     client.has_collection_result = True
-    assert gateway.collection_dimensions("vectors") == 4
+    assert repository.collection_dimensions("vectors") == 4
 
 
 @pytest.mark.parametrize(
@@ -288,7 +288,7 @@ def test_collection_dimensions_reports_missing_and_valid_collection(
     ],
 )
 def test_collection_dimensions_rejects_invalid_schema(
-    gateway: PyMilvusGateway,
+    repository: PyMilvusRepository,
     client: FakeClient,
     description: object,
     message: str,
@@ -297,7 +297,7 @@ def test_collection_dimensions_rejects_invalid_schema(
     client.description = description
 
     with pytest.raises(RuntimeError, match=message):
-        gateway.collection_dimensions("vectors")
+        repository.collection_dimensions("vectors")
 
 
 @pytest.mark.parametrize(
@@ -335,7 +335,7 @@ def test_collection_dimensions_rejects_invalid_schema(
     ],
 )
 def test_collection_dimensions_rejects_incompatible_definition(
-    gateway: PyMilvusGateway,
+    repository: PyMilvusRepository,
     client: FakeClient,
     description: object,
     message: str,
@@ -344,7 +344,7 @@ def test_collection_dimensions_rejects_incompatible_definition(
     client.description = description
 
     with pytest.raises(RuntimeError, match=message):
-        gateway.collection_dimensions("vectors")
+        repository.collection_dimensions("vectors")
 
 
 @pytest.mark.parametrize(
@@ -362,7 +362,7 @@ def test_collection_dimensions_rejects_incompatible_definition(
     ],
 )
 def test_collection_dimensions_rejects_incompatible_index(
-    gateway: PyMilvusGateway,
+    repository: PyMilvusRepository,
     client: FakeClient,
     index_names: object,
     index_description: object,
@@ -373,14 +373,14 @@ def test_collection_dimensions_rejects_incompatible_index(
     client.index_description = index_description
 
     with pytest.raises(RuntimeError, match=message):
-        gateway.collection_dimensions("vectors")
+        repository.collection_dimensions("vectors")
 
 
 def test_create_collection(
-    gateway: PyMilvusGateway,
+    repository: PyMilvusRepository,
     client: FakeClient,
 ) -> None:
-    assert gateway.create_collection("vectors", 4)
+    assert repository.create_collection("vectors", 4)
 
     assert [field["field_name"] for field in client.schema.fields] == [
         "id",
@@ -400,30 +400,30 @@ def test_create_collection(
 
 
 def test_create_collection_reports_confirmed_race(
-    gateway: PyMilvusGateway,
+    repository: PyMilvusRepository,
     client: FakeClient,
 ) -> None:
     client.create_exception = MilvusException(code=1, message="collection already exists")
     client.has_collection_result = True
 
-    assert not gateway.create_collection("vectors", 4)
+    assert not repository.create_collection("vectors", 4)
 
 
 def test_create_collection_preserves_unconfirmed_error(
-    gateway: PyMilvusGateway,
+    repository: PyMilvusRepository,
     client: FakeClient,
 ) -> None:
     client.create_exception = MilvusException(code=1, message="server failure")
 
     with pytest.raises(MilvusException, match="server failure"):
-        gateway.create_collection("vectors", 4)
+        repository.create_collection("vectors", 4)
 
 
 def test_upsert_maps_provider_record(
-    gateway: PyMilvusGateway,
+    repository: PyMilvusRepository,
     client: FakeClient,
 ) -> None:
-    gateway.upsert(
+    repository.upsert(
         "vectors",
         [
             MilvusStoredRecord(
@@ -454,12 +454,12 @@ def test_upsert_maps_provider_record(
 
 
 def test_generation_delete_escapes_values_and_batches(
-    gateway: PyMilvusGateway,
+    repository: PyMilvusRepository,
     client: FakeClient,
 ) -> None:
     records = [(f"id-{index}", f'hash-"{index}') for index in range(257)]
 
-    gateway.delete_records("vectors", records)
+    repository.delete_records("vectors", records)
 
     assert len(client.deletes) == 2
     first_filter = client.deletes[0]["filter"]
@@ -468,11 +468,11 @@ def test_generation_delete_escapes_values_and_batches(
 
 
 def test_delete_entity_and_ids(
-    gateway: PyMilvusGateway,
+    repository: PyMilvusRepository,
     client: FakeClient,
 ) -> None:
-    gateway.delete_entity("vectors", 7)
-    gateway.delete_ids("vectors", [str(index) for index in range(257)])
+    repository.delete_entity("vectors", 7)
+    repository.delete_ids("vectors", [str(index) for index in range(257)])
 
     assert client.deletes[0] == {
         "collection_name": "vectors",
@@ -489,10 +489,10 @@ def test_delete_entity_and_ids(
 
 
 def test_iter_ids_closes_iterator(
-    gateway: PyMilvusGateway,
+    repository: PyMilvusRepository,
     client: FakeClient,
 ) -> None:
-    assert list(gateway.iter_ids("vectors")) == ["one", "two"]
+    assert list(repository.iter_ids("vectors")) == ["one", "two"]
     assert client.iterator.closed
 
 
@@ -505,7 +505,7 @@ def test_iter_ids_closes_iterator(
     ],
 )
 def test_iter_ids_rejects_invalid_payload_and_closes(
-    gateway: PyMilvusGateway,
+    repository: PyMilvusRepository,
     client: FakeClient,
     batches: Sequence[object],
     message: str,
@@ -513,15 +513,15 @@ def test_iter_ids_rejects_invalid_payload_and_closes(
     client.iterator = FakeIterator(batches)
 
     with pytest.raises(RuntimeError, match=message):
-        list(gateway.iter_ids("vectors"))
+        list(repository.iter_ids("vectors"))
 
     assert client.iterator.closed
 
 
 def test_search_maps_nested_milvus_hits(
-    gateway: PyMilvusGateway,
+    repository: PyMilvusRepository,
 ) -> None:
-    matches = gateway.search("vectors", [1.0, 0.0], 5)
+    matches = repository.search("vectors", [1.0, 0.0], 5)
 
     assert matches[0].entity_id == 7
     assert matches[0].chunk_key == "summary:0"
@@ -529,12 +529,12 @@ def test_search_maps_nested_milvus_hits(
 
 
 def test_search_accepts_flat_score_hits(
-    gateway: PyMilvusGateway,
+    repository: PyMilvusRepository,
     client: FakeClient,
 ) -> None:
     client.search_result = [[{"score": 0.5, "entity_id": 8, "chunk_key": "summary:1"}]]
 
-    matches = gateway.search("vectors", [1.0, 0.0], 5)
+    matches = repository.search("vectors", [1.0, 0.0], 5)
 
     assert matches[0].entity_id == 8
     assert matches[0].score == 0.5
@@ -555,7 +555,7 @@ def test_search_accepts_flat_score_hits(
     ],
 )
 def test_search_rejects_invalid_payload(
-    gateway: PyMilvusGateway,
+    repository: PyMilvusRepository,
     client: FakeClient,
     result: object,
     message: str,
@@ -563,30 +563,30 @@ def test_search_rejects_invalid_payload(
     client.search_result = result
 
     with pytest.raises(RuntimeError, match=message):
-        gateway.search("vectors", [1.0, 0.0], 5)
+        repository.search("vectors", [1.0, 0.0], 5)
 
 
 def test_search_handles_empty_results(
-    gateway: PyMilvusGateway,
+    repository: PyMilvusRepository,
     client: FakeClient,
 ) -> None:
     client.search_result = []
 
-    assert gateway.search("vectors", [1.0, 0.0], 5) == []
+    assert repository.search("vectors", [1.0, 0.0], 5) == []
 
 
 def test_close_releases_client(
-    gateway: PyMilvusGateway,
+    repository: PyMilvusRepository,
     client: FakeClient,
 ) -> None:
-    gateway.close()
+    repository.close()
 
     assert client.closed
 
 
-def test_create_gateway_supports_tokenless_connections(client: FakeClient) -> None:
-    gateway = create_gateway(MilvusSettings(uri="http://localhost:19530"))
+def test_create_repository_supports_tokenless_connections(client: FakeClient) -> None:
+    repository = create_repository(MilvusSettings(uri="http://localhost:19530"))
 
-    gateway.close()
+    repository.close()
 
     assert client.closed

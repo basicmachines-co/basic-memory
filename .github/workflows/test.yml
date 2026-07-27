@@ -449,4 +449,4 @@ jobs:
 
       - name: Run Milvus tests
         run: |
-          uv run pytest -q --no-cov tests/repository/test_milvus_config.py tests/repository/test_milvus_gateway.py tests/repository/test_milvus_index.py test-int/semantic/test_milvus_lite.py
+          uv run pytest -q --no-cov tests/repository/test_milvus_config.py tests/repository/test_milvus_repository.py tests/repository/test_milvus_index.py test-int/semantic/test_milvus_lite.py

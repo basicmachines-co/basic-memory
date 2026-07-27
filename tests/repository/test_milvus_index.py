@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.repository.milvus_config import MilvusSettings
-from basic_memory.repository.milvus_gateway import (
+from basic_memory.repository.milvus_repository import (
     MilvusStoredMatch,
     MilvusStoredRecord,
 )
@@ -36,8 +36,8 @@ from basic_memory.repository.semantic_vector_index_factory import (
 )
 
 
-class FakeGateway:
-    """In-memory recorder for the blocking Milvus boundary."""
+class FakeRepository:
+    """In-memory recorder for the blocking Milvus repository."""
 
     def __init__(
         self,
@@ -105,7 +105,7 @@ class FakeGateway:
         self.closed += 1
 
 
-class BlockingMutationGateway(FakeGateway):
+class BlockingMutationRepository(FakeRepository):
     """Hold external mutations until a cancellation assertion releases them."""
 
     def __init__(self, dimensions: int) -> None:
@@ -178,9 +178,13 @@ def settings() -> MilvusSettings:
 def _index(
     scope: VectorIndexScope,
     settings: MilvusSettings,
-    gateway: FakeGateway,
+    repository: FakeRepository,
 ) -> MilvusVectorIndex:
-    return MilvusVectorIndex(scope, settings, gateway_factory=lambda _settings: gateway)
+    return MilvusVectorIndex(
+        scope,
+        settings,
+        repository_factory=lambda _settings: repository,
+    )
 
 
 def test_collection_name_uses_only_stable_scope_identity(
@@ -210,14 +214,14 @@ async def test_initialize_creates_missing_collection_once(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
-    gateway = FakeGateway()
-    index = _index(scope, settings, gateway)
+    repository = FakeRepository()
+    index = _index(scope, settings, repository)
 
     await index.initialize()
     await index.initialize()
 
-    assert gateway.created == [(collection_name(settings, scope), scope.dimensions)]
-    assert gateway.closed == 1
+    assert repository.created == [(collection_name(settings, scope), scope.dimensions)]
+    assert repository.closed == 1
 
 
 @pytest.mark.asyncio
@@ -225,12 +229,12 @@ async def test_initialize_accepts_compatible_collection_create_race(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
-    gateway = FakeGateway(create_result=False, race_dimensions=scope.dimensions)
+    repository = FakeRepository(create_result=False, race_dimensions=scope.dimensions)
 
-    await _index(scope, settings, gateway).initialize()
+    await _index(scope, settings, repository).initialize()
 
-    assert gateway.created == [(collection_name(settings, scope), scope.dimensions)]
-    assert gateway.dimensions == scope.dimensions
+    assert repository.created == [(collection_name(settings, scope), scope.dimensions)]
+    assert repository.dimensions == scope.dimensions
 
 
 @pytest.mark.asyncio
@@ -238,12 +242,12 @@ async def test_initialize_rejects_incompatible_collection_create_race(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
-    gateway = FakeGateway(create_result=False, race_dimensions=99)
+    repository = FakeRepository(create_result=False, race_dimensions=99)
 
     with pytest.raises(RuntimeError, match="Refusing to replace shared vector storage"):
-        await _index(scope, settings, gateway).initialize()
+        await _index(scope, settings, repository).initialize()
 
-    assert gateway.dimensions == 99
+    assert repository.dimensions == 99
 
 
 @pytest.mark.asyncio
@@ -251,10 +255,10 @@ async def test_initialize_rejects_collection_disappearing_after_create_race(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
-    gateway = FakeGateway(create_result=False)
+    repository = FakeRepository(create_result=False)
 
     with pytest.raises(RuntimeError, match="disappeared after a concurrent create"):
-        await _index(scope, settings, gateway).initialize()
+        await _index(scope, settings, repository).initialize()
 
 
 @pytest.mark.asyncio
@@ -262,14 +266,14 @@ async def test_initialize_preserves_collection_on_dimension_mismatch(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
-    gateway = FakeGateway(dimensions=99)
-    index = _index(scope, settings, gateway)
+    repository = FakeRepository(dimensions=99)
+    index = _index(scope, settings, repository)
 
     with pytest.raises(RuntimeError, match="Refusing to replace shared vector storage"):
         await index.initialize()
 
-    assert gateway.created == []
-    assert gateway.dimensions == 99
+    assert repository.created == []
+    assert repository.dimensions == 99
 
 
 @pytest.mark.asyncio
@@ -277,11 +281,11 @@ async def test_initialize_accepts_matching_collection(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
-    gateway = FakeGateway(dimensions=scope.dimensions)
+    repository = FakeRepository(dimensions=scope.dimensions)
 
-    await _index(scope, settings, gateway).initialize()
+    await _index(scope, settings, repository).initialize()
 
-    assert gateway.created == []
+    assert repository.created == []
 
 
 @pytest.mark.asyncio
@@ -289,8 +293,8 @@ async def test_concurrent_initialize_rechecks_state_inside_lock(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
-    gateway = FakeGateway()
-    index = _index(scope, settings, gateway)
+    repository = FakeRepository()
+    index = _index(scope, settings, repository)
     await index._initialize_lock.acquire()
     waiting_initialize = asyncio.create_task(index.initialize())
     await asyncio.sleep(0)
@@ -299,7 +303,7 @@ async def test_concurrent_initialize_rechecks_state_inside_lock(
     index._initialize_lock.release()
     await waiting_initialize
 
-    assert gateway.closed == 0
+    assert repository.closed == 0
 
 
 @pytest.mark.asyncio
@@ -307,8 +311,8 @@ async def test_upsert_preserves_stable_key_generation_and_values(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
-    gateway = FakeGateway(dimensions=scope.dimensions)
-    index = _index(scope, settings, gateway)
+    repository = FakeRepository(dimensions=scope.dimensions)
+    index = _index(scope, settings, repository)
     record = VectorRecord(
         key=VectorKey(entity_id=7, chunk_key="summary:0"),
         source_hash="source-a",
@@ -317,7 +321,7 @@ async def test_upsert_preserves_stable_key_generation_and_values(
 
     await index.upsert([record])
 
-    _, stored_records = gateway.upserts[0]
+    _, stored_records = repository.upserts[0]
     assert len(stored_records) == 1
     assert stored_records[0].entity_id == 7
     assert stored_records[0].chunk_key == "summary:0"
@@ -331,8 +335,8 @@ async def test_upsert_rejects_wrong_dimensions_before_milvus_call(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
-    gateway = FakeGateway(dimensions=scope.dimensions)
-    index = _index(scope, settings, gateway)
+    repository = FakeRepository(dimensions=scope.dimensions)
+    index = _index(scope, settings, repository)
 
     with pytest.raises(ValueError, match="expected 3, got 2"):
         await index.upsert(
@@ -345,7 +349,7 @@ async def test_upsert_rejects_wrong_dimensions_before_milvus_call(
             ]
         )
 
-    assert gateway.upserts == []
+    assert repository.upserts == []
 
 
 @pytest.mark.asyncio
@@ -355,9 +359,9 @@ async def test_mutations_finish_before_propagating_cancellation(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
-    gateway = BlockingMutationGateway(scope.dimensions)
-    gateway.ids = ["orphan"]
-    index = _index(scope, settings, gateway)
+    repository = BlockingMutationRepository(scope.dimensions)
+    repository.ids = ["orphan"]
+    index = _index(scope, settings, repository)
     key = VectorKey(entity_id=7, chunk_key="summary:0")
 
     if operation == "upsert":
@@ -373,7 +377,7 @@ async def test_mutations_finish_before_propagating_cancellation(
 
     mutation_task = asyncio.create_task(mutation)
     async with asyncio.timeout(2):
-        while not gateway.mutation_started.is_set():
+        while not repository.mutation_started.is_set():
             await asyncio.sleep(0)
 
     mutation_task.cancel()
@@ -384,10 +388,10 @@ async def test_mutations_finish_before_propagating_cancellation(
     await asyncio.sleep(0)
     assert not mutation_task.done()
 
-    gateway.release_mutation.set()
+    repository.release_mutation.set()
     with pytest.raises(asyncio.CancelledError):
         await mutation_task
-    assert gateway.closed == 2
+    assert repository.closed == 2
 
 
 @pytest.mark.asyncio
@@ -395,13 +399,13 @@ async def test_delete_forwards_source_generation(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
-    gateway = FakeGateway(dimensions=scope.dimensions)
-    index = _index(scope, settings, gateway)
+    repository = FakeRepository(dimensions=scope.dimensions)
+    index = _index(scope, settings, repository)
     key = VectorKey(entity_id=7, chunk_key="summary:0")
 
     await index.delete([VectorDeletion(key=key, source_hash="source-a")])
 
-    _, deletions = gateway.record_deletes[0]
+    _, deletions = repository.record_deletes[0]
     assert deletions[0][1] == "source-a"
     assert len(deletions[0][0]) == 64
 
@@ -411,12 +415,12 @@ async def test_delete_entity_uses_project_collection(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
-    gateway = FakeGateway(dimensions=scope.dimensions)
-    index = _index(scope, settings, gateway)
+    repository = FakeRepository(dimensions=scope.dimensions)
+    index = _index(scope, settings, repository)
 
     await index.delete_entity(77)
 
-    assert gateway.entity_deletes == [(collection_name(settings, scope), 77)]
+    assert repository.entity_deletes == [(collection_name(settings, scope), 77)]
 
 
 @pytest.mark.asyncio
@@ -424,8 +428,8 @@ async def test_reconciliation_deletes_only_absent_stable_keys(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
-    gateway = FakeGateway(dimensions=scope.dimensions)
-    index = _index(scope, settings, gateway)
+    repository = FakeRepository(dimensions=scope.dimensions)
+    index = _index(scope, settings, repository)
     live_key = VectorKey(entity_id=1, chunk_key="live")
     stale_key = VectorKey(entity_id=2, chunk_key="stale")
 
@@ -435,12 +439,14 @@ async def test_reconciliation_deletes_only_absent_stable_keys(
             VectorRecord(key=stale_key, source_hash="b", values=(0.0, 1.0, 0.0)),
         ]
     )
-    _, stored_records = gateway.upserts[0]
-    gateway.ids = [record.record_id for record in stored_records]
+    _, stored_records = repository.upserts[0]
+    repository.ids = [record.record_id for record in stored_records]
 
     await index.delete_orphans([live_key])
 
-    assert gateway.id_deletes == [(collection_name(settings, scope), [stored_records[1].record_id])]
+    assert repository.id_deletes == [
+        (collection_name(settings, scope), [stored_records[1].record_id])
+    ]
 
 
 @pytest.mark.asyncio
@@ -448,12 +454,12 @@ async def test_reconciliation_is_noop_without_orphans(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
-    gateway = FakeGateway(dimensions=scope.dimensions)
-    index = _index(scope, settings, gateway)
+    repository = FakeRepository(dimensions=scope.dimensions)
+    index = _index(scope, settings, repository)
 
     await index.delete_orphans([])
 
-    assert gateway.id_deletes == []
+    assert repository.id_deletes == []
 
 
 @pytest.mark.asyncio
@@ -461,13 +467,13 @@ async def test_reconciliation_deletes_orphans_incrementally(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
-    gateway = FakeGateway(dimensions=scope.dimensions)
-    gateway.ids = [f"orphan-{index}" for index in range(600)]
-    index = _index(scope, settings, gateway)
+    repository = FakeRepository(dimensions=scope.dimensions)
+    repository.ids = [f"orphan-{index}" for index in range(600)]
+    index = _index(scope, settings, repository)
 
     await index.delete_orphans([])
 
-    assert [len(record_ids) for _, record_ids in gateway.id_deletes] == [256, 256, 88]
+    assert [len(record_ids) for _, record_ids in repository.id_deletes] == [256, 256, 88]
 
 
 @pytest.mark.asyncio
@@ -475,20 +481,20 @@ async def test_search_clamps_milvus_cosine_scores_and_orders_ties(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
-    gateway = FakeGateway(dimensions=scope.dimensions)
-    gateway.matches = [
+    repository = FakeRepository(dimensions=scope.dimensions)
+    repository.matches = [
         MilvusStoredMatch(entity_id=3, chunk_key="c", score=-1.0),
         MilvusStoredMatch(entity_id=2, chunk_key="b", score=0.1),
         MilvusStoredMatch(entity_id=1, chunk_key="a", score=1.0),
         MilvusStoredMatch(entity_id=0, chunk_key="z", score=2.0),
     ]
-    index = _index(scope, settings, gateway)
+    index = _index(scope, settings, repository)
 
     matches = await index.search([1.0, 0.0, 0.0], limit=4)
 
     assert [match.similarity for match in matches] == [1.0, 1.0, 0.1, 0.0]
     assert [match.key.entity_id for match in matches] == [0, 1, 2, 3]
-    assert gateway.searches == [(collection_name(settings, scope), [1.0, 0.0, 0.0], 4)]
+    assert repository.searches == [(collection_name(settings, scope), [1.0, 0.0, 0.0], 4)]
 
 
 @pytest.mark.asyncio
@@ -496,15 +502,15 @@ async def test_empty_operations_do_not_initialize(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
-    gateway = FakeGateway()
-    index = _index(scope, settings, gateway)
+    repository = FakeRepository()
+    index = _index(scope, settings, repository)
 
     await index.upsert([])
     await index.delete([])
     assert await index.search([], limit=10) == []
     assert await index.search([1.0, 0.0, 0.0], limit=0) == []
 
-    assert gateway.closed == 0
+    assert repository.closed == 0
 
 
 def test_first_party_factory_loads_milvus() -> None:

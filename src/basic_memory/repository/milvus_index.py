@@ -7,11 +7,11 @@ import hashlib
 from collections.abc import Callable, Sequence
 
 from basic_memory.repository.milvus_config import MilvusSettings
-from basic_memory.repository.milvus_gateway import (
-    MilvusGateway,
+from basic_memory.repository.milvus_repository import (
+    MilvusRepository,
     MilvusStoredMatch,
     MilvusStoredRecord,
-    create_gateway,
+    create_repository,
 )
 from basic_memory.repository.semantic_vector_index import (
     SemanticVectorIndex,
@@ -25,7 +25,7 @@ from basic_memory.repository.semantic_vector_index import (
     validate_vector_dimensions,
 )
 
-type MilvusGatewayFactory = Callable[[MilvusSettings], MilvusGateway]
+type MilvusRepositoryFactory = Callable[[MilvusSettings], MilvusRepository]
 
 _ORPHAN_DELETE_BATCH_SIZE = 256
 
@@ -54,33 +54,33 @@ class MilvusVectorIndex(SemanticVectorIndex, SemanticVectorIndexReconciler):
         scope: VectorIndexScope,
         settings: MilvusSettings,
         *,
-        gateway_factory: MilvusGatewayFactory = create_gateway,
+        repository_factory: MilvusRepositoryFactory = create_repository,
     ) -> None:
         self.scope = scope
         self._settings = settings
         self._collection_name = collection_name(settings, scope)
-        self._gateway_factory = gateway_factory
+        self._repository_factory = repository_factory
         self._initialized = False
         self._initialize_lock = asyncio.Lock()
 
-    def _with_gateway[T](self, operation: Callable[[MilvusGateway], T]) -> T:
-        gateway = self._gateway_factory(self._settings)
+    def _with_repository[T](self, operation: Callable[[MilvusRepository], T]) -> T:
+        repository = self._repository_factory(self._settings)
         try:
-            return operation(gateway)
+            return operation(repository)
         finally:
-            gateway.close()
+            repository.close()
 
     def _initialize_blocking(self) -> None:
-        def initialize_gateway(gateway: MilvusGateway) -> None:
-            dimensions = gateway.collection_dimensions(self._collection_name)
+        def initialize_repository(repository: MilvusRepository) -> None:
+            dimensions = repository.collection_dimensions(self._collection_name)
             if dimensions is None:
-                created = gateway.create_collection(
+                created = repository.create_collection(
                     self._collection_name,
                     self.scope.dimensions,
                 )
                 if created:
                     return
-                dimensions = gateway.collection_dimensions(self._collection_name)
+                dimensions = repository.collection_dimensions(self._collection_name)
                 if dimensions is None:
                     raise RuntimeError(
                         f"Milvus collection '{self._collection_name}' disappeared after "
@@ -100,18 +100,18 @@ class MilvusVectorIndex(SemanticVectorIndex, SemanticVectorIndexReconciler):
                 "the collection migration before reindexing."
             )
 
-        self._with_gateway(initialize_gateway)
+        self._with_repository(initialize_repository)
 
     def _search_blocking(
         self,
         query: Sequence[float],
         limit: int,
     ) -> list[MilvusStoredMatch]:
-        gateway = self._gateway_factory(self._settings)
+        repository = self._repository_factory(self._settings)
         try:
-            return gateway.search(self._collection_name, query, limit)
+            return repository.search(self._collection_name, query, limit)
         finally:
-            gateway.close()
+            repository.close()
 
     async def _run_blocking_mutation(self, operation: Callable[[], None]) -> None:
         """Keep the project mutation boundary held until the worker has stopped."""
@@ -157,8 +157,8 @@ class MilvusVectorIndex(SemanticVectorIndex, SemanticVectorIndexReconciler):
             for record in records
         ]
         await self._run_blocking_mutation(
-            lambda: self._with_gateway(
-                lambda gateway: gateway.upsert(self._collection_name, stored_records)
+            lambda: self._with_repository(
+                lambda repository: repository.upsert(self._collection_name, stored_records)
             )
         )
 
@@ -168,8 +168,8 @@ class MilvusVectorIndex(SemanticVectorIndex, SemanticVectorIndexReconciler):
         await self.initialize()
         stored_deletions = [(_record_id(record.key), record.source_hash) for record in records]
         await self._run_blocking_mutation(
-            lambda: self._with_gateway(
-                lambda gateway: gateway.delete_records(
+            lambda: self._with_repository(
+                lambda repository: repository.delete_records(
                     self._collection_name,
                     stored_deletions,
                 )
@@ -179,8 +179,8 @@ class MilvusVectorIndex(SemanticVectorIndex, SemanticVectorIndexReconciler):
     async def delete_entity(self, entity_id: int) -> None:
         await self.initialize()
         await self._run_blocking_mutation(
-            lambda: self._with_gateway(
-                lambda gateway: gateway.delete_entity(self._collection_name, entity_id)
+            lambda: self._with_repository(
+                lambda repository: repository.delete_entity(self._collection_name, entity_id)
             )
         )
 
@@ -188,19 +188,19 @@ class MilvusVectorIndex(SemanticVectorIndex, SemanticVectorIndexReconciler):
         await self.initialize()
         live_ids = {_record_id(key) for key in live_keys}
 
-        def delete_missing(gateway: MilvusGateway) -> None:
+        def delete_missing(repository: MilvusRepository) -> None:
             orphan_ids: list[str] = []
-            for record_id in gateway.iter_ids(self._collection_name):
+            for record_id in repository.iter_ids(self._collection_name):
                 if record_id in live_ids:
                     continue
                 orphan_ids.append(record_id)
                 if len(orphan_ids) == _ORPHAN_DELETE_BATCH_SIZE:
-                    gateway.delete_ids(self._collection_name, orphan_ids)
+                    repository.delete_ids(self._collection_name, orphan_ids)
                     orphan_ids.clear()
             if orphan_ids:
-                gateway.delete_ids(self._collection_name, orphan_ids)
+                repository.delete_ids(self._collection_name, orphan_ids)
 
-        await self._run_blocking_mutation(lambda: self._with_gateway(delete_missing))
+        await self._run_blocking_mutation(lambda: self._with_repository(delete_missing))
 
     async def search(
         self,
