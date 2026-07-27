@@ -107,6 +107,8 @@ class FakeClient:
         self.upserts: list[dict[str, object]] = []
         self.deletes: list[dict[str, object]] = []
         self.iterator = FakeIterator([[{"id": "one"}, {"id": "two"}], []])
+        self.queries: list[dict[str, object]] = []
+        self.searches: list[dict[str, object]] = []
         self.search_result: object = [
             [
                 {
@@ -174,10 +176,12 @@ class FakeClient:
 
     def query_iterator(self, **kwargs: object) -> FakeIterator:
         self._record_kwargs_timeout("query_iterator", kwargs)
+        self.queries.append(kwargs)
         return self.iterator
 
     def search(self, **kwargs: object) -> object:
         self._record_kwargs_timeout("search", kwargs)
+        self.searches.append(kwargs)
         return self.search_result
 
     def close(self) -> None:
@@ -249,6 +253,9 @@ def test_repository_applies_finite_deadline_to_every_remote_operation(
         "upsert",
     }
     assert all(timeout == 12.5 for _operation, timeout in client.operation_timeouts)
+    assert client.created[0]["consistency_level"] == "Strong"
+    assert client.queries[0]["consistency_level"] == "Strong"
+    assert client.searches[0]["consistency_level"] == "Strong"
 
 
 def test_collection_dimensions_reports_missing_and_valid_collection(
@@ -397,6 +404,7 @@ def test_create_collection(
         }
     ]
     assert client.created[0]["collection_name"] == "vectors"
+    assert client.created[0]["consistency_level"] == "Strong"
 
 
 def test_create_collection_reports_confirmed_race(

@@ -563,6 +563,8 @@ or Zilliz Cloud.
 Basic Memory applies the configured finite timeout to every remote Milvus operation. Cancellation
 waits for the active client call to terminate before releasing the project's SQL mutation lock,
 preventing stale writes without letting a half-open connection block the project indefinitely.
+Collections and repository reads use strong consistency so a search through a fresh client
+observes writes already marked ready in Basic Memory's SQL manifest.
 
 Each project receives one deterministic collection derived from the stable database namespace
 and project ID. Collection identity deliberately excludes the embedding model and dimensions. If

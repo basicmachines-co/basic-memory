@@ -16,6 +16,9 @@ _CHUNK_KEY_MAX_LENGTH = 4096
 _SOURCE_HASH_MAX_LENGTH = 128
 _DELETE_BATCH_SIZE = 256
 _QUERY_BATCH_SIZE = 1_000
+# The SQL manifest becomes ready when a write is acknowledged, so repository
+# reads must observe that write even when they use a fresh PyMilvus client.
+_CONSISTENCY_LEVEL = "Strong"
 _REQUIRED_FIELDS = {"id", "entity_id", "chunk_key", "source_hash", "embedding"}
 _FIELD_TYPES = {
     "id": DataType.VARCHAR,
@@ -274,6 +277,7 @@ class PyMilvusRepository:
                 collection_name=collection_name,
                 schema=schema,
                 index_params=index_params,
+                consistency_level=_CONSISTENCY_LEVEL,
                 timeout=self._timeout,
             )
         except MilvusException:
@@ -336,6 +340,7 @@ class PyMilvusRepository:
             limit=-1,
             filter="",
             output_fields=["id"],
+            consistency_level=_CONSISTENCY_LEVEL,
             timeout=self._timeout,
         )
         try:
@@ -371,6 +376,7 @@ class PyMilvusRepository:
                 limit=limit,
                 search_params={"metric_type": "COSINE"},
                 output_fields=["entity_id", "chunk_key"],
+                consistency_level=_CONSISTENCY_LEVEL,
                 timeout=self._timeout,
             ),
             "search results",
