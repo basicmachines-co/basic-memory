@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -13,7 +14,10 @@ from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.search_repository import create_search_repository
-from basic_memory.repository.semantic_errors import SemanticVectorIndexExtensionError
+from basic_memory.repository.semantic_errors import (
+    SemanticDependenciesMissingError,
+    SemanticVectorIndexExtensionError,
+)
 from basic_memory.repository.semantic_vector_index import (
     SEMANTIC_VECTOR_INDEX_ENTRY_POINT_GROUP,
     SemanticVectorIndex,
@@ -90,7 +94,7 @@ def _postgres_config(**overrides: object) -> BasicMemoryConfig:
         "database_backend": DatabaseBackend.POSTGRES,
         "database_url": "postgresql+asyncpg://user:secret@db.example.test:5432/memory",
         "semantic_search_enabled": True,
-        "semantic_vector_index": "milvus",
+        "semantic_vector_index": "test-extension",
     }
     values.update(overrides)
     return BasicMemoryConfig(**values)
@@ -121,13 +125,15 @@ def test_vector_contract_values_and_dimension_validation() -> None:
 
 def test_selector_defaults_to_pgvector_and_sqlite_remains_automatic() -> None:
     default_config = BasicMemoryConfig(env="test")
-    milvus_config = _postgres_config()
+    extension_config = _postgres_config()
 
     assert default_config.semantic_vector_index == "pgvector"
     assert (
         resolve_semantic_vector_index_name(default_config, DatabaseBackend.POSTGRES) == "pgvector"
     )
-    assert resolve_semantic_vector_index_name(milvus_config, DatabaseBackend.SQLITE) == "sqlite-vec"
+    assert (
+        resolve_semantic_vector_index_name(extension_config, DatabaseBackend.SQLITE) == "sqlite-vec"
+    )
 
 
 def test_scope_is_stable_credential_free_and_project_isolated() -> None:
@@ -209,6 +215,39 @@ def test_missing_configured_extension_fails_without_fallback(monkeypatch) -> Non
         )
 
 
+def test_milvus_without_optional_dependencies_reports_install_extra(monkeypatch) -> None:
+    config = _postgres_config(
+        semantic_vector_index="milvus",
+        milvus_uri="https://zilliz.example",
+    )
+    real_import = builtins.__import__
+
+    def import_without_pymilvus(
+        name: str,
+        globals: dict[str, object] | None = None,
+        locals: dict[str, object] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> object:
+        if name == "basic_memory.repository.milvus_index":
+            raise ModuleNotFoundError("No module named 'pymilvus'", name="pymilvus")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_pymilvus)
+
+    with pytest.raises(
+        SemanticDependenciesMissingError,
+        match=r"basic-memory\[milvus\]",
+    ):
+        create_semantic_vector_index(
+            session_maker=MagicMock(),
+            project_id=7,
+            app_config=config,
+            database_backend=DatabaseBackend.POSTGRES,
+            embedding_provider=StubEmbeddingProvider(),
+        )
+
+
 def test_extension_factory_receives_explicit_scope_and_config(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
@@ -221,14 +260,14 @@ def test_extension_factory_receives_explicit_scope_and_config(monkeypatch) -> No
         lambda **kwargs: (
             (
                 StubEntryPoint(
-                    value="basic_memory_milvus:create_index",
+                    value="test_extension:create_index",
                     loaded=factory,
                 ),
             )
             if kwargs
             == {
                 "group": SEMANTIC_VECTOR_INDEX_ENTRY_POINT_GROUP,
-                "name": "milvus",
+                "name": "test-extension",
             }
             else ()
         ),
@@ -243,7 +282,7 @@ def test_extension_factory_receives_explicit_scope_and_config(monkeypatch) -> No
         embedding_provider=StubEmbeddingProvider(),
     )
 
-    assert name == "milvus"
+    assert name == "test-extension"
     assert isinstance(index, StubVectorIndex)
     assert captured["app_config"] is config
     assert captured["scope"] == index.scope
@@ -329,7 +368,7 @@ def test_search_repository_composition_root_injects_selected_adapter(monkeypatch
     repository = create_search_repository(
         MagicMock(),
         project_id=7,
-        app_config=_postgres_config(),
+        app_config=_postgres_config(semantic_vector_index="milvus"),
         database_backend=DatabaseBackend.POSTGRES,
     )
 
@@ -348,7 +387,10 @@ def test_disabled_search_repository_retains_configured_adapter_name(monkeypatch)
     repository = create_search_repository(
         MagicMock(),
         project_id=7,
-        app_config=_postgres_config(semantic_search_enabled=False),
+        app_config=_postgres_config(
+            semantic_search_enabled=False,
+            semantic_vector_index="milvus",
+        ),
         database_backend=DatabaseBackend.POSTGRES,
     )
 

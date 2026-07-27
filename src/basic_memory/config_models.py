@@ -246,10 +246,33 @@ class BasicMemoryConfig(BaseSettings):
     semantic_vector_index: str = Field(
         default="pgvector",
         description=(
-            "Semantic vector index backend for Postgres deployments. 'pgvector' is built in; "
-            "other names resolve through the basic_memory.semantic_vector_indexes entry-point "
-            "group. SQLite continues to use sqlite-vec."
+            "Semantic vector index backend for Postgres deployments. 'pgvector' is built in, "
+            "'milvus' is available through the optional basic-memory[milvus] extra, and other "
+            "names resolve through the basic_memory.semantic_vector_indexes entry-point group. "
+            "SQLite continues to use sqlite-vec."
         ),
+        min_length=1,
+    )
+    milvus_uri: str | None = Field(
+        default=None,
+        description=(
+            "Milvus, Milvus Lite, or Zilliz Cloud connection URI used when "
+            "semantic_vector_index='milvus'."
+        ),
+    )
+    milvus_token: str | None = Field(
+        default=None,
+        description="Optional Milvus or Zilliz Cloud authentication token.",
+    )
+    milvus_collection_prefix: str = Field(
+        default="basic_memory",
+        description="Prefix for project-isolated Milvus collections.",
+        min_length=1,
+        max_length=128,
+    )
+    milvus_database: str = Field(
+        default="default",
+        description="Milvus database name.",
         min_length=1,
     )
     semantic_embedding_provider: str = Field(

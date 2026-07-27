@@ -15,7 +15,10 @@ from basic_memory.repository.embedding_provider import (
     EmbeddingProvider,
     embedding_provider_identity,
 )
-from basic_memory.repository.semantic_errors import SemanticVectorIndexExtensionError
+from basic_memory.repository.semantic_errors import (
+    SemanticDependenciesMissingError,
+    SemanticVectorIndexExtensionError,
+)
 from basic_memory.repository.semantic_vector_index import (
     SEMANTIC_VECTOR_INDEX_ENTRY_POINT_GROUP,
     SemanticVectorIndex,
@@ -120,6 +123,25 @@ def _load_extension_factory(name: str) -> SemanticVectorIndexFactory:
     return loaded
 
 
+def _create_milvus_index(
+    scope: VectorIndexScope,
+    app_config: BasicMemoryConfig,
+) -> SemanticVectorIndex:
+    """Load the first-party optional provider only when Milvus is selected."""
+    try:
+        from basic_memory.repository.milvus_config import MilvusSettings
+        from basic_memory.repository.milvus_index import MilvusVectorIndex
+    except ModuleNotFoundError as exc:
+        if exc.name != "pymilvus" and not (exc.name or "").startswith("pymilvus."):
+            raise
+        raise SemanticDependenciesMissingError(
+            "Milvus vector storage requires the optional PyMilvus dependencies. "
+            "Install with `pip install 'basic-memory[milvus]'`."
+        ) from exc
+
+    return MilvusVectorIndex(scope, MilvusSettings.from_config(app_config))
+
+
 def create_semantic_vector_index(
     *,
     session_maker: async_sessionmaker[AsyncSession],
@@ -128,7 +150,7 @@ def create_semantic_vector_index(
     database_backend: DatabaseBackend,
     embedding_provider: EmbeddingProvider,
 ) -> tuple[str, SemanticVectorIndex]:
-    """Create the selected built-in adapter or load one external extension."""
+    """Create the selected first-party adapter or load one external extension."""
     name = resolve_semantic_vector_index_name(app_config, database_backend)
     scope = build_vector_index_scope(app_config, embedding_provider, project_id)
 
@@ -140,6 +162,8 @@ def create_semantic_vector_index(
         from basic_memory.repository.pgvector_index import PgVectorIndex
 
         return name, PgVectorIndex(session_maker, scope)
+    if name == "milvus":
+        return name, _create_milvus_index(scope, app_config)
 
     factory = _load_extension_factory(name)
     index = factory(scope=scope, app_config=app_config)

@@ -64,6 +64,12 @@ dependencies = [
     "filelock>=3.12",
 ]
 
+[project.optional-dependencies]
+milvus = [
+    "pymilvus>=3.0.0,<4; sys_platform == 'win32'",
+    "pymilvus[milvus-lite]>=3.0.0,<4; sys_platform != 'win32'",
+]
+
 [project.urls]
 Homepage = "https://github.com/basicmachines-co/basic-memory"
 Repository = "https://github.com/basicmachines-co/basic-memory"
