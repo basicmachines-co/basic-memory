@@ -113,24 +113,33 @@ class PyMilvusGateway:
     """Typed, explicit resource boundary around the synchronous Milvus client."""
 
     def __init__(self, settings: MilvusSettings) -> None:
+        self._timeout = settings.timeout_seconds
         if settings.token is None:
             self._client = MilvusClient(
                 uri=settings.uri,
                 db_name=settings.database,
+                timeout=self._timeout,
             )
         else:
             self._client = MilvusClient(
                 uri=settings.uri,
                 token=settings.token,
                 db_name=settings.database,
+                timeout=self._timeout,
             )
 
     def collection_dimensions(self, collection_name: str) -> int | None:
-        if not self._client.has_collection(collection_name=collection_name):
+        if not self._client.has_collection(
+            collection_name=collection_name,
+            timeout=self._timeout,
+        ):
             return None
 
         description = _require_mapping(
-            self._client.describe_collection(collection_name=collection_name),
+            self._client.describe_collection(
+                collection_name=collection_name,
+                timeout=self._timeout,
+            ),
             "collection description",
         )
         raw_fields = _require_sequence(description.get("fields"), "collection fields")
@@ -203,7 +212,10 @@ class PyMilvusGateway:
             )
 
         raw_index_names = _require_sequence(
-            self._client.list_indexes(collection_name=collection_name),
+            self._client.list_indexes(
+                collection_name=collection_name,
+                timeout=self._timeout,
+            ),
             "index names",
         )
         has_cosine_index = False
@@ -214,6 +226,7 @@ class PyMilvusGateway:
                 self._client.describe_index(
                     collection_name=collection_name,
                     index_name=raw_index_name,
+                    timeout=self._timeout,
                 ),
                 "index description",
             )
@@ -261,13 +274,17 @@ class PyMilvusGateway:
                 collection_name=collection_name,
                 schema=schema,
                 index_params=index_params,
+                timeout=self._timeout,
             )
         except MilvusException:
             # Trigger: another process may create the collection after our existence check.
             # Why: Milvus reports that race as the same broad exception used for other server
             # failures, so confirm resulting state before treating the create as successful.
             # Outcome: callers re-read and validate the winning collection's dimensions.
-            if self._client.has_collection(collection_name=collection_name):
+            if self._client.has_collection(
+                collection_name=collection_name,
+                timeout=self._timeout,
+            ):
                 return False
             raise
         return True
@@ -285,6 +302,7 @@ class PyMilvusGateway:
                 }
                 for record in records
             ],
+            timeout=self._timeout,
         )
 
     def delete_records(
@@ -301,12 +319,14 @@ class PyMilvusGateway:
             self._client.delete(
                 collection_name=collection_name,
                 filter=" or ".join(predicates),
+                timeout=self._timeout,
             )
 
     def delete_entity(self, collection_name: str, entity_id: int) -> None:
         self._client.delete(
             collection_name=collection_name,
             filter=f"entity_id == {int(entity_id)}",
+            timeout=self._timeout,
         )
 
     def iter_ids(self, collection_name: str) -> Iterator[str]:
@@ -316,6 +336,7 @@ class PyMilvusGateway:
             limit=-1,
             filter="",
             output_fields=["id"],
+            timeout=self._timeout,
         )
         try:
             while raw_batch := iterator.next():
@@ -330,7 +351,11 @@ class PyMilvusGateway:
 
     def delete_ids(self, collection_name: str, record_ids: Sequence[str]) -> None:
         for batch in _batches(record_ids, _DELETE_BATCH_SIZE):
-            self._client.delete(collection_name=collection_name, ids=list(batch))
+            self._client.delete(
+                collection_name=collection_name,
+                ids=list(batch),
+                timeout=self._timeout,
+            )
 
     def search(
         self,
@@ -346,6 +371,7 @@ class PyMilvusGateway:
                 limit=limit,
                 search_params={"metric_type": "COSINE"},
                 output_fields=["entity_id", "chunk_key"],
+                timeout=self._timeout,
             ),
             "search results",
         )

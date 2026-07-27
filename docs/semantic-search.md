@@ -109,6 +109,7 @@ All settings are fields on `BasicMemoryConfig` and can be set via environment va
 | `semantic_vector_index` | `BASIC_MEMORY_SEMANTIC_VECTOR_INDEX` | `"pgvector"` | Postgres vector storage adapter. `"pgvector"` is built in, `"milvus"` is available through the `basic-memory[milvus]` extra, and other names resolve through the `basic_memory.semantic_vector_indexes` Python entry-point group. SQLite always uses its built-in `sqlite-vec` adapter. |
 | `milvus_uri` | `BASIC_MEMORY_MILVUS_URI` | Unset | Milvus, Milvus Lite, or Zilliz Cloud connection URI. Required when `semantic_vector_index="milvus"`. |
 | `milvus_token` | `BASIC_MEMORY_MILVUS_TOKEN` | Unset | Optional Milvus or Zilliz Cloud authentication token. |
+| `milvus_timeout_seconds` | `BASIC_MEMORY_MILVUS_TIMEOUT_SECONDS` | `30.0` | Finite per-operation timeout for Milvus and Zilliz client calls. Increase it for unusually slow deployments. |
 | `milvus_collection_prefix` | `BASIC_MEMORY_MILVUS_COLLECTION_PREFIX` | `"basic_memory"` | Prefix for deterministic project-isolated Milvus collections. |
 | `milvus_database` | `BASIC_MEMORY_MILVUS_DATABASE` | `"default"` | Milvus database name. |
 | `semantic_embedding_provider` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER` | `"fastembed"` | Embedding provider: `"fastembed"` (local), `"openai"` (API), or `"litellm"` (multi-provider API, **experimental** — advanced users only). |
@@ -551,12 +552,17 @@ pip install "basic-memory[milvus]"
 export BASIC_MEMORY_SEMANTIC_VECTOR_INDEX=milvus
 export BASIC_MEMORY_MILVUS_URI=http://localhost:19530
 export BASIC_MEMORY_MILVUS_TOKEN=root:Milvus  # optional
+export BASIC_MEMORY_MILVUS_TIMEOUT_SECONDS=30
 ```
 
 Zilliz Cloud uses the same URI and token settings. On macOS or Linux, the optional extra also
 includes Milvus Lite; set `BASIC_MEMORY_MILVUS_URI` to a local `.db` path. Milvus Lite does not
 support Windows, but Windows installations can connect to Milvus Standalone, Milvus Distributed,
 or Zilliz Cloud.
+
+Basic Memory applies the configured finite timeout to every remote Milvus operation. Cancellation
+waits for the active client call to terminate before releasing the project's SQL mutation lock,
+preventing stale writes without letting a half-open connection block the project indefinitely.
 
 Each project receives one deterministic collection derived from the stable database namespace
 and project ID. Collection identity deliberately excludes the embedding model and dimensions. If

@@ -91,6 +91,8 @@ def _fields_with(field_name: str, **updates: object) -> list[dict[str, object]]:
 
 class FakeClient:
     def __init__(self) -> None:
+        self.connection_options: dict[str, object] = {}
+        self.operation_timeouts: list[tuple[str, float]] = []
         self.has_collection_result = False
         self.description: object = _description(_valid_fields())
         self.index_names: object = ["embedding"]
@@ -115,21 +117,39 @@ class FakeClient:
         ]
         self.closed = False
 
-    def has_collection(self, *, collection_name: str) -> bool:
+    def _record_timeout(self, operation: str, timeout: float) -> None:
+        self.operation_timeouts.append((operation, timeout))
+
+    def _record_kwargs_timeout(self, operation: str, kwargs: dict[str, object]) -> None:
+        timeout = kwargs.get("timeout")
+        assert isinstance(timeout, (int, float)) and not isinstance(timeout, bool)
+        self._record_timeout(operation, float(timeout))
+
+    def has_collection(self, *, collection_name: str, timeout: float) -> bool:
         assert collection_name
+        self._record_timeout("has_collection", timeout)
         return self.has_collection_result
 
-    def describe_collection(self, *, collection_name: str) -> object:
+    def describe_collection(self, *, collection_name: str, timeout: float) -> object:
         assert collection_name
+        self._record_timeout("describe_collection", timeout)
         return self.description
 
-    def list_indexes(self, *, collection_name: str) -> object:
+    def list_indexes(self, *, collection_name: str, timeout: float) -> object:
         assert collection_name
+        self._record_timeout("list_indexes", timeout)
         return self.index_names
 
-    def describe_index(self, *, collection_name: str, index_name: str) -> object:
+    def describe_index(
+        self,
+        *,
+        collection_name: str,
+        index_name: str,
+        timeout: float,
+    ) -> object:
         assert collection_name
         assert index_name
+        self._record_timeout("describe_index", timeout)
         return self.index_description
 
     def create_schema(self, **_kwargs: object) -> FakeSchema:
@@ -139,20 +159,25 @@ class FakeClient:
         return self.index_params
 
     def create_collection(self, **kwargs: object) -> None:
+        self._record_kwargs_timeout("create_collection", kwargs)
         self.created.append(kwargs)
         if self.create_exception is not None:
             raise self.create_exception
 
     def upsert(self, **kwargs: object) -> None:
+        self._record_kwargs_timeout("upsert", kwargs)
         self.upserts.append(kwargs)
 
     def delete(self, **kwargs: object) -> None:
+        self._record_kwargs_timeout("delete", kwargs)
         self.deletes.append(kwargs)
 
-    def query_iterator(self, **_kwargs: object) -> FakeIterator:
+    def query_iterator(self, **kwargs: object) -> FakeIterator:
+        self._record_kwargs_timeout("query_iterator", kwargs)
         return self.iterator
 
-    def search(self, **_kwargs: object) -> object:
+    def search(self, **kwargs: object) -> object:
+        self._record_kwargs_timeout("search", kwargs)
         return self.search_result
 
     def close(self) -> None:
@@ -162,16 +187,68 @@ class FakeClient:
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> FakeClient:
     fake = FakeClient()
+
+    def create_client(**kwargs: object) -> FakeClient:
+        fake.connection_options = kwargs
+        return fake
+
     monkeypatch.setattr(
         "basic_memory.repository.milvus_gateway.MilvusClient",
-        lambda **_kwargs: fake,
+        create_client,
     )
     return fake
 
 
 @pytest.fixture
 def gateway(client: FakeClient) -> PyMilvusGateway:
-    return PyMilvusGateway(MilvusSettings(uri="http://localhost:19530", token="secret"))
+    return PyMilvusGateway(
+        MilvusSettings(
+            uri="http://localhost:19530",
+            token="secret",
+            timeout_seconds=12.5,
+        )
+    )
+
+
+def test_gateway_applies_finite_deadline_to_every_remote_operation(
+    gateway: PyMilvusGateway,
+    client: FakeClient,
+) -> None:
+    client.has_collection_result = True
+
+    assert gateway.collection_dimensions("vectors") == 4
+    assert gateway.create_collection("vectors", 4)
+    gateway.upsert(
+        "vectors",
+        [
+            MilvusStoredRecord(
+                record_id="abc",
+                entity_id=7,
+                chunk_key="summary:0",
+                source_hash="source-a",
+                values=(1.0, 0.0),
+            )
+        ],
+    )
+    gateway.delete_records("vectors", [("abc", "source-a")])
+    gateway.delete_entity("vectors", 7)
+    assert list(gateway.iter_ids("vectors")) == ["one", "two"]
+    gateway.delete_ids("vectors", ["abc"])
+    assert gateway.search("vectors", [1.0, 0.0], 5)
+
+    assert client.connection_options["timeout"] == 12.5
+    assert {operation for operation, _timeout in client.operation_timeouts} == {
+        "create_collection",
+        "delete",
+        "describe_collection",
+        "describe_index",
+        "has_collection",
+        "list_indexes",
+        "query_iterator",
+        "search",
+        "upsert",
+    }
+    assert all(timeout == 12.5 for _operation, timeout in client.operation_timeouts)
 
 
 def test_collection_dimensions_reports_missing_and_valid_collection(
@@ -371,6 +448,7 @@ def test_upsert_maps_provider_record(
                     "embedding": [1.0, 0.0],
                 }
             ],
+            "timeout": 12.5,
         }
     ]
 
@@ -399,6 +477,7 @@ def test_delete_entity_and_ids(
     assert client.deletes[0] == {
         "collection_name": "vectors",
         "filter": "entity_id == 7",
+        "timeout": 12.5,
     }
     assert len(client.deletes) == 3
     first_ids = client.deletes[1]["ids"]

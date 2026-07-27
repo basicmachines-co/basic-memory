@@ -264,6 +264,12 @@ class BasicMemoryConfig(BaseSettings):
         default=None,
         description="Optional Milvus or Zilliz Cloud authentication token.",
     )
+    milvus_timeout_seconds: float = Field(
+        default=30.0,
+        description="Maximum seconds allowed for each Milvus or Zilliz client operation.",
+        gt=0,
+        allow_inf_nan=False,
+    )
     milvus_collection_prefix: str = Field(
         default="basic_memory",
         description="Prefix for project-isolated Milvus collections.",

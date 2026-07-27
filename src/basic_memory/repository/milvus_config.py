@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import re
 from collections.abc import Mapping
@@ -34,6 +35,7 @@ class MilvusSettings:
     token: str | None = None
     collection_prefix: str = "basic_memory"
     database: str = "default"
+    timeout_seconds: float = 30.0
 
     def __post_init__(self) -> None:
         if not self.uri.strip():
@@ -50,6 +52,8 @@ class MilvusSettings:
             )
         if not self.database.strip():
             raise ValueError("Milvus database name cannot be empty.")
+        if not math.isfinite(self.timeout_seconds) or self.timeout_seconds <= 0:
+            raise ValueError("Milvus timeout must be finite and greater than zero.")
 
     @classmethod
     def from_config(
@@ -73,4 +77,5 @@ class MilvusSettings:
             token=token,
             collection_prefix=app_config.milvus_collection_prefix,
             database=app_config.milvus_database,
+            timeout_seconds=app_config.milvus_timeout_seconds,
         )
