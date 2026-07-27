@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections.abc import Iterator, Sequence
 from typing import Any
 
@@ -102,6 +103,44 @@ class FakeGateway:
 
     def close(self) -> None:
         self.closed += 1
+
+
+class BlockingMutationGateway(FakeGateway):
+    """Hold external mutations until a cancellation assertion releases them."""
+
+    def __init__(self, dimensions: int) -> None:
+        super().__init__(dimensions=dimensions)
+        self.mutation_started = threading.Event()
+        self.release_mutation = threading.Event()
+
+    def _block_mutation(self) -> None:
+        self.mutation_started.set()
+        if not self.release_mutation.wait(timeout=5):
+            raise TimeoutError("test did not release the Milvus mutation")
+
+    def upsert(
+        self,
+        collection_name: str,
+        records: Sequence[MilvusStoredRecord],
+    ) -> None:
+        self._block_mutation()
+        super().upsert(collection_name, records)
+
+    def delete_records(
+        self,
+        collection_name: str,
+        records: Sequence[tuple[str, str]],
+    ) -> None:
+        self._block_mutation()
+        super().delete_records(collection_name, records)
+
+    def delete_entity(self, collection_name: str, entity_id: int) -> None:
+        self._block_mutation()
+        super().delete_entity(collection_name, entity_id)
+
+    def delete_ids(self, collection_name: str, record_ids: Sequence[str]) -> None:
+        self._block_mutation()
+        super().delete_ids(collection_name, record_ids)
 
 
 class StubEmbeddingProvider:
@@ -307,6 +346,48 @@ async def test_upsert_rejects_wrong_dimensions_before_milvus_call(
         )
 
     assert gateway.upserts == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["upsert", "delete", "delete_entity", "delete_orphans"])
+async def test_mutations_finish_before_propagating_cancellation(
+    operation: str,
+    scope: VectorIndexScope,
+    settings: MilvusSettings,
+) -> None:
+    gateway = BlockingMutationGateway(scope.dimensions)
+    gateway.ids = ["orphan"]
+    index = _index(scope, settings, gateway)
+    key = VectorKey(entity_id=7, chunk_key="summary:0")
+
+    if operation == "upsert":
+        mutation = index.upsert(
+            [VectorRecord(key=key, source_hash="source-a", values=(1.0, 0.0, 0.0))]
+        )
+    elif operation == "delete":
+        mutation = index.delete([VectorDeletion(key=key, source_hash="source-a")])
+    elif operation == "delete_entity":
+        mutation = index.delete_entity(key.entity_id)
+    else:
+        mutation = index.delete_orphans([])
+
+    mutation_task = asyncio.create_task(mutation)
+    async with asyncio.timeout(2):
+        while not gateway.mutation_started.is_set():
+            await asyncio.sleep(0)
+
+    mutation_task.cancel()
+    await asyncio.sleep(0)
+    assert not mutation_task.done()
+
+    mutation_task.cancel()
+    await asyncio.sleep(0)
+    assert not mutation_task.done()
+
+    gateway.release_mutation.set()
+    with pytest.raises(asyncio.CancelledError):
+        await mutation_task
+    assert gateway.closed == 2
 
 
 @pytest.mark.asyncio

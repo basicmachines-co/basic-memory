@@ -113,13 +113,32 @@ class MilvusVectorIndex(SemanticVectorIndex, SemanticVectorIndexReconciler):
         finally:
             gateway.close()
 
+    async def _run_blocking_mutation(self, operation: Callable[[], None]) -> None:
+        """Keep the project mutation boundary held until the worker has stopped."""
+        mutation = asyncio.create_task(asyncio.to_thread(operation))
+        completed = asyncio.Event()
+        mutation.add_done_callback(lambda _mutation: completed.set())
+        try:
+            await asyncio.shield(mutation)
+        except asyncio.CancelledError:
+            # asyncio cannot stop a running thread. Delay cancellation until the
+            # mutation finishes so SQL state and the per-project lock cannot advance
+            # while an older Milvus write is still able to land.
+            while not completed.is_set():
+                try:
+                    await asyncio.shield(completed.wait())
+                except asyncio.CancelledError:
+                    continue
+            mutation.exception()
+            raise
+
     async def initialize(self) -> None:
         if self._initialized:
             return
         async with self._initialize_lock:
             if self._initialized:
                 return
-            await asyncio.to_thread(self._initialize_blocking)
+            await self._run_blocking_mutation(self._initialize_blocking)
             self._initialized = True
 
     async def upsert(self, records: Sequence[VectorRecord]) -> None:
@@ -137,9 +156,10 @@ class MilvusVectorIndex(SemanticVectorIndex, SemanticVectorIndexReconciler):
             )
             for record in records
         ]
-        await asyncio.to_thread(
-            self._with_gateway,
-            lambda gateway: gateway.upsert(self._collection_name, stored_records),
+        await self._run_blocking_mutation(
+            lambda: self._with_gateway(
+                lambda gateway: gateway.upsert(self._collection_name, stored_records)
+            )
         )
 
     async def delete(self, records: Sequence[VectorDeletion]) -> None:
@@ -147,19 +167,21 @@ class MilvusVectorIndex(SemanticVectorIndex, SemanticVectorIndexReconciler):
             return
         await self.initialize()
         stored_deletions = [(_record_id(record.key), record.source_hash) for record in records]
-        await asyncio.to_thread(
-            self._with_gateway,
-            lambda gateway: gateway.delete_records(
-                self._collection_name,
-                stored_deletions,
-            ),
+        await self._run_blocking_mutation(
+            lambda: self._with_gateway(
+                lambda gateway: gateway.delete_records(
+                    self._collection_name,
+                    stored_deletions,
+                )
+            )
         )
 
     async def delete_entity(self, entity_id: int) -> None:
         await self.initialize()
-        await asyncio.to_thread(
-            self._with_gateway,
-            lambda gateway: gateway.delete_entity(self._collection_name, entity_id),
+        await self._run_blocking_mutation(
+            lambda: self._with_gateway(
+                lambda gateway: gateway.delete_entity(self._collection_name, entity_id)
+            )
         )
 
     async def delete_orphans(self, live_keys: Sequence[VectorKey]) -> None:
@@ -178,7 +200,7 @@ class MilvusVectorIndex(SemanticVectorIndex, SemanticVectorIndexReconciler):
             if orphan_ids:
                 gateway.delete_ids(self._collection_name, orphan_ids)
 
-        await asyncio.to_thread(self._with_gateway, delete_missing)
+        await self._run_blocking_mutation(lambda: self._with_gateway(delete_missing))
 
     async def search(
         self,
