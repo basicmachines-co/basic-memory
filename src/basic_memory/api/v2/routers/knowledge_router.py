@@ -44,11 +44,23 @@ from basic_memory.deps import (
     EntityRepositoryV2ExternalDep,
     RelationRepositoryV2ExternalDep,
     ProjectExternalIdPathDep,
+    ReadCacheDep,
     IndexFileExecutorV2ExternalDep,
     EntityVectorSyncSchedulerDep,
     RelationResolutionSchedulerDep,
     SessionDep,
     SessionMakerDep,
+)
+from basic_memory.read_cache import (
+    ReadCacheKey,
+    ReadCacheOperation,
+    invalidate_project_read_cache,
+    read_cache_request_digest,
+    read_through_model,
+)
+from basic_memory.read_cache.policy import (
+    READ_CACHE_MAX_PAYLOAD_BYTES,
+    READ_CACHE_TTL_SECONDS,
 )
 from basic_memory.runtime.note_content import (
     NOTE_CONTENT_BASE_CHECKSUM_HEADER,
@@ -230,11 +242,15 @@ async def get_orphan_entities(
 @router.post("/resolve", response_model=EntityResolveResponse)
 async def resolve_identifier(
     project_id: ProjectExternalIdPathDep,
+    project_external_id: Annotated[
+        str, Path(alias="project_id", description="Project external UUID")
+    ],
     data: EntityResolveRequest,
     link_resolver: LinkResolverV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
     project_repository: ProjectRepositoryDep,
     session: SessionDep,
+    read_cache: ReadCacheDep,
 ) -> EntityResolveResponse:
     """Resolve a string identifier (external_id, permalink, title, or path) to entity info.
 
@@ -273,59 +289,76 @@ async def resolve_identifier(
     ):
         logger.info(f"API v2 request: resolve_identifier for '{data.identifier}'")
 
-        entity = await entity_repository.get_by_external_id(session, data.identifier)
-        resolution_method = "external_id" if entity else "search"
+        async def load() -> EntityResolveResponse:
+            entity = await entity_repository.get_by_external_id(session, data.identifier)
+            resolution_method = "external_id" if entity else "search"
 
-        if not entity:
-            try:
-                entity = await link_resolver.resolve_link(
-                    data.identifier,
-                    source_path=data.source_path,
-                    strict=data.strict,
-                    session=session,
-                )
-            except AmbiguousIdentifierError as exc:
-                # A strict resolve refused to guess between several same-title notes (#1148).
-                # Surface it as 409 so edit/move report the ambiguity and ask for an exact id.
+            if not entity:
+                try:
+                    entity = await link_resolver.resolve_link(
+                        data.identifier,
+                        source_path=data.source_path,
+                        strict=data.strict,
+                        session=session,
+                    )
+                except AmbiguousIdentifierError as exc:
+                    # A strict resolve refused to guess between several same-title notes (#1148).
+                    # Surface it as 409 so edit/move report ambiguity and ask for an exact id.
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail=str(exc),
+                    ) from exc
+                if entity:
+                    if entity.permalink == data.identifier:
+                        resolution_method = "permalink"
+                    elif entity.title == data.identifier:
+                        resolution_method = "title"
+                    elif entity.file_path == data.identifier:
+                        resolution_method = "path"
+
+            if not entity:
                 raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail=str(exc),
-                ) from exc
-            if entity:
-                if entity.permalink == data.identifier:
-                    resolution_method = "permalink"
-                elif entity.title == data.identifier:
-                    resolution_method = "title"
-                elif entity.file_path == data.identifier:
-                    resolution_method = "path"
-                else:
-                    resolution_method = "search"
+                    status_code=404,
+                    detail=f"Entity not found: '{data.identifier}'",
+                )
 
-        if not entity:
-            raise HTTPException(status_code=404, detail=f"Entity not found: '{data.identifier}'")
+            owner_project = await project_repository.get_by_id(session, entity.project_id)
+            if not owner_project:  # pragma: no cover
+                raise HTTPException(
+                    status_code=500,
+                    detail="Resolved entity references an unknown project",
+                )
 
-        owner_project = await project_repository.get_by_id(session, entity.project_id)
-        if not owner_project:  # pragma: no cover
-            raise HTTPException(
-                status_code=500,
-                detail="Resolved entity references an unknown project",
+            result = EntityResolveResponse(
+                external_id=entity.external_id,
+                entity_id=entity.id,
+                project_external_id=owner_project.external_id,
+                permalink=entity.permalink,
+                file_path=entity.file_path,
+                title=entity.title,
+                resolution_method=resolution_method,
             )
+            logger.debug(
+                f"API v2 response: resolved '{data.identifier}' "
+                f"to external_id={result.external_id} via {resolution_method}"
+            )
+            return result
 
-        result = EntityResolveResponse(
-            external_id=entity.external_id,
-            entity_id=entity.id,
-            project_external_id=owner_project.external_id,
-            permalink=entity.permalink,
-            file_path=entity.file_path,
-            title=entity.title,
-            resolution_method=resolution_method,
+        return await read_through_model(
+            cache=read_cache,
+            key=ReadCacheKey(
+                project_id=project_external_id,
+                operation=ReadCacheOperation.resolve,
+                request_digest=read_cache_request_digest(data.model_dump_json()),
+            ),
+            model_type=EntityResolveResponse,
+            load=load,
+            ttl_seconds=READ_CACHE_TTL_SECONDS,
+            max_payload_bytes=READ_CACHE_MAX_PAYLOAD_BYTES,
+            # Cross-project references depend on two projects. Keep phase-one
+            # generation invalidation exact by caching only local resolutions.
+            should_store=lambda resolved: resolved.project_external_id == project_external_id,
         )
-
-        logger.debug(
-            f"API v2 response: resolved '{data.identifier}' to external_id={result.external_id} via {resolution_method}"
-        )
-
-        return result
 
 
 ## Single-file indexing endpoint
@@ -381,6 +414,9 @@ def _canonical_file_path(home: pathlib.Path, segments: list[str]) -> str | None:
 async def index_file(
     data: IndexFileRequest,
     project_id: ProjectExternalIdPathDep,
+    project_external_id: Annotated[
+        str, Path(alias="project_id", description="Project external UUID")
+    ],
     file_service: FileServiceV2ExternalDep,
     file_indexer: IndexFileExecutorV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
@@ -388,6 +424,7 @@ async def index_file(
     search_service: SearchServiceV2ExternalDep,
     app_config: AppConfigDep,
     session_maker: SessionMakerDep,
+    read_cache: ReadCacheDep,
 ) -> EntityResponseV2:
     """Index a single markdown file that exists on disk but is not indexed yet.
 
@@ -488,6 +525,7 @@ async def index_file(
             )
 
         indexed = await file_indexer.index_file(file_path, source="api-index-file")
+        await invalidate_project_read_cache(read_cache, project_external_id)
         async with db.scoped_session(session_maker) as session:
             entity = await entity_repository.get_by_id(session, indexed.entity_id)
         if entity is None:  # pragma: no cover
@@ -518,10 +556,13 @@ async def index_file(
 @router.get("/entities/{entity_id}", response_model=EntityResponseV2)
 async def get_entity_by_id(
     project_id: ProjectExternalIdPathDep,
-    project_repository: ProjectRepositoryDep,
+    project_external_id: Annotated[
+        str, Path(alias="project_id", description="Project external UUID")
+    ],
     entity_repository: EntityRepositoryV2ExternalDep,
     note_content_query_service: NoteContentQueryServiceDep,
     session: SessionDep,
+    read_cache: ReadCacheDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
 ) -> EntityResponseV2:
     """Get an entity by its external ID (UUID).
@@ -546,30 +587,42 @@ async def get_entity_by_id(
     ):
         logger.info(f"API v2 request: get_entity_by_id entity_id={entity_id}")
 
-        project = await project_repository.get_by_id(session, project_id)
-        if project is None:  # pragma: no cover
-            raise HTTPException(status_code=404, detail=f"Project with ID {project_id} not found")
+        async def load() -> EntityResponseV2:
+            note_payload = (
+                await note_content_query_service.get_note_entity_payload_with_read_repair(
+                    project_external_id=project_external_id,
+                    entity_external_id=entity_id,
+                    session=session,
+                )
+            )
+            if note_payload is not None:
+                result = entity_response_from_note_content_payload(note_payload)
+                logger.info(f"API v2 response: external_id={entity_id}, title='{result.title}'")
+                return result
 
-        note_payload = await note_content_query_service.get_note_entity_payload_with_read_repair(
-            project_external_id=project.external_id,
-            entity_external_id=entity_id,
-            session=session,
-        )
-        if note_payload is not None:
-            result = entity_response_from_note_content_payload(note_payload)
+            entity = await entity_repository.get_by_external_id(session, entity_id)
+            if not entity:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Entity with external_id '{entity_id}' not found",
+                )
+
+            result = EntityResponseV2.model_validate(entity)
             logger.info(f"API v2 response: external_id={entity_id}, title='{result.title}'")
             return result
 
-        entity = await entity_repository.get_by_external_id(session, entity_id)
-        if not entity:
-            raise HTTPException(
-                status_code=404, detail=f"Entity with external_id '{entity_id}' not found"
-            )
-
-        result = EntityResponseV2.model_validate(entity)
-        logger.info(f"API v2 response: external_id={entity_id}, title='{result.title}'")
-
-        return result
+        return await read_through_model(
+            cache=read_cache,
+            key=ReadCacheKey(
+                project_id=project_external_id,
+                operation=ReadCacheOperation.entity,
+                request_digest=read_cache_request_digest(entity_id),
+            ),
+            model_type=EntityResponseV2,
+            load=load,
+            ttl_seconds=READ_CACHE_TTL_SECONDS,
+            max_payload_bytes=READ_CACHE_MAX_PAYLOAD_BYTES,
+        )
 
 
 ## Create endpoints
@@ -907,6 +960,9 @@ async def move_entity(
 async def move_directory(
     data: MoveDirectoryRequestV2,
     project_id: ProjectExternalIdPathDep,
+    project_external_id: Annotated[
+        str, Path(alias="project_id", description="Project external UUID")
+    ],
     entity_service: EntityServiceV2ExternalDep,
     project_config: ProjectConfigV2ExternalDep,
     app_config: AppConfigDep,
@@ -914,6 +970,7 @@ async def move_directory(
     vector_sync_scheduler: EntityVectorSyncSchedulerDep,
     relation_resolution_scheduler: RelationResolutionSchedulerDep,
     session_maker: SessionMakerDep,
+    read_cache: ReadCacheDep,
 ) -> DirectoryMoveResult:
     """Move all entities in a directory to a new location.
 
@@ -946,22 +1003,29 @@ async def move_directory(
                 project_config=project_config,
                 app_config=app_config,
             )
+            await invalidate_project_read_cache(read_cache, project_external_id)
 
-            # Reindex moved entities
-            for file_path in result.moved_files:
-                async with db.scoped_session(session_maker) as session:
-                    entity = await entity_service.link_resolver.resolve_link(
-                        file_path, session=session
-                    )
-                if entity:
-                    await search_service.index_entity(entity)
-                    _schedule_post_write_followups(
-                        vector_sync_scheduler=vector_sync_scheduler,
-                        relation_resolution_scheduler=relation_resolution_scheduler,
-                        app_config=app_config,
-                        entity_id=entity.id,
-                        project_id=project_id,
-                    )
+            try:
+                # Reindex moved entities
+                for file_path in result.moved_files:
+                    async with db.scoped_session(session_maker) as session:
+                        entity = await entity_service.link_resolver.resolve_link(
+                            file_path, session=session
+                        )
+                    if entity:
+                        await search_service.index_entity(entity)
+                        _schedule_post_write_followups(
+                            vector_sync_scheduler=vector_sync_scheduler,
+                            relation_resolution_scheduler=relation_resolution_scheduler,
+                            app_config=app_config,
+                            entity_id=entity.id,
+                            project_id=project_id,
+                        )
+            finally:
+                # Reindexing can alter entity responses after the move was first
+                # invalidated. Close that fill window even after partial
+                # follow-up failure.
+                await invalidate_project_read_cache(read_cache, project_external_id)
 
             logger.info(
                 f"API v2 response: move_directory "
@@ -984,6 +1048,7 @@ async def delete_directory(
         str, Path(alias="project_id", description="Project external UUID")
     ],
     directory_delete_service: DirectoryDeleteServiceDep,
+    read_cache: ReadCacheDep,
 ) -> Response:
     """Delete all entities in a directory.
 
@@ -1011,6 +1076,7 @@ async def delete_directory(
                 project_external_id=project_external_id,
                 directory=data.directory,
             )
+            await invalidate_project_read_cache(read_cache, project_external_id)
             payload = result.to_response_payload()
             logger.info(
                 f"API v2 response: delete_directory "

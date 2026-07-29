@@ -24,8 +24,9 @@ async def test_start_waits_for_recovery_before_reporting_running(
         quiet: bool = True,
         *,
         recovery_complete: asyncio.Event | None = None,
+        read_cache: object | None = None,
     ) -> None:
-        del config, quiet
+        del config, quiet, read_cache
         await allow_recovery_to_finish.wait()
         assert recovery_complete is not None
         recovery_complete.set()
@@ -62,8 +63,9 @@ async def test_start_propagates_failure_before_recovery_completes(
         quiet: bool = True,
         *,
         recovery_complete: asyncio.Event | None = None,
+        read_cache: object | None = None,
     ) -> None:
-        del config, quiet, recovery_complete
+        del config, quiet, recovery_complete, read_cache
         raise RuntimeError("recovery boom")
 
     monkeypatch.setattr(

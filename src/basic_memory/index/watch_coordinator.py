@@ -9,6 +9,7 @@ from enum import Enum, auto
 from loguru import logger
 
 from basic_memory.config import BasicMemoryConfig
+from basic_memory.read_cache import NullReadCache, ReadCache
 
 
 class WatchStatus(Enum):
@@ -30,6 +31,7 @@ class WatchCoordinator:
     should_watch: bool = True
     skip_reason: str | None = None
     quiet: bool = True
+    read_cache: ReadCache = field(default_factory=NullReadCache)
 
     _status: WatchStatus = field(default=WatchStatus.NOT_STARTED, init=False)
     _watch_task: asyncio.Task[None] | None = field(default=None, init=False)
@@ -72,6 +74,7 @@ class WatchCoordinator:
                         self.config,
                         quiet=self.quiet,
                         recovery_complete=recovery_complete,
+                        read_cache=self.read_cache,
                     )
                 except asyncio.CancelledError:
                     logger.debug("Local event-index watcher cancelled")

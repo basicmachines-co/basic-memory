@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from basic_memory.index.local_project import LocalProjectIndexRuntimeProvider
+    from basic_memory.read_cache import ReadCache
 
 
 async def run_initial_project_index(
@@ -151,6 +152,7 @@ async def initialize_file_indexing(
     quiet: bool = True,
     *,
     recovery_complete: asyncio.Event | None = None,
+    read_cache: "ReadCache | None" = None,
 ) -> None:
     """Initialize file indexing services.
 
@@ -160,6 +162,7 @@ async def initialize_file_indexing(
         app_config: The Basic Memory project configuration
         quiet: Whether to suppress Rich console output (True for MCP, False for CLI watch)
         recovery_complete: Optional startup barrier set after durable recovery finishes.
+        read_cache: Optional host-injected semantic read cache.
 
     Returns:
         The watch service task that's monitoring file changes
@@ -177,6 +180,7 @@ async def initialize_file_indexing(
     from basic_memory.index.local_project import LocalProjectIndexRuntimeFactory
     from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
     from basic_memory.index.watch_service import WatchService
+    from basic_memory.read_cache import NullReadCache
 
     # Get database session (migrations already run if needed)
     _, session_maker = await db.get_or_create_db(
@@ -190,11 +194,15 @@ async def initialize_file_indexing(
     # running multiple `basic-memory mcp --project X` processes does not produce
     # duplicate watchers fighting over the same files.
     constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
+    active_read_cache = read_cache if read_cache is not None else NullReadCache()
 
     event_index_runtime_factory = LocalWatchEventIndexRuntimeFactory(
         index_embeddings=app_config.semantic_search_enabled,
+        read_cache=active_read_cache,
     )
-    project_index_runtime_factory = LocalProjectIndexRuntimeFactory()
+    project_index_runtime_factory = LocalProjectIndexRuntimeFactory(
+        read_cache=active_read_cache,
+    )
 
     # Initialize watch service
     watch_service = WatchService(

@@ -315,6 +315,9 @@ async def test_initialize_file_indexing_uses_project_index_runtime_for_initial_s
             return original_create_task(coro)
 
         class RecordingProjectIndexRuntimeFactory:
+            def __init__(self, *, read_cache: object) -> None:
+                self.read_cache = read_cache
+
             async def runtime_for_project(self, project):  # noqa: ANN001
                 return f"runtime:{project.name}"
 

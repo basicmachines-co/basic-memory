@@ -38,6 +38,11 @@ from basic_memory.deps.projects import (
     ProjectConfigV2ExternalDep,
 )
 
+from basic_memory.deps.read_cache import (
+    get_read_cache,
+    ReadCacheDep,
+)
+
 from basic_memory.deps.repositories import (
     get_entity_repository_v2_external,
     EntityRepositoryV2ExternalDep,
@@ -123,6 +128,9 @@ __all__ = [
     "ProjectExternalIdPathDep",
     "get_project_config_v2_external",
     "ProjectConfigV2ExternalDep",
+    # Read cache
+    "get_read_cache",
+    "ReadCacheDep",
     # Repositories
     "get_entity_repository_v2_external",
     "EntityRepositoryV2ExternalDep",

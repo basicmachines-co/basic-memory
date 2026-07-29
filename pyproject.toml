@@ -68,6 +68,9 @@ milvus = [
     "pymilvus>=3.0.0,<4; sys_platform == 'win32'",
     "pymilvus[milvus-lite]>=3.0.0,<4; sys_platform != 'win32'",
 ]
+redis = [
+    "redis>=8.0.0,<9",
+]
 
 [project.urls]
 Homepage = "https://github.com/basicmachines-co/basic-memory"
@@ -103,6 +106,7 @@ markers = [
     "benchmark: Performance benchmark tests (deselect with '-m \"not benchmark\"')",
     "slow: Slow-running tests (deselect with '-m \"not slow\"')",
     "postgres: Tests that run against Postgres backend (deselect with '-m \"not postgres\"')",
+    "redis: Tests that run against a real Redis server",
     "windows: Windows-specific tests (deselect with '-m \"not windows\"')",
     "smoke: Fast end-to-end smoke tests for MCP flows",
     "semantic: Tests requiring semantic dependencies (fastembed, sqlite-vec, openai)",
@@ -131,6 +135,7 @@ dev = [
     "ruff>=0.16.0",
     "freezegun>=1.5.5",
     "testcontainers[postgres]>=4.0.0",
+    "redis>=8.0.0,<9",
     "psycopg>=3.2.0",
     "pyright>=1.1.408",
     "pytest-testmon>=2.2.0",

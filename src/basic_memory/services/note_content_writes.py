@@ -30,6 +30,7 @@ from basic_memory.runtime.note_content import (
     RuntimeAcceptedNoteChange,
     RuntimeNoteContentResponsePayload,
 )
+from basic_memory.read_cache import NullReadCache, ReadCache, invalidate_project_read_cache
 from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.schemas.request import EditEntityRequest
 
@@ -138,11 +139,17 @@ class NoteContentMutationService:
         mutation_dependencies: AcceptedNoteMutationDependencies,
         content_freshener: NoteContentMutationFreshener | None = None,
         actor_resolver: NoteContentMutationActorResolver | None = None,
+        read_cache: ReadCache | None = None,
     ) -> None:
         self.session_maker = session_maker
         self.mutation_dependencies = mutation_dependencies
         self.content_freshener = content_freshener
         self.actor_resolver = actor_resolver
+        self.read_cache = read_cache if read_cache is not None else NullReadCache()
+
+    async def _invalidate_project(self, project_external_id: str) -> None:
+        """Invalidate semantic reads after the accepted transaction commits."""
+        await invalidate_project_read_cache(self.read_cache, project_external_id)
 
     def _resolve_actor(
         self,
@@ -200,7 +207,7 @@ class NoteContentMutationService:
         )
         try:
             async with accepted_note_transaction(self.session_maker) as session:
-                return await run_accepted_note_create(
+                accepted = await run_accepted_note_create(
                     session,
                     request=AcceptedNoteCreateMutation(
                         project_external_id=project_external_id,
@@ -214,6 +221,8 @@ class NoteContentMutationService:
                     ),
                     dependencies=self.mutation_dependencies,
                 )
+            await self._invalidate_project(project_external_id)
+            return accepted
         except AcceptedNoteMutationRejected as error:
             raise note_content_mutation_error_from_rejection(error.rejection) from error
 
@@ -251,7 +260,7 @@ class NoteContentMutationService:
                 entity_external_id=entity_external_id,
             )
             async with accepted_note_transaction(self.session_maker) as session:
-                return await run_accepted_note_update(
+                accepted = await run_accepted_note_update(
                     session,
                     request=AcceptedNoteUpdateMutation(
                         project_external_id=project_external_id,
@@ -267,6 +276,8 @@ class NoteContentMutationService:
                     ),
                     dependencies=self.mutation_dependencies,
                 )
+            await self._invalidate_project(project_external_id)
+            return accepted
         except AcceptedNoteMutationRejected as error:
             raise note_content_mutation_error_from_rejection(error.rejection) from error
 
@@ -295,7 +306,7 @@ class NoteContentMutationService:
                 entity_external_id=entity_external_id,
             )
             async with accepted_note_transaction(self.session_maker) as session:
-                return await run_accepted_note_edit(
+                accepted = await run_accepted_note_edit(
                     session,
                     request=AcceptedNoteEditMutation(
                         project_external_id=project_external_id,
@@ -310,6 +321,8 @@ class NoteContentMutationService:
                     ),
                     dependencies=self.mutation_dependencies,
                 )
+            await self._invalidate_project(project_external_id)
+            return accepted
         except AcceptedNoteMutationRejected as error:
             raise note_content_mutation_error_from_rejection(error.rejection) from error
 
@@ -338,7 +351,7 @@ class NoteContentMutationService:
                 entity_external_id=entity_external_id,
             )
             async with accepted_note_transaction(self.session_maker) as session:
-                return await run_accepted_note_move(
+                accepted = await run_accepted_note_move(
                     session,
                     request=AcceptedNoteMoveMutation(
                         project_external_id=project_external_id,
@@ -353,6 +366,8 @@ class NoteContentMutationService:
                     ),
                     dependencies=self.mutation_dependencies,
                 )
+            await self._invalidate_project(project_external_id)
+            return accepted
         except AcceptedNoteMutationRejected as error:
             raise note_content_mutation_error_from_rejection(error.rejection) from error
 
@@ -369,7 +384,7 @@ class NoteContentMutationService:
                 entity_external_id=entity_external_id,
             )
             async with accepted_note_transaction(self.session_maker) as session:
-                return await run_accepted_note_delete(
+                accepted = await run_accepted_note_delete(
                     session,
                     request=AcceptedNoteDeleteMutation(
                         project_external_id=project_external_id,
@@ -377,5 +392,7 @@ class NoteContentMutationService:
                     ),
                     dependencies=self.mutation_dependencies,
                 )
+            await self._invalidate_project(project_external_id)
+            return accepted
         except AcceptedNoteMutationRejected as error:
             raise note_content_mutation_error_from_rejection(error.rejection) from error

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, override, Protocol
 
@@ -79,6 +79,7 @@ from basic_memory.indexing.relation_resolution import (
     resolve_project_index_completion_relations,
 )
 from basic_memory.models import Entity, Project
+from basic_memory.read_cache import NullReadCache, ReadCache, invalidate_project_read_cache
 from basic_memory.repository import NoteContentRepository
 from basic_memory.runtime.jobs import (
     RuntimeIndexFileBatchJobRequest,
@@ -459,6 +460,7 @@ class LocalProjectIndexRuntime:
     embedding_vector_sync: EmbeddingBatchVectorSync | None = None
     batch_size: int = 100
     coordinator_job_id: RuntimeJobId | None = None
+    read_cache: ReadCache = field(default_factory=NullReadCache)
 
 
 LocalProjectIndexObservation = ProjectIndexObservation
@@ -573,6 +575,7 @@ class LocalProjectIndexRuntimeFactory:
     batch_size: int = 100
     read_max_concurrent: int = 8
     index_max_concurrent: int = 8
+    read_cache: ReadCache = field(default_factory=NullReadCache)
 
     async def dependencies_for_project(self, project: Project) -> LocalIndexProjectDependencies:
         return await self.dependency_provider.dependencies_for_project(project)
@@ -652,6 +655,7 @@ class LocalProjectIndexRuntimeFactory:
             ),
             embedding_vector_sync=local_project_embedding_vector_sync(dependencies),
             batch_size=self.batch_size,
+            read_cache=self.read_cache,
         )
 
     async def runtime_for_project(self, project: Project) -> LocalProjectIndexRuntime:
@@ -770,12 +774,28 @@ async def run_local_project_index(
         batch_size=runtime.batch_size,
         embedding_vector_sync=runtime.embedding_vector_sync,
     )
+    # Project indexing has already committed entity/search changes. Invalidate
+    # before relation repair so a later failure cannot leave pre-index values
+    # reachable for the full TTL.
+    await invalidate_project_read_cache(
+        runtime.read_cache,
+        request.project.project_external_id,
+    )
     if runtime.completion_relation_runtime is not None:
-        await resolve_project_index_completion_relations(
-            ProjectIndexRelationResolutionContext(
-                project_id=request.project.project_id,
-                project_path=request.project.project_path,
-            ),
-            runtime.completion_relation_runtime,
-        )
+        try:
+            await resolve_project_index_completion_relations(
+                ProjectIndexRelationResolutionContext(
+                    project_id=request.project.project_id,
+                    project_path=request.project.project_path,
+                ),
+                runtime.completion_relation_runtime,
+            )
+        finally:
+            # Relation repair can mutate cached entity responses after the first
+            # invalidation. Clear any value filled during that window, including
+            # when repair commits partial progress before raising.
+            await invalidate_project_read_cache(
+                runtime.read_cache,
+                request.project.project_external_id,
+            )
     return result

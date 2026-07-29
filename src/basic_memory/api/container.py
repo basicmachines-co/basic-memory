@@ -10,13 +10,14 @@ Design principles:
 - Factories for services are provided, not singletons
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, AsyncSession
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ConfigManager
+from basic_memory.read_cache import NullReadCache, ReadCache
 from basic_memory.runtime.mode import RuntimeMode, resolve_runtime_mode
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -38,6 +39,11 @@ class ApiContainer:
     # Cached database connections (set during lifespan startup)
     engine: AsyncEngine | None = None
     session_maker: async_sessionmaker[AsyncSession] | None = None
+
+    # --- Optional semantic read cache ---
+    # Hosts inject a namespace-bound implementation; local and off-lifespan
+    # ASGI requests deliberately stay dependency-free by default.
+    read_cache: ReadCache = field(default_factory=NullReadCache)
 
     @classmethod
     def create(cls) -> "ApiContainer":  # pragma: no cover
@@ -91,6 +97,7 @@ class ApiContainer:
             config=self.config,
             should_watch=self.should_watch_files,
             skip_reason=self.watch_skip_reason,
+            read_cache=self.read_cache,
         )
 
     # --- Database Factory ---

@@ -13,6 +13,7 @@ from pathlib import Path as PathLib
 
 from fastapi import APIRouter, HTTPException, Response, Path
 from loguru import logger
+from pydantic import BaseModel, ConfigDict
 
 import logfire
 from basic_memory import db
@@ -21,11 +22,35 @@ from basic_memory.deps import (
     FileServiceV2ExternalDep,
     EntityRepositoryV2ExternalDep,
     NoteContentQueryServiceDep,
+    ReadCacheDep,
     SessionMakerDep,
+)
+from basic_memory.read_cache import (
+    ReadCacheKey,
+    ReadCacheOperation,
+    read_cache_request_digest,
+    read_through_model,
+)
+from basic_memory.read_cache.policy import (
+    READ_CACHE_MAX_PAYLOAD_BYTES,
+    READ_CACHE_TTL_SECONDS,
 )
 from basic_memory.utils import validate_project_path
 
 router = APIRouter(prefix="/resource", tags=["resources-v2"])
+
+
+class CachedResourceResponse(BaseModel):
+    """Typed wire value for one cacheable resource response."""
+
+    content: bytes
+    media_type: str
+
+    model_config = ConfigDict(ser_json_bytes="base64", val_json_bytes="base64")
+
+
+def _is_markdown_resource(resource: CachedResourceResponse) -> bool:
+    return resource.media_type.partition(";")[0].strip().lower() == "text/markdown"
 
 
 @router.get("/{entity_id}")
@@ -34,6 +59,7 @@ async def get_resource_content(
     entity_repository: EntityRepositoryV2ExternalDep,
     file_service: FileServiceV2ExternalDep,
     note_content_query_service: NoteContentQueryServiceDep,
+    read_cache: ReadCacheDep,
     session_maker: SessionMakerDep,
     project_id: str = Path(..., description="Project external UUID"),
     entity_id: str = Path(..., description="Entity external UUID"),
@@ -61,69 +87,91 @@ async def get_resource_content(
     ):
         logger.debug(f"V2 Getting content for project {project_id}, entity_id: {entity_id}")
 
-        # Keep the DB session open only for the lookups; close it before the
-        # filesystem I/O below so large/slow resource reads don't pin a pooled
-        # connection (and an open read transaction on Postgres) for their duration.
-        async with db.scoped_session(session_maker) as session:
-            note_resource = await note_content_query_service.get_note_resource_with_read_repair(
-                project_external_id=project_id,
-                entity_external_id=entity_id,
-                session=session,
-            )
-            if note_resource is not None:
-                return Response(
-                    content=note_resource.content,
-                    media_type=note_resource.content_type,
+        async def load() -> CachedResourceResponse:
+            # Keep the DB session open only for the lookups; close it before the
+            # filesystem I/O below so large/slow resource reads don't pin a pooled
+            # connection (and an open read transaction on Postgres) for their duration.
+            async with db.scoped_session(session_maker) as session:
+                note_resource = await note_content_query_service.get_note_resource_with_read_repair(
+                    project_external_id=project_id,
+                    entity_external_id=entity_id,
+                    session=session,
                 )
+                if note_resource is not None:
+                    return CachedResourceResponse(
+                        content=note_resource.content.encode("utf-8"),
+                        media_type=note_resource.content_type,
+                    )
+
+                with logfire.span(
+                    "api.resource.get_content.load_entity",
+                    domain="resource",
+                    action="get_content",
+                    phase="load_entity",
+                ):
+                    entity = await entity_repository.get_by_external_id(session, entity_id)
+                if not entity:
+                    raise HTTPException(status_code=404, detail=f"Entity {entity_id} not found")
+                # Copy the scalar columns needed for file I/O so the session can close.
+                entity_file_path = entity.file_path
+                entity_db_id = entity.id
 
             with logfire.span(
-                "api.resource.get_content.load_entity",
+                "api.resource.get_content.validate_path",
                 domain="resource",
                 action="get_content",
-                phase="load_entity",
+                phase="validate_path",
             ):
-                entity = await entity_repository.get_by_external_id(session, entity_id)
-            if not entity:
-                raise HTTPException(status_code=404, detail=f"Entity {entity_id} not found")
-            # Copy the scalar columns needed for file I/O so the session can close.
-            entity_file_path = entity.file_path
-            entity_db_id = entity.id
+                project_path = PathLib(config.home)
+                if not validate_project_path(entity_file_path, project_path):
+                    logger.error(  # pragma: no cover
+                        f"Invalid file path in entity {entity_db_id}: {entity_file_path}"
+                    )
+                    raise HTTPException(  # pragma: no cover
+                        status_code=500,
+                        detail="Entity contains invalid file path",
+                    )
 
-        with logfire.span(
-            "api.resource.get_content.validate_path",
-            domain="resource",
-            action="get_content",
-            phase="validate_path",
-        ):
-            project_path = PathLib(config.home)
-            if not validate_project_path(entity_file_path, project_path):
-                logger.error(  # pragma: no cover
-                    f"Invalid file path in entity {entity_db_id}: {entity_file_path}"
-                )
-                raise HTTPException(  # pragma: no cover
-                    status_code=500,
-                    detail="Entity contains invalid file path",
-                )
+            with logfire.span(
+                "api.resource.get_content.ensure_exists",
+                domain="resource",
+                action="get_content",
+                phase="ensure_exists",
+            ):
+                if not await file_service.exists(entity_file_path):
+                    raise HTTPException(  # pragma: no cover
+                        status_code=404,
+                        detail=f"File not found: {entity_file_path}",
+                    )
 
-        with logfire.span(
-            "api.resource.get_content.ensure_exists",
-            domain="resource",
-            action="get_content",
-            phase="ensure_exists",
-        ):
-            if not await file_service.exists(entity_file_path):
-                raise HTTPException(  # pragma: no cover
-                    status_code=404,
-                    detail=f"File not found: {entity_file_path}",
-                )
+            with logfire.span(
+                "api.resource.get_content.read_content",
+                domain="resource",
+                action="get_content",
+                phase="read_content",
+            ):
+                content = await file_service.read_file_bytes(entity_file_path)
+                content_type = file_service.content_type(entity_file_path)
 
-        with logfire.span(
-            "api.resource.get_content.read_content",
-            domain="resource",
-            action="get_content",
-            phase="read_content",
-        ):
-            content = await file_service.read_file_bytes(entity_file_path)
-            content_type = file_service.content_type(entity_file_path)
+            return CachedResourceResponse(
+                content=content,
+                media_type=content_type,
+            )
 
-        return Response(content=content, media_type=content_type)
+        resource = await read_through_model(
+            cache=read_cache,
+            key=ReadCacheKey(
+                project_id=project_id,
+                operation=ReadCacheOperation.resource,
+                request_digest=read_cache_request_digest(entity_id),
+            ),
+            model_type=CachedResourceResponse,
+            load=load,
+            ttl_seconds=READ_CACHE_TTL_SECONDS,
+            max_payload_bytes=READ_CACHE_MAX_PAYLOAD_BYTES,
+            should_store=_is_markdown_resource,
+        )
+        return Response(
+            content=resource.content,
+            media_type=resource.media_type,
+        )

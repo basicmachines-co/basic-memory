@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from loguru import logger
 
@@ -57,6 +57,7 @@ from basic_memory.indexing.external_file_delete_runner import (
     RepositoryExternalFileDeleteEntities,
 )
 from basic_memory.models import Entity, Project
+from basic_memory.read_cache import NullReadCache, ReadCache, invalidate_project_read_cache
 from basic_memory.repository import NoteContentRepository
 from basic_memory.runtime.projects import ProjectRuntimeReference
 from basic_memory.runtime.storage import (
@@ -144,6 +145,7 @@ class LocalInlineStorageEventResultRecorder:
     relation_cleanup_search_refresher: ProjectIndexMovedEntitySearchRefresher
     relation_runtime: RelationResolutionRuntime
     index_embeddings: bool
+    read_cache: ReadCache = field(default_factory=NullReadCache)
 
     async def index_file_completed(
         self,
@@ -158,6 +160,12 @@ class LocalInlineStorageEventResultRecorder:
             entity_id=result.entity_id,
         )
 
+        if result.status == IndexFileJobStatus.processed:
+            await invalidate_project_read_cache(
+                self.read_cache,
+                self.project.project_external_id,
+            )
+
         # --- Relation repair ---
         # Back-resolve forward references now that this file is indexed.
         relation_request = plan_index_file_relation_resolution(
@@ -168,15 +176,24 @@ class LocalInlineStorageEventResultRecorder:
             )
         )
         if relation_request is not None:
-            relation_result = await resolve_project_relations(self.relation_runtime)
-            logger.info(
-                "Local event-index relation repair completed",
-                project_id=relation_request.project_id,
-                project_path=relation_request.project_path,
-                resolved=relation_result.resolved,
-                remaining=relation_result.remaining,
-                passes=relation_result.passes,
-            )
+            try:
+                relation_result = await resolve_project_relations(self.relation_runtime)
+                logger.info(
+                    "Local event-index relation repair completed",
+                    project_id=relation_request.project_id,
+                    project_path=relation_request.project_path,
+                    resolved=relation_result.resolved,
+                    remaining=relation_result.remaining,
+                    passes=relation_result.passes,
+                )
+            finally:
+                # Relation repair changes cached entity payloads after indexing.
+                # A second generation bump closes the fill window opened by the
+                # first post-index invalidation, even after partial failure.
+                await invalidate_project_read_cache(
+                    self.read_cache,
+                    self.project.project_external_id,
+                )
 
         # --- Semantic embedding ---
         # Trigger: a file was (re)indexed and semantic embeddings are enabled.
@@ -209,12 +226,27 @@ class LocalInlineStorageEventResultRecorder:
         )
         if not result.entity_deleted:
             return
-        if not isinstance(result.deleted_entity, Entity):
-            raise RuntimeError("Local external file delete returned an incomplete entity result")
-        await self.search_service.handle_delete(result.deleted_entity)
-        await self.relation_cleanup_search_refresher.refresh_moved_entities(
-            tuple(sorted(result.relation_cleanup_entity_ids)),
+        await invalidate_project_read_cache(
+            self.read_cache,
+            self.project.project_external_id,
         )
+        try:
+            if not isinstance(result.deleted_entity, Entity):
+                raise RuntimeError(
+                    "Local external file delete returned an incomplete entity result"
+                )
+            await self.search_service.handle_delete(result.deleted_entity)
+            await self.relation_cleanup_search_refresher.refresh_moved_entities(
+                tuple(sorted(result.relation_cleanup_entity_ids)),
+            )
+        finally:
+            # Cleanup may rewrite relations on surviving entities. Invalidate
+            # values filled after the delete became visible, including partial
+            # cleanup progress followed by an error.
+            await invalidate_project_read_cache(
+                self.read_cache,
+                self.project.project_external_id,
+            )
 
     async def skip_event(self, operation: RuntimeStorageEventOperation) -> None:
         logger.debug(
@@ -264,6 +296,7 @@ class LocalWatchEventIndexRuntimeFactory:
     # let runtime construction opt in via semantic_search_enabled (#1016).
     index_embeddings: bool = False
     move_batch_size: int = 100
+    read_cache: ReadCache = field(default_factory=NullReadCache)
 
     async def runtime_for_project(self, project: Project) -> StorageEventIndexRuntime:
         dependencies = await self.dependency_provider.dependencies_for_project(project)
@@ -332,6 +365,7 @@ class LocalWatchEventIndexRuntimeFactory:
                     entity_indexer=dependencies.search_service,
                 ),
                 index_embeddings=self.index_embeddings,
+                read_cache=self.read_cache,
             ),
             index_embeddings=self.index_embeddings,
         )
