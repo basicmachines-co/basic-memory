@@ -51,6 +51,7 @@ from basic_memory.repository.note_file_vacate_repository import (
     NoteFileVacateRepository,
     RecoverableVacate,
 )
+from basic_memory.read_cache import ReadCache, invalidate_project_read_cache
 from basic_memory.schemas.response import ObservationResponse, RelationResponse
 from basic_memory.services.file_service import FileService
 
@@ -571,6 +572,8 @@ class LocalNoteContentMaterializationProvider:
 
     session_maker: async_sessionmaker[AsyncSession]
     file_service: FileService
+    project_external_id: str
+    read_cache: ReadCache
     file_indexer: IndexFileExecutor | None = None
     test_mode: bool = False
     materialization_workers: int = 4
@@ -626,60 +629,69 @@ class LocalNoteContentMaterializationProvider:
     ) -> RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload]:
         if accepted.materialization is None:  # pragma: no cover - guarded by caller
             return accepted
-        storage = LocalNoteContentStorage(self.file_service)
-        cleanup_enqueuer = InlineNoteFileDeleteEnqueuer(
-            storage,
-            vacate_clearer=RepositoryMoveVacateClearer(session_maker=self.session_maker),
-        )
-        result = await run_note_materialization(
-            plan_note_materialization_job_request(accepted.materialization),
-            preflight=RepositoryNoteMaterializationPreflight(
-                session_maker=self.session_maker,
-            ),
-            writer=ContentStoreNoteMaterializationFileWriter(storage),
-            publisher=RepositoryNoteMaterializationPublisher(
-                session_maker=self.session_maker,
-            ),
-            status_publisher=RepositoryNoteMaterializationStatusPublisher(
-                session_maker=self.session_maker,
-            ),
-            cleanup_enqueuer=cleanup_enqueuer,
-        )
-        if result.status is not RuntimeNoteMaterializationStatus.written:
-            return replace(
-                accepted,
-                payload=note_content_payload_with_materialization_result(
-                    accepted.payload,
-                    result,
-                ),
+        try:
+            storage = LocalNoteContentStorage(self.file_service)
+            cleanup_enqueuer = InlineNoteFileDeleteEnqueuer(
+                storage,
+                vacate_clearer=RepositoryMoveVacateClearer(session_maker=self.session_maker),
             )
-
-        file_path = note_content_payload_file_path(accepted.payload)
-        if file_path is not None and self.file_indexer is not None:
-            await self.file_indexer.index_file(
-                file_path,
-                source="note-content-materialization",
-            )
-            # The deferred index has now inserted this note's entity/relation rows,
-            # so back-resolve inbound forward references. The router schedules an
-            # eager pass right after enqueue, but under load that pass can scan
-            # before this index lands; scheduling here (coalesced/re-armed by the
-            # resolution scheduler) guarantees a pass runs after indexing (#1002).
-            if self.relation_resolution_scheduler is not None:
-                self.relation_resolution_scheduler.schedule_relation_resolution(
-                    project_id=accepted.materialization.project_id,
-                )
-            return replace(
-                accepted,
-                payload=await load_indexed_note_content_response_payload(
+            result = await run_note_materialization(
+                plan_note_materialization_job_request(accepted.materialization),
+                preflight=RepositoryNoteMaterializationPreflight(
                     session_maker=self.session_maker,
-                    project_id=accepted.materialization.project_id,
-                    entity_id=accepted.materialization.entity_id,
-                    fallback_source=accepted.materialization.source
-                    or "note-content-materialization",
                 ),
+                writer=ContentStoreNoteMaterializationFileWriter(storage),
+                publisher=RepositoryNoteMaterializationPublisher(
+                    session_maker=self.session_maker,
+                ),
+                status_publisher=RepositoryNoteMaterializationStatusPublisher(
+                    session_maker=self.session_maker,
+                ),
+                cleanup_enqueuer=cleanup_enqueuer,
             )
-        return accepted
+            if result.status is not RuntimeNoteMaterializationStatus.written:
+                return replace(
+                    accepted,
+                    payload=note_content_payload_with_materialization_result(
+                        accepted.payload,
+                        result,
+                    ),
+                )
+
+            file_path = note_content_payload_file_path(accepted.payload)
+            if file_path is not None and self.file_indexer is not None:
+                await self.file_indexer.index_file(
+                    file_path,
+                    source="note-content-materialization",
+                )
+                # The deferred index has now inserted this note's entity/relation rows,
+                # so back-resolve inbound forward references. The router schedules an
+                # eager pass right after enqueue, but under load that pass can scan
+                # before this index lands; scheduling here (coalesced/re-armed by the
+                # resolution scheduler) guarantees a pass runs after indexing (#1002).
+                if self.relation_resolution_scheduler is not None:
+                    self.relation_resolution_scheduler.schedule_relation_resolution(
+                        project_id=accepted.materialization.project_id,
+                    )
+                return replace(
+                    accepted,
+                    payload=await load_indexed_note_content_response_payload(
+                        session_maker=self.session_maker,
+                        project_id=accepted.materialization.project_id,
+                        entity_id=accepted.materialization.entity_id,
+                        fallback_source=accepted.materialization.source
+                        or "note-content-materialization",
+                    ),
+                )
+            return accepted
+        finally:
+            # The accepted-write invalidation runs before deferred materialization.
+            # Invalidate again after status publication and indexing so a read
+            # filled during that window cannot survive the terminal state.
+            await invalidate_project_read_cache(
+                self.read_cache,
+                self.project_external_id,
+            )
 
     async def materialize_delete_change(
         self,

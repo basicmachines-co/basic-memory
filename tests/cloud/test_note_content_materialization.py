@@ -6,7 +6,7 @@ import asyncio
 import os
 from datetime import UTC, datetime
 from hashlib import sha256
-from typing import Any, cast
+from typing import Any, cast, override
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -27,6 +27,11 @@ from basic_memory.repository.note_content_repository import (
     NoteContentRepository,
 )
 from basic_memory.repository.note_file_vacate_repository import NoteFileVacateRepository
+from basic_memory.read_cache import (
+    NullReadCache,
+    ReadCache,
+    ReadCacheInvalidationStatus,
+)
 from basic_memory.runtime.cleanup import RuntimeNoteFileDeleteJobRequest
 from basic_memory.indexing.models import FileIndexOperation, FileIndexResult
 from basic_memory.runtime.note_content import (
@@ -41,6 +46,8 @@ from basic_memory.runtime.note_content import (
     runtime_note_content_payload_as_dict,
 )
 from basic_memory.services.file_service import FileService
+
+PROJECT_EXTERNAL_ID = "00000000-0000-0000-0000-000000000007"
 
 
 class RecordingFileIndexer:
@@ -58,6 +65,16 @@ class RecordingFileIndexer:
             checksum="indexed-checksum",
             operation=FileIndexOperation.updated,
         )
+
+
+class RecordingReadCache(NullReadCache):
+    def __init__(self) -> None:
+        self.invalidated_project_ids: list[str] = []
+
+    @override
+    async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
+        self.invalidated_project_ids.append(project_id)
+        return ReadCacheInvalidationStatus.invalidated
 
 
 def accepted_materialization_change() -> RuntimeAcceptedNoteChange[
@@ -102,12 +119,15 @@ def local_materialization_provider(
     indexer: RecordingFileIndexer,
     *,
     test_mode: bool = True,
+    read_cache: ReadCache | None = None,
 ) -> LocalNoteContentMaterializationProvider:
     # test_mode=True keeps materialization inline so these tests can assert the
     # result synchronously; production defers it to a background task.
     return LocalNoteContentMaterializationProvider(
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
         file_service=cast(FileService, object()),
+        project_external_id=PROJECT_EXTERNAL_ID,
+        read_cache=read_cache if read_cache is not None else NullReadCache(),
         file_indexer=indexer,
         test_mode=test_mode,
     )
@@ -277,19 +297,24 @@ async def test_local_materialization_defers_write_off_the_accept_path(
     pool = note_content_materialization._MaterializationWorkerPool()
     monkeypatch.setattr(note_content_materialization, "_materialization_pool", pool)
     indexer = RecordingFileIndexer()
+    read_cache = RecordingReadCache()
     accepted = accepted_materialization_change()
 
     result = await local_materialization_provider(
-        indexer, test_mode=False
+        indexer,
+        test_mode=False,
+        read_cache=read_cache,
     ).materialize_write_change(accepted)
 
     # Returned immediately with the accepted DB state — no inline write yet.
     assert result is accepted
     assert requests == []
+    assert read_cache.invalidated_project_ids == []
 
     # The write happens off the accept path via the bounded pool; drain to confirm.
     await pool.join()
     assert len(requests) == 1
+    assert read_cache.invalidated_project_ids == [PROJECT_EXTERNAL_ID]
     await pool.aclose()
 
 
@@ -350,9 +375,12 @@ async def test_local_materialization_schedules_relation_resolution_after_index(
         def schedule_relation_resolution(self, *, project_id: int) -> None:
             scheduled.append(project_id)
 
+    read_cache = RecordingReadCache()
     provider = LocalNoteContentMaterializationProvider(
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
         file_service=cast(FileService, object()),
+        project_external_id=PROJECT_EXTERNAL_ID,
+        read_cache=read_cache,
         file_indexer=RecordingFileIndexer(),
         test_mode=True,
         relation_resolution_scheduler=RecordingScheduler(),
@@ -362,6 +390,7 @@ async def test_local_materialization_schedules_relation_resolution_after_index(
 
     assert accepted.materialization is not None
     assert scheduled == [accepted.materialization.project_id]
+    assert read_cache.invalidated_project_ids == [PROJECT_EXTERNAL_ID]
 
 
 @pytest.mark.asyncio

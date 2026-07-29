@@ -20,6 +20,7 @@ from basic_memory.indexing.relation_resolution import (
     RelationResolutionRuntime,
     resolve_project_relations,
 )
+from basic_memory.read_cache import ReadCache, invalidate_project_read_cache
 from basic_memory.runtime.vector_sync import EntityVectorSync
 
 # --- Background Task Machinery ---
@@ -192,6 +193,8 @@ class LocalRelationResolutionScheduler:
     """
 
     relation_runtime: RelationResolutionRuntime
+    project_external_id: str
+    read_cache: ReadCache
     test_mode: bool
     debounce_seconds: float = 0.5
 
@@ -220,12 +223,22 @@ class LocalRelationResolutionScheduler:
             # Writes up to here are covered by the scan we are about to run, so only
             # writes that land DURING the scan should force a re-run.
             _dirty_relation_resolution.discard(project_id)
-            await resolve_project_relations(self.relation_runtime)
+            try:
+                await resolve_project_relations(self.relation_runtime)
+            finally:
+                # Relation resolution commits entity changes after the index pass.
+                # A second bump closes the window in which an intermediate entity
+                # response could have populated the current generation.
+                await invalidate_project_read_cache(
+                    self.read_cache,
+                    self.project_external_id,
+                )
         finally:
             rerun = project_id in _dirty_relation_resolution
             _dirty_relation_resolution.discard(project_id)
             _pending_relation_resolution.discard(project_id)
-        # Re-arm outside the in-flight window (pending now cleared) so a write that
-        # raced the scan gets its own pass. Bounded to one extra pass per burst.
-        if rerun:
-            self.schedule_relation_resolution(project_id=project_id)
+            # Re-arm after clearing the in-flight marker so a write that raced the
+            # scan gets its own pass. Keep this in the cleanup path so a cache
+            # failure cannot drop the required relation rerun.
+            if rerun:
+                self.schedule_relation_resolution(project_id=project_id)

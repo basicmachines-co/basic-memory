@@ -1,7 +1,7 @@
 """Typed scheduler tests for derived async work."""
 
 import asyncio
-from typing import cast
+from typing import cast, override
 
 import pytest
 
@@ -13,6 +13,12 @@ from basic_memory.index.local_schedulers import (
     LocalSearchReindexScheduler,
     drain_background_tasks,
 )
+from basic_memory.read_cache import (
+    NullReadCache,
+    ReadCacheInvalidationStatus,
+)
+
+PROJECT_EXTERNAL_ID = "00000000-0000-0000-0000-000000000013"
 
 
 class StubProjectIndexRunner:
@@ -39,6 +45,16 @@ class StubSearchService:
 
     async def reindex_all(self) -> None:
         self.reindexed_project = True
+
+
+class RecordingReadCache(NullReadCache):
+    def __init__(self) -> None:
+        self.invalidated_project_ids: list[str] = []
+
+    @override
+    async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
+        self.invalidated_project_ids.append(project_id)
+        return ReadCacheInvalidationStatus.invalidated
 
 
 @pytest.mark.asyncio
@@ -243,9 +259,12 @@ async def test_relation_resolution_scheduler_runs_project_resolution():
 
     _pending_relation_resolution.clear()
     runtime = StubRelationResolutionRuntime()
+    read_cache = RecordingReadCache()
 
     scheduler = LocalRelationResolutionScheduler(
         relation_runtime=runtime,
+        project_external_id=PROJECT_EXTERNAL_ID,
+        read_cache=read_cache,
         test_mode=False,
         debounce_seconds=0.0,
     )
@@ -253,6 +272,7 @@ async def test_relation_resolution_scheduler_runs_project_resolution():
     await asyncio.sleep(0.05)
 
     assert runtime.resolve_calls == 1
+    assert read_cache.invalidated_project_ids == [PROJECT_EXTERNAL_ID]
     # The pending marker is cleared after the pass so later writes can schedule.
     assert 13 not in _pending_relation_resolution
 
@@ -267,6 +287,8 @@ async def test_relation_resolution_scheduler_coalesces_a_burst():
 
     scheduler = LocalRelationResolutionScheduler(
         relation_runtime=runtime,
+        project_external_id=PROJECT_EXTERNAL_ID,
+        read_cache=NullReadCache(),
         test_mode=False,
         debounce_seconds=0.02,
     )
@@ -289,6 +311,7 @@ async def test_relation_resolution_scheduler_reruns_for_write_during_pass():
 
     _pending_relation_resolution.clear()
     _dirty_relation_resolution.clear()
+    read_cache = RecordingReadCache()
 
     class WriteDuringScanRuntime:
         def __init__(self) -> None:
@@ -309,6 +332,8 @@ async def test_relation_resolution_scheduler_reruns_for_write_during_pass():
     runtime = WriteDuringScanRuntime()
     scheduler = LocalRelationResolutionScheduler(
         relation_runtime=runtime,
+        project_external_id=PROJECT_EXTERNAL_ID,
+        read_cache=read_cache,
         test_mode=False,
         debounce_seconds=0.0,
     )
@@ -318,6 +343,10 @@ async def test_relation_resolution_scheduler_reruns_for_write_during_pass():
     await asyncio.sleep(0.05)
 
     assert runtime.resolve_calls == 2
+    assert read_cache.invalidated_project_ids == [
+        PROJECT_EXTERNAL_ID,
+        PROJECT_EXTERNAL_ID,
+    ]
     assert 21 not in _pending_relation_resolution
     assert 21 not in _dirty_relation_resolution
 
@@ -369,6 +398,8 @@ async def test_drain_background_tasks_covers_follow_up_tasks():
     runtime = WriteDuringScanRuntime()
     scheduler = LocalRelationResolutionScheduler(
         relation_runtime=runtime,
+        project_external_id=PROJECT_EXTERNAL_ID,
+        read_cache=NullReadCache(),
         test_mode=False,
         debounce_seconds=0.0,
     )
@@ -388,14 +419,18 @@ async def test_relation_resolution_scheduler_is_noop_in_test_mode():
 
     _pending_relation_resolution.clear()
     runtime = StubRelationResolutionRuntime()
+    read_cache = RecordingReadCache()
 
     scheduler = LocalRelationResolutionScheduler(
         relation_runtime=runtime,
+        project_external_id=PROJECT_EXTERNAL_ID,
+        read_cache=read_cache,
         test_mode=True,
     )
     scheduler.schedule_relation_resolution(project_id=13)
     await asyncio.sleep(0.05)
 
     assert runtime.resolve_calls == 0
+    assert read_cache.invalidated_project_ids == []
     # Test mode must not leak a pending marker (it never runs the clearer).
     assert 13 not in _pending_relation_resolution

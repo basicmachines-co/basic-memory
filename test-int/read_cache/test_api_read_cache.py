@@ -25,6 +25,10 @@ from basic_memory.read_cache.redis import RedisReadCache
 from basic_memory.repository import EntityRepository
 from basic_memory.runtime.note_content import NOTE_CONTENT_BASE_CHECKSUM_HEADER
 from basic_memory.schemas.v2 import EntityResolveRequest
+from basic_memory.workspace_context import (
+    WORKSPACE_SLUG_HEADER,
+    WORKSPACE_TYPE_HEADER,
+)
 
 
 class RedisCacheHarness(Protocol):
@@ -44,11 +48,12 @@ def _cache_key(
     project_id: str,
     operation: ReadCacheOperation,
     request: str,
+    request_context: tuple[str, ...] = (),
 ) -> ReadCacheKey:
     return ReadCacheKey(
         project_id=project_id,
         operation=operation,
-        request_digest=read_cache_request_digest(request),
+        request_digest=read_cache_request_digest(request, *request_context),
     )
 
 
@@ -82,10 +87,19 @@ async def test_entity_resolve_and_markdown_reads_cache_then_write_invalidates(
         f"{project_url}/knowledge/resolve",
         json=resolve_request.model_dump(mode="json"),
     )
+    workspace_resolve_response = await client.post(
+        f"{project_url}/knowledge/resolve",
+        headers={
+            WORKSPACE_SLUG_HEADER: "team-paul",
+            WORKSPACE_TYPE_HEADER: "organization",
+        },
+        json=resolve_request.model_dump(mode="json"),
+    )
     resource_response = await client.get(f"{project_url}/resource/{entity_id}")
 
     assert entity_response.status_code == 200
     assert resolve_response.status_code == 200
+    assert workspace_resolve_response.status_code == 200
     assert resource_response.status_code == 200
     assert "Version one." in resource_response.text
 
@@ -99,6 +113,13 @@ async def test_entity_resolve_and_markdown_reads_cache_then_write_invalidates(
             project_id=project_external_id,
             operation=ReadCacheOperation.resolve,
             request=resolve_request.model_dump_json(),
+            request_context=("", ""),
+        ),
+        _cache_key(
+            project_id=project_external_id,
+            operation=ReadCacheOperation.resolve,
+            request=resolve_request.model_dump_json(),
+            request_context=("team-paul", "organization"),
         ),
         _cache_key(
             project_id=project_external_id,

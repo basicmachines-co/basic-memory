@@ -83,6 +83,7 @@ from basic_memory.schemas.v2 import (
     OrphanEntitiesResponse,
     IndexFileRequest,
 )
+from basic_memory.workspace_context import current_workspace_permalink_context
 from basic_memory.schemas.response import DirectoryMoveResult
 from basic_memory.utils import validate_project_path
 
@@ -344,12 +345,17 @@ async def resolve_identifier(
             )
             return result
 
+        workspace_context = current_workspace_permalink_context()
         return await read_through_model(
             cache=read_cache,
             key=ReadCacheKey(
                 project_id=project_external_id,
                 operation=ReadCacheOperation.resolve,
-                request_digest=read_cache_request_digest(data.model_dump_json()),
+                request_digest=read_cache_request_digest(
+                    data.model_dump_json(),
+                    workspace_context.workspace_slug if workspace_context else "",
+                    workspace_context.workspace_type if workspace_context else "",
+                ),
             ),
             model_type=EntityResolveResponse,
             load=load,

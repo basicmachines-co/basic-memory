@@ -79,6 +79,10 @@ tenant:
    materialization, object-storage events, direct and project indexing, directory moves/deletes,
    and relation-resolution workers. Request-path invalidation alone is insufficient because a
    worker can update a cached entity after the request returns.
+1. Treat each asynchronous state transition as a separate freshness boundary. Invalidate after
+   the accepted-note transaction commits, again after terminal materialization/status publication
+   and indexing, and again after relation resolution completes. This prevents a read filled
+   between phases from surviving the later worker commit.
 1. Keep `bm:read:v1` separate from rate-limit and Cloud control-plane prefixes, metrics,
    timeouts, and failure policies. The clients may target one Redis deployment, but a read-cache
    timeout must bypass while a rate-limit decision keeps its Cloud-owned security behavior.
@@ -161,7 +165,7 @@ Phase one:
 | Operation              | Initial TTL | Constraints                             |
 | ---------------------- | ----------: | --------------------------------------- |
 | Entity by external ID  |  60 seconds | Cache validated `EntityResponseV2` JSON |
-| Identifier resolution  |  60 seconds | Cache successful same-project results   |
+| Identifier resolution  |  60 seconds | Include body and workspace context      |
 | Markdown note resource |  60 seconds | Cache only below an explicit size limit |
 
 Phase two, after measuring phase one:
@@ -176,7 +180,9 @@ Do not initially cache failures, missing entities, graph/orphan responses, large
 binary resources, schema inference, writes, or Cloud control-plane data.
 
 Caching is semantic rather than HTTP-method based. The POST identifier-resolution and search
-operations can be cached without changing their public API.
+operations can be cached without changing their public API. Identifier resolution depends on the
+request-local workspace permalink context, so its request digest includes the workspace slug and
+workspace type in addition to the validated request body.
 
 ## Placement
 
@@ -193,9 +199,11 @@ Primary integration points:
 - later, `src/basic_memory/api/v2/routers/search_router.py`
 
 Invalidation belongs at portable mutation and indexing completion boundaries, not only in
-FastAPI routes. It must cover accepted note writes, direct file indexing, filesystem watcher
-updates, project indexing, directory mutations, Cloud storage events, and later search or
-relation changes that affect cached responses.
+FastAPI routes. It must cover accepted note writes, terminal deferred materialization and status
+publication, direct file indexing, filesystem watcher updates, project indexing, directory
+mutations, Cloud storage events, and relation-resolution changes that affect cached responses.
+Each later phase invalidates again so a value filled after an earlier generation bump cannot
+outlive the state that phase publishes.
 
 ## Dependency And Lifecycle
 
@@ -288,8 +296,9 @@ semantics themselves are asserted only against the real Redis integration fixtur
 
 - Inject a Basic Memory-specific Redis client and tenant namespace.
 - Derive that namespace from trusted request and worker context with one canonical function.
-- Invalidate from materialization, storage-event, and relation-resolution workers using the
-  same tenant namespace as the request path before enabling reads for a tenant.
+- Invalidate after accepted-note commit, terminal materialization/indexing, storage events, and
+  relation-resolution workers using the same tenant namespace as the request path before enabling
+  reads for a tenant.
 - Start with shadow telemetry or a limited tenant cohort.
 - Compare hit rate, Redis latency, database query volume, and end-to-end tool latency.
 
