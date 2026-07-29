@@ -7,7 +7,10 @@ The caller owns the Redis client lifecycle.
 from uuid import uuid4
 
 from redis.asyncio import Redis
+from redis.exceptions import ClusterError as RedisClusterError
 from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import InvalidResponse as RedisInvalidResponse
+from redis.exceptions import ResponseError as RedisResponseError
 from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from basic_memory.read_cache.contract import (
@@ -26,6 +29,13 @@ from basic_memory.read_cache.keys import (
 )
 
 _ENVELOPE_SEPARATOR = b"\n"
+_REDIS_OPERATIONAL_ERRORS = (
+    RedisClusterError,
+    RedisConnectionError,
+    RedisInvalidResponse,
+    RedisResponseError,
+    RedisTimeoutError,
+)
 _INITIALIZE_GENERATION_SCRIPT = """
 local generation = redis.call("GET", KEYS[1])
 if generation then
@@ -132,7 +142,7 @@ class RedisReadCache:
             generation_value, cached_value = await self._client.mget([keys.generation, keys.data])
             if generation_value is None:
                 generation_value = await self._initialize_generation(keys.generation)
-        except (RedisConnectionError, RedisTimeoutError) as error:
+        except _REDIS_OPERATIONAL_ERRORS as error:
             raise ReadCacheUnavailable("Redis cache lookup failed") from error
 
         generation, generation_text = _decode_generation(generation_value)
@@ -173,7 +183,7 @@ class RedisReadCache:
                 encoded,
                 ttl_seconds,
             )
-        except (RedisConnectionError, RedisTimeoutError) as error:
+        except _REDIS_OPERATIONAL_ERRORS as error:
             raise ReadCacheUnavailable("Redis cache store failed") from error
 
         return _store_status(stored)
@@ -186,6 +196,6 @@ class RedisReadCache:
         )
         try:
             await self._client.set(generation_key, uuid4().hex.encode("ascii"))
-        except (RedisConnectionError, RedisTimeoutError) as error:
+        except _REDIS_OPERATIONAL_ERRORS as error:
             raise ReadCacheUnavailable("Redis project invalidation failed") from error
         return ReadCacheInvalidationStatus.invalidated

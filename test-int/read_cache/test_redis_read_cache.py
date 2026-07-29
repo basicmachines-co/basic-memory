@@ -266,6 +266,45 @@ async def test_unavailable_redis_is_explicit_for_every_operation() -> None:
 
 
 @pytest.mark.asyncio
+async def test_real_redis_capacity_failures_are_cache_unavailable(
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """A no-eviction maxmemory error cannot fail reads or committed-write invalidation."""
+    key = _key(request="capacity-limited-store")
+    original_maxmemory = str((await redis_cache.client.config_get("maxmemory"))["maxmemory"])
+    original_policy = str(
+        (await redis_cache.client.config_get("maxmemory-policy"))["maxmemory-policy"]
+    )
+    await redis_cache.cache.lookup(key)
+
+    async def load() -> CachedEntity:
+        return CachedEntity(external_id="entity-1", title="Authoritative")
+
+    try:
+        await redis_cache.client.config_set("maxmemory-policy", "noeviction")
+        await redis_cache.client.config_set("maxmemory", "1")
+
+        result = await read_through_model(
+            cache=redis_cache.cache,
+            key=key,
+            model_type=CachedEntity,
+            load=load,
+            ttl_seconds=60,
+            max_payload_bytes=1_024,
+        )
+        invalidation_status = await invalidate_project_read_cache(
+            redis_cache.cache,
+            PROJECT_ID,
+        )
+    finally:
+        await redis_cache.client.config_set("maxmemory", original_maxmemory)
+        await redis_cache.client.config_set("maxmemory-policy", original_policy)
+
+    assert result.title == "Authoritative"
+    assert invalidation_status is ReadCacheInvalidationStatus.unavailable
+
+
+@pytest.mark.asyncio
 async def test_null_cache_preserves_disabled_semantics() -> None:
     class StoreMustNotRun(NullReadCache):
         @override

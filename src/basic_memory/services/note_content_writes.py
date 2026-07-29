@@ -178,14 +178,23 @@ class NoteContentMutationService:
         *,
         project_external_id: str,
         entity_external_id: str,
-    ) -> None:
-        """Let the runtime converge observed file state before an existing-note mutation."""
+    ) -> bool:
+        """Converge observed file state and report whether it may have published state."""
         if self.content_freshener is None:
-            return
-        await self.content_freshener.freshen_note_content(
-            project_external_id=project_external_id,
-            entity_external_id=entity_external_id,
-        )
+            return False
+
+        try:
+            await self.content_freshener.freshen_note_content(
+                project_external_id=project_external_id,
+                entity_external_id=entity_external_id,
+            )
+        except BaseException:
+            # Freshening can commit entity and note-content state before a later
+            # indexing follow-up raises. Invalidate before propagating so those
+            # partial publications cannot retain the previous cache generation.
+            await self._invalidate_project(project_external_id)
+            raise
+        return True
 
     async def create_note(
         self,
@@ -254,8 +263,9 @@ class NoteContentMutationService:
             actor_kind=actor_kind,
             actor_name=actor_name,
         )
+        freshening_may_have_published = False
         try:
-            await self.freshen_existing_note_content(
+            freshening_may_have_published = await self.freshen_existing_note_content(
                 project_external_id=project_external_id,
                 entity_external_id=entity_external_id,
             )
@@ -276,10 +286,18 @@ class NoteContentMutationService:
                     ),
                     dependencies=self.mutation_dependencies,
                 )
-            await self._invalidate_project(project_external_id)
-            return accepted
         except AcceptedNoteMutationRejected as error:
             raise note_content_mutation_error_from_rejection(error.rejection) from error
+        finally:
+            # A rejected or failed mutation can follow a successful freshening
+            # index commit. The freshening attempt therefore owns invalidation
+            # for every downstream outcome, not only accepted writes.
+            if freshening_may_have_published:
+                await self._invalidate_project(project_external_id)
+
+        if not freshening_may_have_published:
+            await self._invalidate_project(project_external_id)
+        return accepted
 
     async def edit_note(
         self,
@@ -300,8 +318,9 @@ class NoteContentMutationService:
             actor_kind=actor_kind,
             actor_name=actor_name,
         )
+        freshening_may_have_published = False
         try:
-            await self.freshen_existing_note_content(
+            freshening_may_have_published = await self.freshen_existing_note_content(
                 project_external_id=project_external_id,
                 entity_external_id=entity_external_id,
             )
@@ -321,10 +340,15 @@ class NoteContentMutationService:
                     ),
                     dependencies=self.mutation_dependencies,
                 )
-            await self._invalidate_project(project_external_id)
-            return accepted
         except AcceptedNoteMutationRejected as error:
             raise note_content_mutation_error_from_rejection(error.rejection) from error
+        finally:
+            if freshening_may_have_published:
+                await self._invalidate_project(project_external_id)
+
+        if not freshening_may_have_published:
+            await self._invalidate_project(project_external_id)
+        return accepted
 
     async def move_note(
         self,
@@ -345,8 +369,9 @@ class NoteContentMutationService:
             actor_kind=actor_kind,
             actor_name=actor_name,
         )
+        freshening_may_have_published = False
         try:
-            await self.freshen_existing_note_content(
+            freshening_may_have_published = await self.freshen_existing_note_content(
                 project_external_id=project_external_id,
                 entity_external_id=entity_external_id,
             )
@@ -366,10 +391,15 @@ class NoteContentMutationService:
                     ),
                     dependencies=self.mutation_dependencies,
                 )
-            await self._invalidate_project(project_external_id)
-            return accepted
         except AcceptedNoteMutationRejected as error:
             raise note_content_mutation_error_from_rejection(error.rejection) from error
+        finally:
+            if freshening_may_have_published:
+                await self._invalidate_project(project_external_id)
+
+        if not freshening_may_have_published:
+            await self._invalidate_project(project_external_id)
+        return accepted
 
     async def delete_note(
         self,
@@ -378,8 +408,9 @@ class NoteContentMutationService:
         entity_external_id: str,
     ) -> AcceptedNoteChange:
         """DELETE the DB note and return the runtime follow-up change."""
+        freshening_may_have_published = False
         try:
-            await self.freshen_existing_note_content(
+            freshening_may_have_published = await self.freshen_existing_note_content(
                 project_external_id=project_external_id,
                 entity_external_id=entity_external_id,
             )
@@ -392,7 +423,12 @@ class NoteContentMutationService:
                     ),
                     dependencies=self.mutation_dependencies,
                 )
-            await self._invalidate_project(project_external_id)
-            return accepted
         except AcceptedNoteMutationRejected as error:
             raise note_content_mutation_error_from_rejection(error.rejection) from error
+        finally:
+            if freshening_may_have_published:
+                await self._invalidate_project(project_external_id)
+
+        if not freshening_may_have_published:
+            await self._invalidate_project(project_external_id)
+        return accepted

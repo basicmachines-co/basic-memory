@@ -92,6 +92,10 @@ tenant:
 1. Pass the namespace-bound cache into hosted note-content read repair. A resource or entity read
    can bootstrap a missing accepted-content row; invalidate immediately after that commit and
    before the repaired response is offered to read-through storage.
+1. Pass the namespace-bound cache into pre-mutation content freshening. Freshening can index an
+   externally edited file before the accepted mutation begins, so invalidate after every
+   freshening attempt that may have published state, including when the later mutation is
+   rejected or raises.
 1. Inject the namespace-bound cache into import endpoints and workers. Invalidate after every
    import attempt that may have written files, including importers that return a failed result or
    raise after partial progress, so cached file-first resources cannot survive overwritten bytes.
@@ -256,12 +260,14 @@ local ASGI transport does not run FastAPI lifespan.
 
 ## Failure Behavior
 
-- Connection and timeout failures are represented explicitly as cache-unavailable outcomes.
+- Operational Redis command failures, including connection, timeout, capacity, replica-read-only,
+  and server response failures, are represented explicitly as cache-unavailable outcomes.
 - Reads bypass Redis and use the authoritative path when the cache is unavailable.
 - Cache-store failures do not fail an otherwise successful read.
 - Cache-invalidation failures do not fail committed writes, but they emit prominent telemetry.
 - Short initial TTLs bound stale-data exposure after an invalidation failure and Redis recovery.
-- Serialization and programming errors fail fast rather than masquerading as cache misses.
+- Redis client-input errors plus local serialization, decoding, and programming errors fail fast
+  rather than masquerading as cache misses.
 
 Rate-limit failure behavior remains entirely Cloud-owned.
 
@@ -306,7 +312,11 @@ The real-Redis suite must prove:
 - no invalidation operation touches keys outside the Basic Memory prefix;
 - payload size limits;
 - repeated API entity reads use the real cached representation;
-- successful writes invalidate while rejected or rolled-back writes do not;
+- successful writes invalidate; a rejected write also invalidates when pre-write freshening may
+  already have published external file state, while a rolled-back transaction without such a
+  publication does not;
+- real Redis no-eviction capacity failures bypass cache storage and cannot fail committed-write
+  invalidation;
 - watcher-detected paired moves invalidate even though their events bypass ordinary callbacks;
 - startup recovery that publishes written, conflict, or failed materialization state invalidates
   before serving resumes;
@@ -351,6 +361,8 @@ semantics themselves are asserted only against the real Redis integration fixtur
   precede some search and reconciliation follow-ups.
 - Invalidate hosted note-content read repair after it commits and before returning its repaired
   entity or resource to the read-through helper.
+- Invalidate pre-mutation content freshening even when a later accepted mutation is rejected or
+  fails, because the freshening index may already have committed external file state.
 - Invalidate every import attempt that may write files, including partial failures.
 - Invalidate directory moves after every committed file and again after search/relation
   follow-ups.

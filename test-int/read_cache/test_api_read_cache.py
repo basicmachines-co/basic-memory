@@ -24,6 +24,7 @@ from basic_memory.indexing.note_content_read_repair_runner import (
     NoteContentReadRepairTarget,
 )
 from basic_memory.indexing.models import FileIndexResult
+from basic_memory.index.note_content_materialization import drain_pending_materializations
 from basic_memory.models import Project
 from basic_memory.models.knowledge import Entity
 from basic_memory.read_cache import (
@@ -169,13 +170,13 @@ async def _initialized_generation(
 
 
 @pytest.mark.asyncio
-async def test_entity_resolve_and_markdown_reads_cache_then_write_invalidates(
+async def test_entity_resolve_and_markdown_reads_cache_then_freshened_write_invalidates(
     app: FastAPI,
     client: AsyncClient,
     test_project: Project,
     redis_cache: RedisCacheHarness,
 ) -> None:
-    """Successful reads populate Redis; rejected writes preserve and accepted writes bump."""
+    """Pre-write freshening invalidates even when the following write is rejected."""
     app.dependency_overrides[get_read_cache] = lambda: redis_cache.cache
     project_external_id = str(test_project.external_id)
     project_url = f"/v2/projects/{project_external_id}"
@@ -191,6 +192,7 @@ async def test_entity_resolve_and_markdown_reads_cache_then_write_invalidates(
     assert created_response.status_code == 202
     created = created_response.json()
     entity_id = created["external_id"]
+    await drain_pending_materializations()
 
     entity_response = await client.get(f"{project_url}/knowledge/entities/{entity_id}")
     resolve_request = EntityResolveRequest(identifier=created["permalink"])
@@ -254,6 +256,11 @@ async def test_entity_resolve_and_markdown_reads_cache_then_write_invalidates(
     populated_generation = await redis_cache.client.get(generation_key)
     assert populated_generation is not None
 
+    disk_path = Path(test_project.path) / created["file_path"]
+    disk_path.write_text(
+        "# Redis Cached Note\n\nExternally edited before rejected update.",
+        encoding="utf-8",
+    )
     rejected_response = await client.put(
         f"{project_url}/knowledge/entities/{entity_id}",
         headers={NOTE_CONTENT_BASE_CHECKSUM_HEADER: "stale-checksum"},
@@ -264,7 +271,16 @@ async def test_entity_resolve_and_markdown_reads_cache_then_write_invalidates(
         },
     )
     assert rejected_response.status_code == 409
-    assert await redis_cache.client.get(generation_key) == populated_generation
+    freshened_generation = await redis_cache.client.get(generation_key)
+    assert freshened_generation is not None
+    assert freshened_generation != populated_generation
+
+    freshened_entity = await client.get(f"{project_url}/knowledge/entities/{entity_id}")
+    freshened_resource = await client.get(f"{project_url}/resource/{entity_id}")
+    assert freshened_entity.status_code == 200
+    assert "Externally edited" in freshened_entity.json()["content"]
+    assert freshened_resource.status_code == 200
+    assert "Externally edited" in freshened_resource.text
 
     edited_response = await client.patch(
         f"{project_url}/knowledge/entities/{entity_id}",
@@ -276,13 +292,15 @@ async def test_entity_resolve_and_markdown_reads_cache_then_write_invalidates(
     assert edited_response.status_code == 202
     invalidated_generation = await redis_cache.client.get(generation_key)
     assert invalidated_generation is not None
-    assert invalidated_generation != populated_generation
+    assert invalidated_generation != freshened_generation
 
     refreshed_entity = await client.get(f"{project_url}/knowledge/entities/{entity_id}")
     refreshed_resource = await client.get(f"{project_url}/resource/{entity_id}")
     assert refreshed_entity.status_code == 200
+    assert "Externally edited" in refreshed_entity.json()["content"]
     assert "Version two." in refreshed_entity.json()["content"]
     assert refreshed_resource.status_code == 200
+    assert "Externally edited" in refreshed_resource.text
     assert "Version two." in refreshed_resource.text
 
 
