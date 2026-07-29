@@ -13,7 +13,11 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from basic_memory import db
-from basic_memory.deps import get_index_file_executor_v2_external, get_read_cache
+from basic_memory.deps import (
+    get_chatgpt_importer_v2_external,
+    get_index_file_executor_v2_external,
+    get_read_cache,
+)
 from basic_memory.indexing.models import FileIndexResult
 from basic_memory.models import Project
 from basic_memory.models.knowledge import Entity
@@ -55,6 +59,23 @@ class FailingIndexFileExecutor:
     ) -> FileIndexResult:
         del file_path, source
         raise RuntimeError("partial direct index failure")
+
+
+class PartiallyFailingImporter:
+    """Overwrite one resource before reporting an import failure."""
+
+    def __init__(self, target: Path) -> None:
+        self.target = target
+
+    async def import_data(
+        self,
+        source_data: object,
+        destination_folder: str,
+        **kwargs: object,
+    ) -> None:
+        del source_data, destination_folder, kwargs
+        self.target.write_text("# Imported before failure\n", encoding="utf-8")
+        raise RuntimeError("partial import failure")
 
 
 def _cache_key(
@@ -301,3 +322,65 @@ async def test_direct_index_failure_invalidates_real_redis(
         request="direct-index-failure",
     )
     assert generation_after != generation_before
+
+
+@pytest.mark.asyncio
+async def test_partial_import_failure_invalidates_cached_resource_in_real_redis(
+    app: FastAPI,
+    client: AsyncClient,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """File writes from a failed import cannot retain cached pre-import bytes."""
+    app.dependency_overrides[get_read_cache] = lambda: redis_cache.cache
+    project_external_id = str(test_project.external_id)
+    file_path = "cache/partial-import.md"
+    disk_path = Path(test_project.path) / file_path
+    disk_path.parent.mkdir(parents=True, exist_ok=True)
+    disk_path.write_text("# Before import\n", encoding="utf-8")
+
+    repository = EntityRepository(project_id=test_project.id)
+    _, session_maker = engine_factory
+    async with db.scoped_session(session_maker) as session:
+        entity = await repository.add(
+            session,
+            Entity(
+                title="partial-import.md",
+                note_type="note",
+                content_type="text/markdown",
+                file_path=file_path,
+                checksum="partial-import-checksum",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+        )
+
+    resource_url = f"/v2/projects/{project_external_id}/resource/{entity.external_id}"
+    cached_response = await client.get(resource_url)
+    assert cached_response.status_code == 200
+    assert cached_response.text == "# Before import\n"
+    generation_before = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="partial-import-failure",
+    )
+    app.dependency_overrides[get_chatgpt_importer_v2_external] = lambda: PartiallyFailingImporter(
+        disk_path
+    )
+
+    response = await client.post(
+        f"/v2/projects/{project_external_id}/import/chatgpt",
+        files={"file": ("conversations.json", b"[]", "application/json")},
+    )
+
+    assert response.status_code == 500
+    generation_after = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="partial-import-failure",
+    )
+    assert generation_after != generation_before
+    refreshed_response = await client.get(resource_url)
+    assert refreshed_response.status_code == 200
+    assert refreshed_response.text == "# Imported before failure\n"
