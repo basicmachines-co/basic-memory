@@ -74,7 +74,7 @@ async def recover_project_materializations(
         # FileService needs only base_path to write the accepted markdown bytes;
         # the markdown_processor/app_config are unused on the materialization path.
         file_service = FileService(Path(project.path))
-        recovered = await recover_stuck_materializations(
+        materialization_recovery = await recover_stuck_materializations(
             session_maker=session_maker,
             file_service=file_service,
             project_id=project.id,
@@ -88,13 +88,14 @@ async def recover_project_materializations(
         logger.error(f"Error recovering stuck materializations for project {project.name}: {e}")
         return
 
-    if not recovered and not recovered_vacates:
+    if not materialization_recovery.attempted and not recovered_vacates:
         return
 
     logger.info(
         "Recovered note materialization state on startup",
         project=project.name,
-        recovered_materializations=recovered,
+        attempted_materializations=materialization_recovery.attempted,
+        recovered_materializations=materialization_recovery.written,
         recovered_move_vacates=recovered_vacates,
     )
 

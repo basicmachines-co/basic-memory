@@ -84,11 +84,17 @@ tenant:
    the accepted-note transaction commits, again after terminal materialization/status publication
    and indexing, and again after relation resolution completes. This prevents a read filled
    between phases from surviving the later worker commit.
+1. Put project-index invalidation in a failure-safe completion boundary. Move, delete, file-index,
+   and vector batches can commit incrementally before a later batch raises.
+1. Invalidate directory deletion immediately after its acceptance transaction commits, then
+   again after file cleanup and surviving-relation refresh. A slow or failed cleanup must not
+   keep deleted entities reachable through the pre-acceptance generation.
 1. Invalidate watcher-detected moves at their own completion boundary. Paired delete/create
    events are consumed by move processing and therefore bypass the ordinary watcher callbacks.
-1. If startup recovery or reconciliation changes materialization, vacate, index, or relation
-   state, invalidate through the same namespace-bound cache before releasing the serving barrier
-   or resuming tenant traffic.
+1. If startup recovery or reconciliation attempts can publish materialization, vacate, index, or
+   relation state, invalidate through the same namespace-bound cache before releasing the serving
+   barrier or resuming tenant traffic. Terminal conflict and failure publication count even when
+   the recovery did not produce a written file.
 1. Keep `bm:read:v1` separate from rate-limit and Cloud control-plane prefixes, metrics,
    timeouts, and failure policies. The clients may target one Redis deployment, but a read-cache
    timeout must bypass while a rate-limit decision keeps its Cloud-owned security behavior.
@@ -210,7 +216,9 @@ publication, direct file indexing, filesystem watcher updates, project indexing,
 mutations, watcher-detected paired moves, startup recovery or reconciliation, Cloud storage
 events, and relation-resolution changes that affect cached responses. Each later phase
 invalidates again so a value filled after an earlier generation bump cannot outlive the state
-that phase publishes. Recovery invalidation runs before the serving barrier is released.
+that phase publishes. Directory deletion invalidates after acceptance and after cleanup. Project
+indexing invalidates even after a partial failure. Recovery invalidation runs before the serving
+barrier is released and includes terminal conflict or failure publication.
 
 ## Dependency And Lifecycle
 
@@ -282,7 +290,10 @@ The real-Redis suite must prove:
 - repeated API entity reads use the real cached representation;
 - successful writes invalidate while rejected or rolled-back writes do not;
 - watcher-detected paired moves invalidate even though their events bypass ordinary callbacks;
-- startup recovery that changes materialization state invalidates before serving resumes.
+- startup recovery that publishes written, conflict, or failed materialization state invalidates
+  before serving resumes;
+- project-index failures invalidate any earlier committed batches;
+- directory deletion invalidates before cleanup starts and again after cleanup completes.
 
 Run route behavior against both SQLite and Postgres where persistence behavior differs. Redis
 semantics themselves are asserted only against the real Redis integration fixture.
@@ -308,9 +319,12 @@ semantics themselves are asserted only against the real Redis integration fixtur
 - Invalidate after accepted-note commit, terminal materialization/indexing, storage events, and
   relation-resolution workers using the same tenant namespace as the request path.
 - Invalidate watcher-detected paired moves at move completion, and invalidate any recovery or
-  reconciliation state change before releasing the serving barrier or resuming tenant traffic.
-- Enable reads for a tenant only after every request, worker, move, and recovery boundary has
-  namespace and invalidation parity.
+  reconciliation attempt that can publish terminal state before releasing the serving barrier or
+  resuming tenant traffic.
+- Invalidate project indexing from a failure-safe completion boundary, and invalidate directory
+  deletion both after acceptance commit and after cleanup/relation refresh.
+- Enable reads for a tenant only after every request, worker, partial-index, accepted-delete, move,
+  and recovery boundary has namespace and invalidation parity.
 - Start with shadow telemetry or a limited tenant cohort.
 - Compare hit rate, Redis latency, database query volume, and end-to-end tool latency.
 

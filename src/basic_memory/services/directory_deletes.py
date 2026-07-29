@@ -19,6 +19,7 @@ from basic_memory.indexing.directory_delete_runner import (
     finish_directory_delete_acceptance,
     normalize_directory_delete_path,
 )
+from basic_memory.read_cache import NullReadCache, ReadCache, invalidate_project_read_cache
 
 
 class DirectoryDeleteServiceError(Exception):
@@ -57,6 +58,7 @@ class DirectoryDeleteService:
         *,
         project_external_id: str,
         directory: str,
+        read_cache: ReadCache | None = None,
     ) -> DirectoryDeleteAcceptedResult:
         """Delete directory entities immediately and queue file cleanup in the background.
 
@@ -81,24 +83,43 @@ class DirectoryDeleteService:
         except DirectoryDeleteRejected as error:
             raise directory_delete_service_error_from_rejection(error.rejection) from error
 
-        result = await finish_directory_delete_acceptance(
-            request=request,
-            accepted=accepted,
-            enqueuer=self.runtime.file_delete_enqueuer,
-        )
-
-        # Trigger: notes outside the deleted directory linked into it.
-        # Why: the delete cascaded their relation rows away, but those sources own
-        #   matching search_index relation rows that now dangle; without a reindex
-        #   they linger until an unrelated rebuild.
-        # Outcome: reindex each surviving source inline when the runtime provides a
-        #   refresher (local); queued runtimes consume the ids from the result.
-        if accepted.relation_cleanup_entity_ids and self.runtime.relation_cleanup_refresher:
-            await self.runtime.relation_cleanup_refresher.refresh_relation_sources(
-                sorted(accepted.relation_cleanup_entity_ids)
+        active_read_cache = read_cache if read_cache is not None else NullReadCache()
+        if accepted.files:
+            # Acceptance commits entity and search deletion before storage cleanup.
+            # Invalidate now so deleted reads cannot survive a slow or failed
+            # follow-up phase.
+            await invalidate_project_read_cache(
+                active_read_cache,
+                project_external_id,
             )
 
-        return result
+        try:
+            result = await finish_directory_delete_acceptance(
+                request=request,
+                accepted=accepted,
+                enqueuer=self.runtime.file_delete_enqueuer,
+            )
+
+            # Trigger: notes outside the deleted directory linked into it.
+            # Why: the delete cascaded their relation rows away, but those sources own
+            #   matching search_index relation rows that now dangle; without a reindex
+            #   they linger until an unrelated rebuild.
+            # Outcome: reindex each surviving source inline when the runtime provides a
+            #   refresher (local); queued runtimes consume the ids from the result.
+            if accepted.relation_cleanup_entity_ids and self.runtime.relation_cleanup_refresher:
+                await self.runtime.relation_cleanup_refresher.refresh_relation_sources(
+                    sorted(accepted.relation_cleanup_entity_ids)
+                )
+
+            return result
+        finally:
+            if accepted.files:
+                # Cleanup and relation refresh can publish additional state or fail
+                # after partial progress. Close the fill window in either case.
+                await invalidate_project_read_cache(
+                    active_read_cache,
+                    project_external_id,
+                )
 
     @staticmethod
     def normalize_directory_path(directory: str) -> str:

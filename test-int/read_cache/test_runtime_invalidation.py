@@ -16,6 +16,12 @@ from basic_memory.index.local_moves import (
     LocalMoveEntityRepository,
     LocalWatchMoveProcessor,
 )
+from basic_memory.index.local_project import LocalProjectIndexRuntime, run_local_project_index
+from basic_memory.indexing.change_planning import ChangeReport
+from basic_memory.indexing.directory_delete_runner import (
+    DirectoryDeleteRuntime,
+    RepositoryDirectoryDeleteAcceptanceStore,
+)
 from basic_memory.indexing.project_index_maintenance import (
     ProjectIndexDeleteRun,
     ProjectIndexMoveRun,
@@ -34,12 +40,20 @@ from basic_memory.repository.note_content_repository import (
     AcceptedNoteContentWrite,
     NoteContentRepository,
 )
+from basic_memory.runtime.cleanup import RuntimeFileDeleteResult, RuntimeNoteFileDeleteJobRequest
+from basic_memory.runtime.jobs import (
+    RuntimeIndexFileBatchJobRequest,
+    RuntimeObservedIndexFile,
+    RuntimeProjectIndexJobRequest,
+)
+from basic_memory.runtime.projects import ProjectRuntimeReference
 from basic_memory.runtime.storage import (
     STORAGE_OBJECT_DELETED_EVENT,
     StorageEventPayload,
     StorageObjectIdentity,
     StorageObjectVersion,
 )
+from basic_memory.services.directory_deletes import DirectoryDeleteService
 from basic_memory.services.file_service import FileService
 from basic_memory.services.initialization import recover_project_materializations
 
@@ -121,6 +135,82 @@ class RecordingMovedEntitySearchRefresher:
         self.calls.append(list(entity_ids))
 
 
+class EmptyObservedFileSource:
+    async def list_observed_index_files(self) -> tuple[RuntimeObservedIndexFile, ...]:
+        return ()
+
+
+class DeletedFileChangeDetector:
+    async def detect_all_changes(
+        self,
+        storage_files: Mapping[str, RuntimeObservedIndexFile],
+    ) -> ChangeReport:
+        del storage_files
+        return ChangeReport(deleted_files=["notes/stale.md"])
+
+
+class FailingDeleteMaintenance:
+    async def run_move_batches(
+        self,
+        *,
+        moved_files: Mapping[str, str],
+        batch_size: int,
+    ) -> ProjectIndexMoveRun:
+        del moved_files, batch_size
+        return ProjectIndexMoveRun(
+            total_moves=0,
+            total_updated_files=0,
+            records=(),
+        )
+
+    async def run_delete_batches(
+        self,
+        *,
+        deleted_paths: Sequence[str],
+        batch_size: int,
+    ) -> ProjectIndexDeleteRun:
+        del deleted_paths, batch_size
+        raise RuntimeError("partial project index failure")
+
+
+class UnusedBatchEnqueuer:
+    async def enqueue_index_file_batch(
+        self,
+        request: RuntimeIndexFileBatchJobRequest,
+    ) -> None:
+        del request
+        raise AssertionError("failing maintenance must stop before file batches")
+
+
+class GenerationObservingDirectoryDeleteEnqueuer:
+    def __init__(
+        self,
+        redis_cache: RedisCacheHarness,
+        project_external_id: str,
+    ) -> None:
+        self.redis_cache = redis_cache
+        self.project_external_id = project_external_id
+        self.observed_generations: list[bytes | str] = []
+
+    async def enqueue_directory_file_delete(
+        self,
+        request: RuntimeNoteFileDeleteJobRequest,
+    ) -> RuntimeFileDeleteResult:
+        generation = await self.redis_cache.client.get(
+            redis_read_cache_generation_key(
+                prefix=self.redis_cache.prefix,
+                namespace=self.redis_cache.namespace,
+                project_id=self.project_external_id,
+            )
+        )
+        assert generation is not None
+        self.observed_generations.append(generation)
+        return RuntimeFileDeleteResult.already_absent(
+            entity_id=request.entity_id,
+            file_path=request.file_path,
+        )
+
+
 async def _initialized_generation(
     redis_cache: RedisCacheHarness,
     project_external_id: str,
@@ -143,6 +233,47 @@ async def _initialized_generation(
     )
     assert generation is not None
     return generation
+
+
+async def _seed_recovery_note(
+    session_maker: async_sessionmaker[AsyncSession],
+    project: Project,
+    *,
+    title: str,
+    file_path: str,
+    markdown_content: str,
+) -> Entity:
+    entity_repository = EntityRepository(project_id=project.id)
+    content_repository = NoteContentRepository(project_id=project.id)
+    async with db.scoped_session(session_maker) as session:
+        entity = await entity_repository.add(
+            session,
+            Entity(
+                title=title,
+                note_type="note",
+                content_type="text/markdown",
+                file_path=file_path,
+                checksum="entity-checksum-1",
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            ),
+        )
+        await content_repository.accept_write(
+            session,
+            AcceptedNoteContentWrite(
+                entity_id=entity.id,
+                markdown_content=markdown_content,
+                db_version=1,
+                db_checksum="db-checksum-1",
+                last_source="api",
+                updated_at=datetime.now(UTC),
+            ),
+        )
+        row = await content_repository.select_by_id(session, entity.id)
+        assert row is not None
+        row.file_write_status = "writing"
+        await session.flush()
+    return entity
 
 
 def _move_event(event_name: str, path: str) -> StorageEventPayload:
@@ -214,36 +345,13 @@ async def test_startup_materialization_recovery_invalidates_real_redis(
         project_external_id,
         request="startup-recovery",
     )
-    entity_repository = EntityRepository(project_id=test_project.id)
-    content_repository = NoteContentRepository(project_id=test_project.id)
-    async with db.scoped_session(session_maker) as session:
-        entity = await entity_repository.add(
-            session,
-            Entity(
-                title="Recovered Note",
-                note_type="note",
-                content_type="text/markdown",
-                file_path="notes/recovered.md",
-                checksum="entity-checksum-1",
-                created_at=datetime.now(UTC),
-                updated_at=datetime.now(UTC),
-            ),
-        )
-        await content_repository.accept_write(
-            session,
-            AcceptedNoteContentWrite(
-                entity_id=entity.id,
-                markdown_content="# Recovered with cache invalidation\n",
-                db_version=1,
-                db_checksum="db-checksum-1",
-                last_source="api",
-                updated_at=datetime.now(UTC),
-            ),
-        )
-        row = await content_repository.select_by_id(session, entity.id)
-        assert row is not None
-        row.file_write_status = "writing"
-        await session.flush()
+    entity = await _seed_recovery_note(
+        session_maker,
+        test_project,
+        title="Recovered Note",
+        file_path="notes/recovered.md",
+        markdown_content="# Recovered with cache invalidation\n",
+    )
 
     await recover_project_materializations(
         test_project,
@@ -259,3 +367,140 @@ async def test_startup_materialization_recovery_invalidates_real_redis(
         request="startup-recovery",
     )
     assert generation_after != generation_before
+
+
+@pytest.mark.asyncio
+async def test_startup_recovery_conflict_invalidates_published_failure_in_real_redis(
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+) -> None:
+    _, session_maker = engine_factory
+    project_external_id = str(test_project.external_id)
+    generation_before = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="startup-recovery-conflict",
+    )
+    entity = await _seed_recovery_note(
+        session_maker,
+        test_project,
+        title="Conflicted Recovery",
+        file_path="notes/conflicted-recovery.md",
+        markdown_content="# Accepted recovery content\n",
+    )
+    target = Path(test_project.path) / entity.file_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("# External edit\n", encoding="utf-8")
+
+    await recover_project_materializations(
+        test_project,
+        session_maker,
+        read_cache=redis_cache.cache,
+    )
+
+    content_repository = NoteContentRepository(project_id=test_project.id)
+    async with db.scoped_session(session_maker) as session:
+        row = await content_repository.get_by_entity_id(session, entity.id)
+    assert row is not None
+    assert row.file_write_status == "external_change_detected"
+    generation_after = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="startup-recovery-conflict",
+    )
+    assert generation_after != generation_before
+
+
+@pytest.mark.asyncio
+async def test_project_index_failure_invalidates_real_redis(
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+) -> None:
+    project_external_id = str(test_project.external_id)
+    generation_before = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="project-index-failure",
+    )
+
+    with pytest.raises(RuntimeError, match="partial project index failure"):
+        await run_local_project_index(
+            RuntimeProjectIndexJobRequest(
+                project=ProjectRuntimeReference.from_project(test_project),
+                embeddings=False,
+            ),
+            runtime=LocalProjectIndexRuntime(
+                observed_file_source=EmptyObservedFileSource(),
+                change_detector=DeletedFileChangeDetector(),
+                maintenance_runner=FailingDeleteMaintenance(),
+                moved_entity_search_refresher=RecordingMovedEntitySearchRefresher(),
+                batch_enqueuer=UnusedBatchEnqueuer(),
+                read_cache=redis_cache.cache,
+            ),
+        )
+
+    generation_after = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="project-index-failure",
+    )
+    assert generation_after != generation_before
+
+
+@pytest.mark.asyncio
+async def test_directory_delete_invalidates_before_and_after_cleanup_in_real_redis(
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+) -> None:
+    _, session_maker = engine_factory
+    project_external_id = str(test_project.external_id)
+    generation_before = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="directory-delete",
+    )
+    entity_repository = EntityRepository(project_id=test_project.id)
+    async with db.scoped_session(session_maker) as session:
+        await entity_repository.add(
+            session,
+            Entity(
+                title="Deleted During Cleanup",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="delete-with-cache/note.md",
+                checksum="directory-delete-checksum",
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            ),
+        )
+
+    enqueuer = GenerationObservingDirectoryDeleteEnqueuer(
+        redis_cache,
+        project_external_id,
+    )
+    service = DirectoryDeleteService(
+        session_maker=session_maker,
+        runtime=DirectoryDeleteRuntime(
+            store=RepositoryDirectoryDeleteAcceptanceStore(),
+            file_delete_enqueuer=enqueuer,
+        ),
+    )
+
+    result = await service.delete_directory(
+        project_external_id=project_external_id,
+        directory="delete-with-cache",
+        read_cache=redis_cache.cache,
+    )
+
+    assert result.deleted_files == ("delete-with-cache/note.md",)
+    assert len(enqueuer.observed_generations) == 1
+    generation_during_cleanup = enqueuer.observed_generations[0]
+    assert generation_during_cleanup != generation_before
+    generation_after = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="directory-delete",
+    )
+    assert generation_after != generation_during_cleanup

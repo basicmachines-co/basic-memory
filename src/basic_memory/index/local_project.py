@@ -761,26 +761,28 @@ async def run_local_project_index(
     runtime: LocalProjectIndexRuntime,
 ) -> ProjectIndexCoordinatorResult:
     """Run project-wide local indexing through the storage-neutral coordinator."""
-    result = await run_project_index_coordinator(
-        request,
-        coordinator_job_id=runtime.coordinator_job_id,
-        observed_file_source=runtime.observed_file_source,
-        change_detector=runtime.change_detector,
-        maintenance_runner=runtime.maintenance_runner,
-        moved_entity_search_refresher=runtime.moved_entity_search_refresher,
-        workflow_starter=runtime.workflow_starter,
-        batch_enqueuer=runtime.batch_enqueuer,
-        fanout_failure_recorder=runtime.fanout_failure_recorder,
-        batch_size=runtime.batch_size,
-        embedding_vector_sync=runtime.embedding_vector_sync,
-    )
-    # Project indexing has already committed entity/search changes. Invalidate
-    # before relation repair so a later failure cannot leave pre-index values
-    # reachable for the full TTL.
-    await invalidate_project_read_cache(
-        runtime.read_cache,
-        request.project.project_external_id,
-    )
+    try:
+        result = await run_project_index_coordinator(
+            request,
+            coordinator_job_id=runtime.coordinator_job_id,
+            observed_file_source=runtime.observed_file_source,
+            change_detector=runtime.change_detector,
+            maintenance_runner=runtime.maintenance_runner,
+            moved_entity_search_refresher=runtime.moved_entity_search_refresher,
+            workflow_starter=runtime.workflow_starter,
+            batch_enqueuer=runtime.batch_enqueuer,
+            fanout_failure_recorder=runtime.fanout_failure_recorder,
+            batch_size=runtime.batch_size,
+            embedding_vector_sync=runtime.embedding_vector_sync,
+        )
+    finally:
+        # The coordinator commits moves, deletes, and file batches incrementally.
+        # Invalidate even when a later batch or vector sync raises so already
+        # published changes cannot remain behind the previous generation.
+        await invalidate_project_read_cache(
+            runtime.read_cache,
+            request.project.project_external_id,
+        )
     if runtime.completion_relation_runtime is not None:
         try:
             await resolve_project_index_completion_relations(

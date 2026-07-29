@@ -560,7 +560,8 @@ async def test_recover_stuck_materializations_writes_file_and_marks_synced(
         project_id=test_project.id,
     )
 
-    assert recovered == 1
+    assert recovered.attempted == 1
+    assert recovered.written == 1
     written = file_service.base_path / sample_entity.file_path
     assert written.read_text(encoding="utf-8") == "# Recovered\n\nThe crash left this unwritten.\n"
 
@@ -616,14 +617,13 @@ async def test_move_vacate_recovery_waits_for_destination_then_cleans_source(
     )
     assert source.exists()
 
-    assert (
-        await recover_stuck_materializations(
-            session_maker=session_maker,
-            file_service=file_service,
-            project_id=test_project.id,
-        )
-        == 1
+    recovered = await recover_stuck_materializations(
+        session_maker=session_maker,
+        file_service=file_service,
+        project_id=test_project.id,
     )
+    assert recovered.attempted == 1
+    assert recovered.written == 1
     assert (
         await recover_move_vacates(
             session_maker=session_maker,
@@ -668,7 +668,8 @@ async def test_recover_stuck_materializations_re_drives_failed_row(
         project_id=test_project.id,
     )
 
-    assert recovered == 1
+    assert recovered.attempted == 1
+    assert recovered.written == 1
     written = file_service.base_path / sample_entity.file_path
     assert written.read_text(encoding="utf-8") == "# Recovered after transient failure\n"
 
@@ -703,7 +704,8 @@ async def test_recover_stuck_materializations_returns_zero_when_none_stuck(
         project_id=test_project.id,
     )
 
-    assert recovered == 0
+    assert recovered.attempted == 0
+    assert recovered.written == 0
 
 
 @pytest.mark.asyncio
@@ -736,7 +738,8 @@ async def test_recover_stuck_materializations_is_non_fatal_per_row(
         project_id=test_project.id,
     )
 
-    assert recovered == 0
+    assert recovered.attempted == 1
+    assert recovered.written == 0
 
 
 @pytest.mark.asyncio
@@ -768,7 +771,8 @@ async def test_recover_stuck_materializations_does_not_overwrite_unexpected_file
         project_id=test_project.id,
     )
 
-    assert recovered == 0
+    assert recovered.attempted == 1
+    assert recovered.written == 0
     assert target.read_text(encoding="utf-8") == "# External edit\n"
 
     repository = NoteContentRepository(project_id=test_project.id)
@@ -817,7 +821,8 @@ async def test_recover_stuck_materializations_publishes_already_written_file(
         project_id=test_project.id,
     )
 
-    assert recovered == 1
+    assert recovered.attempted == 1
+    assert recovered.written == 1
     assert target.read_text(encoding="utf-8") == markdown_content
 
     repository = NoteContentRepository(project_id=test_project.id)

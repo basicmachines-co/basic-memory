@@ -1081,8 +1081,8 @@ async def delete_directory(
             result = await directory_delete_service.delete_directory(
                 project_external_id=project_external_id,
                 directory=data.directory,
+                read_cache=read_cache,
             )
-            await invalidate_project_read_cache(read_cache, project_external_id)
             payload = result.to_response_payload()
             logger.info(
                 f"API v2 response: delete_directory "
