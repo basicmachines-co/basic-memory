@@ -383,6 +383,8 @@ class LocalWatchEventIndexRuntimeFactory:
                 entity_repository=dependencies.entity_repository,
                 maintenance_runner=maintenance_runner,
                 moved_entity_search_refresher=moved_entity_search_refresher,
+                project_external_id=project_ref.project_external_id,
+                read_cache=self.read_cache,
                 batch_size=self.move_batch_size,
             ),
         )

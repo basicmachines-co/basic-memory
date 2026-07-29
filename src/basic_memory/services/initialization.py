@@ -51,6 +51,8 @@ async def run_initial_project_index(
 async def recover_project_materializations(
     project: Project,
     session_maker: "async_sessionmaker[AsyncSession]",
+    *,
+    read_cache: "ReadCache | None" = None,
 ) -> None:
     """Re-drive note materialization and move cleanup lost across a process exit.
 
@@ -82,15 +84,29 @@ async def recover_project_materializations(
             file_service=file_service,
             project_id=project.id,
         )
-        if recovered or recovered_vacates:
-            logger.info(
-                "Recovered note materialization state on startup",
-                project=project.name,
-                recovered_materializations=recovered,
-                recovered_move_vacates=recovered_vacates,
-            )
     except Exception as e:  # pragma: no cover - defensive startup guard
         logger.error(f"Error recovering stuck materializations for project {project.name}: {e}")
+        return
+
+    if not recovered and not recovered_vacates:
+        return
+
+    logger.info(
+        "Recovered note materialization state on startup",
+        project=project.name,
+        recovered_materializations=recovered,
+        recovered_move_vacates=recovered_vacates,
+    )
+
+    # Redis can outlive the process that left this materialization unfinished.
+    # Invalidate before releasing the startup barrier so no pre-crash pending or
+    # failed payload remains reachable while background indexing catches up.
+    from basic_memory.read_cache import NullReadCache, invalidate_project_read_cache
+
+    await invalidate_project_read_cache(
+        read_cache if read_cache is not None else NullReadCache(),
+        str(project.external_id),
+    )
 
 
 async def initialize_database(app_config: BasicMemoryConfig) -> None:
@@ -235,7 +251,11 @@ async def initialize_file_indexing(
     # cleanup whose in-process enqueue was lost. Runs synchronously so the files
     # converge before the initial project index scans them.
     for project in active_projects:
-        await recover_project_materializations(project, session_maker)
+        await recover_project_materializations(
+            project,
+            session_maker,
+            read_cache=active_read_cache,
+        )
 
     # Trigger: the API/MCP lifespan is waiting for durable startup recovery.
     # Why: serving accepted writes while recovery holds cached vacate work can

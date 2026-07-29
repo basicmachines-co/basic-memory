@@ -77,12 +77,18 @@ tenant:
    from a public request field.
 1. Inject the namespace-bound cache into every mutation-producing runtime: accepted note
    materialization, object-storage events, direct and project indexing, directory moves/deletes,
-   and relation-resolution workers. Request-path invalidation alone is insufficient because a
-   worker can update a cached entity after the request returns.
+   watcher-detected paired moves, relation-resolution workers, and startup recovery or
+   reconciliation. Request-path invalidation alone is insufficient because a worker can update a
+   cached entity after the request returns.
 1. Treat each asynchronous state transition as a separate freshness boundary. Invalidate after
    the accepted-note transaction commits, again after terminal materialization/status publication
    and indexing, and again after relation resolution completes. This prevents a read filled
    between phases from surviving the later worker commit.
+1. Invalidate watcher-detected moves at their own completion boundary. Paired delete/create
+   events are consumed by move processing and therefore bypass the ordinary watcher callbacks.
+1. If startup recovery or reconciliation changes materialization, vacate, index, or relation
+   state, invalidate through the same namespace-bound cache before releasing the serving barrier
+   or resuming tenant traffic.
 1. Keep `bm:read:v1` separate from rate-limit and Cloud control-plane prefixes, metrics,
    timeouts, and failure policies. The clients may target one Redis deployment, but a read-cache
    timeout must bypass while a rate-limit decision keeps its Cloud-owned security behavior.
@@ -106,7 +112,7 @@ flowchart LR
     RC -->|"hit"| API
     RC -->|"miss"| DB["Services, repositories, and storage"]
     DB -->|"successful result"| RC
-    W["Writes, indexing, and storage events"] -->|"invalidate after commit"| RC
+    W["Writes, indexing, recovery, and storage events"] -->|"invalidate after commit"| RC
 
     RL["Cloud tenant rate limiter"] --> RLD["Cloud rate-limit keyspace"]
     RC --> BMD["Basic Memory read-cache keyspace"]
@@ -201,9 +207,10 @@ Primary integration points:
 Invalidation belongs at portable mutation and indexing completion boundaries, not only in
 FastAPI routes. It must cover accepted note writes, terminal deferred materialization and status
 publication, direct file indexing, filesystem watcher updates, project indexing, directory
-mutations, Cloud storage events, and relation-resolution changes that affect cached responses.
-Each later phase invalidates again so a value filled after an earlier generation bump cannot
-outlive the state that phase publishes.
+mutations, watcher-detected paired moves, startup recovery or reconciliation, Cloud storage
+events, and relation-resolution changes that affect cached responses. Each later phase
+invalidates again so a value filled after an earlier generation bump cannot outlive the state
+that phase publishes. Recovery invalidation runs before the serving barrier is released.
 
 ## Dependency And Lifecycle
 
@@ -273,7 +280,9 @@ The real-Redis suite must prove:
 - no invalidation operation touches keys outside the Basic Memory prefix;
 - payload size limits;
 - repeated API entity reads use the real cached representation;
-- successful writes invalidate while rejected or rolled-back writes do not.
+- successful writes invalidate while rejected or rolled-back writes do not;
+- watcher-detected paired moves invalidate even though their events bypass ordinary callbacks;
+- startup recovery that changes materialization state invalidates before serving resumes.
 
 Run route behavior against both SQLite and Postgres where persistence behavior differs. Redis
 semantics themselves are asserted only against the real Redis integration fixture.
@@ -297,8 +306,11 @@ semantics themselves are asserted only against the real Redis integration fixtur
 - Inject a Basic Memory-specific Redis client and tenant namespace.
 - Derive that namespace from trusted request and worker context with one canonical function.
 - Invalidate after accepted-note commit, terminal materialization/indexing, storage events, and
-  relation-resolution workers using the same tenant namespace as the request path before enabling
-  reads for a tenant.
+  relation-resolution workers using the same tenant namespace as the request path.
+- Invalidate watcher-detected paired moves at move completion, and invalidate any recovery or
+  reconciliation state change before releasing the serving barrier or resuming tenant traffic.
+- Enable reads for a tenant only after every request, worker, move, and recovery boundary has
+  namespace and invalidation parity.
 - Start with shadow telemetry or a limited tenant cohort.
 - Compare hit rate, Redis latency, database query volume, and end-to-end tool latency.
 
