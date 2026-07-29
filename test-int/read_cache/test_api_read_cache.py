@@ -28,6 +28,7 @@ from basic_memory.index.note_content_materialization import drain_pending_materi
 from basic_memory.models import Project
 from basic_memory.models.knowledge import Entity
 from basic_memory.read_cache import (
+    ReadCache,
     ReadCacheInvalidationStatus,
     ReadCacheKey,
     ReadCacheOperation,
@@ -105,6 +106,21 @@ class LocalReadRepairFileReader:
             markdown_content=path.read_text(encoding="utf-8"),
             observed_at=datetime.fromtimestamp(stat.st_mtime, timezone.utc),
         )
+
+
+class NoAcceptedNoteContent:
+    """Keep this resource on the file-first path for project-root cache coverage."""
+
+    async def get_note_resource_with_read_repair(
+        self,
+        *,
+        project_external_id: str,
+        entity_external_id: str,
+        session: AsyncSession,
+        read_cache: ReadCache,
+    ) -> None:
+        del project_external_id, entity_external_id, session, read_cache
+        return None
 
 
 class DirectoryMoveObservingRedisReadCache(RedisReadCache):
@@ -354,6 +370,73 @@ async def test_non_markdown_resource_is_never_cached(
         key=key,
     )
     assert await redis_cache.client.exists(redis_keys.data) == 0
+
+
+@pytest.mark.asyncio
+async def test_project_root_change_invalidates_cached_markdown_resource(
+    app: FastAPI,
+    client: AsyncClient,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+    tmp_path: Path,
+) -> None:
+    """A stable project/entity UUID cannot retain bytes from the previous root."""
+    app.dependency_overrides[get_read_cache] = lambda: redis_cache.cache
+    app.dependency_overrides[get_note_content_query_service] = NoAcceptedNoteContent
+    project_external_id = str(test_project.external_id)
+    file_path = "cache/project-root.md"
+    old_disk_path = Path(test_project.path) / file_path
+    old_disk_path.parent.mkdir(parents=True, exist_ok=True)
+    old_disk_path.write_text("# Old project root\n", encoding="utf-8")
+
+    new_root = tmp_path / "new-project-root"
+    new_disk_path = new_root / file_path
+    new_disk_path.parent.mkdir(parents=True, exist_ok=True)
+    new_disk_path.write_text("# New project root\n", encoding="utf-8")
+
+    repository = EntityRepository(project_id=test_project.id)
+    _, session_maker = engine_factory
+    async with db.scoped_session(session_maker) as session:
+        entity = await repository.add(
+            session,
+            Entity(
+                title="project-root.md",
+                note_type="file",
+                content_type="text/markdown",
+                file_path=file_path,
+                checksum="project-root-checksum",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+        )
+
+    project_url = f"/v2/projects/{project_external_id}"
+    resource_url = f"{project_url}/resource/{entity.external_id}"
+    cached_response = await client.get(resource_url)
+    assert cached_response.status_code == 200
+    assert cached_response.text == "# Old project root\n"
+    generation_before = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="project-root-change",
+    )
+
+    move_response = await client.patch(
+        project_url,
+        json={"path": str(new_root)},
+    )
+
+    assert move_response.status_code == 200
+    generation_after = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="project-root-change",
+    )
+    assert generation_after != generation_before
+    refreshed_response = await client.get(resource_url)
+    assert refreshed_response.status_code == 200
+    assert refreshed_response.text == "# New project root\n"
 
 
 @pytest.mark.asyncio

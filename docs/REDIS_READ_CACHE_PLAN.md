@@ -107,6 +107,9 @@ tenant:
 1. Invalidate directory moves after each individual file/database move commits, then again after
    the final search and relation follow-ups. Directory moves are incremental batches, so a long or
    partially failed request must not keep earlier files under the pre-move generation.
+1. Inject the namespace-bound cache into project-root path mutations. A root change preserves the
+   project and entity UUIDs while changing the filesystem source behind resource reads, so
+   invalidate in a failure-safe boundary around the committed path update.
 1. If startup recovery or reconciliation attempts can publish materialization, vacate, index, or
    relation state, invalidate through the same namespace-bound cache before releasing the serving
    barrier or resuming tenant traffic. Treat materialization and move-vacate recovery as separate
@@ -326,6 +329,8 @@ The real-Redis suite must prove:
 - hosted read repair invalidates cached entity metadata before storing the repaired resource;
 - import attempts invalidate cached file-first resources after success and partial failure;
 - directory moves invalidate after each committed file and again after final reindexing;
+- project-root path changes invalidate cached resources whose project/entity UUID keys remain
+  stable;
 - directory deletion invalidates before cleanup starts and again after cleanup completes.
 - startup materialization recovery remains invalidated when a later move-vacate phase fails.
 
@@ -366,6 +371,8 @@ semantics themselves are asserted only against the real Redis integration fixtur
 - Invalidate every import attempt that may write files, including partial failures.
 - Invalidate directory moves after every committed file and again after search/relation
   follow-ups.
+- Invalidate project-root path changes in a failure-safe boundary because the filesystem source
+  can change while every cache identity remains stable.
 - Invalidate each startup recovery phase before beginning the next phase.
 - Enable reads for a tenant only after every request, worker, partial-index, direct-index,
   read-repair, import, accepted-delete, move, and recovery boundary has namespace and invalidation
