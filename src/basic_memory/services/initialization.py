@@ -68,18 +68,16 @@ async def recover_project_materializations(
         recover_move_vacates,
         recover_stuck_materializations,
     )
+    from basic_memory.read_cache import NullReadCache, invalidate_project_read_cache
     from basic_memory.services.file_service import FileService
 
+    # FileService needs only base_path to write the accepted markdown bytes;
+    # the markdown_processor/app_config are unused on the materialization path.
+    file_service = FileService(Path(project.path))
+    active_read_cache = read_cache if read_cache is not None else NullReadCache()
+
     try:
-        # FileService needs only base_path to write the accepted markdown bytes;
-        # the markdown_processor/app_config are unused on the materialization path.
-        file_service = FileService(Path(project.path))
         materialization_recovery = await recover_stuck_materializations(
-            session_maker=session_maker,
-            file_service=file_service,
-            project_id=project.id,
-        )
-        recovered_vacates = await recover_move_vacates(
             session_maker=session_maker,
             file_service=file_service,
             project_id=project.id,
@@ -88,24 +86,43 @@ async def recover_project_materializations(
         logger.error(f"Error recovering stuck materializations for project {project.name}: {e}")
         return
 
-    if not materialization_recovery.attempted and not recovered_vacates:
+    if materialization_recovery.attempted:
+        logger.info(
+            "Recovered note materialization state on startup",
+            project=project.name,
+            attempted_materializations=materialization_recovery.attempted,
+            recovered_materializations=materialization_recovery.written,
+        )
+
+        # Redis can outlive the process that left this materialization unfinished.
+        # Invalidate this committed phase before move-vacate recovery begins; a
+        # later setup/query failure must not leave its published state cached.
+        await invalidate_project_read_cache(
+            active_read_cache,
+            str(project.external_id),
+        )
+
+    try:
+        recovered_vacates = await recover_move_vacates(
+            session_maker=session_maker,
+            file_service=file_service,
+            project_id=project.id,
+        )
+    except Exception as e:  # pragma: no cover - defensive startup guard
+        logger.error(f"Error recovering move vacates for project {project.name}: {e}")
+        return
+
+    if not recovered_vacates:
         return
 
     logger.info(
-        "Recovered note materialization state on startup",
+        "Recovered note move-vacate state on startup",
         project=project.name,
-        attempted_materializations=materialization_recovery.attempted,
-        recovered_materializations=materialization_recovery.written,
         recovered_move_vacates=recovered_vacates,
     )
 
-    # Redis can outlive the process that left this materialization unfinished.
-    # Invalidate before releasing the startup barrier so no pre-crash pending or
-    # failed payload remains reachable while background indexing catches up.
-    from basic_memory.read_cache import NullReadCache, invalidate_project_read_cache
-
     await invalidate_project_read_cache(
-        read_cache if read_cache is not None else NullReadCache(),
+        active_read_cache,
         str(project.external_id),
     )
 

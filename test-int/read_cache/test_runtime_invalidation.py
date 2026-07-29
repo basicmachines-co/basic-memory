@@ -12,6 +12,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from basic_memory import db
+from basic_memory.index import note_content_materialization
 from basic_memory.index.local_moves import (
     LocalMoveEntityRepository,
     LocalWatchMoveProcessor,
@@ -415,6 +416,60 @@ async def test_startup_materialization_recovery_invalidates_real_redis(
         redis_cache,
         project_external_id,
         request="startup-recovery",
+    )
+    assert generation_after != generation_before
+
+
+@pytest.mark.asyncio
+async def test_startup_recovery_invalidates_before_later_vacate_failure_in_real_redis(
+    monkeypatch: pytest.MonkeyPatch,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """A later recovery phase failure cannot retain phase-one published state."""
+    _, session_maker = engine_factory
+    project_external_id = str(test_project.external_id)
+    generation_before = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="startup-recovery-later-failure",
+    )
+    entity = await _seed_recovery_note(
+        session_maker,
+        test_project,
+        title="Recovered Before Vacate Failure",
+        file_path="notes/recovered-before-vacate-failure.md",
+        markdown_content="# Recovered before later failure\n",
+    )
+
+    async def fail_move_vacate_recovery(
+        *,
+        session_maker: async_sessionmaker[AsyncSession],
+        file_service: FileService,
+        project_id: int,
+    ) -> int:
+        del session_maker, file_service, project_id
+        raise RuntimeError("move-vacate setup failure")
+
+    monkeypatch.setattr(
+        note_content_materialization,
+        "recover_move_vacates",
+        fail_move_vacate_recovery,
+    )
+
+    await recover_project_materializations(
+        test_project,
+        session_maker,
+        read_cache=redis_cache.cache,
+    )
+
+    written = Path(test_project.path) / entity.file_path
+    assert written.read_text(encoding="utf-8") == "# Recovered before later failure\n"
+    generation_after = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="startup-recovery-later-failure",
     )
     assert generation_after != generation_before
 

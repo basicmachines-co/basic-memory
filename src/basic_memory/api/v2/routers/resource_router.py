@@ -96,6 +96,7 @@ async def get_resource_content(
                     project_external_id=project_id,
                     entity_external_id=entity_id,
                     session=session,
+                    read_cache=read_cache,
                 )
                 if note_resource is not None:
                     return CachedResourceResponse(

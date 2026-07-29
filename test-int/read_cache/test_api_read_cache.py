@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, override
 
 import pytest
 from fastapi import FastAPI
@@ -16,12 +16,22 @@ from basic_memory import db
 from basic_memory.deps import (
     get_chatgpt_importer_v2_external,
     get_index_file_executor_v2_external,
+    get_note_content_query_service,
     get_read_cache,
+)
+from basic_memory.indexing.note_content_read_repair_runner import (
+    NoteContentReadRepairFile,
+    NoteContentReadRepairTarget,
 )
 from basic_memory.indexing.models import FileIndexResult
 from basic_memory.models import Project
 from basic_memory.models.knowledge import Entity
-from basic_memory.read_cache import ReadCacheKey, ReadCacheOperation, read_cache_request_digest
+from basic_memory.read_cache import (
+    ReadCacheInvalidationStatus,
+    ReadCacheKey,
+    ReadCacheOperation,
+    read_cache_request_digest,
+)
 from basic_memory.read_cache.keys import (
     redis_read_cache_generation_key,
     redis_read_cache_keys,
@@ -30,6 +40,7 @@ from basic_memory.read_cache.redis import RedisReadCache
 from basic_memory.repository import EntityRepository
 from basic_memory.runtime.note_content import NOTE_CONTENT_BASE_CHECKSUM_HEADER
 from basic_memory.schemas.v2 import EntityResolveRequest
+from basic_memory.services.note_content_reads import NoteContentQueryService
 from basic_memory.workspace_context import (
     WORKSPACE_SLUG_HEADER,
     WORKSPACE_TYPE_HEADER,
@@ -76,6 +87,47 @@ class PartiallyFailingImporter:
         del source_data, destination_folder, kwargs
         self.target.write_text("# Imported before failure\n", encoding="utf-8")
         raise RuntimeError("partial import failure")
+
+
+class LocalReadRepairFileReader:
+    """Read canonical project files through the hosted read-repair protocol."""
+
+    async def read_note_content_repair_file(
+        self,
+        target: NoteContentReadRepairTarget[Project, Entity],
+    ) -> NoteContentReadRepairFile | None:
+        path = Path(target.project.path) / target.entity.file_path
+        if not path.exists():
+            return None
+        stat = path.stat()
+        return NoteContentReadRepairFile(
+            markdown_content=path.read_text(encoding="utf-8"),
+            observed_at=datetime.fromtimestamp(stat.st_mtime, timezone.utc),
+        )
+
+
+class DirectoryMoveObservingRedisReadCache(RedisReadCache):
+    """Record how much of a directory move is durable at each real invalidation."""
+
+    def __init__(
+        self,
+        *,
+        client: Redis,
+        namespace: str,
+        prefix: str,
+        destination_paths: tuple[Path, ...],
+    ) -> None:
+        super().__init__(client=client, namespace=namespace, prefix=prefix)
+        self.destination_paths = destination_paths
+        self.destination_counts: list[int] = []
+
+    @override
+    async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
+        status = await super().invalidate_project(project_id)
+        self.destination_counts.append(
+            sum(destination.exists() for destination in self.destination_paths)
+        )
+        return status
 
 
 def _cache_key(
@@ -384,3 +436,129 @@ async def test_partial_import_failure_invalidates_cached_resource_in_real_redis(
     refreshed_response = await client.get(resource_url)
     assert refreshed_response.status_code == 200
     assert refreshed_response.text == "# Imported before failure\n"
+
+
+@pytest.mark.asyncio
+async def test_resource_read_repair_invalidates_cached_entity_in_real_redis(
+    app: FastAPI,
+    client: AsyncClient,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """A resource-triggered note_content repair supersedes cached entity metadata."""
+    app.dependency_overrides[get_read_cache] = lambda: redis_cache.cache
+    project_external_id = str(test_project.external_id)
+    file_path = "cache/read-repair.md"
+    disk_path = Path(test_project.path) / file_path
+    disk_path.parent.mkdir(parents=True, exist_ok=True)
+    disk_path.write_text("# Read repair\n\nCanonical file content.\n", encoding="utf-8")
+
+    repository = EntityRepository(project_id=test_project.id)
+    _, session_maker = engine_factory
+    async with db.scoped_session(session_maker) as session:
+        entity = await repository.add(
+            session,
+            Entity(
+                title="Read repair",
+                note_type="note",
+                content_type="text/markdown",
+                file_path=file_path,
+                checksum="read-repair-checksum",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+        )
+
+    project_url = f"/v2/projects/{project_external_id}"
+    entity_url = f"{project_url}/knowledge/entities/{entity.external_id}"
+    resource_url = f"{project_url}/resource/{entity.external_id}"
+    cached_entity = await client.get(entity_url)
+    assert cached_entity.status_code == 200
+    assert cached_entity.json().get("db_version") is None
+    generation_before = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="resource-read-repair",
+    )
+
+    query_service = NoteContentQueryService(
+        session_maker=session_maker,
+        read_repair_file_reader=LocalReadRepairFileReader(),
+    )
+    app.dependency_overrides[get_note_content_query_service] = lambda: query_service
+
+    repaired_resource = await client.get(resource_url)
+    assert repaired_resource.status_code == 200
+    assert repaired_resource.text == "# Read repair\n\nCanonical file content.\n"
+    generation_after = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="resource-read-repair",
+    )
+    assert generation_after != generation_before
+
+    refreshed_entity = await client.get(entity_url)
+    assert refreshed_entity.status_code == 200
+    assert refreshed_entity.json()["db_version"] == 1
+    assert "Canonical file content." in refreshed_entity.json()["content"]
+
+
+@pytest.mark.asyncio
+async def test_directory_move_invalidates_after_each_committed_file_in_real_redis(
+    app: FastAPI,
+    client: AsyncClient,
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """Each file move advances Redis before the next directory item is processed."""
+    project_external_id = str(test_project.external_id)
+    project_url = f"/v2/projects/{project_external_id}"
+    created_paths: list[str] = []
+    for title in ("First directory move", "Second directory move"):
+        response = await client.post(
+            f"{project_url}/knowledge/entities",
+            json={
+                "title": title,
+                "directory": "move-source",
+                "content": f"# {title}\n",
+            },
+        )
+        assert response.status_code == 202
+        created_paths.append(response.json()["file_path"])
+
+    destination_paths = tuple(
+        Path(test_project.path) / source_path.replace("move-source/", "move-destination/", 1)
+        for source_path in created_paths
+    )
+    observing_cache = DirectoryMoveObservingRedisReadCache(
+        client=redis_cache.client,
+        namespace=redis_cache.namespace,
+        prefix=redis_cache.prefix,
+        destination_paths=destination_paths,
+    )
+    app.dependency_overrides[get_read_cache] = lambda: observing_cache
+    generation_before = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="directory-move",
+    )
+
+    response = await client.post(
+        f"{project_url}/knowledge/move-directory",
+        json={
+            "source_directory": "move-source",
+            "destination_directory": "move-destination",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["successful_moves"] == 2
+    assert observing_cache.destination_counts[:2] == [1, 2]
+    assert all(destination.exists() for destination in destination_paths)
+    generation_after = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="directory-move",
+    )
+    assert generation_after != generation_before

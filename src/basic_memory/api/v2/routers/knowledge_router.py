@@ -604,6 +604,7 @@ async def get_entity_by_id(
                     project_external_id=project_external_id,
                     entity_external_id=entity_id,
                     session=session,
+                    read_cache=read_cache,
                 )
             )
             if note_payload is not None:
@@ -1013,8 +1014,9 @@ async def move_directory(
                 destination_directory=data.destination_directory,
                 project_config=project_config,
                 app_config=app_config,
+                project_external_id=project_external_id,
+                read_cache=read_cache,
             )
-            await invalidate_project_read_cache(read_cache, project_external_id)
 
             try:
                 # Reindex moved entities

@@ -22,6 +22,7 @@ from basic_memory.models import Observation, Relation
 from basic_memory.models.knowledge import Entity
 from basic_memory.repository import ObservationRepository, RelationRepository
 from basic_memory.repository.entity_repository import EntityRepository
+from basic_memory.read_cache import ReadCache, invalidate_project_read_cache
 from basic_memory.runtime.note_move import normalize_note_move_destination_path
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.schemas.base import Permalink
@@ -1129,6 +1130,9 @@ class EntityService(BaseService[EntityModel]):
         destination_directory: str,
         project_config: ProjectConfig,
         app_config: BasicMemoryConfig,
+        *,
+        project_external_id: str,
+        read_cache: ReadCache,
     ) -> DirectoryMoveResult:
         """Move all entities in a directory to a new location.
 
@@ -1141,6 +1145,8 @@ class EntityService(BaseService[EntityModel]):
             destination_directory: Destination directory path relative to project root
             project_config: Project configuration for file operations
             app_config: App configuration for permalink update settings
+            project_external_id: Canonical project UUID used for cache invalidation
+            read_cache: Namespace-bound semantic read cache
 
         Returns:
             DirectoryMoveResult with counts and details of moved files
@@ -1177,18 +1183,16 @@ class EntityService(BaseService[EntityModel]):
 
         # Process each entity
         for entity in entities:
-            try:
-                # Calculate new path by replacing source prefix with destination
-                old_path = entity.file_path
-                # Replace only the first occurrence of the source directory prefix
-                if old_path.startswith(f"{source_directory}/"):
-                    new_path = old_path.replace(
-                        f"{source_directory}/", f"{destination_directory}/", 1
-                    )
-                else:  # pragma: no cover
-                    # Entity is directly in the source directory (shouldn't happen with prefix match)
-                    new_path = f"{destination_directory}/{old_path}"
+            # Calculate new path by replacing source prefix with destination
+            old_path = entity.file_path
+            # Replace only the first occurrence of the source directory prefix
+            if old_path.startswith(f"{source_directory}/"):
+                new_path = old_path.replace(f"{source_directory}/", f"{destination_directory}/", 1)
+            else:  # pragma: no cover
+                # Entity is directly in the source directory (shouldn't happen with prefix match)
+                new_path = f"{destination_directory}/{old_path}"
 
+            try:
                 # Move the individual entity
                 await self.move_entity(
                     identifier=entity.file_path,
@@ -1196,15 +1200,18 @@ class EntityService(BaseService[EntityModel]):
                     project_config=project_config,
                     app_config=app_config,
                 )
-
-                moved_files.append(new_path)
-                successful_moves += 1
-                logger.debug(f"Moved entity: {old_path} -> {new_path}")
-
             except Exception as e:  # pragma: no cover
                 failed_moves += 1
                 errors.append(DirectoryMoveError(path=entity.file_path, error=str(e)))
                 logger.error(f"Failed to move entity {entity.file_path}: {e}")
+                continue
+
+            # Each move commits independently. Invalidate before the next file so a
+            # long directory batch cannot serve early moves from the old generation.
+            await invalidate_project_read_cache(read_cache, project_external_id)
+            moved_files.append(new_path)
+            successful_moves += 1
+            logger.debug(f"Moved entity: {old_path} -> {new_path}")
 
         logger.info(
             f"Directory move complete: {successful_moves} succeeded, {failed_moves} failed "

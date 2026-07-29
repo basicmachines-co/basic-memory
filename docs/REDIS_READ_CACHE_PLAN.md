@@ -89,6 +89,9 @@ tenant:
 1. Put direct single-file and watcher file-index invalidation in failure-safe boundaries. Entity
    transactions can commit before search refresh or note-content reconciliation raises, so a
    failed index attempt can still publish cache-relevant state.
+1. Pass the namespace-bound cache into hosted note-content read repair. A resource or entity read
+   can bootstrap a missing accepted-content row; invalidate immediately after that commit and
+   before the repaired response is offered to read-through storage.
 1. Inject the namespace-bound cache into import endpoints and workers. Invalidate after every
    import attempt that may have written files, including importers that return a failed result or
    raise after partial progress, so cached file-first resources cannot survive overwritten bytes.
@@ -97,10 +100,15 @@ tenant:
    keep deleted entities reachable through the pre-acceptance generation.
 1. Invalidate watcher-detected moves at their own completion boundary. Paired delete/create
    events are consumed by move processing and therefore bypass the ordinary watcher callbacks.
+1. Invalidate directory moves after each individual file/database move commits, then again after
+   the final search and relation follow-ups. Directory moves are incremental batches, so a long or
+   partially failed request must not keep earlier files under the pre-move generation.
 1. If startup recovery or reconciliation attempts can publish materialization, vacate, index, or
    relation state, invalidate through the same namespace-bound cache before releasing the serving
-   barrier or resuming tenant traffic. Terminal conflict and failure publication count even when
-   the recovery did not produce a written file.
+   barrier or resuming tenant traffic. Treat materialization and move-vacate recovery as separate
+   freshness phases: invalidate a completed first phase before starting the second so a later
+   setup/query failure cannot skip the earlier generation bump. Terminal conflict and failure
+   publication count even when the recovery did not produce a written file.
 1. Keep `bm:read:v1` separate from rate-limit and Cloud control-plane prefixes, metrics,
    timeouts, and failure policies. The clients may target one Redis deployment, but a read-cache
    timeout must bypass while a rate-limit decision keeps its Cloud-owned security behavior.
@@ -222,11 +230,13 @@ publication, direct file indexing, filesystem watcher updates, project indexing,
 mutations, imports, watcher-detected paired moves, startup recovery or reconciliation, Cloud
 storage events, and relation-resolution changes that affect cached responses. Each later phase
 invalidates again so a value filled after an earlier generation bump cannot outlive the state
-that phase publishes. Directory deletion invalidates after acceptance and after cleanup. Imports
-invalidate after every attempt that may have written files. Project indexing invalidates even
-after a partial failure. Direct single-file and watcher file indexing invalidate even when a
-follow-up fails after the entity commit. Recovery invalidation runs before the serving barrier is
-released and includes terminal conflict or failure publication.
+that phase publishes. Hosted read repair invalidates after bootstrapping accepted content and
+before a repaired entity or resource is stored. Directory moves invalidate after every committed
+file plus the final reindex; directory deletion invalidates after acceptance and after cleanup.
+Imports invalidate after every attempt that may have written files. Project indexing invalidates
+even after a partial failure. Direct single-file and watcher file indexing invalidate even when a
+follow-up fails after the entity commit. Recovery phases invalidate independently before the
+serving barrier is released and include terminal conflict or failure publication.
 
 ## Dependency And Lifecycle
 
@@ -303,8 +313,11 @@ The real-Redis suite must prove:
 - project-index failures invalidate any earlier committed batches;
 - direct and watcher file-index failures invalidate any entity state committed before failed
   search or reconciliation follow-ups;
+- hosted read repair invalidates cached entity metadata before storing the repaired resource;
 - import attempts invalidate cached file-first resources after success and partial failure;
+- directory moves invalidate after each committed file and again after final reindexing;
 - directory deletion invalidates before cleanup starts and again after cleanup completes.
+- startup materialization recovery remains invalidated when a later move-vacate phase fails.
 
 Run route behavior against both SQLite and Postgres where persistence behavior differs. Redis
 semantics themselves are asserted only against the real Redis integration fixture.
@@ -336,9 +349,15 @@ semantics themselves are asserted only against the real Redis integration fixtur
   deletion both after acceptance commit and after cleanup/relation refresh.
 - Invalidate direct and watcher file indexing from failure-safe boundaries because entity commits
   precede some search and reconciliation follow-ups.
+- Invalidate hosted note-content read repair after it commits and before returning its repaired
+  entity or resource to the read-through helper.
 - Invalidate every import attempt that may write files, including partial failures.
+- Invalidate directory moves after every committed file and again after search/relation
+  follow-ups.
+- Invalidate each startup recovery phase before beginning the next phase.
 - Enable reads for a tenant only after every request, worker, partial-index, direct-index,
-  import, accepted-delete, move, and recovery boundary has namespace and invalidation parity.
+  read-repair, import, accepted-delete, move, and recovery boundary has namespace and invalidation
+  parity.
 - Start with shadow telemetry or a limited tenant cohort.
 - Compare hit rate, Redis latency, database query volume, and end-to-end tool latency.
 
