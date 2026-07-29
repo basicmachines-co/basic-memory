@@ -530,8 +530,13 @@ async def index_file(
                 detail=f"Only markdown files can be indexed: '{data.file_path}'",
             )
 
-        indexed = await file_indexer.index_file(file_path, source="api-index-file")
-        await invalidate_project_read_cache(read_cache, project_external_id)
+        try:
+            indexed = await file_indexer.index_file(file_path, source="api-index-file")
+        finally:
+            # The file indexer commits entity state before search and reconciliation
+            # follow-ups finish. Invalidate even when a later phase raises so those
+            # partial commits cannot remain reachable through the old generation.
+            await invalidate_project_read_cache(read_cache, project_external_id)
         async with db.scoped_session(session_maker) as session:
             entity = await entity_repository.get_by_id(session, indexed.entity_id)
         if entity is None:  # pragma: no cover

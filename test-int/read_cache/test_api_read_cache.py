@@ -8,12 +8,13 @@ from typing import Protocol
 
 import pytest
 from fastapi import FastAPI
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from basic_memory import db
-from basic_memory.deps import get_read_cache
+from basic_memory.deps import get_index_file_executor_v2_external, get_read_cache
+from basic_memory.indexing.models import FileIndexResult
 from basic_memory.models import Project
 from basic_memory.models.knowledge import Entity
 from basic_memory.read_cache import ReadCacheKey, ReadCacheOperation, read_cache_request_digest
@@ -43,6 +44,19 @@ class RedisCacheHarness(Protocol):
 pytestmark = pytest.mark.redis
 
 
+class FailingIndexFileExecutor:
+    """Represent an indexer that fails after it may have committed entity state."""
+
+    async def index_file(
+        self,
+        file_path: str,
+        *,
+        source: str,
+    ) -> FileIndexResult:
+        del file_path, source
+        raise RuntimeError("partial direct index failure")
+
+
 def _cache_key(
     *,
     project_id: str,
@@ -55,6 +69,30 @@ def _cache_key(
         operation=operation,
         request_digest=read_cache_request_digest(request, *request_context),
     )
+
+
+async def _initialized_generation(
+    redis_cache: RedisCacheHarness,
+    project_id: str,
+    *,
+    request: str,
+) -> bytes | str:
+    await redis_cache.cache.lookup(
+        _cache_key(
+            project_id=project_id,
+            operation=ReadCacheOperation.entity,
+            request=request,
+        )
+    )
+    generation = await redis_cache.client.get(
+        redis_read_cache_generation_key(
+            prefix=redis_cache.prefix,
+            namespace=redis_cache.namespace,
+            project_id=project_id,
+        )
+    )
+    assert generation is not None
+    return generation
 
 
 @pytest.mark.asyncio
@@ -225,3 +263,41 @@ async def test_non_markdown_resource_is_never_cached(
         key=key,
     )
     assert await redis_cache.client.exists(redis_keys.data) == 0
+
+
+@pytest.mark.asyncio
+async def test_direct_index_failure_invalidates_real_redis(
+    app: FastAPI,
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """A partial direct index commit cannot retain the previous cache generation."""
+    app.dependency_overrides[get_read_cache] = lambda: redis_cache.cache
+    app.dependency_overrides[get_index_file_executor_v2_external] = FailingIndexFileExecutor
+    project_external_id = str(test_project.external_id)
+    generation_before = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="direct-index-failure",
+    )
+    file_path = "cache/direct-index-failure.md"
+    disk_path = Path(test_project.path) / file_path
+    disk_path.parent.mkdir(parents=True, exist_ok=True)
+    disk_path.write_text("# Partial direct index\n", encoding="utf-8")
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test",
+    ) as failure_client:
+        response = await failure_client.post(
+            f"/v2/projects/{project_external_id}/knowledge/index-file",
+            json={"file_path": file_path},
+        )
+
+    assert response.status_code == 500
+    generation_after = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="direct-index-failure",
+    )
+    assert generation_after != generation_before

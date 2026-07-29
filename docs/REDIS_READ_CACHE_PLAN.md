@@ -86,6 +86,9 @@ tenant:
    between phases from surviving the later worker commit.
 1. Put project-index invalidation in a failure-safe completion boundary. Move, delete, file-index,
    and vector batches can commit incrementally before a later batch raises.
+1. Put direct single-file and watcher file-index invalidation in failure-safe boundaries. Entity
+   transactions can commit before search refresh or note-content reconciliation raises, so a
+   failed index attempt can still publish cache-relevant state.
 1. Invalidate directory deletion immediately after its acceptance transaction commits, then
    again after file cleanup and surviving-relation refresh. A slow or failed cleanup must not
    keep deleted entities reachable through the pre-acceptance generation.
@@ -217,8 +220,9 @@ mutations, watcher-detected paired moves, startup recovery or reconciliation, Cl
 events, and relation-resolution changes that affect cached responses. Each later phase
 invalidates again so a value filled after an earlier generation bump cannot outlive the state
 that phase publishes. Directory deletion invalidates after acceptance and after cleanup. Project
-indexing invalidates even after a partial failure. Recovery invalidation runs before the serving
-barrier is released and includes terminal conflict or failure publication.
+indexing invalidates even after a partial failure. Direct single-file and watcher file indexing
+invalidate even when a follow-up fails after the entity commit. Recovery invalidation runs before
+the serving barrier is released and includes terminal conflict or failure publication.
 
 ## Dependency And Lifecycle
 
@@ -293,6 +297,8 @@ The real-Redis suite must prove:
 - startup recovery that publishes written, conflict, or failed materialization state invalidates
   before serving resumes;
 - project-index failures invalidate any earlier committed batches;
+- direct and watcher file-index failures invalidate any entity state committed before failed
+  search or reconciliation follow-ups;
 - directory deletion invalidates before cleanup starts and again after cleanup completes.
 
 Run route behavior against both SQLite and Postgres where persistence behavior differs. Redis
@@ -323,8 +329,10 @@ semantics themselves are asserted only against the real Redis integration fixtur
   resuming tenant traffic.
 - Invalidate project indexing from a failure-safe completion boundary, and invalidate directory
   deletion both after acceptance commit and after cleanup/relation refresh.
-- Enable reads for a tenant only after every request, worker, partial-index, accepted-delete, move,
-  and recovery boundary has namespace and invalidation parity.
+- Invalidate direct and watcher file indexing from failure-safe boundaries because entity commits
+  precede some search and reconciliation follow-ups.
+- Enable reads for a tenant only after every request, worker, partial-index, direct-index,
+  accepted-delete, move, and recovery boundary has namespace and invalidation parity.
 - Start with shadow telemetry or a limited tenant cohort.
 - Compare hit rate, Redis latency, database query volume, and end-to-end tool latency.
 

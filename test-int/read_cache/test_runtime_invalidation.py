@@ -16,7 +16,9 @@ from basic_memory.index.local_moves import (
     LocalMoveEntityRepository,
     LocalWatchMoveProcessor,
 )
+from basic_memory.index.local_dependencies import LocalIndexSearchService
 from basic_memory.index.local_project import LocalProjectIndexRuntime, run_local_project_index
+from basic_memory.index.local_runtime import LocalInlineStorageEventResultRecorder
 from basic_memory.indexing.change_planning import ChangeReport
 from basic_memory.indexing.directory_delete_runner import (
     DirectoryDeleteRuntime,
@@ -25,7 +27,9 @@ from basic_memory.indexing.directory_delete_runner import (
 from basic_memory.indexing.project_index_maintenance import (
     ProjectIndexDeleteRun,
     ProjectIndexMoveRun,
+    ProjectIndexMovedEntitySearchRefresher,
 )
+from basic_memory.indexing.relation_resolution import RelationResolutionRuntime
 from basic_memory.models import Project
 from basic_memory.models.knowledge import Entity
 from basic_memory.read_cache import (
@@ -52,6 +56,8 @@ from basic_memory.runtime.storage import (
     StorageEventPayload,
     StorageObjectIdentity,
     StorageObjectVersion,
+    RuntimeStorageEventOperation,
+    RuntimeStorageEventOperationKind,
 )
 from basic_memory.services.directory_deletes import DirectoryDeleteService
 from basic_memory.services.file_service import FileService
@@ -290,6 +296,14 @@ def _move_event(event_name: str, path: str) -> StorageEventPayload:
     )
 
 
+def _index_operation(path: str) -> RuntimeStorageEventOperation:
+    return RuntimeStorageEventOperation(
+        kind=RuntimeStorageEventOperationKind.index_file,
+        storage_event=_move_event("OBJECT_CREATED_PUT", path),
+        relative_path=path,
+    )
+
+
 @pytest.mark.asyncio
 async def test_watcher_move_completion_invalidates_real_redis(
     test_project: Project,
@@ -328,6 +342,42 @@ async def test_watcher_move_completion_invalidates_real_redis(
         redis_cache,
         project_external_id,
         request="watcher-move",
+    )
+    assert generation_after != generation_before
+
+
+@pytest.mark.asyncio
+async def test_watcher_index_failure_invalidates_real_redis(
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+) -> None:
+    project_external_id = str(test_project.external_id)
+    generation_before = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="watcher-index-failure",
+    )
+    recorder = LocalInlineStorageEventResultRecorder(
+        project=ProjectRuntimeReference.from_project(test_project),
+        search_service=cast(LocalIndexSearchService, object()),
+        relation_cleanup_search_refresher=cast(
+            ProjectIndexMovedEntitySearchRefresher,
+            object(),
+        ),
+        relation_runtime=cast(RelationResolutionRuntime, object()),
+        index_embeddings=False,
+        read_cache=redis_cache.cache,
+    )
+
+    await recorder.event_failed(
+        _index_operation("notes/partial-index.md"),
+        RuntimeError("partial watcher index failure"),
+    )
+
+    generation_after = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="watcher-index-failure",
     )
     assert generation_after != generation_before
 

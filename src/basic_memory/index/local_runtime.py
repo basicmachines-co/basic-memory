@@ -65,6 +65,7 @@ from basic_memory.runtime.storage import (
     RuntimeFileChecksum,
     RuntimeFilePath,
     RuntimeStorageEventOperation,
+    RuntimeStorageEventOperationKind,
 )
 from basic_memory.services import FileService
 from basic_memory.services.exceptions import FileOperationError
@@ -265,6 +266,14 @@ class LocalInlineStorageEventResultRecorder:
             file_path=operation.relative_path,
             error=str(exc),
         )
+        if operation.kind == RuntimeStorageEventOperationKind.index_file:
+            # LocalMarkdownFileIndexer commits the entity before all search and
+            # reconciliation follow-ups complete. A watcher failure can therefore
+            # publish partial state even though the success callback never runs.
+            await invalidate_project_read_cache(
+                self.read_cache,
+                self.project.project_external_id,
+            )
 
 
 @dataclass(frozen=True, slots=True)
