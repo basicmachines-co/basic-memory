@@ -25,11 +25,12 @@ def read_cache_request_digest(*parts: str) -> str:
 class RedisReadCacheKeys:
     """Redis keys for one project generation and canonical request."""
 
-    generation: str
-    data: str
+    generation_key: str
+    data_key: str
 
 
 def _redis_read_cache_cluster_scope(*, namespace: str, project_id: str) -> str:
+    namespace = namespace.strip()
     if not namespace:
         raise ValueError("read-cache namespace must not be empty")
 
@@ -40,13 +41,12 @@ def _redis_read_cache_cluster_scope(*, namespace: str, project_id: str) -> str:
     return f"{{{scope_digest}}}"
 
 
-def redis_read_cache_generation_key(
+def _redis_read_cache_key_base(
     *,
     prefix: str,
     namespace: str,
     project_id: str,
 ) -> str:
-    """Build the generation key shared by every cached read in one project."""
     if not prefix or any(character.isspace() for character in prefix):
         raise ValueError("read-cache prefix must be non-empty and contain no whitespace")
 
@@ -54,7 +54,22 @@ def redis_read_cache_generation_key(
         namespace=namespace,
         project_id=project_id,
     )
-    return f"{prefix}:{cluster_scope}:generation"
+    return f"{prefix}:{cluster_scope}"
+
+
+def redis_read_cache_generation_key(
+    *,
+    prefix: str,
+    namespace: str,
+    project_id: str,
+) -> str:
+    """Build the generation key shared by every cached read in one project."""
+    key_base = _redis_read_cache_key_base(
+        prefix=prefix,
+        namespace=namespace,
+        project_id=project_id,
+    )
+    return f"{key_base}:generation"
 
 
 def redis_read_cache_keys(
@@ -64,16 +79,12 @@ def redis_read_cache_keys(
     key: ReadCacheKey,
 ) -> RedisReadCacheKeys:
     """Build versioned Redis keys without exposing namespace values."""
-    cluster_scope = _redis_read_cache_cluster_scope(
-        namespace=namespace,
-        project_id=key.project_id,
-    )
-    generation = redis_read_cache_generation_key(
+    key_base = _redis_read_cache_key_base(
         prefix=prefix,
         namespace=namespace,
         project_id=key.project_id,
     )
     return RedisReadCacheKeys(
-        generation=generation,
-        data=f"{prefix}:{cluster_scope}:{key.operation.value}:{key.request_digest}",
+        generation_key=f"{key_base}:generation",
+        data_key=f"{key_base}:{key.operation.value}:{key.request_digest}",
     )

@@ -15,7 +15,7 @@ from basic_memory.indexing.note_content_read_repair_runner import (
     run_note_content_read_repair_with_default_reconciler,
 )
 from basic_memory.models import Entity, NoteContent, Project
-from basic_memory.read_cache import ReadCache, invalidate_project_read_cache
+from basic_memory.read_cache import ReadCacheInvalidator, invalidate_project_read_cache
 from basic_memory.runtime.note_content import (
     RuntimeNoteContentResource,
     RuntimeNoteContentResponsePayload,
@@ -92,7 +92,7 @@ class NoteContentQueryService:
         entity_external_id: str,
         session: AsyncSession | None = None,
         source: str = "read_repair",
-        read_cache: ReadCache | None = None,
+        read_cache: ReadCacheInvalidator | None = None,
     ) -> RuntimeNoteContentResponsePayload | None:
         """Return entity payload, repairing missing note_content when a reader exists."""
         payload = await self.get_note_entity_payload(
@@ -154,7 +154,7 @@ class NoteContentQueryService:
         entity_external_id: str,
         session: AsyncSession | None = None,
         source: str = "read_repair",
-        read_cache: ReadCache | None = None,
+        read_cache: ReadCacheInvalidator | None = None,
     ) -> RuntimeNoteContentResource | None:
         """Return markdown resource, repairing missing note_content when possible."""
         resource = await self.get_note_resource(

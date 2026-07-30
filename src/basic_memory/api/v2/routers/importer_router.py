@@ -18,7 +18,7 @@ from basic_memory.deps import (
     ReadCacheDep,
 )
 from basic_memory.importers import Importer
-from basic_memory.read_cache import ReadCache, invalidate_project_read_cache
+from basic_memory.read_cache import ReadCache, invalidate_cache
 from basic_memory.schemas.importer import (
     ChatImportResult,
     EntityImportResult,
@@ -260,10 +260,8 @@ async def run_import_with_invalidation[ImportResultT: ImportResult](
     project_external_id: str,
 ) -> ImportResultT:
     """Run one import attempt and invalidate files it may have written."""
-    try:
+    # Importers write files one at a time and may return a failed result after
+    # earlier writes. Invalidate every attempted import so cached file-first
+    # resources cannot survive either success or partial failure.
+    async with invalidate_cache(read_cache, project_external_id):
         return await importer.import_data(source_data, destination_directory)
-    finally:
-        # Importers write files one at a time and may return a failed result after
-        # earlier writes. Invalidate every attempted import so cached file-first
-        # resources cannot survive either success or partial failure.
-        await invalidate_project_read_cache(read_cache, project_external_id)

@@ -1,10 +1,13 @@
 """Best-effort project invalidation shared by mutation and indexing runtimes."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from loguru import logger
 
 import logfire
 from basic_memory.read_cache.contract import (
-    ReadCache,
+    ReadCacheInvalidator,
     ReadCacheInvalidationStatus,
     ReadCacheUnavailable,
 )
@@ -21,7 +24,7 @@ def _record_invalidation_event(event: ReadCacheInvalidationStatus) -> None:
 
 
 async def invalidate_project_read_cache(
-    cache: ReadCache,
+    cache: ReadCacheInvalidator,
     project_id: str,
 ) -> ReadCacheInvalidationStatus:
     """Invalidate one project without failing an already-committed mutation."""
@@ -43,3 +46,15 @@ async def invalidate_project_read_cache(
         _record_invalidation_event(status)
         span.set_attribute("cache.outcome", status.value)
         return status
+
+
+@asynccontextmanager
+async def invalidate_cache(
+    cache: ReadCacheInvalidator,
+    project_id: str,
+) -> AsyncIterator[None]:
+    """Invalidate one project's read cache when the enclosed operation exits."""
+    try:
+        yield
+    finally:
+        await invalidate_project_read_cache(cache, project_id)

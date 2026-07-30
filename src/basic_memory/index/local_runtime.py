@@ -57,7 +57,12 @@ from basic_memory.indexing.external_file_delete_runner import (
     RepositoryExternalFileDeleteEntities,
 )
 from basic_memory.models import Entity, Project
-from basic_memory.read_cache import NullReadCache, ReadCache, invalidate_project_read_cache
+from basic_memory.read_cache import (
+    NullReadCache,
+    ReadCache,
+    invalidate_cache,
+    invalidate_project_read_cache,
+)
 from basic_memory.repository import NoteContentRepository
 from basic_memory.runtime.projects import ProjectRuntimeReference
 from basic_memory.runtime.storage import (
@@ -177,7 +182,13 @@ class LocalInlineStorageEventResultRecorder:
             )
         )
         if relation_request is not None:
-            try:
+            # Relation repair changes cached entity payloads after indexing.
+            # A second generation bump closes the fill window opened by the
+            # first post-index invalidation, even after partial failure.
+            async with invalidate_cache(
+                self.read_cache,
+                self.project.project_external_id,
+            ):
                 relation_result = await resolve_project_relations(self.relation_runtime)
                 logger.info(
                     "Local event-index relation repair completed",
@@ -186,14 +197,6 @@ class LocalInlineStorageEventResultRecorder:
                     resolved=relation_result.resolved,
                     remaining=relation_result.remaining,
                     passes=relation_result.passes,
-                )
-            finally:
-                # Relation repair changes cached entity payloads after indexing.
-                # A second generation bump closes the fill window opened by the
-                # first post-index invalidation, even after partial failure.
-                await invalidate_project_read_cache(
-                    self.read_cache,
-                    self.project.project_external_id,
                 )
 
         # --- Semantic embedding ---
@@ -231,7 +234,13 @@ class LocalInlineStorageEventResultRecorder:
             self.read_cache,
             self.project.project_external_id,
         )
-        try:
+        # Cleanup may rewrite relations on surviving entities. Invalidate
+        # values filled after the delete became visible, including partial
+        # cleanup progress followed by an error.
+        async with invalidate_cache(
+            self.read_cache,
+            self.project.project_external_id,
+        ):
             if not isinstance(result.deleted_entity, Entity):
                 raise RuntimeError(
                     "Local external file delete returned an incomplete entity result"
@@ -239,14 +248,6 @@ class LocalInlineStorageEventResultRecorder:
             await self.search_service.handle_delete(result.deleted_entity)
             await self.relation_cleanup_search_refresher.refresh_moved_entities(
                 tuple(sorted(result.relation_cleanup_entity_ids)),
-            )
-        finally:
-            # Cleanup may rewrite relations on surviving entities. Invalidate
-            # values filled after the delete became visible, including partial
-            # cleanup progress followed by an error.
-            await invalidate_project_read_cache(
-                self.read_cache,
-                self.project.project_external_id,
             )
 
     async def skip_event(self, operation: RuntimeStorageEventOperation) -> None:

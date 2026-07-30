@@ -30,6 +30,7 @@ from basic_memory.ignore_utils import (
     should_ignore_path,
 )
 from basic_memory.deps import (
+    ConfiguredReadCacheDep,
     EntityServiceV2ExternalDep,
     FileServiceV2ExternalDep,
     SearchServiceV2ExternalDep,
@@ -54,13 +55,8 @@ from basic_memory.deps import (
 from basic_memory.read_cache import (
     ReadCacheKey,
     ReadCacheOperation,
-    invalidate_project_read_cache,
+    invalidate_cache,
     read_cache_request_digest,
-    read_through_model,
-)
-from basic_memory.read_cache.policy import (
-    READ_CACHE_MAX_PAYLOAD_BYTES,
-    READ_CACHE_TTL_SECONDS,
 )
 from basic_memory.runtime.note_content import (
     NOTE_CONTENT_BASE_CHECKSUM_HEADER,
@@ -251,7 +247,7 @@ async def resolve_identifier(
     entity_repository: EntityRepositoryV2ExternalDep,
     project_repository: ProjectRepositoryDep,
     session: SessionDep,
-    read_cache: ReadCacheDep,
+    read_cache: ConfiguredReadCacheDep,
 ) -> EntityResolveResponse:
     """Resolve a string identifier (external_id, permalink, title, or path) to entity info.
 
@@ -290,7 +286,23 @@ async def resolve_identifier(
     ):
         logger.info(f"API v2 request: resolve_identifier for '{data.identifier}'")
 
-        async def load() -> EntityResolveResponse:
+        workspace_context = current_workspace_permalink_context()
+        cache_key = ReadCacheKey(
+            project_id=project_external_id,
+            operation=ReadCacheOperation.resolve,
+            request_digest=read_cache_request_digest(
+                data.model_dump_json(),
+                workspace_context.workspace_slug if workspace_context else "",
+                workspace_context.workspace_type if workspace_context else "",
+            ),
+        )
+        async with read_cache.read(
+            key=cache_key,
+            model_type=EntityResolveResponse,
+        ) as cached:
+            if cached.value is not None:
+                return cached.value
+
             entity = await entity_repository.get_by_external_id(session, data.identifier)
             resolution_method = "external_id" if entity else "search"
 
@@ -343,28 +355,11 @@ async def resolve_identifier(
                 f"API v2 response: resolved '{data.identifier}' "
                 f"to external_id={result.external_id} via {resolution_method}"
             )
-            return result
-
-        workspace_context = current_workspace_permalink_context()
-        return await read_through_model(
-            cache=read_cache,
-            key=ReadCacheKey(
-                project_id=project_external_id,
-                operation=ReadCacheOperation.resolve,
-                request_digest=read_cache_request_digest(
-                    data.model_dump_json(),
-                    workspace_context.workspace_slug if workspace_context else "",
-                    workspace_context.workspace_type if workspace_context else "",
-                ),
-            ),
-            model_type=EntityResolveResponse,
-            load=load,
-            ttl_seconds=READ_CACHE_TTL_SECONDS,
-            max_payload_bytes=READ_CACHE_MAX_PAYLOAD_BYTES,
             # Cross-project references depend on two projects. Keep phase-one
             # generation invalidation exact by caching only local resolutions.
-            should_store=lambda resolved: resolved.project_external_id == project_external_id,
-        )
+            cached.cacheable = result.project_external_id == project_external_id
+            cached.value = result
+            return result
 
 
 ## Single-file indexing endpoint
@@ -530,13 +525,11 @@ async def index_file(
                 detail=f"Only markdown files can be indexed: '{data.file_path}'",
             )
 
-        try:
+        # The file indexer commits entity state before search and reconciliation
+        # follow-ups finish. Invalidate even when a later phase raises so those
+        # partial commits cannot remain reachable through the old generation.
+        async with invalidate_cache(read_cache, project_external_id):
             indexed = await file_indexer.index_file(file_path, source="api-index-file")
-        finally:
-            # The file indexer commits entity state before search and reconciliation
-            # follow-ups finish. Invalidate even when a later phase raises so those
-            # partial commits cannot remain reachable through the old generation.
-            await invalidate_project_read_cache(read_cache, project_external_id)
         async with db.scoped_session(session_maker) as session:
             entity = await entity_repository.get_by_id(session, indexed.entity_id)
         if entity is None:  # pragma: no cover
@@ -573,7 +566,7 @@ async def get_entity_by_id(
     entity_repository: EntityRepositoryV2ExternalDep,
     note_content_query_service: NoteContentQueryServiceDep,
     session: SessionDep,
-    read_cache: ReadCacheDep,
+    read_cache: ConfiguredReadCacheDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
 ) -> EntityResponseV2:
     """Get an entity by its external ID (UUID).
@@ -598,7 +591,18 @@ async def get_entity_by_id(
     ):
         logger.info(f"API v2 request: get_entity_by_id entity_id={entity_id}")
 
-        async def load() -> EntityResponseV2:
+        cache_key = ReadCacheKey(
+            project_id=project_external_id,
+            operation=ReadCacheOperation.entity,
+            request_digest=read_cache_request_digest(entity_id),
+        )
+        async with read_cache.read(
+            key=cache_key,
+            model_type=EntityResponseV2,
+        ) as cached:
+            if cached.value is not None:
+                return cached.value
+
             note_payload = (
                 await note_content_query_service.get_note_entity_payload_with_read_repair(
                     project_external_id=project_external_id,
@@ -610,6 +614,7 @@ async def get_entity_by_id(
             if note_payload is not None:
                 result = entity_response_from_note_content_payload(note_payload)
                 logger.info(f"API v2 response: external_id={entity_id}, title='{result.title}'")
+                cached.value = result
                 return result
 
             entity = await entity_repository.get_by_external_id(session, entity_id)
@@ -621,20 +626,8 @@ async def get_entity_by_id(
 
             result = EntityResponseV2.model_validate(entity)
             logger.info(f"API v2 response: external_id={entity_id}, title='{result.title}'")
+            cached.value = result
             return result
-
-        return await read_through_model(
-            cache=read_cache,
-            key=ReadCacheKey(
-                project_id=project_external_id,
-                operation=ReadCacheOperation.entity,
-                request_digest=read_cache_request_digest(entity_id),
-            ),
-            model_type=EntityResponseV2,
-            load=load,
-            ttl_seconds=READ_CACHE_TTL_SECONDS,
-            max_payload_bytes=READ_CACHE_MAX_PAYLOAD_BYTES,
-        )
 
 
 ## Create endpoints
@@ -1018,7 +1011,10 @@ async def move_directory(
                 read_cache=read_cache,
             )
 
-            try:
+            # Reindexing can alter entity responses after the move was first
+            # invalidated. Close that fill window even after partial
+            # follow-up failure.
+            async with invalidate_cache(read_cache, project_external_id):
                 # Reindex moved entities
                 for file_path in result.moved_files:
                     async with db.scoped_session(session_maker) as session:
@@ -1034,11 +1030,6 @@ async def move_directory(
                             entity_id=entity.id,
                             project_id=project_id,
                         )
-            finally:
-                # Reindexing can alter entity responses after the move was first
-                # invalidated. Close that fill window even after partial
-                # follow-up failure.
-                await invalidate_project_read_cache(read_cache, project_external_id)
 
             logger.info(
                 f"API v2 response: move_directory "

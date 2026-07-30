@@ -57,9 +57,12 @@ class ReadCacheKey:
         if len(self.request_digest) != 64:
             raise ValueError("read-cache request_digest must be a SHA-256 hex digest")
         try:
-            bytes.fromhex(self.request_digest)
+            decoded_digest = bytes.fromhex(self.request_digest)
         except ValueError as error:
             raise ValueError("read-cache request_digest must be a SHA-256 hex digest") from error
+        if len(decoded_digest) != 32:
+            raise ValueError("read-cache request_digest must be a SHA-256 hex digest")
+        object.__setattr__(self, "request_digest", self.request_digest.lower())
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +75,10 @@ class ReadCacheLookup:
 
     generation: str | None
     payload: bytes | None = None
+
+    def __post_init__(self) -> None:
+        if self.generation is None and self.payload is not None:
+            raise ValueError("read-cache payload requires a lookup generation")
 
     @property
     def is_hit(self) -> bool:
@@ -86,8 +93,15 @@ class ReadCacheDataError(RuntimeError):
     """A cached value violated the Basic Memory cache encoding contract."""
 
 
-class ReadCache(Protocol):
-    """Best-effort read cache with project-generation invalidation."""
+class ReadCacheInvalidator(Protocol):
+    """Capability for making one project's cached reads unreachable."""
+
+    async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
+        """Make every existing cached value for one project unreachable."""
+
+
+class ReadCache(ReadCacheInvalidator, Protocol):
+    """Best-effort read-through backend with project-generation invalidation."""
 
     async def lookup(self, key: ReadCacheKey) -> ReadCacheLookup:
         """Return a cached payload and the generation observed by this lookup."""
@@ -101,6 +115,3 @@ class ReadCache(Protocol):
         ttl_seconds: int,
     ) -> ReadCacheStoreStatus:
         """Store a payload under the generation observed by ``lookup``."""
-
-    async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
-        """Make every existing cached value for one project unreachable."""

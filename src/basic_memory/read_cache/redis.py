@@ -144,8 +144,8 @@ class RedisReadCache:
             generation_value, cached_value = await self._client.eval(
                 _LOOKUP_SCRIPT,
                 2,
-                keys.generation,
-                keys.data,
+                keys.generation_key,
+                keys.data_key,
                 uuid4().hex.encode("ascii"),
                 self._generation_ttl_seconds,
             )
@@ -184,8 +184,8 @@ class RedisReadCache:
             stored = await self._client.eval(
                 _STORE_IF_CURRENT_SCRIPT,
                 2,
-                keys.generation,
-                keys.data,
+                keys.generation_key,
+                keys.data_key,
                 generation,
                 encoded,
                 ttl_seconds,

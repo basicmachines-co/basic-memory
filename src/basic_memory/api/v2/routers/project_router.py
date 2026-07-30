@@ -29,7 +29,7 @@ from basic_memory.deps import (
     SessionMakerDep,
 )
 from basic_memory.index.local_project import ProjectIndexRouteRequest
-from basic_memory.read_cache import invalidate_project_read_cache
+from basic_memory.read_cache import invalidate_cache
 from basic_memory.schemas import ProjectIndexStatusResponse
 from basic_memory.models import Project
 from basic_memory.repository.project_repository import ProjectRepository
@@ -457,14 +457,12 @@ async def update_project_by_id(
 
         # Update using project name (service layer still uses names internally)
         if path:
-            try:
+            # A path update changes the filesystem source behind every
+            # resource key while project and entity UUIDs stay stable. The
+            # service can update config before its DB follow-up completes,
+            # so invalidate on every attempted move completion path.
+            async with invalidate_cache(read_cache, project_id):
                 await project_service.move_project(old_project.name, path)
-            finally:
-                # A path update changes the filesystem source behind every
-                # resource key while project and entity UUIDs stay stable. The
-                # service can update config before its DB follow-up completes,
-                # so invalidate on every attempted move completion path.
-                await invalidate_project_read_cache(read_cache, project_id)
         elif is_active is not None:
             await project_service.update_project(old_project.name, is_active=is_active)
 

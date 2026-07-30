@@ -79,7 +79,7 @@ from basic_memory.indexing.relation_resolution import (
     resolve_project_index_completion_relations,
 )
 from basic_memory.models import Entity, Project
-from basic_memory.read_cache import NullReadCache, ReadCache, invalidate_project_read_cache
+from basic_memory.read_cache import NullReadCache, ReadCache, invalidate_cache
 from basic_memory.repository import NoteContentRepository
 from basic_memory.runtime.jobs import (
     RuntimeIndexFileBatchJobRequest,
@@ -761,7 +761,13 @@ async def run_local_project_index(
     runtime: LocalProjectIndexRuntime,
 ) -> ProjectIndexCoordinatorResult:
     """Run project-wide local indexing through the storage-neutral coordinator."""
-    try:
+    # The coordinator commits moves, deletes, and file batches incrementally.
+    # Invalidate even when a later batch or vector sync raises so already
+    # published changes cannot remain behind the previous generation.
+    async with invalidate_cache(
+        runtime.read_cache,
+        request.project.project_external_id,
+    ):
         result = await run_project_index_coordinator(
             request,
             coordinator_job_id=runtime.coordinator_job_id,
@@ -775,29 +781,19 @@ async def run_local_project_index(
             batch_size=runtime.batch_size,
             embedding_vector_sync=runtime.embedding_vector_sync,
         )
-    finally:
-        # The coordinator commits moves, deletes, and file batches incrementally.
-        # Invalidate even when a later batch or vector sync raises so already
-        # published changes cannot remain behind the previous generation.
-        await invalidate_project_read_cache(
+    if runtime.completion_relation_runtime is not None:
+        # Relation repair can mutate cached entity responses after the first
+        # invalidation. Clear any value filled during that window, including
+        # when repair commits partial progress before raising.
+        async with invalidate_cache(
             runtime.read_cache,
             request.project.project_external_id,
-        )
-    if runtime.completion_relation_runtime is not None:
-        try:
+        ):
             await resolve_project_index_completion_relations(
                 ProjectIndexRelationResolutionContext(
                     project_id=request.project.project_id,
                     project_path=request.project.project_path,
                 ),
                 runtime.completion_relation_runtime,
-            )
-        finally:
-            # Relation repair can mutate cached entity responses after the first
-            # invalidation. Clear any value filled during that window, including
-            # when repair commits partial progress before raising.
-            await invalidate_project_read_cache(
-                runtime.read_cache,
-                request.project.project_external_id,
             )
     return result

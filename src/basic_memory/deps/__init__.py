@@ -39,7 +39,9 @@ from basic_memory.deps.projects import (
 )
 
 from basic_memory.deps.read_cache import (
+    get_configured_read_cache,
     get_read_cache,
+    ConfiguredReadCacheDep,
     ReadCacheDep,
 )
 
@@ -129,7 +131,9 @@ __all__ = [
     "get_project_config_v2_external",
     "ProjectConfigV2ExternalDep",
     # Read cache
+    "get_configured_read_cache",
     "get_read_cache",
+    "ConfiguredReadCacheDep",
     "ReadCacheDep",
     # Repositories
     "get_entity_repository_v2_external",

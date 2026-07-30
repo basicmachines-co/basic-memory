@@ -28,7 +28,7 @@ from basic_memory.index.note_content_materialization import drain_pending_materi
 from basic_memory.models import Project
 from basic_memory.models.knowledge import Entity
 from basic_memory.read_cache import (
-    ReadCache,
+    ReadCacheInvalidator,
     ReadCacheInvalidationStatus,
     ReadCacheKey,
     ReadCacheOperation,
@@ -117,7 +117,7 @@ class NoAcceptedNoteContent:
         project_external_id: str,
         entity_external_id: str,
         session: AsyncSession,
-        read_cache: ReadCache,
+        read_cache: ReadCacheInvalidator,
     ) -> None:
         del project_external_id, entity_external_id, session, read_cache
         return None
@@ -262,7 +262,7 @@ async def test_entity_resolve_and_markdown_reads_cache_then_freshened_write_inva
             namespace=redis_cache.namespace,
             key=key,
         )
-        assert await redis_cache.client.exists(redis_keys.data) == 1
+        assert await redis_cache.client.exists(redis_keys.data_key) == 1
 
     generation_key = redis_read_cache_generation_key(
         prefix=redis_cache.prefix,
@@ -369,7 +369,7 @@ async def test_non_markdown_resource_is_never_cached(
         namespace=redis_cache.namespace,
         key=key,
     )
-    assert await redis_cache.client.exists(redis_keys.data) == 0
+    assert await redis_cache.client.exists(redis_keys.data_key) == 0
 
 
 @pytest.mark.asyncio

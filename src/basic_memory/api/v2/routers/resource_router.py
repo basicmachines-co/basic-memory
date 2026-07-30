@@ -18,22 +18,17 @@ from pydantic import BaseModel, ConfigDict
 import logfire
 from basic_memory import db
 from basic_memory.deps import (
+    ConfiguredReadCacheDep,
     ProjectConfigV2ExternalDep,
     FileServiceV2ExternalDep,
     EntityRepositoryV2ExternalDep,
     NoteContentQueryServiceDep,
-    ReadCacheDep,
     SessionMakerDep,
 )
 from basic_memory.read_cache import (
     ReadCacheKey,
     ReadCacheOperation,
     read_cache_request_digest,
-    read_through_model,
-)
-from basic_memory.read_cache.policy import (
-    READ_CACHE_MAX_PAYLOAD_BYTES,
-    READ_CACHE_TTL_SECONDS,
 )
 from basic_memory.utils import validate_project_path
 
@@ -59,7 +54,7 @@ async def get_resource_content(
     entity_repository: EntityRepositoryV2ExternalDep,
     file_service: FileServiceV2ExternalDep,
     note_content_query_service: NoteContentQueryServiceDep,
-    read_cache: ReadCacheDep,
+    read_cache: ConfiguredReadCacheDep,
     session_maker: SessionMakerDep,
     project_id: str = Path(..., description="Project external UUID"),
     entity_id: str = Path(..., description="Entity external UUID"),
@@ -87,7 +82,21 @@ async def get_resource_content(
     ):
         logger.debug(f"V2 Getting content for project {project_id}, entity_id: {entity_id}")
 
-        async def load() -> CachedResourceResponse:
+        cache_key = ReadCacheKey(
+            project_id=project_id,
+            operation=ReadCacheOperation.resource,
+            request_digest=read_cache_request_digest(entity_id),
+        )
+        async with read_cache.read(
+            key=cache_key,
+            model_type=CachedResourceResponse,
+        ) as cached:
+            if cached.value is not None:
+                return Response(
+                    content=cached.value.content,
+                    media_type=cached.value.media_type,
+                )
+
             # Keep the DB session open only for the lookups; close it before the
             # filesystem I/O below so large/slow resource reads don't pin a pooled
             # connection (and an open read transaction on Postgres) for their duration.
@@ -99,9 +108,14 @@ async def get_resource_content(
                     read_cache=read_cache,
                 )
                 if note_resource is not None:
-                    return CachedResourceResponse(
+                    resource = CachedResourceResponse(
                         content=note_resource.content.encode("utf-8"),
                         media_type=note_resource.content_type,
+                    )
+                    cached.value = resource
+                    return Response(
+                        content=resource.content,
+                        media_type=resource.media_type,
                     )
 
                 with logfire.span(
@@ -112,7 +126,10 @@ async def get_resource_content(
                 ):
                     entity = await entity_repository.get_by_external_id(session, entity_id)
                 if not entity:
-                    raise HTTPException(status_code=404, detail=f"Entity {entity_id} not found")
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Entity {entity_id} not found",
+                    )
                 # Copy the scalar columns needed for file I/O so the session can close.
                 entity_file_path = entity.file_path
                 entity_db_id = entity.id
@@ -154,25 +171,13 @@ async def get_resource_content(
                 content = await file_service.read_file_bytes(entity_file_path)
                 content_type = file_service.content_type(entity_file_path)
 
-            return CachedResourceResponse(
+            resource = CachedResourceResponse(
                 content=content,
                 media_type=content_type,
             )
-
-        resource = await read_through_model(
-            cache=read_cache,
-            key=ReadCacheKey(
-                project_id=project_id,
-                operation=ReadCacheOperation.resource,
-                request_digest=read_cache_request_digest(entity_id),
-            ),
-            model_type=CachedResourceResponse,
-            load=load,
-            ttl_seconds=READ_CACHE_TTL_SECONDS,
-            max_payload_bytes=READ_CACHE_MAX_PAYLOAD_BYTES,
-            should_store=_is_markdown_resource,
-        )
-        return Response(
-            content=resource.content,
-            media_type=resource.media_type,
-        )
+            cached.cacheable = _is_markdown_resource(resource)
+            cached.value = resource
+            return Response(
+                content=resource.content,
+                media_type=resource.media_type,
+            )

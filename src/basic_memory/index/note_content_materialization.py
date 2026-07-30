@@ -51,7 +51,7 @@ from basic_memory.repository.note_file_vacate_repository import (
     NoteFileVacateRepository,
     RecoverableVacate,
 )
-from basic_memory.read_cache import ReadCache, invalidate_project_read_cache
+from basic_memory.read_cache import ReadCache, invalidate_cache
 from basic_memory.schemas.response import ObservationResponse, RelationResponse
 from basic_memory.services.file_service import FileService
 
@@ -640,7 +640,10 @@ class LocalNoteContentMaterializationProvider:
     ) -> RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload]:
         if accepted.materialization is None:  # pragma: no cover - guarded by caller
             return accepted
-        try:
+        # The accepted-write invalidation runs before deferred materialization.
+        # Invalidate again after status publication and indexing so a read
+        # filled during that window cannot survive the terminal state.
+        async with invalidate_cache(self.read_cache, self.project_external_id):
             storage = LocalNoteContentStorage(self.file_service)
             cleanup_enqueuer = InlineNoteFileDeleteEnqueuer(
                 storage,
@@ -695,14 +698,6 @@ class LocalNoteContentMaterializationProvider:
                     ),
                 )
             return accepted
-        finally:
-            # The accepted-write invalidation runs before deferred materialization.
-            # Invalidate again after status publication and indexing so a read
-            # filled during that window cannot survive the terminal state.
-            await invalidate_project_read_cache(
-                self.read_cache,
-                self.project_external_id,
-            )
 
     async def materialize_delete_change(
         self,

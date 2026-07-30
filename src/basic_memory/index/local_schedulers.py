@@ -20,7 +20,7 @@ from basic_memory.indexing.relation_resolution import (
     RelationResolutionRuntime,
     resolve_project_relations,
 )
-from basic_memory.read_cache import ReadCache, invalidate_project_read_cache
+from basic_memory.read_cache import ReadCache, invalidate_cache
 from basic_memory.runtime.vector_sync import EntityVectorSync
 
 # --- Background Task Machinery ---
@@ -223,16 +223,11 @@ class LocalRelationResolutionScheduler:
             # Writes up to here are covered by the scan we are about to run, so only
             # writes that land DURING the scan should force a re-run.
             _dirty_relation_resolution.discard(project_id)
-            try:
+            # Relation resolution commits entity changes after the index pass.
+            # A second bump closes the window in which an intermediate entity
+            # response could have populated the current generation.
+            async with invalidate_cache(self.read_cache, self.project_external_id):
                 await resolve_project_relations(self.relation_runtime)
-            finally:
-                # Relation resolution commits entity changes after the index pass.
-                # A second bump closes the window in which an intermediate entity
-                # response could have populated the current generation.
-                await invalidate_project_read_cache(
-                    self.read_cache,
-                    self.project_external_id,
-                )
         finally:
             rerun = project_id in _dirty_relation_resolution
             _dirty_relation_resolution.discard(project_id)
