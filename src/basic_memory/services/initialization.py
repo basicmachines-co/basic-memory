@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
     from basic_memory.index.local_project import LocalProjectIndexRuntimeProvider
-    from basic_memory.read_cache import ReadCache
+    from basic_memory.read_cache import ReadCache, ReadCacheInvalidator
 
 
 async def run_initial_project_index(
@@ -52,7 +52,7 @@ async def recover_project_materializations(
     project: Project,
     session_maker: "async_sessionmaker[AsyncSession]",
     *,
-    read_cache: "ReadCache | None" = None,
+    read_cache: "ReadCacheInvalidator | None" = None,
 ) -> None:
     """Re-drive note materialization and move cleanup lost across a process exit.
 
@@ -68,14 +68,12 @@ async def recover_project_materializations(
         recover_move_vacates,
         recover_stuck_materializations,
     )
-    from basic_memory.read_cache import NullReadCache, invalidate_project_read_cache
+    from basic_memory.read_cache import invalidate_project_read_cache
     from basic_memory.services.file_service import FileService
 
     # FileService needs only base_path to write the accepted markdown bytes;
     # the markdown_processor/app_config are unused on the materialization path.
     file_service = FileService(Path(project.path))
-    active_read_cache = read_cache if read_cache is not None else NullReadCache()
-
     try:
         materialization_recovery = await recover_stuck_materializations(
             session_maker=session_maker,
@@ -97,10 +95,11 @@ async def recover_project_materializations(
         # Redis can outlive the process that left this materialization unfinished.
         # Invalidate this committed phase before move-vacate recovery begins; a
         # later setup/query failure must not leave its published state cached.
-        await invalidate_project_read_cache(
-            active_read_cache,
-            str(project.external_id),
-        )
+        if read_cache is not None:
+            await invalidate_project_read_cache(
+                read_cache,
+                str(project.external_id),
+            )
 
     try:
         recovered_vacates = await recover_move_vacates(
@@ -121,10 +120,11 @@ async def recover_project_materializations(
         recovered_move_vacates=recovered_vacates,
     )
 
-    await invalidate_project_read_cache(
-        active_read_cache,
-        str(project.external_id),
-    )
+    if read_cache is not None:
+        await invalidate_project_read_cache(
+            read_cache,
+            str(project.external_id),
+        )
 
 
 async def initialize_database(app_config: BasicMemoryConfig) -> None:
@@ -214,7 +214,6 @@ async def initialize_file_indexing(
     from basic_memory.index.local_project import LocalProjectIndexRuntimeFactory
     from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
     from basic_memory.index.watch_service import WatchService
-    from basic_memory.read_cache import NullReadCache
 
     # Get database session (migrations already run if needed)
     _, session_maker = await db.get_or_create_db(
@@ -228,14 +227,12 @@ async def initialize_file_indexing(
     # running multiple `basic-memory mcp --project X` processes does not produce
     # duplicate watchers fighting over the same files.
     constrained_project = os.environ.get("BASIC_MEMORY_MCP_PROJECT")
-    active_read_cache = read_cache if read_cache is not None else NullReadCache()
-
     event_index_runtime_factory = LocalWatchEventIndexRuntimeFactory(
         index_embeddings=app_config.semantic_search_enabled,
-        read_cache=active_read_cache,
+        read_cache=read_cache,
     )
     project_index_runtime_factory = LocalProjectIndexRuntimeFactory(
-        read_cache=active_read_cache,
+        read_cache=read_cache,
     )
 
     # Initialize watch service
@@ -272,7 +269,7 @@ async def initialize_file_indexing(
         await recover_project_materializations(
             project,
             session_maker,
-            read_cache=active_read_cache,
+            read_cache=read_cache,
         )
 
     # Trigger: the API/MCP lifespan is waiting for durable startup recovery.

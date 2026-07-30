@@ -25,7 +25,7 @@ Basic Memory owns:
 - typed serialization;
 - TTL and payload-size policy;
 - project-scoped invalidation;
-- the no-op and Redis read-cache implementations.
+- the model-bound read-through facade and Redis read-cache implementation.
 
 Cloud owns:
 
@@ -72,9 +72,9 @@ tenant:
 1. Override the low-level `get_read_cache` dependency at the Cloud composition root. Construct
    `RedisReadCache(client=shared_basic_memory_client, namespace=trusted_namespace)` as a
    lightweight request-scoped adapter; reuse the long-lived client and connection pool.
-   FastAPI then resolves `ConfiguredReadCacheDep` from that backend and binds Basic Memory's TTL
-   and payload-size policy. Cloud should not duplicate those policy constants or override
-   `get_configured_read_cache`.
+   FastAPI route dependencies then create lightweight `ModelReadCache` facades from that shared
+   backend and bind Basic Memory's response type, TTL, and payload-size policy. Cloud should not
+   duplicate those policy constants or construct Redis clients per response model.
 1. Pass the trusted tenant/workspace identity through internal queue payloads, or include enough
    trusted identifiers for workers to derive the exact same namespace. Never copy a namespace
    from a public request field.
@@ -143,15 +143,16 @@ and every worker must switch atomically enough to avoid missing invalidations.
 
 ```mermaid
 flowchart LR
-    H["Cloud or standalone API host"] -->|"client plus opaque namespace"| RC["Basic Memory ReadCache"]
-    API["Basic Memory read routes"] --> RC
-    RC -->|"hit"| API
-    RC -->|"miss"| DB["Services, repositories, and storage"]
-    DB -->|"successful result"| RC
-    W["Writes, indexing, recovery, and storage events"] -->|"invalidate after commit"| RC
+    H["Cloud or standalone API host"] -->|"optional client plus opaque namespace"| B["Raw ReadCache backend"]
+    B --> F["Typed ModelReadCache facades"]
+    API["Basic Memory read routes"] --> F
+    F -->|"hit"| API
+    F -->|"miss"| DB["Services, repositories, and storage"]
+    DB -->|"successful result"| F
+    W["Writes, indexing, recovery, and storage events"] -->|"invalidate after commit"| B
 
     RL["Cloud tenant rate limiter"] --> RLD["Cloud rate-limit keyspace"]
-    RC --> BMD["Basic Memory read-cache keyspace"]
+    B --> BMD["Basic Memory read-cache keyspace"]
     RLD -. "same or separate instance" .-> R["Redis"]
     BMD -. "same or separate instance" .-> R
 ```
@@ -163,20 +164,20 @@ Introduce `src/basic_memory/read_cache/` with:
 - a narrow `ReadCache` protocol;
 - a narrower `ReadCacheInvalidator` protocol for mutation and repair paths;
 - immutable request/key values;
-- a `NullReadCache` default;
 - canonical key construction;
-- a configured Pydantic read-through dependency;
+- a generic `ModelReadCache[ModelT]` facade that owns one Pydantic response type and policy;
 - an optional `RedisReadCache` adapter.
 
-The cache is namespace-bound at construction. Its public operations are:
+The raw backend is namespace-bound at construction. Its public operations are:
 
 - `lookup(key)`, which returns the generation observed with a hit or miss;
-- `store(key, lookup, payload, ttl)`, which reports stored, superseded, or disabled;
+- `store(key, lookup, payload, ttl)`, which reports stored or superseded;
 - `invalidate_project(project_id)`.
 
 Cloud can create a lightweight namespace-bound adapter around a long-lived, Basic
-Memory-specific async Redis client. Basic Memory does not receive tenant, subscription, or
-rate-limit concepts.
+Memory-specific async Redis client. Basic Memory then creates separate model-bound facades for
+entity, resolution, and resource responses over that same adapter. Facades do not own clients or
+connections. Basic Memory does not receive tenant, subscription, or rate-limit concepts.
 
 ## Keys And Invalidation
 
@@ -235,9 +236,10 @@ workspace type in addition to the validated request body.
 
 Cache typed boundary values rather than SQLAlchemy models. Use an explicit read-through scope in
 the API routes so hit, miss, serialization, and fallback behavior remain visible. FastAPI injects
-`ConfiguredReadCacheDep`; its provider binds the injected backend to Basic Memory's TTL and
-payload-size policy at the dependency boundary. Routes keep the authoritative read inline inside
-a Python async context manager instead of constructing loader callbacks:
+a route-specific `ModelReadCache[ResponseType] | None`; its provider binds the optional backend
+to Basic Memory's response type, TTL, and payload-size policy at the dependency boundary. Routes
+keep the authoritative read inline inside a Python async context manager instead of constructing
+loader callbacks:
 
 ```python
 cache_key = ReadCacheKey(
@@ -245,7 +247,12 @@ cache_key = ReadCacheKey(
     operation=ReadCacheOperation.entity,
     request_digest=read_cache_request_digest(entity_id),
 )
-async with read_cache.read(key=cache_key, model_type=EntityResponseV2) as cached:
+cache_scope = (
+    read_cache.read(key=cache_key)
+    if read_cache is not None
+    else nullcontext(ReadCacheScope[EntityResponseV2]())
+)
+async with cache_scope as cached:
     if cached.value is not None:
         return cached.value
 
@@ -256,9 +263,11 @@ async with read_cache.read(key=cache_key, model_type=EntityResponseV2) as cached
 ```
 
 The context manager performs lookup before entering the body and stores an eligible miss when the
-body exits normally. Exceptions and cancellation propagate without storing. A route that performs
-read repair passes the configured dependency itself through the narrow `ReadCacheInvalidator`
-capability; it never reaches through the facade to a Redis/backend attribute.
+body exits normally. Exceptions and cancellation propagate without storing. When no backend is
+configured, callers do not invoke cache lookup, store, or invalidation; there is no disabled cache
+result or no-op implementation. A route that performs read repair passes the model-bound facade
+itself through the narrow `ReadCacheInvalidator` capability when present; it never reaches through
+the facade to a Redis/backend attribute.
 
 Mutation and indexing code uses the same direct scope pattern when invalidation is unconditional:
 
@@ -267,7 +276,8 @@ async with invalidate_cache(read_cache, project_id):
     await importer.import_data(...)
 ```
 
-Conditional and multi-phase invalidation remains explicit so the freshness boundary is visible.
+Callers enter this scope only when a backend is present. Conditional and multi-phase invalidation
+remains explicit so the freshness boundary is visible.
 
 Primary integration points:
 
@@ -297,17 +307,17 @@ serving barrier is released and include terminal conflict or failure publication
 Use the official asynchronous `redis-py` client behind the Basic Memory protocol. Add it only as
 an optional package extra. A host may instead supply a compatible, already-owned client.
 
-The Core `ApiContainer` carries `NullReadCache` by default. A managed host activates caching by
-injecting or dependency-overriding a namespace-bound implementation and owns that client's
-lifecycle; Cloud therefore reuses its long-lived Basic Memory cache client. Local CLI, MCP
-in-process ASGI routing, and the standalone API remain on `NullReadCache` in the first rollout.
-A later standalone Redis setting can create and close a client in the FastAPI lifespan without
-changing the cache contract.
+The Core `ApiContainer` carries `ReadCache | None` and defaults to `None`. A managed host
+activates caching by injecting or dependency-overriding a namespace-bound implementation and owns
+that client's lifecycle; Cloud therefore reuses its long-lived Basic Memory cache client. Local
+CLI, MCP in-process ASGI routing, and the standalone API simply skip cache work in the first
+rollout. A later standalone Redis setting can create and close a client in the FastAPI lifespan
+without changing the cache contract.
 
-`get_read_cache` is the host override point. `get_configured_read_cache` is Core-owned FastAPI
-composition: it receives that backend through dependency injection and returns the route-facing
-cache with validated policy. Portable mutation and indexing runtimes continue to depend only on
-the backend or the narrower invalidation capability; they do not depend on FastAPI.
+`get_read_cache` is the host override point and returns `ReadCache | None`. Core-owned,
+route-specific FastAPI providers call `create_model_read_cache` to return a correctly typed facade
+when that backend exists. Portable mutation and indexing runtimes continue to depend only on the
+optional backend or narrower invalidation capability; they do not depend on FastAPI.
 
 The FastAPI Redis SDK is not the foundational dependency for this work. The cache contract must
 also participate in portable indexing and hosted storage-event invalidation, and Basic Memory's
@@ -358,6 +368,7 @@ changing the test contract.
 The real-Redis suite must prove:
 
 - namespace, project, operation, and request isolation;
+- distinct model-bound facades share one raw backend while retaining their own response type;
 - deterministic canonical keys;
 - cache hit and TTL expiry behavior;
 - project invalidation;
@@ -401,7 +412,7 @@ semantics themselves are asserted only against the real Redis integration fixtur
 
 ### 1. Cache infrastructure
 
-- Add the protocol, key values, no-op backend, Redis adapter, typed helper, optional dependency,
+- Add the protocol, key values, Redis adapter, typed facade, optional dependency,
   telemetry, and real Redis integration tests.
 - Do not cache production routes yet.
 

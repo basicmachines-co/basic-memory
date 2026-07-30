@@ -9,6 +9,7 @@ behind the same protocols.
 """
 
 import asyncio
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, Coroutine
 
@@ -20,7 +21,7 @@ from basic_memory.indexing.relation_resolution import (
     RelationResolutionRuntime,
     resolve_project_relations,
 )
-from basic_memory.read_cache import ReadCache, invalidate_cache
+from basic_memory.read_cache import ReadCacheInvalidator, invalidate_cache
 from basic_memory.runtime.vector_sync import EntityVectorSync
 
 # --- Background Task Machinery ---
@@ -194,7 +195,7 @@ class LocalRelationResolutionScheduler:
 
     relation_runtime: RelationResolutionRuntime
     project_external_id: str
-    read_cache: ReadCache
+    read_cache: ReadCacheInvalidator | None
     test_mode: bool
     debounce_seconds: float = 0.5
 
@@ -226,7 +227,12 @@ class LocalRelationResolutionScheduler:
             # Relation resolution commits entity changes after the index pass.
             # A second bump closes the window in which an intermediate entity
             # response could have populated the current generation.
-            async with invalidate_cache(self.read_cache, self.project_external_id):
+            invalidation_scope = (
+                invalidate_cache(self.read_cache, self.project_external_id)
+                if self.read_cache is not None
+                else nullcontext()
+            )
+            async with invalidation_scope:
                 await resolve_project_relations(self.relation_runtime)
         finally:
             rerun = project_id in _dirty_relation_resolution

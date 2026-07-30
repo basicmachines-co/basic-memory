@@ -40,10 +40,11 @@ class ReadCacheScope[ModelT: BaseModel]:
 
 
 @dataclass(frozen=True, slots=True)
-class ConfiguredReadCache:
-    """Request dependency that binds one cache backend to read policy."""
+class ModelReadCache[ModelT: BaseModel]:
+    """Typed facade that binds one cache backend to a response model and policy."""
 
     backend: ReadCache
+    model_type: type[ModelT]
     ttl_seconds: int
     max_payload_bytes: int
 
@@ -58,11 +59,10 @@ class ConfiguredReadCache:
         return await self.backend.invalidate_project(project_id)
 
     @asynccontextmanager
-    async def read[ModelT: BaseModel](
+    async def read(
         self,
         *,
         key: ReadCacheKey,
-        model_type: type[ModelT],
     ) -> AsyncIterator[ReadCacheScope[ModelT]]:
         """Yield a cached model or store the authoritative value supplied by the route."""
         with logfire.span(
@@ -82,18 +82,6 @@ class ConfiguredReadCache:
                 result.require_value()
                 return
 
-            if lookup.generation is None:
-                # Trigger: the host selected the no-op cache implementation.
-                # Why: an optional cache must not serialize every response merely to
-                # discover that storage is disabled.
-                # Outcome: execute only the authoritative read path.
-                _record_event(key, "disabled")
-                span.set_attribute("cache.outcome", "disabled")
-                result = ReadCacheScope[ModelT]()
-                yield result
-                result.require_value()
-                return
-
             if lookup.payload is not None:
                 _record_event(key, "hit")
                 span.set_attributes(
@@ -103,7 +91,7 @@ class ConfiguredReadCache:
                     }
                 )
                 yield ReadCacheScope(
-                    value=model_type.model_validate_json(lookup.payload),
+                    value=self.model_type.model_validate_json(lookup.payload),
                     cacheable=False,
                 )
                 return

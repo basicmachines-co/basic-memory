@@ -17,12 +17,10 @@ from basic_memory.read_cache.invalidation import (
     invalidate_project_read_cache,
 )
 from basic_memory.read_cache.keys import read_cache_request_digest
-from basic_memory.read_cache.null import NullReadCache
-from basic_memory.read_cache.read_through import ConfiguredReadCache
+from basic_memory.read_cache.read_through import ModelReadCache, ReadCacheScope
 
 __all__ = [
-    "ConfiguredReadCache",
-    "NullReadCache",
+    "ModelReadCache",
     "ReadCache",
     "ReadCacheDataError",
     "ReadCacheInvalidator",
@@ -30,6 +28,7 @@ __all__ = [
     "ReadCacheKey",
     "ReadCacheLookup",
     "ReadCacheOperation",
+    "ReadCacheScope",
     "ReadCacheStoreStatus",
     "ReadCacheUnavailable",
     "finish_project_read_cache_invalidation",

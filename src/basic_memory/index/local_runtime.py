@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from contextlib import nullcontext
+from dataclasses import dataclass
 
 from loguru import logger
 
@@ -58,7 +59,6 @@ from basic_memory.indexing.external_file_delete_runner import (
 )
 from basic_memory.models import Entity, Project
 from basic_memory.read_cache import (
-    NullReadCache,
     ReadCache,
     invalidate_cache,
     invalidate_project_read_cache,
@@ -151,7 +151,7 @@ class LocalInlineStorageEventResultRecorder:
     relation_cleanup_search_refresher: ProjectIndexMovedEntitySearchRefresher
     relation_runtime: RelationResolutionRuntime
     index_embeddings: bool
-    read_cache: ReadCache = field(default_factory=NullReadCache)
+    read_cache: ReadCache | None = None
 
     async def index_file_completed(
         self,
@@ -166,7 +166,7 @@ class LocalInlineStorageEventResultRecorder:
             entity_id=result.entity_id,
         )
 
-        if result.status == IndexFileJobStatus.processed:
+        if result.status == IndexFileJobStatus.processed and self.read_cache is not None:
             await invalidate_project_read_cache(
                 self.read_cache,
                 self.project.project_external_id,
@@ -185,10 +185,15 @@ class LocalInlineStorageEventResultRecorder:
             # Relation repair changes cached entity payloads after indexing.
             # A second generation bump closes the fill window opened by the
             # first post-index invalidation, even after partial failure.
-            async with invalidate_cache(
-                self.read_cache,
-                self.project.project_external_id,
-            ):
+            invalidation_scope = (
+                invalidate_cache(
+                    self.read_cache,
+                    self.project.project_external_id,
+                )
+                if self.read_cache is not None
+                else nullcontext()
+            )
+            async with invalidation_scope:
                 relation_result = await resolve_project_relations(self.relation_runtime)
                 logger.info(
                     "Local event-index relation repair completed",
@@ -230,17 +235,23 @@ class LocalInlineStorageEventResultRecorder:
         )
         if not result.entity_deleted:
             return
-        await invalidate_project_read_cache(
-            self.read_cache,
-            self.project.project_external_id,
-        )
+        if self.read_cache is not None:
+            await invalidate_project_read_cache(
+                self.read_cache,
+                self.project.project_external_id,
+            )
         # Cleanup may rewrite relations on surviving entities. Invalidate
         # values filled after the delete became visible, including partial
         # cleanup progress followed by an error.
-        async with invalidate_cache(
-            self.read_cache,
-            self.project.project_external_id,
-        ):
+        invalidation_scope = (
+            invalidate_cache(
+                self.read_cache,
+                self.project.project_external_id,
+            )
+            if self.read_cache is not None
+            else nullcontext()
+        )
+        async with invalidation_scope:
             if not isinstance(result.deleted_entity, Entity):
                 raise RuntimeError(
                     "Local external file delete returned an incomplete entity result"
@@ -267,7 +278,10 @@ class LocalInlineStorageEventResultRecorder:
             file_path=operation.relative_path,
             error=str(exc),
         )
-        if operation.kind == RuntimeStorageEventOperationKind.index_file:
+        if (
+            operation.kind == RuntimeStorageEventOperationKind.index_file
+            and self.read_cache is not None
+        ):
             # LocalMarkdownFileIndexer commits the entity before all search and
             # reconciliation follow-ups complete. A watcher failure can therefore
             # publish partial state even though the success callback never runs.
@@ -306,7 +320,7 @@ class LocalWatchEventIndexRuntimeFactory:
     # let runtime construction opt in via semantic_search_enabled (#1016).
     index_embeddings: bool = False
     move_batch_size: int = 100
-    read_cache: ReadCache = field(default_factory=NullReadCache)
+    read_cache: ReadCache | None = None
 
     async def runtime_for_project(self, project: Project) -> StorageEventIndexRuntime:
         dependencies = await self.dependency_provider.dependencies_for_project(project)

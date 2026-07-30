@@ -11,12 +11,13 @@ Key improvements:
 """
 
 from collections.abc import Mapping
+from contextlib import nullcontext
 from hashlib import sha256
 import os
 import pathlib
 from typing import Annotated
 
-from fastapi import APIRouter, Header, HTTPException, Response, Path, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, Path, status
 from loguru import logger
 
 import logfire
@@ -30,7 +31,7 @@ from basic_memory.ignore_utils import (
     should_ignore_path,
 )
 from basic_memory.deps import (
-    ConfiguredReadCacheDep,
+    create_model_read_cache,
     EntityServiceV2ExternalDep,
     FileServiceV2ExternalDep,
     SearchServiceV2ExternalDep,
@@ -53,8 +54,10 @@ from basic_memory.deps import (
     SessionMakerDep,
 )
 from basic_memory.read_cache import (
+    ModelReadCache,
     ReadCacheKey,
     ReadCacheOperation,
+    ReadCacheScope,
     invalidate_cache,
     read_cache_request_digest,
 )
@@ -84,6 +87,32 @@ from basic_memory.schemas.response import DirectoryMoveResult
 from basic_memory.utils import validate_project_path
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge-v2"])
+
+
+def get_resolve_read_cache(
+    read_cache: ReadCacheDep,
+) -> ModelReadCache[EntityResolveResponse] | None:
+    """Bind identifier-resolution responses to the optional cache backend."""
+    return create_model_read_cache(read_cache, EntityResolveResponse)
+
+
+ResolveReadCacheDep = Annotated[
+    ModelReadCache[EntityResolveResponse] | None,
+    Depends(get_resolve_read_cache),
+]
+
+
+def get_entity_read_cache(
+    read_cache: ReadCacheDep,
+) -> ModelReadCache[EntityResponseV2] | None:
+    """Bind entity responses to the optional cache backend."""
+    return create_model_read_cache(read_cache, EntityResponseV2)
+
+
+EntityReadCacheDep = Annotated[
+    ModelReadCache[EntityResponseV2] | None,
+    Depends(get_entity_read_cache),
+]
 
 
 def _schedule_post_write_followups(
@@ -247,7 +276,7 @@ async def resolve_identifier(
     entity_repository: EntityRepositoryV2ExternalDep,
     project_repository: ProjectRepositoryDep,
     session: SessionDep,
-    read_cache: ConfiguredReadCacheDep,
+    read_cache: ResolveReadCacheDep,
 ) -> EntityResolveResponse:
     """Resolve a string identifier (external_id, permalink, title, or path) to entity info.
 
@@ -296,10 +325,12 @@ async def resolve_identifier(
                 workspace_context.workspace_type if workspace_context else "",
             ),
         )
-        async with read_cache.read(
-            key=cache_key,
-            model_type=EntityResolveResponse,
-        ) as cached:
+        cache_scope = (
+            read_cache.read(key=cache_key)
+            if read_cache is not None
+            else nullcontext(ReadCacheScope[EntityResolveResponse]())
+        )
+        async with cache_scope as cached:
             if cached.value is not None:
                 return cached.value
 
@@ -528,7 +559,12 @@ async def index_file(
         # The file indexer commits entity state before search and reconciliation
         # follow-ups finish. Invalidate even when a later phase raises so those
         # partial commits cannot remain reachable through the old generation.
-        async with invalidate_cache(read_cache, project_external_id):
+        invalidation_scope = (
+            invalidate_cache(read_cache, project_external_id)
+            if read_cache is not None
+            else nullcontext()
+        )
+        async with invalidation_scope:
             indexed = await file_indexer.index_file(file_path, source="api-index-file")
         async with db.scoped_session(session_maker) as session:
             entity = await entity_repository.get_by_id(session, indexed.entity_id)
@@ -566,7 +602,7 @@ async def get_entity_by_id(
     entity_repository: EntityRepositoryV2ExternalDep,
     note_content_query_service: NoteContentQueryServiceDep,
     session: SessionDep,
-    read_cache: ConfiguredReadCacheDep,
+    read_cache: EntityReadCacheDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
 ) -> EntityResponseV2:
     """Get an entity by its external ID (UUID).
@@ -596,10 +632,12 @@ async def get_entity_by_id(
             operation=ReadCacheOperation.entity,
             request_digest=read_cache_request_digest(entity_id),
         )
-        async with read_cache.read(
-            key=cache_key,
-            model_type=EntityResponseV2,
-        ) as cached:
+        cache_scope = (
+            read_cache.read(key=cache_key)
+            if read_cache is not None
+            else nullcontext(ReadCacheScope[EntityResponseV2]())
+        )
+        async with cache_scope as cached:
             if cached.value is not None:
                 return cached.value
 
@@ -1014,7 +1052,12 @@ async def move_directory(
             # Reindexing can alter entity responses after the move was first
             # invalidated. Close that fill window even after partial
             # follow-up failure.
-            async with invalidate_cache(read_cache, project_external_id):
+            invalidation_scope = (
+                invalidate_cache(read_cache, project_external_id)
+                if read_cache is not None
+                else nullcontext()
+            )
+            async with invalidation_scope:
                 # Reindex moved entities
                 for file_path in result.moved_files:
                     async with db.scoped_session(session_maker) as session:

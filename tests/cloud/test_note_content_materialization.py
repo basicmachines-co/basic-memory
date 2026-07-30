@@ -6,7 +6,7 @@ import asyncio
 import os
 from datetime import UTC, datetime
 from hashlib import sha256
-from typing import Any, cast, override
+from typing import Any, cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -28,8 +28,7 @@ from basic_memory.repository.note_content_repository import (
 )
 from basic_memory.repository.note_file_vacate_repository import NoteFileVacateRepository
 from basic_memory.read_cache import (
-    NullReadCache,
-    ReadCache,
+    ReadCacheInvalidator,
     ReadCacheInvalidationStatus,
 )
 from basic_memory.runtime.cleanup import RuntimeNoteFileDeleteJobRequest
@@ -67,11 +66,10 @@ class RecordingFileIndexer:
         )
 
 
-class RecordingReadCache(NullReadCache):
+class RecordingReadCache:
     def __init__(self) -> None:
         self.invalidated_project_ids: list[str] = []
 
-    @override
     async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
         self.invalidated_project_ids.append(project_id)
         return ReadCacheInvalidationStatus.invalidated
@@ -119,7 +117,7 @@ def local_materialization_provider(
     indexer: RecordingFileIndexer,
     *,
     test_mode: bool = True,
-    read_cache: ReadCache | None = None,
+    read_cache: ReadCacheInvalidator | None = None,
 ) -> LocalNoteContentMaterializationProvider:
     # test_mode=True keeps materialization inline so these tests can assert the
     # result synchronously; production defers it to a background task.
@@ -127,7 +125,7 @@ def local_materialization_provider(
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
         file_service=cast(FileService, object()),
         project_external_id=PROJECT_EXTERNAL_ID,
-        read_cache=read_cache if read_cache is not None else NullReadCache(),
+        read_cache=read_cache,
         file_indexer=indexer,
         test_mode=test_mode,
     )

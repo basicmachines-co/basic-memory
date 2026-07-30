@@ -10,6 +10,7 @@ Key improvements:
 - Consistent with v2 entity operations
 """
 
+from contextlib import nullcontext
 import os
 from typing import Literal, Optional
 
@@ -461,7 +462,12 @@ async def update_project_by_id(
             # resource key while project and entity UUIDs stay stable. The
             # service can update config before its DB follow-up completes,
             # so invalidate on every attempted move completion path.
-            async with invalidate_cache(read_cache, project_id):
+            invalidation_scope = (
+                invalidate_cache(read_cache, project_id)
+                if read_cache is not None
+                else nullcontext()
+            )
+            async with invalidation_scope:
                 await project_service.move_project(old_project.name, path)
         elif is_active is not None:
             await project_service.update_project(old_project.name, is_active=is_active)

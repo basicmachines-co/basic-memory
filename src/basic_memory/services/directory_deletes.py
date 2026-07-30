@@ -20,8 +20,7 @@ from basic_memory.indexing.directory_delete_runner import (
     normalize_directory_delete_path,
 )
 from basic_memory.read_cache import (
-    NullReadCache,
-    ReadCache,
+    ReadCacheInvalidator,
     finish_project_read_cache_invalidation,
 )
 
@@ -62,7 +61,7 @@ class DirectoryDeleteService:
         *,
         project_external_id: str,
         directory: str,
-        read_cache: ReadCache | None = None,
+        read_cache: ReadCacheInvalidator | None = None,
     ) -> DirectoryDeleteAcceptedResult:
         """Delete directory entities immediately and queue file cleanup in the background.
 
@@ -73,7 +72,6 @@ class DirectoryDeleteService:
             project_external_id=project_external_id,
             directory=directory,
         )
-        active_read_cache = read_cache if read_cache is not None else NullReadCache()
         delete_may_have_committed = False
         try:
             # scoped_session enables `PRAGMA foreign_keys=ON` for SQLite; this bulk
@@ -90,12 +88,12 @@ class DirectoryDeleteService:
         except DirectoryDeleteRejected as error:
             raise directory_delete_service_error_from_rejection(error.rejection) from error
         finally:
-            if delete_may_have_committed:
+            if delete_may_have_committed and read_cache is not None:
                 # Acceptance commits entity and search deletion before storage cleanup.
                 # Finish the generation bump even when cancellation interrupts the
                 # transaction exit, then preserve that cancellation.
                 await finish_project_read_cache_invalidation(
-                    active_read_cache,
+                    read_cache,
                     project_external_id,
                 )
 
@@ -119,11 +117,11 @@ class DirectoryDeleteService:
 
             return result
         finally:
-            if accepted.files:
+            if accepted.files and read_cache is not None:
                 # Cleanup and relation refresh can publish additional state or fail
                 # after partial progress. Close the fill window in either case.
                 await finish_project_read_cache_invalidation(
-                    active_read_cache,
+                    read_cache,
                     project_external_id,
                 )
 

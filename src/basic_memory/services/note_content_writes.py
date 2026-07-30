@@ -31,8 +31,7 @@ from basic_memory.runtime.note_content import (
     RuntimeNoteContentResponsePayload,
 )
 from basic_memory.read_cache import (
-    NullReadCache,
-    ReadCache,
+    ReadCacheInvalidator,
     finish_project_read_cache_invalidation,
 )
 from basic_memory.schemas.base import Entity as EntitySchema
@@ -143,13 +142,13 @@ class NoteContentMutationService:
         mutation_dependencies: AcceptedNoteMutationDependencies,
         content_freshener: NoteContentMutationFreshener | None = None,
         actor_resolver: NoteContentMutationActorResolver | None = None,
-        read_cache: ReadCache | None = None,
+        read_cache: ReadCacheInvalidator | None = None,
     ) -> None:
         self.session_maker = session_maker
         self.mutation_dependencies = mutation_dependencies
         self.content_freshener = content_freshener
         self.actor_resolver = actor_resolver
-        self.read_cache = read_cache if read_cache is not None else NullReadCache()
+        self.read_cache = read_cache
 
     @asynccontextmanager
     async def _mutation_cache_scope(
@@ -159,12 +158,17 @@ class NoteContentMutationService:
         invalidate_on_rejection: bool = False,
     ) -> AsyncIterator[None]:
         """Invalidate after a mutation can publish authoritative state."""
+        read_cache = self.read_cache
+        if read_cache is None:
+            yield
+            return
+
         try:
             yield
         except AcceptedNoteMutationRejected:
             if invalidate_on_rejection:
                 await finish_project_read_cache_invalidation(
-                    self.read_cache,
+                    read_cache,
                     project_external_id,
                 )
             raise
@@ -173,13 +177,13 @@ class NoteContentMutationService:
             # Invalidation is safe after an earlier rollback and required after
             # any commit whose response was interrupted.
             await finish_project_read_cache_invalidation(
-                self.read_cache,
+                read_cache,
                 project_external_id,
             )
             raise
         else:
             await finish_project_read_cache_invalidation(
-                self.read_cache,
+                read_cache,
                 project_external_id,
             )
 
@@ -224,10 +228,11 @@ class NoteContentMutationService:
             # Freshening can commit entity and note-content state before a later
             # indexing follow-up raises. Invalidate before propagating so those
             # partial publications cannot retain the previous cache generation.
-            await finish_project_read_cache_invalidation(
-                self.read_cache,
-                project_external_id,
-            )
+            if self.read_cache is not None:
+                await finish_project_read_cache_invalidation(
+                    self.read_cache,
+                    project_external_id,
+                )
             raise
         return True
 

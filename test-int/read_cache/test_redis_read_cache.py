@@ -12,8 +12,7 @@ from pydantic import BaseModel, ValidationError
 from redis.asyncio import Redis
 
 from basic_memory.read_cache import (
-    ConfiguredReadCache,
-    NullReadCache,
+    ModelReadCache,
     ReadCacheDataError,
     ReadCacheInvalidationStatus,
     ReadCacheKey,
@@ -54,6 +53,13 @@ class CachedEntity(BaseModel):
     title: str
 
 
+class CachedResolution(BaseModel):
+    """A second boundary type used to prove facade-local serialization."""
+
+    external_id: str
+    resolution_method: str
+
+
 pytestmark = pytest.mark.redis
 
 PROJECT_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
@@ -70,6 +76,20 @@ def _key(
         project_id=project_id,
         operation=operation,
         request_digest=read_cache_request_digest(request),
+    )
+
+
+def _model_cache(
+    backend: RedisReadCache,
+    *,
+    ttl_seconds: int = 60,
+    max_payload_bytes: int = 1_024,
+) -> ModelReadCache[CachedEntity]:
+    return ModelReadCache(
+        backend=backend,
+        model_type=CachedEntity,
+        ttl_seconds=ttl_seconds,
+        max_payload_bytes=max_payload_bytes,
     )
 
 
@@ -478,20 +498,13 @@ async def test_real_redis_capacity_failures_are_cache_unavailable(
         (await redis_cache.client.config_get("maxmemory-policy"))["maxmemory-policy"]
     )
     await redis_cache.cache.lookup(key)
-    read_cache = ConfiguredReadCache(
-        backend=redis_cache.cache,
-        ttl_seconds=60,
-        max_payload_bytes=1_024,
-    )
+    read_cache = _model_cache(redis_cache.cache)
 
     try:
         await redis_cache.client.config_set("maxmemory-policy", "noeviction")
         await redis_cache.client.config_set("maxmemory", "1")
 
-        async with read_cache.read(
-            key=key,
-            model_type=CachedEntity,
-        ) as cached:
+        async with read_cache.read(key=key) as cached:
             assert cached.value is None
             cached.value = CachedEntity(
                 external_id="entity-1",
@@ -511,64 +524,15 @@ async def test_real_redis_capacity_failures_are_cache_unavailable(
 
 
 @pytest.mark.asyncio
-async def test_null_cache_preserves_disabled_semantics() -> None:
-    class StoreMustNotRun(NullReadCache):
-        @override
-        async def store(
-            self,
-            key: ReadCacheKey,
-            lookup: ReadCacheLookup,
-            payload: bytes,
-            *,
-            ttl_seconds: int,
-        ) -> ReadCacheStoreStatus:
-            raise AssertionError("disabled read-through must skip serialization and storage")
-
-    cache = StoreMustNotRun()
-    key = _key()
-    lookup = await cache.lookup(key)
-
-    assert lookup == ReadCacheLookup(generation=None)
-    store_status = await NullReadCache().store(key, lookup, b"ignored", ttl_seconds=60)
-    assert store_status is ReadCacheStoreStatus.disabled
-    status = await cache.invalidate_project(key.project_id)
-    assert status is ReadCacheInvalidationStatus.disabled
-    read_cache = ConfiguredReadCache(
-        backend=cache,
-        ttl_seconds=60,
-        max_payload_bytes=1_024,
-    )
-
-    async with read_cache.read(
-        key=key,
-        model_type=CachedEntity,
-    ) as cached:
-        assert cached.value is None
-        cached.value = CachedEntity(
-            external_id="entity-1",
-            title="Authoritative",
-        )
-        result = cached.value
-    assert result.title == "Authoritative"
-
-
-@pytest.mark.asyncio
 async def test_typed_read_through_uses_real_cached_representation(
     redis_cache: RedisCacheHarness,
 ) -> None:
     loads = 0
-    read_cache = ConfiguredReadCache(
-        backend=redis_cache.cache,
-        ttl_seconds=60,
-        max_payload_bytes=1_024,
-    )
+    read_cache = _model_cache(redis_cache.cache)
 
     results: list[CachedEntity] = []
     for _ in range(2):
-        async with read_cache.read(
-            key=_key(),
-            model_type=CachedEntity,
-        ) as cached:
+        async with read_cache.read(key=_key()) as cached:
             if cached.value is None:
                 loads += 1
                 cached.value = CachedEntity(
@@ -584,21 +548,51 @@ async def test_typed_read_through_uses_real_cached_representation(
 
 
 @pytest.mark.asyncio
+async def test_typed_facades_share_backend_and_keep_model_types_local(
+    redis_cache: RedisCacheHarness,
+) -> None:
+    entity_cache = _model_cache(redis_cache.cache)
+    resolution_cache = ModelReadCache(
+        backend=redis_cache.cache,
+        model_type=CachedResolution,
+        ttl_seconds=60,
+        max_payload_bytes=1_024,
+    )
+    entity_key = _key(request="typed-entity")
+    resolution_key = _key(
+        operation=ReadCacheOperation.resolve,
+        request="typed-resolution",
+    )
+
+    async with entity_cache.read(key=entity_key) as cached_entity:
+        cached_entity.value = CachedEntity(external_id="entity-1", title="First")
+    async with resolution_cache.read(key=resolution_key) as cached_resolution:
+        cached_resolution.value = CachedResolution(
+            external_id="entity-1",
+            resolution_method="permalink",
+        )
+
+    async with entity_cache.read(key=entity_key) as cached_entity:
+        assert cached_entity.value == CachedEntity(external_id="entity-1", title="First")
+    async with resolution_cache.read(key=resolution_key) as cached_resolution:
+        assert cached_resolution.value == CachedResolution(
+            external_id="entity-1",
+            resolution_method="permalink",
+        )
+
+    assert entity_cache.backend is redis_cache.cache
+    assert resolution_cache.backend is redis_cache.cache
+
+
+@pytest.mark.asyncio
 async def test_typed_read_through_does_not_cache_oversize_models(
     redis_cache: RedisCacheHarness,
 ) -> None:
     loads = 0
-    read_cache = ConfiguredReadCache(
-        backend=redis_cache.cache,
-        ttl_seconds=60,
-        max_payload_bytes=1,
-    )
+    read_cache = _model_cache(redis_cache.cache, max_payload_bytes=1)
 
     for _ in range(2):
-        async with read_cache.read(
-            key=_key(),
-            model_type=CachedEntity,
-        ) as cached:
+        async with read_cache.read(key=_key()) as cached:
             assert cached.value is None
             loads += 1
             cached.value = CachedEntity(
@@ -614,16 +608,11 @@ async def test_typed_read_through_does_not_cache_ineligible_models(
     redis_cache: RedisCacheHarness,
 ) -> None:
     loads = 0
-    read_cache = ConfiguredReadCache(
-        backend=redis_cache.cache,
-        ttl_seconds=60,
-        max_payload_bytes=1_024,
-    )
+    read_cache = _model_cache(redis_cache.cache)
 
     for _ in range(2):
         async with read_cache.read(
             key=_key(operation=ReadCacheOperation.resolve),
-            model_type=CachedEntity,
         ) as cached:
             assert cached.value is None
             loads += 1
@@ -641,17 +630,10 @@ async def test_typed_read_through_does_not_store_after_body_error(
     redis_cache: RedisCacheHarness,
 ) -> None:
     key = _key(request="failed-authoritative-read")
-    read_cache = ConfiguredReadCache(
-        backend=redis_cache.cache,
-        ttl_seconds=60,
-        max_payload_bytes=1_024,
-    )
+    read_cache = _model_cache(redis_cache.cache)
 
     with pytest.raises(RuntimeError, match="authoritative read failed"):
-        async with read_cache.read(
-            key=key,
-            model_type=CachedEntity,
-        ) as cached:
+        async with read_cache.read(key=key) as cached:
             cached.value = CachedEntity(
                 external_id="entity-1",
                 title="Must not be stored",
@@ -668,17 +650,10 @@ async def test_typed_read_through_rejects_invalid_cached_models(
     key = _key()
     miss = await redis_cache.cache.lookup(key)
     await redis_cache.cache.store(key, miss, b'{"wrong":"shape"}', ttl_seconds=60)
-    read_cache = ConfiguredReadCache(
-        backend=redis_cache.cache,
-        ttl_seconds=60,
-        max_payload_bytes=1_024,
-    )
+    read_cache = _model_cache(redis_cache.cache)
 
     with pytest.raises(ValidationError):
-        async with read_cache.read(
-            key=key,
-            model_type=CachedEntity,
-        ):
+        async with read_cache.read(key=key):
             raise AssertionError("invalid cache data must not enter the read scope")
 
 
@@ -693,17 +668,10 @@ async def test_typed_read_through_bypasses_unavailable_real_redis() -> None:
         socket_timeout=0.05,
     )
     cache = RedisReadCache(client=client, namespace="unavailable")
-    read_cache = ConfiguredReadCache(
-        backend=cache,
-        ttl_seconds=60,
-        max_payload_bytes=1_024,
-    )
+    read_cache = _model_cache(cache)
 
     try:
-        async with read_cache.read(
-            key=_key(),
-            model_type=CachedEntity,
-        ) as cached:
+        async with read_cache.read(key=_key()) as cached:
             assert cached.value is None
             cached.value = CachedEntity(
                 external_id="entity-1",
@@ -747,17 +715,10 @@ async def test_typed_read_through_returns_data_when_real_redis_store_times_out(
         namespace="paused-store",
         prefix=prefix,
     )
-    read_cache = ConfiguredReadCache(
-        backend=cache,
-        ttl_seconds=60,
-        max_payload_bytes=1_024,
-    )
+    read_cache = _model_cache(cache)
 
     try:
-        async with read_cache.read(
-            key=_key(),
-            model_type=CachedEntity,
-        ) as cached:
+        async with read_cache.read(key=_key()) as cached:
             assert cached.value is None
             await redis_cache.client.execute_command("CLIENT", "PAUSE", 200, "WRITE")
             cached.value = CachedEntity(
@@ -774,41 +735,30 @@ async def test_typed_read_through_returns_data_when_real_redis_store_times_out(
         await client.aclose()
 
 
-@pytest.mark.asyncio
-async def test_typed_read_through_validates_policy_before_loading() -> None:
+def test_typed_read_through_validates_policy_before_loading(
+    redis_cache: RedisCacheHarness,
+) -> None:
     with pytest.raises(ValueError, match="ttl_seconds"):
-        async with ConfiguredReadCache(
-            backend=NullReadCache(),
+        _model_cache(
+            redis_cache.cache,
             ttl_seconds=0,
             max_payload_bytes=1,
-        ).read(
-            key=_key(),
-            model_type=CachedEntity,
-        ):
-            raise AssertionError("invalid policy must fail before entering the read scope")
+        )
     with pytest.raises(ValueError, match="max_payload_bytes"):
-        async with ConfiguredReadCache(
-            backend=NullReadCache(),
+        _model_cache(
+            redis_cache.cache,
             ttl_seconds=1,
             max_payload_bytes=0,
-        ).read(
-            key=_key(),
-            model_type=CachedEntity,
-        ):
-            raise AssertionError("invalid policy must fail before entering the read scope")
+        )
 
 
 @pytest.mark.asyncio
-async def test_typed_read_through_requires_an_authoritative_result() -> None:
+async def test_typed_read_through_requires_an_authoritative_result(
+    redis_cache: RedisCacheHarness,
+) -> None:
+    read_cache = _model_cache(redis_cache.cache)
     with pytest.raises(RuntimeError, match="exited without a result"):
-        async with ConfiguredReadCache(
-            backend=NullReadCache(),
-            ttl_seconds=1,
-            max_payload_bytes=1,
-        ).read(
-            key=_key(),
-            model_type=CachedEntity,
-        ):
+        async with read_cache.read(key=_key(request="missing-authoritative-result")):
             pass
 
 
@@ -872,8 +822,8 @@ def test_key_validation_and_canonicalization() -> None:
         ).request_digest
         == uppercase_digest.lower()
     )
-    with pytest.raises(ValueError, match="payload requires"):
-        ReadCacheLookup(generation=None, payload=b"orphaned")
+    with pytest.raises(ValueError, match="generation"):
+        ReadCacheLookup(generation="", payload=b"orphaned")
     with pytest.raises(ValueError, match="prefix"):
         redis_read_cache_generation_key(
             prefix="",
@@ -902,13 +852,6 @@ async def test_invalid_store_inputs_fail_before_redis(
 ) -> None:
     key = _key()
 
-    with pytest.raises(ValueError, match="lookup generation"):
-        await redis_cache.cache.store(
-            key,
-            ReadCacheLookup(generation=None),
-            b"payload",
-            ttl_seconds=60,
-        )
     with pytest.raises(ValueError, match="positive"):
         await redis_cache.cache.store(
             key,

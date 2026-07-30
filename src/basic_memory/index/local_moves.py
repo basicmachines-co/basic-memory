@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import override, Protocol
@@ -173,7 +174,7 @@ class LocalWatchMoveProcessor:
     maintenance_runner: ProjectIndexMaintenanceRunner
     moved_entity_search_refresher: ProjectIndexMovedEntitySearchRefresher
     project_external_id: str
-    read_cache: ReadCache
+    read_cache: ReadCache | None
     batch_size: int = 100
 
     async def process_moves(
@@ -188,7 +189,12 @@ class LocalWatchMoveProcessor:
             # Move pairs bypass ordinary file/delete completion callbacks.
             # Invalidate after maintenance and search refresh so cached paths,
             # permalinks, and relations cannot retain the pre-move state.
-            async with invalidate_cache(self.read_cache, self.project_external_id):
+            invalidation_scope = (
+                invalidate_cache(self.read_cache, self.project_external_id)
+                if self.read_cache is not None
+                else nullcontext()
+            )
+            async with invalidation_scope:
                 move_run = await self.maintenance_runner.run_move_batches(
                     moved_files=moved_files,
                     batch_size=self.batch_size,

@@ -1,7 +1,7 @@
 """Typed scheduler tests for derived async work."""
 
 import asyncio
-from typing import cast, override
+from typing import cast
 
 import pytest
 
@@ -13,10 +13,7 @@ from basic_memory.index.local_schedulers import (
     LocalSearchReindexScheduler,
     drain_background_tasks,
 )
-from basic_memory.read_cache import (
-    NullReadCache,
-    ReadCacheInvalidationStatus,
-)
+from basic_memory.read_cache import ReadCacheInvalidationStatus
 
 PROJECT_EXTERNAL_ID = "00000000-0000-0000-0000-000000000013"
 
@@ -47,11 +44,10 @@ class StubSearchService:
         self.reindexed_project = True
 
 
-class RecordingReadCache(NullReadCache):
+class RecordingReadCache:
     def __init__(self) -> None:
         self.invalidated_project_ids: list[str] = []
 
-    @override
     async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
         self.invalidated_project_ids.append(project_id)
         return ReadCacheInvalidationStatus.invalidated
@@ -288,7 +284,7 @@ async def test_relation_resolution_scheduler_coalesces_a_burst():
     scheduler = LocalRelationResolutionScheduler(
         relation_runtime=runtime,
         project_external_id=PROJECT_EXTERNAL_ID,
-        read_cache=NullReadCache(),
+        read_cache=None,
         test_mode=False,
         debounce_seconds=0.02,
     )
@@ -399,7 +395,7 @@ async def test_drain_background_tasks_covers_follow_up_tasks():
     scheduler = LocalRelationResolutionScheduler(
         relation_runtime=runtime,
         project_external_id=PROJECT_EXTERNAL_ID,
-        read_cache=NullReadCache(),
+        read_cache=None,
         test_mode=False,
         debounce_seconds=0.0,
     )

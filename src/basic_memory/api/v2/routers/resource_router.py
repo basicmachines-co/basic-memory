@@ -9,25 +9,30 @@ kind (binaries, uploads, imports, external edits) arrives file-first through the
 storage-event indexing pipeline. No API endpoint writes resource files inline.
 """
 
+from contextlib import nullcontext
 from pathlib import Path as PathLib
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Response, Path
+from fastapi import APIRouter, Depends, HTTPException, Response, Path
 from loguru import logger
 from pydantic import BaseModel, ConfigDict
 
 import logfire
 from basic_memory import db
 from basic_memory.deps import (
-    ConfiguredReadCacheDep,
+    create_model_read_cache,
     ProjectConfigV2ExternalDep,
     FileServiceV2ExternalDep,
     EntityRepositoryV2ExternalDep,
     NoteContentQueryServiceDep,
+    ReadCacheDep,
     SessionMakerDep,
 )
 from basic_memory.read_cache import (
+    ModelReadCache,
     ReadCacheKey,
     ReadCacheOperation,
+    ReadCacheScope,
     read_cache_request_digest,
 )
 from basic_memory.utils import validate_project_path
@@ -44,6 +49,19 @@ class CachedResourceResponse(BaseModel):
     model_config = ConfigDict(ser_json_bytes="base64", val_json_bytes="base64")
 
 
+def get_resource_read_cache(
+    read_cache: ReadCacheDep,
+) -> ModelReadCache[CachedResourceResponse] | None:
+    """Bind resource responses to the optional cache backend."""
+    return create_model_read_cache(read_cache, CachedResourceResponse)
+
+
+ResourceReadCacheDep = Annotated[
+    ModelReadCache[CachedResourceResponse] | None,
+    Depends(get_resource_read_cache),
+]
+
+
 def _is_markdown_resource(resource: CachedResourceResponse) -> bool:
     return resource.media_type.partition(";")[0].strip().lower() == "text/markdown"
 
@@ -54,7 +72,7 @@ async def get_resource_content(
     entity_repository: EntityRepositoryV2ExternalDep,
     file_service: FileServiceV2ExternalDep,
     note_content_query_service: NoteContentQueryServiceDep,
-    read_cache: ConfiguredReadCacheDep,
+    read_cache: ResourceReadCacheDep,
     session_maker: SessionMakerDep,
     project_id: str = Path(..., description="Project external UUID"),
     entity_id: str = Path(..., description="Entity external UUID"),
@@ -87,10 +105,12 @@ async def get_resource_content(
             operation=ReadCacheOperation.resource,
             request_digest=read_cache_request_digest(entity_id),
         )
-        async with read_cache.read(
-            key=cache_key,
-            model_type=CachedResourceResponse,
-        ) as cached:
+        cache_scope = (
+            read_cache.read(key=cache_key)
+            if read_cache is not None
+            else nullcontext(ReadCacheScope[CachedResourceResponse]())
+        )
+        async with cache_scope as cached:
             if cached.value is not None:
                 return Response(
                     content=cached.value.content,

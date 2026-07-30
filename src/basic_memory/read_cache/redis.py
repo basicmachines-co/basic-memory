@@ -172,8 +172,6 @@ class RedisReadCache:
         *,
         ttl_seconds: int,
     ) -> ReadCacheStoreStatus:
-        if lookup.generation is None:
-            raise ValueError("Redis cache store requires a lookup generation")
         if ttl_seconds <= 0:
             raise ValueError("read-cache ttl_seconds must be positive")
 

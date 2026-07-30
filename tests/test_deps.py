@@ -7,7 +7,6 @@ from basic_memory.api import container as container_module
 from basic_memory.api.container import ApiContainer, resolve_container
 from basic_memory.deps import get_app_config, get_read_cache, validate_project_external_id
 from basic_memory.models.project import Project
-from basic_memory.read_cache import NullReadCache
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.runtime.mode import resolve_runtime_mode
 
@@ -46,30 +45,26 @@ def test_resolve_container_prefers_installed_container(app_config, monkeypatch):
 
 
 def test_get_read_cache_reads_lifespan_container(app_config):
-    """API requests get the cache the lifespan stored on app.state."""
+    """API requests preserve the container's absent cache backend."""
     app = FastAPI()
-    cache = NullReadCache()
     app.state.container = ApiContainer(
         config=app_config,
         mode=resolve_runtime_mode(is_test_env=True),
-        read_cache=cache,
     )
 
-    assert get_read_cache(_request_for(app)) is cache
+    assert get_read_cache(_request_for(app)) is None
 
 
 def test_get_read_cache_falls_back_to_composition_root(app_config, monkeypatch):
-    """Off-lifespan requests resolve the cache from the API composition root."""
+    """Off-lifespan requests preserve the composition root's absent cache backend."""
     app = FastAPI()
-    cache = NullReadCache()
     installed = ApiContainer(
         config=app_config,
         mode=resolve_runtime_mode(is_test_env=True),
-        read_cache=cache,
     )
     monkeypatch.setattr(container_module, "_container", installed)
 
-    assert get_read_cache(_request_for(app)) is cache
+    assert get_read_cache(_request_for(app)) is None
 
 
 @pytest.mark.asyncio

@@ -6,6 +6,7 @@ Import endpoints use project_id in the path for consistency with other v2 endpoi
 
 import json
 import logging
+from contextlib import nullcontext
 
 from fastapi import APIRouter, Form, HTTPException, Path, UploadFile, status
 
@@ -205,7 +206,7 @@ async def import_file[ImportResultT: ImportResult](
     destination_directory: str,
     max_bytes: int,
     *,
-    read_cache: ReadCache,
+    read_cache: ReadCache | None,
     project_external_id: str,
 ) -> ImportResultT:
     """Helper function to import a file using an importer instance.
@@ -256,12 +257,17 @@ async def run_import_with_invalidation[ImportResultT: ImportResult](
     source_data: object,
     destination_directory: str,
     *,
-    read_cache: ReadCache,
+    read_cache: ReadCache | None,
     project_external_id: str,
 ) -> ImportResultT:
     """Run one import attempt and invalidate files it may have written."""
     # Importers write files one at a time and may return a failed result after
     # earlier writes. Invalidate every attempted import so cached file-first
     # resources cannot survive either success or partial failure.
-    async with invalidate_cache(read_cache, project_external_id):
+    invalidation_scope = (
+        invalidate_cache(read_cache, project_external_id)
+        if read_cache is not None
+        else nullcontext()
+    )
+    async with invalidation_scope:
         return await importer.import_data(source_data, destination_directory)

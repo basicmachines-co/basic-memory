@@ -3,16 +3,17 @@
 from typing import Annotated
 
 from fastapi import Depends, Request
+from pydantic import BaseModel
 
-from basic_memory.read_cache import ConfiguredReadCache, ReadCache
+from basic_memory.read_cache import ModelReadCache, ReadCache
 from basic_memory.read_cache.policy import (
     READ_CACHE_MAX_PAYLOAD_BYTES,
     READ_CACHE_TTL_SECONDS,
 )
 
 
-def get_read_cache(request: Request) -> ReadCache:
-    """Return the host-injected cache or the container's no-op default."""
+def get_read_cache(request: Request) -> ReadCache | None:
+    """Return the optional host-injected cache backend."""
     try:
         container = request.app.state.container
     except AttributeError:
@@ -26,16 +27,19 @@ def get_read_cache(request: Request) -> ReadCache:
     return resolve_container().read_cache
 
 
-ReadCacheDep = Annotated[ReadCache, Depends(get_read_cache)]
+ReadCacheDep = Annotated[ReadCache | None, Depends(get_read_cache)]
 
 
-def get_configured_read_cache(read_cache: ReadCacheDep) -> ConfiguredReadCache:
-    """Bind the host cache to Basic Memory's API read policy."""
-    return ConfiguredReadCache(
+def create_model_read_cache[ModelT: BaseModel](
+    read_cache: ReadCache | None,
+    model_type: type[ModelT],
+) -> ModelReadCache[ModelT] | None:
+    """Bind one response model to the host cache and Basic Memory's read policy."""
+    if read_cache is None:
+        return None
+    return ModelReadCache(
         backend=read_cache,
+        model_type=model_type,
         ttl_seconds=READ_CACHE_TTL_SECONDS,
         max_payload_bytes=READ_CACHE_MAX_PAYLOAD_BYTES,
     )
-
-
-ConfiguredReadCacheDep = Annotated[ConfiguredReadCache, Depends(get_configured_read_cache)]

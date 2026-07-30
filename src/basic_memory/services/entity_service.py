@@ -1132,7 +1132,7 @@ class EntityService(BaseService[EntityModel]):
         app_config: BasicMemoryConfig,
         *,
         project_external_id: str,
-        read_cache: ReadCache,
+        read_cache: ReadCache | None,
     ) -> DirectoryMoveResult:
         """Move all entities in a directory to a new location.
 
@@ -1208,7 +1208,8 @@ class EntityService(BaseService[EntityModel]):
 
             # Each move commits independently. Invalidate before the next file so a
             # long directory batch cannot serve early moves from the old generation.
-            await invalidate_project_read_cache(read_cache, project_external_id)
+            if read_cache is not None:
+                await invalidate_project_read_cache(read_cache, project_external_id)
             moved_files.append(new_path)
             successful_moves += 1
             logger.debug(f"Moved entity: {old_path} -> {new_path}")

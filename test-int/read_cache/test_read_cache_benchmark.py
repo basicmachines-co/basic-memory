@@ -15,7 +15,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from basic_memory.deps import get_read_cache
 from basic_memory.models import Project
-from basic_memory.read_cache import NullReadCache
 from basic_memory.read_cache.redis import RedisReadCache
 
 
@@ -77,7 +76,7 @@ async def test_benchmark_warmed_entity_reads_reduce_authoritative_queries(
     engine, _ = engine_factory
     event.listen(engine.sync_engine, "before_cursor_execute", count_query)
     try:
-        app.dependency_overrides[get_read_cache] = NullReadCache
+        app.dependency_overrides[get_read_cache] = lambda: None
         await client.get(entity_url)
         query_count = 0
         authoritative_latencies = await _entity_read_latencies(

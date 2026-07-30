@@ -19,7 +19,6 @@ class ReadCacheStoreStatus(StrEnum):
 
     stored = "stored"
     superseded = "superseded"
-    disabled = "disabled"
 
 
 class ReadCacheInvalidationStatus(StrEnum):
@@ -27,7 +26,6 @@ class ReadCacheInvalidationStatus(StrEnum):
 
     invalidated = "invalidated"
     unavailable = "unavailable"
-    disabled = "disabled"
 
 
 def canonical_read_cache_project_id(project_id: str) -> str:
@@ -67,18 +65,14 @@ class ReadCacheKey:
 
 @dataclass(frozen=True, slots=True)
 class ReadCacheLookup:
-    """Cache lookup result plus the generation observed by that read.
+    """Cache lookup result plus the generation observed by that read."""
 
-    A missing generation means the cache implementation is disabled. Read-through
-    callers can then skip serialization and the store call entirely.
-    """
-
-    generation: str | None
+    generation: str
     payload: bytes | None = None
 
     def __post_init__(self) -> None:
-        if self.generation is None and self.payload is not None:
-            raise ValueError("read-cache payload requires a lookup generation")
+        if not self.generation:
+            raise ValueError("read-cache lookup generation must not be empty")
 
     @property
     def is_hit(self) -> bool:

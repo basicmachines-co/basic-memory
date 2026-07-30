@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Coroutine, Mapping
-from contextlib import suppress
+from contextlib import nullcontext, suppress
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -51,7 +51,7 @@ from basic_memory.repository.note_file_vacate_repository import (
     NoteFileVacateRepository,
     RecoverableVacate,
 )
-from basic_memory.read_cache import ReadCache, invalidate_cache
+from basic_memory.read_cache import ReadCacheInvalidator, invalidate_cache
 from basic_memory.schemas.response import ObservationResponse, RelationResponse
 from basic_memory.services.file_service import FileService
 
@@ -584,7 +584,7 @@ class LocalNoteContentMaterializationProvider:
     session_maker: async_sessionmaker[AsyncSession]
     file_service: FileService
     project_external_id: str
-    read_cache: ReadCache
+    read_cache: ReadCacheInvalidator | None
     file_indexer: IndexFileExecutor | None = None
     test_mode: bool = False
     materialization_workers: int = 4
@@ -643,7 +643,12 @@ class LocalNoteContentMaterializationProvider:
         # The accepted-write invalidation runs before deferred materialization.
         # Invalidate again after status publication and indexing so a read
         # filled during that window cannot survive the terminal state.
-        async with invalidate_cache(self.read_cache, self.project_external_id):
+        invalidation_scope = (
+            invalidate_cache(self.read_cache, self.project_external_id)
+            if self.read_cache is not None
+            else nullcontext()
+        )
+        async with invalidation_scope:
             storage = LocalNoteContentStorage(self.file_service)
             cleanup_enqueuer = InlineNoteFileDeleteEnqueuer(
                 storage,
