@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol, override
+from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
@@ -12,6 +16,7 @@ from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+import basic_memory.services.note_content_writes as note_content_writes
 from basic_memory import db
 from basic_memory.deps import (
     get_chatgpt_importer_v2_external,
@@ -147,6 +152,27 @@ class DirectoryMoveObservingRedisReadCache(RedisReadCache):
         return status
 
 
+class BlockingInvalidationRedisReadCache(RedisReadCache):
+    """Hold one real invalidation so the request can be cancelled repeatedly."""
+
+    def __init__(
+        self,
+        *,
+        client: Redis,
+        namespace: str,
+        prefix: str,
+    ) -> None:
+        super().__init__(client=client, namespace=namespace, prefix=prefix)
+        self.invalidation_started = asyncio.Event()
+        self.release_invalidation = asyncio.Event()
+
+    @override
+    async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
+        self.invalidation_started.set()
+        await self.release_invalidation.wait()
+        return await super().invalidate_project(project_id)
+
+
 def _cache_key(
     *,
     project_id: str,
@@ -183,6 +209,90 @@ async def _initialized_generation(
     )
     assert generation is not None
     return generation
+
+
+@pytest.mark.asyncio
+async def test_cancelled_committed_create_finishes_real_redis_invalidation(
+    app: FastAPI,
+    client: AsyncClient,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cancellation after commit waits for invalidation before propagating."""
+    project_external_id = str(test_project.external_id)
+    generation_before = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="cancelled-committed-create",
+    )
+    blocking_cache = BlockingInvalidationRedisReadCache(
+        client=redis_cache.client,
+        namespace=redis_cache.namespace,
+        prefix=redis_cache.prefix,
+    )
+    app.dependency_overrides[get_read_cache] = lambda: blocking_cache
+
+    transaction_committed = asyncio.Event()
+    hold_after_commit = asyncio.Event()
+    original_transaction = note_content_writes.accepted_note_transaction
+
+    @asynccontextmanager
+    async def pause_after_commit(
+        session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[AsyncSession]:
+        async with original_transaction(session_maker) as session:
+            yield session
+        transaction_committed.set()
+        await hold_after_commit.wait()
+
+    monkeypatch.setattr(
+        note_content_writes,
+        "accepted_note_transaction",
+        pause_after_commit,
+    )
+    title = f"Cancelled committed create {uuid4()}"
+    request_task = asyncio.create_task(
+        client.post(
+            f"/v2/projects/{project_external_id}/knowledge/entities",
+            json={
+                "title": title,
+                "directory": "cache",
+                "content": f"# {title}\n",
+            },
+        )
+    )
+
+    async with asyncio.timeout(5):
+        await transaction_committed.wait()
+    request_task.cancel()
+    async with asyncio.timeout(5):
+        await blocking_cache.invalidation_started.wait()
+
+    # A second cancellation must not abandon the already-running cleanup.
+    request_task.cancel()
+    await asyncio.sleep(0)
+    assert not request_task.done()
+
+    blocking_cache.release_invalidation.set()
+    with pytest.raises(asyncio.CancelledError):
+        await request_task
+
+    generation_after = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="cancelled-committed-create",
+    )
+    assert generation_after != generation_before
+
+    _, session_maker = engine_factory
+    async with db.scoped_session(session_maker) as session:
+        committed_entities = await EntityRepository(project_id=test_project.id).get_by_title(
+            session,
+            title,
+        )
+    assert len(committed_entities) == 1
 
 
 @pytest.mark.asyncio

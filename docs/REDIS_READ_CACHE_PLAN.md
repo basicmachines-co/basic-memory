@@ -87,6 +87,10 @@ tenant:
    the accepted-note transaction commits, again after terminal materialization/status publication
    and indexing, and again after relation resolution completes. This prevents a read filled
    between phases from surviving the later worker commit.
+1. Make accepted-mutation invalidation cancellation-safe. A request or worker can be cancelled
+   after its database commit succeeds but before the transaction context returns. Finish the
+   namespace-bound generation bump before re-propagating cancellation so committed state cannot
+   remain hidden behind the previous generation.
 1. Put project-index invalidation in a failure-safe completion boundary. Move, delete, file-index,
    and vector batches can commit incrementally before a later batch raises.
 1. Put direct single-file and watcher file-index invalidation in failure-safe boundaries. Entity
@@ -366,6 +370,8 @@ The real-Redis suite must prove:
 - successful writes invalidate; a rejected write also invalidates when pre-write freshening may
   already have published external file state, while a rolled-back transaction without such a
   publication does not;
+- cancellation after a real accepted-note transaction commits cannot interrupt the real Redis
+  generation bump, including repeated cancellation while invalidation is in progress;
 - real Redis no-eviction capacity failures bypass cache storage and cannot fail committed-write
   invalidation;
 - authoritative read exceptions propagate without populating the missed cache key;

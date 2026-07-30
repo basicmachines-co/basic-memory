@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -148,8 +149,60 @@ class NoteContentMutationService:
         self.read_cache = read_cache if read_cache is not None else NullReadCache()
 
     async def _invalidate_project(self, project_external_id: str) -> None:
-        """Invalidate semantic reads after the accepted transaction commits."""
-        await invalidate_project_read_cache(self.read_cache, project_external_id)
+        """Finish invalidation before propagating request cancellation."""
+        invalidation = asyncio.create_task(
+            invalidate_project_read_cache(self.read_cache, project_external_id)
+        )
+        try:
+            await asyncio.shield(invalidation)
+        except asyncio.CancelledError as cancellation:
+            # Trigger: request cancellation landed after a mutation may have committed.
+            # Why: abandoning this Redis write can leave the committed DB state hidden
+            # behind the previous generation until its TTL expires.
+            # Outcome: finish invalidation, then preserve the caller's cancellation.
+            cleanup_error: BaseException | None = None
+            while not invalidation.done():
+                try:
+                    await asyncio.shield(invalidation)
+                except asyncio.CancelledError:
+                    continue
+                except BaseException as error:
+                    cleanup_error = error
+            if cleanup_error is None:
+                if invalidation.cancelled():
+                    cleanup_error = asyncio.CancelledError(
+                        "read-cache invalidation task was cancelled"
+                    )
+                else:
+                    cleanup_error = invalidation.exception()
+            if cleanup_error is not None:
+                cancellation.add_note(
+                    f"Read-cache invalidation failed during cancellation: {cleanup_error!r}"
+                )
+            raise
+
+    @asynccontextmanager
+    async def _mutation_cache_scope(
+        self,
+        project_external_id: str,
+        *,
+        invalidate_on_rejection: bool = False,
+    ) -> AsyncIterator[None]:
+        """Invalidate after a mutation can publish authoritative state."""
+        try:
+            yield
+        except AcceptedNoteMutationRejected:
+            if invalidate_on_rejection:
+                await self._invalidate_project(project_external_id)
+            raise
+        except BaseException:
+            # Transaction exit can raise after its commit reached the database.
+            # Invalidation is safe after an earlier rollback and required after
+            # any commit whose response was interrupted.
+            await self._invalidate_project(project_external_id)
+            raise
+        else:
+            await self._invalidate_project(project_external_id)
 
     def _resolve_actor(
         self,
@@ -215,22 +268,22 @@ class NoteContentMutationService:
             actor_name=actor_name,
         )
         try:
-            async with accepted_note_transaction(self.session_maker) as session:
-                accepted = await run_accepted_note_create(
-                    session,
-                    request=AcceptedNoteCreateMutation(
-                        project_external_id=project_external_id,
-                        data=data,
-                        actor=accepted_note_mutation_actor(
-                            user_profile_id=actor_context.user_profile_id,
-                            actor_kind=actor_context.actor_kind,
-                            actor_name=actor_context.actor_name,
+            async with self._mutation_cache_scope(project_external_id):
+                async with accepted_note_transaction(self.session_maker) as session:
+                    accepted = await run_accepted_note_create(
+                        session,
+                        request=AcceptedNoteCreateMutation(
+                            project_external_id=project_external_id,
+                            data=data,
+                            actor=accepted_note_mutation_actor(
+                                user_profile_id=actor_context.user_profile_id,
+                                actor_kind=actor_context.actor_kind,
+                                actor_name=actor_context.actor_name,
+                            ),
+                            source=actor_context.source,
                         ),
-                        source=actor_context.source,
-                    ),
-                    dependencies=self.mutation_dependencies,
-                )
-            await self._invalidate_project(project_external_id)
+                        dependencies=self.mutation_dependencies,
+                    )
             return accepted
         except AcceptedNoteMutationRejected as error:
             raise note_content_mutation_error_from_rejection(error.rejection) from error
@@ -269,34 +322,29 @@ class NoteContentMutationService:
                 project_external_id=project_external_id,
                 entity_external_id=entity_external_id,
             )
-            async with accepted_note_transaction(self.session_maker) as session:
-                accepted = await run_accepted_note_update(
-                    session,
-                    request=AcceptedNoteUpdateMutation(
-                        project_external_id=project_external_id,
-                        entity_external_id=entity_external_id,
-                        data=data,
-                        actor=accepted_note_mutation_actor(
-                            user_profile_id=actor_context.user_profile_id,
-                            actor_kind=actor_context.actor_kind,
-                            actor_name=actor_context.actor_name,
+            async with self._mutation_cache_scope(
+                project_external_id,
+                invalidate_on_rejection=freshening_may_have_published,
+            ):
+                async with accepted_note_transaction(self.session_maker) as session:
+                    accepted = await run_accepted_note_update(
+                        session,
+                        request=AcceptedNoteUpdateMutation(
+                            project_external_id=project_external_id,
+                            entity_external_id=entity_external_id,
+                            data=data,
+                            actor=accepted_note_mutation_actor(
+                                user_profile_id=actor_context.user_profile_id,
+                                actor_kind=actor_context.actor_kind,
+                                actor_name=actor_context.actor_name,
+                            ),
+                            source=actor_context.source,
+                            base_checksum=base_checksum,
                         ),
-                        source=actor_context.source,
-                        base_checksum=base_checksum,
-                    ),
-                    dependencies=self.mutation_dependencies,
-                )
+                        dependencies=self.mutation_dependencies,
+                    )
         except AcceptedNoteMutationRejected as error:
             raise note_content_mutation_error_from_rejection(error.rejection) from error
-        finally:
-            # A rejected or failed mutation can follow a successful freshening
-            # index commit. The freshening attempt therefore owns invalidation
-            # for every downstream outcome, not only accepted writes.
-            if freshening_may_have_published:
-                await self._invalidate_project(project_external_id)
-
-        if not freshening_may_have_published:
-            await self._invalidate_project(project_external_id)
         return accepted
 
     async def edit_note(
@@ -324,30 +372,28 @@ class NoteContentMutationService:
                 project_external_id=project_external_id,
                 entity_external_id=entity_external_id,
             )
-            async with accepted_note_transaction(self.session_maker) as session:
-                accepted = await run_accepted_note_edit(
-                    session,
-                    request=AcceptedNoteEditMutation(
-                        project_external_id=project_external_id,
-                        entity_external_id=entity_external_id,
-                        data=data,
-                        actor=accepted_note_mutation_actor(
-                            user_profile_id=actor_context.user_profile_id,
-                            actor_kind=actor_context.actor_kind,
-                            actor_name=actor_context.actor_name,
+            async with self._mutation_cache_scope(
+                project_external_id,
+                invalidate_on_rejection=freshening_may_have_published,
+            ):
+                async with accepted_note_transaction(self.session_maker) as session:
+                    accepted = await run_accepted_note_edit(
+                        session,
+                        request=AcceptedNoteEditMutation(
+                            project_external_id=project_external_id,
+                            entity_external_id=entity_external_id,
+                            data=data,
+                            actor=accepted_note_mutation_actor(
+                                user_profile_id=actor_context.user_profile_id,
+                                actor_kind=actor_context.actor_kind,
+                                actor_name=actor_context.actor_name,
+                            ),
+                            source=actor_context.source,
                         ),
-                        source=actor_context.source,
-                    ),
-                    dependencies=self.mutation_dependencies,
-                )
+                        dependencies=self.mutation_dependencies,
+                    )
         except AcceptedNoteMutationRejected as error:
             raise note_content_mutation_error_from_rejection(error.rejection) from error
-        finally:
-            if freshening_may_have_published:
-                await self._invalidate_project(project_external_id)
-
-        if not freshening_may_have_published:
-            await self._invalidate_project(project_external_id)
         return accepted
 
     async def move_note(
@@ -375,30 +421,28 @@ class NoteContentMutationService:
                 project_external_id=project_external_id,
                 entity_external_id=entity_external_id,
             )
-            async with accepted_note_transaction(self.session_maker) as session:
-                accepted = await run_accepted_note_move(
-                    session,
-                    request=AcceptedNoteMoveMutation(
-                        project_external_id=project_external_id,
-                        entity_external_id=entity_external_id,
-                        destination_path=destination_path,
-                        actor=accepted_note_mutation_actor(
-                            user_profile_id=actor_context.user_profile_id,
-                            actor_kind=actor_context.actor_kind,
-                            actor_name=actor_context.actor_name,
+            async with self._mutation_cache_scope(
+                project_external_id,
+                invalidate_on_rejection=freshening_may_have_published,
+            ):
+                async with accepted_note_transaction(self.session_maker) as session:
+                    accepted = await run_accepted_note_move(
+                        session,
+                        request=AcceptedNoteMoveMutation(
+                            project_external_id=project_external_id,
+                            entity_external_id=entity_external_id,
+                            destination_path=destination_path,
+                            actor=accepted_note_mutation_actor(
+                                user_profile_id=actor_context.user_profile_id,
+                                actor_kind=actor_context.actor_kind,
+                                actor_name=actor_context.actor_name,
+                            ),
+                            source=actor_context.source,
                         ),
-                        source=actor_context.source,
-                    ),
-                    dependencies=self.mutation_dependencies,
-                )
+                        dependencies=self.mutation_dependencies,
+                    )
         except AcceptedNoteMutationRejected as error:
             raise note_content_mutation_error_from_rejection(error.rejection) from error
-        finally:
-            if freshening_may_have_published:
-                await self._invalidate_project(project_external_id)
-
-        if not freshening_may_have_published:
-            await self._invalidate_project(project_external_id)
         return accepted
 
     async def delete_note(
@@ -414,21 +458,19 @@ class NoteContentMutationService:
                 project_external_id=project_external_id,
                 entity_external_id=entity_external_id,
             )
-            async with accepted_note_transaction(self.session_maker) as session:
-                accepted = await run_accepted_note_delete(
-                    session,
-                    request=AcceptedNoteDeleteMutation(
-                        project_external_id=project_external_id,
-                        entity_external_id=entity_external_id,
-                    ),
-                    dependencies=self.mutation_dependencies,
-                )
+            async with self._mutation_cache_scope(
+                project_external_id,
+                invalidate_on_rejection=freshening_may_have_published,
+            ):
+                async with accepted_note_transaction(self.session_maker) as session:
+                    accepted = await run_accepted_note_delete(
+                        session,
+                        request=AcceptedNoteDeleteMutation(
+                            project_external_id=project_external_id,
+                            entity_external_id=entity_external_id,
+                        ),
+                        dependencies=self.mutation_dependencies,
+                    )
         except AcceptedNoteMutationRejected as error:
             raise note_content_mutation_error_from_rejection(error.rejection) from error
-        finally:
-            if freshening_may_have_published:
-                await self._invalidate_project(project_external_id)
-
-        if not freshening_may_have_published:
-            await self._invalidate_project(project_external_id)
         return accepted
