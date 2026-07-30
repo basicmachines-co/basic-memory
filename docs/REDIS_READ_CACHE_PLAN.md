@@ -101,14 +101,15 @@ tenant:
    failed index attempt can still publish cache-relevant state.
 1. Pass the namespace-bound cache into hosted note-content read repair. A resource or entity read
    can bootstrap a missing accepted-content row; invalidate immediately after that commit and
-   before the repaired response is offered to read-through storage.
+   before the repaired response is offered to read-through storage. Finish that generation bump
+   before re-propagating cancellation that arrives after the repair transaction commits.
 1. Pass the namespace-bound cache into pre-mutation content freshening. Freshening can index an
    externally edited file before the accepted mutation begins, so invalidate after every
    freshening attempt that may have published state, including when the later mutation is
    rejected or raises.
 1. Inject the namespace-bound cache into import endpoints and workers. Invalidate after every
-   import attempt that may have written files, including importers that return a failed result or
-   raise after partial progress, so cached file-first resources cannot survive overwritten bytes.
+   attempted file write before the next item, including writes that raise after partial progress,
+   and retain the final failure-safe invalidation around the complete import attempt.
 1. Invalidate directory deletion immediately after its acceptance transaction commits, then
    again after file cleanup and surviving-relation refresh. A slow or failed cleanup must not
    keep deleted entities reachable through the pre-acceptance generation.
@@ -300,8 +301,9 @@ invalidates again so a value filled after an earlier generation bump cannot outl
 that phase publishes. Hosted read repair invalidates after bootstrapping accepted content and
 before a repaired entity or resource is stored. Directory moves invalidate after every committed
 file plus the final reindex; directory deletion invalidates after acceptance and after cleanup.
-Imports invalidate after every attempt that may have written files. Project indexing invalidates
-even after a partial failure. Direct single-file and watcher file indexing invalidate even when a
+Imports invalidate after every attempted file write and again around the complete attempt so
+partial failures cannot escape. Project indexing invalidates even after a partial failure. Direct
+single-file and watcher file indexing invalidate even when a
 follow-up fails after the entity commit. Recovery phases invalidate independently before the
 serving barrier is released and include terminal conflict or failure publication.
 
@@ -389,6 +391,8 @@ The real-Redis suite must prove:
 - cancellation after a real accepted-note, directory-delete, or per-file directory-move
   transaction commits cannot interrupt the real Redis generation bump, including repeated
   cancellation while invalidation is in progress;
+- cancellation after a real hosted read-repair transaction commits cannot interrupt the real
+  Redis generation bump;
 - real Redis no-eviction capacity failures bypass cache storage and cannot fail committed-write
   invalidation;
 - authoritative read exceptions propagate without populating the missed cache key;
@@ -401,7 +405,8 @@ The real-Redis suite must prove:
 - direct and watcher file-index failures invalidate any entity state committed before failed
   search or reconciliation follow-ups;
 - hosted read repair invalidates cached entity metadata before storing the repaired resource;
-- import attempts invalidate cached file-first resources after success and partial failure;
+- multi-item imports advance the real Redis generation after every attempted file write, while
+  retaining the final success and partial-failure bump;
 - directory moves invalidate after each committed file and again after final reindexing;
 - project-root path changes invalidate cached resources whose project/entity UUID keys remain
   stable;
@@ -439,10 +444,11 @@ semantics themselves are asserted only against the real Redis integration fixtur
 - Invalidate direct and watcher file indexing from failure-safe boundaries because entity commits
   precede some search and reconciliation follow-ups.
 - Invalidate hosted note-content read repair after it commits and before returning its repaired
-  entity or resource to the read-through helper.
+  entity or resource to the read-through helper; finish that bump before cancellation propagates.
 - Invalidate pre-mutation content freshening even when a later accepted mutation is rejected or
   fails, because the freshening index may already have committed external file state.
-- Invalidate every import attempt that may write files, including partial failures.
+- Invalidate every imported file write before the next item, and retain whole-import invalidation
+  for partial failures.
 - Finish directory-delete acceptance invalidation before re-propagating cancellation that lands
   after the delete transaction may have committed.
 - Finish each directory-move file invalidation before re-propagating cancellation that lands

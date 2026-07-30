@@ -15,7 +15,10 @@ from basic_memory.indexing.note_content_read_repair_runner import (
     run_note_content_read_repair_with_default_reconciler,
 )
 from basic_memory.models import Entity, NoteContent, Project
-from basic_memory.read_cache import ReadCacheInvalidator, invalidate_project_read_cache
+from basic_memory.read_cache import (
+    ReadCacheInvalidator,
+    finish_project_read_cache_invalidation,
+)
 from basic_memory.runtime.note_content import (
     RuntimeNoteContentResource,
     RuntimeNoteContentResponsePayload,
@@ -114,7 +117,7 @@ class NoteContentQueryService:
             # Read repair commits note_content before this method reloads the response.
             # Advance the generation first so the surrounding read-through cannot
             # publish the repaired payload under the pre-repair generation.
-            await invalidate_project_read_cache(read_cache, project_external_id)
+            await finish_project_read_cache_invalidation(read_cache, project_external_id)
         # The repair commits through a separate scoped session, so reopen the read to
         # avoid stale snapshots in caller-owned transactions.
         return await self.get_note_entity_payload(
@@ -175,7 +178,7 @@ class NoteContentQueryService:
         if read_cache is not None:
             # A resource read can repair the row used by cached entity responses.
             # Invalidate before returning the repaired resource to read-through.
-            await invalidate_project_read_cache(read_cache, project_external_id)
+            await finish_project_read_cache_invalidation(read_cache, project_external_id)
         # The repair commits through a separate scoped session, so reopen the read to
         # avoid stale snapshots in caller-owned transactions.
         return await self.get_note_resource(

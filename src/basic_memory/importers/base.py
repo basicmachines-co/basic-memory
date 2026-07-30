@@ -2,11 +2,14 @@
 
 import logging
 from abc import abstractmethod
+from contextlib import nullcontext
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, TypeVar
 
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.markdown.schemas import EntityMarkdown
+from basic_memory.read_cache import ReadCacheInvalidator, invalidate_cache
 from basic_memory.schemas.importer import ImportResult
 from basic_memory.utils import build_canonical_permalink, generate_permalink
 
@@ -16,6 +19,14 @@ if TYPE_CHECKING:  # pragma: no cover
 logger = logging.getLogger(__name__)
 
 T = TypeVar("T", bound=ImportResult)
+
+
+@dataclass(frozen=True, slots=True)
+class ImportReadCache:
+    """Bind an importer's file writes to one project cache generation."""
+
+    backend: ReadCacheInvalidator
+    project_id: str
 
 
 class Importer[T: ImportResult]:
@@ -31,6 +42,8 @@ class Importer[T: ImportResult]:
         markdown_processor: MarkdownProcessor,
         file_service: "FileService",
         project_name: Optional[str] = None,
+        *,
+        read_cache: ImportReadCache | None = None,
     ):
         """Initialize the import service.
 
@@ -44,6 +57,7 @@ class Importer[T: ImportResult]:
         self.file_service = file_service
         self.project_name = project_name
         self.project_permalink = generate_permalink(project_name) if project_name else None
+        self.read_cache = read_cache
 
     @abstractmethod
     async def import_data(self, source_data, destination_folder: str, **kwargs: Any) -> T:
@@ -74,8 +88,19 @@ class Importer[T: ImportResult]:
             Checksum of written file.
         """
         content = self.markdown_processor.to_markdown_string(entity)
-        # FileService.write_file handles directory creation and returns checksum
-        return await self.file_service.write_file(file_path, content)
+
+        # Trigger: one imported file can become visible before the remaining batch completes.
+        # Why: cached file-first resources must not retain the overwritten bytes until the
+        #      import's final failure-safe invalidation.
+        # Outcome: advance the project generation after every attempted file write.
+        invalidation_scope = (
+            invalidate_cache(self.read_cache.backend, self.read_cache.project_id)
+            if self.read_cache is not None
+            else nullcontext()
+        )
+        async with invalidation_scope:
+            # FileService.write_file handles directory creation and returns checksum
+            return await self.file_service.write_file(file_path, content)
 
     def canonical_permalink(self, path: str) -> str:
         """Build a canonical permalink for imported content."""

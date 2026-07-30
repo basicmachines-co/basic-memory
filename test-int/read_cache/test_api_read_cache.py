@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Protocol, override
+from typing import Literal, Protocol, override
 from uuid import uuid4
 
 import pytest
@@ -45,6 +46,7 @@ from basic_memory.read_cache.keys import (
 )
 from basic_memory.read_cache.redis import RedisReadCache
 from basic_memory.repository import EntityRepository
+from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.runtime.note_content import NOTE_CONTENT_BASE_CHECKSUM_HEADER
 from basic_memory.schemas.v2 import EntityResolveRequest
 from basic_memory.services.note_content_reads import NoteContentQueryService
@@ -128,8 +130,8 @@ class NoAcceptedNoteContent:
         return None
 
 
-class DirectoryMoveObservingRedisReadCache(RedisReadCache):
-    """Record how much of a directory move is durable at each real invalidation."""
+class DestinationObservingRedisReadCache(RedisReadCache):
+    """Record how many target files exist at each real invalidation."""
 
     def __init__(
         self,
@@ -142,10 +144,12 @@ class DirectoryMoveObservingRedisReadCache(RedisReadCache):
         super().__init__(client=client, namespace=namespace, prefix=prefix)
         self.destination_paths = destination_paths
         self.destination_counts: list[int] = []
+        self.project_ids: list[str] = []
 
     @override
     async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
         status = await super().invalidate_project(project_id)
+        self.project_ids.append(project_id)
         self.destination_counts.append(
             sum(destination.exists() for destination in self.destination_paths)
         )
@@ -650,6 +654,52 @@ async def test_partial_import_failure_invalidates_cached_resource_in_real_redis(
 
 
 @pytest.mark.asyncio
+async def test_import_invalidates_after_each_written_file_in_real_redis(
+    app: FastAPI,
+    client: AsyncClient,
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """Each imported file advances Redis before the next item is processed."""
+    project_external_id = str(test_project.external_id)
+    destination_directory = "cache/import-per-file"
+    destination_paths = tuple(
+        Path(test_project.path) / destination_directory / "note" / f"{name}.md"
+        for name in ("First import", "Second import")
+    )
+    observing_cache = DestinationObservingRedisReadCache(
+        client=redis_cache.client,
+        namespace=redis_cache.namespace,
+        prefix=redis_cache.prefix,
+        destination_paths=destination_paths,
+    )
+    app.dependency_overrides[get_read_cache] = lambda: observing_cache
+    source_data = b"\n".join(
+        json.dumps(
+            {
+                "type": "entity",
+                "name": name,
+                "entityType": "note",
+                "observations": [],
+            }
+        ).encode()
+        for name in ("First import", "Second import")
+    )
+
+    response = await client.post(
+        f"/v2/projects/{project_external_id}/import/memory-json",
+        files={"file": ("memory.json", source_data, "application/json")},
+        data={"directory": destination_directory},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["entities"] == 2
+    assert observing_cache.destination_counts[:2] == [1, 2]
+    assert observing_cache.project_ids[:2] == [project_external_id, project_external_id]
+    assert all(destination.exists() for destination in destination_paths)
+
+
+@pytest.mark.asyncio
 async def test_resource_read_repair_invalidates_cached_entity_in_real_redis(
     app: FastAPI,
     client: AsyncClient,
@@ -716,6 +766,96 @@ async def test_resource_read_repair_invalidates_cached_entity_in_real_redis(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("read_method", ["entity", "resource"])
+async def test_cancelled_committed_read_repair_finishes_real_redis_invalidation(
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+    read_method: Literal["entity", "resource"],
+) -> None:
+    """Cancellation after read-repair commit waits for invalidation."""
+    project_external_id = str(test_project.external_id)
+    file_path = "cache/cancelled-read-repair.md"
+    markdown_content = "# Cancelled read repair\n\nCommitted canonical content.\n"
+    disk_path = Path(test_project.path) / file_path
+    disk_path.parent.mkdir(parents=True, exist_ok=True)
+    disk_path.write_text(markdown_content, encoding="utf-8")
+
+    repository = EntityRepository(project_id=test_project.id)
+    _, session_maker = engine_factory
+    async with db.scoped_session(session_maker) as session:
+        entity = await repository.add(
+            session,
+            Entity(
+                title="Cancelled read repair",
+                note_type="note",
+                content_type="text/markdown",
+                file_path=file_path,
+                checksum="cancelled-read-repair-checksum",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+        )
+
+    blocking_cache = BlockingInvalidationRedisReadCache(
+        client=redis_cache.client,
+        namespace=redis_cache.namespace,
+        prefix=redis_cache.prefix,
+    )
+    generation_before = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="cancelled-committed-read-repair",
+    )
+
+    query_service = NoteContentQueryService(
+        session_maker=session_maker,
+        read_repair_file_reader=LocalReadRepairFileReader(),
+    )
+    if read_method == "entity":
+        read_repair = query_service.get_note_entity_payload_with_read_repair(
+            project_external_id=project_external_id,
+            entity_external_id=entity.external_id,
+            read_cache=blocking_cache,
+        )
+    else:
+        read_repair = query_service.get_note_resource_with_read_repair(
+            project_external_id=project_external_id,
+            entity_external_id=entity.external_id,
+            read_cache=blocking_cache,
+        )
+    request_task = asyncio.create_task(read_repair)
+
+    async with asyncio.timeout(5):
+        await blocking_cache.invalidation_started.wait()
+    request_task.cancel()
+    await asyncio.sleep(0)
+    request_task.cancel()
+    await asyncio.sleep(0)
+    assert not request_task.done()
+
+    blocking_cache.release_invalidation.set()
+    with pytest.raises(asyncio.CancelledError):
+        await request_task
+
+    generation_after = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="cancelled-committed-read-repair",
+    )
+    assert generation_after != generation_before
+
+    async with db.scoped_session(session_maker) as session:
+        repaired = await NoteContentRepository(project_id=test_project.id).get_by_entity_id(
+            session,
+            entity.id,
+        )
+    assert repaired is not None
+    assert repaired.db_version == 1
+    assert repaired.markdown_content == markdown_content
+
+
+@pytest.mark.asyncio
 async def test_directory_move_invalidates_after_each_committed_file_in_real_redis(
     app: FastAPI,
     client: AsyncClient,
@@ -742,7 +882,7 @@ async def test_directory_move_invalidates_after_each_committed_file_in_real_redi
         Path(test_project.path) / source_path.replace("move-source/", "move-destination/", 1)
         for source_path in created_paths
     )
-    observing_cache = DirectoryMoveObservingRedisReadCache(
+    observing_cache = DestinationObservingRedisReadCache(
         client=redis_cache.client,
         namespace=redis_cache.namespace,
         prefix=redis_cache.prefix,

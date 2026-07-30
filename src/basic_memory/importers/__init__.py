@@ -1,6 +1,6 @@
 """Import services for Basic Memory."""
 
-from basic_memory.importers.base import Importer
+from basic_memory.importers.base import Importer, ImportReadCache
 from basic_memory.importers.chatgpt_importer import ChatGPTImporter
 from basic_memory.importers.claude_conversations_importer import (
     ClaudeConversationsImporter,
@@ -22,6 +22,7 @@ from basic_memory.schemas.importer import (
 
 __all__ = [
     "Importer",
+    "ImportReadCache",
     "ChatGPTImporter",
     "ClaudeConversationsImporter",
     "ClaudeProjectsImporter",
