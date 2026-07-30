@@ -15,6 +15,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 import basic_memory.indexing.external_file_delete_runner as external_file_delete_runner
+import basic_memory.indexing.index_file_runner as index_file_runner
 import basic_memory.services.directory_deletes as directory_deletes
 import basic_memory.services.entity_service as entity_service_module
 from basic_memory import db
@@ -52,6 +53,8 @@ from basic_memory.indexing.external_file_delete_runner import (
     RepositoryExternalFileDeleteEntities,
 )
 from basic_memory.indexing.models import IndexFileJobResult, IndexFileJobStatus, IndexInputFile
+from basic_memory.indexing.models import FileIndexResult
+from basic_memory.indexing.index_file_runner import InvalidatingIndexFileExecutor
 from basic_memory.indexing.project_index_maintenance import (
     InvalidatingProjectIndexBatchStore,
     ProjectIndexDeleteBatch,
@@ -373,6 +376,37 @@ class PartiallyFailingSearchReindexService:
             self.project_external_id,
         )
         raise RuntimeError("partial search reindex failure")
+
+
+class CommittingIndexFileExecutor:
+    """Publish one real entity row before the caller cancels transaction exit."""
+
+    def __init__(
+        self,
+        session_maker: async_sessionmaker[AsyncSession],
+        entity_repository: EntityRepository,
+    ) -> None:
+        self.session_maker = session_maker
+        self.entity_repository = entity_repository
+        self.entity_id: int | None = None
+
+    async def index_file(self, file_path: str, *, source: str) -> FileIndexResult:
+        del source
+        async with db.scoped_session(self.session_maker) as session:
+            entity = await self.entity_repository.add(
+                session,
+                Entity(
+                    title="Cancelled Watcher Index Commit",
+                    note_type="note",
+                    content_type="text/markdown",
+                    file_path=file_path,
+                    checksum="cancelled-watcher-index-commit-checksum",
+                    created_at=datetime.now(UTC),
+                    updated_at=datetime.now(UTC),
+                ),
+            )
+            self.entity_id = entity.id
+        raise AssertionError("test transaction-exit pause should be cancelled")
 
 
 async def _initialized_generation(
@@ -801,6 +835,81 @@ async def test_cancelled_watcher_delete_commit_finishes_real_redis_invalidation(
     blocking_cache.release_invalidation.set()
     with pytest.raises(asyncio.CancelledError):
         await delete_task
+
+    generation_after = await _current_generation(redis_cache, project_external_id)
+    assert generation_after != generation_before
+
+
+@pytest.mark.asyncio
+async def test_cancelled_watcher_index_commit_finishes_real_redis_invalidation(
+    monkeypatch: pytest.MonkeyPatch,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """Cancellation during watcher index transaction exit cannot skip invalidation."""
+    _, session_maker = engine_factory
+    project_external_id = str(test_project.external_id)
+    generation_before = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="cancelled-watcher-index-commit",
+    )
+    entity_repository = EntityRepository(project_id=test_project.id)
+    executor = CommittingIndexFileExecutor(session_maker, entity_repository)
+    blocking_cache = BlockingInvalidationRedisReadCache(
+        client=redis_cache.client,
+        namespace=redis_cache.namespace,
+        prefix=redis_cache.prefix,
+    )
+    invalidating_executor = InvalidatingIndexFileExecutor(
+        executor=executor,
+        read_cache=blocking_cache,
+        project_external_id=project_external_id,
+    )
+
+    transaction_committed = asyncio.Event()
+    hold_after_commit = asyncio.Event()
+    original_scoped_session = index_file_runner.db.scoped_session
+
+    @asynccontextmanager
+    async def pause_after_index_commit(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[AsyncSession]:
+        async with original_scoped_session(scoped_session_maker) as session:
+            yield session
+        transaction_committed.set()
+        await hold_after_commit.wait()
+
+    monkeypatch.setattr(
+        index_file_runner.db,
+        "scoped_session",
+        pause_after_index_commit,
+    )
+    file_path = "notes/cancelled-watcher-index-commit.md"
+    index_task = asyncio.create_task(
+        invalidating_executor.index_file(file_path, source="s3_webhook")
+    )
+
+    async with asyncio.timeout(5):
+        await transaction_committed.wait()
+    assert executor.entity_id is not None
+    async with original_scoped_session(session_maker) as session:
+        indexed_entity = await entity_repository.get_by_id(session, executor.entity_id)
+    assert indexed_entity is not None
+    assert indexed_entity.file_path == file_path
+
+    index_task.cancel()
+    async with asyncio.timeout(5):
+        await blocking_cache.invalidation_started.wait()
+
+    index_task.cancel()
+    await asyncio.sleep(0)
+    assert not index_task.done()
+
+    blocking_cache.release_invalidation.set()
+    with pytest.raises(asyncio.CancelledError):
+        await index_task
 
     generation_after = await _current_generation(redis_cache, project_external_id)
     assert generation_after != generation_before

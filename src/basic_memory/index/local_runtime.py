@@ -43,6 +43,8 @@ from basic_memory.indexing.file_index_checking import (
 from basic_memory.repository.note_file_vacate_repository import NoteFileVacateRepository
 from basic_memory.indexing.index_file_runner import (
     IndexFileObjectMetadata,
+    IndexFileExecutor,
+    InvalidatingIndexFileExecutor,
     RepositoryCurrentMaterializedNoteSource,
 )
 from basic_memory.indexing.models import IndexFileJobResult, IndexFileJobStatus
@@ -373,11 +375,17 @@ class LocalWatchEventIndexRuntimeFactory:
             entity_repository=dependencies.entity_repository,
             entity_indexer=dependencies.search_service,
         )
+        file_indexer: IndexFileExecutor = dependencies.file_indexer
         delete_entities: ExternalFileDeleteEntities = RepositoryExternalFileDeleteEntities(
             session_maker=dependencies.session_maker,
             entity_repository=dependencies.entity_repository,
         )
         if self.read_cache is not None:
+            file_indexer = InvalidatingIndexFileExecutor(
+                executor=file_indexer,
+                read_cache=self.read_cache,
+                project_external_id=project_ref.project_external_id,
+            )
             delete_entities = InvalidatingExternalFileDeleteEntities(
                 entities=delete_entities,
                 read_cache=self.read_cache,
@@ -391,7 +399,7 @@ class LocalWatchEventIndexRuntimeFactory:
                 session_maker=dependencies.session_maker,
                 entity_repository=dependencies.entity_repository,
             ),
-            file_indexer=dependencies.file_indexer,
+            file_indexer=file_indexer,
             delete_entities=delete_entities,
             delete_objects=LocalExternalFileDeleteObjects(dependencies.file_service),
             result_recorder=LocalInlineStorageEventResultRecorder(

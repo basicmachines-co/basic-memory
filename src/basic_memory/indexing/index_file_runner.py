@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Protocol, override
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -25,6 +25,7 @@ from basic_memory.indexing.models import (
     plan_current_materialized_note_result,
     plan_indexed_file_live_update_metadata,
 )
+from basic_memory.read_cache import ReadCacheInvalidator, invalidate_cache
 from basic_memory.runtime.jobs import RuntimeStorageFileIndexMode
 from basic_memory.runtime.note_object_metadata import RuntimeNoteObjectMetadataMap
 from basic_memory.runtime.storage import RuntimeFileChecksum, RuntimeFilePath
@@ -72,6 +73,27 @@ class IndexFileExecutor(Protocol):
         *,
         source: str,
     ) -> FileIndexResult: ...
+
+
+@dataclass(frozen=True, slots=True)
+class InvalidatingIndexFileExecutor(IndexFileExecutor):
+    """Advance cached reads after a transaction-bearing file index attempt exits."""
+
+    executor: IndexFileExecutor
+    read_cache: ReadCacheInvalidator
+    project_external_id: str
+
+    @override
+    async def index_file(
+        self,
+        file_path: RuntimeFilePath,
+        *,
+        source: str,
+    ) -> FileIndexResult:
+        # File indexing can commit entity state while its session context exits.
+        # Keep that exit inside the scope so cancellation waits for invalidation.
+        async with invalidate_cache(self.read_cache, self.project_external_id):
+            return await self.executor.index_file(file_path, source=source)
 
 
 class CurrentMaterializedNoteEntityRepository(Protocol):
