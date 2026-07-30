@@ -14,7 +14,9 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 import basic_memory.services.directory_deletes as directory_deletes
+import basic_memory.services.entity_service as entity_service_module
 from basic_memory import db
+from basic_memory.config import ProjectConfig, BasicMemoryConfig
 from basic_memory.index import note_content_materialization
 from basic_memory.index.local_moves import (
     LocalMoveEntityRepository,
@@ -51,6 +53,8 @@ from basic_memory.indexing.project_index_maintenance import (
     StoreProjectIndexMaintenanceRunner,
 )
 from basic_memory.indexing.relation_resolution import RelationResolutionRuntime
+from basic_memory.markdown import EntityParser
+from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.models import Project
 from basic_memory.models.knowledge import Entity
 from basic_memory.read_cache import (
@@ -61,7 +65,11 @@ from basic_memory.read_cache import (
 )
 from basic_memory.read_cache.keys import redis_read_cache_generation_key
 from basic_memory.read_cache.redis import RedisReadCache
-from basic_memory.repository import EntityRepository
+from basic_memory.repository import (
+    EntityRepository,
+    ObservationRepository,
+    RelationRepository,
+)
 from basic_memory.repository.note_content_repository import (
     AcceptedNoteContentWrite,
     NoteContentRepository,
@@ -81,9 +89,13 @@ from basic_memory.runtime.storage import (
     RuntimeStorageEventOperation,
     RuntimeStorageEventOperationKind,
 )
+from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services.directory_deletes import DirectoryDeleteService
+from basic_memory.services.entity_service import EntityService
 from basic_memory.services.file_service import FileService
 from basic_memory.services.initialization import recover_project_materializations
+from basic_memory.services.link_resolver import LinkResolver
+from basic_memory.services.search_service import SearchService
 
 pytestmark = pytest.mark.redis
 
@@ -868,3 +880,122 @@ async def test_cancelled_committed_directory_delete_finishes_real_redis_invalida
     async with original_scoped_session(session_maker) as session:
         deleted_entities = await entity_repository.get_by_title(session, title)
     assert deleted_entities == []
+
+
+@pytest.mark.asyncio
+async def test_cancelled_committed_directory_move_finishes_real_redis_invalidation(
+    monkeypatch: pytest.MonkeyPatch,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    search_service: SearchService,
+    app_config: BasicMemoryConfig,
+    project_config: ProjectConfig,
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """Cancellation during a file-move commit cannot skip invalidation."""
+    _, session_maker = engine_factory
+    entity_repository = EntityRepository(project_id=test_project.id)
+    entity_parser = EntityParser(project_config.home)
+    file_service = FileService(project_config.home, MarkdownProcessor(entity_parser))
+    entity_service = EntityService(
+        entity_parser=entity_parser,
+        entity_repository=entity_repository,
+        observation_repository=ObservationRepository(project_id=test_project.id),
+        relation_repository=RelationRepository(project_id=test_project.id),
+        file_service=file_service,
+        link_resolver=LinkResolver(
+            entity_repository,
+            search_service,
+            session_maker=session_maker,
+            app_config=app_config,
+        ),
+        session_maker=session_maker,
+        search_service=search_service,
+        app_config=app_config,
+    )
+    project_external_id = str(test_project.external_id)
+    generation_before = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="cancelled-committed-directory-move",
+    )
+    entity = await entity_service.create_entity(
+        EntitySchema(
+            title="Cancelled Committed Directory Move",
+            directory="cancelled-move-source",
+            note_type="note",
+            content="Move must remain visible after cancellation.",
+        )
+    )
+    destination_path = "cancelled-move-destination/Cancelled Committed Directory Move.md"
+    blocking_cache = BlockingInvalidationRedisReadCache(
+        client=redis_cache.client,
+        namespace=redis_cache.namespace,
+        prefix=redis_cache.prefix,
+    )
+    transaction_committed = asyncio.Event()
+    hold_after_commit = asyncio.Event()
+    original_scoped_session = entity_service_module.db.scoped_session
+
+    @asynccontextmanager
+    async def pause_after_move_commit(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+        existing_session: AsyncSession | None = None,
+    ) -> AsyncIterator[AsyncSession]:
+        async with original_scoped_session(scoped_session_maker, existing_session) as session:
+            yield session
+        if transaction_committed.is_set():
+            return
+
+        async with original_scoped_session(scoped_session_maker) as session:
+            moved_entity = await entity_repository.get_by_id(
+                session,
+                entity.id,
+                load_relations=False,
+            )
+        if moved_entity is not None and moved_entity.file_path == destination_path:
+            transaction_committed.set()
+            await hold_after_commit.wait()
+
+    monkeypatch.setattr(entity_service_module.db, "scoped_session", pause_after_move_commit)
+    move_task = asyncio.create_task(
+        entity_service.move_directory(
+            source_directory="cancelled-move-source",
+            destination_directory="cancelled-move-destination",
+            project_config=project_config,
+            app_config=app_config.model_copy(update={"update_permalinks_on_move": False}),
+            project_external_id=project_external_id,
+            read_cache=blocking_cache,
+        )
+    )
+
+    async with asyncio.timeout(5):
+        await transaction_committed.wait()
+    move_task.cancel()
+    async with asyncio.timeout(5):
+        await blocking_cache.invalidation_started.wait()
+
+    # A second cancellation must not abandon the already-running generation bump.
+    move_task.cancel()
+    await asyncio.sleep(0)
+    assert not move_task.done()
+
+    blocking_cache.release_invalidation.set()
+    with pytest.raises(asyncio.CancelledError):
+        await move_task
+
+    generation_after = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="cancelled-committed-directory-move",
+    )
+    assert generation_after != generation_before
+
+    async with original_scoped_session(entity_service.session_maker) as session:
+        moved_entity = await entity_repository.get_by_id(
+            session,
+            entity.id,
+            load_relations=False,
+        )
+    assert moved_entity is not None
+    assert moved_entity.file_path == destination_path

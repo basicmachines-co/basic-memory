@@ -91,4 +91,4 @@ async def invalidate_cache(
     try:
         yield
     finally:
-        await invalidate_project_read_cache(cache, project_id)
+        await finish_project_read_cache_invalidation(cache, project_id)

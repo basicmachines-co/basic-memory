@@ -1,6 +1,7 @@
 """Service for managing entities in the database."""
 
 from collections.abc import Callable
+from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional, Sequence, Tuple, Union
@@ -22,7 +23,7 @@ from basic_memory.models import Observation, Relation
 from basic_memory.models.knowledge import Entity
 from basic_memory.repository import ObservationRepository, RelationRepository
 from basic_memory.repository.entity_repository import EntityRepository
-from basic_memory.read_cache import ReadCache, invalidate_project_read_cache
+from basic_memory.read_cache import ReadCache, invalidate_cache
 from basic_memory.runtime.note_move import normalize_note_move_destination_path
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.schemas.base import Permalink
@@ -1192,24 +1193,34 @@ class EntityService(BaseService[EntityModel]):
                 # Entity is directly in the source directory (shouldn't happen with prefix match)
                 new_path = f"{destination_directory}/{old_path}"
 
-            try:
-                # Move the individual entity
-                await self.move_entity(
-                    identifier=entity.file_path,
-                    destination_path=new_path,
-                    project_config=project_config,
-                    app_config=app_config,
-                )
-            except Exception as e:  # pragma: no cover
+            # Trigger: one file move can publish filesystem or database state before returning.
+            # Why: every move publishes independently and cached reads must not retain
+            #      an earlier file's state while the remaining directory batch runs.
+            # Outcome: finish one generation bump before reporting the result or cancellation.
+            invalidation_scope = (
+                invalidate_cache(read_cache, project_external_id)
+                if read_cache is not None
+                else nullcontext()
+            )
+            move_error: Exception | None = None
+            async with invalidation_scope:
+                try:
+                    # Move the individual entity
+                    await self.move_entity(
+                        identifier=entity.file_path,
+                        destination_path=new_path,
+                        project_config=project_config,
+                        app_config=app_config,
+                    )
+                except Exception as error:  # pragma: no cover
+                    move_error = error
+
+            if move_error is not None:  # pragma: no cover
                 failed_moves += 1
-                errors.append(DirectoryMoveError(path=entity.file_path, error=str(e)))
-                logger.error(f"Failed to move entity {entity.file_path}: {e}")
+                errors.append(DirectoryMoveError(path=entity.file_path, error=str(move_error)))
+                logger.error(f"Failed to move entity {entity.file_path}: {move_error}")
                 continue
 
-            # Each move commits independently. Invalidate before the next file so a
-            # long directory batch cannot serve early moves from the old generation.
-            if read_cache is not None:
-                await invalidate_project_read_cache(read_cache, project_external_id)
             moved_files.append(new_path)
             successful_moves += 1
             logger.debug(f"Moved entity: {old_path} -> {new_path}")
