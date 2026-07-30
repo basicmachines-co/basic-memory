@@ -96,6 +96,9 @@ tenant:
    retaining the final failure-safe completion boundary for later-phase errors. Local inline file
    batches invalidate when their runner returns; queued Cloud file batches invalidate in the child
    worker after its durable commit, not merely when the coordinator enqueues the job.
+1. Put full search reindexing in a failure-safe invalidation scope owned by the worker that runs
+   the rebuild. Reindexing drops and repopulates search rows incrementally, so fuzzy resolutions
+   filled during a partial or completed rebuild must not survive its final generation bump.
 1. Put direct single-file and watcher file-index invalidation in failure-safe boundaries. Entity
    transactions can commit before search refresh or note-content reconciliation raises, so a
    failed index attempt can still publish cache-relevant state. Once a watcher index or delete
@@ -116,8 +119,10 @@ tenant:
 1. Invalidate directory deletion immediately after its acceptance transaction commits, then
    again after file cleanup and surviving-relation refresh. A slow or failed cleanup must not
    keep deleted entities reachable through the pre-acceptance generation.
-1. Invalidate watcher-detected moves at their own completion boundary. Paired delete/create
-   events are consumed by move processing and therefore bypass the ordinary watcher callbacks.
+1. Invalidate every committed watcher-detected move batch, then retain the final invalidation
+   after search refresh. Paired delete/create events are consumed by move processing and therefore
+   bypass the ordinary watcher callbacks; a large watcher run commits bounded batches before the
+   final refresh.
 1. Invalidate directory moves after each individual file/database move commits, then again after
    the final search and relation follow-ups. Directory moves are incremental batches, so a long or
    partially failed request must not keep earlier files under the pre-move generation.
@@ -299,18 +304,19 @@ Invalidation belongs at portable mutation and indexing completion boundaries, no
 FastAPI routes. It must cover accepted note writes, terminal deferred materialization and status
 publication, direct file indexing, filesystem watcher updates, project indexing, directory
 mutations, imports, watcher-detected paired moves, startup recovery or reconciliation, Cloud
-storage events, and relation-resolution changes that affect cached responses. Each later phase
-invalidates again so a value filled after an earlier generation bump cannot outlive the state
-that phase publishes. Hosted read repair invalidates after bootstrapping accepted content and
-before a repaired entity or resource is stored, including cancellation during the repair
-transaction's exit. Directory moves invalidate after every committed file plus the final reindex;
-directory deletion invalidates after acceptance and after cleanup. Imports invalidate after every
-attempted file write and again around the complete attempt so partial failures cannot escape.
-Project indexing invalidates even after a partial failure. Direct single-file and watcher file
-indexing invalidate even when a follow-up fails after the entity commit. Watcher index and delete
-completion callbacks finish their first post-event generation bump before cancellation can
-escape. Recovery phases invalidate independently before the serving barrier is released and
-include terminal conflict or failure publication.
+storage events, full search reindexing, and relation-resolution changes that affect cached
+responses. Each later phase invalidates again so a value filled after an earlier generation bump
+cannot outlive the state that phase publishes. Hosted read repair invalidates after bootstrapping
+accepted content and before a repaired entity or resource is stored, including cancellation
+during the repair transaction's exit. Directory moves invalidate after every committed file plus
+the final reindex; directory deletion invalidates after acceptance and after cleanup. Imports
+invalidate after every attempted file write and again around the complete attempt so partial
+failures cannot escape. Project indexing and full search reindexing invalidate even after a
+partial failure. Direct single-file and watcher file indexing invalidate even when a follow-up
+fails after the entity commit. Watcher move batches invalidate after every commit, and watcher
+index/delete completion callbacks finish their first post-event generation bump before
+cancellation can escape. Recovery phases invalidate independently before the serving barrier is
+released and include terminal conflict or failure publication.
 
 ## Dependency And Lifecycle
 
@@ -404,6 +410,10 @@ The real-Redis suite must prove:
   invalidation;
 - authoritative read exceptions propagate without populating the missed cache key;
 - watcher-detected paired moves invalidate even though their events bypass ordinary callbacks;
+- consecutive watcher move batches each advance the real Redis generation before the next batch,
+  while retaining the final post-refresh bump;
+- a partial or completed full search reindex invalidates fuzzy resolutions filled while the
+  search index was being rebuilt;
 - startup recovery that publishes written, conflict, or failed materialization state invalidates
   before serving resumes;
 - project-index failures invalidate any earlier committed batches;
@@ -448,10 +458,14 @@ semantics themselves are asserted only against the real Redis integration fixtur
   resuming tenant traffic.
 - Invalidate project indexing from a failure-safe completion boundary, and invalidate directory
   deletion both after acceptance commit and after cleanup/relation refresh.
+- Invalidate full search reindexing from the worker that executes the rebuild so partial or
+  completed search rows cannot leave cached fuzzy resolutions behind.
 - Invalidate direct and watcher file indexing from failure-safe boundaries because entity commits
   precede some search and reconciliation follow-ups.
 - Finish watcher index and delete completion invalidation before cancellation propagates from the
   post-event callback.
+- Invalidate every committed watcher move batch before the next batch starts, then retain the
+  final post-refresh invalidation.
 - Wrap hosted note-content read repair in cancellation-safe invalidation so cancellation during
   transaction exit cannot skip the bump before a repaired entity or resource reaches read-through.
 - Invalidate pre-mutation content freshening even when a later accepted mutation is rejected or

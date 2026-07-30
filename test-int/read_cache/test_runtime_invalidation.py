@@ -23,6 +23,10 @@ from basic_memory.index.local_moves import (
     LocalWatchMoveProcessor,
 )
 from basic_memory.index.local_dependencies import LocalIndexSearchService
+from basic_memory.index.local_schedulers import (
+    LocalSearchReindexScheduler,
+    drain_background_tasks,
+)
 from basic_memory.index.local_project import (
     LocalProjectIndexBatchEnqueuer,
     LocalProjectIndexRuntime,
@@ -157,6 +161,21 @@ class DetectedMoveProcessor(LocalWatchMoveProcessor):
     ) -> set[int]:
         del events, exclude_indexes
         return set()
+
+
+class DetectedMoveBatchProcessor(DetectedMoveProcessor):
+    """Exercise multiple durable watcher move batches without detection I/O."""
+
+    @override
+    async def detect_moves(
+        self,
+        events: Sequence[StorageEventPayload],
+    ) -> tuple[dict[str, str], set[int]]:
+        del events
+        return {
+            "notes/old-1.md": "notes/new-1.md",
+            "notes/old-2.md": "notes/new-2.md",
+        }, {0, 1, 2, 3}
 
 
 class RecordingMoveMaintenance:
@@ -324,6 +343,26 @@ class BlockingInvalidationRedisReadCache(RedisReadCache):
         return await super().invalidate_project(project_id)
 
 
+class PartiallyFailingSearchReindexService:
+    """Observe the generation inside a rebuild that fails after publishing work."""
+
+    def __init__(
+        self,
+        redis_cache: RedisCacheHarness,
+        project_external_id: str,
+    ) -> None:
+        self.redis_cache = redis_cache
+        self.project_external_id = project_external_id
+        self.generation_during_reindex: bytes | str | None = None
+
+    async def reindex_all(self) -> None:
+        self.generation_during_reindex = await _current_generation(
+            self.redis_cache,
+            self.project_external_id,
+        )
+        raise RuntimeError("partial search reindex failure")
+
+
 async def _initialized_generation(
     redis_cache: RedisCacheHarness,
     project_external_id: str,
@@ -446,6 +485,59 @@ async def test_watcher_move_completion_invalidates_real_redis(
 
 
 @pytest.mark.asyncio
+async def test_watcher_move_batches_invalidate_real_redis_before_next_batch(
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """Every committed watcher move batch advances Redis before the next batch."""
+    project_external_id = str(test_project.external_id)
+    generation_before = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="watcher-move-batches",
+    )
+    observed_store = GenerationObservingProjectIndexBatchStore(
+        redis_cache,
+        project_external_id,
+    )
+    invalidating_store = InvalidatingProjectIndexBatchStore(
+        move_store=observed_store,
+        delete_store=observed_store,
+        read_cache=redis_cache.cache,
+        project_external_id=project_external_id,
+    )
+    processor = DetectedMoveBatchProcessor(
+        session_maker=cast(async_sessionmaker[AsyncSession], object()),
+        file_service=cast(FileService, object()),
+        entity_repository=cast(LocalMoveEntityRepository, object()),
+        maintenance_runner=StoreProjectIndexMaintenanceRunner(
+            move_store=invalidating_store,
+            delete_store=invalidating_store,
+        ),
+        moved_entity_search_refresher=RecordingMovedEntitySearchRefresher(),
+        project_external_id=project_external_id,
+        read_cache=redis_cache.cache,
+        batch_size=1,
+    )
+
+    result = await processor.process_moves(
+        (
+            _move_event(STORAGE_OBJECT_DELETED_EVENT, "notes/old-1.md"),
+            _move_event("OBJECT_CREATED_PUT", "notes/new-1.md"),
+            _move_event(STORAGE_OBJECT_DELETED_EVENT, "notes/old-2.md"),
+            _move_event("OBJECT_CREATED_PUT", "notes/new-2.md"),
+        )
+    )
+
+    assert result.remaining_events == ()
+    assert result.processed_moves == 2
+    assert observed_store.move_generations[0] == generation_before
+    assert observed_store.move_generations[1] != observed_store.move_generations[0]
+    generation_after = await _current_generation(redis_cache, project_external_id)
+    assert generation_after != observed_store.move_generations[1]
+
+
+@pytest.mark.asyncio
 async def test_watcher_index_failure_invalidates_real_redis(
     test_project: Project,
     redis_cache: RedisCacheHarness,
@@ -478,6 +570,37 @@ async def test_watcher_index_failure_invalidates_real_redis(
         project_external_id,
         request="watcher-index-failure",
     )
+    assert generation_after != generation_before
+
+
+@pytest.mark.asyncio
+async def test_partial_search_reindex_invalidates_real_redis(
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """A partial search rebuild cannot retain resolutions filled during the run."""
+    project_external_id = str(test_project.external_id)
+    generation_before = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="partial-search-reindex",
+    )
+    search_service = PartiallyFailingSearchReindexService(
+        redis_cache,
+        project_external_id,
+    )
+    scheduler = LocalSearchReindexScheduler(
+        search_service=search_service,
+        project_external_id=project_external_id,
+        read_cache=redis_cache.cache,
+        test_mode=False,
+    )
+
+    scheduler.schedule_search_reindex(project_id=test_project.id)
+    await drain_background_tasks()
+
+    assert search_service.generation_during_reindex == generation_before
+    generation_after = await _current_generation(redis_cache, project_external_id)
     assert generation_after != generation_before
 
 

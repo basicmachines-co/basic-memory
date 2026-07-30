@@ -156,14 +156,28 @@ class LocalProjectIndexScheduler:
 @dataclass(frozen=True, slots=True)
 class LocalSearchReindexScheduler:
     search_service: SearchReindexService
+    project_external_id: str
+    read_cache: ReadCacheInvalidator | None
     test_mode: bool
 
     def schedule_search_reindex(self, *, project_id: int) -> None:
         _ = project_id
         _schedule_background_coroutine(
-            self.search_service.reindex_all(),
+            self._run_search_reindex(),
             test_mode=self.test_mode,
         )
+
+    async def _run_search_reindex(self) -> None:
+        # A rebuild publishes search rows incrementally after dropping the old
+        # index. Invalidate after success or partial failure so fuzzy resolutions
+        # cached during that window cannot survive the rebuild.
+        invalidation_scope = (
+            invalidate_cache(self.read_cache, self.project_external_id)
+            if self.read_cache is not None
+            else nullcontext()
+        )
+        async with invalidation_scope:
+            await self.search_service.reindex_all()
 
 
 # Process-lifetime coalescing state: project ids with a relation-resolution

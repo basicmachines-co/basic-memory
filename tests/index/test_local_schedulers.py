@@ -225,15 +225,19 @@ async def test_project_index_scheduler_is_noop_in_test_mode():
 async def test_search_reindex_scheduler_maps_to_search_service():
     """Search reindex scheduling should rebuild the search index."""
     search_service = StubSearchService()
+    read_cache = RecordingReadCache()
 
     scheduler = LocalSearchReindexScheduler(
         search_service=search_service,
+        project_external_id=PROJECT_EXTERNAL_ID,
+        read_cache=read_cache,
         test_mode=False,
     )
     scheduler.schedule_search_reindex(project_id=13)
     await asyncio.sleep(0.05)
 
     assert search_service.reindexed_project is True
+    assert read_cache.invalidated_project_ids == [PROJECT_EXTERNAL_ID]
 
 
 class StubRelationResolutionRuntime:

@@ -42,6 +42,7 @@ from basic_memory.indexing.index_file_runner import (
 )
 from basic_memory.indexing.models import IndexFileJobResult, IndexFileJobStatus
 from basic_memory.indexing.project_index_maintenance import (
+    InvalidatingProjectIndexBatchStore,
     ProjectIndexMovedEntitySearchRefresher,
     RepositoryProjectIndexMaintenanceStore,
     RepositoryProjectIndexMovedEntitySearchRefresher,
@@ -351,9 +352,19 @@ class LocalWatchEventIndexRuntimeFactory:
                 file_service=dependencies.file_service,
             ),
         )
+        maintenance_batch_store = (
+            InvalidatingProjectIndexBatchStore(
+                move_store=maintenance_store,
+                delete_store=maintenance_store,
+                read_cache=self.read_cache,
+                project_external_id=project_ref.project_external_id,
+            )
+            if self.read_cache is not None
+            else maintenance_store
+        )
         maintenance_runner = StoreProjectIndexMaintenanceRunner(
-            move_store=maintenance_store,
-            delete_store=maintenance_store,
+            move_store=maintenance_batch_store,
+            delete_store=maintenance_batch_store,
         )
         moved_entity_search_refresher = RepositoryProjectIndexMovedEntitySearchRefresher(
             session_maker=dependencies.session_maker,

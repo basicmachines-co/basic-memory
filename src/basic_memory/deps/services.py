@@ -417,11 +417,17 @@ async def get_project_index_scheduler(
 
 
 async def get_search_reindex_scheduler(
+    project_external_id: Annotated[
+        str, FastAPIPath(alias="project_id", description="Project external UUID")
+    ],
     search_service: SearchServiceV2ExternalDep,
     app_config: AppConfigDep,
+    read_cache: ReadCacheDep,
 ) -> SearchReindexScheduler:
     return LocalSearchReindexScheduler(
         search_service=search_service,
+        project_external_id=project_external_id,
+        read_cache=read_cache,
         test_mode=app_config.is_test_env,
     )
 
