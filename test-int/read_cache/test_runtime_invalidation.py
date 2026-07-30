@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import asyncio
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol, cast, override
@@ -11,6 +13,7 @@ import pytest
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+import basic_memory.services.directory_deletes as directory_deletes
 from basic_memory import db
 from basic_memory.index import note_content_materialization
 from basic_memory.index.local_moves import (
@@ -51,6 +54,7 @@ from basic_memory.indexing.relation_resolution import RelationResolutionRuntime
 from basic_memory.models import Project
 from basic_memory.models.knowledge import Entity
 from basic_memory.read_cache import (
+    ReadCacheInvalidationStatus,
     ReadCacheKey,
     ReadCacheOperation,
     read_cache_request_digest,
@@ -280,6 +284,27 @@ class GenerationObservingDirectoryDeleteEnqueuer:
             entity_id=request.entity_id,
             file_path=request.file_path,
         )
+
+
+class BlockingInvalidationRedisReadCache(RedisReadCache):
+    """Hold one real invalidation so cancellation can repeat during cleanup."""
+
+    def __init__(
+        self,
+        *,
+        client: Redis,
+        namespace: str,
+        prefix: str,
+    ) -> None:
+        super().__init__(client=client, namespace=namespace, prefix=prefix)
+        self.invalidation_started = asyncio.Event()
+        self.release_invalidation = asyncio.Event()
+
+    @override
+    async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
+        self.invalidation_started.set()
+        await self.release_invalidation.wait()
+        return await super().invalidate_project(project_id)
 
 
 async def _initialized_generation(
@@ -748,3 +773,98 @@ async def test_directory_delete_invalidates_before_and_after_cleanup_in_real_red
         request="directory-delete",
     )
     assert generation_after != generation_during_cleanup
+
+
+@pytest.mark.asyncio
+async def test_cancelled_committed_directory_delete_finishes_real_redis_invalidation(
+    monkeypatch: pytest.MonkeyPatch,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """Cancellation during transaction exit cannot skip delete invalidation."""
+    _, session_maker = engine_factory
+    project_external_id = str(test_project.external_id)
+    generation_before = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="cancelled-committed-directory-delete",
+    )
+    entity_repository = EntityRepository(project_id=test_project.id)
+    title = "Cancelled Committed Directory Delete"
+    async with db.scoped_session(session_maker) as session:
+        await entity_repository.add(
+            session,
+            Entity(
+                title=title,
+                note_type="note",
+                content_type="text/markdown",
+                file_path="cancelled-delete/note.md",
+                checksum="cancelled-directory-delete-checksum",
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            ),
+        )
+
+    blocking_cache = BlockingInvalidationRedisReadCache(
+        client=redis_cache.client,
+        namespace=redis_cache.namespace,
+        prefix=redis_cache.prefix,
+    )
+    transaction_committed = asyncio.Event()
+    hold_after_commit = asyncio.Event()
+    original_scoped_session = directory_deletes.db.scoped_session
+
+    @asynccontextmanager
+    async def pause_after_commit(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[AsyncSession]:
+        async with original_scoped_session(scoped_session_maker) as session:
+            yield session
+        transaction_committed.set()
+        await hold_after_commit.wait()
+
+    monkeypatch.setattr(directory_deletes.db, "scoped_session", pause_after_commit)
+    service = DirectoryDeleteService(
+        session_maker=session_maker,
+        runtime=DirectoryDeleteRuntime(
+            store=RepositoryDirectoryDeleteAcceptanceStore(),
+            file_delete_enqueuer=GenerationObservingDirectoryDeleteEnqueuer(
+                redis_cache,
+                project_external_id,
+            ),
+        ),
+    )
+    delete_task = asyncio.create_task(
+        service.delete_directory(
+            project_external_id=project_external_id,
+            directory="cancelled-delete",
+            read_cache=blocking_cache,
+        )
+    )
+
+    async with asyncio.timeout(5):
+        await transaction_committed.wait()
+    delete_task.cancel()
+    async with asyncio.timeout(5):
+        await blocking_cache.invalidation_started.wait()
+
+    # A second cancellation must not abandon the already-running generation bump.
+    delete_task.cancel()
+    await asyncio.sleep(0)
+    assert not delete_task.done()
+
+    blocking_cache.release_invalidation.set()
+    with pytest.raises(asyncio.CancelledError):
+        await delete_task
+
+    generation_after = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="cancelled-committed-directory-delete",
+    )
+    assert generation_after != generation_before
+
+    async with original_scoped_session(session_maker) as session:
+        deleted_entities = await entity_repository.get_by_title(session, title)
+    assert deleted_entities == []

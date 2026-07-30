@@ -21,6 +21,7 @@ from basic_memory.read_cache import (
     ReadCacheOperation,
     ReadCacheStoreStatus,
     ReadCacheUnavailable,
+    finish_project_read_cache_invalidation,
     invalidate_cache,
     invalidate_project_read_cache,
     read_cache_request_digest,
@@ -263,6 +264,98 @@ async def test_invalidation_context_invalidates_real_generation_after_body_error
     assert generation_before is not None
     assert generation_after is not None
     assert generation_after != generation_before
+
+
+@pytest.mark.asyncio
+async def test_cancelled_invalidation_records_real_redis_cleanup_failure(
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """Preserve cancellation while attaching a failure from the shielded cleanup."""
+
+    class FailingAfterRealInvalidation(RedisReadCache):
+        def __init__(self) -> None:
+            super().__init__(
+                client=redis_cache.client,
+                namespace=redis_cache.namespace,
+                prefix=redis_cache.prefix,
+            )
+            self.invalidation_started = asyncio.Event()
+            self.release_invalidation = asyncio.Event()
+
+        @override
+        async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
+            self.invalidation_started.set()
+            await self.release_invalidation.wait()
+            await super().invalidate_project(project_id)
+            raise ReadCacheDataError("cleanup failed after real invalidation")
+
+    key = _key(request="cancelled-cleanup-failure")
+    await redis_cache.cache.lookup(key)
+    generation_key = redis_read_cache_generation_key(
+        prefix=redis_cache.prefix,
+        namespace=redis_cache.namespace,
+        project_id=PROJECT_ID,
+    )
+    generation_before = await redis_cache.client.get(generation_key)
+    cache = FailingAfterRealInvalidation()
+    invalidation = asyncio.create_task(finish_project_read_cache_invalidation(cache, PROJECT_ID))
+
+    await cache.invalidation_started.wait()
+    invalidation.cancel()
+    await asyncio.sleep(0)
+    assert not invalidation.done()
+    cache.release_invalidation.set()
+
+    with pytest.raises(asyncio.CancelledError) as exc_info:
+        await invalidation
+
+    generation_after = await redis_cache.client.get(generation_key)
+    assert generation_before is not None
+    assert generation_after is not None
+    assert generation_after != generation_before
+    assert any(
+        "cleanup failed after real invalidation" in note
+        for note in getattr(exc_info.value, "__notes__", ())
+    )
+
+
+@pytest.mark.asyncio
+async def test_child_cancelled_after_real_invalidation_is_recorded(
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """A cancelled cleanup task remains visible on the propagated cancellation."""
+
+    class CancellingAfterRealInvalidation(RedisReadCache):
+        @override
+        async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
+            await super().invalidate_project(project_id)
+            raise asyncio.CancelledError("cleanup task cancelled")
+
+    key = _key(request="child-cancelled-after-invalidation")
+    await redis_cache.cache.lookup(key)
+    generation_key = redis_read_cache_generation_key(
+        prefix=redis_cache.prefix,
+        namespace=redis_cache.namespace,
+        project_id=PROJECT_ID,
+    )
+    generation_before = await redis_cache.client.get(generation_key)
+    cache = CancellingAfterRealInvalidation(
+        client=redis_cache.client,
+        namespace=redis_cache.namespace,
+        prefix=redis_cache.prefix,
+    )
+
+    with pytest.raises(asyncio.CancelledError) as exc_info:
+        await finish_project_read_cache_invalidation(cache, PROJECT_ID)
+
+    generation_after = await redis_cache.client.get(generation_key)
+    assert generation_before is not None
+    assert generation_after is not None
+    assert generation_after != generation_before
+    assert any(
+        "read-cache invalidation task was cancelled" in note
+        for note in getattr(exc_info.value, "__notes__", ())
+    )
 
 
 @pytest.mark.asyncio

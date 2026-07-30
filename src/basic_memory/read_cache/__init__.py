@@ -12,6 +12,7 @@ from basic_memory.read_cache.contract import (
     ReadCacheUnavailable,
 )
 from basic_memory.read_cache.invalidation import (
+    finish_project_read_cache_invalidation,
     invalidate_cache,
     invalidate_project_read_cache,
 )
@@ -31,6 +32,7 @@ __all__ = [
     "ReadCacheOperation",
     "ReadCacheStoreStatus",
     "ReadCacheUnavailable",
+    "finish_project_read_cache_invalidation",
     "invalidate_cache",
     "invalidate_project_read_cache",
     "read_cache_request_digest",

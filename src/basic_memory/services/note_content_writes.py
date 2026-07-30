@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -31,7 +30,11 @@ from basic_memory.runtime.note_content import (
     RuntimeAcceptedNoteChange,
     RuntimeNoteContentResponsePayload,
 )
-from basic_memory.read_cache import NullReadCache, ReadCache, invalidate_project_read_cache
+from basic_memory.read_cache import (
+    NullReadCache,
+    ReadCache,
+    finish_project_read_cache_invalidation,
+)
 from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.schemas.request import EditEntityRequest
 
@@ -148,39 +151,6 @@ class NoteContentMutationService:
         self.actor_resolver = actor_resolver
         self.read_cache = read_cache if read_cache is not None else NullReadCache()
 
-    async def _invalidate_project(self, project_external_id: str) -> None:
-        """Finish invalidation before propagating request cancellation."""
-        invalidation = asyncio.create_task(
-            invalidate_project_read_cache(self.read_cache, project_external_id)
-        )
-        try:
-            await asyncio.shield(invalidation)
-        except asyncio.CancelledError as cancellation:
-            # Trigger: request cancellation landed after a mutation may have committed.
-            # Why: abandoning this Redis write can leave the committed DB state hidden
-            # behind the previous generation until its TTL expires.
-            # Outcome: finish invalidation, then preserve the caller's cancellation.
-            cleanup_error: BaseException | None = None
-            while not invalidation.done():
-                try:
-                    await asyncio.shield(invalidation)
-                except asyncio.CancelledError:
-                    continue
-                except BaseException as error:
-                    cleanup_error = error
-            if cleanup_error is None:
-                if invalidation.cancelled():
-                    cleanup_error = asyncio.CancelledError(
-                        "read-cache invalidation task was cancelled"
-                    )
-                else:
-                    cleanup_error = invalidation.exception()
-            if cleanup_error is not None:
-                cancellation.add_note(
-                    f"Read-cache invalidation failed during cancellation: {cleanup_error!r}"
-                )
-            raise
-
     @asynccontextmanager
     async def _mutation_cache_scope(
         self,
@@ -193,16 +163,25 @@ class NoteContentMutationService:
             yield
         except AcceptedNoteMutationRejected:
             if invalidate_on_rejection:
-                await self._invalidate_project(project_external_id)
+                await finish_project_read_cache_invalidation(
+                    self.read_cache,
+                    project_external_id,
+                )
             raise
         except BaseException:
             # Transaction exit can raise after its commit reached the database.
             # Invalidation is safe after an earlier rollback and required after
             # any commit whose response was interrupted.
-            await self._invalidate_project(project_external_id)
+            await finish_project_read_cache_invalidation(
+                self.read_cache,
+                project_external_id,
+            )
             raise
         else:
-            await self._invalidate_project(project_external_id)
+            await finish_project_read_cache_invalidation(
+                self.read_cache,
+                project_external_id,
+            )
 
     def _resolve_actor(
         self,
@@ -245,7 +224,10 @@ class NoteContentMutationService:
             # Freshening can commit entity and note-content state before a later
             # indexing follow-up raises. Invalidate before propagating so those
             # partial publications cannot retain the previous cache generation.
-            await self._invalidate_project(project_external_id)
+            await finish_project_read_cache_invalidation(
+                self.read_cache,
+                project_external_id,
+            )
             raise
         return True
 

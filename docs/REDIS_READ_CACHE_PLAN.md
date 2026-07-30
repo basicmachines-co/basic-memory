@@ -87,10 +87,10 @@ tenant:
    the accepted-note transaction commits, again after terminal materialization/status publication
    and indexing, and again after relation resolution completes. This prevents a read filled
    between phases from surviving the later worker commit.
-1. Make accepted-mutation invalidation cancellation-safe. A request or worker can be cancelled
-   after its database commit succeeds but before the transaction context returns. Finish the
-   namespace-bound generation bump before re-propagating cancellation so committed state cannot
-   remain hidden behind the previous generation.
+1. Make committed-mutation invalidation cancellation-safe. Accepted-note writes and directory
+   deletion can be cancelled after their database commit succeeds but before the transaction
+   context returns. Finish the namespace-bound generation bump before re-propagating cancellation
+   so committed state cannot remain hidden behind the previous generation.
 1. Invalidate after each committed project-index move, delete, and file-index batch, while
    retaining the final failure-safe completion boundary for later-phase errors. Local inline file
    batches invalidate when their runner returns; queued Cloud file batches invalidate in the child
@@ -372,8 +372,9 @@ The real-Redis suite must prove:
 - successful writes invalidate; a rejected write also invalidates when pre-write freshening may
   already have published external file state, while a rolled-back transaction without such a
   publication does not;
-- cancellation after a real accepted-note transaction commits cannot interrupt the real Redis
-  generation bump, including repeated cancellation while invalidation is in progress;
+- cancellation after a real accepted-note or directory-delete transaction commits cannot
+  interrupt the real Redis generation bump, including repeated cancellation while invalidation is
+  in progress;
 - real Redis no-eviction capacity failures bypass cache storage and cannot fail committed-write
   invalidation;
 - authoritative read exceptions propagate without populating the missed cache key;
@@ -428,6 +429,8 @@ semantics themselves are asserted only against the real Redis integration fixtur
 - Invalidate pre-mutation content freshening even when a later accepted mutation is rejected or
   fails, because the freshening index may already have committed external file state.
 - Invalidate every import attempt that may write files, including partial failures.
+- Finish directory-delete acceptance invalidation before re-propagating cancellation that lands
+  after the delete transaction may have committed.
 - Invalidate directory moves after every committed file and again after search/relation
   follow-ups.
 - Invalidate project-root path changes in a failure-safe boundary because the filesystem source

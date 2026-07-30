@@ -19,7 +19,11 @@ from basic_memory.indexing.directory_delete_runner import (
     finish_directory_delete_acceptance,
     normalize_directory_delete_path,
 )
-from basic_memory.read_cache import NullReadCache, ReadCache, invalidate_project_read_cache
+from basic_memory.read_cache import (
+    NullReadCache,
+    ReadCache,
+    finish_project_read_cache_invalidation,
+)
 
 
 class DirectoryDeleteServiceError(Exception):
@@ -69,6 +73,8 @@ class DirectoryDeleteService:
             project_external_id=project_external_id,
             directory=directory,
         )
+        active_read_cache = read_cache if read_cache is not None else NullReadCache()
+        delete_may_have_committed = False
         try:
             # scoped_session enables `PRAGMA foreign_keys=ON` for SQLite; this bulk
             # delete issues a Core DELETE on entity and relies on ON DELETE CASCADE
@@ -80,18 +86,18 @@ class DirectoryDeleteService:
                     request=request,
                     store=self.runtime.store,
                 )
+                delete_may_have_committed = bool(accepted.files)
         except DirectoryDeleteRejected as error:
             raise directory_delete_service_error_from_rejection(error.rejection) from error
-
-        active_read_cache = read_cache if read_cache is not None else NullReadCache()
-        if accepted.files:
-            # Acceptance commits entity and search deletion before storage cleanup.
-            # Invalidate now so deleted reads cannot survive a slow or failed
-            # follow-up phase.
-            await invalidate_project_read_cache(
-                active_read_cache,
-                project_external_id,
-            )
+        finally:
+            if delete_may_have_committed:
+                # Acceptance commits entity and search deletion before storage cleanup.
+                # Finish the generation bump even when cancellation interrupts the
+                # transaction exit, then preserve that cancellation.
+                await finish_project_read_cache_invalidation(
+                    active_read_cache,
+                    project_external_id,
+                )
 
         try:
             result = await finish_directory_delete_acceptance(
@@ -116,7 +122,7 @@ class DirectoryDeleteService:
             if accepted.files:
                 # Cleanup and relation refresh can publish additional state or fail
                 # after partial progress. Close the fill window in either case.
-                await invalidate_project_read_cache(
+                await finish_project_read_cache_invalidation(
                     active_read_cache,
                     project_external_id,
                 )

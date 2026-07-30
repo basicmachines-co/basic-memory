@@ -1,5 +1,6 @@
 """Best-effort project invalidation shared by mutation and indexing runtimes."""
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -46,6 +47,39 @@ async def invalidate_project_read_cache(
         _record_invalidation_event(status)
         span.set_attribute("cache.outcome", status.value)
         return status
+
+
+async def finish_project_read_cache_invalidation(
+    cache: ReadCacheInvalidator,
+    project_id: str,
+) -> ReadCacheInvalidationStatus:
+    """Finish invalidation before propagating caller cancellation."""
+    invalidation = asyncio.create_task(invalidate_project_read_cache(cache, project_id))
+    try:
+        return await asyncio.shield(invalidation)
+    except asyncio.CancelledError as cancellation:
+        # Trigger: cancellation landed after authoritative state may have committed.
+        # Why: abandoning this Redis write can leave that state hidden behind the
+        #   previous generation until its TTL expires.
+        # Outcome: finish invalidation, then preserve the caller's cancellation.
+        cleanup_error: BaseException | None = None
+        while not invalidation.done():
+            try:
+                await asyncio.shield(invalidation)
+            except asyncio.CancelledError:
+                continue
+            except BaseException as error:
+                cleanup_error = error
+        if cleanup_error is None:
+            if invalidation.cancelled():
+                cleanup_error = asyncio.CancelledError("read-cache invalidation task was cancelled")
+            else:
+                cleanup_error = invalidation.exception()
+        if cleanup_error is not None:
+            cancellation.add_note(
+                f"Read-cache invalidation failed during cancellation: {cleanup_error!r}"
+            )
+        raise
 
 
 @asynccontextmanager
