@@ -101,9 +101,10 @@ tenant:
    filled during a partial or completed rebuild must not survive its final generation bump.
 1. Put direct single-file and watcher file-index invalidation in failure-safe boundaries. Entity
    transactions can commit before search refresh or note-content reconciliation raises, so a
-   failed index attempt can still publish cache-relevant state. Once a watcher index or delete
-   completion callback runs after its durable event, finish the first generation bump before
-   propagating cancellation; relation/search cleanup may not begin after cancellation.
+   failed index attempt can still publish cache-relevant state. Wrap the transaction-bearing
+   watcher entity delete itself in cancellation-safe invalidation because cancellation can land
+   during transaction exit before its completion callback runs. Once a watcher index or delete
+   completion callback runs, retain its generation bump before relation and search cleanup.
 1. Pass the namespace-bound cache into hosted note-content read repair. A resource or entity read
    can bootstrap a missing accepted-content row. Put cancellation-safe invalidation around the
    transaction-bearing repair call, not only after it returns, so cancellation during transaction
@@ -316,10 +317,11 @@ invalidate after every attempted file write and again around the complete attemp
 failures cannot escape. Project indexing and full search reindexing invalidate even after a
 partial failure. Direct single-file and watcher file indexing invalidate even when a follow-up
 fails after the entity commit. Watcher move batches invalidate after every commit, and watcher
-index/delete completion callbacks finish their first post-event generation bump before
-cancellation can escape. Recovery phases invalidate independently before the serving barrier is
-released, include terminal conflict or failure publication, and finish their generation bump
-before startup cancellation propagates.
+entity deletes wrap the transaction-bearing repository operation so cancellation cannot escape
+between its commit and completion callback. Watcher index/delete completion callbacks retain a
+later generation bump before relation and search cleanup. Recovery phases invalidate
+independently before the serving barrier is released, include terminal conflict or failure
+publication, and finish their generation bump before startup cancellation propagates.
 
 ## Dependency And Lifecycle
 
@@ -409,6 +411,8 @@ The real-Redis suite must prove:
   real Redis generation bump;
 - cancellation during watcher index or delete completion cannot interrupt the first real Redis
   generation bump after the durable event;
+- cancellation during a watcher entity-delete transaction's commit exit cannot escape before the
+  real Redis generation advances, even when the completion callback is never reached;
 - real Redis no-eviction capacity failures bypass cache storage and cannot fail committed-write
   invalidation;
 - authoritative read exceptions propagate without populating the missed cache key;
@@ -467,6 +471,8 @@ semantics themselves are asserted only against the real Redis integration fixtur
   completed search rows cannot leave cached fuzzy resolutions behind.
 - Invalidate direct and watcher file indexing from failure-safe boundaries because entity commits
   precede some search and reconciliation follow-ups.
+- Wrap the watcher entity-delete transaction itself in cancellation-safe invalidation because
+  cancellation can escape before its completion callback is reached.
 - Finish watcher index and delete completion invalidation before cancellation propagates from the
   post-event callback.
 - Invalidate every committed watcher move batch before the next batch starts, then retain the

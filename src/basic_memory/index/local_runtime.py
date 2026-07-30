@@ -28,7 +28,12 @@ from basic_memory.index.storage_events import (
     StorageEventOperationProcessorFactory,
     StorageEventProjectResolver,
 )
-from basic_memory.indexing.external_file_delete_runner import ExternalFileDeleteResult
+from basic_memory.indexing.external_file_delete_runner import (
+    ExternalFileDeleteEntities,
+    ExternalFileDeleteResult,
+    InvalidatingExternalFileDeleteEntities,
+    RepositoryExternalFileDeleteEntities,
+)
 from basic_memory.indexing.file_index_checking import (
     FileIndexChecker,
     RepositoryIndexedFileChecksumSource,
@@ -54,9 +59,6 @@ from basic_memory.indexing.relation_resolution import (
     RepositoryRelationResolutionRuntime,
     plan_index_file_relation_resolution,
     resolve_project_relations,
-)
-from basic_memory.indexing.external_file_delete_runner import (
-    RepositoryExternalFileDeleteEntities,
 )
 from basic_memory.models import Entity, Project
 from basic_memory.read_cache import (
@@ -371,6 +373,16 @@ class LocalWatchEventIndexRuntimeFactory:
             entity_repository=dependencies.entity_repository,
             entity_indexer=dependencies.search_service,
         )
+        delete_entities: ExternalFileDeleteEntities = RepositoryExternalFileDeleteEntities(
+            session_maker=dependencies.session_maker,
+            entity_repository=dependencies.entity_repository,
+        )
+        if self.read_cache is not None:
+            delete_entities = InvalidatingExternalFileDeleteEntities(
+                entities=delete_entities,
+                read_cache=self.read_cache,
+                project_external_id=project_ref.project_external_id,
+            )
         inline_runtime = InlineStorageEventIndexRuntime(
             project=project_ref,
             checker=checker,
@@ -380,10 +392,7 @@ class LocalWatchEventIndexRuntimeFactory:
                 entity_repository=dependencies.entity_repository,
             ),
             file_indexer=dependencies.file_indexer,
-            delete_entities=RepositoryExternalFileDeleteEntities(
-                session_maker=dependencies.session_maker,
-                entity_repository=dependencies.entity_repository,
-            ),
+            delete_entities=delete_entities,
             delete_objects=LocalExternalFileDeleteObjects(dependencies.file_service),
             result_recorder=LocalInlineStorageEventResultRecorder(
                 project=project_ref,

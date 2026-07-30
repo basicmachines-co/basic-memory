@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.models import Relation
+from basic_memory.read_cache import ReadCacheInvalidator, invalidate_cache
 from basic_memory.runtime.cleanup import RuntimeExternalFileDeletePlan
 from basic_memory.runtime.note_content import (
     RuntimeDeletedNoteEntityDeleteSource,
@@ -123,6 +124,37 @@ class RepositoryExternalFileDeleteEntities(ExternalFileDeleteEntities):
             return ExternalFileDeleteEntityDeleteResult(
                 entity_deleted=True,
                 relation_cleanup_entity_ids=relation_cleanup_entity_ids,
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class InvalidatingExternalFileDeleteEntities(ExternalFileDeleteEntities):
+    """Advance cached reads after a repository-backed delete attempt exits."""
+
+    entities: ExternalFileDeleteEntities
+    read_cache: ReadCacheInvalidator
+    project_external_id: str
+
+    @override
+    async def find_entity_by_file_path(
+        self,
+        file_path: RuntimeFilePath,
+    ) -> RuntimeDeletedNoteEntityDeleteSource | None:
+        return await self.entities.find_entity_by_file_path(file_path)
+
+    @override
+    async def delete_entity_if_file_path_matches(
+        self,
+        *,
+        entity_id: RuntimeEntityId,
+        file_path: RuntimeFilePath,
+    ) -> ExternalFileDeleteEntityDeleteResult:
+        # The repository transaction can commit while its context manager exits.
+        # Keeping that exit inside the scope makes cancellation wait for invalidation.
+        async with invalidate_cache(self.read_cache, self.project_external_id):
+            return await self.entities.delete_entity_if_file_path_matches(
+                entity_id=entity_id,
+                file_path=file_path,
             )
 
 

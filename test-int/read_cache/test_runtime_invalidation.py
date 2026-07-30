@@ -14,6 +14,7 @@ import pytest
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+import basic_memory.indexing.external_file_delete_runner as external_file_delete_runner
 import basic_memory.services.directory_deletes as directory_deletes
 import basic_memory.services.entity_service as entity_service_module
 from basic_memory import db
@@ -34,7 +35,6 @@ from basic_memory.index.local_project import (
     run_local_project_index,
 )
 from basic_memory.index.local_runtime import LocalInlineStorageEventResultRecorder
-from basic_memory.indexing.external_file_delete_runner import ExternalFileDeleteResult
 from basic_memory.indexing.change_planning import ChangeReport
 from basic_memory.indexing.directory_delete_runner import (
     DirectoryDeleteRuntime,
@@ -45,6 +45,11 @@ from basic_memory.indexing.file_batch_runner import (
     IndexFileBatchContentClassifier,
     IndexFileBatchIndexer,
     IndexFileBatchReader,
+)
+from basic_memory.indexing.external_file_delete_runner import (
+    ExternalFileDeleteResult,
+    InvalidatingExternalFileDeleteEntities,
+    RepositoryExternalFileDeleteEntities,
 )
 from basic_memory.indexing.models import IndexFileJobResult, IndexFileJobStatus, IndexInputFile
 from basic_memory.indexing.project_index_maintenance import (
@@ -703,6 +708,101 @@ async def test_cancelled_watcher_completion_finishes_real_redis_invalidation(
         project_external_id,
         request=f"cancelled-watcher-{completion}",
     )
+    assert generation_after != generation_before
+
+
+@pytest.mark.asyncio
+async def test_cancelled_watcher_delete_commit_finishes_real_redis_invalidation(
+    monkeypatch: pytest.MonkeyPatch,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """Cancellation during watcher delete transaction exit cannot skip invalidation."""
+    _, session_maker = engine_factory
+    project_external_id = str(test_project.external_id)
+    generation_before = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="cancelled-watcher-delete-commit",
+    )
+    entity_repository = EntityRepository(project_id=test_project.id)
+    file_path = "notes/cancelled-watcher-delete-commit.md"
+    async with db.scoped_session(session_maker) as session:
+        entity = await entity_repository.add(
+            session,
+            Entity(
+                title="Cancelled Watcher Delete Commit",
+                note_type="note",
+                content_type="text/markdown",
+                file_path=file_path,
+                checksum="cancelled-watcher-delete-commit-checksum",
+                created_at=datetime.now(UTC),
+                updated_at=datetime.now(UTC),
+            ),
+        )
+
+    blocking_cache = BlockingInvalidationRedisReadCache(
+        client=redis_cache.client,
+        namespace=redis_cache.namespace,
+        prefix=redis_cache.prefix,
+    )
+    delete_entities = InvalidatingExternalFileDeleteEntities(
+        entities=RepositoryExternalFileDeleteEntities(
+            session_maker=session_maker,
+            entity_repository=entity_repository,
+        ),
+        read_cache=blocking_cache,
+        project_external_id=project_external_id,
+    )
+    found = await delete_entities.find_entity_by_file_path(file_path)
+    assert found is not None
+    assert found.id == entity.id
+
+    transaction_committed = asyncio.Event()
+    hold_after_commit = asyncio.Event()
+    original_scoped_session = external_file_delete_runner.db.scoped_session
+
+    @asynccontextmanager
+    async def pause_after_delete_commit(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[AsyncSession]:
+        async with original_scoped_session(scoped_session_maker) as session:
+            yield session
+        transaction_committed.set()
+        await hold_after_commit.wait()
+
+    monkeypatch.setattr(
+        external_file_delete_runner.db,
+        "scoped_session",
+        pause_after_delete_commit,
+    )
+    delete_task = asyncio.create_task(
+        delete_entities.delete_entity_if_file_path_matches(
+            entity_id=entity.id,
+            file_path=file_path,
+        )
+    )
+
+    async with asyncio.timeout(5):
+        await transaction_committed.wait()
+    async with original_scoped_session(session_maker) as session:
+        assert await entity_repository.get_by_id(session, entity.id) is None
+
+    delete_task.cancel()
+    async with asyncio.timeout(5):
+        await blocking_cache.invalidation_started.wait()
+
+    # Repeated cancellation must not abandon the in-flight Redis generation bump.
+    delete_task.cancel()
+    await asyncio.sleep(0)
+    assert not delete_task.done()
+
+    blocking_cache.release_invalidation.set()
+    with pytest.raises(asyncio.CancelledError):
+        await delete_task
+
+    generation_after = await _current_generation(redis_cache, project_external_id)
     assert generation_after != generation_before
 
 
