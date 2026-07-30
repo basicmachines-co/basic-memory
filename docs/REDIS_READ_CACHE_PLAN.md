@@ -102,9 +102,9 @@ tenant:
 1. Put direct single-file and watcher file-index invalidation in failure-safe boundaries. Entity
    transactions can commit before search refresh or note-content reconciliation raises, so a
    failed index attempt can still publish cache-relevant state. Wrap the transaction-bearing
-   watcher entity delete itself in cancellation-safe invalidation because cancellation can land
-   during transaction exit before its completion callback runs. Once a watcher index or delete
-   completion callback runs, retain its generation bump before relation and search cleanup.
+   watcher index and entity-delete operations themselves in cancellation-safe invalidation because
+   cancellation can land during transaction exit before their completion callbacks run. Once a
+   watcher callback runs, retain its generation bump before relation and search cleanup.
 1. Pass the namespace-bound cache into hosted note-content read repair. A resource or entity read
    can bootstrap a missing accepted-content row. Put cancellation-safe invalidation around the
    transaction-bearing repair call, not only after it returns, so cancellation during transaction
@@ -223,18 +223,20 @@ old token no longer matches.
 
 Phase one:
 
-| Operation              | Initial TTL | Constraints                             |
-| ---------------------- | ----------: | --------------------------------------- |
-| Entity by external ID  |  60 seconds | Cache validated `EntityResponseV2` JSON |
-| Identifier resolution  |  60 seconds | Include body and workspace context      |
-| Markdown note resource |  60 seconds | Cache only below an explicit size limit |
+| Operation                   | Initial TTL | Constraints                                         |
+| --------------------------- | ----------: | --------------------------------------------------- |
+| Entity by external ID       |  60 seconds | Cache validated `EntityResponseV2` JSON             |
+| Identifier resolution       |  60 seconds | Include body and workspace context                  |
+| Markdown note resource      |  60 seconds | Cache only below an explicit size limit             |
+| Directory structure         |  60 seconds | Folder-only tree; two MiB payload cap               |
+| Directory tree              |  60 seconds | Full hierarchy; two MiB measured payload cap        |
+| Paginated directory listing |  60 seconds | Include path, depth, glob, page, and page-size keys |
 
 Phase two, after measuring phase one:
 
 | Operation                   |   Initial TTL | Constraints                                    |
 | --------------------------- | ------------: | ---------------------------------------------- |
 | Search                      |    30 seconds | Canonicalize the complete query and pagination |
-| Directory reads             | 30-60 seconds | Key every filtering and pagination input       |
 | Context and recent activity | 15-30 seconds | Normalize or bound time-relative inputs        |
 
 Do not initially cache failures, missing entities, graph/orphan responses, large or arbitrary
@@ -299,6 +301,7 @@ Primary integration points:
 - `src/basic_memory/api/container.py`
 - `src/basic_memory/api/app.py`
 - `src/basic_memory/deps/read_cache.py`
+- `src/basic_memory/api/v2/routers/directory_router.py`
 - `src/basic_memory/api/v2/routers/knowledge_router.py`
 - `src/basic_memory/api/v2/routers/resource_router.py`
 - later, `src/basic_memory/api/v2/routers/search_router.py`
@@ -317,9 +320,9 @@ invalidate after every attempted file write and again around the complete attemp
 failures cannot escape. Project indexing and full search reindexing invalidate even after a
 partial failure. Direct single-file and watcher file indexing invalidate even when a follow-up
 fails after the entity commit. Watcher move batches invalidate after every commit, and watcher
-entity deletes wrap the transaction-bearing repository operation so cancellation cannot escape
-between its commit and completion callback. Watcher index/delete completion callbacks retain a
-later generation bump before relation and search cleanup. Recovery phases invalidate
+index and entity-delete operations wrap their transaction-bearing executors so cancellation cannot
+escape between a commit and completion callback. Watcher index/delete completion callbacks retain
+a later generation bump before relation and search cleanup. Recovery phases invalidate
 independently before the serving barrier is released, include terminal conflict or failure
 publication, and finish their generation bump before startup cancellation propagates.
 
@@ -343,6 +346,58 @@ optional backend or narrower invalidation capability; they do not depend on Fast
 The FastAPI Redis SDK is not the foundational dependency for this work. The cache contract must
 also participate in portable indexing and hosted storage-event invalidation, and Basic Memory's
 local ASGI transport does not run FastAPI lifespan.
+
+## Cloud Production Calibration
+
+A bounded production snapshot from 2026-07-30 00:00-19:03 UTC changed directory reads from a
+phase-two idea into a phase-one requirement:
+
+| Cloud web route             | Calls |  Average |      p95 |
+| --------------------------- | ----: | -------: | -------: |
+| `GET /api/v2/projects/tree` | 1,073 | 1,794 ms | 4,656 ms |
+| `GET /api/v2/notes`         |   789 | 1,688 ms | 3,295 ms |
+| `GET /api/v2/projects`      |   145 | 1,536 ms | 3,269 ms |
+
+Cloud's existing user-scoped gateway response cache already proved that the directory work is
+cacheable, but also exposed the misses that remain expensive:
+
+| Gateway route family  | Attempts |  Hits | Hit rate | Tenant dispatches |
+| --------------------- | -------: | ----: | -------: | ----------------: |
+| `directory_structure` |   14,163 | 8,845 |    62.5% |             5,318 |
+| `directory_list`      |      722 |   166 |    23.0% |               556 |
+| `directory_tree`      |       88 |    13 |    14.8% |                75 |
+| `note_entity`         |    2,779 |   877 |    31.6% |             1,896 |
+
+Across the preceding seven days, cached directory-tree response bodies had a p99 of 573 KiB and a
+maximum of 1.29 MiB. Directory-node facades therefore use a two MiB payload cap rather than the
+one MiB default; otherwise the largest and usually slowest tree in the measured workload would
+always bypass storage. Paginated listings retain the one MiB default—their measured maximum was
+183 KiB.
+
+For folder file navigation, a directory-list miss plus a tenant project-list dispatch averaged
+2,407 ms; when both dependencies avoided tenant dispatch, the same composed endpoint averaged
+636 ms. Project-tree requests with no directory miss and no project-list dispatch averaged
+673 ms, while requests with six or more directory misses plus a project-list dispatch averaged
+3,571 ms. These are associations within the snapshot, not a controlled benchmark, but they show
+that cache locality materially changes end-to-end latency.
+
+The same snapshot contained 6,338 hosted MCP tool calls. `read_note` accounted for 2,636 calls at
+2,782 ms average, `search` for 723 at 3,386 ms, and `list_directory` for 231 at 1,960 ms. Their
+instrumented Basic Memory API dependencies included 3,947 identifier resolutions, 3,064 resource
+reads, and 1,140 searches. This preserves resolution and resource as the primary MCP targets while
+adding directory reads for the web explorer and `list_directory`.
+
+Project enumeration remains a Cloud-owned concern. `GET /api/v2/projects` combines access to
+multiple workspaces, user visibility, project soft-delete state, and tenant database selection.
+Even after loading a cached project-list body, the current Cloud service opens each tenant
+database and queries active project IDs. Basic Memory's project-scoped semantic cache must not
+absorb that authorization-aware composition. Cloud should optimize that active-project
+reconciliation and its own project-list cache independently.
+
+Directory caching in Basic Memory is intended to replace overlapping route families after Cloud
+reaches namespace, invalidation, and observability parity. During rollout, the inner cache can
+also share tenant-project directory results across already-authorized users while Cloud's current
+outer key remains user-specific. Do not keep both response-cache layers as the final design.
 
 ## Failure Behavior
 
@@ -413,6 +468,8 @@ The real-Redis suite must prove:
   generation bump after the durable event;
 - cancellation during a watcher entity-delete transaction's commit exit cannot escape before the
   real Redis generation advances, even when the completion callback is never reached;
+- cancellation during a watcher file-index transaction's commit exit cannot escape before the
+  real Redis generation advances, even when the completion callback is never reached;
 - real Redis no-eviction capacity failures bypass cache storage and cannot fail committed-write
   invalidation;
 - authoritative read exceptions propagate without populating the missed cache key;
@@ -450,11 +507,12 @@ semantics themselves are asserted only against the real Redis integration fixtur
   telemetry, and real Redis integration tests.
 - Do not cache production routes yet.
 
-### 2. Hot entity reads
+### 2. Hot semantic and directory reads
 
-- Cache entity, resolution, and bounded markdown-resource reads behind default-off configuration.
+- Cache entity, resolution, bounded markdown-resource, directory tree, directory structure, and
+  paginated directory-list reads behind default-off configuration.
 - Wire project invalidation through accepted writes and indexing paths.
-- Add full-stack API and repeated `read_note` integration coverage.
+- Add full-stack API, repeated `read_note`, and directory refresh integration coverage.
 
 ### 3. Cloud rollout
 
@@ -471,8 +529,15 @@ semantics themselves are asserted only against the real Redis integration fixtur
   completed search rows cannot leave cached fuzzy resolutions behind.
 - Invalidate direct and watcher file indexing from failure-safe boundaries because entity commits
   precede some search and reconciliation follow-ups.
-- Wrap the watcher entity-delete transaction itself in cancellation-safe invalidation because
-  cancellation can escape before its completion callback is reached.
+- In Cloud's `build_cloud_index_file_runtime`, decorate the transaction-bearing `FileIndexer`
+  with `InvalidatingIndexFileExecutor` using the namespace-bound cache and canonical project UUID.
+  Both single-file jobs and every child of `index_file_batch` then invalidate at the same
+  committed-file boundary as the local filesystem watcher.
+- Retain Cloud's existing post-entrypoint `GatewayCache` invalidation until directory/entity
+  route-family overlap is removed, but do not treat that later live-update side effect as the
+  Basic Memory cache correctness boundary.
+- Wrap the watcher index and entity-delete transactions themselves in cancellation-safe
+  invalidation because cancellation can escape before their completion callbacks are reached.
 - Finish watcher index and delete completion invalidation before cancellation propagates from the
   post-event callback.
 - Invalidate every committed watcher move batch before the next batch starts, then retain the
@@ -500,7 +565,7 @@ semantics themselves are asserted only against the real Redis integration fixtur
 
 ### 4. Expand from evidence
 
-- Add search, directory, and graph-context reads when measured reuse supports them.
+- Add search and graph-context reads when measured reuse supports them.
 - Refine project-wide invalidation only if unrelated writes materially reduce the entity hit
   rate.
 

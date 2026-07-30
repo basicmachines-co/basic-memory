@@ -33,6 +33,8 @@ ReadCacheDep = Annotated[ReadCache | None, Depends(get_read_cache)]
 def create_model_read_cache[ModelT: BaseModel](
     read_cache: ReadCache | None,
     model_type: type[ModelT],
+    *,
+    max_payload_bytes: int = READ_CACHE_MAX_PAYLOAD_BYTES,
 ) -> ModelReadCache[ModelT] | None:
     """Bind one response model to the host cache and Basic Memory's read policy."""
     if read_cache is None:
@@ -41,5 +43,5 @@ def create_model_read_cache[ModelT: BaseModel](
         backend=read_cache,
         model_type=model_type,
         ttl_seconds=READ_CACHE_TTL_SECONDS,
-        max_payload_bytes=READ_CACHE_MAX_PAYLOAD_BYTES,
+        max_payload_bytes=max_payload_bytes,
     )

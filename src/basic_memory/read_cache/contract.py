@@ -9,6 +9,9 @@ from uuid import UUID
 class ReadCacheOperation(StrEnum):
     """Read operations supported by the initial cache rollout."""
 
+    directory_list = "directory_list"
+    directory_structure = "directory_structure"
+    directory_tree = "directory_tree"
     entity = "entity"
     resolve = "resolve"
     resource = "resource"

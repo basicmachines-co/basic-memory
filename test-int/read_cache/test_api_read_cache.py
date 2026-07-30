@@ -49,6 +49,7 @@ from basic_memory.read_cache.redis import RedisReadCache
 from basic_memory.repository import EntityRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.runtime.note_content import NOTE_CONTENT_BASE_CHECKSUM_HEADER
+from basic_memory.schemas.directory import DirectoryListResponse, DirectoryNode
 from basic_memory.schemas.v2 import EntityResolveRequest
 from basic_memory.services.note_content_reads import NoteContentQueryService
 from basic_memory.workspace_context import (
@@ -190,6 +191,14 @@ def _cache_key(
         operation=operation,
         request_digest=read_cache_request_digest(request, *request_context),
     )
+
+
+def descendant_paths(node: DirectoryNode) -> set[str]:
+    """Collect one directory response's complete path set."""
+    paths = {node.directory_path}
+    for child in node.children:
+        paths.update(descendant_paths(child))
+    return paths
 
 
 async def _initialized_generation(
@@ -433,6 +442,119 @@ async def test_entity_resolve_and_markdown_reads_cache_then_freshened_write_inva
     assert refreshed_resource.status_code == 200
     assert "Externally edited" in refreshed_resource.text
     assert "Version two." in refreshed_resource.text
+
+
+@pytest.mark.asyncio
+async def test_directory_reads_cache_then_project_invalidation_refreshes(
+    app: FastAPI,
+    client: AsyncClient,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """Tree, structure, and paginated list reads share real project invalidation."""
+    project_external_id = str(test_project.external_id)
+    project_url = f"/v2/projects/{project_external_id}"
+    repository = EntityRepository(project_id=test_project.id)
+    _, session_maker = engine_factory
+
+    async with db.scoped_session(session_maker) as session:
+        await repository.add(
+            session,
+            Entity(
+                title="Existing cached directory note",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="cache-surface/existing.md",
+                checksum="existing-cached-directory-checksum",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+        )
+
+    app.dependency_overrides[get_read_cache] = lambda: redis_cache.cache
+    tree_url = f"{project_url}/directory/tree"
+    structure_url = f"{project_url}/directory/structure"
+    list_url = f"{project_url}/directory/list"
+    list_params = {
+        "dir_name": "/cache-surface",
+        "depth": 2,
+        "page": 1,
+        "page_size": 200,
+    }
+
+    first_tree_response = await client.get(tree_url)
+    first_structure_response = await client.get(structure_url)
+    first_list_response = await client.get(list_url, params=list_params)
+    assert first_tree_response.status_code == 200
+    assert first_structure_response.status_code == 200
+    assert first_list_response.status_code == 200
+
+    first_tree = DirectoryNode.model_validate(first_tree_response.json())
+    first_structure = DirectoryNode.model_validate(first_structure_response.json())
+    first_list = DirectoryListResponse.model_validate(first_list_response.json())
+    assert "/cache-surface/after-cache" not in descendant_paths(first_tree)
+    assert "/cache-surface/after-cache" not in descendant_paths(first_structure)
+    assert "/cache-surface/after-cache" not in {node.directory_path for node in first_list.nodes}
+
+    cache_keys = (
+        _cache_key(
+            project_id=project_external_id,
+            operation=ReadCacheOperation.directory_tree,
+            request="tree",
+        ),
+        _cache_key(
+            project_id=project_external_id,
+            operation=ReadCacheOperation.directory_structure,
+            request="structure",
+        ),
+        _cache_key(
+            project_id=project_external_id,
+            operation=ReadCacheOperation.directory_list,
+            request="/cache-surface",
+            request_context=("2", "", "1", "200"),
+        ),
+    )
+    for key in cache_keys:
+        redis_keys = redis_read_cache_keys(
+            prefix=redis_cache.prefix,
+            namespace=redis_cache.namespace,
+            key=key,
+        )
+        assert await redis_cache.client.exists(redis_keys.data_key) == 1
+
+    async with db.scoped_session(session_maker) as session:
+        await repository.add(
+            session,
+            Entity(
+                title="Added after directory cache fill",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="cache-surface/after-cache/new.md",
+                checksum="added-after-directory-cache-checksum",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+        )
+
+    cached_tree_response = await client.get(tree_url)
+    cached_structure_response = await client.get(structure_url)
+    cached_list_response = await client.get(list_url, params=list_params)
+    assert cached_tree_response.json() == first_tree_response.json()
+    assert cached_structure_response.json() == first_structure_response.json()
+    assert cached_list_response.json() == first_list_response.json()
+
+    await redis_cache.cache.invalidate_project(project_external_id)
+
+    refreshed_tree = DirectoryNode.model_validate((await client.get(tree_url)).json())
+    refreshed_structure = DirectoryNode.model_validate((await client.get(structure_url)).json())
+    refreshed_list = DirectoryListResponse.model_validate(
+        (await client.get(list_url, params=list_params)).json()
+    )
+
+    assert "/cache-surface/after-cache" in descendant_paths(refreshed_tree)
+    assert "/cache-surface/after-cache" in descendant_paths(refreshed_structure)
+    assert "/cache-surface/after-cache" in {node.directory_path for node in refreshed_list.nodes}
 
 
 @pytest.mark.asyncio
