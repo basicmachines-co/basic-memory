@@ -5,6 +5,7 @@ from unittest.mock import Mock
 from basic_memory.index.local_dependencies import LocalIndexProjectDependencies
 from basic_memory.index.local_project import LocalProjectIndexRuntimeFactory
 from basic_memory.indexing.project_index_maintenance import (
+    InvalidatingProjectIndexBatchStore,
     RepositoryProjectIndexMaintenanceStore,
     StoreProjectIndexMaintenanceRunner,
 )
@@ -33,11 +34,18 @@ def test_full_project_runtime_forwards_external_vector_cleaner() -> None:
         external_vector_cleaner=cleaner,
     )
 
-    runtime = LocalProjectIndexRuntimeFactory().runtime_from_dependencies(dependencies)
+    runtime = LocalProjectIndexRuntimeFactory().runtime_from_dependencies(
+        dependencies,
+        project_external_id="project-external-id",
+    )
 
     assert isinstance(runtime.maintenance_runner, StoreProjectIndexMaintenanceRunner)
     assert isinstance(
         runtime.maintenance_runner.delete_store,
+        InvalidatingProjectIndexBatchStore,
+    )
+    assert isinstance(
+        runtime.maintenance_runner.delete_store.delete_store,
         RepositoryProjectIndexMaintenanceStore,
     )
-    assert runtime.maintenance_runner.delete_store.external_vector_cleaner is cleaner
+    assert runtime.maintenance_runner.delete_store.delete_store.external_vector_cleaner is cleaner

@@ -91,8 +91,10 @@ tenant:
    after its database commit succeeds but before the transaction context returns. Finish the
    namespace-bound generation bump before re-propagating cancellation so committed state cannot
    remain hidden behind the previous generation.
-1. Put project-index invalidation in a failure-safe completion boundary. Move, delete, file-index,
-   and vector batches can commit incrementally before a later batch raises.
+1. Invalidate after each committed project-index move, delete, and file-index batch, while
+   retaining the final failure-safe completion boundary for later-phase errors. Local inline file
+   batches invalidate when their runner returns; queued Cloud file batches invalidate in the child
+   worker after its durable commit, not merely when the coordinator enqueues the job.
 1. Put direct single-file and watcher file-index invalidation in failure-safe boundaries. Entity
    transactions can commit before search refresh or note-content reconciliation raises, so a
    failed index attempt can still publish cache-relevant state.
@@ -379,6 +381,8 @@ The real-Redis suite must prove:
 - startup recovery that publishes written, conflict, or failed materialization state invalidates
   before serving resumes;
 - project-index failures invalidate any earlier committed batches;
+- consecutive project-index move, delete, and inline file batches each advance the real Redis
+  generation before the next batch begins;
 - direct and watcher file-index failures invalidate any entity state committed before failed
   search or reconciliation follow-ups;
 - hosted read repair invalidates cached entity metadata before storing the repaired resource;

@@ -16,7 +16,8 @@ from basic_memory.repository.accepted_note_vector_cleanup import (
     ProjectIndexExternalVectorCleaner,
     delete_project_index_vector_rows,
 )
-from basic_memory.runtime.storage import ProjectId
+from basic_memory.read_cache import ReadCacheInvalidator, invalidate_cache
+from basic_memory.runtime.storage import ProjectExternalId, ProjectId
 
 
 class ProjectIndexMaintenanceRunner(Protocol):
@@ -35,6 +36,24 @@ class ProjectIndexMaintenanceRunner(Protocol):
         deleted_paths: Sequence[str],
         batch_size: int,
     ) -> ProjectIndexDeleteRun: ...
+
+
+class ProjectIndexMoveBatchStore(Protocol):
+    """Capability that commits one project-index move batch."""
+
+    async def apply_project_index_move_batch(
+        self,
+        move_batch: ProjectIndexMoveBatch,
+    ) -> ProjectIndexMoveBatchResult: ...
+
+
+class ProjectIndexDeleteBatchStore(Protocol):
+    """Capability that commits one project-index delete batch."""
+
+    async def apply_project_index_delete_batch(
+        self,
+        delete_batch: ProjectIndexDeleteBatch,
+    ) -> ProjectIndexDeleteBatchResult: ...
 
 
 class ProjectIndexMovedEntityRepository(Protocol):
@@ -883,11 +902,40 @@ class RepositoryProjectIndexMaintenanceStore:
 
 
 @dataclass(frozen=True, slots=True)
+class InvalidatingProjectIndexBatchStore(
+    ProjectIndexMoveBatchStore,
+    ProjectIndexDeleteBatchStore,
+):
+    """Invalidate semantic reads after each durable move or delete batch."""
+
+    move_store: ProjectIndexMoveBatchStore
+    delete_store: ProjectIndexDeleteBatchStore
+    read_cache: ReadCacheInvalidator
+    project_external_id: ProjectExternalId
+
+    @override
+    async def apply_project_index_move_batch(
+        self,
+        move_batch: ProjectIndexMoveBatch,
+    ) -> ProjectIndexMoveBatchResult:
+        async with invalidate_cache(self.read_cache, self.project_external_id):
+            return await self.move_store.apply_project_index_move_batch(move_batch)
+
+    @override
+    async def apply_project_index_delete_batch(
+        self,
+        delete_batch: ProjectIndexDeleteBatch,
+    ) -> ProjectIndexDeleteBatchResult:
+        async with invalidate_cache(self.read_cache, self.project_external_id):
+            return await self.delete_store.apply_project_index_delete_batch(delete_batch)
+
+
+@dataclass(frozen=True, slots=True)
 class StoreProjectIndexMaintenanceRunner(ProjectIndexMaintenanceRunner):
     """Run project-index maintenance through explicit move/delete batch stores."""
 
-    move_store: RepositoryProjectIndexMaintenanceStore
-    delete_store: RepositoryProjectIndexMaintenanceStore
+    move_store: ProjectIndexMoveBatchStore
+    delete_store: ProjectIndexDeleteBatchStore
 
     @override
     async def run_move_batches(
@@ -1011,7 +1059,7 @@ async def run_project_index_move_batches(
     *,
     moved_files: Mapping[str, str],
     batch_size: int,
-    move_store: RepositoryProjectIndexMaintenanceStore,
+    move_store: ProjectIndexMoveBatchStore,
 ) -> ProjectIndexMoveRun:
     """Apply project-index move maintenance through a storage adapter."""
     move_plan = build_project_index_move_batch_plan(
@@ -1064,7 +1112,7 @@ async def run_project_index_delete_batches(
     *,
     deleted_paths: Sequence[str],
     batch_size: int,
-    delete_store: RepositoryProjectIndexMaintenanceStore,
+    delete_store: ProjectIndexDeleteBatchStore,
 ) -> ProjectIndexDeleteRun:
     """Apply project-index delete maintenance through a storage adapter."""
     delete_plan = build_project_index_delete_batch_plan(

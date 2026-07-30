@@ -65,6 +65,7 @@ from basic_memory.indexing.project_index_coordinator import (
     run_project_index_coordinator,
 )
 from basic_memory.indexing.project_index_maintenance import (
+    InvalidatingProjectIndexBatchStore,
     ProjectIndexDeletePathVerifier,
     ProjectIndexMaintenanceRunner,
     ProjectIndexMovedEntitySearchRefresher,
@@ -79,7 +80,12 @@ from basic_memory.indexing.relation_resolution import (
     resolve_project_index_completion_relations,
 )
 from basic_memory.models import Entity, Project
-from basic_memory.read_cache import NullReadCache, ReadCache, invalidate_cache
+from basic_memory.read_cache import (
+    NullReadCache,
+    ReadCache,
+    ReadCacheInvalidator,
+    invalidate_cache,
+)
 from basic_memory.repository import NoteContentRepository
 from basic_memory.runtime.jobs import (
     RuntimeIndexFileBatchJobRequest,
@@ -546,6 +552,7 @@ class LocalProjectIndexBatchEnqueuer(ProjectIndexBatchEnqueuer):
     reader: IndexFileBatchReader[IndexInputFile]
     indexer: IndexFileBatchIndexer[IndexInputFile]
     content_classifier: IndexFileBatchContentClassifier
+    read_cache: ReadCacheInvalidator = field(default_factory=NullReadCache)
     read_max_concurrent: int = 8
     index_max_concurrent: int = 8
 
@@ -554,15 +561,19 @@ class LocalProjectIndexBatchEnqueuer(ProjectIndexBatchEnqueuer):
         self,
         request: RuntimeIndexFileBatchJobRequest,
     ) -> IndexFileBatchJobResult:
-        return await run_index_file_batch(
-            request,
-            checker=self.checker,
-            reader=self.reader,
-            indexer=self.indexer,
-            content_classifier=self.content_classifier,
-            read_max_concurrent=self.read_max_concurrent,
-            index_max_concurrent=self.index_max_concurrent,
-        )
+        async with invalidate_cache(
+            self.read_cache,
+            request.project.project_external_id,
+        ):
+            return await run_index_file_batch(
+                request,
+                checker=self.checker,
+                reader=self.reader,
+                indexer=self.indexer,
+                content_classifier=self.content_classifier,
+                read_max_concurrent=self.read_max_concurrent,
+                index_max_concurrent=self.index_max_concurrent,
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -583,6 +594,8 @@ class LocalProjectIndexRuntimeFactory:
     def runtime_from_dependencies(
         self,
         dependencies: LocalIndexProjectDependencies,
+        *,
+        project_external_id: str,
     ) -> LocalProjectIndexRuntime:
         metadata_source = LocalStorageFileMetadataSource(dependencies.file_service)
         checker = FileIndexChecker(
@@ -616,6 +629,12 @@ class LocalProjectIndexRuntimeFactory:
             # concurrent creation that must be checksum-verified before deletion.
             verify_replaced_move_targets=True,
         )
+        invalidating_maintenance_store = InvalidatingProjectIndexBatchStore(
+            move_store=maintenance_store,
+            delete_store=maintenance_store,
+            read_cache=self.read_cache,
+            project_external_id=project_external_id,
+        )
         return LocalProjectIndexRuntime(
             observed_file_source=LocalProjectIndexObservedFileSource(
                 dependencies.file_service,
@@ -629,8 +648,8 @@ class LocalProjectIndexRuntimeFactory:
                 entity_repository=dependencies.entity_repository,
             ),
             maintenance_runner=StoreProjectIndexMaintenanceRunner(
-                move_store=maintenance_store,
-                delete_store=maintenance_store,
+                move_store=invalidating_maintenance_store,
+                delete_store=invalidating_maintenance_store,
             ),
             moved_entity_search_refresher=RepositoryProjectIndexMovedEntitySearchRefresher(
                 session_maker=dependencies.session_maker,
@@ -642,6 +661,7 @@ class LocalProjectIndexRuntimeFactory:
                 reader=LocalIndexFileBatchReader(dependencies.file_service),
                 indexer=dependencies.file_batch_indexer,
                 content_classifier=dependencies.file_service,
+                read_cache=self.read_cache,
                 read_max_concurrent=self.read_max_concurrent,
                 index_max_concurrent=self.index_max_concurrent,
             ),
@@ -659,7 +679,10 @@ class LocalProjectIndexRuntimeFactory:
         )
 
     async def runtime_for_project(self, project: Project) -> LocalProjectIndexRuntime:
-        return self.runtime_from_dependencies(await self.dependencies_for_project(project))
+        return self.runtime_from_dependencies(
+            await self.dependencies_for_project(project),
+            project_external_id=str(project.external_id),
+        )
 
 
 async def run_local_project_index_for_project(
@@ -703,7 +726,10 @@ class LocalProjectIndexRunner:
     async def observe_project(self, project_id: int) -> LocalProjectIndexObservation:
         project = await self._get_project(project_id)
         dependencies = await self.runtime_factory.dependencies_for_project(project)
-        runtime = self.runtime_factory.runtime_from_dependencies(dependencies)
+        runtime = self.runtime_factory.runtime_from_dependencies(
+            dependencies,
+            project_external_id=str(project.external_id),
+        )
         observed_files = await runtime.observed_file_source.list_observed_index_files()
         return LocalProjectIndexObservation(observed_files=observed_files)
 

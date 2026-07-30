@@ -18,17 +18,34 @@ from basic_memory.index.local_moves import (
     LocalWatchMoveProcessor,
 )
 from basic_memory.index.local_dependencies import LocalIndexSearchService
-from basic_memory.index.local_project import LocalProjectIndexRuntime, run_local_project_index
+from basic_memory.index.local_project import (
+    LocalProjectIndexBatchEnqueuer,
+    LocalProjectIndexRuntime,
+    run_local_project_index,
+)
 from basic_memory.index.local_runtime import LocalInlineStorageEventResultRecorder
 from basic_memory.indexing.change_planning import ChangeReport
 from basic_memory.indexing.directory_delete_runner import (
     DirectoryDeleteRuntime,
     RepositoryDirectoryDeleteAcceptanceStore,
 )
+from basic_memory.indexing.file_batch_runner import (
+    IndexFileBatchChecker,
+    IndexFileBatchContentClassifier,
+    IndexFileBatchIndexer,
+    IndexFileBatchReader,
+)
+from basic_memory.indexing.models import IndexInputFile
 from basic_memory.indexing.project_index_maintenance import (
+    InvalidatingProjectIndexBatchStore,
+    ProjectIndexDeleteBatch,
+    ProjectIndexDeleteBatchResult,
     ProjectIndexDeleteRun,
+    ProjectIndexMoveBatch,
+    ProjectIndexMoveBatchResult,
     ProjectIndexMoveRun,
     ProjectIndexMovedEntitySearchRefresher,
+    StoreProjectIndexMaintenanceRunner,
 )
 from basic_memory.indexing.relation_resolution import RelationResolutionRuntime
 from basic_memory.models import Project
@@ -72,6 +89,21 @@ class RedisCacheHarness(Protocol):
     client: Redis
     namespace: str
     prefix: str
+
+
+async def _current_generation(
+    redis_cache: RedisCacheHarness,
+    project_external_id: str,
+) -> bytes | str:
+    generation = await redis_cache.client.get(
+        redis_read_cache_generation_key(
+            prefix=redis_cache.prefix,
+            namespace=redis_cache.namespace,
+            project_id=project_external_id,
+        )
+    )
+    assert generation is not None
+    return generation
 
 
 class DetectedMoveProcessor(LocalWatchMoveProcessor):
@@ -189,6 +221,38 @@ class UnusedBatchEnqueuer:
         raise AssertionError("failing maintenance must stop before file batches")
 
 
+class GenerationObservingProjectIndexBatchStore:
+    """Record the real Redis generation seen before each durable batch."""
+
+    def __init__(
+        self,
+        redis_cache: RedisCacheHarness,
+        project_external_id: str,
+    ) -> None:
+        self.redis_cache = redis_cache
+        self.project_external_id = project_external_id
+        self.move_generations: list[bytes | str] = []
+        self.delete_generations: list[bytes | str] = []
+
+    async def apply_project_index_move_batch(
+        self,
+        move_batch: ProjectIndexMoveBatch,
+    ) -> ProjectIndexMoveBatchResult:
+        self.move_generations.append(
+            await _current_generation(self.redis_cache, self.project_external_id)
+        )
+        return ProjectIndexMoveBatchResult(updated_files=len(move_batch.targets))
+
+    async def apply_project_index_delete_batch(
+        self,
+        delete_batch: ProjectIndexDeleteBatch,
+    ) -> ProjectIndexDeleteBatchResult:
+        self.delete_generations.append(
+            await _current_generation(self.redis_cache, self.project_external_id)
+        )
+        return ProjectIndexDeleteBatchResult(deleted_entities=len(delete_batch.paths))
+
+
 class GenerationObservingDirectoryDeleteEnqueuer:
     def __init__(
         self,
@@ -231,15 +295,7 @@ async def _initialized_generation(
             request_digest=read_cache_request_digest(request),
         )
     )
-    generation = await redis_cache.client.get(
-        redis_read_cache_generation_key(
-            prefix=redis_cache.prefix,
-            namespace=redis_cache.namespace,
-            project_id=project_external_id,
-        )
-    )
-    assert generation is not None
-    return generation
+    return await _current_generation(redis_cache, project_external_id)
 
 
 async def _seed_recovery_note(
@@ -515,6 +571,89 @@ async def test_startup_recovery_conflict_invalidates_published_failure_in_real_r
         request="startup-recovery-conflict",
     )
     assert generation_after != generation_before
+
+
+@pytest.mark.asyncio
+async def test_project_index_batches_invalidate_real_redis(
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """Every inline move, delete, and file batch advances the generation."""
+    project_external_id = str(test_project.external_id)
+    generation_before = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="project-index-batches",
+    )
+    observed_store = GenerationObservingProjectIndexBatchStore(
+        redis_cache,
+        project_external_id,
+    )
+    invalidating_store = InvalidatingProjectIndexBatchStore(
+        move_store=observed_store,
+        delete_store=observed_store,
+        read_cache=redis_cache.cache,
+        project_external_id=project_external_id,
+    )
+    maintenance = StoreProjectIndexMaintenanceRunner(
+        move_store=invalidating_store,
+        delete_store=invalidating_store,
+    )
+
+    await maintenance.run_move_batches(
+        moved_files={
+            "notes/old-1.md": "notes/new-1.md",
+            "notes/old-2.md": "notes/new-2.md",
+        },
+        batch_size=1,
+    )
+    assert observed_store.move_generations[0] == generation_before
+    assert observed_store.move_generations[1] != observed_store.move_generations[0]
+    generation_after_moves = await _current_generation(redis_cache, project_external_id)
+    assert generation_after_moves != observed_store.move_generations[1]
+
+    await maintenance.run_delete_batches(
+        deleted_paths=("notes/deleted-1.md", "notes/deleted-2.md"),
+        batch_size=1,
+    )
+    assert observed_store.delete_generations[0] == generation_after_moves
+    assert observed_store.delete_generations[1] != observed_store.delete_generations[0]
+    generation_after_deletes = await _current_generation(redis_cache, project_external_id)
+    assert generation_after_deletes != observed_store.delete_generations[1]
+
+    batch_enqueuer = LocalProjectIndexBatchEnqueuer(
+        checker=cast(IndexFileBatchChecker, object()),
+        reader=cast(IndexFileBatchReader[IndexInputFile], object()),
+        indexer=cast(IndexFileBatchIndexer[IndexInputFile], object()),
+        content_classifier=cast(IndexFileBatchContentClassifier, object()),
+        read_cache=redis_cache.cache,
+    )
+    project = ProjectRuntimeReference.from_project(test_project)
+    await batch_enqueuer.enqueue_index_file_batch(
+        RuntimeIndexFileBatchJobRequest(
+            project=project,
+            batch_index=0,
+            batch_count=2,
+        )
+    )
+    generation_after_first_file_batch = await _current_generation(
+        redis_cache,
+        project_external_id,
+    )
+    assert generation_after_first_file_batch != generation_after_deletes
+
+    await batch_enqueuer.enqueue_index_file_batch(
+        RuntimeIndexFileBatchJobRequest(
+            project=project,
+            batch_index=1,
+            batch_count=2,
+        )
+    )
+    generation_after_second_file_batch = await _current_generation(
+        redis_cache,
+        project_external_id,
+    )
+    assert generation_after_second_file_batch != generation_after_first_file_batch
 
 
 @pytest.mark.asyncio
