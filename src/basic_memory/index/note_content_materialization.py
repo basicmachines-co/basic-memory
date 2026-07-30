@@ -522,6 +522,22 @@ class LocalNoteContentStorage:
     async def delete_file(self, path: RuntimeFilePath) -> None:
         await self.file_service.delete_file(path)
 
+    async def delete_file_if_unchanged(
+        self,
+        path: RuntimeFilePath,
+        *,
+        expected_checksum: RuntimeFileChecksum,
+    ) -> bool:
+        # Re-verify the checksum immediately before deleting so a replacement written into the
+        # freshness-read → delete gap is never removed (basic-memory-cloud#1618). Local has no
+        # atomic precondition; the race is negligible on a filesystem.
+        if not await self.file_service.exists(path):
+            return False
+        if await self.file_service.compute_checksum(path) != expected_checksum:
+            return False
+        await self.file_service.delete_file(path)
+        return True
+
 
 @dataclass(frozen=True, slots=True)
 class InlineNoteFileDeleteEnqueuer:

@@ -182,8 +182,21 @@ class LocalNoteFileDeleteStorage:
     async def compute_checksum(self, path: RuntimeFilePath) -> RuntimeFileChecksum:
         return await self.file_service.compute_checksum(path)
 
-    async def delete_file(self, path: RuntimeFilePath) -> None:
+    async def delete_file_if_unchanged(
+        self,
+        path: RuntimeFilePath,
+        *,
+        expected_checksum: RuntimeFileChecksum,
+    ) -> bool:
+        # The local filesystem has no atomic compare-and-delete, so re-verify the checksum
+        # immediately before deleting. A local race is negligible, but this keeps the runner's
+        # guarantee portable: never delete an object that no longer matches (basic-memory-cloud#1618).
+        if not await self.file_service.exists(path):
+            return False
+        if await self.file_service.compute_checksum(path) != expected_checksum:
+            return False
         await self.file_service.delete_file(path)
+        return True
 
 
 @dataclass(frozen=True, slots=True)

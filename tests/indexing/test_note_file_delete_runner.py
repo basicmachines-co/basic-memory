@@ -14,6 +14,9 @@ from basic_memory.services.exceptions import FileOperationError
 class FakeNoteFileStorage:
     def __init__(self, checksum: str | None = "file-sum") -> None:
         self.checksum = checksum
+        # Checksum seen by the guarded delete; defaults to the freshness-read value. Set it apart
+        # from `checksum` to simulate a TOCTOU: matches at plan time, differs at delete time.
+        self.checksum_at_delete: str | None = checksum
         self.exists_calls: list[str] = []
         self.compute_checksum_calls: list[str] = []
         self.delete_calls: list[str] = []
@@ -29,10 +32,13 @@ class FakeNoteFileStorage:
             raise AssertionError("compute_checksum should not be called for absent files")
         return self.checksum
 
-    async def delete_file(self, path: str) -> None:
+    async def delete_file_if_unchanged(self, path: str, *, expected_checksum: str) -> bool:
         self.delete_calls.append(path)
         if self.delete_error is not None:
             raise self.delete_error
+        if self.checksum_at_delete != expected_checksum:
+            return False
+        return True
 
 
 def delete_request(file_checksum: str | None = "file-sum") -> RuntimeNoteFileDeleteJobRequest:
@@ -94,6 +100,25 @@ async def test_run_note_file_delete_skips_changed_object() -> None:
     assert result.status == RuntimeDeleteStatus.skipped
     assert result.reason == "file changed before delete: notes/a.md"
     assert storage.delete_calls == []
+
+
+@pytest.mark.asyncio
+async def test_run_note_file_delete_skips_when_object_changes_before_delete() -> None:
+    """TOCTOU guard: an object matching at read time but replaced before the delete is not removed.
+
+    The guarded delete sees a different checksum and deletes nothing; the runner reports `changed`
+    instead of claiming it deleted the replacement (basic-memory-cloud#1618).
+    """
+    storage = FakeNoteFileStorage(checksum="file-sum")
+    # A writer replaces the object between the freshness read and the delete.
+    storage.checksum_at_delete = "replacement-sum"
+
+    result = await run_note_file_delete(delete_request(), storage=storage)
+
+    assert result.status == RuntimeDeleteStatus.skipped
+    assert result.reason == "file changed before delete: notes/a.md"
+    # The guarded delete was attempted (and declined) — not skipped at plan time.
+    assert storage.delete_calls == ["notes/a.md"]
 
 
 @pytest.mark.asyncio
