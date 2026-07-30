@@ -13,8 +13,8 @@ Redis instance.
   requirement.
 - Make cache semantics, typed serialization, TTLs, and invalidation part of Basic Memory.
 - Let a host such as Basic Memory Cloud inject an existing Redis client and opaque namespace.
-- Preserve independent clients, key prefixes, metrics, and failure behavior for read caching and
-  rate limiting.
+- Preserve independent key prefixes, metrics, ownership, and failure behavior for read caching
+  and rate limiting.
 
 ## Ownership Boundary
 
@@ -36,13 +36,13 @@ Cloud owns:
 - capacity, eviction, and availability decisions when Redis is shared.
 
 Physical topology is deliberately outside the Basic Memory cache contract. Cloud may point the
-read cache and limiter at separate Redis instances or at separately configured clients on one
-instance.
+read cache and limiter at separate Redis instances or clients, or reuse one client and connection
+pool when both concerns share an instance.
 
 ### Tenant isolation on shared Redis
 
-Cloud does not create a Redis instance or connection pool per tenant. It reuses one long-lived,
-Basic Memory-specific Redis client and constructs a lightweight `RedisReadCache` adapter from
+Cloud does not create a Redis instance or connection pool per tenant. It reuses one long-lived
+Redis client and connection pool and constructs a lightweight `RedisReadCache` adapter from
 trusted request or worker context:
 
 - `namespace`: the stable tenant/workspace UUID;
@@ -69,11 +69,13 @@ Basic Memory Cloud must satisfy all of these requirements when composing cached 
 1. Complete authorization and tenant database/schema selection before cache lookup. The
    namespace prevents key collisions; it does not replace Cloud's access-control boundary.
 1. Override the low-level `get_read_cache` dependency at the Cloud composition root. Construct
-   `RedisReadCache(client=shared_basic_memory_client, namespace=trusted_namespace)` as a
-   lightweight request-scoped adapter; reuse the long-lived client and connection pool.
-   FastAPI route dependencies then create lightweight `ModelReadCache` facades from that shared
-   backend and bind Basic Memory's response type, TTL, and payload-size policy. Cloud should not
-   duplicate those policy constants or construct Redis clients per response model.
+   `RedisReadCache(client=shared_redis_client, namespace=trusted_namespace)` as a lightweight
+   request-scoped adapter; reuse the long-lived client and connection pool. A single Cloud
+   composition function owns this choice so the cache can move to a separate client or instance
+   later without changing Basic Memory routes or workers. FastAPI route dependencies then create
+   lightweight `ModelReadCache` facades from that shared backend and bind Basic Memory's response
+   type, TTL, and payload-size policy. Cloud should not duplicate those policy constants or
+   construct Redis clients per response model.
 1. Pass the trusted tenant/workspace identity through internal queue payloads, or include enough
    trusted identifiers for workers to derive the exact same namespace. Never copy a namespace
    from a public request field.
@@ -233,12 +235,12 @@ Phase one:
 | Directory tree              |  60 seconds | Full hierarchy; two MiB measured payload cap        |
 | Paginated directory listing |  60 seconds | Include path, depth, glob, page, and page-size keys |
 
-Phase two, after measuring phase one:
+Additional measured surfaces:
 
 | Operation                   |   Initial TTL | Constraints                                    |
 | --------------------------- | ------------: | ---------------------------------------------- |
-| Search                      |    30 seconds | Canonicalize the complete query and pagination |
-| Context and recent activity | 15-30 seconds | Normalize or bound time-relative inputs        |
+| Search                      |    30 seconds | Implemented; complete query plus pagination key |
+| Context and recent activity | 15-30 seconds | Future; normalize or bound time-relative inputs |
 
 Do not initially cache failures, missing entities, graph/orphan responses, large or arbitrary
 binary resources, schema inference, writes, or Cloud control-plane data.
@@ -399,9 +401,10 @@ absorb that authorization-aware composition. Cloud should optimize that active-p
 reconciliation and its own project-list cache independently.
 
 Directory caching in Basic Memory is intended to replace overlapping route families after Cloud
-reaches namespace, invalidation, and observability parity. During rollout, the inner cache can
-also share tenant-project directory results across already-authorized users while Cloud's current
-outer key remains user-specific. Do not keep both response-cache layers as the final design.
+reaches namespace, invalidation, and observability parity. During the transition away from the
+overlapping outer cache, the inner cache can also share tenant-project directory results across
+already-authorized users while Cloud's current outer key remains user-specific. Do not keep both
+response-cache layers as the final design.
 
 ## Failure Behavior
 
@@ -571,7 +574,7 @@ semantics themselves are asserted only against the real Redis integration fixtur
 
 ### 4. Expand from evidence
 
-- Add search and graph-context reads when measured reuse supports them.
+- Add graph-context and recent-activity reads when measured reuse supports them.
 - Refine project-wide invalidation only if unrelated writes materially reduce the entity hit
   rate.
 
