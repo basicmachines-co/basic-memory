@@ -241,12 +241,12 @@ class TestSearchClient:
             "page_size": 10,
         }
 
-        async def mock_call_post(client, url, **kwargs):
+        async def mock_call_query(client, url, **kwargs):
             assert "/v2/projects/proj-123/search/" in url
             assert kwargs.get("params") == {"page": 1, "page_size": 10}
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", mock_call_post)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", mock_call_query)
 
         mock_http = MagicMock()
         client = SearchClient(mock_http, "proj-123")
@@ -276,10 +276,10 @@ class TestSearchClient:
             "has_more": False,
         }
 
-        async def mock_call_post(client, url, **kwargs):
+        async def mock_call_query(client, url, **kwargs):
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", mock_call_post)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", mock_call_query)
 
         client = SearchClient(MagicMock(), "proj-123")
         result = await client.search({"text": "query", "retrieval_mode": retrieval_mode})
@@ -301,10 +301,10 @@ class TestSearchClient:
             "has_more": False,
         }
 
-        async def mock_call_post(client, url, **kwargs):
+        async def mock_call_query(client, url, **kwargs):
             return mock_response
 
-        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", mock_call_post)
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", mock_call_query)
 
         client = SearchClient(MagicMock(), "proj-123")
         result = await client.search(

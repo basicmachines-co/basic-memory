@@ -15,6 +15,7 @@ class ReadCacheOperation(StrEnum):
     entity = "entity"
     resolve = "resolve"
     resource = "resource"
+    search = "search"
 
 
 class ReadCacheStoreStatus(StrEnum):

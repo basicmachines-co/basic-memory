@@ -60,7 +60,7 @@ class SearchClient:
         Raises:
             ToolError: If the request fails
         """
-        from basic_memory.mcp.tools.utils import call_post
+        from basic_memory.mcp.tools.utils import call_query
 
         with logfire.span(
             "mcp.client.search.search",
@@ -69,7 +69,7 @@ class SearchClient:
             page=page,
             page_size=page_size,
         ):
-            response = await call_post(
+            response = await call_query(
                 self.http_client,
                 f"{self._base_path}/",
                 json=query,

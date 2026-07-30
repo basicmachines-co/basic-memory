@@ -12,6 +12,7 @@ from basic_memory.mcp.tools.utils import (
     call_get,
     call_patch,
     call_post,
+    call_query,
     call_put,
     get_error_message,
 )
@@ -59,6 +60,11 @@ class _Client:
     async def post(self, *args, **kwargs):
         self.calls.append(("post", args, kwargs))
         return self._responses["post"]
+
+    async def request(self, method, *args, **kwargs):
+        normalized_method = method.lower()
+        self.calls.append((normalized_method, args, kwargs))
+        return self._responses[normalized_method]
 
     async def put(self, *args, **kwargs):
         self.calls.append(("put", args, kwargs))
@@ -118,6 +124,32 @@ async def test_call_post_error(mock_response):
     with pytest.raises(ToolError) as exc:
         await call_post(_client(client), "http://test.com", json={"test": "data"})
     assert "Internal server error" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_call_query_sends_json_with_query_method(mock_response):
+    """QUERY carries the validated search document as request content."""
+    client = _Client()
+    client.set_response("query", mock_response())
+
+    query = {"text": "cache semantics"}
+    response = await call_query(_client(client), "http://test.com", json=query)
+
+    assert response.status_code == 200
+    method, _args, kwargs = client.calls[0]
+    assert method == "query"
+    assert kwargs["json"] == query
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [400, 500])
+async def test_call_query_error(mock_response, status_code):
+    """QUERY uses the same friendly client and server errors as other helpers."""
+    client = _Client()
+    client.set_response("query", mock_response(status_code))
+
+    with pytest.raises(ToolError):
+        await call_query(_client(client), "http://test.com", json={"text": "query"})
 
 
 @pytest.mark.asyncio
@@ -200,6 +232,7 @@ async def test_call_post_adds_workspace_permalink_headers_at_request_time(mock_r
 _ALL_CALL_HELPERS = [
     (call_get, "GET"),
     (call_post, "POST"),
+    (call_query, "QUERY"),
     (call_put, "PUT"),
     (call_patch, "PATCH"),
     (call_delete, "DELETE"),

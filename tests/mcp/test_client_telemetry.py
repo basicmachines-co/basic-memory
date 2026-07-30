@@ -74,7 +74,7 @@ async def test_search_client_emits_client_and_http_spans(monkeypatch) -> None:
     monkeypatch.setattr(logfire, "span", fake_span)
 
     async def handler(request: httpx.Request) -> httpx.Response:
-        assert request.method == "POST"
+        assert request.method == "QUERY"
         return httpx.Response(
             200,
             json={
@@ -96,7 +96,7 @@ async def test_search_client_emits_client_and_http_spans(monkeypatch) -> None:
         "mcp.http.request",
     ]
     assert spans[1][1] == {
-        "method": "POST",
+        "method": "QUERY",
         "client_name": "search",
         "operation": "search",
         "path_template": "/v2/projects/{project_id}/search/",

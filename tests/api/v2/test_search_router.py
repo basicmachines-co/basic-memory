@@ -73,6 +73,25 @@ async def test_search_entities(
 
 
 @pytest.mark.asyncio
+async def test_query_search_uses_same_contract_and_advertises_media_type(
+    client: AsyncClient,
+    app,
+    v2_project_url: str,
+):
+    """QUERY is canonical while POST remains the documented compatibility route."""
+    response = await client.request(
+        "QUERY",
+        f"{v2_project_url}/search/",
+        json={"text": "safe search"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["Accept-Query"] == "application/json"
+    search_path = app.openapi()["paths"]["/v2/projects/{project_id}/search/"]
+    assert set(search_path) == {"post"}
+
+
+@pytest.mark.asyncio
 async def test_search_with_pagination(
     client: AsyncClient,
     test_project: Project,

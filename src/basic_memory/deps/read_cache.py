@@ -34,6 +34,7 @@ def create_model_read_cache[ModelT: BaseModel](
     read_cache: ReadCache | None,
     model_type: type[ModelT],
     *,
+    ttl_seconds: int = READ_CACHE_TTL_SECONDS,
     max_payload_bytes: int = READ_CACHE_MAX_PAYLOAD_BYTES,
 ) -> ModelReadCache[ModelT] | None:
     """Bind one response model to the host cache and Basic Memory's read policy."""
@@ -42,6 +43,6 @@ def create_model_read_cache[ModelT: BaseModel](
     return ModelReadCache(
         backend=read_cache,
         model_type=model_type,
-        ttl_seconds=READ_CACHE_TTL_SECONDS,
+        ttl_seconds=ttl_seconds,
         max_payload_bytes=max_payload_bytes,
     )

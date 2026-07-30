@@ -656,6 +656,88 @@ async def call_post(
         raise
 
 
+async def call_query(
+    client: AsyncClient,
+    url: URL | str,
+    *,
+    client_name: str | None = None,
+    operation: str | None = None,
+    path_template: str | None = None,
+    content: RequestContent | None = None,
+    data: RequestData | None = None,
+    files: RequestFiles | None = None,
+    json: typing.Any | None = None,
+    params: QueryParamTypes | None = None,
+    headers: HeaderTypes | None = None,
+    cookies: CookieTypes | None = None,
+    auth: AuthTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+    follow_redirects: bool | UseClientDefault = USE_CLIENT_DEFAULT,
+    timeout: TimeoutTypes | UseClientDefault = USE_CLIENT_DEFAULT,
+    extensions: RequestExtensions | None = None,
+) -> Response:
+    """Make a safe, idempotent QUERY request and handle errors appropriately."""
+    logger.debug(f"Calling QUERY '{url}'")
+    error_message = None
+    request_span: logfire.LogfireSpan | None = None
+
+    try:
+        with logfire.span(
+            "mcp.http.request",
+            method="QUERY",
+            client_name=client_name,
+            operation=operation,
+            path_template=path_template,
+            phase="request",
+            has_query=bool(params),
+            has_body=any(value is not None for value in (content, data, files, json)),
+        ) as request_span:
+            response = await client.request(
+                "QUERY",
+                url=url,
+                content=content,
+                data=data,
+                files=files,
+                json=json,
+                params=params,
+                headers=_request_headers(headers),
+                cookies=cookies,
+                auth=auth,
+                follow_redirects=follow_redirects,
+                timeout=timeout,
+                extensions=extensions,
+            )
+            request_span.set_attributes(_response_span_attrs(response))
+
+        if response.is_success:
+            return response
+
+        status_code = response.status_code
+        response_data = _extract_response_data(response)
+        error_message = _resolve_error_message(status_code, url, "QUERY", response_data)
+
+        if 400 <= status_code < 500:
+            if status_code == 429:  # pragma: no cover
+                logger.warning(f"Rate limit exceeded: QUERY {url}: {error_message}")
+            else:
+                logger.info(f"Client error: QUERY {url}: {error_message}")
+        else:
+            logger.error(f"Server error: QUERY {url}: {error_message}")
+
+        response.raise_for_status()
+        return response  # pragma: no cover
+
+    except HTTPStatusError as e:
+        raise ToolError(error_message) from e
+    except TransportError as e:
+        if request_span is not None:
+            request_span.set_attributes(_transport_error_span_attrs(e))
+        raise ToolError(_transport_error_message(e, url, "QUERY")) from e
+    except Exception as e:
+        if request_span is not None:
+            request_span.set_attributes(_transport_error_span_attrs(e))
+        raise
+
+
 async def resolve_entity_id(client: AsyncClient, project_external_id: str, identifier: str) -> str:
     """Resolve a string identifier to an entity external_id using the v2 API.
 
