@@ -60,8 +60,8 @@ from basic_memory.indexing.external_file_delete_runner import (
 from basic_memory.models import Entity, Project
 from basic_memory.read_cache import (
     ReadCache,
+    finish_project_read_cache_invalidation,
     invalidate_cache,
-    invalidate_project_read_cache,
 )
 from basic_memory.repository import NoteContentRepository
 from basic_memory.runtime.projects import ProjectRuntimeReference
@@ -167,7 +167,7 @@ class LocalInlineStorageEventResultRecorder:
         )
 
         if result.status == IndexFileJobStatus.processed and self.read_cache is not None:
-            await invalidate_project_read_cache(
+            await finish_project_read_cache_invalidation(
                 self.read_cache,
                 self.project.project_external_id,
             )
@@ -236,7 +236,7 @@ class LocalInlineStorageEventResultRecorder:
         if not result.entity_deleted:
             return
         if self.read_cache is not None:
-            await invalidate_project_read_cache(
+            await finish_project_read_cache_invalidation(
                 self.read_cache,
                 self.project.project_external_id,
             )
@@ -285,7 +285,7 @@ class LocalInlineStorageEventResultRecorder:
             # LocalMarkdownFileIndexer commits the entity before all search and
             # reconciliation follow-ups complete. A watcher failure can therefore
             # publish partial state even though the success callback never runs.
-            await invalidate_project_read_cache(
+            await finish_project_read_cache_invalidation(
                 self.read_cache,
                 self.project.project_external_id,
             )

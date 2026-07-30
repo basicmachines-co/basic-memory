@@ -396,10 +396,12 @@ async def test_note_content_read_repair_rereads_with_fresh_session(monkeypatch) 
         project_external_id: str,
         entity_external_id: str,
         source: str,
+        read_cache: object | None = None,
     ) -> bool:
         assert project_external_id == "project-123"
         assert entity_external_id == "note-456"
         assert source == "read_repair"
+        assert read_cache is None
         return True
 
     service = NoteContentQueryService(

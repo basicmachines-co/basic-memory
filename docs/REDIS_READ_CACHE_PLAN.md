@@ -98,11 +98,14 @@ tenant:
    worker after its durable commit, not merely when the coordinator enqueues the job.
 1. Put direct single-file and watcher file-index invalidation in failure-safe boundaries. Entity
    transactions can commit before search refresh or note-content reconciliation raises, so a
-   failed index attempt can still publish cache-relevant state.
+   failed index attempt can still publish cache-relevant state. Once a watcher index or delete
+   completion callback runs after its durable event, finish the first generation bump before
+   propagating cancellation; relation/search cleanup may not begin after cancellation.
 1. Pass the namespace-bound cache into hosted note-content read repair. A resource or entity read
-   can bootstrap a missing accepted-content row; invalidate immediately after that commit and
-   before the repaired response is offered to read-through storage. Finish that generation bump
-   before re-propagating cancellation that arrives after the repair transaction commits.
+   can bootstrap a missing accepted-content row. Put cancellation-safe invalidation around the
+   transaction-bearing repair call, not only after it returns, so cancellation during transaction
+   exit still advances the generation before the repaired response can reach read-through
+   storage.
 1. Pass the namespace-bound cache into pre-mutation content freshening. Freshening can index an
    externally edited file before the accepted mutation begins, so invalidate after every
    freshening attempt that may have published state, including when the later mutation is
@@ -299,13 +302,15 @@ mutations, imports, watcher-detected paired moves, startup recovery or reconcili
 storage events, and relation-resolution changes that affect cached responses. Each later phase
 invalidates again so a value filled after an earlier generation bump cannot outlive the state
 that phase publishes. Hosted read repair invalidates after bootstrapping accepted content and
-before a repaired entity or resource is stored. Directory moves invalidate after every committed
-file plus the final reindex; directory deletion invalidates after acceptance and after cleanup.
-Imports invalidate after every attempted file write and again around the complete attempt so
-partial failures cannot escape. Project indexing invalidates even after a partial failure. Direct
-single-file and watcher file indexing invalidate even when a
-follow-up fails after the entity commit. Recovery phases invalidate independently before the
-serving barrier is released and include terminal conflict or failure publication.
+before a repaired entity or resource is stored, including cancellation during the repair
+transaction's exit. Directory moves invalidate after every committed file plus the final reindex;
+directory deletion invalidates after acceptance and after cleanup. Imports invalidate after every
+attempted file write and again around the complete attempt so partial failures cannot escape.
+Project indexing invalidates even after a partial failure. Direct single-file and watcher file
+indexing invalidate even when a follow-up fails after the entity commit. Watcher index and delete
+completion callbacks finish their first post-event generation bump before cancellation can
+escape. Recovery phases invalidate independently before the serving barrier is released and
+include terminal conflict or failure publication.
 
 ## Dependency And Lifecycle
 
@@ -391,8 +396,10 @@ The real-Redis suite must prove:
 - cancellation after a real accepted-note, directory-delete, or per-file directory-move
   transaction commits cannot interrupt the real Redis generation bump, including repeated
   cancellation while invalidation is in progress;
-- cancellation after a real hosted read-repair transaction commits cannot interrupt the real
-  Redis generation bump;
+- cancellation during a real hosted read-repair transaction's commit exit cannot interrupt the
+  real Redis generation bump;
+- cancellation during watcher index or delete completion cannot interrupt the first real Redis
+  generation bump after the durable event;
 - real Redis no-eviction capacity failures bypass cache storage and cannot fail committed-write
   invalidation;
 - authoritative read exceptions propagate without populating the missed cache key;
@@ -443,8 +450,10 @@ semantics themselves are asserted only against the real Redis integration fixtur
   deletion both after acceptance commit and after cleanup/relation refresh.
 - Invalidate direct and watcher file indexing from failure-safe boundaries because entity commits
   precede some search and reconciliation follow-ups.
-- Invalidate hosted note-content read repair after it commits and before returning its repaired
-  entity or resource to the read-through helper; finish that bump before cancellation propagates.
+- Finish watcher index and delete completion invalidation before cancellation propagates from the
+  post-event callback.
+- Wrap hosted note-content read repair in cancellation-safe invalidation so cancellation during
+  transaction exit cannot skip the bump before a repaired entity or resource reaches read-through.
 - Invalidate pre-mutation content freshening even when a later accepted mutation is rejected or
   fails, because the freshening index may already have committed external file state.
 - Invalidate every imported file write before the next item, and retain whole-import invalidation

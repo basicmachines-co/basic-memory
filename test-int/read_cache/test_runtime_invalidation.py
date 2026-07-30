@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol, cast, override
+from typing import Literal, Protocol, cast, override
 
 import pytest
 from redis.asyncio import Redis
@@ -29,6 +29,7 @@ from basic_memory.index.local_project import (
     run_local_project_index,
 )
 from basic_memory.index.local_runtime import LocalInlineStorageEventResultRecorder
+from basic_memory.indexing.external_file_delete_runner import ExternalFileDeleteResult
 from basic_memory.indexing.change_planning import ChangeReport
 from basic_memory.indexing.directory_delete_runner import (
     DirectoryDeleteRuntime,
@@ -40,7 +41,7 @@ from basic_memory.indexing.file_batch_runner import (
     IndexFileBatchIndexer,
     IndexFileBatchReader,
 )
-from basic_memory.indexing.models import IndexInputFile
+from basic_memory.indexing.models import IndexFileJobResult, IndexFileJobStatus, IndexInputFile
 from basic_memory.indexing.project_index_maintenance import (
     InvalidatingProjectIndexBatchStore,
     ProjectIndexDeleteBatch,
@@ -74,7 +75,11 @@ from basic_memory.repository.note_content_repository import (
     AcceptedNoteContentWrite,
     NoteContentRepository,
 )
-from basic_memory.runtime.cleanup import RuntimeFileDeleteResult, RuntimeNoteFileDeleteJobRequest
+from basic_memory.runtime.cleanup import (
+    RuntimeExternalFileDeletePlan,
+    RuntimeFileDeleteResult,
+    RuntimeNoteFileDeleteJobRequest,
+)
 from basic_memory.runtime.jobs import (
     RuntimeIndexFileBatchJobRequest,
     RuntimeObservedIndexFile,
@@ -472,6 +477,101 @@ async def test_watcher_index_failure_invalidates_real_redis(
         redis_cache,
         project_external_id,
         request="watcher-index-failure",
+    )
+    assert generation_after != generation_before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("completion", ["index", "delete"])
+async def test_cancelled_watcher_completion_finishes_real_redis_invalidation(
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+    completion: Literal["index", "delete"],
+) -> None:
+    """Cancellation after a durable watcher event waits for invalidation."""
+    project_external_id = str(test_project.external_id)
+    generation_before = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request=f"cancelled-watcher-{completion}",
+    )
+    blocking_cache = BlockingInvalidationRedisReadCache(
+        client=redis_cache.client,
+        namespace=redis_cache.namespace,
+        prefix=redis_cache.prefix,
+    )
+    recorder = LocalInlineStorageEventResultRecorder(
+        project=ProjectRuntimeReference.from_project(test_project),
+        search_service=cast(LocalIndexSearchService, object()),
+        relation_cleanup_search_refresher=cast(
+            ProjectIndexMovedEntitySearchRefresher,
+            object(),
+        ),
+        relation_runtime=cast(RelationResolutionRuntime, object()),
+        index_embeddings=False,
+        read_cache=blocking_cache,
+    )
+
+    if completion == "index":
+        completion_call = recorder.index_file_completed(
+            _index_operation("notes/cancelled-index.md"),
+            IndexFileJobResult(
+                status=IndexFileJobStatus.processed,
+                reason="file indexed",
+                entity_id=42,
+            ),
+        )
+    else:
+        deleted_entity = Entity(
+            id=42,
+            project_id=test_project.id,
+            external_id="cancelled-watcher-delete",
+            title="Cancelled watcher delete",
+            permalink="notes/cancelled-watcher-delete",
+            note_type="note",
+            content_type="text/markdown",
+            file_path="notes/cancelled-delete.md",
+            checksum="cancelled-watcher-delete-checksum",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        completion_call = recorder.delete_file_completed(
+            RuntimeStorageEventOperation(
+                kind=RuntimeStorageEventOperationKind.delete_file,
+                storage_event=_move_event(
+                    STORAGE_OBJECT_DELETED_EVENT,
+                    deleted_entity.file_path,
+                ),
+                relative_path=deleted_entity.file_path,
+            ),
+            ExternalFileDeleteResult(
+                plan=RuntimeExternalFileDeletePlan.from_existing_entity(
+                    deleted_entity,
+                    file_path=deleted_entity.file_path,
+                    object_exists=False,
+                ),
+                entity_deleted=True,
+                deleted_entity=deleted_entity,
+            ),
+        )
+
+    completion_task = asyncio.create_task(completion_call)
+    async with asyncio.timeout(5):
+        await blocking_cache.invalidation_started.wait()
+    completion_task.cancel()
+    await asyncio.sleep(0)
+    completion_task.cancel()
+    await asyncio.sleep(0)
+    assert not completion_task.done()
+
+    blocking_cache.release_invalidation.set()
+    with pytest.raises(asyncio.CancelledError):
+        await completion_task
+
+    generation_after = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request=f"cancelled-watcher-{completion}",
     )
     assert generation_after != generation_before
 

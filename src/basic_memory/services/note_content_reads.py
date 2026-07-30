@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -17,7 +19,7 @@ from basic_memory.indexing.note_content_read_repair_runner import (
 from basic_memory.models import Entity, NoteContent, Project
 from basic_memory.read_cache import (
     ReadCacheInvalidator,
-    finish_project_read_cache_invalidation,
+    invalidate_cache,
 )
 from basic_memory.runtime.note_content import (
     RuntimeNoteContentResource,
@@ -110,14 +112,10 @@ class NoteContentQueryService:
             project_external_id=project_external_id,
             entity_external_id=entity_external_id,
             source=source,
+            read_cache=read_cache,
         )
         if not repaired:
             return None
-        if read_cache is not None:
-            # Read repair commits note_content before this method reloads the response.
-            # Advance the generation first so the surrounding read-through cannot
-            # publish the repaired payload under the pre-repair generation.
-            await finish_project_read_cache_invalidation(read_cache, project_external_id)
         # The repair commits through a separate scoped session, so reopen the read to
         # avoid stale snapshots in caller-owned transactions.
         return await self.get_note_entity_payload(
@@ -172,13 +170,10 @@ class NoteContentQueryService:
             project_external_id=project_external_id,
             entity_external_id=entity_external_id,
             source=source,
+            read_cache=read_cache,
         )
         if not repaired:
             return None
-        if read_cache is not None:
-            # A resource read can repair the row used by cached entity responses.
-            # Invalidate before returning the repaired resource to read-through.
-            await finish_project_read_cache_invalidation(read_cache, project_external_id)
         # The repair commits through a separate scoped session, so reopen the read to
         # avoid stale snapshots in caller-owned transactions.
         return await self.get_note_resource(
@@ -192,6 +187,7 @@ class NoteContentQueryService:
         project_external_id: str,
         entity_external_id: str,
         source: str,
+        read_cache: ReadCacheInvalidator | None = None,
     ) -> bool:
         """Repair a missing note_content row from the runtime's canonical file source."""
         async with db.scoped_session(self.session_maker) as session:
@@ -208,10 +204,19 @@ class NoteContentQueryService:
         if self.read_repair_file_reader is None:
             raise RuntimeError("note-content read repair requires a file reader")
 
-        repair_run = await run_note_content_read_repair_with_default_reconciler(
-            repair_preflight,
-            session_maker=self.session_maker,
-            file_reader=self.read_repair_file_reader,
-            source=source,
+        # The repair runner owns the transaction that may create note_content.
+        # Keep invalidation around that whole await so cancellation during commit
+        # exit still advances the cache generation before it propagates.
+        repair_scope = (
+            invalidate_cache(read_cache, project_external_id)
+            if read_cache is not None
+            else nullcontext()
         )
+        async with repair_scope:
+            repair_run = await run_note_content_read_repair_with_default_reconciler(
+                repair_preflight,
+                session_maker=self.session_maker,
+                file_reader=self.read_repair_file_reader,
+                source=source,
+            )
         return repair_run.repaired

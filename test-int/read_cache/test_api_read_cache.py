@@ -17,6 +17,7 @@ from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+import basic_memory.indexing.note_content_reconciler as note_content_reconciler
 import basic_memory.services.note_content_writes as note_content_writes
 from basic_memory import db
 from basic_memory.deps import (
@@ -772,8 +773,9 @@ async def test_cancelled_committed_read_repair_finishes_real_redis_invalidation(
     test_project: Project,
     redis_cache: RedisCacheHarness,
     read_method: Literal["entity", "resource"],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Cancellation after read-repair commit waits for invalidation."""
+    """Cancellation during read-repair transaction exit waits for invalidation."""
     project_external_id = str(test_project.external_id)
     file_path = "cache/cancelled-read-repair.md"
     markdown_content = "# Cancelled read repair\n\nCommitted canonical content.\n"
@@ -807,6 +809,34 @@ async def test_cancelled_committed_read_repair_finishes_real_redis_invalidation(
         project_external_id,
         request="cancelled-committed-read-repair",
     )
+    transaction_committed = asyncio.Event()
+    hold_after_commit = asyncio.Event()
+    original_scoped_session = note_content_reconciler.db.scoped_session
+
+    @asynccontextmanager
+    async def pause_after_repair_commit(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+        session: AsyncSession | None = None,
+    ) -> AsyncIterator[AsyncSession]:
+        async with original_scoped_session(scoped_session_maker, session) as scoped_session:
+            yield scoped_session
+        if transaction_committed.is_set():
+            return
+
+        async with original_scoped_session(scoped_session_maker) as verification_session:
+            repaired = await NoteContentRepository(project_id=test_project.id).get_by_entity_id(
+                verification_session,
+                entity.id,
+            )
+        if repaired is not None:
+            transaction_committed.set()
+            await hold_after_commit.wait()
+
+    monkeypatch.setattr(
+        note_content_reconciler.db,
+        "scoped_session",
+        pause_after_repair_commit,
+    )
 
     query_service = NoteContentQueryService(
         session_maker=session_maker,
@@ -827,9 +857,12 @@ async def test_cancelled_committed_read_repair_finishes_real_redis_invalidation(
     request_task = asyncio.create_task(read_repair)
 
     async with asyncio.timeout(5):
-        await blocking_cache.invalidation_started.wait()
+        await transaction_committed.wait()
     request_task.cancel()
-    await asyncio.sleep(0)
+    async with asyncio.timeout(5):
+        await blocking_cache.invalidation_started.wait()
+
+    # A second cancellation must not abandon the already-running generation bump.
     request_task.cancel()
     await asyncio.sleep(0)
     assert not request_task.done()
