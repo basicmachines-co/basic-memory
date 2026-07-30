@@ -29,6 +29,7 @@ from basic_memory.read_cache.keys import (
 )
 
 _ENVELOPE_SEPARATOR = b"\n"
+_DEFAULT_GENERATION_TTL_SECONDS = 60
 _REDIS_OPERATIONAL_ERRORS = (
     RedisClusterError,
     RedisConnectionError,
@@ -36,19 +37,26 @@ _REDIS_OPERATIONAL_ERRORS = (
     RedisResponseError,
     RedisTimeoutError,
 )
-_INITIALIZE_GENERATION_SCRIPT = """
+_LOOKUP_SCRIPT = """
 local generation = redis.call("GET", KEYS[1])
 if generation then
-    return generation
+    if redis.call("TTL", KEYS[1]) == -1 then
+        redis.call("EXPIRE", KEYS[1], ARGV[2])
+    end
+else
+    redis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[2])
 end
-redis.call("SET", KEYS[1], ARGV[1])
-return ARGV[1]
+return redis.call("MGET", KEYS[1], KEYS[2])
 """
 _STORE_IF_CURRENT_SCRIPT = """
 if redis.call("GET", KEYS[1]) ~= ARGV[1] then
     return 0
 end
 redis.call("SET", KEYS[2], ARGV[2], "EX", ARGV[3])
+local response_ttl_ms = tonumber(ARGV[3]) * 1000
+if redis.call("PTTL", KEYS[1]) < response_ttl_ms then
+    redis.call("PEXPIRE", KEYS[1], response_ttl_ms)
+end
 return 1
 """
 
@@ -111,13 +119,17 @@ class RedisReadCache:
         client: Redis,
         namespace: str,
         prefix: str = DEFAULT_READ_CACHE_PREFIX,
+        generation_ttl_seconds: int = _DEFAULT_GENERATION_TTL_SECONDS,
     ) -> None:
         namespace = namespace.strip()
         if not namespace:
             raise ValueError("read-cache namespace must not be empty")
+        if generation_ttl_seconds <= 0:
+            raise ValueError("read-cache generation_ttl_seconds must be positive")
         self._client = client
         self._namespace = namespace
         self._prefix = prefix
+        self._generation_ttl_seconds = generation_ttl_seconds
 
     def _keys(self, key: ReadCacheKey) -> RedisReadCacheKeys:
         return redis_read_cache_keys(
@@ -126,22 +138,17 @@ class RedisReadCache:
             key=key,
         )
 
-    async def _initialize_generation(self, generation_key: str) -> bytes:
-        token = uuid4().hex.encode("ascii")
-        generation = await self._client.eval(
-            _INITIALIZE_GENERATION_SCRIPT,
-            1,
-            generation_key,
-            token,
-        )
-        return _required_bytes(generation, field="generation")
-
     async def lookup(self, key: ReadCacheKey) -> ReadCacheLookup:
         keys = self._keys(key)
         try:
-            generation_value, cached_value = await self._client.mget([keys.generation, keys.data])
-            if generation_value is None:
-                generation_value = await self._initialize_generation(keys.generation)
+            generation_value, cached_value = await self._client.eval(
+                _LOOKUP_SCRIPT,
+                2,
+                keys.generation,
+                keys.data,
+                uuid4().hex.encode("ascii"),
+                self._generation_ttl_seconds,
+            )
         except _REDIS_OPERATIONAL_ERRORS as error:
             raise ReadCacheUnavailable("Redis cache lookup failed") from error
 
@@ -195,7 +202,11 @@ class RedisReadCache:
             project_id=project_id,
         )
         try:
-            await self._client.set(generation_key, uuid4().hex.encode("ascii"))
+            await self._client.set(
+                generation_key,
+                uuid4().hex.encode("ascii"),
+                ex=self._generation_ttl_seconds,
+            )
         except _REDIS_OPERATIONAL_ERRORS as error:
             raise ReadCacheUnavailable("Redis project invalidation failed") from error
         return ReadCacheInvalidationStatus.invalidated

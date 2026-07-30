@@ -185,7 +185,11 @@ Each value records the random generation token under which it was created:
 1. Read the generation and data key together.
 1. Accept the cached value only when its embedded generation matches.
 1. After a successful mutation commit, replace the generation with a new random token.
-1. Let unreachable entries expire; never scan or bulk-delete keys.
+1. Give generation metadata a bounded TTL, renew it to at least each stored response's remaining
+   lifetime, and reset that TTL on invalidation. A lookup also migrates a legacy persistent
+   generation key to a bounded TTL.
+1. Let unreachable entries and inactive-project generation metadata expire; never scan or
+   bulk-delete keys.
 
 Random tokens prevent an evicted generation key from returning to an old integer generation and
 reviving stale data. A read that fills after concurrent invalidation also remains safe because its
@@ -311,6 +315,8 @@ The real-Redis suite must prove:
 - project invalidation;
 - a fill that completes after invalidation is never served;
 - loss of the generation key cannot revive an older value;
+- generation metadata expires for inactive projects, including legacy persistent keys, and stores
+  keep it alive at least as long as their response data;
 - Redis restart or unavailability produces explicit bypass behavior;
 - no invalidation operation touches keys outside the Basic Memory prefix;
 - payload size limits;

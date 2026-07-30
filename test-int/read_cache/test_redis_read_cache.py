@@ -92,6 +92,69 @@ async def test_round_trip_and_ttl_expiry(redis_cache: RedisCacheHarness) -> None
 
 
 @pytest.mark.asyncio
+async def test_generation_metadata_expires_and_tracks_response_lifetime(
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """Inactive projects cannot leave permanent generation metadata in Redis."""
+    cache = RedisReadCache(
+        client=redis_cache.client,
+        namespace=redis_cache.namespace,
+        prefix=redis_cache.prefix,
+        generation_ttl_seconds=1,
+    )
+    long_lived_key = _key(request="long-lived-generation")
+    redis_keys = redis_read_cache_keys(
+        prefix=redis_cache.prefix,
+        namespace=redis_cache.namespace,
+        key=long_lived_key,
+    )
+
+    # Existing deployments may already have persistent generation keys. A
+    # lookup migrates them to bounded metadata without changing the token.
+    legacy_generation = b"0" * 32
+    await redis_cache.client.set(redis_keys.generation, legacy_generation)
+    lookup = await cache.lookup(long_lived_key)
+    assert lookup.generation == legacy_generation.decode("ascii")
+    assert await redis_cache.client.pttl(redis_keys.generation) > 0
+
+    stored = await cache.store(
+        long_lived_key,
+        lookup,
+        b"long-lived payload",
+        ttl_seconds=3,
+    )
+    generation_ttl = await redis_cache.client.pttl(redis_keys.generation)
+    data_ttl = await redis_cache.client.pttl(redis_keys.data)
+    assert stored is ReadCacheStoreStatus.stored
+    assert generation_ttl >= data_ttl > 2_000
+
+    short_lived_key = _key(request="short-lived-generation")
+    short_lookup = await cache.lookup(short_lived_key)
+    await cache.store(
+        short_lived_key,
+        short_lookup,
+        b"short-lived payload",
+        ttl_seconds=1,
+    )
+    assert await redis_cache.client.pttl(redis_keys.generation) > 2_000
+
+    generation_before_invalidation = await redis_cache.client.get(redis_keys.generation)
+    await cache.invalidate_project(PROJECT_ID)
+    generation_after_invalidation = await redis_cache.client.get(redis_keys.generation)
+    invalidated_ttl = await redis_cache.client.pttl(redis_keys.generation)
+    assert generation_before_invalidation is not None
+    assert isinstance(generation_after_invalidation, bytes)
+    assert generation_after_invalidation != generation_before_invalidation
+    assert 0 < invalidated_ttl <= 1_000
+
+    await asyncio.sleep(1.1)
+    assert not await redis_cache.client.exists(redis_keys.generation)
+    after_expiry = await cache.lookup(long_lived_key)
+    assert not after_expiry.is_hit
+    assert after_expiry.generation != generation_after_invalidation.decode("ascii")
+
+
+@pytest.mark.asyncio
 async def test_cache_identity_isolates_every_key_dimension(
     redis_cache: RedisCacheHarness,
 ) -> None:
@@ -648,6 +711,12 @@ async def test_invalid_store_inputs_fail_before_redis(
         RedisReadCache(client=redis_cache.client, namespace="")
     with pytest.raises(ValueError, match="namespace"):
         RedisReadCache(client=redis_cache.client, namespace=" ")
+    with pytest.raises(ValueError, match="generation_ttl_seconds"):
+        RedisReadCache(
+            client=redis_cache.client,
+            namespace="tenant",
+            generation_ttl_seconds=0,
+        )
     with pytest.raises(ValueError, match="project_id"):
         await redis_cache.cache.invalidate_project("")
 
