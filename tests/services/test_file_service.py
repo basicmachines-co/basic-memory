@@ -201,6 +201,30 @@ async def test_update_frontmatter_checksum_matches_windows_crlf_persisted_bytes(
 
 
 @pytest.mark.asyncio
+async def test_update_frontmatter_replaces_malformed_block_instead_of_stacking(
+    tmp_path: Path, file_service: FileService
+):
+    """A frontmatter block that fails to parse as YAML must be replaced, never
+    left in place with a second block prepended ahead of it (issue #1171)."""
+    test_path = tmp_path / "note.md"
+    # Colon inside an unquoted scalar makes this block detectable via fences
+    # (has_frontmatter -> True) but invalid YAML (parse_frontmatter -> raises).
+    test_path.write_text(
+        "---\ndescription: bad: value: shape\n---\n\n# Note\nBody\n",
+        encoding="utf-8",
+    )
+
+    result = await file_service.update_frontmatter_with_result(
+        test_path,
+        {"permalink": "test/note"},
+    )
+
+    assert result.content.count("---\n") == 2
+    assert "permalink: test/note" in result.content
+    assert "# Note\nBody" in result.content
+
+
+@pytest.mark.asyncio
 async def test_read_file_content(tmp_path: Path, file_service: FileService):
     """Test read_file_content returns just the content without checksum."""
     test_path = tmp_path / "test.md"

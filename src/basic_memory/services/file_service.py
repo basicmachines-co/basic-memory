@@ -481,15 +481,21 @@ class FileService:
             if file_utils.has_frontmatter(content):
                 try:
                     current_fm = file_utils.parse_frontmatter(content)
-                    content = file_utils.remove_frontmatter(content)
-                except (ParseError, yaml.YAMLError) as e:  # pragma: no cover
-                    # Log warning and treat as plain markdown without frontmatter
-                    logger.warning(  # pragma: no cover
+                except (ParseError, yaml.YAMLError) as e:
+                    # Malformed YAML in the existing block: fall through and replace
+                    # it below rather than merging into it.
+                    logger.warning(
                         f"Failed to parse YAML frontmatter in {full_path}: {e}. "
-                        "Treating file as plain markdown without frontmatter."
+                        "Replacing malformed frontmatter instead of merging into it."
                     )
-                    # Keep full content, treat as having no frontmatter
-                    current_fm = {}  # pragma: no cover
+                    current_fm = {}
+                # Trigger: an existing frontmatter block was detected, whether or not
+                # it parsed as valid YAML.
+                # Why: the writer must never emit a second `---` block ahead of the
+                # existing one — that silently shadows every field in it (issue #1171).
+                # Outcome: always strip the detected block from the body so the new
+                # block replaces it in place instead of stacking on top of it.
+                content = file_utils.remove_frontmatter(content)
 
             # Update frontmatter
             new_fm = {**current_fm, **updates}
