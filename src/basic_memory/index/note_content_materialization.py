@@ -641,33 +641,41 @@ class LocalNoteContentMaterializationProvider:
         if accepted.materialization is None:  # pragma: no cover - guarded by caller
             return accepted
         # The accepted-write invalidation runs before deferred materialization.
-        # Invalidate again after status publication and indexing so a read
-        # filled during that window cannot survive the terminal state.
-        invalidation_scope = (
+        # The outer boundary retires reads filled during later indexing.
+        final_invalidation_scope = (
             invalidate_cache(self.read_cache, self.project_external_id)
             if self.read_cache is not None
             else nullcontext()
         )
-        async with invalidation_scope:
+        async with final_invalidation_scope:
             storage = LocalNoteContentStorage(self.file_service)
             cleanup_enqueuer = InlineNoteFileDeleteEnqueuer(
                 storage,
                 vacate_clearer=RepositoryMoveVacateClearer(session_maker=self.session_maker),
             )
-            result = await run_note_materialization(
-                plan_note_materialization_job_request(accepted.materialization),
-                preflight=RepositoryNoteMaterializationPreflight(
-                    session_maker=self.session_maker,
-                ),
-                writer=ContentStoreNoteMaterializationFileWriter(storage),
-                publisher=RepositoryNoteMaterializationPublisher(
-                    session_maker=self.session_maker,
-                ),
-                status_publisher=RepositoryNoteMaterializationStatusPublisher(
-                    session_maker=self.session_maker,
-                ),
-                cleanup_enqueuer=cleanup_enqueuer,
+            # Materialization commits terminal status before indexing begins. Retire
+            # pending/writing reads at that commit instead of holding them for the
+            # potentially slow index operation.
+            publication_invalidation_scope = (
+                invalidate_cache(self.read_cache, self.project_external_id)
+                if self.read_cache is not None
+                else nullcontext()
             )
+            async with publication_invalidation_scope:
+                result = await run_note_materialization(
+                    plan_note_materialization_job_request(accepted.materialization),
+                    preflight=RepositoryNoteMaterializationPreflight(
+                        session_maker=self.session_maker,
+                    ),
+                    writer=ContentStoreNoteMaterializationFileWriter(storage),
+                    publisher=RepositoryNoteMaterializationPublisher(
+                        session_maker=self.session_maker,
+                    ),
+                    status_publisher=RepositoryNoteMaterializationStatusPublisher(
+                        session_maker=self.session_maker,
+                    ),
+                    cleanup_enqueuer=cleanup_enqueuer,
+                )
             if result.status is not RuntimeNoteMaterializationStatus.written:
                 return replace(
                     accepted,

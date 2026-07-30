@@ -84,9 +84,10 @@ tenant:
    reconciliation. Request-path invalidation alone is insufficient because a worker can update a
    cached entity after the request returns.
 1. Treat each asynchronous state transition as a separate freshness boundary. Invalidate after
-   the accepted-note transaction commits, again after terminal materialization/status publication
-   and indexing, and again after relation resolution completes. This prevents a read filled
-   between phases from surviving the later worker commit.
+   the accepted-note transaction commits, immediately after terminal materialization/status
+   publication before indexing begins, again after indexing, and again after relation resolution
+   completes. This prevents a read filled between phases from surviving the later worker commit
+   or remaining pending throughout a slow index.
 1. Make committed-mutation invalidation cancellation-safe. Accepted-note writes, directory
    deletion, and each file in a directory move can be cancelled after their database commit
    succeeds but before the transaction context returns. Finish the namespace-bound generation
@@ -325,6 +326,9 @@ escape between a commit and completion callback. Watcher index/delete completion
 a later generation bump before relation and search cleanup. Recovery phases invalidate
 independently before the serving barrier is released, include terminal conflict or failure
 publication, and finish their generation bump before startup cancellation propagates.
+Deferred accepted-note materialization similarly advances the generation immediately after
+terminal status publication, before potentially slow indexing, and retains the outer post-index
+bump.
 
 ## Dependency And Lifecycle
 
@@ -480,6 +484,8 @@ The real-Redis suite must prove:
   search index was being rebuilt;
 - startup recovery that publishes written, conflict, or failed materialization state invalidates
   before serving resumes;
+- accepted-note materialization advances the generation after terminal status publication while
+  a following index is still blocked, then advances it again after indexing;
 - cancellation after materialization or move-vacate recovery commits cannot interrupt the
   phase-specific real Redis generation bump;
 - project-index failures invalidate any earlier committed batches;
@@ -518,8 +524,9 @@ semantics themselves are asserted only against the real Redis integration fixtur
 
 - Inject a Basic Memory-specific Redis client and tenant namespace.
 - Derive that namespace from trusted request and worker context with one canonical function.
-- Invalidate after accepted-note commit, terminal materialization/indexing, storage events, and
-  relation-resolution workers using the same tenant namespace as the request path.
+- Invalidate after accepted-note commit, immediately after terminal materialization/status
+  publication before indexing, again after indexing, and after relation-resolution workers using
+  the same tenant namespace as the request path.
 - Invalidate watcher-detected paired moves at move completion, and invalidate any recovery or
   reconciliation attempt that can publish terminal state before releasing the serving barrier or
   resuming tenant traffic.

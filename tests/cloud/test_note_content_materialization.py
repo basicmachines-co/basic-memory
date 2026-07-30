@@ -312,7 +312,10 @@ async def test_local_materialization_defers_write_off_the_accept_path(
     # The write happens off the accept path via the bounded pool; drain to confirm.
     await pool.join()
     assert len(requests) == 1
-    assert read_cache.invalidated_project_ids == [PROJECT_EXTERNAL_ID]
+    assert read_cache.invalidated_project_ids == [
+        PROJECT_EXTERNAL_ID,
+        PROJECT_EXTERNAL_ID,
+    ]
     await pool.aclose()
 
 
@@ -388,7 +391,10 @@ async def test_local_materialization_schedules_relation_resolution_after_index(
 
     assert accepted.materialization is not None
     assert scheduled == [accepted.materialization.project_id]
-    assert read_cache.invalidated_project_ids == [PROJECT_EXTERNAL_ID]
+    assert read_cache.invalidated_project_ids == [
+        PROJECT_EXTERNAL_ID,
+        PROJECT_EXTERNAL_ID,
+    ]
 
 
 @pytest.mark.asyncio
