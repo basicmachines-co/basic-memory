@@ -75,12 +75,11 @@ async def recover_project_materializations(
     # FileService needs only base_path to write the accepted markdown bytes;
     # the markdown_processor/app_config are unused on the materialization path.
     file_service = FileService(Path(project.path))
-    project_external_id = str(project.external_id)
     # Recovery reports whether it published state only after its transaction-bearing
     # phase exits. Scope the whole phase so cancellation cannot land in that window;
     # a harmless generation bump after a no-op recovery is the correctness tradeoff.
     materialization_scope = (
-        invalidate_cache(read_cache, project_external_id)
+        invalidate_cache(read_cache, str(project.external_id))
         if read_cache is not None
         else nullcontext()
     )
@@ -104,7 +103,7 @@ async def recover_project_materializations(
         )
 
     vacate_scope = (
-        invalidate_cache(read_cache, project_external_id)
+        invalidate_cache(read_cache, str(project.external_id))
         if read_cache is not None
         else nullcontext()
     )
