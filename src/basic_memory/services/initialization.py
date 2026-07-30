@@ -6,6 +6,7 @@ to ensure consistent application startup across all entry points.
 
 import asyncio
 import os
+from contextlib import nullcontext
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -68,21 +69,31 @@ async def recover_project_materializations(
         recover_move_vacates,
         recover_stuck_materializations,
     )
-    from basic_memory.read_cache import invalidate_project_read_cache
+    from basic_memory.read_cache import invalidate_cache
     from basic_memory.services.file_service import FileService
 
     # FileService needs only base_path to write the accepted markdown bytes;
     # the markdown_processor/app_config are unused on the materialization path.
     file_service = FileService(Path(project.path))
-    try:
-        materialization_recovery = await recover_stuck_materializations(
-            session_maker=session_maker,
-            file_service=file_service,
-            project_id=project.id,
-        )
-    except Exception as e:  # pragma: no cover - defensive startup guard
-        logger.error(f"Error recovering stuck materializations for project {project.name}: {e}")
-        return
+    project_external_id = str(project.external_id)
+    # Recovery reports whether it published state only after its transaction-bearing
+    # phase exits. Scope the whole phase so cancellation cannot land in that window;
+    # a harmless generation bump after a no-op recovery is the correctness tradeoff.
+    materialization_scope = (
+        invalidate_cache(read_cache, project_external_id)
+        if read_cache is not None
+        else nullcontext()
+    )
+    async with materialization_scope:
+        try:
+            materialization_recovery = await recover_stuck_materializations(
+                session_maker=session_maker,
+                file_service=file_service,
+                project_id=project.id,
+            )
+        except Exception as e:  # pragma: no cover - defensive startup guard
+            logger.error(f"Error recovering stuck materializations for project {project.name}: {e}")
+            return
 
     if materialization_recovery.attempted:
         logger.info(
@@ -92,24 +103,21 @@ async def recover_project_materializations(
             recovered_materializations=materialization_recovery.written,
         )
 
-        # Redis can outlive the process that left this materialization unfinished.
-        # Invalidate this committed phase before move-vacate recovery begins; a
-        # later setup/query failure must not leave its published state cached.
-        if read_cache is not None:
-            await invalidate_project_read_cache(
-                read_cache,
-                str(project.external_id),
+    vacate_scope = (
+        invalidate_cache(read_cache, project_external_id)
+        if read_cache is not None
+        else nullcontext()
+    )
+    async with vacate_scope:
+        try:
+            recovered_vacates = await recover_move_vacates(
+                session_maker=session_maker,
+                file_service=file_service,
+                project_id=project.id,
             )
-
-    try:
-        recovered_vacates = await recover_move_vacates(
-            session_maker=session_maker,
-            file_service=file_service,
-            project_id=project.id,
-        )
-    except Exception as e:  # pragma: no cover - defensive startup guard
-        logger.error(f"Error recovering move vacates for project {project.name}: {e}")
-        return
+        except Exception as e:  # pragma: no cover - defensive startup guard
+            logger.error(f"Error recovering move vacates for project {project.name}: {e}")
+            return
 
     if not recovered_vacates:
         return
@@ -119,12 +127,6 @@ async def recover_project_materializations(
         project=project.name,
         recovered_move_vacates=recovered_vacates,
     )
-
-    if read_cache is not None:
-        await invalidate_project_read_cache(
-            read_cache,
-            str(project.external_id),
-        )
 
 
 async def initialize_database(app_config: BasicMemoryConfig) -> None:

@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Literal, Protocol, cast, override
 
@@ -79,6 +80,7 @@ from basic_memory.repository.note_content_repository import (
     AcceptedNoteContentWrite,
     NoteContentRepository,
 )
+from basic_memory.repository.note_file_vacate_repository import NoteFileVacateRepository
 from basic_memory.runtime.cleanup import (
     RuntimeExternalFileDeletePlan,
     RuntimeFileDeleteResult,
@@ -331,15 +333,20 @@ class BlockingInvalidationRedisReadCache(RedisReadCache):
         client: Redis,
         namespace: str,
         prefix: str,
+        block_on_call: int = 1,
     ) -> None:
         super().__init__(client=client, namespace=namespace, prefix=prefix)
+        self.block_on_call = block_on_call
+        self.invalidation_calls = 0
         self.invalidation_started = asyncio.Event()
         self.release_invalidation = asyncio.Event()
 
     @override
     async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
-        self.invalidation_started.set()
-        await self.release_invalidation.wait()
+        self.invalidation_calls += 1
+        if self.invalidation_calls == self.block_on_call:
+            self.invalidation_started.set()
+            await self.release_invalidation.wait()
         return await super().invalidate_project(project_id)
 
 
@@ -734,6 +741,144 @@ async def test_startup_materialization_recovery_invalidates_real_redis(
         request="startup-recovery",
     )
     assert generation_after != generation_before
+
+
+@pytest.mark.asyncio
+async def test_cancelled_startup_materialization_recovery_finishes_real_redis_invalidation(
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """Cancellation after recovery commits waits for the Redis generation bump."""
+    _, session_maker = engine_factory
+    project_external_id = str(test_project.external_id)
+    generation_before = await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="cancelled-startup-materialization-recovery",
+    )
+    entity = await _seed_recovery_note(
+        session_maker,
+        test_project,
+        title="Cancelled Startup Recovery",
+        file_path="notes/cancelled-startup-recovery.md",
+        markdown_content="# Recovered before cancellation\n",
+    )
+    blocking_cache = BlockingInvalidationRedisReadCache(
+        client=redis_cache.client,
+        namespace=redis_cache.namespace,
+        prefix=redis_cache.prefix,
+    )
+
+    recovery_task = asyncio.create_task(
+        recover_project_materializations(
+            test_project,
+            session_maker,
+            read_cache=blocking_cache,
+        )
+    )
+    async with asyncio.timeout(5):
+        await blocking_cache.invalidation_started.wait()
+
+    written = Path(test_project.path) / entity.file_path
+    assert written.read_text(encoding="utf-8") == "# Recovered before cancellation\n"
+    recovery_task.cancel()
+    await asyncio.sleep(0)
+    recovery_task.cancel()
+    await asyncio.sleep(0)
+    assert not recovery_task.done()
+
+    blocking_cache.release_invalidation.set()
+    with pytest.raises(asyncio.CancelledError):
+        await recovery_task
+
+    content_repository = NoteContentRepository(project_id=test_project.id)
+    async with db.scoped_session(session_maker) as session:
+        row = await content_repository.get_by_entity_id(session, entity.id)
+    assert row is not None
+    assert row.file_write_status == "synced"
+    generation_after = await _current_generation(redis_cache, project_external_id)
+    assert generation_after != generation_before
+
+
+@pytest.mark.asyncio
+async def test_cancelled_startup_move_vacate_recovery_finishes_real_redis_invalidation(
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """Cancellation after vacate cleanup commits waits for its own generation bump."""
+    _, session_maker = engine_factory
+    markdown_content = "# Moved before cancellation\n"
+    entity = await _seed_recovery_note(
+        session_maker,
+        test_project,
+        title="Cancelled Startup Vacate Recovery",
+        file_path="notes/cancelled-startup-vacate-recovery.md",
+        markdown_content=markdown_content,
+    )
+    await recover_project_materializations(
+        test_project,
+        session_maker,
+        read_cache=None,
+    )
+
+    source_relative = "old/cancelled-startup-vacate-recovery.md"
+    source = Path(test_project.path) / source_relative
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text(markdown_content, encoding="utf-8")
+    source_checksum = sha256(markdown_content.encode()).hexdigest()
+    vacate_repository = NoteFileVacateRepository(project_id=test_project.id)
+    async with db.scoped_session(session_maker) as session:
+        await vacate_repository.record_vacate(
+            session,
+            entity_id=entity.id,
+            file_path=source_relative,
+            file_checksum=source_checksum,
+        )
+
+    project_external_id = str(test_project.external_id)
+    await _initialized_generation(
+        redis_cache,
+        project_external_id,
+        request="cancelled-startup-vacate-recovery",
+    )
+    blocking_cache = BlockingInvalidationRedisReadCache(
+        client=redis_cache.client,
+        namespace=redis_cache.namespace,
+        prefix=redis_cache.prefix,
+        block_on_call=2,
+    )
+    recovery_task = asyncio.create_task(
+        recover_project_materializations(
+            test_project,
+            session_maker,
+            read_cache=blocking_cache,
+        )
+    )
+    async with asyncio.timeout(5):
+        await blocking_cache.invalidation_started.wait()
+
+    generation_before_vacate_invalidation = await _current_generation(
+        redis_cache,
+        project_external_id,
+    )
+    assert not source.exists()
+    async with db.scoped_session(session_maker) as session:
+        assert await vacate_repository.load_vacate_markers(session, [source_relative]) == {}
+
+    recovery_task.cancel()
+    await asyncio.sleep(0)
+    recovery_task.cancel()
+    await asyncio.sleep(0)
+    assert not recovery_task.done()
+
+    blocking_cache.release_invalidation.set()
+    with pytest.raises(asyncio.CancelledError):
+        await recovery_task
+
+    generation_after = await _current_generation(redis_cache, project_external_id)
+    assert generation_after != generation_before_vacate_invalidation
 
 
 @pytest.mark.asyncio

@@ -134,7 +134,9 @@ tenant:
    barrier or resuming tenant traffic. Treat materialization and move-vacate recovery as separate
    freshness phases: invalidate a completed first phase before starting the second so a later
    setup/query failure cannot skip the earlier generation bump. Terminal conflict and failure
-   publication count even when the recovery did not produce a written file.
+   publication count even when the recovery did not produce a written file. Put each
+   transaction-bearing phase inside a cancellation-safe invalidation scope so shutdown cannot
+   interrupt the generation bump after recovery commits.
 1. Keep `bm:read:v1` separate from rate-limit and Cloud control-plane prefixes, metrics,
    timeouts, and failure policies. The clients may target one Redis deployment, but a read-cache
    timeout must bypass while a rate-limit decision keeps its Cloud-owned security behavior.
@@ -316,7 +318,8 @@ partial failure. Direct single-file and watcher file indexing invalidate even wh
 fails after the entity commit. Watcher move batches invalidate after every commit, and watcher
 index/delete completion callbacks finish their first post-event generation bump before
 cancellation can escape. Recovery phases invalidate independently before the serving barrier is
-released and include terminal conflict or failure publication.
+released, include terminal conflict or failure publication, and finish their generation bump
+before startup cancellation propagates.
 
 ## Dependency And Lifecycle
 
@@ -416,6 +419,8 @@ The real-Redis suite must prove:
   search index was being rebuilt;
 - startup recovery that publishes written, conflict, or failed materialization state invalidates
   before serving resumes;
+- cancellation after materialization or move-vacate recovery commits cannot interrupt the
+  phase-specific real Redis generation bump;
 - project-index failures invalidate any earlier committed batches;
 - consecutive project-index move, delete, and inline file batches each advance the real Redis
   generation before the next batch begins;
@@ -479,7 +484,8 @@ semantics themselves are asserted only against the real Redis integration fixtur
   follow-ups.
 - Invalidate project-root path changes in a failure-safe boundary because the filesystem source
   can change while every cache identity remains stable.
-- Invalidate each startup recovery phase before beginning the next phase.
+- Put each startup recovery phase inside a cancellation-safe invalidation scope before beginning
+  the next phase.
 - Enable reads for a tenant only after every request, worker, partial-index, direct-index,
   read-repair, import, accepted-delete, move, and recovery boundary has namespace and invalidation
   parity.
