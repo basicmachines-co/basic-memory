@@ -61,8 +61,7 @@ invalidates the exact scope populated by the request path.
 
 ### Cloud host requirements
 
-Basic Memory Cloud must satisfy all of these requirements before enabling cached reads for a
-tenant:
+Basic Memory Cloud must satisfy all of these requirements when composing cached reads:
 
 1. Derive one stable namespace from authenticated Cloud context. The preferred value is the
    tenant UUID or workspace UUID already owned by Cloud. Project UUID alone is not a tenant
@@ -142,9 +141,10 @@ tenant:
 1. Keep `bm:read:v1` separate from rate-limit and Cloud control-plane prefixes, metrics,
    timeouts, and failure policies. The clients may target one Redis deployment, but a read-cache
    timeout must bypass while a rate-limit decision keeps its Cloud-owned security behavior.
-1. Enable reads only after request and worker invalidation use the same namespace in the target
-   environment. Roll out by tenant cohort, watch hit/bypass/invalidation outcomes and database
-   queries, then remove overlapping Cloud gateway response caches only after parity.
+1. Activate request reads and worker invalidation together in the same Cloud release, using the
+   same namespace function. The cache is fail-open and TTL-bounded, so do not add tenant cohorts,
+   shadow reads, or a second rollout switch; use integration coverage and cache telemetry to
+   verify the direct activation.
 1. Coordinate rolling deployments around the `bm:read:v1` payload/key contract. Bump the prefix
    for incompatible serialized response changes so mixed application versions never interpret
    one another's payloads with different schemas.
@@ -520,7 +520,7 @@ semantics themselves are asserted only against the real Redis integration fixtur
 - Wire project invalidation through accepted writes and indexing paths.
 - Add full-stack API, repeated `read_note`, and directory refresh integration coverage.
 
-### 3. Cloud rollout
+### 3. Cloud integration
 
 - Inject a Basic Memory-specific Redis client and tenant namespace.
 - Derive that namespace from trusted request and worker context with one canonical function.
@@ -564,11 +564,10 @@ semantics themselves are asserted only against the real Redis integration fixtur
   can change while every cache identity remains stable.
 - Put each startup recovery phase inside a cancellation-safe invalidation scope before beginning
   the next phase.
-- Enable reads for a tenant only after every request, worker, partial-index, direct-index,
-  read-repair, import, accepted-delete, move, and recovery boundary has namespace and invalidation
-  parity.
-- Start with shadow telemetry or a limited tenant cohort.
-- Compare hit rate, Redis latency, database query volume, and end-to-end tool latency.
+- Land request reads and the worker invalidation boundaries in one Cloud change, using the same
+  tenant namespace function everywhere.
+- Do not add shadow reads, tenant cohorts, or a cache-specific rollout switch. Observe hit rate,
+  Redis latency, database query volume, and end-to-end tool latency after direct activation.
 
 ### 4. Expand from evidence
 
