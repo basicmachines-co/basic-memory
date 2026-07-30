@@ -11,7 +11,6 @@ from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from docker.errors import DockerException
 from redis import Redis as SyncRedis
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
@@ -51,20 +50,16 @@ def redis_url() -> Generator[str]:
         yield configured_url
         return
 
+    # GitHub's Windows runners cannot start the Linux Redis image through testcontainers.
+    # A configured URL still runs the same real-server suite on Windows when one is available.
+    if os.name == "nt":
+        pytest.skip("Set BASIC_MEMORY_TEST_REDIS_URL to run real Redis tests on Windows")
+
     if shutil.which("docker") is None:
         pytest.skip("Docker is required for real Redis integration tests")
 
     image = os.environ.get("BASIC_MEMORY_TEST_REDIS_IMAGE", "redis:8.8-alpine")
-    try:
-        container = DockerContainer(image).with_exposed_ports(6379)
-    except DockerException:
-        # GitHub's Windows image includes the Docker CLI without a running daemon.
-        # Keep real Redis coverage on Linux CI while allowing Windows coverage to proceed.
-        if os.name == "nt":
-            pytest.skip("A Docker daemon is required for real Redis integration tests")
-        raise
-
-    with container:
+    with DockerContainer(image).with_exposed_ports(6379) as container:
         host = container.get_container_host_ip()
         port = container.get_exposed_port(6379)
         url = f"redis://{host}:{port}/0"
