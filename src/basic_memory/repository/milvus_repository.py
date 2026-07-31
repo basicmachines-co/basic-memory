@@ -239,6 +239,13 @@ class PyMilvusRepository:
             raise RuntimeError(
                 f"Milvus collection '{collection_name}' requires a COSINE index on 'embedding'."
             )
+        # Milvus Lite releases persisted collections when the owning process exits.
+        # Fresh CLI processes must load a compatible existing collection before any
+        # search, query, or orphan-reconciliation operation can use it.
+        self._client.load_collection(
+            collection_name=collection_name,
+            timeout=self._timeout,
+        )
         return dimensions
 
     def create_collection(self, collection_name: str, dimensions: int) -> bool:
