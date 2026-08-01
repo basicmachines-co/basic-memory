@@ -322,9 +322,18 @@ class EntityParser:
         if tags:
             metadata["tags"] = tags
 
-        # Parse content for observations and relations
+        # Raw extraction text is useful for retrieval but is untrusted semantic input.
+        # The ingestion contract sets this explicit opt-out so arbitrary PDF syntax cannot
+        # mint observations or relations before the bounded enrichment pass.
         entity_frontmatter = EntityFrontmatter(metadata=metadata)
-        entity_content = parse(post.content)
+        semantic_setting = metadata.get("bm_parse_semantics")
+        parse_semantics = not (
+            semantic_setting is False
+            or (isinstance(semantic_setting, str) and semantic_setting.lower() == "false")
+        )
+        entity_content = (
+            parse(post.content) if parse_semantics else EntityContent(content=post.content)
+        )
 
         # Canonical frontmatter timestamps describe note semantics. File times are
         # only compatibility fallbacks for notes that do not declare them.
