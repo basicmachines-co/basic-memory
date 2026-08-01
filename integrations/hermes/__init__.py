@@ -290,6 +290,47 @@ for _schema in TOOL_SCHEMAS:
 # ---------------------------------------------------------------------------
 
 
+# Variables that point a child process at the *parent's* Python installation.
+# Hermes ships its own interpreter (3.11 today) and exports these; `bm` is a
+# uv-managed 3.12+ tool with its own environment. A child that inherits them
+# resolves imports against Hermes's site-packages, which surfaces as a native
+# extension ABI failure rather than a missing package.
+#
+# `__PYVENV_LAUNCHER__` is included defensively: the macOS framework launcher
+# exports it to steer a child at a specific interpreter. We have not observed a
+# failure caused by it, unlike the other three.
+_PARENT_PYTHON_ENV_VARS = (
+    "PYTHONPATH",
+    "PYTHONHOME",
+    "VIRTUAL_ENV",
+    "__PYVENV_LAUNCHER__",
+)
+
+
+def _clean_child_env(env: dict[str, str] | None = None) -> dict[str, str]:
+    """
+    Copy of `env` (default: this process's environment) with the parent's
+    Python-interpreter variables removed.
+
+    Every external process this plugin spawns — `bm mcp`, `uv tool install`,
+    `bm project add` — runs under its own interpreter and must resolve its own
+    dependencies. Inheriting Hermes's `PYTHONPATH` makes it import Hermes's
+    site-packages instead, reported as:
+
+        ModuleNotFoundError: No module named 'pydantic_core._pydantic_core'
+
+    which is a compiled-extension mismatch between two Python versions, not a
+    missing dependency — so it is invisible to a `pip install` fix.
+
+    Everything else is preserved: the child still needs PATH, HOME, HTTP proxy
+    settings and credentials. An explicitly supplied `env` is sanitized too,
+    since the guarantee is about what the child receives, not about who
+    assembled it.
+    """
+    source = os.environ if env is None else env
+    return {k: v for k, v in source.items() if k not in _PARENT_PYTHON_ENV_VARS}
+
+
 def _bm_binary_path() -> str | None:
     """Find the bm CLI without making network calls. Used by is_available()."""
     candidates = [
@@ -336,6 +377,7 @@ def _install_bm_via_uv(timeout: float = 180.0) -> str | None:
             check=False,
             capture_output=True,
             timeout=timeout,
+            env=_clean_child_env(),
         )
     except Exception as e:
         logger.warning("basic-memory: `uv tool install basic-memory` failed: %s", e)
@@ -543,7 +585,9 @@ class _BmMcpActor:
 
     def __init__(self, server_argv: list[str], env: dict[str, str] | None = None):
         self._server_argv = list(server_argv)
-        self._env = dict(env) if env is not None else os.environ.copy()
+        # Sanitized so `bm mcp` resolves imports against its own interpreter,
+        # not Hermes's — see _clean_child_env.
+        self._env = _clean_child_env(env)
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._session: "ClientSession" | None = None
@@ -996,6 +1040,7 @@ class BasicMemoryProvider(MemoryProvider):
                 check=False,
                 capture_output=True,
                 timeout=15,
+                env=_clean_child_env(),
             )
         except Exception as e:
             logger.debug("bm project add: %s", e)
