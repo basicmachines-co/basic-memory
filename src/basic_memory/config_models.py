@@ -238,6 +238,11 @@ class BasicMemoryConfig(BaseSettings):
         description="Database connection URL. For Postgres, use postgresql+asyncpg://user:pass@host:port/db. If not set, SQLite will use default path.",
     )
 
+    redis_url: Optional[str] = Field(
+        default=None,
+        description="Optional Redis URL for standalone MCP read caching. Bare hostnames are accepted.",
+    )
+
     # Semantic search configuration
     semantic_search_enabled: bool = Field(
         default_factory=_default_semantic_search_enabled,

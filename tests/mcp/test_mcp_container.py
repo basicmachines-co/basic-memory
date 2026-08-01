@@ -18,6 +18,7 @@ class TestMcpContainer:
         container = McpContainer(config=app_config, mode=RuntimeMode.LOCAL)
         assert container.config == app_config
         assert container.mode == RuntimeMode.LOCAL
+        assert container.read_cache is None
 
     def test_should_watch_files_when_enabled_local_mode(self, app_config):
         """Local watching should be enabled in local mode when config says so."""

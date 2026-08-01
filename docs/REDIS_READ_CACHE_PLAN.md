@@ -339,10 +339,15 @@ an optional package extra. A host may instead supply a compatible, already-owned
 
 The Core `ApiContainer` carries `ReadCache | None` and defaults to `None`. A managed host
 activates caching by injecting or dependency-overriding a namespace-bound implementation and owns
-that client's lifecycle; Cloud therefore reuses its long-lived Basic Memory cache client. Local
-CLI, MCP in-process ASGI routing, and the standalone API simply skip cache work in the first
-rollout. A later standalone Redis setting can create and close a client in the FastAPI lifespan
-without changing the cache contract.
+that client's lifecycle; Cloud therefore reuses its long-lived Basic Memory cache client.
+
+Standalone `bm mcp` activates the cache when `BASIC_MEMORY_REDIS_URL` is set. A bare hostname such
+as `redis` is normalized to `redis://redis`; complete `redis://` and `rediss://` URLs are preserved.
+The MCP lifespan owns one async client and shares its namespace-bound cache with both in-process
+FastAPI requests and watcher/index invalidation, then closes the client after those paths shut
+down. When the variable is absent, the dependency remains `None` and callers take only the
+authoritative path. Cloud runtime mode ignores this standalone setting because Cloud injects a
+separately owned cache using its trusted tenant namespace.
 
 `get_read_cache` is the host override point and returns `ReadCache | None`. Core-owned,
 route-specific FastAPI providers call `create_model_read_cache` to return a correctly typed facade
@@ -352,6 +357,11 @@ optional backend or narrower invalidation capability; they do not depend on Fast
 The FastAPI Redis SDK is not the foundational dependency for this work. The cache contract must
 also participate in portable indexing and hosted storage-event invalidation, and Basic Memory's
 local ASGI transport does not run FastAPI lifespan.
+
+The end-to-end MCP benchmark is documented in
+[`benchmarks/docs/read-load-benchmark.md`](../benchmarks/docs/read-load-benchmark.md). It removes
+ambient Redis configuration for the authoritative run and sets `BASIC_MEMORY_REDIS_URL` only for
+the warmed-cache run, so both cases exercise the same `bm mcp` process boundary.
 
 ## Cloud Production Calibration
 
@@ -441,7 +451,7 @@ Redis URL.
 Run the focused suite with:
 
 ```bash
-LOGFIRE_IGNORE_NO_CONFIG=1 uv run pytest -p pytest_mock --no-cov -q test-int/read_cache
+just test-read-cache
 ```
 
 `BASIC_MEMORY_TEST_REDIS_URL` selects an externally managed test server. Otherwise the fixture

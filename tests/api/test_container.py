@@ -1,6 +1,6 @@
 """Tests for the API container composition root."""
 
-from basic_memory.api.container import ApiContainer
+from basic_memory.api.container import ApiContainer, installed_container, resolve_container
 from basic_memory.runtime.mode import RuntimeMode
 
 
@@ -32,3 +32,17 @@ class TestApiContainerWatchGating:
         container = ApiContainer(config=app_config, mode=RuntimeMode.CLOUD)
         assert container.should_watch_files is False
         assert container.watch_skip_reason == "Cloud mode enabled"
+
+
+def test_installed_container_restores_previous_container(app_config, monkeypatch):
+    """Off-lifespan hosts can expose dependencies without replacing API ownership."""
+    import basic_memory.api.container as container_module
+
+    previous = ApiContainer(config=app_config, mode=RuntimeMode.LOCAL)
+    current = ApiContainer(config=app_config, mode=RuntimeMode.TEST)
+    monkeypatch.setattr(container_module, "_container", previous)
+
+    with installed_container(current):
+        assert resolve_container() is current
+
+    assert resolve_container() is previous

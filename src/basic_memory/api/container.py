@@ -10,6 +10,8 @@ Design principles:
 - Factories for services are provided, not singletons
 """
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -41,8 +43,8 @@ class ApiContainer:
     session_maker: async_sessionmaker[AsyncSession] | None = None
 
     # --- Optional semantic read cache ---
-    # Hosts inject a namespace-bound implementation; local and off-lifespan
-    # ASGI requests deliberately stay dependency-free by default.
+    # Hosts inject a namespace-bound implementation. Standalone MCP may install
+    # one for its in-process ASGI path; unconfigured callers receive None.
     read_cache: ReadCache | None = None
 
     @classmethod
@@ -155,3 +157,15 @@ def set_container(container: ApiContainer) -> None:
     """Set the API container (called by lifespan)."""
     global _container
     _container = container
+
+
+@contextmanager
+def installed_container(container: ApiContainer) -> Iterator[None]:
+    """Temporarily expose a container to off-lifespan ASGI requests."""
+    global _container
+    previous = _container
+    _container = container
+    try:
+        yield
+    finally:
+        _container = previous

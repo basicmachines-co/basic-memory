@@ -103,6 +103,11 @@ testmon-status:
 test-smoke:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m smoke test-int/mcp/test_smoke_integration.py
 
+# Run the complete semantic read-cache suite against a real Redis server.
+# BASIC_MEMORY_TEST_REDIS_URL may select an existing server; otherwise testcontainers owns one.
+test-read-cache:
+    BASIC_MEMORY_ENV=test LOGFIRE_IGNORE_NO_CONFIG=1 uv run pytest -p pytest_mock --no-cov -q test-int/read_cache
+
 # Fast static check: auto-fix lint, format, and typecheck, but do not run tests.
 fast-check:
     just fix
@@ -402,6 +407,25 @@ semantic-report *args:
 #   just benchmark-compare .benchmarks/search-baseline.jsonl .benchmarks/search-candidate.jsonl --format markdown --show-missing
 benchmark-compare baseline candidate *args:
     uv run python test-int/compare_search_benchmarks.py "{{baseline}}" "{{candidate}}" --format table {{args}}
+
+# Run one MCP read-load sweep. An empty Redis URL is the authoritative baseline.
+bench-read-load label="authoritative" redis_url="":
+    uv run python benchmarks/scripts/read_load_bench.py \
+        --bm-command .venv/bin/basic-memory \
+        --label "{{label}}" \
+        --redis-url "{{redis_url}}" \
+        --scratch ".scratch/read-load-{{label}}" \
+        --output ".scratch/read-load-{{label}}.jsonl" \
+        --truncate
+
+# Run adjacent authoritative and warmed-Redis sweeps, then print their comparison.
+bench-read-cache redis_url="redis://127.0.0.1:6379/0" run_id="latest":
+    just bench-read-load "authoritative-{{run_id}}"
+    just bench-read-load "redis-warm-{{run_id}}" "{{redis_url}}"
+    uv run python test-int/compare_search_benchmarks.py \
+        ".scratch/read-load-authoritative-{{run_id}}.jsonl" \
+        ".scratch/read-load-redis-warm-{{run_id}}.jsonl" \
+        --format markdown
 
 # Run all tests including Windows, Postgres, and Benchmarks (for CI/comprehensive testing)
 # Use this before releasing to ensure everything works across all backends and platforms

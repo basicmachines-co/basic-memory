@@ -11,12 +11,14 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
 from basic_memory import db
+from basic_memory.api.container import ApiContainer, installed_container
 from basic_memory.cli.auth import CLIAuth
 from basic_memory.index.note_content_materialization import drain_pending_materializations
 from basic_memory.db import scoped_session
 from basic_memory.index.local_schedulers import drain_background_tasks
 from basic_memory.mcp.client_info import MCPClientInfoMiddleware
 from basic_memory.mcp.container import McpContainer, set_container
+from basic_memory.read_cache.lifecycle import open_redis_read_cache
 from basic_memory.services.initialization import initialize_app
 import logfire
 
@@ -63,95 +65,105 @@ async def lifespan(app: FastMCP):
     # --- Composition Root ---
     # Create container and read config (single point of config access)
     container = McpContainer.create()
-    set_container(container)
-
     config = container.config
-    with logfire.span(
-        "mcp.lifecycle.startup",
-        entrypoint="mcp",
-        mode=container.mode.name.lower(),
-        default_project=config.default_project,
-    ):
-        logger.info(f"Starting Basic Memory MCP server (mode={container.mode.name})")
-        logger.info(
-            f"Config: database_backend={config.database_backend.value}, "
-            f"semantic_search_enabled={config.semantic_search_enabled}, "
-            f"default_project={config.default_project}"
-        )
-        if config.semantic_search_enabled:
-            logger.info(
-                f"Semantic search: provider={config.semantic_embedding_provider}, "
-                f"model={config.semantic_embedding_model}, "
-                f"dimensions={config.semantic_embedding_dimensions or 'auto'}, "
-                f"batch_size={config.semantic_embedding_batch_size}, "
-                f"document_prefix_set={bool(config.semantic_embedding_document_prefix)}, "
-                f"query_prefix_set={bool(config.semantic_embedding_query_prefix)}"
-            )
+    standalone_redis_url = None if container.mode.is_cloud else config.redis_url
 
-        # Log configured projects with their routing mode
-        for name, entry in config.projects.items():
-            default = " (default)" if name == config.default_project else ""
-            logger.info(f"Project: {name} -> {entry.path} [mode={entry.mode.value}]{default}")
+    async with open_redis_read_cache(standalone_redis_url) as read_cache:
+        container.read_cache = read_cache
+        set_container(container)
+        api_container = ApiContainer(config=config, mode=container.mode, read_cache=read_cache)
 
-        # Check cloud auth status (local file check, no network call)
-        auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
-        tokens = auth.load_tokens()
-        if tokens is not None:
-            if not auth.is_token_valid(tokens):
-                expires_at = tokens.get("expires_at", 0)
-                expired_ago = int(time.time() - expires_at)
-                logger.warning(
-                    f"Cloud token expired {expired_ago}s ago - may need 'bm cloud login'"
+        # Local MCP requests use FastAPI through ASGITransport without entering its lifespan.
+        # Installing the same container keeps request reads and watcher invalidation on one cache.
+        with installed_container(api_container):
+            with logfire.span(
+                "mcp.lifecycle.startup",
+                entrypoint="mcp",
+                mode=container.mode.name.lower(),
+                default_project=config.default_project,
+            ):
+                logger.info(f"Starting Basic Memory MCP server (mode={container.mode.name})")
+                logger.info(
+                    f"Config: database_backend={config.database_backend.value}, "
+                    f"semantic_search_enabled={config.semantic_search_enabled}, "
+                    f"default_project={config.default_project}"
                 )
-            else:
-                logger.info("Cloud: authenticated (OAuth token valid)")
+                if config.semantic_search_enabled:
+                    logger.info(
+                        f"Semantic search: provider={config.semantic_embedding_provider}, "
+                        f"model={config.semantic_embedding_model}, "
+                        f"dimensions={config.semantic_embedding_dimensions or 'auto'}, "
+                        f"batch_size={config.semantic_embedding_batch_size}, "
+                        f"document_prefix_set={bool(config.semantic_embedding_document_prefix)}, "
+                        f"query_prefix_set={bool(config.semantic_embedding_query_prefix)}"
+                    )
 
-        if config.cloud_api_key:
-            logger.info("Cloud: API key configured")
+                # Log configured projects with their routing mode
+                for name, entry in config.projects.items():
+                    default = " (default)" if name == config.default_project else ""
+                    logger.info(
+                        f"Project: {name} -> {entry.path} [mode={entry.mode.value}]{default}"
+                    )
 
-        # Track if we created the engine (vs test fixtures providing it)
-        # This prevents disposing an engine provided by test fixtures when
-        # multiple Client connections are made in the same test
-        engine_was_none = db._engine is None
+                # Check cloud auth status (local file check, no network call)
+                auth = CLIAuth(client_id=config.cloud_client_id, authkit_domain=config.cloud_domain)
+                tokens = auth.load_tokens()
+                if tokens is not None:
+                    if not auth.is_token_valid(tokens):
+                        expires_at = tokens.get("expires_at", 0)
+                        expired_ago = int(time.time() - expires_at)
+                        logger.warning(
+                            f"Cloud token expired {expired_ago}s ago - may need 'bm cloud login'"
+                        )
+                    else:
+                        logger.info("Cloud: authenticated (OAuth token valid)")
 
-        # Initialize app (runs migrations, reconciles projects)
-        await initialize_app(container.config)
+                if config.cloud_api_key:
+                    logger.info("Cloud: API key configured")
 
-        # Log embedding status so it's easy to spot in the logs
-        if config.semantic_search_enabled and db._session_maker is not None:
-            await _log_embedding_status(db._session_maker)
+                # Track if we created the engine (vs test fixtures providing it)
+                # This prevents disposing an engine provided by test fixtures when
+                # multiple Client connections are made in the same test
+                engine_was_none = db._engine is None
 
-        # Create and start local watch coordinator (lifecycle centralized in coordinator)
-        watch_coordinator = container.create_watch_coordinator()
-        await watch_coordinator.start()
+                # Initialize app (runs migrations, reconciles projects)
+                await initialize_app(container.config)
 
-    try:
-        yield
-    finally:
-        # Shutdown - coordinator handles clean task cancellation
-        with logfire.span(
-            "mcp.lifecycle.shutdown",
-            entrypoint="mcp",
-            mode=container.mode.name.lower(),
-        ):
-            logger.debug("Shutting down Basic Memory MCP server")
+                # Log embedding status so it's easy to spot in the logs
+                if config.semantic_search_enabled and db._session_maker is not None:
+                    await _log_embedding_status(db._session_maker)
 
-            await watch_coordinator.stop()
+                # Create and start local watch coordinator (lifecycle centralized in coordinator)
+                watch_coordinator = container.create_watch_coordinator()
+                await watch_coordinator.start()
 
-            # A local note write returns 202 before its markdown file is written;
-            # shutdown can land while that materialization (and the vector sync /
-            # relation resolution it schedules) is still queued in the in-process
-            # pool. Drain both queues before the engine closes so an accepted
-            # write is never lost — mirrors the API lifespan shutdown.
-            await drain_pending_materializations()
-            await drain_background_tasks()
+            try:
+                yield
+            finally:
+                # Shutdown - coordinator handles clean task cancellation
+                with logfire.span(
+                    "mcp.lifecycle.shutdown",
+                    entrypoint="mcp",
+                    mode=container.mode.name.lower(),
+                ):
+                    logger.debug("Shutting down Basic Memory MCP server")
 
-            # Only shutdown DB if we created it (not if test fixture provided it)
-            if engine_was_none:
-                await db.shutdown_db()
-                logger.debug("Database connections closed")
-            else:  # pragma: no cover
-                logger.debug("Skipping DB shutdown - engine provided externally")
+                    await watch_coordinator.stop()
+
+                    # A local note write returns 202 before its markdown file is written;
+                    # shutdown can land while that materialization (and the vector sync /
+                    # relation resolution it schedules) is still queued in the in-process
+                    # pool. Drain both queues before the engine closes so an accepted
+                    # write is never lost — mirrors the API lifespan shutdown.
+                    await drain_pending_materializations()
+                    await drain_background_tasks()
+
+                    # Only shutdown DB if we created it (not if test fixture provided it)
+                    if engine_was_none:
+                        await db.shutdown_db()
+                        logger.debug("Database connections closed")
+                    else:  # pragma: no cover
+                        logger.debug("Skipping DB shutdown - engine provided externally")
 
 
 # A newly-connected model only sees the server `instructions` for free — everything else

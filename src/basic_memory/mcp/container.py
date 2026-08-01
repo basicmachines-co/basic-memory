@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from basic_memory.config import BasicMemoryConfig, ConfigManager
+from basic_memory.read_cache import ReadCache
 from basic_memory.runtime.mode import RuntimeMode, resolve_runtime_mode
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -30,6 +31,7 @@ class McpContainer:
 
     config: BasicMemoryConfig
     mode: RuntimeMode
+    read_cache: ReadCache | None = None
 
     @classmethod
     def create(cls) -> "McpContainer":
@@ -83,6 +85,7 @@ class McpContainer:
             config=self.config,
             should_watch=self.should_watch_files,
             skip_reason=self.watch_skip_reason,
+            read_cache=self.read_cache,
         )
 
 
