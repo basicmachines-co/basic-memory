@@ -327,6 +327,26 @@ def test_config_list_redacts_reranker_credentials(runner, write_config):
     )
 
 
+def test_config_get_and_list_redact_redis_credentials(runner, write_config):
+    redis_url = (
+        "redis://cache-user:cache-password@redis.internal:6379/0?password=query-secret&timeout=30"
+    )
+    write_config(_base_config(redis_url=redis_url))
+
+    get_result = runner.invoke(app, ["config", "get", "redis_url"])
+    list_result = runner.invoke(app, ["config", "list", "--json"])
+
+    assert get_result.exit_code == 0, get_result.output
+    assert list_result.exit_code == 0, list_result.output
+    for secret in ("cache-user", "cache-password", "query-secret"):
+        assert secret not in get_result.output
+        assert secret not in list_result.output
+    rows = {row["key"]: row for row in json.loads(list_result.output)}
+    expected = "redis://***@redis.internal:6379/0?password=%2A%2A%2A&timeout=30"
+    assert get_result.output.split("redis_url = ", 1)[1].strip() == expected
+    assert rows["redis_url"]["value"] == expected
+
+
 def test_config_set_never_prints_reranker_api_key(runner, write_config):
     config_file = write_config(_base_config())
 

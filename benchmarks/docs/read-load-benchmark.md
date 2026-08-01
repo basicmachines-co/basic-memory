@@ -11,7 +11,9 @@ the standalone Redis read cache is warmed.
 - 128 measured reads at concurrency 1, 8, 32, and 64;
 - corpus materialization, indexing, connection setup, and cache warmup outside measurement;
 - isolated Basic Memory config, database, project, and home directories for every run;
-- JSONL output with p50, p95, p99, throughput, response bandwidth, errors, and workload metadata.
+- JSONL output with p50, p95, p99, throughput, response bandwidth, errors, and workload metadata;
+- a `manifest.json` beside each result with benchmark and Basic Memory SHAs, provider versions,
+  dirty-worktree state, synthetic-corpus checksum, and runtime configuration.
 
 The uncached run removes any inherited `BASIC_MEMORY_REDIS_URL`. The cached run sets it only in
 the spawned MCP process. Output records whether Redis was enabled without recording the URL,
@@ -27,12 +29,16 @@ of the measurement.
 just bench-read-cache redis://127.0.0.1:6379/0 run-01
 ```
 
-The recipe writes `.scratch/read-load-authoritative-run-01.jsonl` and
-`.scratch/read-load-redis-warm-run-01.jsonl`, then prints the Markdown comparison. Give each
-repetition a distinct run ID so its workload and JSONL artifacts remain available. Use
+The recipe writes each side's `results.jsonl` and `manifest.json` under
+`.scratch/read-load-{authoritative,redis-warm}-run-01/`, then prints the Markdown comparison. Give
+each repetition a distinct run ID so its corpus, results, and provenance remain available. Use
 `just bench-read-load <label> [redis_url]` when running one side independently.
+
+Use `just bench-read-smoke [redis_url]` for a tiny real-MCP run that verifies result and manifest
+generation before committing to the full matrix.
 
 Latency is evidence, not a CI threshold. Use at least six paired repetitions before making a
 performance claim, alternate run order, and discard runs with material host contention. The
+manifest must report clean benchmark and Basic Memory worktrees for a publishable comparison. The
 real-Redis integration suite remains the correctness gate for cache identity and invalidation.
 Run that gate with `just test-read-cache`.

@@ -24,6 +24,7 @@ URL_FIELDS = frozenset(
     {
         "database_url",
         "milvus_uri",
+        "redis_url",
         "reranker_api_base",
         "semantic_embedding_api_base",
     }

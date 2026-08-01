@@ -16,17 +16,22 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
+import platform
 import random
 import shutil
 import sqlite3
+import subprocess
+import sys
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import urlparse
 
 from mcp.client.session import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
@@ -51,7 +56,11 @@ class PostgresContainer(Protocol):
 
     def stop(self) -> None: ...
 
-    def get_connection_url(self) -> str: ...
+    def get_connection_url(
+        self,
+        host: str | None = None,
+        driver: str | None = None,
+    ) -> str: ...
 
 
 # --- Synthetic corpus ------------------------------------------------------
@@ -106,6 +115,166 @@ def emit(output_path: Path | None, record: dict[str, object]) -> None:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with output_path.open("a", encoding="utf-8") as handle:
             handle.write(line + "\n")
+
+
+def checked_output(command: list[str], *, env: dict[str, str] | None = None) -> str:
+    """Run a provenance command and require one non-empty output value."""
+    try:
+        result = subprocess.run(
+            command,
+            check=True,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise RuntimeError(f"provenance command failed: {command[0]}") from error
+    output = result.stdout.strip()
+    if not output:
+        raise RuntimeError(f"provenance command returned no output: {command[0]}")
+    return output
+
+
+def git_root(path: Path) -> Path:
+    """Find the repository that owns a benchmark executable or source file."""
+    start = path if path.is_dir() else path.parent
+    for candidate in (start, *start.parents):
+        if (candidate / ".git").exists():
+            return candidate
+    raise RuntimeError(f"could not resolve a Git repository for {path}")
+
+
+def git_sha(repo_root: Path) -> str:
+    return checked_output(["git", "-C", str(repo_root), "rev-parse", "HEAD"])
+
+
+def git_is_dirty(repo_root: Path) -> bool:
+    """Record whether the resolved SHA has uncommitted differences."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), "status", "--porcelain"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise RuntimeError("could not inspect benchmark Git state") from error
+    return bool(result.stdout.strip())
+
+
+def git_source(repo_root: Path) -> str:
+    """Return a credential-free repository source identifier."""
+    try:
+        remote = checked_output(["git", "-C", str(repo_root), "remote", "get-url", "origin"])
+    except RuntimeError:
+        return f"local:{repo_root.name}"
+
+    if remote.startswith("git@") and ":" in remote:
+        host, path = remote.split("@", 1)[1].split(":", 1)
+        return f"git:{host}/{path.removesuffix('.git')}"
+    if "://" in remote:
+        parsed = urlparse(remote)
+        if parsed.hostname:
+            return f"git:{parsed.hostname}{parsed.path.removesuffix('.git')}"
+    return f"local:{repo_root.name}"
+
+
+def synthetic_corpus_checksum(*, sizes: list[int], notes_per_size: int) -> str:
+    """Hash the exact deterministic corpus with unambiguous value boundaries."""
+    digest = hashlib.sha256()
+    for size_bytes in sizes:
+        for index in range(notes_per_size):
+            for value in synthetic_read_note(size_bytes, index):
+                encoded = value.encode("utf-8")
+                digest.update(len(encoded).to_bytes(8, "big"))
+                digest.update(encoded)
+    return digest.hexdigest()
+
+
+async def redis_server_version(redis_url: str) -> str:
+    """Read Redis server provenance without persisting its credential-bearing URL."""
+    from redis.asyncio import Redis
+
+    connection_url = redis_url if "://" in redis_url else f"redis://{redis_url}"
+    client = Redis.from_url(connection_url, decode_responses=True)
+    try:
+        server = await client.info(section="server")
+    finally:
+        await client.aclose()
+    version = server.get("redis_version")
+    if not isinstance(version, str) or not version:
+        raise RuntimeError("Redis did not report its server version")
+    return version
+
+
+def write_manifest(
+    *,
+    scratch: Path,
+    args: argparse.Namespace,
+    env: dict[str, str],
+    sizes: list[int],
+    concurrency_levels: list[int],
+    redis_version: str | None,
+) -> None:
+    """Write the provenance required to reproduce and interpret one run."""
+    command_path = Path(shutil.which(args.bm_command) or "").resolve()
+    if not command_path.is_file():
+        raise RuntimeError(f"could not resolve Basic Memory command: {args.bm_command}")
+    bm_repo_root = git_root(command_path)
+    benchmark_repo_root = git_root(Path(__file__).resolve())
+    try:
+        command_source = str(command_path.relative_to(bm_repo_root))
+    except ValueError:
+        command_source = command_path.name
+
+    provider_versions = {
+        "basic-memory": {
+            "command": command_source,
+            "version": checked_output([str(command_path), "--version"], env=env),
+        }
+    }
+    if redis_version is not None:
+        provider_versions["redis"] = {"version": redis_version}
+
+    manifest = {
+        "schema_version": 1,
+        "run_id": args.label,
+        "created_at_utc": datetime.now(UTC).isoformat(),
+        "benchmark_source": git_source(benchmark_repo_root),
+        "benchmark_git_sha": git_sha(benchmark_repo_root),
+        "benchmark_git_dirty": git_is_dirty(benchmark_repo_root),
+        "bm_source": git_source(bm_repo_root),
+        "bm_resolved_sha": git_sha(bm_repo_root),
+        "bm_git_dirty": git_is_dirty(bm_repo_root),
+        "provider_versions": provider_versions,
+        "dataset": {
+            "source": "synthetic:read-load-v1",
+            "checksum_sha256": synthetic_corpus_checksum(
+                sizes=sizes,
+                notes_per_size=args.notes_per_size,
+            ),
+            "sizes_bytes": sizes,
+            "notes_per_size": args.notes_per_size,
+        },
+        "runtime": {
+            "os": platform.platform(),
+            "python_version": sys.version.split()[0],
+            "backend": args.backend,
+            "redis_read_cache_enabled": redis_version is not None,
+        },
+        "config": {
+            "reads_per_scenario": args.reads,
+            "concurrency_levels": concurrency_levels,
+            "seed_concurrency": args.seed_concurrency,
+            "seed": args.seed,
+            "ready_timeout_seconds": args.ready_timeout,
+            "quiesce_seconds": args.quiesce_seconds,
+        },
+    }
+    manifest_path = scratch / "manifest.json"
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 def result_payload(result: CallToolResult) -> dict[str, object]:
@@ -401,6 +570,16 @@ async def run(args: argparse.Namespace) -> int:
             raise ValueError("Postgres backend requires a database URL")
         env["BASIC_MEMORY_DATABASE_BACKEND"] = "postgres"
         env["BASIC_MEMORY_DATABASE_URL"] = database_url
+
+    version = await redis_server_version(redis_url) if redis_url is not None else None
+    write_manifest(
+        scratch=scratch,
+        args=args,
+        env=env,
+        sizes=sizes,
+        concurrency_levels=concurrency_levels,
+        redis_version=version,
+    )
     params = StdioServerParameters(command=args.bm_command, args=["mcp"], env=env)
     had_failures = False
 
@@ -446,7 +625,6 @@ async def run(args: argparse.Namespace) -> int:
                 )
 
             await asyncio.sleep(args.quiesce_seconds)
-            await warm_targets(session, project, targets)
 
             sqlite_note_content_rows = (
                 note_content_rows(config_dir / "memory.db") if args.backend == "sqlite" else -1
@@ -457,6 +635,9 @@ async def run(args: argparse.Namespace) -> int:
                     target for target in targets if target.requested_content_bytes == size_bytes
                 ]
                 for concurrency in concurrency_levels:
+                    # Response entries expire after 60 seconds and reads do not extend their TTL.
+                    # Rewarming outside the timer keeps every row on the advertised cache state.
+                    await warm_targets(session, project, size_targets)
                     wall_started = time.perf_counter()
                     latencies, errors, validation_failures, response_bytes = await read_burst(
                         session,

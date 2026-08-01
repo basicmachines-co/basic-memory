@@ -408,6 +408,11 @@ semantic-report *args:
 benchmark-compare baseline candidate *args:
     uv run python test-int/compare_search_benchmarks.py "{{baseline}}" "{{candidate}}" --format table {{args}}
 
+# Check the standalone read-load driver in the root environment that supplies Redis/testcontainers.
+bench-read-check:
+    uv run ruff check benchmarks/scripts/read_load_bench.py
+    uv run pyright benchmarks/scripts/read_load_bench.py
+
 # Run one MCP read-load sweep. An empty Redis URL is the authoritative baseline.
 bench-read-load label="authoritative" redis_url="":
     uv run python benchmarks/scripts/read_load_bench.py \
@@ -415,16 +420,32 @@ bench-read-load label="authoritative" redis_url="":
         --label "{{label}}" \
         --redis-url "{{redis_url}}" \
         --scratch ".scratch/read-load-{{label}}" \
-        --output ".scratch/read-load-{{label}}.jsonl" \
+        --output ".scratch/read-load-{{label}}/results.jsonl" \
         --truncate
+
+# Exercise MCP startup, per-scenario warmup, result output, and provenance with a tiny corpus.
+bench-read-smoke redis_url="redis://127.0.0.1:6379/0":
+    uv run python benchmarks/scripts/read_load_bench.py \
+        --bm-command .venv/bin/basic-memory \
+        --label "smoke" \
+        --redis-url "{{redis_url}}" \
+        --scratch ".scratch/read-load-smoke" \
+        --output ".scratch/read-load-smoke/results.jsonl" \
+        --truncate \
+        --sizes 1024 \
+        --notes-per-size 2 \
+        --reads 4 \
+        --concurrency 1 \
+        --seed-concurrency 1 \
+        --quiesce-seconds 0.1
 
 # Run adjacent authoritative and warmed-Redis sweeps, then print their comparison.
 bench-read-cache redis_url="redis://127.0.0.1:6379/0" run_id="latest":
     just bench-read-load "authoritative-{{run_id}}"
     just bench-read-load "redis-warm-{{run_id}}" "{{redis_url}}"
     uv run python test-int/compare_search_benchmarks.py \
-        ".scratch/read-load-authoritative-{{run_id}}.jsonl" \
-        ".scratch/read-load-redis-warm-{{run_id}}.jsonl" \
+        ".scratch/read-load-authoritative-{{run_id}}/results.jsonl" \
+        ".scratch/read-load-redis-warm-{{run_id}}/results.jsonl" \
         --format markdown
 
 # Run all tests including Windows, Postgres, and Benchmarks (for CI/comprehensive testing)

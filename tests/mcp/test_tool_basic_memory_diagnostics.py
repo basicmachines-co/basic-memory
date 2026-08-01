@@ -100,6 +100,21 @@ def test_redact_config_scrubs_milvus_uri_credentials():
     assert result["milvus_uri"] == ("https://***@milvus.example.com?token=%2A%2A%2A&timeout=30")
 
 
+def test_redact_config_scrubs_redis_url_credentials():
+    raw = {
+        "redis_url": (
+            "redis://cache-user:cache-password@redis.internal:6379/0"
+            "?password=query-secret&timeout=30"
+        ),
+    }
+
+    result = _redact_config(raw)
+
+    assert result["redis_url"] == (
+        "redis://***@redis.internal:6379/0?password=%2A%2A%2A&timeout=30"
+    )
+
+
 def test_redact_config_passes_through_safe_fields():
     raw = {"default_project": "main", "log_level": "INFO", "env": "dev"}
     result = _redact_config(raw)
@@ -252,6 +267,27 @@ def test_diagnostics_redacts_milvus_credentials(tmp_path):
     config_json = result.split("```json\n", 1)[1].split("\n```", 1)[0]
     assert json.loads(config_json)["milvus_uri"] == (
         "https://***@milvus.example.com?token=%2A%2A%2A&timeout=30"
+    )
+
+
+def test_diagnostics_redacts_redis_credentials(tmp_path):
+    config_data = {
+        "redis_url": (
+            "redis://cache-user:cache-password@redis.internal:6379/0"
+            "?password=query-secret&timeout=30"
+        ),
+        "projects": {},
+    }
+    config_file = tmp_path / "config.json"
+    config_file.write_text(json.dumps(config_data))
+
+    result = basic_memory_diagnostics()
+
+    for secret in ("cache-user", "cache-password", "query-secret"):
+        assert secret not in result
+    config_json = result.split("```json\n", 1)[1].split("\n```", 1)[0]
+    assert json.loads(config_json)["redis_url"] == (
+        "redis://***@redis.internal:6379/0?password=%2A%2A%2A&timeout=30"
     )
 
 
