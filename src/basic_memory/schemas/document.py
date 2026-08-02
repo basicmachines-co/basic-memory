@@ -208,7 +208,6 @@ class DocumentNoteFrontmatterV1(_DocumentContractModel):
     extraction: DocumentExtractionV1
     ingestion: DocumentIngestionV1
     document: DocumentMetadataV1 = Field(default_factory=DocumentMetadataV1)
-    bm_parse_semantics: StrictBool
 
     @field_validator("tags")
     @classmethod
@@ -236,14 +235,6 @@ class DocumentNoteFrontmatterV1(_DocumentContractModel):
             prompt_version=self.ingestion.prompt_version,
         )
 
-        parses_semantics = self.ingestion.stage in {
-            DocumentIngestionStage.ready,
-            DocumentIngestionStage.needs_review,
-        }
-        if self.bm_parse_semantics != parses_semantics:
-            raise ValueError(
-                "bm_parse_semantics must be false for raw/failed notes and true after enrichment"
-            )
         return self
 
 
@@ -345,7 +336,6 @@ class DocumentIngestionRunFrontmatterV1(_DocumentContractModel):
     ingestion: DocumentIngestionRunStateV1
     output: DocumentIngestionRunOutputV1 | None = None
     failure: DocumentIngestionFailureV1 | None = None
-    bm_parse_semantics: Literal[False] = False
 
     @field_validator("created", "modified")
     @classmethod
@@ -714,7 +704,6 @@ def enrich_document_markdown(
             extraction=raw_frontmatter.extraction,
             ingestion=target_ingestion,
             document=agent_output.document,
-            bm_parse_semantics=True,
         ),
         body=_assemble_agent_body(agent_output),
     )
