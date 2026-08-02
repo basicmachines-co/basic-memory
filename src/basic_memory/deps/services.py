@@ -397,11 +397,17 @@ ProjectIndexObserverDep = Annotated[
 
 
 async def get_entity_vector_sync_scheduler(
+    project_external_id: Annotated[
+        str, FastAPIPath(alias="project_id", description="Project external UUID")
+    ],
     search_service: SearchServiceV2ExternalDep,
     app_config: AppConfigDep,
+    read_cache: ReadCacheDep,
 ) -> EntityVectorSyncScheduler:
     return LocalEntityVectorSyncScheduler(
         search_service=search_service,
+        project_external_id=project_external_id,
+        read_cache=read_cache,
         test_mode=app_config.is_test_env,
     )
 

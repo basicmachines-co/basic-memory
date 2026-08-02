@@ -1,7 +1,7 @@
 """Typed scheduler tests for derived async work."""
 
 import asyncio
-from typing import cast
+from typing import cast, override
 
 import pytest
 
@@ -57,15 +57,44 @@ class RecordingReadCache:
 async def test_entity_vector_scheduler_maps_to_search_service():
     """Entity vector scheduling should call the semantic vector sync method."""
     search_service = StubSearchService()
+    read_cache = RecordingReadCache()
 
     scheduler = LocalEntityVectorSyncScheduler(
         search_service=search_service,
+        project_external_id=PROJECT_EXTERNAL_ID,
+        read_cache=read_cache,
         test_mode=False,
     )
     scheduler.schedule_entity_vector_sync(entity_id=7, project_id=13)
     await asyncio.sleep(0.05)
 
     assert search_service.vector_synced == [7]
+    assert read_cache.invalidated_project_ids == [PROJECT_EXTERNAL_ID]
+
+
+@pytest.mark.asyncio
+async def test_entity_vector_scheduler_invalidates_after_partial_failure():
+    """A failed vector publication may still have changed derived search state."""
+
+    class FailingSearchService(StubSearchService):
+        @override
+        async def sync_entity_vectors(self, entity_id: int) -> None:
+            self.vector_synced.append(entity_id)
+            raise RuntimeError("vector publication failed")
+
+    search_service = FailingSearchService()
+    read_cache = RecordingReadCache()
+    scheduler = LocalEntityVectorSyncScheduler(
+        search_service=search_service,
+        project_external_id=PROJECT_EXTERNAL_ID,
+        read_cache=read_cache,
+        test_mode=False,
+    )
+
+    with pytest.raises(RuntimeError, match="vector publication failed"):
+        await scheduler._run_entity_vector_sync(7)
+
+    assert read_cache.invalidated_project_ids == [PROJECT_EXTERNAL_ID]
 
 
 def _clear_project_index_scheduler_state() -> None:
@@ -359,6 +388,8 @@ async def test_drain_background_tasks_awaits_scheduled_work():
 
     scheduler = LocalEntityVectorSyncScheduler(
         search_service=search_service,
+        project_external_id=PROJECT_EXTERNAL_ID,
+        read_cache=None,
         test_mode=False,
     )
     scheduler.schedule_entity_vector_sync(entity_id=7, project_id=13)

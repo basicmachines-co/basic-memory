@@ -245,9 +245,15 @@ async def redis_server_version(redis_url: str) -> str:
     return version
 
 
+def benchmark_manifest_path(*, scratch: Path, output_path: Path | None) -> Path:
+    """Keep provenance beside retained results, or in scratch for stdout-only runs."""
+    return (output_path.parent if output_path is not None else scratch) / "manifest.json"
+
+
 def write_manifest(
     *,
     scratch: Path,
+    output_path: Path | None,
     args: argparse.Namespace,
     env: dict[str, str],
     sizes: list[int],
@@ -322,7 +328,8 @@ def write_manifest(
             "quiesce_seconds": args.quiesce_seconds,
         },
     }
-    manifest_path = scratch / "manifest.json"
+    manifest_path = benchmark_manifest_path(scratch=scratch, output_path=output_path)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -591,6 +598,8 @@ async def run(args: argparse.Namespace) -> int:
     concurrency_levels = [int(value) for value in args.concurrency.split(",") if value.strip()]
     if not sizes or min(sizes) <= 0:
         raise ValueError("--sizes must contain positive byte counts")
+    if len(sizes) != len(set(sizes)):
+        raise ValueError("--sizes must not contain duplicates")
     if not concurrency_levels or min(concurrency_levels) <= 0:
         raise ValueError("--concurrency must contain positive integers")
     for option, value in (
@@ -640,6 +649,7 @@ async def run(args: argparse.Namespace) -> int:
         version = await redis_server_version(redis_url) if redis_url is not None else None
         write_manifest(
             scratch=scratch,
+            output_path=output_path,
             args=args,
             env=env,
             sizes=sizes,

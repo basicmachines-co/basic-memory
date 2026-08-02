@@ -9,7 +9,6 @@ behind the same protocols.
 """
 
 import asyncio
-from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, Coroutine
 
@@ -89,14 +88,27 @@ async def drain_background_tasks() -> None:
 @dataclass(frozen=True, slots=True)
 class LocalEntityVectorSyncScheduler:
     search_service: EntityVectorSync
+    project_external_id: str
+    read_cache: ReadCacheInvalidator | None
     test_mode: bool
 
     def schedule_entity_vector_sync(self, *, entity_id: int, project_id: int) -> None:
         _ = project_id
         _schedule_background_coroutine(
-            self.search_service.sync_entity_vectors(entity_id),
+            self._run_entity_vector_sync(entity_id),
             test_mode=self.test_mode,
         )
+
+    async def _run_entity_vector_sync(self, entity_id: int) -> None:
+        if self.read_cache is None:
+            await self.search_service.sync_entity_vectors(entity_id)
+            return
+
+        # Vector publication happens after the mutation/index generation bump and can change
+        # VECTOR/HYBRID results. Advance the generation after success or partial failure so a
+        # result cached while vectors were stale cannot survive this derived-state update.
+        async with invalidate_cache(self.read_cache, self.project_external_id):
+            await self.search_service.sync_entity_vectors(entity_id)
 
 
 # Process-lifetime single-flight state: project ids with an index run already
@@ -168,15 +180,14 @@ class LocalSearchReindexScheduler:
         )
 
     async def _run_search_reindex(self) -> None:
+        if self.read_cache is None:
+            await self.search_service.reindex_all()
+            return
+
         # A rebuild publishes search rows incrementally after dropping the old
         # index. Invalidate after success or partial failure so fuzzy resolutions
         # cached during that window cannot survive the rebuild.
-        invalidation_scope = (
-            invalidate_cache(self.read_cache, self.project_external_id)
-            if self.read_cache is not None
-            else nullcontext()
-        )
-        async with invalidation_scope:
+        async with invalidate_cache(self.read_cache, self.project_external_id):
             await self.search_service.reindex_all()
 
 
@@ -241,13 +252,11 @@ class LocalRelationResolutionScheduler:
             # Relation resolution commits entity changes after the index pass.
             # A second bump closes the window in which an intermediate entity
             # response could have populated the current generation.
-            invalidation_scope = (
-                invalidate_cache(self.read_cache, self.project_external_id)
-                if self.read_cache is not None
-                else nullcontext()
-            )
-            async with invalidation_scope:
+            if self.read_cache is None:
                 await resolve_project_relations(self.relation_runtime)
+            else:
+                async with invalidate_cache(self.read_cache, self.project_external_id):
+                    await resolve_project_relations(self.relation_runtime)
         finally:
             rerun = project_id in _dirty_relation_resolution
             _dirty_relation_resolution.discard(project_id)

@@ -9,7 +9,9 @@ from redis.asyncio import Redis
 
 from basic_memory.deps.read_cache import get_read_cache
 from basic_memory.deps.services import get_search_service_v2_external
+from basic_memory.index.local_schedulers import LocalEntityVectorSyncScheduler
 from basic_memory.models import Project
+from basic_memory.read_cache import ReadCacheKey, ReadCacheOperation
 from basic_memory.read_cache.redis import RedisReadCache
 
 
@@ -41,6 +43,17 @@ class CountingSearchService:
         del query
         self.count_calls += 1
         return 0
+
+
+class PartiallyFailingVectorSync:
+    """Vector publisher that fails after derived state may have changed."""
+
+    def __init__(self) -> None:
+        self.synced_entity_ids: list[int] = []
+
+    async def sync_entity_vectors(self, entity_id: int) -> None:
+        self.synced_entity_ids.append(entity_id)
+        raise RuntimeError("vector publication failed")
 
 
 @pytest.mark.asyncio
@@ -149,3 +162,32 @@ async def test_search_pagination_uses_distinct_real_redis_entries(
         key async for key in redis_cache.client.scan_iter(match=f"{redis_cache.prefix}:*:search:*")
     ]
     assert len(search_keys) == 2
+
+
+@pytest.mark.asyncio
+async def test_partial_vector_publication_invalidates_real_redis_generation(
+    test_project: Project,
+    redis_cache: RedisCacheHarness,
+) -> None:
+    """A failed background vector sync cannot preserve cached vector or hybrid results."""
+    project_external_id = str(test_project.external_id)
+    cache_key = ReadCacheKey(
+        project_id=project_external_id,
+        operation=ReadCacheOperation.search,
+        request_digest="0" * 64,
+    )
+    generation_before = (await redis_cache.cache.lookup(cache_key)).generation
+    vector_sync = PartiallyFailingVectorSync()
+    scheduler = LocalEntityVectorSyncScheduler(
+        search_service=vector_sync,
+        project_external_id=project_external_id,
+        read_cache=redis_cache.cache,
+        test_mode=False,
+    )
+
+    with pytest.raises(RuntimeError, match="vector publication failed"):
+        await scheduler._run_entity_vector_sync(entity_id=42)
+
+    generation_after = (await redis_cache.cache.lookup(cache_key)).generation
+    assert vector_sync.synced_entity_ids == [42]
+    assert generation_after != generation_before

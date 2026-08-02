@@ -84,6 +84,10 @@ Basic Memory Cloud must satisfy all of these requirements when composing cached 
    watcher-detected paired moves, relation-resolution workers, and startup recovery or
    reconciliation. Request-path invalidation alone is insufficient because a worker can update a
    cached entity after the request returns.
+1. Invalidate after semantic vector publication, including partial-failure paths. Vector sync can
+   run after the mutation and file-index generation bumps, so VECTOR/HYBRID responses filled while
+   embeddings are stale must not survive the later derived-state update. Queue-backed Cloud vector
+   workers use the same trusted tenant namespace and canonical project UUID as request reads.
 1. Treat each asynchronous state transition as a separate freshness boundary. Invalidate after
    the accepted-note transaction commits, immediately after terminal materialization/status
    publication before indexing begins, again after indexing, and again after relation resolution
@@ -546,6 +550,8 @@ semantics themselves are asserted only against the real Redis integration fixtur
 - Invalidate after accepted-note commit, immediately after terminal materialization/status
   publication before indexing, again after indexing, and after relation-resolution workers using
   the same tenant namespace as the request path.
+- Invalidate after semantic vector publication, including partial failures, because vector sync is
+  derived work that can complete after the note/index freshness boundaries.
 - Invalidate watcher-detected paired moves at move completion, and invalidate any recovery or
   reconciliation attempt that can publish terminal state before releasing the serving barrier or
   resuming tenant traffic.

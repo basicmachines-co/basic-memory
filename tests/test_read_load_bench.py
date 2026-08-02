@@ -24,6 +24,26 @@ def load_read_load_bench() -> ModuleType:
 read_load_bench = load_read_load_bench()
 
 
+def test_benchmark_manifest_stays_beside_custom_output(tmp_path: Path) -> None:
+    scratch = tmp_path / "scratch"
+    output_path = tmp_path / "published" / "results.jsonl"
+
+    assert (
+        read_load_bench.benchmark_manifest_path(
+            scratch=scratch,
+            output_path=output_path,
+        )
+        == output_path.parent / "manifest.json"
+    )
+    assert (
+        read_load_bench.benchmark_manifest_path(
+            scratch=scratch,
+            output_path=None,
+        )
+        == scratch / "manifest.json"
+    )
+
+
 def test_basic_memory_module_path_uses_target_python_environment(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -162,5 +182,25 @@ async def test_run_rejects_non_positive_counts_before_starting_postgres(
 
     with pytest.raises(ValueError, match=f"--{option.replace('_', '-')}"):
         await read_load_bench.run(benchmark_args(tmp_path / option, **{option: 0}))
+
+    assert not postgres_started
+
+
+@pytest.mark.asyncio
+async def test_run_rejects_duplicate_sizes_before_starting_postgres(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    postgres_started = False
+
+    def start_postgres() -> RecordingPostgresContainer:
+        nonlocal postgres_started
+        postgres_started = True
+        return RecordingPostgresContainer()
+
+    monkeypatch.setattr(read_load_bench, "start_postgres", start_postgres)
+
+    with pytest.raises(ValueError, match="--sizes must not contain duplicates"):
+        await read_load_bench.run(benchmark_args(tmp_path / "duplicate-sizes", sizes="1024,1024"))
 
     assert not postgres_started

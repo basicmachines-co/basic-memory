@@ -41,6 +41,8 @@ The recipe writes each side's `results.jsonl` and `manifest.json` under
 `.scratch/read-load-{authoritative,redis-warm}-run-01/`, then prints the Markdown comparison. Give
 each repetition a distinct run ID so its corpus, results, and provenance remain available. Use
 `just bench-read-load <label> [redis_url]` when running one side independently.
+When invoking the script with a custom `--output` outside `--scratch`, `manifest.json` follows the
+JSONL file into that output directory so retained results never lose their provenance.
 
 Use `just bench-read-smoke [redis_url]` for a tiny real-MCP run at concurrency 64 that verifies
 Redis pool sizing plus result and manifest generation before committing to the full matrix.
