@@ -332,27 +332,6 @@ async def test_parse_invalid_canonical_timestamp_fails_for_field(
         )
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "semantic_setting",
-    [
-        "bm_parse_semantics:\n  - false",
-        "bm_parse_semantics:\n  enabled: false",
-    ],
-)
-async def test_non_scalar_semantic_setting_does_not_crash(
-    entity_parser,
-    semantic_setting: str,
-) -> None:
-    entity = await entity_parser.parse_markdown_content(
-        Path("non-scalar-semantics.md"),
-        f"---\n{semantic_setting}\n---\n- [note] Still parsed\n- references [[Target]]",
-    )
-
-    assert [observation.content for observation in entity.observations] == ["Still parsed"]
-    assert [relation.target for relation in entity.relations] == ["Target"]
-
-
 # @pytest.mark.asyncio
 # async def test_parse_file_invalid_yaml(test_config, entity_parser):
 #     """Test parsing file with invalid YAML frontmatter."""

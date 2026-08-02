@@ -110,7 +110,6 @@ def raw_document() -> DocumentMarkdownV1:
                 run_id=RUN_ID,
                 input_checksum=SOURCE_CHECKSUM,
             ),
-            bm_parse_semantics=False,
         ),
         body="# Extracted report\r\n\r\n- [accidental] not an observation\r\n\r\n[[Not a relation]]\r\n",
     )
@@ -263,8 +262,6 @@ def test_document_frontmatter_requires_consistent_trusted_metadata() -> None:
                 },
             }
         )
-    with pytest.raises(ValidationError, match="bm_parse_semantics"):
-        DocumentNoteFrontmatterV1.model_validate({**frontmatter_data, "bm_parse_semantics": True})
     without_canonical_timestamps = DocumentNoteFrontmatterV1.model_validate(
         {**frontmatter_data, "created": None, "modified": None}
     )
@@ -513,7 +510,6 @@ def test_agent_enrichment_preserves_provenance_and_requires_raw_checksum() -> No
     assert enriched.frontmatter.created == raw.frontmatter.created
     assert enriched.frontmatter.modified == raw.frontmatter.modified
     assert enriched.frontmatter.tags == ("document", "pdf", "imported", "quarterly")
-    assert enriched.frontmatter.bm_parse_semantics is True
     assert "- [summary] Revenue increased. #finance (reported result)" in enriched.body
     assert "- references [[Finance plan]] (supporting plan)" in enriched.body
 
@@ -638,7 +634,7 @@ def test_agent_payload_rejects_unsafe_relation_targets() -> None:
 
 
 @pytest.mark.asyncio
-async def test_raw_search_only_note_does_not_mint_graph_semantics(tmp_path) -> None:
+async def test_raw_note_uses_normal_graph_semantics(tmp_path) -> None:
     parser = EntityParser(tmp_path)
     raw = raw_document()
 
@@ -649,8 +645,10 @@ async def test_raw_search_only_note_does_not_mint_graph_semantics(tmp_path) -> N
 
     assert parsed_raw.content is not None
     assert "accidental" in parsed_raw.content
-    assert parsed_raw.observations == []
-    assert parsed_raw.relations == []
+    assert [observation.content for observation in parsed_raw.observations] == [
+        "not an observation"
+    ]
+    assert [relation.target for relation in parsed_raw.relations] == ["Not a relation"]
 
     raw_checksum = document_markdown_checksum(assemble_document_markdown(raw))
     enriched = enrich_document_markdown(
