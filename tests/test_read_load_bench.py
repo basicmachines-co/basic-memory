@@ -249,6 +249,26 @@ class RecordingPostgresContainer:
         return "postgresql://benchmark:benchmark@localhost:5432/benchmark"
 
 
+@dataclass
+class FailingStartPostgresContainer(RecordingPostgresContainer):
+    def start(self) -> object:
+        raise RuntimeError("Postgres readiness failed")
+
+
+def test_start_postgres_stops_container_when_startup_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from testcontainers import postgres as postgres_module
+
+    container = FailingStartPostgresContainer()
+    monkeypatch.setattr(postgres_module, "PostgresContainer", lambda image: container)
+
+    with pytest.raises(RuntimeError, match="Postgres readiness failed"):
+        read_load_bench.start_postgres()
+
+    assert container.stopped
+
+
 @pytest.mark.asyncio
 async def test_run_stops_postgres_when_setup_fails(
     tmp_path: Path,

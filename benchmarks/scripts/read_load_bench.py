@@ -439,7 +439,11 @@ def start_postgres() -> PostgresContainer:
     from testcontainers.postgres import PostgresContainer as TestPostgresContainer
 
     container = TestPostgresContainer("pgvector/pgvector:pg16")
-    container.start()
+    try:
+        container.start()
+    except Exception:
+        container.stop()
+        raise
     return container
 
 

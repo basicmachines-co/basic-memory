@@ -350,10 +350,14 @@ as `redis` is normalized to `redis://redis`; complete `redis://` and `rediss://`
 The optional `BASIC_MEMORY_REDIS_MAX_CONNECTIONS` setting tunes that process-owned connection pool
 and defaults to 20; it does not activate caching by itself. The MCP lifespan owns one async client
 and shares its namespace-bound cache with both in-process FastAPI requests and watcher/index
-invalidation, then closes the client after those paths shut down. When the URL is absent, the
-dependency remains `None` and callers take only the authoritative path. Cloud runtime mode ignores
-this standalone composition because Cloud injects a separately owned cache using its trusted
-tenant namespace and capacity policy.
+invalidation, then closes the client after those paths shut down. After project reconciliation and
+before accepting requests, every standalone MCP lifespan replaces each active project's persisted
+generation. This prevents entries from an earlier process from hiding a source-of-truth file edit
+made while MCP was stopped. If Redis cannot complete every startup invalidation, caching is disabled
+for that lifespan and requests use the authoritative path; a later Redis recovery cannot revive the
+untrusted generation. When the URL is absent, the dependency remains `None` and callers take only
+the authoritative path. Cloud runtime mode ignores this standalone composition because Cloud
+injects a separately owned cache using its trusted tenant namespace and capacity policy.
 
 `get_read_cache` is the host override point and returns `ReadCache | None`. Core-owned,
 route-specific FastAPI providers call `create_model_read_cache` to return a correctly typed facade
@@ -480,6 +484,8 @@ The real-Redis suite must prove:
 - generation metadata expires for inactive projects, including legacy persistent keys, and stores
   keep it alive at least as long as their response data;
 - Redis restart or unavailability produces explicit bypass behavior;
+- a fresh standalone MCP lifespan replaces persisted project generations before serving, so
+  offline file edits cannot remain hidden behind cache entries from the previous process;
 - no invalidation operation touches keys outside the Basic Memory prefix;
 - payload size limits;
 - repeated API entity reads use the real cached representation;

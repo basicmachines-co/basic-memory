@@ -1,11 +1,25 @@
 import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import pytest
 
 import basic_memory.index.note_content_materialization as note_content_materialization
 import basic_memory.mcp.server as server_module
 from basic_memory import db
+from basic_memory.api.container import resolve_container
+from basic_memory.mcp.container import get_container
 from basic_memory.mcp.server import lifespan, mcp
+from basic_memory.read_cache import ReadCacheInvalidationStatus, ReadCacheUnavailable
+
+
+class UnavailableStartupCache:
+    def __init__(self) -> None:
+        self.project_ids: list[str] = []
+
+    async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
+        self.project_ids.append(project_id)
+        raise ReadCacheUnavailable("Redis unavailable during startup")
 
 
 @pytest.mark.asyncio
@@ -33,6 +47,30 @@ async def test_mcp_lifespan_shuts_down_db_when_engine_was_none(config_manager):
     db._engine = None
     async with lifespan(mcp):
         pass
+
+
+@pytest.mark.asyncio
+async def test_mcp_lifespan_disables_cache_when_startup_invalidation_is_unavailable(
+    config_manager,
+    monkeypatch,
+) -> None:
+    cache = UnavailableStartupCache()
+
+    @asynccontextmanager
+    async def open_unavailable_cache(
+        redis_url: str | None,
+        *,
+        max_connections: int,
+    ) -> AsyncIterator[UnavailableStartupCache]:
+        del redis_url, max_connections
+        yield cache
+
+    monkeypatch.setattr(server_module, "open_redis_read_cache", open_unavailable_cache)
+
+    async with lifespan(mcp):
+        assert cache.project_ids
+        assert get_container().read_cache is None
+        assert resolve_container().read_cache is None
 
 
 @pytest.mark.asyncio

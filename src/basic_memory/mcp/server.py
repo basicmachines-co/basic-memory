@@ -18,7 +18,9 @@ from basic_memory.db import scoped_session
 from basic_memory.index.local_schedulers import drain_background_tasks
 from basic_memory.mcp.client_info import MCPClientInfoMiddleware
 from basic_memory.mcp.container import McpContainer, set_container
+from basic_memory.read_cache import ReadCache, ReadCacheUnavailable
 from basic_memory.read_cache.lifecycle import open_redis_read_cache
+from basic_memory.repository import ProjectRepository
 from basic_memory.services.initialization import initialize_app
 import logfire
 
@@ -51,6 +53,31 @@ async def _log_embedding_status(session_maker: async_sessionmaker[AsyncSession])
             )
     except Exception as exc:
         logger.debug(f"Could not check embedding status at startup: {exc}")
+
+
+async def _invalidate_persisted_read_cache(
+    read_cache: ReadCache,
+    session_maker: async_sessionmaker[AsyncSession],
+) -> ReadCache | None:
+    """Invalidate cache generations that may predate offline file changes."""
+    project_repository = ProjectRepository()
+    async with scoped_session(session_maker) as session:
+        active_projects = await project_repository.get_active_projects(session)
+
+    try:
+        for project in active_projects:
+            await read_cache.invalidate_project(str(project.external_id))
+    except ReadCacheUnavailable as error:
+        # Trigger: Redis cannot invalidate every persisted project generation at startup.
+        # Why: reusing any prior generation could hide an offline file edit until TTL expiry.
+        # Outcome: disable caching for this lifespan and serve only authoritative reads.
+        logger.error(
+            "Standalone Redis read cache disabled because startup invalidation was unavailable",
+            error=str(error),
+        )
+        return None
+
+    return read_cache
 
 
 @asynccontextmanager
@@ -131,6 +158,17 @@ async def lifespan(app: FastMCP):
 
                 # Initialize app (runs migrations, reconciles projects)
                 await initialize_app(container.config)
+
+                if read_cache is not None:
+                    assert db._session_maker is not None, (
+                        "Database session maker missing after MCP initialization"
+                    )
+                    read_cache = await _invalidate_persisted_read_cache(
+                        read_cache,
+                        db._session_maker,
+                    )
+                    container.read_cache = read_cache
+                    api_container.read_cache = read_cache
 
                 # Log embedding status so it's easy to spot in the logs
                 if config.semantic_search_enabled and db._session_maker is not None:
