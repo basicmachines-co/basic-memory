@@ -87,6 +87,7 @@ def test_isolated_env_removes_all_inherited_basic_memory_settings(
     )
     for key in inherited_keys:
         monkeypatch.setenv(key, "must-not-escape")
+    monkeypatch.setenv("BASIC_MEMORY_AUTO_UPDATE", "true")
     monkeypatch.setenv("BENCHMARK_TEST", "preserved")
 
     env = read_load_bench.isolated_env(
@@ -96,9 +97,11 @@ def test_isolated_env_removes_all_inherited_basic_memory_settings(
     )
 
     assert env["BENCHMARK_TEST"] == "preserved"
+    assert env["BASIC_MEMORY_AUTO_UPDATE"] == "false"
     assert env["BASIC_MEMORY_REDIS_MAX_CONNECTIONS"] == "64"
     assert all(key not in env for key in inherited_keys)
     assert {key for key in env if key.startswith("BASIC_MEMORY_")} == {
+        "BASIC_MEMORY_AUTO_UPDATE",
         "BASIC_MEMORY_CONFIG_DIR",
         "BASIC_MEMORY_LOG_LEVEL",
         "BASIC_MEMORY_REDIS_MAX_CONNECTIONS",
@@ -203,4 +206,30 @@ async def test_run_rejects_duplicate_sizes_before_starting_postgres(
     with pytest.raises(ValueError, match="--sizes must not contain duplicates"):
         await read_load_bench.run(benchmark_args(tmp_path / "duplicate-sizes", sizes="1024,1024"))
 
+    assert not postgres_started
+
+
+@pytest.mark.asyncio
+async def test_run_rejects_existing_output_without_truncate_before_starting_postgres(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    postgres_started = False
+    output_path = tmp_path / "published" / "results.jsonl"
+    output_path.parent.mkdir(parents=True)
+    output_path.write_text("existing run\n", encoding="utf-8")
+
+    def start_postgres() -> RecordingPostgresContainer:
+        nonlocal postgres_started
+        postgres_started = True
+        return RecordingPostgresContainer()
+
+    monkeypatch.setattr(read_load_bench, "start_postgres", start_postgres)
+
+    with pytest.raises(ValueError, match="--output already exists"):
+        await read_load_bench.run(
+            benchmark_args(tmp_path / "existing-output", output=str(output_path))
+        )
+
+    assert output_path.read_text(encoding="utf-8") == "existing run\n"
     assert not postgres_started

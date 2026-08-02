@@ -375,6 +375,7 @@ def isolated_env(
 ) -> dict[str, str]:
     """Create a local runtime environment without inherited BM configuration."""
     env = {key: value for key, value in os.environ.items() if not key.startswith("BASIC_MEMORY_")}
+    env["BASIC_MEMORY_AUTO_UPDATE"] = "false"
     env["BASIC_MEMORY_CONFIG_DIR"] = str(config_dir)
     env["BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED"] = "false"
     env["BASIC_MEMORY_LOG_LEVEL"] = "WARNING"
@@ -611,6 +612,13 @@ async def run(args: argparse.Namespace) -> int:
             raise ValueError(f"{option} must be a positive integer")
 
     scratch = Path(args.scratch).resolve()
+    output_path = Path(args.output).resolve() if args.output else None
+    if output_path is not None and output_path.exists() and not args.truncate:
+        raise ValueError("--output already exists; pass --truncate to replace its run artifacts")
+    if output_path is not None and args.truncate:
+        output_path.unlink(missing_ok=True)
+        benchmark_manifest_path(scratch=scratch, output_path=output_path).unlink(missing_ok=True)
+
     config_dir = scratch / "config"
     project_dir = scratch / "project"
     main_home = scratch / "main-home"
@@ -625,9 +633,6 @@ async def run(args: argparse.Namespace) -> int:
             start_postgres() if args.backend == "postgres" and not args.database_url else None
         )
         database_url = args.database_url or (asyncpg_url(pg_container) if pg_container else None)
-        output_path = Path(args.output).resolve() if args.output else None
-        if output_path is not None and output_path.exists() and args.truncate:
-            output_path.unlink()
 
         redis_url = args.redis_url.strip() if args.redis_url else None
         redis_max_connections = (
@@ -826,7 +831,11 @@ def main() -> int:
         help="Scratch directory for isolated config and project files",
     )
     parser.add_argument("--output", default=None, help="JSONL output path (also printed)")
-    parser.add_argument("--truncate", action="store_true", help="Truncate output before writing")
+    parser.add_argument(
+        "--truncate",
+        action="store_true",
+        help="Replace an existing output and its manifest before writing",
+    )
     parser.add_argument(
         "--ready-timeout",
         type=float,
