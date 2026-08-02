@@ -66,8 +66,21 @@ def redact_url(url: str) -> str:
 
     Replaces any credentials with *** so the host/path remain visible for
     diagnostics (e.g. ``postgresql://***@localhost/mydb``).  If the value
-    cannot be parsed as a URL it is returned unchanged.
+    cannot be parsed as a URL it is returned unchanged. Scheme-less authorities
+    are handled explicitly because ``urlparse`` otherwise treats their userinfo
+    as a path and can expose credentials from supported bare Redis values.
     """
+    if "://" not in url:
+        base, query_separator, query = url.partition("?")
+        redacted_query = _redact_query_secrets(query)
+        redacted_base = base
+        if "@" in base:
+            _, _, authority = base.rpartition("@")
+            redacted_base = f"***@{authority}"
+        if redacted_base == base and redacted_query == query:
+            return url
+        return f"{redacted_base}?{redacted_query}" if query_separator else redacted_base
+
     try:
         parsed = urlparse(url)
     except ValueError:

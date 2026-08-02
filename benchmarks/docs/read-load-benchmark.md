@@ -16,11 +16,13 @@ the standalone Redis read cache is warmed.
   dirty-worktree state, synthetic-corpus checksum, and runtime configuration.
 
 Every inherited `BASIC_MEMORY_*` setting is removed before the harness adds its explicit isolated
-configuration. The cached run sets `BASIC_MEMORY_REDIS_URL` only in the spawned MCP process and
-sizes `BASIC_MEMORY_REDIS_MAX_CONNECTIONS` to the largest requested workload or seed concurrency.
-This prevents high-concurrency rows from exhausting the default pool and silently measuring the
-cache's authoritative-read fallback. Output records whether Redis was enabled and the non-secret
-pool size without recording the URL, because URLs may contain credentials.
+configuration. The harness explicitly disables Basic Memory auto-update so measurement cannot
+start background package checks or upgrades. The cached run sets `BASIC_MEMORY_REDIS_URL` only in
+the spawned MCP process and sizes `BASIC_MEMORY_REDIS_MAX_CONNECTIONS` to the largest requested
+workload or seed concurrency. This prevents high-concurrency rows from exhausting the default pool
+and silently measuring the cache's authoritative-read fallback. Output records whether Redis was
+enabled and the non-secret pool size without recording the URL, because URLs may contain
+credentials.
 
 The Basic Memory SHA comes from the `basic_memory` module imported by the Python environment behind
 `--bm-command`, not from the console script's parent directory. Publishable per-ref environments
@@ -45,6 +47,8 @@ When invoking the script with a custom `--output` outside `--scratch`, `manifest
 JSONL file into that output directory so retained results never lose their provenance.
 The output path must be new unless `--truncate` is explicit; otherwise the harness fails before
 starting runtime resources so one manifest cannot describe JSONL rows appended by multiple runs.
+Each custom output directory is one run-artifact boundary: a second output filename is rejected
+when that directory already contains `manifest.json`, preserving the first result's provenance.
 
 Use `just bench-read-smoke [redis_url]` for a tiny real-MCP run at concurrency 64 that verifies
 Redis pool sizing plus result and manifest generation before committing to the full matrix.

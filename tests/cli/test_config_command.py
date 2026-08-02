@@ -327,10 +327,26 @@ def test_config_list_redacts_reranker_credentials(runner, write_config):
     )
 
 
-def test_config_get_and_list_redact_redis_credentials(runner, write_config):
-    redis_url = (
-        "redis://cache-user:cache-password@redis.internal:6379/0?password=query-secret&timeout=30"
-    )
+@pytest.mark.parametrize(
+    ("redis_url", "expected"),
+    [
+        (
+            "redis://cache-user:cache-password@redis.internal:6379/0"
+            "?password=query-secret&timeout=30",
+            "redis://***@redis.internal:6379/0?password=%2A%2A%2A&timeout=30",
+        ),
+        (
+            "cache-user:cache-password@redis.internal:6379/0?password=query-secret&timeout=30",
+            "***@redis.internal:6379/0?password=%2A%2A%2A&timeout=30",
+        ),
+    ],
+)
+def test_config_get_and_list_redact_redis_credentials(
+    runner,
+    write_config,
+    redis_url: str,
+    expected: str,
+):
     write_config(_base_config(redis_url=redis_url))
 
     get_result = runner.invoke(app, ["config", "get", "redis_url"])
@@ -342,7 +358,6 @@ def test_config_get_and_list_redact_redis_credentials(runner, write_config):
         assert secret not in get_result.output
         assert secret not in list_result.output
     rows = {row["key"]: row for row in json.loads(list_result.output)}
-    expected = "redis://***@redis.internal:6379/0?password=%2A%2A%2A&timeout=30"
     assert get_result.output.split("redis_url = ", 1)[1].strip() == expected
     assert rows["redis_url"]["value"] == expected
 

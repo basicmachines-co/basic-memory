@@ -613,11 +613,14 @@ async def run(args: argparse.Namespace) -> int:
 
     scratch = Path(args.scratch).resolve()
     output_path = Path(args.output).resolve() if args.output else None
+    manifest_path = benchmark_manifest_path(scratch=scratch, output_path=output_path)
     if output_path is not None and output_path.exists() and not args.truncate:
         raise ValueError("--output already exists; pass --truncate to replace its run artifacts")
+    if output_path is not None and manifest_path.exists() and not output_path.exists():
+        raise ValueError("--output directory already contains manifest.json for another run")
     if output_path is not None and args.truncate:
         output_path.unlink(missing_ok=True)
-        benchmark_manifest_path(scratch=scratch, output_path=output_path).unlink(missing_ok=True)
+        manifest_path.unlink(missing_ok=True)
 
     config_dir = scratch / "config"
     project_dir = scratch / "project"

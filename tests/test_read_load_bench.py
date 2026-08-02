@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -232,4 +233,36 @@ async def test_run_rejects_existing_output_without_truncate_before_starting_post
         )
 
     assert output_path.read_text(encoding="utf-8") == "existing run\n"
+    assert not postgres_started
+
+
+@pytest.mark.asyncio
+async def test_run_rejects_second_output_in_manifest_directory_before_starting_postgres(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    postgres_started = False
+    output_dir = tmp_path / "published"
+    output_dir.mkdir(parents=True)
+    first_output = output_dir / "first.jsonl"
+    first_output.write_text("first run\n", encoding="utf-8")
+    manifest_path = output_dir / "manifest.json"
+    manifest_path.write_text('{"run_id": "first"}\n', encoding="utf-8")
+    second_output = output_dir / "second.jsonl"
+
+    def start_postgres() -> RecordingPostgresContainer:
+        nonlocal postgres_started
+        postgres_started = True
+        return RecordingPostgresContainer()
+
+    monkeypatch.setattr(read_load_bench, "start_postgres", start_postgres)
+
+    with pytest.raises(ValueError, match="manifest.json for another run"):
+        await read_load_bench.run(
+            benchmark_args(tmp_path / "second-output", output=str(second_output))
+        )
+
+    assert first_output.read_text(encoding="utf-8") == "first run\n"
+    assert json.loads(manifest_path.read_text(encoding="utf-8"))["run_id"] == "first"
+    assert not second_output.exists()
     assert not postgres_started
