@@ -37,6 +37,7 @@ from urllib.parse import urlparse
 from mcp.client.session import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.types import CallToolResult
+from sqlalchemy.ext.asyncio import create_async_engine
 
 _CORPUS_SEARCH_TOKEN = "readloadbenchmarkmarker"
 
@@ -245,6 +246,22 @@ async def redis_server_version(redis_url: str) -> str:
     return version
 
 
+async def database_server_version(*, backend: str, database_url: str | None) -> str:
+    """Read the selected database engine version without retaining its URL."""
+    if backend == "sqlite":
+        return sqlite3.sqlite_version
+    if database_url is None:
+        raise ValueError("Postgres provenance requires a database URL")
+
+    engine = create_async_engine(database_url)
+    try:
+        async with engine.connect() as connection:
+            result = await connection.exec_driver_sql("SHOW server_version")
+            return str(result.scalar_one())
+    finally:
+        await engine.dispose()
+
+
 def benchmark_manifest_path(*, scratch: Path, output_path: Path | None) -> Path:
     """Keep provenance beside retained results, or in scratch for stdout-only runs."""
     return (output_path.parent if output_path is not None else scratch) / "manifest.json"
@@ -258,6 +275,7 @@ def write_manifest(
     env: dict[str, str],
     sizes: list[int],
     concurrency_levels: list[int],
+    database_version: str,
     redis_version: str | None,
 ) -> None:
     """Write the provenance required to reproduce and interpret one run."""
@@ -287,6 +305,8 @@ def write_manifest(
     }
     if redis_version is not None:
         provider_versions["redis"] = {"version": redis_version}
+    database_provider = "postgresql" if args.backend == "postgres" else "sqlite"
+    provider_versions[database_provider] = {"version": database_version}
 
     manifest = {
         "schema_version": 1,
@@ -603,6 +623,8 @@ async def run(args: argparse.Namespace) -> int:
         raise ValueError("--sizes must not contain duplicates")
     if not concurrency_levels or min(concurrency_levels) <= 0:
         raise ValueError("--concurrency must contain positive integers")
+    if len(concurrency_levels) != len(set(concurrency_levels)):
+        raise ValueError("--concurrency must not contain duplicates")
     for option, value in (
         ("--notes-per-size", args.notes_per_size),
         ("--reads", args.reads),
@@ -614,6 +636,18 @@ async def run(args: argparse.Namespace) -> int:
     scratch = Path(args.scratch).resolve()
     output_path = Path(args.output).resolve() if args.output else None
     manifest_path = benchmark_manifest_path(scratch=scratch, output_path=output_path)
+    config_dir = (scratch / "config").resolve()
+    project_dir = (scratch / "project").resolve()
+    main_home = (scratch / "main-home").resolve()
+    runtime_dirs = (config_dir, project_dir, main_home)
+    if output_path == manifest_path:
+        raise ValueError("--output filename must not be manifest.json")
+    if output_path is not None and any(
+        artifact_path.is_relative_to(runtime_dir)
+        for artifact_path in (output_path, manifest_path)
+        for runtime_dir in runtime_dirs
+    ):
+        raise ValueError("--output and manifest must stay outside benchmark runtime directories")
     if output_path is not None and output_path.exists() and not args.truncate:
         raise ValueError("--output already exists; pass --truncate to replace its run artifacts")
     if output_path is not None and manifest_path.exists() and not output_path.exists():
@@ -622,9 +656,6 @@ async def run(args: argparse.Namespace) -> int:
         output_path.unlink(missing_ok=True)
         manifest_path.unlink(missing_ok=True)
 
-    config_dir = scratch / "config"
-    project_dir = scratch / "project"
-    main_home = scratch / "main-home"
     for path in (config_dir, project_dir, main_home):
         if path.exists():
             shutil.rmtree(path)
@@ -654,7 +685,11 @@ async def run(args: argparse.Namespace) -> int:
             env["BASIC_MEMORY_DATABASE_BACKEND"] = "postgres"
             env["BASIC_MEMORY_DATABASE_URL"] = database_url
 
-        version = await redis_server_version(redis_url) if redis_url is not None else None
+        database_version = await database_server_version(
+            backend=args.backend,
+            database_url=database_url,
+        )
+        redis_version = await redis_server_version(redis_url) if redis_url is not None else None
         write_manifest(
             scratch=scratch,
             output_path=output_path,
@@ -662,7 +697,8 @@ async def run(args: argparse.Namespace) -> int:
             env=env,
             sizes=sizes,
             concurrency_levels=concurrency_levels,
-            redis_version=version,
+            database_version=database_version,
+            redis_version=redis_version,
         )
         params = StdioServerParameters(command=args.bm_command, args=["mcp"], env=env)
         had_failures = False

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import sqlite3
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +26,42 @@ def load_read_load_bench() -> ModuleType:
 read_load_bench = load_read_load_bench()
 
 
+@dataclass
+class RecordingScalarResult:
+    version: str
+
+    def scalar_one(self) -> str:
+        return self.version
+
+
+@dataclass
+class RecordingConnection:
+    version: str
+    query: str | None = None
+
+    async def __aenter__(self) -> RecordingConnection:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+    async def exec_driver_sql(self, query: str) -> RecordingScalarResult:
+        self.query = query
+        return RecordingScalarResult(self.version)
+
+
+@dataclass
+class RecordingEngine:
+    connection: RecordingConnection
+    disposed: bool = False
+
+    def connect(self) -> RecordingConnection:
+        return self.connection
+
+    async def dispose(self) -> None:
+        self.disposed = True
+
+
 def test_benchmark_manifest_stays_beside_custom_output(tmp_path: Path) -> None:
     scratch = tmp_path / "scratch"
     output_path = tmp_path / "published" / "results.jsonl"
@@ -43,6 +80,46 @@ def test_benchmark_manifest_stays_beside_custom_output(tmp_path: Path) -> None:
         )
         == scratch / "manifest.json"
     )
+
+
+@pytest.mark.asyncio
+async def test_database_server_version_reports_sqlite_library() -> None:
+    assert (
+        await read_load_bench.database_server_version(backend="sqlite", database_url=None)
+        == sqlite3.sqlite_version
+    )
+
+
+@pytest.mark.asyncio
+async def test_database_server_version_queries_postgres_and_closes_engine(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = RecordingConnection(version="16.9")
+    engine = RecordingEngine(connection=connection)
+    observed_url: str | None = None
+
+    def create_async_engine(database_url: str) -> RecordingEngine:
+        nonlocal observed_url
+        observed_url = database_url
+        return engine
+
+    monkeypatch.setattr(read_load_bench, "create_async_engine", create_async_engine)
+
+    version = await read_load_bench.database_server_version(
+        backend="postgres",
+        database_url="postgresql+asyncpg://benchmark.test/readload",
+    )
+
+    assert version == "16.9"
+    assert observed_url == "postgresql+asyncpg://benchmark.test/readload"
+    assert connection.query == "SHOW server_version"
+    assert engine.disposed
+
+
+@pytest.mark.asyncio
+async def test_database_server_version_requires_postgres_url() -> None:
+    with pytest.raises(ValueError, match="Postgres provenance requires a database URL"):
+        await read_load_bench.database_server_version(backend="postgres", database_url=None)
 
 
 def test_basic_memory_module_path_uses_target_python_environment(
@@ -160,6 +237,12 @@ async def test_run_stops_postgres_when_setup_fails(
     async def fail_redis_provenance(redis_url: str) -> str:
         raise RuntimeError(f"Redis unavailable: {redis_url}")
 
+    async def database_provenance(*, backend: str, database_url: str | None) -> str:
+        assert backend == "postgres"
+        assert database_url is not None
+        return "16.9"
+
+    monkeypatch.setattr(read_load_bench, "database_server_version", database_provenance)
     monkeypatch.setattr(read_load_bench, "redis_server_version", fail_redis_provenance)
 
     with pytest.raises(RuntimeError, match="Redis unavailable"):
@@ -206,6 +289,81 @@ async def test_run_rejects_duplicate_sizes_before_starting_postgres(
 
     with pytest.raises(ValueError, match="--sizes must not contain duplicates"):
         await read_load_bench.run(benchmark_args(tmp_path / "duplicate-sizes", sizes="1024,1024"))
+
+    assert not postgres_started
+
+
+@pytest.mark.asyncio
+async def test_run_rejects_duplicate_concurrency_before_starting_postgres(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    postgres_started = False
+
+    def start_postgres() -> RecordingPostgresContainer:
+        nonlocal postgres_started
+        postgres_started = True
+        return RecordingPostgresContainer()
+
+    monkeypatch.setattr(read_load_bench, "start_postgres", start_postgres)
+
+    with pytest.raises(ValueError, match="--concurrency must not contain duplicates"):
+        await read_load_bench.run(
+            benchmark_args(tmp_path / "duplicate-concurrency", concurrency="1,8,8")
+        )
+
+    assert not postgres_started
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("runtime_directory", ["config", "project", "main-home"])
+async def test_run_rejects_output_inside_runtime_directories_before_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    runtime_directory: str,
+) -> None:
+    postgres_started = False
+    scratch = tmp_path / "runtime-output"
+    output_dir = scratch / runtime_directory
+    output_dir.mkdir(parents=True)
+    sentinel = output_dir / "keep.txt"
+    sentinel.write_text("preserved\n", encoding="utf-8")
+
+    def start_postgres() -> RecordingPostgresContainer:
+        nonlocal postgres_started
+        postgres_started = True
+        return RecordingPostgresContainer()
+
+    monkeypatch.setattr(read_load_bench, "start_postgres", start_postgres)
+
+    with pytest.raises(ValueError, match="outside benchmark runtime directories"):
+        await read_load_bench.run(benchmark_args(scratch, output=str(output_dir / "results.jsonl")))
+
+    assert sentinel.read_text(encoding="utf-8") == "preserved\n"
+    assert not postgres_started
+
+
+@pytest.mark.asyncio
+async def test_run_rejects_manifest_as_output_before_starting_postgres(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    postgres_started = False
+
+    def start_postgres() -> RecordingPostgresContainer:
+        nonlocal postgres_started
+        postgres_started = True
+        return RecordingPostgresContainer()
+
+    monkeypatch.setattr(read_load_bench, "start_postgres", start_postgres)
+
+    with pytest.raises(ValueError, match="must not be manifest.json"):
+        await read_load_bench.run(
+            benchmark_args(
+                tmp_path / "manifest-output",
+                output=str(tmp_path / "published" / "manifest.json"),
+            )
+        )
 
     assert not postgres_started
 

@@ -13,7 +13,8 @@ the standalone Redis read cache is warmed.
 - isolated Basic Memory config, database, project, and home directories for every run;
 - JSONL output with p50, p95, p99, throughput, response bandwidth, errors, and workload metadata;
 - a `manifest.json` beside each result with benchmark and Basic Memory SHAs, provider versions,
-  dirty-worktree state, synthetic-corpus checksum, and runtime configuration.
+  selected Redis and database server versions, dirty-worktree state, synthetic-corpus checksum,
+  and runtime configuration.
 
 Every inherited `BASIC_MEMORY_*` setting is removed before the harness adds its explicit isolated
 configuration. The harness explicitly disables Basic Memory auto-update so measurement cannot
@@ -49,6 +50,9 @@ The output path must be new unless `--truncate` is explicit; otherwise the harne
 starting runtime resources so one manifest cannot describe JSONL rows appended by multiple runs.
 Each custom output directory is one run-artifact boundary: a second output filename is rejected
 when that directory already contains `manifest.json`, preserving the first result's provenance.
+Custom output and manifest paths must also stay outside the benchmark's runtime-owned `config`,
+`project`, and `main-home` directories. Otherwise Basic Memory could index a result while the run
+is active and invalidate the Redis entries being measured.
 
 Use `just bench-read-smoke [redis_url]` for a tiny real-MCP run at concurrency 64 that verifies
 Redis pool sizing plus result and manifest generation before committing to the full matrix.
