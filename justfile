@@ -423,7 +423,7 @@ bench-read-load label="authoritative" redis_url="":
         --output ".scratch/read-load-{{label}}/results.jsonl" \
         --truncate
 
-# Exercise MCP startup, per-scenario warmup, result output, and provenance with a tiny corpus.
+# Exercise MCP startup, Redis pool capacity, warmup, result output, and provenance with a tiny corpus.
 bench-read-smoke redis_url="redis://127.0.0.1:6379/0":
     uv run python benchmarks/scripts/read_load_bench.py \
         --bm-command .venv/bin/basic-memory \
@@ -434,8 +434,8 @@ bench-read-smoke redis_url="redis://127.0.0.1:6379/0":
         --truncate \
         --sizes 1024 \
         --notes-per-size 2 \
-        --reads 4 \
-        --concurrency 1 \
+        --reads 64 \
+        --concurrency 64 \
         --seed-concurrency 1 \
         --quiesce-seconds 0.1
 

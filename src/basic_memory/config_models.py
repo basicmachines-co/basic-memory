@@ -242,6 +242,11 @@ class BasicMemoryConfig(BaseSettings):
         default=None,
         description="Optional Redis URL for standalone MCP read caching. Bare hostnames are accepted.",
     )
+    redis_max_connections: int = Field(
+        default=20,
+        description="Maximum Redis connections used by standalone MCP read caching.",
+        gt=0,
+    )
 
     # Semantic search configuration
     semantic_search_enabled: bool = Field(

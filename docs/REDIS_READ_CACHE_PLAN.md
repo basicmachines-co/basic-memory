@@ -343,11 +343,13 @@ that client's lifecycle; Cloud therefore reuses its long-lived Basic Memory cach
 
 Standalone `bm mcp` activates the cache when `BASIC_MEMORY_REDIS_URL` is set. A bare hostname such
 as `redis` is normalized to `redis://redis`; complete `redis://` and `rediss://` URLs are preserved.
-The MCP lifespan owns one async client and shares its namespace-bound cache with both in-process
-FastAPI requests and watcher/index invalidation, then closes the client after those paths shut
-down. When the variable is absent, the dependency remains `None` and callers take only the
-authoritative path. Cloud runtime mode ignores this standalone setting because Cloud injects a
-separately owned cache using its trusted tenant namespace.
+The optional `BASIC_MEMORY_REDIS_MAX_CONNECTIONS` setting tunes that process-owned connection pool
+and defaults to 20; it does not activate caching by itself. The MCP lifespan owns one async client
+and shares its namespace-bound cache with both in-process FastAPI requests and watcher/index
+invalidation, then closes the client after those paths shut down. When the URL is absent, the
+dependency remains `None` and callers take only the authoritative path. Cloud runtime mode ignores
+this standalone composition because Cloud injects a separately owned cache using its trusted
+tenant namespace and capacity policy.
 
 `get_read_cache` is the host override point and returns `ReadCache | None`. Core-owned,
 route-specific FastAPI providers call `create_model_read_cache` to return a correctly typed facade
@@ -361,7 +363,11 @@ local ASGI transport does not run FastAPI lifespan.
 The end-to-end MCP benchmark is documented in
 [`benchmarks/docs/read-load-benchmark.md`](../benchmarks/docs/read-load-benchmark.md). It removes
 ambient Redis configuration for the authoritative run and sets `BASIC_MEMORY_REDIS_URL` only for
-the warmed-cache run, so both cases exercise the same `bm mcp` process boundary.
+the warmed-cache run, so both cases exercise the same `bm mcp` process boundary. The harness also
+sets `BASIC_MEMORY_REDIS_MAX_CONNECTIONS` to the largest requested workload or seed concurrency and
+records that non-secret value in the manifest. Without this capacity guarantee, Redis pool
+exhaustion would correctly bypass to authoritative reads but mislabel the resulting benchmark row
+as a warmed-cache measurement.
 
 ## Cloud Production Calibration
 

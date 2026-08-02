@@ -16,8 +16,11 @@ the standalone Redis read cache is warmed.
   dirty-worktree state, synthetic-corpus checksum, and runtime configuration.
 
 Every inherited `BASIC_MEMORY_*` setting is removed before the harness adds its explicit isolated
-configuration. The cached run sets `BASIC_MEMORY_REDIS_URL` only in the spawned MCP process. Output
-records whether Redis was enabled without recording the URL, because URLs may contain credentials.
+configuration. The cached run sets `BASIC_MEMORY_REDIS_URL` only in the spawned MCP process and
+sizes `BASIC_MEMORY_REDIS_MAX_CONNECTIONS` to the largest requested workload or seed concurrency.
+This prevents high-concurrency rows from exhausting the default pool and silently measuring the
+cache's authoritative-read fallback. Output records whether Redis was enabled and the non-secret
+pool size without recording the URL, because URLs may contain credentials.
 
 The Basic Memory SHA comes from the `basic_memory` module imported by the Python environment behind
 `--bm-command`, not from the console script's parent directory. Publishable per-ref environments
@@ -39,8 +42,8 @@ The recipe writes each side's `results.jsonl` and `manifest.json` under
 each repetition a distinct run ID so its corpus, results, and provenance remain available. Use
 `just bench-read-load <label> [redis_url]` when running one side independently.
 
-Use `just bench-read-smoke [redis_url]` for a tiny real-MCP run that verifies result and manifest
-generation before committing to the full matrix.
+Use `just bench-read-smoke [redis_url]` for a tiny real-MCP run at concurrency 64 that verifies
+Redis pool sizing plus result and manifest generation before committing to the full matrix.
 
 Latency is evidence, not a CI threshold. Use at least six paired repetitions before making a
 performance claim, alternate run order, and discard runs with material host contention. The

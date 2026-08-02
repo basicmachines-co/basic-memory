@@ -69,13 +69,19 @@ def test_isolated_env_removes_all_inherited_basic_memory_settings(
         monkeypatch.setenv(key, "must-not-escape")
     monkeypatch.setenv("BENCHMARK_TEST", "preserved")
 
-    env = read_load_bench.isolated_env(tmp_path / "config", redis_url="redis")
+    env = read_load_bench.isolated_env(
+        tmp_path / "config",
+        redis_url="redis",
+        redis_max_connections=64,
+    )
 
     assert env["BENCHMARK_TEST"] == "preserved"
+    assert env["BASIC_MEMORY_REDIS_MAX_CONNECTIONS"] == "64"
     assert all(key not in env for key in inherited_keys)
     assert {key for key in env if key.startswith("BASIC_MEMORY_")} == {
         "BASIC_MEMORY_CONFIG_DIR",
         "BASIC_MEMORY_LOG_LEVEL",
+        "BASIC_MEMORY_REDIS_MAX_CONNECTIONS",
         "BASIC_MEMORY_REDIS_URL",
         "BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED",
     }

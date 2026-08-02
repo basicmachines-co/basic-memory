@@ -68,7 +68,10 @@ async def lifespan(app: FastMCP):
     config = container.config
     standalone_redis_url = None if container.mode.is_cloud else config.redis_url
 
-    async with open_redis_read_cache(standalone_redis_url) as read_cache:
+    async with open_redis_read_cache(
+        standalone_redis_url,
+        max_connections=config.redis_max_connections,
+    ) as read_cache:
         container.read_cache = read_cache
         set_container(container)
         api_container = ApiContainer(config=config, mode=container.mode, read_cache=read_cache)

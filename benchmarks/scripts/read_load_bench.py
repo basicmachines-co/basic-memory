@@ -312,6 +312,11 @@ def write_manifest(
             "reads_per_scenario": args.reads,
             "concurrency_levels": concurrency_levels,
             "seed_concurrency": args.seed_concurrency,
+            "redis_max_connections": (
+                int(env["BASIC_MEMORY_REDIS_MAX_CONNECTIONS"])
+                if redis_version is not None
+                else None
+            ),
             "seed": args.seed,
             "ready_timeout_seconds": args.ready_timeout,
             "quiesce_seconds": args.quiesce_seconds,
@@ -355,7 +360,12 @@ def result_text(result: CallToolResult) -> str | None:
 # --- Isolated runtime ------------------------------------------------------
 
 
-def isolated_env(config_dir: Path, *, redis_url: str | None) -> dict[str, str]:
+def isolated_env(
+    config_dir: Path,
+    *,
+    redis_url: str | None,
+    redis_max_connections: int | None,
+) -> dict[str, str]:
     """Create a local runtime environment without inherited BM configuration."""
     env = {key: value for key, value in os.environ.items() if not key.startswith("BASIC_MEMORY_")}
     env["BASIC_MEMORY_CONFIG_DIR"] = str(config_dir)
@@ -363,7 +373,10 @@ def isolated_env(config_dir: Path, *, redis_url: str | None) -> dict[str, str]:
     env["BASIC_MEMORY_LOG_LEVEL"] = "WARNING"
     env["LOGFIRE_IGNORE_NO_CONFIG"] = "1"
     if redis_url is not None:
+        if redis_max_connections is None or redis_max_connections <= 0:
+            raise ValueError("Redis runs require a positive connection-pool size")
         env["BASIC_MEMORY_REDIS_URL"] = redis_url
+        env["BASIC_MEMORY_REDIS_MAX_CONNECTIONS"] = str(redis_max_connections)
     return env
 
 
@@ -608,8 +621,15 @@ async def run(args: argparse.Namespace) -> int:
             output_path.unlink()
 
         redis_url = args.redis_url.strip() if args.redis_url else None
+        redis_max_connections = (
+            max(max(concurrency_levels), args.seed_concurrency) if redis_url is not None else None
+        )
         project = "readload"
-        env = isolated_env(config_dir, redis_url=redis_url)
+        env = isolated_env(
+            config_dir,
+            redis_url=redis_url,
+            redis_max_connections=redis_max_connections,
+        )
         env["BASIC_MEMORY_HOME"] = str(main_home)
         if args.backend == "postgres":
             if database_url is None:
