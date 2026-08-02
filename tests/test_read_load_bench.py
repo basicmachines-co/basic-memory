@@ -24,6 +24,63 @@ def load_read_load_bench() -> ModuleType:
 read_load_bench = load_read_load_bench()
 
 
+def test_basic_memory_module_path_uses_target_python_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    command_dir = tmp_path / "benchmark-checkout" / ".venv" / "bin"
+    command_dir.mkdir(parents=True)
+    command_path = command_dir / "basic-memory"
+    command_path.touch()
+    python_path = command_dir / "python"
+    python_path.touch()
+
+    module_path = tmp_path / "basic-memory-source" / "src" / "basic_memory" / "__init__.py"
+    module_path.parent.mkdir(parents=True)
+    module_path.touch()
+    observed_commands: list[list[str]] = []
+
+    def checked_output(command: list[str], *, env: dict[str, str] | None = None) -> str:
+        observed_commands.append(command)
+        assert env == {"BENCHMARK_TEST": "target"}
+        return str(module_path)
+
+    monkeypatch.setattr(read_load_bench, "checked_output", checked_output)
+
+    resolved = read_load_bench.basic_memory_module_path(
+        command_path,
+        {"BENCHMARK_TEST": "target"},
+    )
+
+    assert resolved == module_path
+    assert observed_commands[0][0] == str(python_path)
+
+
+def test_isolated_env_removes_all_inherited_basic_memory_settings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    inherited_keys = (
+        "BASIC_MEMORY_PROJECT_ROOT",
+        "BASIC_MEMORY_CLOUD_API_KEY",
+        "BASIC_MEMORY_DATABASE_POOL_SIZE",
+    )
+    for key in inherited_keys:
+        monkeypatch.setenv(key, "must-not-escape")
+    monkeypatch.setenv("BENCHMARK_TEST", "preserved")
+
+    env = read_load_bench.isolated_env(tmp_path / "config", redis_url="redis")
+
+    assert env["BENCHMARK_TEST"] == "preserved"
+    assert all(key not in env for key in inherited_keys)
+    assert {key for key in env if key.startswith("BASIC_MEMORY_")} == {
+        "BASIC_MEMORY_CONFIG_DIR",
+        "BASIC_MEMORY_LOG_LEVEL",
+        "BASIC_MEMORY_REDIS_URL",
+        "BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED",
+    }
+
+
 def benchmark_args(scratch: Path, **overrides: object) -> argparse.Namespace:
     values: dict[str, object] = {
         "backend": "postgres",

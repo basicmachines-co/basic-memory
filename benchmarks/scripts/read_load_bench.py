@@ -21,6 +21,7 @@ import json
 import os
 import platform
 import random
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -179,6 +180,43 @@ def git_source(repo_root: Path) -> str:
     return f"local:{repo_root.name}"
 
 
+def basic_memory_module_path(command_path: Path, env: dict[str, str]) -> Path:
+    """Resolve the module imported by the Python environment behind one BM command."""
+    python_command: list[str] | None = None
+    for name in ("python", "python3", "python.exe"):
+        interpreter = command_path.parent / name
+        if interpreter.is_file():
+            python_command = [str(interpreter)]
+            break
+
+    if python_command is None:
+        try:
+            with command_path.open(encoding="utf-8") as handle:
+                first_line = handle.readline().strip()
+        except (OSError, UnicodeDecodeError) as error:
+            raise RuntimeError(
+                f"could not resolve the Python environment for {command_path}"
+            ) from error
+        if not first_line.startswith("#!"):
+            raise RuntimeError(f"Basic Memory command has no Python shebang: {command_path}")
+        python_command = shlex.split(first_line.removeprefix("#!"))
+        if not python_command:
+            raise RuntimeError(f"Basic Memory command has an empty shebang: {command_path}")
+
+    module_output = checked_output(
+        [
+            *python_command,
+            "-c",
+            "import basic_memory; print(basic_memory.__file__)",
+        ],
+        env=env,
+    )
+    module_path = Path(module_output).resolve()
+    if not module_path.is_file():
+        raise RuntimeError(f"Basic Memory reported an invalid module path: {module_output}")
+    return module_path
+
+
 def synthetic_corpus_checksum(*, sizes: list[int], notes_per_size: int) -> str:
     """Hash the exact deterministic corpus with unambiguous value boundaries."""
     digest = hashlib.sha256()
@@ -220,7 +258,14 @@ def write_manifest(
     command_path = Path(shutil.which(args.bm_command) or "").resolve()
     if not command_path.is_file():
         raise RuntimeError(f"could not resolve Basic Memory command: {args.bm_command}")
-    bm_repo_root = git_root(command_path)
+    bm_module_path = basic_memory_module_path(command_path, env)
+    bm_repo_root = git_root(bm_module_path)
+    package_root = (bm_repo_root / "src" / "basic_memory").resolve()
+    if not bm_module_path.is_relative_to(package_root):
+        raise RuntimeError(
+            "installed Basic Memory is not linked to the resolved source checkout; "
+            "use a per-ref editable environment"
+        )
     benchmark_repo_root = git_root(Path(__file__).resolve())
     try:
         command_source = str(command_path.relative_to(bm_repo_root))
@@ -230,6 +275,7 @@ def write_manifest(
     provider_versions = {
         "basic-memory": {
             "command": command_source,
+            "module": str(bm_module_path.relative_to(bm_repo_root)),
             "version": checked_output([str(command_path), "--version"], env=env),
         }
     }
@@ -311,16 +357,7 @@ def result_text(result: CallToolResult) -> str | None:
 
 def isolated_env(config_dir: Path, *, redis_url: str | None) -> dict[str, str]:
     """Create a local runtime environment without inherited BM configuration."""
-    env = dict(os.environ)
-    for key in (
-        "BASIC_MEMORY_ENV",
-        "BASIC_MEMORY_CLOUD_MODE",
-        "BASIC_MEMORY_DATABASE_BACKEND",
-        "BASIC_MEMORY_DATABASE_URL",
-        "BASIC_MEMORY_HOME",
-        "BASIC_MEMORY_REDIS_URL",
-    ):
-        env.pop(key, None)
+    env = {key: value for key, value in os.environ.items() if not key.startswith("BASIC_MEMORY_")}
     env["BASIC_MEMORY_CONFIG_DIR"] = str(config_dir)
     env["BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED"] = "false"
     env["BASIC_MEMORY_LOG_LEVEL"] = "WARNING"

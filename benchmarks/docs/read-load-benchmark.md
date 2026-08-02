@@ -15,9 +15,14 @@ the standalone Redis read cache is warmed.
 - a `manifest.json` beside each result with benchmark and Basic Memory SHAs, provider versions,
   dirty-worktree state, synthetic-corpus checksum, and runtime configuration.
 
-The uncached run removes any inherited `BASIC_MEMORY_REDIS_URL`. The cached run sets it only in
-the spawned MCP process. Output records whether Redis was enabled without recording the URL,
-because URLs may contain credentials.
+Every inherited `BASIC_MEMORY_*` setting is removed before the harness adds its explicit isolated
+configuration. The cached run sets `BASIC_MEMORY_REDIS_URL` only in the spawned MCP process. Output
+records whether Redis was enabled without recording the URL, because URLs may contain credentials.
+
+The Basic Memory SHA comes from the `basic_memory` module imported by the Python environment behind
+`--bm-command`, not from the console script's parent directory. Publishable per-ref environments
+must therefore use an editable install linked to the source checkout; the harness fails rather
+than attributing a wheel or unrelated enclosing repository to the wrong SHA.
 
 ## Run a paired comparison
 
