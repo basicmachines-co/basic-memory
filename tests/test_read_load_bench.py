@@ -122,7 +122,7 @@ async def test_database_server_version_requires_postgres_url() -> None:
         await read_load_bench.database_server_version(backend="postgres", database_url=None)
 
 
-def test_basic_memory_module_path_uses_target_python_environment(
+def test_basic_memory_runtime_uses_target_python_environment(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -141,17 +141,40 @@ def test_basic_memory_module_path_uses_target_python_environment(
     def checked_output(command: list[str], *, env: dict[str, str] | None = None) -> str:
         observed_commands.append(command)
         assert env == {"BENCHMARK_TEST": "target"}
-        return str(module_path)
+        return json.dumps(
+            {
+                "module_path": str(module_path),
+                "python_version": "3.12.11",
+            }
+        )
 
     monkeypatch.setattr(read_load_bench, "checked_output", checked_output)
 
-    resolved = read_load_bench.basic_memory_module_path(
+    runtime = read_load_bench.basic_memory_runtime(
         command_path,
         {"BENCHMARK_TEST": "target"},
     )
 
-    assert resolved == module_path
+    assert runtime.module_path == module_path
+    assert runtime.python_version == "3.12.11"
     assert observed_commands[0][0] == str(python_path)
+
+
+@pytest.mark.parametrize("runtime_output", ["not json", "{}", "[]"])
+def test_basic_memory_runtime_rejects_invalid_target_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    runtime_output: str,
+) -> None:
+    command_dir = tmp_path / "benchmark-checkout" / ".venv" / "bin"
+    command_dir.mkdir(parents=True)
+    command_path = command_dir / "basic-memory"
+    command_path.touch()
+    (command_dir / "python").touch()
+    monkeypatch.setattr(read_load_bench, "checked_output", lambda *args, **kwargs: runtime_output)
+
+    with pytest.raises((RuntimeError, TypeError), match="runtime provenance"):
+        read_load_bench.basic_memory_runtime(command_path, {})
 
 
 def test_isolated_env_removes_all_inherited_basic_memory_settings(

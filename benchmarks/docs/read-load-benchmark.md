@@ -13,8 +13,8 @@ the standalone Redis read cache is warmed.
 - isolated Basic Memory config, database, project, and home directories for every run;
 - JSONL output with p50, p95, p99, throughput, response bandwidth, errors, and workload metadata;
 - a `manifest.json` beside each result with benchmark and Basic Memory SHAs, provider versions,
-  selected Redis and database server versions, dirty-worktree state, synthetic-corpus checksum,
-  and runtime configuration.
+  selected Redis and database server versions, target and harness Python versions, dirty-worktree
+  state, synthetic-corpus checksum, and runtime configuration.
 
 Every inherited `BASIC_MEMORY_*` setting is removed before the harness adds its explicit isolated
 configuration. The harness explicitly disables Basic Memory auto-update so measurement cannot

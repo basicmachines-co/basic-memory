@@ -51,6 +51,14 @@ class ReadTarget:
     requested_content_bytes: int
 
 
+@dataclass(frozen=True, slots=True)
+class BasicMemoryRuntime:
+    """Provenance from the Python interpreter that runs the target BM command."""
+
+    module_path: Path
+    python_version: str
+
+
 class PostgresContainer(Protocol):
     """Narrow testcontainer lifecycle used by the optional Postgres backend."""
 
@@ -181,8 +189,8 @@ def git_source(repo_root: Path) -> str:
     return f"local:{repo_root.name}"
 
 
-def basic_memory_module_path(command_path: Path, env: dict[str, str]) -> Path:
-    """Resolve the module imported by the Python environment behind one BM command."""
+def basic_memory_runtime(command_path: Path, env: dict[str, str]) -> BasicMemoryRuntime:
+    """Resolve module and Python provenance from the target BM environment."""
     python_command: list[str] | None = None
     for name in ("python", "python3", "python.exe"):
         interpreter = command_path.parent / name
@@ -204,18 +212,34 @@ def basic_memory_module_path(command_path: Path, env: dict[str, str]) -> Path:
         if not python_command:
             raise RuntimeError(f"Basic Memory command has an empty shebang: {command_path}")
 
-    module_output = checked_output(
+    probe = (
+        "import basic_memory, json, platform; "
+        'print(json.dumps({"module_path": basic_memory.__file__, '
+        '"python_version": platform.python_version()}))'
+    )
+    runtime_output = checked_output(
         [
             *python_command,
             "-c",
-            "import basic_memory; print(basic_memory.__file__)",
+            probe,
         ],
         env=env,
     )
+    try:
+        runtime = json.loads(runtime_output)
+    except json.JSONDecodeError as error:
+        raise RuntimeError("Basic Memory returned invalid runtime provenance") from error
+    if not isinstance(runtime, dict):
+        raise TypeError("Basic Memory returned invalid runtime provenance")
+    module_output = runtime.get("module_path")
+    python_version = runtime.get("python_version")
+    if not isinstance(module_output, str) or not isinstance(python_version, str):
+        raise TypeError("Basic Memory returned incomplete runtime provenance")
+
     module_path = Path(module_output).resolve()
     if not module_path.is_file():
         raise RuntimeError(f"Basic Memory reported an invalid module path: {module_output}")
-    return module_path
+    return BasicMemoryRuntime(module_path=module_path, python_version=python_version)
 
 
 def synthetic_corpus_checksum(*, sizes: list[int], notes_per_size: int) -> str:
@@ -282,7 +306,8 @@ def write_manifest(
     command_path = Path(shutil.which(args.bm_command) or "").resolve()
     if not command_path.is_file():
         raise RuntimeError(f"could not resolve Basic Memory command: {args.bm_command}")
-    bm_module_path = basic_memory_module_path(command_path, env)
+    bm_runtime = basic_memory_runtime(command_path, env)
+    bm_module_path = bm_runtime.module_path
     bm_repo_root = git_root(bm_module_path)
     package_root = (bm_repo_root / "src" / "basic_memory").resolve()
     if not bm_module_path.is_relative_to(package_root):
@@ -300,6 +325,7 @@ def write_manifest(
         "basic-memory": {
             "command": command_source,
             "module": str(bm_module_path.relative_to(bm_repo_root)),
+            "python_version": bm_runtime.python_version,
             "version": checked_output([str(command_path), "--version"], env=env),
         }
     }
@@ -330,7 +356,7 @@ def write_manifest(
         },
         "runtime": {
             "os": platform.platform(),
-            "python_version": sys.version.split()[0],
+            "harness_python_version": sys.version.split()[0],
             "backend": args.backend,
             "redis_read_cache_enabled": redis_version is not None,
         },
