@@ -537,6 +537,20 @@ async def read_burst(
 
 
 async def run(args: argparse.Namespace) -> int:
+    sizes = [int(value) for value in args.sizes.split(",") if value.strip()]
+    concurrency_levels = [int(value) for value in args.concurrency.split(",") if value.strip()]
+    if not sizes or min(sizes) <= 0:
+        raise ValueError("--sizes must contain positive byte counts")
+    if not concurrency_levels or min(concurrency_levels) <= 0:
+        raise ValueError("--concurrency must contain positive integers")
+    for option, value in (
+        ("--notes-per-size", args.notes_per_size),
+        ("--reads", args.reads),
+        ("--seed-concurrency", args.seed_concurrency),
+    ):
+        if value <= 0:
+            raise ValueError(f"{option} must be a positive integer")
+
     scratch = Path(args.scratch).resolve()
     config_dir = scratch / "config"
     project_dir = scratch / "project"
@@ -546,44 +560,38 @@ async def run(args: argparse.Namespace) -> int:
             shutil.rmtree(path)
         path.mkdir(parents=True, exist_ok=True)
 
-    pg_container = (
-        start_postgres() if args.backend == "postgres" and not args.database_url else None
-    )
-    database_url = args.database_url or (asyncpg_url(pg_container) if pg_container else None)
-    output_path = Path(args.output).resolve() if args.output else None
-    if output_path is not None and output_path.exists() and args.truncate:
-        output_path.unlink()
-
-    sizes = [int(value) for value in args.sizes.split(",") if value.strip()]
-    concurrency_levels = [int(value) for value in args.concurrency.split(",") if value.strip()]
-    if not sizes or min(sizes) <= 0:
-        raise ValueError("--sizes must contain positive byte counts")
-    if not concurrency_levels or min(concurrency_levels) <= 0:
-        raise ValueError("--concurrency must contain positive integers")
-    redis_url = args.redis_url.strip() if args.redis_url else None
-
-    project = "readload"
-    env = isolated_env(config_dir, redis_url=redis_url)
-    env["BASIC_MEMORY_HOME"] = str(main_home)
-    if args.backend == "postgres":
-        if database_url is None:
-            raise ValueError("Postgres backend requires a database URL")
-        env["BASIC_MEMORY_DATABASE_BACKEND"] = "postgres"
-        env["BASIC_MEMORY_DATABASE_URL"] = database_url
-
-    version = await redis_server_version(redis_url) if redis_url is not None else None
-    write_manifest(
-        scratch=scratch,
-        args=args,
-        env=env,
-        sizes=sizes,
-        concurrency_levels=concurrency_levels,
-        redis_version=version,
-    )
-    params = StdioServerParameters(command=args.bm_command, args=["mcp"], env=env)
-    had_failures = False
-
+    pg_container: PostgresContainer | None = None
     try:
+        pg_container = (
+            start_postgres() if args.backend == "postgres" and not args.database_url else None
+        )
+        database_url = args.database_url or (asyncpg_url(pg_container) if pg_container else None)
+        output_path = Path(args.output).resolve() if args.output else None
+        if output_path is not None and output_path.exists() and args.truncate:
+            output_path.unlink()
+
+        redis_url = args.redis_url.strip() if args.redis_url else None
+        project = "readload"
+        env = isolated_env(config_dir, redis_url=redis_url)
+        env["BASIC_MEMORY_HOME"] = str(main_home)
+        if args.backend == "postgres":
+            if database_url is None:
+                raise ValueError("Postgres backend requires a database URL")
+            env["BASIC_MEMORY_DATABASE_BACKEND"] = "postgres"
+            env["BASIC_MEMORY_DATABASE_URL"] = database_url
+
+        version = await redis_server_version(redis_url) if redis_url is not None else None
+        write_manifest(
+            scratch=scratch,
+            args=args,
+            env=env,
+            sizes=sizes,
+            concurrency_levels=concurrency_levels,
+            redis_version=version,
+        )
+        params = StdioServerParameters(command=args.bm_command, args=["mcp"], env=env)
+        had_failures = False
+
         async with (
             stdio_client(params) as (read_stream, write_stream),
             ClientSession(read_stream, write_stream) as session,
