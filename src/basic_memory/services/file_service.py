@@ -465,7 +465,6 @@ class FileService:
 
         Raises:
             FileOperationError: If file operations fail
-            ParseError: If frontmatter parsing fails
         """
         # Convert string to Path if needed
         path_obj = self.base_path / path if isinstance(path, str) else path
@@ -481,15 +480,15 @@ class FileService:
             if file_utils.has_frontmatter(content):
                 try:
                     current_fm = file_utils.parse_frontmatter(content)
-                    content = file_utils.remove_frontmatter(content)
-                except (ParseError, yaml.YAMLError) as e:  # pragma: no cover
-                    # Log warning and treat as plain markdown without frontmatter
-                    logger.warning(  # pragma: no cover
-                        f"Failed to parse YAML frontmatter in {full_path}: {e}. "
-                        "Treating file as plain markdown without frontmatter."
-                    )
-                    # Keep full content, treat as having no frontmatter
-                    current_fm = {}  # pragma: no cover
+                except ParseError as e:
+                    # Trigger: a fenced frontmatter block cannot be parsed safely.
+                    # Why: Markdown is authoritative, and a partial update cannot know
+                    # which malformed metadata fields the user intended to preserve.
+                    # Outcome: reject the rewrite before any bytes are changed.
+                    raise FileOperationError(
+                        f"Refusing to update malformed frontmatter in {full_path}: {e}"
+                    ) from e
+                content = file_utils.remove_frontmatter(content)
 
             # Update frontmatter
             new_fm = {**current_fm, **updates}
@@ -522,14 +521,14 @@ class FileService:
                 content=content_for_checksum,
             )
 
+        except FileOperationError:
+            raise
         except Exception as e:  # pragma: no cover
-            # Only log real errors (not YAML parsing, which is handled above)
-            if not isinstance(e, (ParseError, yaml.YAMLError)):
-                logger.error(
-                    "Failed to update frontmatter",
-                    path=str(full_path),
-                    error=str(e),
-                )
+            logger.error(
+                "Failed to update frontmatter",
+                path=str(full_path),
+                error=str(e),
+            )
             raise FileOperationError(f"Failed to update frontmatter: {e}")
 
     async def update_frontmatter(self, path: FilePath, updates: Dict[str, Any]) -> str:

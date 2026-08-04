@@ -656,6 +656,58 @@ async def test_batch_indexer_uses_parsed_markdown_body_for_malformed_frontmatter
 
 
 @pytest.mark.asyncio
+async def test_batch_indexer_reports_malformed_yaml_without_rewriting_source(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+):
+    path = "notes/malformed-yaml.md"
+    original_content = dedent(
+        """\
+        ---
+        title: Important
+        description: Agent context: urgent: keep
+        tags: [critical]
+        ---
+
+        # Important
+
+        The source file must remain authoritative.
+        """
+    )
+    await _create_file(project_config.home / path, original_content)
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+
+    result = await batch_indexer.index_files(
+        {path: await _load_input(file_service, path)},
+        max_concurrent=1,
+        parse_max_concurrent=1,
+    )
+
+    assert result.indexed == []
+    assert len(result.errors) == 1
+    error_path, error = result.errors[0]
+    assert error_path == path
+    assert "Refusing to update malformed frontmatter" in error
+    assert (project_config.home / path).read_text(encoding="utf-8") == original_content
+
+    async with db.scoped_session(search_service.session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, path)
+    assert entity is None
+
+
+@pytest.mark.asyncio
 async def test_batch_indexer_re_raises_fatal_sync_errors(
     app_config,
     entity_service,

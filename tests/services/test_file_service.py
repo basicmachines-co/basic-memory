@@ -201,6 +201,32 @@ async def test_update_frontmatter_checksum_matches_windows_crlf_persisted_bytes(
 
 
 @pytest.mark.asyncio
+async def test_update_frontmatter_rejects_malformed_yaml_without_changing_file(
+    tmp_path: Path, file_service: FileService
+):
+    """A partial metadata update must not replace malformed user frontmatter."""
+    test_path = tmp_path / "note.md"
+    original_content = (
+        "---\n"
+        "title: Important\n"
+        "description: Agent context: urgent: keep\n"
+        "tags: [critical]\n"
+        "---\n\n"
+        "# Note\n"
+        "Body\n"
+    )
+    test_path.write_text(original_content, encoding="utf-8")
+
+    with pytest.raises(FileOperationError, match="Refusing to update malformed frontmatter"):
+        await file_service.update_frontmatter_with_result(
+            test_path,
+            {"permalink": "notes/important"},
+        )
+
+    assert test_path.read_text(encoding="utf-8") == original_content
+
+
+@pytest.mark.asyncio
 async def test_read_file_content(tmp_path: Path, file_service: FileService):
     """Test read_file_content returns just the content without checksum."""
     test_path = tmp_path / "test.md"
