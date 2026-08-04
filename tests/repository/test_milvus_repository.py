@@ -231,6 +231,7 @@ def test_repository_applies_finite_deadline_to_every_remote_operation(
     client.has_collection_result = True
 
     assert repository.collection_dimensions("vectors") == 4
+    repository.load_collection("vectors")
     assert repository.create_collection("vectors", 4)
     repository.upsert(
         "vectors",
@@ -269,7 +270,7 @@ def test_repository_applies_finite_deadline_to_every_remote_operation(
     assert client.searches[0]["consistency_level"] == "Strong"
 
 
-def test_collection_dimensions_reports_missing_and_loads_valid_collection(
+def test_collection_dimensions_reports_missing_and_valid_collection(
     repository: PyMilvusRepository,
     client: FakeClient,
 ) -> None:
@@ -277,6 +278,10 @@ def test_collection_dimensions_reports_missing_and_loads_valid_collection(
 
     client.has_collection_result = True
     assert repository.collection_dimensions("vectors") == 4
+    assert client.loaded == []
+
+    repository.load_collection("vectors")
+
     assert client.loaded == [{"collection_name": "vectors", "timeout": 12.5}]
 
 

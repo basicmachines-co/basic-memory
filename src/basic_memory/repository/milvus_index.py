@@ -85,6 +85,10 @@ class MilvusVectorIndex:
                         "a concurrent create operation."
                     )
             if dimensions == self.scope.dimensions:
+                # Milvus Lite releases persisted collections when the owning process exits.
+                # Load only after the scope check so migrations do not load incompatible
+                # remote collections before Basic Memory refuses to use them.
+                repository.load_collection(self._collection_name)
                 return
 
             # Trigger: an existing project collection uses another embedding dimension.

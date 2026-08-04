@@ -50,6 +50,7 @@ class FakeRepository:
         self.create_result = create_result
         self.race_dimensions = race_dimensions
         self.created: list[tuple[str, int]] = []
+        self.loaded: list[str] = []
         self.upserts: list[tuple[str, list[MilvusStoredRecord]]] = []
         self.record_deletes: list[tuple[str, list[tuple[str, str]]]] = []
         self.entity_deletes: list[tuple[str, int]] = []
@@ -62,6 +63,9 @@ class FakeRepository:
     def collection_dimensions(self, collection_name: str) -> int | None:
         assert collection_name
         return self.dimensions
+
+    def load_collection(self, collection_name: str) -> None:
+        self.loaded.append(collection_name)
 
     def create_collection(self, collection_name: str, dimensions: int) -> bool:
         self.created.append((collection_name, dimensions))
@@ -239,6 +243,7 @@ async def test_initialize_accepts_compatible_collection_create_race(
 
     assert repository.created == [(collection_name(settings, scope), scope.dimensions)]
     assert repository.dimensions == scope.dimensions
+    assert repository.loaded == [collection_name(settings, scope)]
 
 
 @pytest.mark.asyncio
@@ -252,6 +257,7 @@ async def test_initialize_rejects_incompatible_collection_create_race(
         await _index(scope, settings, repository).initialize()
 
     assert repository.dimensions == 99
+    assert repository.loaded == []
 
 
 @pytest.mark.asyncio
@@ -278,6 +284,7 @@ async def test_initialize_preserves_collection_on_dimension_mismatch(
 
     assert repository.created == []
     assert repository.dimensions == 99
+    assert repository.loaded == []
 
 
 @pytest.mark.asyncio
@@ -290,6 +297,7 @@ async def test_initialize_accepts_matching_collection(
     await _index(scope, settings, repository).initialize()
 
     assert repository.created == []
+    assert repository.loaded == [collection_name(settings, scope)]
 
 
 @pytest.mark.asyncio
