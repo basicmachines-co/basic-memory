@@ -52,6 +52,9 @@ which graph and search projections attach.
 - `permalink` is the human/agent-facing semantic address for Markdown content. It is
   project-scoped, may be absent when permalinks are disabled or inapplicable, and changes only
   according to the configured move and permalink policies.
+- Non-Markdown entities always have `permalink=None`. `external_id` is their stable API identity,
+  and `file_path` locates the stored resource; a database-only permalink would not round-trip
+  through the source file.
 - `title` is mutable display metadata, not identity.
 - For Markdown notes, `created_at` and `updated_at` project the canonical `created` and `modified`
   frontmatter values. Missing values fall back independently to file ctime and mtime for legacy

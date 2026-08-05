@@ -438,7 +438,8 @@ class BatchIndexer:
         is_new_entity = existing is None
 
         if existing is None:
-            await self.entity_service.resolve_permalink(file.path, skip_conflict_check=True)
+            # Non-Markdown resources cannot persist a semantic address back to source bytes.
+            # Their stable API identity is external_id; file_path locates the stored resource.
             entity = Entity(
                 note_type="file",
                 file_path=file.path,

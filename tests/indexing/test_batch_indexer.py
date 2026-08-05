@@ -347,6 +347,7 @@ async def test_batch_indexer_indexes_non_markdown_files(
     search_service,
     file_service,
     project_config,
+    monkeypatch,
 ):
     pdf_path = "assets/doc.pdf"
     image_path = "assets/image.png"
@@ -357,6 +358,10 @@ async def test_batch_indexer_indexes_non_markdown_files(
         pdf_path: await _load_input(file_service, pdf_path),
         image_path: await _load_input(file_service, image_path),
     }
+    resolve_permalink = AsyncMock(
+        side_effect=AssertionError("non-Markdown files must not resolve permalinks")
+    )
+    monkeypatch.setattr(entity_service, "resolve_permalink", resolve_permalink)
     batch_indexer = _make_batch_indexer(
         app_config,
         entity_service,
@@ -380,8 +385,11 @@ async def test_batch_indexer_indexes_non_markdown_files(
         image_entity = await entity_repository.get_by_file_path(session, image_path)
     assert pdf_entity is not None
     assert pdf_entity.content_type == "application/pdf"
+    assert pdf_entity.permalink is None
     assert image_entity is not None
     assert image_entity.content_type == "image/png"
+    assert image_entity.permalink is None
+    resolve_permalink.assert_not_awaited()
 
 
 @pytest.mark.asyncio
