@@ -64,9 +64,22 @@ async def test_strict_entity_resolution_rejects_legacy_cross_project_path_after_
         f"{v2_project_url}/knowledge/resolve",
         json={"identifier": "other-project/docs/local-note", "strict": True},
     )
+    fuzzy_entity_response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={
+            "title": "Missing",
+            "directory": "local",
+            "content": "A local note that must not satisfy a qualified project reference.",
+        },
+    )
+    assert fuzzy_entity_response.status_code == 202
     qualified_miss_response = await client.post(
         f"{v2_project_url}/knowledge/resolve",
         json={"identifier": "other-project/docs/missing", "strict": True},
+    )
+    non_strict_qualified_miss_response = await client.post(
+        f"{v2_project_url}/knowledge/resolve",
+        json={"identifier": "other-project/docs/missing"},
     )
     namespaced_title_response = await client.post(
         f"{v2_project_url}/knowledge/resolve",
@@ -82,3 +95,5 @@ async def test_strict_entity_resolution_rejects_legacy_cross_project_path_after_
     )
     assert qualified_miss_response.status_code == 400
     assert "/knowledge/links/resolve" in qualified_miss_response.json()["detail"]
+    assert non_strict_qualified_miss_response.status_code == 400
+    assert "/knowledge/links/resolve" in non_strict_qualified_miss_response.json()["detail"]

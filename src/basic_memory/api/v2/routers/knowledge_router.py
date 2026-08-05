@@ -345,35 +345,12 @@ async def resolve_identifier(
             resolution_method = "external_id" if entity else "search"
 
             if not entity:
-                try:
-                    entity = await link_resolver.resolve_entity(
-                        data.identifier,
-                        source_path=data.source_path,
-                        strict=data.strict,
-                        session=session,
-                    )
-                except AmbiguousIdentifierError as exc:
-                    # A strict resolve refused to guess between several same-title notes (#1148).
-                    # Surface it as 409 so edit/move report ambiguity and ask for an exact id.
-                    raise HTTPException(
-                        status_code=status.HTTP_409_CONFLICT,
-                        detail=str(exc),
-                    ) from exc
-                if entity:
-                    if entity.permalink == data.identifier:
-                        resolution_method = "permalink"
-                    elif entity.title == data.identifier:
-                        resolution_method = "title"
-                    elif entity.file_path == data.identifier:
-                        resolution_method = "path"
-
-            if not entity:
-                # Trigger: local resolution missed and the first path segment names another
-                # project through the legacy ``project/note`` syntax.
-                # Why: a mutation caller treats a 404 as permission to create locally, which
-                # can turn a cross-project reference into a misleading note in this project.
-                # Outcome: direct the caller to source-aware link resolution before returning
-                # the ordinary not-found response for genuinely local identifiers.
+                # Trigger: the identifier uses legacy ``project/note`` syntax and the prefix
+                # names a different project.
+                # Why: non-strict resolution includes fuzzy search, which can otherwise turn a
+                # qualified miss into an unrelated entity from the route project.
+                # Outcome: allow an exact local title/path/permalink first, but reject the miss
+                # before fuzzy fallback and direct the caller to source-aware link resolution.
                 normalized_identifier = normalize_project_reference(data.identifier).strip("/")
                 project_prefix, separator, _ = normalized_identifier.partition("/")
                 referenced_project = None
@@ -389,12 +366,51 @@ async def resolve_identifier(
                         referenced_project = await project_repository.get_by_permalink(
                             session, generate_permalink(project_prefix)
                         )
-                if referenced_project is not None and referenced_project.id != project_id:
+                qualified_other_project = (
+                    referenced_project is not None and referenced_project.id != project_id
+                )
+
+                try:
+                    entity = await link_resolver.resolve_entity(
+                        data.identifier,
+                        source_path=data.source_path,
+                        strict=True if qualified_other_project else data.strict,
+                        session=session,
+                    )
+                except AmbiguousIdentifierError as exc:
+                    if qualified_other_project and not data.strict:
+                        # An ambiguity proves that exact local title candidates exist, so retain
+                        # the non-strict caller's historical shortest-path selection without
+                        # opening the fuzzy qualified-miss path.
+                        entity = await link_resolver.resolve_entity(
+                            data.identifier,
+                            source_path=data.source_path,
+                            strict=False,
+                            session=session,
+                        )
+                    else:
+                        # A strict resolve refused to guess between several same-title notes
+                        # (#1148). Surface it as 409 so edit/move report ambiguity and ask for
+                        # an exact id.
+                        raise HTTPException(
+                            status_code=status.HTTP_409_CONFLICT,
+                            detail=str(exc),
+                        ) from exc
+                if entity:
+                    if entity.permalink == data.identifier:
+                        resolution_method = "permalink"
+                    elif entity.title == data.identifier:
+                        resolution_method = "title"
+                    elif entity.file_path == data.identifier:
+                        resolution_method = "path"
+
+                if not entity and qualified_other_project:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="Qualified project references must use /knowledge/links/resolve",
                     )
 
+            if not entity:
                 raise HTTPException(
                     status_code=404,
                     detail=f"Entity not found: '{data.identifier}'",
