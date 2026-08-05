@@ -1129,7 +1129,8 @@ class ProjectService:
                     session,
                     text(
                         "SELECT column_name FROM information_schema.columns "
-                        "WHERE table_name = 'search_vector_embeddings'"
+                        "WHERE table_schema = ANY (current_schemas(false)) "
+                        "AND table_name = 'search_vector_embeddings'"
                     ),
                     {},
                 )

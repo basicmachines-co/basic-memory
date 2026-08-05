@@ -211,6 +211,15 @@ async def test_embedding_status_treats_legacy_pgvector_storage_as_unavailable(
         text("CREATE TABLE search_vector_embeddings (chunk_id INTEGER PRIMARY KEY)"),
         {},
     )
+    await _execute(project_service, text("CREATE SCHEMA embedding_status_shadow"), {})
+    await _execute(
+        project_service,
+        text(
+            "CREATE TABLE embedding_status_shadow.search_vector_embeddings ("
+            "chunk_id INTEGER PRIMARY KEY, source_hash TEXT NOT NULL)"
+        ),
+        {},
+    )
 
     try:
         with patch.object(
@@ -223,6 +232,11 @@ async def test_embedding_status_treats_legacy_pgvector_storage_as_unavailable(
             status = await project_service.get_embedding_status(test_project.id)
     finally:
         await _drop_embeddings_stub(project_service)
+        await _execute(
+            project_service,
+            text("DROP SCHEMA embedding_status_shadow CASCADE"),
+            {},
+        )
 
     assert status.vector_tables_exist is False
     assert status.reindex_recommended is True
