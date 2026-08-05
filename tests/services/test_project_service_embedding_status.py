@@ -205,28 +205,36 @@ async def test_embedding_status_treats_legacy_pgvector_storage_as_unavailable(
     if not _is_postgres():
         pytest.skip("The pgvector physical storage schema only applies to Postgres.")
 
-    await _drop_embeddings_stub(project_service)
-    await _execute(
-        project_service,
-        text("CREATE TABLE search_vector_embeddings (chunk_id INTEGER PRIMARY KEY)"),
-        {},
-    )
+    await _create_embeddings_stub(project_service)
     await _execute(project_service, text("CREATE SCHEMA embedding_status_shadow"), {})
     await _execute(
         project_service,
         text(
             "CREATE TABLE embedding_status_shadow.search_vector_embeddings ("
-            "chunk_id INTEGER PRIMARY KEY, source_hash TEXT NOT NULL)"
+            "chunk_id INTEGER PRIMARY KEY)"
         ),
         {},
     )
 
+    original_execute_query = project_service.repository.execute_query
+
+    async def _execute_with_legacy_storage_first(session, query, params=None):
+        await session.execute(text("SET LOCAL search_path TO embedding_status_shadow, public"))
+        return await original_execute_query(session, query, params or {})
+
     try:
-        with patch.object(
-            type(project_service),
-            "config_manager",
-            new_callable=lambda: property(
-                lambda self: _config_manager_with(semantic_search_enabled=True)
+        with (
+            patch.object(
+                type(project_service),
+                "config_manager",
+                new_callable=lambda: property(
+                    lambda self: _config_manager_with(semantic_search_enabled=True)
+                ),
+            ),
+            patch.object(
+                project_service.repository,
+                "execute_query",
+                side_effect=_execute_with_legacy_storage_first,
             ),
         ):
             status = await project_service.get_embedding_status(test_project.id)

@@ -1094,7 +1094,8 @@ class ProjectService:
         if is_postgres:
             table_check_sql = text(
                 "SELECT table_name FROM information_schema.tables "
-                "WHERE table_name IN ('search_vector_chunks', 'search_vector_embeddings')"
+                "WHERE table_schema = ANY (current_schemas(false)) "
+                "AND table_name IN ('search_vector_chunks', 'search_vector_embeddings')"
             )
         else:
             table_check_sql = text(
@@ -1128,14 +1129,13 @@ class ProjectService:
                 columns_result = await self.repository.execute_query(
                     session,
                     text(
-                        "SELECT column_name FROM information_schema.columns "
-                        "WHERE table_schema = ANY (current_schemas(false)) "
-                        "AND table_name = 'search_vector_embeddings'"
+                        "SELECT 1 FROM pg_attribute "
+                        "WHERE attrelid = 'search_vector_embeddings'::regclass "
+                        "AND attname = 'source_hash'"
                     ),
                     {},
                 )
-                storage_columns = {str(name) for name in columns_result.scalars().all()}
-                storage_schema_current = "source_hash" in storage_columns
+                storage_schema_current = columns_result.scalar_one_or_none() is not None
 
             vector_tables_exist = manifest_exists and (
                 not uses_builtin_vector_storage or (storage_exists and storage_schema_current)
