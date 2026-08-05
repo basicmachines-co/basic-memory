@@ -102,3 +102,22 @@ def test_build_accepted_note_search_row_returns_immutable_hot_search_state() -> 
 
     with pytest.raises(FrozenInstanceError):
         setattr(row, "title", "Changed")
+
+
+def test_build_accepted_note_search_row_canonicalizes_legacy_note_type() -> None:
+    timestamp = datetime(2026, 6, 18, 12, 0, tzinfo=UTC)
+
+    row = build_accepted_note_search_row(
+        entity_id=42,
+        title="Legacy task",
+        note_type="TaskItem",
+        entity_metadata=None,
+        permalink="tasks/legacy-task",
+        file_path="tasks/legacy-task.md",
+        search_content="Legacy body",
+        created_at=timestamp,
+        updated_at=timestamp,
+        project_id=7,
+    )
+
+    assert row.note_type == "task_item"

@@ -9,6 +9,7 @@ from pathlib import Path
 
 from basic_memory.file_utils import ParseError, remove_frontmatter
 from basic_memory.repository.accepted_note_search_row import AcceptedNoteSearchRow
+from basic_memory.schemas.base import normalize_note_type
 
 MAX_ACCEPTED_SEARCH_CONTENT_STEMS_SIZE = 6000
 
@@ -125,7 +126,7 @@ def build_accepted_note_search_row(
         permalink=permalink,
         file_path=Path(file_path).as_posix(),
         item_type=item_type,
-        note_type=note_type,
+        note_type=normalize_note_type(note_type) if note_type is not None else None,
         entity_id=entity_id,
         created_at=created_at,
         updated_at=updated_at,
