@@ -196,6 +196,40 @@ async def test_embedding_status_treats_legacy_sqlite_manifest_as_unavailable(
 
 
 @pytest.mark.asyncio
+async def test_embedding_status_treats_legacy_pgvector_storage_as_unavailable(
+    project_service: ProjectService,
+    test_graph,
+    test_project,
+):
+    """Legacy pgvector storage should recommend rebuild before querying source_hash."""
+    if not _is_postgres():
+        pytest.skip("The pgvector physical storage schema only applies to Postgres.")
+
+    await _drop_embeddings_stub(project_service)
+    await _execute(
+        project_service,
+        text("CREATE TABLE search_vector_embeddings (chunk_id INTEGER PRIMARY KEY)"),
+        {},
+    )
+
+    try:
+        with patch.object(
+            type(project_service),
+            "config_manager",
+            new_callable=lambda: property(
+                lambda self: _config_manager_with(semantic_search_enabled=True)
+            ),
+        ):
+            status = await project_service.get_embedding_status(test_project.id)
+    finally:
+        await _drop_embeddings_stub(project_service)
+
+    assert status.vector_tables_exist is False
+    assert status.reindex_recommended is True
+    assert "Vector storage schema is outdated" in (status.reindex_reason or "")
+
+
+@pytest.mark.asyncio
 async def test_embedding_status_entities_without_chunks(
     project_service: ProjectService, test_graph, test_project
 ):

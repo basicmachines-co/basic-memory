@@ -1108,9 +1108,6 @@ class ProjectService:
             existing_vector_tables = {str(name) for name in table_result.scalars().all()}
             manifest_exists = "search_vector_chunks" in existing_vector_tables
             storage_exists = "search_vector_embeddings" in existing_vector_tables
-            vector_tables_exist = manifest_exists and (
-                storage_exists or not uses_builtin_vector_storage
-            )
 
             manifest_schema_current = manifest_exists
             if manifest_exists and not is_postgres:
@@ -1125,6 +1122,23 @@ class ProjectService:
                     "vector_index",
                     "embedding_status",
                 }.issubset(manifest_columns)
+
+            storage_schema_current = storage_exists
+            if storage_exists and is_postgres and vector_index == "pgvector":
+                columns_result = await self.repository.execute_query(
+                    session,
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_name = 'search_vector_embeddings'"
+                    ),
+                    {},
+                )
+                storage_columns = {str(name) for name in columns_result.scalars().all()}
+                storage_schema_current = "source_hash" in storage_columns
+
+            vector_tables_exist = manifest_exists and (
+                not uses_builtin_vector_storage or (storage_exists and storage_schema_current)
+            )
 
             if not manifest_schema_current or not vector_tables_exist:
                 # Count distinct entities in search index for the recommendation message
@@ -1141,6 +1155,12 @@ class ProjectService:
                 if manifest_exists and not manifest_schema_current:
                     reindex_reason = (
                         "Vector manifest schema is outdated — run: bm reindex --embeddings"
+                    )
+                elif storage_exists and not storage_schema_current:
+                    # Legacy pgvector tables are repaired by index initialization. Status is a
+                    # read path, so it only reports the required rebuild instead of mutating data.
+                    reindex_reason = (
+                        "Vector storage schema is outdated — run: bm reindex --embeddings"
                     )
                 elif manifest_schema_current:
                     reindex_reason = "Vector storage not initialized — run: bm reindex --embeddings"
