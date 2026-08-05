@@ -8,7 +8,7 @@ from contextlib import contextmanager
 import httpx
 import logfire
 import pytest
-from mcp.server.fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ToolError
 from typing import Any
 
 knowledge_client_module = importlib.import_module("basic_memory.mcp.clients.knowledge")

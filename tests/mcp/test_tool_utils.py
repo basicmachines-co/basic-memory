@@ -5,7 +5,7 @@ from typing import Any, cast
 import httpx
 import pytest
 from httpx import HTTPStatusError, Request
-from mcp.server.fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.tools.utils import (
     call_delete,
@@ -98,6 +98,25 @@ async def test_call_get_error(mock_response):
     with pytest.raises(ToolError) as exc:
         await call_get(_client(client), "http://test.com")
     assert "Resource not found" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_call_get_error_raises_fastmcp_runtime_tool_error(mock_response):
+    """The shared HTTP helper must raise the FastMCP runtime's ToolError, not the
+    legacy `mcp.server.fastmcp.exceptions.ToolError` SDK class — hosted middleware
+    only catches the runtime class (#1197), and the HTTPStatusError cause must
+    survive so structured API error details stay inspectable.
+    """
+    from mcp.server.fastmcp.exceptions import ToolError as LegacyToolError
+
+    client = _Client()
+    client.set_response("get", mock_response(403))
+
+    with pytest.raises(ToolError) as exc:
+        await call_get(_client(client), "http://test.com")
+
+    assert not isinstance(exc.value, LegacyToolError)
+    assert isinstance(exc.value.__cause__, HTTPStatusError)
 
 
 @pytest.mark.asyncio

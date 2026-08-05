@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 import importlib
 
 from httpx import HTTPStatusError, Request, Response
-from mcp.server.fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ToolError
 import pytest
 
 from basic_memory.schemas.search import SearchItemType, SearchResponse, SearchResult

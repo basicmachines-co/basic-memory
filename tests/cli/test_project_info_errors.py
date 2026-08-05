@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 import typer
-from mcp.server.fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ToolError
 from typer.testing import CliRunner
 
 from basic_memory.cli.app import app

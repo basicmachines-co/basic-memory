@@ -3,7 +3,7 @@
 import importlib
 
 import pytest
-from mcp.server.fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.tools.delete_note import delete_note
 from basic_memory.mcp.tools.move_note import move_note

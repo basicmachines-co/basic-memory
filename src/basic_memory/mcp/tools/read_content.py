@@ -14,7 +14,7 @@ from loguru import logger
 from PIL import Image as PILImage
 from fastmcp import Context
 from pydantic import AliasChoices, Field
-from mcp.server.fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ToolError
 
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.project_context import (

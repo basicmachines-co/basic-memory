@@ -5,6 +5,7 @@ from typing import Any, Annotated, Optional, Literal
 import logfire
 from loguru import logger
 from fastmcp import Context
+from fastmcp.exceptions import ToolError
 from pydantic import AliasChoices, Field
 
 from basic_memory.config import ConfigManager
@@ -250,8 +251,6 @@ async def build_context(
         try:
             depth = int(depth)
         except ValueError:
-            from mcp.server.fastmcp.exceptions import ToolError
-
             raise ToolError(f"Invalid depth parameter: '{depth}' is not a valid integer")
 
     # URL is already validated and normalized by MemoryUrl type annotation

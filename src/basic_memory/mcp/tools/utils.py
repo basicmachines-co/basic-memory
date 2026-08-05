@@ -29,8 +29,8 @@ from httpx._types import (
     TimeoutTypes,
     RequestExtensions,
 )
+from fastmcp.exceptions import ToolError
 from loguru import logger
-from mcp.server.fastmcp.exceptions import ToolError
 
 from basic_memory.config import ConfigManager
 
