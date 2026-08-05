@@ -141,6 +141,11 @@ class FakeRepositorySession:
         self.entity = entity
         self.note_content = note_content
         self.flush_count = 0
+        self.scalar_statements: list[object] = []
+
+    async def scalar(self, statement: object) -> object | None:
+        self.scalar_statements.append(statement)
+        return self.entity
 
     async def get(self, model: type[object], identity: int) -> object | None:
         assert identity == 42
@@ -563,6 +568,8 @@ async def test_repository_note_materialization_publisher_updates_current_written
         file_checksum="new-file-sum",
     )
     assert session_lock.calls == [(cast(AsyncSession, session), 7, 42)]
+    assert len(session.scalar_statements) == 1
+    assert "FOR UPDATE" in str(session.scalar_statements[0])
     assert repository.calls == [
         (
             cast(AsyncSession, session),

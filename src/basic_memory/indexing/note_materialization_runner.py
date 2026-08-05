@@ -9,6 +9,7 @@ from typing import Protocol, Self
 
 from loguru import logger
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -426,6 +427,17 @@ class RepositoryNoteMaterializationPublisher:
                 entity_id=request.entity_id,
             )
 
+            # Materialization publishes NoteContent and Entity in one transaction.
+            # Lock Entity before reading the publish state so an Entity-first move
+            # cannot change the destination path while this publisher waits.
+            entity = await session.scalar(
+                select(Entity)
+                .where(
+                    Entity.id == request.entity_id,
+                    Entity.project_id == request.project_id,
+                )
+                .with_for_update()
+            )
             note_content = await session.get(NoteContent, request.entity_id)
             publish_plan = plan_written_note_materialization_publish(
                 request=request,
@@ -436,7 +448,13 @@ class RepositoryNoteMaterializationPublisher:
                     if note_content is not None
                     else None
                 ),
-                current_file_path=note_content.file_path if note_content is not None else None,
+                current_file_path=(
+                    entity.file_path
+                    if entity is not None
+                    else note_content.file_path
+                    if note_content is not None
+                    else None
+                ),
             )
             if note_content is None:
                 return publish_plan.result
@@ -466,7 +484,6 @@ class RepositoryNoteMaterializationPublisher:
                     f"Unhandled note materialization publish action: {publish_plan.action}"
                 )
 
-            entity = await session.get(Entity, request.entity_id)
             if entity is None:
                 return RuntimeNoteMaterializationResult(
                     entity_id=request.entity_id,

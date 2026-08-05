@@ -74,9 +74,11 @@ class PausingNoteContentRepository(NoteContentRepository):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("move_during_wait", [False, True], ids=["stable-path", "moved-path"])
 async def test_materialization_waits_for_entity_before_updating_note_content(
     engine_factory,
     test_project: Project,
+    move_during_wait: bool,
 ) -> None:
     """An Entity-first reconciliation transaction must not deadlock materialization.
 
@@ -169,11 +171,19 @@ async def test_materialization_waits_for_entity_before_updating_note_content(
                     timeout=0.5,
                 )
 
-            await reconciliation_session.execute(
-                update(NoteContent)
-                .where(NoteContent.entity_id == entity_id)
-                .values(last_materialization_error="entity-first reconciliation")
-            )
+            if move_during_wait:
+                locked_entity.file_path = "notes/moved-during-materialization.md"
+                await reconciliation_session.execute(
+                    update(NoteContent)
+                    .where(NoteContent.entity_id == entity_id)
+                    .values(file_path=locked_entity.file_path)
+                )
+            else:
+                await reconciliation_session.execute(
+                    update(NoteContent)
+                    .where(NoteContent.entity_id == entity_id)
+                    .values(last_materialization_error="entity-first reconciliation")
+                )
             await reconciliation_session.commit()
 
             note_content_repository.release_update.set()
@@ -187,16 +197,24 @@ async def test_materialization_waits_for_entity_before_updating_note_content(
                 with suppress(asyncio.CancelledError):
                     await publish_task
 
-    assert result.status is RuntimeNoteMaterializationStatus.written
-
     async with session_maker() as verification_session:
         note_content = await verification_session.get(NoteContent, entity_id)
         entity = await verification_session.get(Entity, entity_id)
 
     assert note_content is not None
-    assert note_content.file_version == 1
-    assert note_content.file_checksum == "materialized-checksum"
-    assert note_content.file_write_status == "synced"
     assert entity is not None
-    assert entity.mtime == written_file.file_updated_at.timestamp()
-    assert entity.size == len(markdown.encode("utf-8"))
+    if move_during_wait:
+        assert result.status is RuntimeNoteMaterializationStatus.stale
+        assert result.written_file_orphaned
+        assert note_content.file_path == "notes/moved-during-materialization.md"
+        assert note_content.file_version is None
+        assert note_content.file_checksum == "previous-file-checksum"
+        assert entity.file_path == "notes/moved-during-materialization.md"
+        assert entity.mtime != written_file.file_updated_at.timestamp()
+    else:
+        assert result.status is RuntimeNoteMaterializationStatus.written
+        assert note_content.file_version == 1
+        assert note_content.file_checksum == "materialized-checksum"
+        assert note_content.file_write_status == "synced"
+        assert entity.mtime == written_file.file_updated_at.timestamp()
+        assert entity.size == len(markdown.encode("utf-8"))
