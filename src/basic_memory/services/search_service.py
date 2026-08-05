@@ -4,7 +4,7 @@ import asyncio
 import ast
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, List, Optional, Set, Dict
 
@@ -183,6 +183,35 @@ class SearchService:
             or prepared.after_date
         )
 
+    async def _include_legacy_note_type_spellings(
+        self,
+        prepared: _PreparedSearchQuery,
+        *,
+        session: AsyncSession | None = None,
+    ) -> _PreparedSearchQuery:
+        """Expand canonical note-type filters to exact legacy entity spellings."""
+        if not prepared.note_types:
+            return prepared
+
+        canonical_note_types = set(prepared.note_types)
+        async with db.scoped_session(self.session_maker, session) as active_session:
+            stored_types_query = self.entity_repository.select(Entity.note_type).distinct()
+            stored_types_result = await self.entity_repository.execute_query(
+                active_session,
+                stored_types_query,
+                use_query_options=False,
+            )
+
+        # Search rows written before canonicalization preserve the owning entity's
+        # exact type spelling. Include those spellings alongside canonical values
+        # so an upgrade remains searchable without requiring an eager full reindex.
+        compatible_note_types = canonical_note_types | {
+            stored_type
+            for stored_type in stored_types_result.scalars().all()
+            if stored_type and normalize_note_type(stored_type) in canonical_note_types
+        }
+        return replace(prepared, note_types=sorted(compatible_note_types))
+
     async def _search_repository(
         self,
         prepared: _PreparedSearchQuery,
@@ -250,6 +279,10 @@ class SearchService:
         prepared = self._prepare_query(query)
         if prepared is None:
             return []
+        prepared = await self._include_legacy_note_type_spellings(
+            prepared,
+            session=session,
+        )
 
         strict_search_text = prepared.search_text
         has_query = bool(
@@ -289,6 +322,7 @@ class SearchService:
         prepared = self._prepare_query(query)
         if prepared is None:
             return 0
+        prepared = await self._include_legacy_note_type_spellings(prepared)
 
         strict_search_text = prepared.search_text
         has_query = bool(
