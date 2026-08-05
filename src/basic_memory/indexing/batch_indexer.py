@@ -438,7 +438,11 @@ class BatchIndexer:
         is_new_entity = existing is None
 
         if existing is None:
-            await self.entity_service.resolve_permalink(file.path, skip_conflict_check=True)
+            # Regular files intentionally carry no permalink. A permalink's durable home is the
+            # markdown frontmatter, and a non-markdown file has nowhere to record one: a DB-only
+            # value could not survive a rebuild from files, and its collision suffix would depend
+            # on indexing order, so links to it would silently rot. file_path and external_id are
+            # the stable addresses for these entities (#1182).
             entity = Entity(
                 note_type="file",
                 file_path=file.path,

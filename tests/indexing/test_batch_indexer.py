@@ -382,6 +382,10 @@ async def test_batch_indexer_indexes_non_markdown_files(
     assert pdf_entity.content_type == "application/pdf"
     assert image_entity is not None
     assert image_entity.content_type == "image/png"
+    # Non-markdown entities carry no permalink: there is no frontmatter to record one in, so a
+    # DB-only value could not survive a rebuild from files (#1182). file_path is their address.
+    assert pdf_entity.permalink is None
+    assert image_entity.permalink is None
 
 
 @pytest.mark.asyncio
