@@ -42,6 +42,13 @@ def test_search_filters():
     assert query.after_date == "2024-01-01T00:00:00"
 
 
+def test_search_note_types_use_write_side_canonicalization():
+    """Multiword and camel-case filters share the write-side note type identity."""
+    query = SearchQuery(note_types=["Task Item", "TaskItem", "task-item"])
+
+    assert query.note_types == ["task_item", "task_item", "task_item"]
+
+
 def test_search_retrieval_mode_defaults_to_fts():
     """Search retrieval mode defaults to FTS and accepts vector modes."""
     query = SearchQuery(text="search implementation")

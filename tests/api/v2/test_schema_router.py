@@ -3,8 +3,8 @@
 Tests the integration layer where ORM entities are converted to NoteData
 and passed through the schema engine (infer, validate, diff).
 
-Note: EntityType uses BeforeValidator(to_snake_case) so "Person" becomes "person"
-in the database. All query params must use the stored (snake_case) form.
+Note types use one snake_case identity at write and query boundaries. Legacy stored
+spellings remain part of the same logical population.
 """
 
 from pathlib import Path
@@ -12,8 +12,9 @@ from textwrap import dedent
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import update
 
-from basic_memory.models import Project
+from basic_memory.models import Entity, Project
 from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.services.file_service import FileService
 
@@ -364,6 +365,57 @@ async def test_validate_total_entities_without_schema(
     # But entities of this type do exist
     assert data["total_entities"] == 3
     assert data["results"] == []
+
+
+@pytest.mark.asyncio
+async def test_validate_note_type_includes_canonical_and_legacy_spellings(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_service,
+    session_maker,
+):
+    """One explicit type validates canonical rows and legacy camel-case rows."""
+    canonical_entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Canonical Task Item",
+            directory="tasks",
+            note_type="Task Item",
+            entity_metadata={"schema": {"status": "string"}},
+            content="## Observations\n- [status] active\n",
+        )
+    )
+    legacy_entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Legacy Task Item",
+            directory="tasks",
+            note_type="task_item",
+            entity_metadata={"schema": {"status": "string"}},
+            content="## Observations\n- [status] complete\n",
+        )
+    )
+
+    # Simulate a row indexed by an older version before write-side canonicalization.
+    async with session_maker() as session:
+        await session.execute(
+            update(Entity).where(Entity.id == legacy_entity.id).values(note_type="TaskItem")
+        )
+        await session.commit()
+
+    response = await client.post(
+        f"{v2_project_url}/schema/validate",
+        params={"note_type": "task-item"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["note_type"] == "task_item"
+    assert data["total_entities"] == 2
+    assert data["total_notes"] == 2
+    assert {result["note_identifier"] for result in data["results"]} == {
+        canonical_entity.title,
+        legacy_entity.title,
+    }
 
 
 # --- All-Types Validation Tests (#1013) ---

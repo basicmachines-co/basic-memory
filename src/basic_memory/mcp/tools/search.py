@@ -31,6 +31,7 @@ from basic_memory.mcp.project_context import (
     resolve_project_and_path,
 )
 from basic_memory.mcp.server import mcp
+from basic_memory.schemas.base import normalize_note_type
 from basic_memory.schemas.search import (
     SearchItemType,
     SearchQuery,
@@ -998,11 +999,12 @@ async def search_notes(
     categories = parse_str_list(categories) if categories is not None else []
 
     # Avoid mutable-default-argument footguns. Treat None as "no filter".
-    # Lowercase note_types so "Chapter" matches the stored "chapter".
-    note_types = [t.lower() for t in note_types] if note_types else []
+    # Note types use one snake_case identity at write and query boundaries. Lowercasing
+    # alone leaves multiword and camel-case inputs in a separate logical population.
+    note_types = [normalize_note_type(note_type) for note_type in note_types]
     entity_types = entity_types or []
     # Categories are matched exactly against the indexed observation category,
-    # so preserve their original casing (unlike the lowercased note_types).
+    # so preserve their original casing (unlike the canonicalized note_types).
     categories = categories or []
 
     # Trigger: tags arrived via a direct function call instead of the MCP layer.

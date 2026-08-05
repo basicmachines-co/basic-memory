@@ -22,6 +22,7 @@ from basic_memory.deps import (
     SessionDep,
 )
 from basic_memory.models.knowledge import Entity
+from basic_memory.schemas.base import normalize_note_type
 from basic_memory.schemas.schema import (
     ValidationReport,
     InferenceReport,
@@ -196,10 +197,11 @@ async def validate_schema(
 
     # --- Batch validation by note type ---
     if note_type:
-        entities = await _find_by_note_type(session, entity_repository, note_type)
+        canonical_note_type = normalize_note_type(note_type)
+        entities = await _find_by_note_type(session, entity_repository, canonical_note_type)
         results = await _validate_note_entities(session, entity_repository, file_service, entities)
         return ValidationReport(
-            note_type=note_type,
+            note_type=canonical_note_type,
             total_notes=len(results),
             total_entities=len(entities),
             valid_count=sum(1 for r in results if r.passed),
@@ -217,10 +219,8 @@ async def validate_schema(
 
     type_summaries: list[TypeValidationSummary] = []
     total_entities = 0
-    for target_type, stored_note_types in covered_types.items():
-        entities = []
-        for stored_type in stored_note_types:
-            entities.extend(await _find_by_note_type(session, entity_repository, stored_type))
+    for target_type in covered_types:
+        entities = await _find_by_note_type(session, entity_repository, target_type)
         type_results = await _validate_note_entities(
             session, entity_repository, file_service, entities
         )
@@ -265,10 +265,11 @@ async def infer_schema_endpoint(
     Examines observation categories and relation types across all notes
     of the given type. Returns frequency analysis and suggested Picoschema.
     """
-    entities = await _find_by_note_type(session, entity_repository, note_type)
+    canonical_note_type = normalize_note_type(note_type)
+    entities = await _find_by_note_type(session, entity_repository, canonical_note_type)
     notes_data = [_entity_to_note_data(entity) for entity in entities]
 
-    result = infer_schema(note_type, notes_data, optional_threshold=threshold)
+    result = infer_schema(canonical_note_type, notes_data, optional_threshold=threshold)
 
     return InferenceReport(
         note_type=result.note_type,
@@ -316,14 +317,15 @@ async def diff_schema_endpoint(
         return [await _schema_frontmatter_from_file(file_service, e) for e in entities]
 
     # Resolve schema by note type
-    schema_frontmatter = {"type": note_type}
+    canonical_note_type = normalize_note_type(note_type)
+    schema_frontmatter = {"type": canonical_note_type}
     schema_def = await resolve_schema(schema_frontmatter, search_fn)
 
     if not schema_def:
-        return DriftReport(note_type=note_type, schema_found=False)
+        return DriftReport(note_type=canonical_note_type, schema_found=False)
 
     # Collect all notes of this type
-    entities = await _find_by_note_type(session, entity_repository, note_type)
+    entities = await _find_by_note_type(session, entity_repository, canonical_note_type)
     notes_data = [_entity_to_note_data(entity) for entity in entities]
 
     result = diff_schema(schema_def, notes_data)
@@ -404,11 +406,10 @@ async def _schema_covered_note_types(
     """Map each schema-covered target type to the stored note_type values it covers.
 
     Coverage comes from both standalone schema notes and notes that carry inline
-    schemas or explicit schema references. Stored note types are snake_case while
-    schema authors may write "Person" or "person", so both sides are compared
-    through generate_permalink normalization — the same matching rule
-    _find_schema_entities uses for implicit type lookup. Standalone targets with no
-    matching notes map to an empty list so they still appear in the report.
+    schemas or explicit schema references. Schema authors and legacy database rows
+    may use different spellings, so both sides use the same note-type canonicalizer
+    as the write boundary. Standalone targets with no matching notes map to an empty
+    list so they still appear in the report.
     """
     schema_query = entity_repository.select().where(Entity.note_type == "schema")
     schema_result = await entity_repository.execute_query(session, schema_query)
@@ -418,7 +419,7 @@ async def _schema_covered_note_types(
     for schema_entity in schema_result.scalars().all():
         target = (schema_entity.entity_metadata or {}).get("entity")
         if isinstance(target, str) and target:
-            targets.setdefault(generate_permalink(target), (target, set()))
+            targets.setdefault(normalize_note_type(target), (target, set()))
 
     # Column-only select: skip eager-load options, which apply only to full entities.
     # Reading metadata here also discovers inline schemas and explicit references;
@@ -433,7 +434,7 @@ async def _schema_covered_note_types(
         if not stored_type:
             continue
 
-        normalized_type = generate_permalink(stored_type)
+        normalized_type = normalize_note_type(stored_type)
         if normalized_type in targets:
             targets[normalized_type][1].add(stored_type)
 
@@ -456,8 +457,27 @@ async def _find_by_note_type(
     entity_repository: EntityRepositoryV2ExternalDep,
     note_type: str,
 ) -> list[Entity]:
-    """Find all entities of a given type using the repository's select pattern."""
-    query = entity_repository.select().where(Entity.note_type == note_type)
+    """Find canonical and legacy spellings that represent one logical note type."""
+    canonical_note_type = normalize_note_type(note_type)
+
+    # Legacy databases may contain values written before note types were canonicalized.
+    # Resolve their exact stored spellings in Python, where the shared normalizer can
+    # handle camel-case as well as case and punctuation without backend-specific SQL.
+    stored_types_query = entity_repository.select(Entity.note_type).distinct()
+    stored_types_result = await entity_repository.execute_query(
+        session,
+        stored_types_query,
+        use_query_options=False,
+    )
+    stored_types = {
+        stored_type
+        for stored_type in stored_types_result.scalars().all()
+        if stored_type and normalize_note_type(stored_type) == canonical_note_type
+    }
+    if not stored_types:
+        return []
+
+    query = entity_repository.select().where(Entity.note_type.in_(stored_types))
     result = await entity_repository.execute_query(session, query)
     return list(result.scalars().all())
 
@@ -481,14 +501,14 @@ async def _find_schema_entities(
     result = await entity_repository.execute_query(session, query)
     entities = list(result.scalars().all())
 
-    normalized_target = generate_permalink(target_note_type)
+    normalized_target_type = normalize_note_type(target_note_type)
 
     entity_matches = [
         e
         for e in entities
         if e.entity_metadata
         and isinstance(e.entity_metadata.get("entity"), str)
-        and generate_permalink(e.entity_metadata["entity"]) == normalized_target
+        and normalize_note_type(e.entity_metadata["entity"]) == normalized_target_type
     ]
     if entity_matches:
         return entity_matches
@@ -496,6 +516,7 @@ async def _find_schema_entities(
     if not allow_reference_match:
         return []
 
+    normalized_target_reference = generate_permalink(target_note_type)
     reference_matches: list[Entity] = []
     for entity in entities:
         candidate_refs: list[str] = []
@@ -505,7 +526,7 @@ async def _find_schema_entities(
             candidate_refs.append(entity.permalink)
             candidate_refs.append(FilePath(entity.permalink).name)
 
-        if any(generate_permalink(ref) == normalized_target for ref in candidate_refs):
+        if any(generate_permalink(ref) == normalized_target_reference for ref in candidate_refs):
             reference_matches.append(entity)
 
     return reference_matches

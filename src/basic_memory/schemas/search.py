@@ -11,7 +11,7 @@ from datetime import datetime
 from enum import Enum
 from pydantic import BaseModel, Field, field_validator
 
-from basic_memory.schemas.base import Permalink
+from basic_memory.schemas.base import Permalink, normalize_note_type
 
 
 class SearchItemType(str, Enum):
@@ -79,6 +79,14 @@ class SearchQuery(BaseModel):
         if isinstance(v, datetime):
             return v.isoformat()
         return v
+
+    @field_validator("note_types")
+    @classmethod
+    def normalize_note_types(cls, values: Optional[List[str]]) -> Optional[List[str]]:
+        """Apply the same canonical identity used when note types are written."""
+        if values is None:
+            return None
+        return [normalize_note_type(value) for value in values]
 
     def no_criteria(self) -> bool:
         text_is_empty = self.text is None or (isinstance(self.text, str) and not self.text.strip())

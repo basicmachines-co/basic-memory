@@ -24,6 +24,7 @@ from basic_memory.repository.search_repository import (
     SearchRepository,
 )
 from basic_memory.repository.search_query import relaxed_query_words
+from basic_memory.schemas.base import normalize_note_type
 from basic_memory.schemas.search import SearchQuery, SearchItemType, SearchRetrievalMode
 from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.services import FileService
@@ -143,7 +144,11 @@ class SearchService:
             permalink=query.permalink,
             permalink_match=query.permalink_match,
             title=query.title,
-            note_types=query.note_types,
+            note_types=(
+                [normalize_note_type(note_type) for note_type in query.note_types]
+                if query.note_types
+                else None
+            ),
             search_item_types=query.entity_types,
             categories=query.categories,
             after_date=after_date,
@@ -697,7 +702,7 @@ class SearchService:
                 permalink=entity.permalink,  # Required for Postgres NOT NULL constraint
                 file_path=entity.file_path,
                 metadata={
-                    "note_type": entity.note_type,
+                    "note_type": normalize_note_type(entity.note_type),
                 },
                 created_at=entity.created_at,
                 updated_at=entity.updated_at,
@@ -779,7 +784,7 @@ class SearchService:
                     file_path=entity.file_path,
                     entity_id=entity.id,
                     metadata={
-                        "note_type": entity.note_type,
+                        "note_type": normalize_note_type(entity.note_type),
                     },
                     created_at=entity.created_at,
                     updated_at=entity.updated_at,

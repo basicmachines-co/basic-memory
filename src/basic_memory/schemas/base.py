@@ -72,6 +72,11 @@ def to_snake_case(name: str) -> str:
     return s2.lower()
 
 
+def normalize_note_type(note_type: str) -> str:
+    """Return the canonical identity used for note types across all boundaries."""
+    return to_snake_case(note_type)
+
+
 def parse_timeframe(timeframe: str) -> datetime:
     """Parse timeframe with special handling for 'today' and other natural language expressions.
 
@@ -160,7 +165,7 @@ Permalink = Annotated[str, MinLen(1)]
 """Unique identifier in format '{path}/{normalized_name}'."""
 
 
-NoteType = Annotated[str, BeforeValidator(to_snake_case), MinLen(1), MaxLen(200)]
+NoteType = Annotated[str, BeforeValidator(normalize_note_type), MinLen(1), MaxLen(200)]
 """Classification of note (e.g., 'note', 'person', 'spec', 'schema'). """
 
 ALLOWED_CONTENT_TYPES = {
