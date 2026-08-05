@@ -5,7 +5,7 @@ import base64
 from PIL import Image as PILImage
 
 import pytest
-from mcp.server.fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.tools import read_content, write_note
 from basic_memory.mcp.tools.read_content import (

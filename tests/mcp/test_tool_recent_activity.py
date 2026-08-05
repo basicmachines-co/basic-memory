@@ -5,7 +5,7 @@ from typing import Any, cast
 
 import pytest
 
-from mcp.server.fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.tools import recent_activity
 from basic_memory.schemas.search import SearchItemType

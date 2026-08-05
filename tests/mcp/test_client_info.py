@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any, cast, Literal
 
 import mcp.types as mt
 import pytest
+from fastmcp import Client, Context, FastMCP
 from fastmcp.server.middleware import CallNext, MiddlewareContext
 
 from basic_memory.mcp.client_info import (
@@ -21,6 +22,7 @@ class FakeMCPContext:
 
     def __init__(self) -> None:
         self.state: dict[str, object] = {}
+        self.request_context = None
 
     async def set_state(self, key: str, value: object) -> None:
         self.state[key] = value
@@ -39,9 +41,9 @@ def _initialize_context(
     return MiddlewareContext(
         message=mt.InitializeRequest(
             params=mt.InitializeRequestParams(
-                protocolVersion="2025-06-18",
+                protocol_version="2025-06-18",
                 capabilities=mt.ClientCapabilities(),
-                clientInfo=mt.Implementation(name=name, title=title, version=version),
+                client_info=mt.Implementation(name=name, title=title, version=version),
             )
         ),
         fastmcp_context=cast(Any, fastmcp_context),
@@ -86,7 +88,7 @@ async def test_client_info_middleware_stores_initialize_state() -> None:
 
 @pytest.mark.asyncio
 async def test_is_openai_mcp_client_reads_session_state() -> None:
-    """The gate accepts OpenAI's versioned clientInfo label."""
+    """Legacy sessions can still use client info captured during initialization."""
     context = FakeMCPContext()
     await context.set_state(
         MCP_CLIENT_INFO_STATE_KEY,
@@ -94,6 +96,28 @@ async def test_is_openai_mcp_client_reads_session_state() -> None:
     )
 
     assert await is_openai_mcp_client(cast(Any, context)) is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["auto", "legacy"])
+async def test_is_openai_mcp_client_reads_request_identity(
+    mode: Literal["auto", "legacy"],
+) -> None:
+    """Modern and legacy protocols expose identity on each FastMCP request."""
+    server = FastMCP("client-info-test")
+
+    @server.tool
+    async def identify(context: Context) -> bool:
+        return await is_openai_mcp_client(context)
+
+    async with Client(
+        server,
+        client_info=mt.Implementation(name="openai-mcp", version="1.0.0"),
+        mode=mode,
+    ) as client:
+        result = await client.call_tool("identify", {})
+
+    assert result.data is True
 
 
 @pytest.mark.asyncio

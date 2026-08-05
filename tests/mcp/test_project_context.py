@@ -1642,7 +1642,7 @@ async def test_get_project_client_with_cloud_project_id_routes_to_workspace_with
         WorkspaceProjectEntry,
         _build_workspace_project_index,
     )
-    from mcp.server.fastmcp.exceptions import ToolError
+    from fastmcp.exceptions import ToolError
 
     config = config_manager.load_config()
     config.projects["hermes-memory"] = ProjectEntry(
@@ -1985,7 +1985,7 @@ async def test_resolve_project_and_path_keeps_workspace_qualified_canonical_path
     config_manager,
     monkeypatch,
 ):
-    from mcp.server.fastmcp.exceptions import ToolError
+    from fastmcp.exceptions import ToolError
 
     from basic_memory.mcp.project_context import resolve_project_and_path
     from basic_memory.schemas.project_info import ProjectItem
@@ -2033,7 +2033,7 @@ async def test_resolve_project_and_path_preserves_personal_workspace_prefix(
     config_manager,
     monkeypatch,
 ):
-    from mcp.server.fastmcp.exceptions import ToolError
+    from fastmcp.exceptions import ToolError
 
     from basic_memory.mcp.project_context import resolve_project_and_path
     from basic_memory.schemas.project_info import ProjectItem
@@ -2114,7 +2114,7 @@ async def test_resolve_project_and_path_uses_cached_workspace_for_active_route(
     config_manager,
     monkeypatch,
 ):
-    from mcp.server.fastmcp.exceptions import ToolError
+    from fastmcp.exceptions import ToolError
 
     import basic_memory.mcp.project_context as project_context
     from basic_memory.mcp.project_context import resolve_project_and_path
@@ -2436,7 +2436,7 @@ class TestGetProjectClientRoutingOrder:
         """A previous cloud workspace must not decorate later local memory URLs."""
         from contextlib import asynccontextmanager
 
-        from mcp.server.fastmcp.exceptions import ToolError
+        from fastmcp.exceptions import ToolError
 
         import basic_memory.mcp.project_context as project_context
         from basic_memory.config import ProjectEntry
@@ -3235,7 +3235,7 @@ async def test_resolve_project_and_path_keeps_patterns_project_qualified(
     Direct URLs keep workspace qualification (the link resolver handles them);
     patterns have no resolver fallback and must match the index form.
     """
-    from mcp.server.fastmcp.exceptions import ToolError
+    from fastmcp.exceptions import ToolError
 
     from basic_memory.mcp.project_context import resolve_project_and_path
     from basic_memory.schemas.project_info import ProjectItem

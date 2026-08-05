@@ -4,7 +4,7 @@ from typing import Any, cast
 
 import pytest
 from httpx import HTTPStatusError, Request
-from mcp.server.fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.tools.utils import call_post
 

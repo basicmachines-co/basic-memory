@@ -254,12 +254,8 @@ async def test_delete_current_project_protection(mcp_server, app, test_project):
 
         # Should show error about deleting current project
         error_message = str(exc_info.value)
-        assert "delete_project" in error_message
-        assert (
-            "currently active" in error_message
-            or "test-project" in error_message
-            or "Switch to a different project" in error_message
-        )
+        assert "Cannot delete default project" in error_message
+        assert "test-project" in error_message
 
 
 @pytest.mark.asyncio

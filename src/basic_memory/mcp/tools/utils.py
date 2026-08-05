@@ -30,7 +30,7 @@ from httpx._types import (
     RequestExtensions,
 )
 from loguru import logger
-from mcp.server.fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ToolError
 
 from basic_memory.config import ConfigManager
 

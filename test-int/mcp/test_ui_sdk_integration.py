@@ -39,7 +39,7 @@ async def test_search_notes_ui_embedded_resource(mcp_server, app, test_project):
         assert len(result.content) == 1
         block = result.content[0]
         assert block.type == "resource"
-        assert block.resource.mimeType == "text/html"
+        assert block.resource.mime_type == "text/html"
         assert "<!doctype html>" in block.resource.text.lower()
         assert block.resource.meta is not None
         assert "mcpui.dev/ui-initial-render-data" in block.resource.meta
@@ -70,7 +70,7 @@ async def test_read_note_ui_embedded_resource(mcp_server, app, test_project):
         assert len(result.content) == 1
         block = result.content[0]
         assert block.type == "resource"
-        assert block.resource.mimeType == "text/html"
+        assert block.resource.mime_type == "text/html"
         assert "<!doctype html>" in block.resource.text.lower()
         assert block.resource.meta is not None
         assert "mcpui.dev/ui-initial-render-data" in block.resource.meta

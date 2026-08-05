@@ -252,13 +252,13 @@ async def test_mcp_tool_annotations_meet_directory_requirements():
         annotations = tool.to_mcp_tool().annotations
         assert annotations is not None, f"Tool '{tool_name}' has no annotations"
         assert annotations.title, f"Tool '{tool_name}' is missing annotations.title"
-        assert annotations.readOnlyHint is expected["readOnlyHint"], (
+        assert annotations.read_only_hint is expected["readOnlyHint"], (
             f"Tool '{tool_name}' readOnlyHint should be {expected['readOnlyHint']}"
         )
-        assert annotations.destructiveHint is expected["destructiveHint"], (
+        assert annotations.destructive_hint is expected["destructiveHint"], (
             f"Tool '{tool_name}' destructiveHint should be {expected['destructiveHint']}"
         )
-        assert annotations.openWorldHint is False, (
+        assert annotations.open_world_hint is False, (
             f"Tool '{tool_name}' openWorldHint should be False"
         )
 
@@ -269,7 +269,7 @@ async def test_edit_note_operation_schema_exposes_supported_operations():
     tool_list = await mcp.list_tools()
     edit_note_tool = next(tool for tool in tool_list if tool.name == "edit_note")
 
-    input_schema = edit_note_tool.to_mcp_tool().inputSchema
+    input_schema = edit_note_tool.to_mcp_tool().input_schema
     operation_schema = input_schema["properties"]["operation"]
 
     assert operation_schema["type"] == "string"

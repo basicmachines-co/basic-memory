@@ -15,7 +15,7 @@ ClientInfoState = dict[str, str | None]
 
 
 class MCPClientInfoMiddleware(Middleware):
-    """Persist sanitized initialize clientInfo in FastMCP session state."""
+    """Persist sanitized initialize client info as a legacy-session fallback."""
 
     @override
     async def on_initialize(
@@ -34,16 +34,34 @@ class MCPClientInfoMiddleware(Middleware):
 
 
 async def is_openai_mcp_client(context: Context | None) -> bool:
-    """Return whether the current MCP session identified itself as OpenAI's MCP client."""
+    """Return whether the current request identified itself as OpenAI's MCP client."""
     if context is None:
         return False
+
+    request_client_info = client_info_from_context(context)
+    if request_client_info is not None:
+        return client_info_is_openai_mcp(request_client_info)
 
     return client_info_is_openai_mcp(await context.get_state(MCP_CLIENT_INFO_STATE_KEY))
 
 
 def client_info_from_initialize(message: mt.InitializeRequest) -> ClientInfoState | None:
-    """Extract the normalized clientInfo payload from an initialize request."""
-    client_info = message.params.clientInfo
+    """Extract the normalized client info payload from an initialize request."""
+    return _client_info_from_implementation(message.params.client_info)
+
+
+def client_info_from_context(context: Context) -> ClientInfoState | None:
+    """Extract the client identity attached to the current FastMCP request."""
+    request_context = context.request_context
+    if request_context is None:
+        return None
+    client_params = request_context.session.client_params
+    if client_params is None:
+        return None
+    return _client_info_from_implementation(client_params.client_info)
+
+
+def _client_info_from_implementation(client_info: mt.Implementation) -> ClientInfoState | None:
     return _client_info_from_mapping(
         {
             "name": client_info.name,

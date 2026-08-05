@@ -825,8 +825,8 @@ async def resolve_project_and_path(
         # Why: allow project-scoped memory URLs without requiring a separate project parameter
         # Outcome: attempt to resolve the prefix as a project and route to it
         if project_prefix:
-            # Deferred: ToolError lives in the mcp SDK, which must not load at CLI startup (#886).
-            from mcp.server.fastmcp.exceptions import ToolError
+            # Deferred: ToolError lives in FastMCP's runtime, which must not load at CLI startup (#886).
+            from fastmcp.exceptions import ToolError
 
             if cached_project and _project_matches_identifier(cached_project, project_prefix):
                 resolved_project = await resolve_project_parameter(project_prefix, context=context)
@@ -1026,8 +1026,8 @@ async def get_project_client(
         is_factory_mode,
     )
 
-    # Deferred: ToolError lives in the mcp SDK, which must not load at CLI startup (#886).
-    from mcp.server.fastmcp.exceptions import ToolError
+    # Deferred: ToolError lives in FastMCP's runtime, which must not load at CLI startup (#886).
+    from fastmcp.exceptions import ToolError
 
     # When project_id (UUID) is provided, prefer it as the resolution identifier.
     # external_id is unambiguous across workspaces; project name can collide.

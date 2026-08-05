@@ -3,7 +3,7 @@
 from typing import Any, cast
 
 import pytest
-from mcp.server.fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.project_context import resolve_project_and_path
 from basic_memory.schemas.project_info import ProjectItem

@@ -131,8 +131,8 @@ def status(
     """
     from basic_memory.cli.commands.command_utils import run_with_cleanup
 
-    # Deferred: ToolError lives in the mcp SDK, which must not load at CLI startup (#886).
-    from mcp.server.fastmcp.exceptions import ToolError
+    # Deferred: ToolError lives in FastMCP's runtime, which must not load at CLI startup (#886).
+    from fastmcp.exceptions import ToolError
 
     # Trigger: --wait with a negative --timeout
     # Why: a negative deadline times out on the very first poll, producing a confusing

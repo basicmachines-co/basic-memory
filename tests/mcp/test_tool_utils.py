@@ -4,8 +4,8 @@ from typing import Any, cast
 
 import httpx
 import pytest
+from fastmcp.exceptions import ToolError
 from httpx import HTTPStatusError, Request
-from mcp.server.fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.tools.utils import (
     call_delete,
@@ -98,6 +98,7 @@ async def test_call_get_error(mock_response):
     with pytest.raises(ToolError) as exc:
         await call_get(_client(client), "http://test.com")
     assert "Resource not found" in str(exc.value)
+    assert isinstance(exc.value.__cause__, HTTPStatusError)
 
 
 @pytest.mark.asyncio

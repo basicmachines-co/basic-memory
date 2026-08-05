@@ -65,8 +65,8 @@ async def run_project_index(
         force_full: If True, force a full scan bypassing watermark optimization
         run_in_background: If True, return immediately; if False, wait for completion
     """
-    # Deferred: ToolError lives in the mcp SDK, which must not load at CLI startup (#886).
-    from mcp.server.fastmcp.exceptions import ToolError
+    # Deferred: ToolError lives in FastMCP's runtime, which must not load at CLI startup (#886).
+    from fastmcp.exceptions import ToolError
 
     # Resolve default project so get_client() can route per-project
     project = project or ConfigManager().default_project
@@ -99,8 +99,8 @@ async def run_project_index(
 
 async def get_project_info(project: str):
     """Get project information via API endpoint."""
-    # Deferred: ToolError lives in the mcp SDK, which must not load at CLI startup (#886).
-    from mcp.server.fastmcp.exceptions import ToolError
+    # Deferred: ToolError lives in FastMCP's runtime, which must not load at CLI startup (#886).
+    from fastmcp.exceptions import ToolError
 
     try:
         async with get_client(project_name=project) as client:

@@ -6,8 +6,8 @@ from typing import Any, cast
 import pytest
 import pytest_asyncio
 from fastapi import FastAPI
+from fastmcp import FastMCP
 from httpx import AsyncClient, ASGITransport
-from mcp.server import FastMCP
 
 from basic_memory.api.app import app as fastapi_app
 from basic_memory.deps import get_engine_factory, get_app_config
@@ -25,6 +25,7 @@ class ContextState:
 
     def __init__(self):
         self._state: dict[str, object] = {}
+        self.request_context = None
 
     async def get_state(self, key: str):
         return self._state.get(key)

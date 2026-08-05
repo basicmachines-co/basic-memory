@@ -2,7 +2,7 @@
 
 import pytest
 
-from mcp.server.fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.tools import build_context, write_note
 

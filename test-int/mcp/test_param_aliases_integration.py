@@ -581,14 +581,14 @@ async def test_aliases_not_advertised_in_schema(mcp_server, app):
 
         for tool_name, (must_have, must_not_have) in checks.items():
             assert tool_name in tools, f"tool {tool_name} not registered"
-            props = tools[tool_name].inputSchema["properties"]
+            props = tools[tool_name].input_schema["properties"]
             for canonical in must_have:
                 assert canonical in props, f"{tool_name}: canonical '{canonical}' missing"
             for alias in must_not_have:
                 assert alias not in props, f"{tool_name}: alias '{alias}' leaked into schema"
 
         # #818: AliasChoices on optional bool broke external-client JSON schema (null-only).
-        overwrite_schema = tools["write_note"].inputSchema["properties"]["overwrite"]
+        overwrite_schema = tools["write_note"].input_schema["properties"]["overwrite"]
         schema_types: set[str] = set()
         if "type" in overwrite_schema:
             raw = overwrite_schema["type"]

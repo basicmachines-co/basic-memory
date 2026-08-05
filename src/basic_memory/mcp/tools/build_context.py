@@ -250,7 +250,7 @@ async def build_context(
         try:
             depth = int(depth)
         except ValueError:
-            from mcp.server.fastmcp.exceptions import ToolError
+            from fastmcp.exceptions import ToolError
 
             raise ToolError(f"Invalid depth parameter: '{depth}' is not a valid integer")
 

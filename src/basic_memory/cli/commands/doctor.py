@@ -64,8 +64,8 @@ async def _delete_doctor_project(
     project_client: ProjectClient, project_name: str, project_id: str
 ) -> None:
     """Delete the generated doctor project without weakening the public API guard."""
-    # Deferred: ToolError lives in the mcp SDK, which must not load at CLI startup (#886).
-    from mcp.server.fastmcp.exceptions import ToolError
+    # Deferred: ToolError lives in FastMCP's runtime, which must not load at CLI startup (#886).
+    from fastmcp.exceptions import ToolError
 
     try:
         await project_client.delete_project(project_id)
@@ -203,8 +203,8 @@ def doctor(
     cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
 ) -> None:
     """Run local consistency checks to verify file/database indexing."""
-    # Deferred: ToolError lives in the mcp SDK, which must not load at CLI startup (#886).
-    from mcp.server.fastmcp.exceptions import ToolError
+    # Deferred: ToolError lives in FastMCP's runtime, which must not load at CLI startup (#886).
+    from fastmcp.exceptions import ToolError
 
     try:
         validate_routing_flags(local, cloud)

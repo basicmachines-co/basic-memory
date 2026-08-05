@@ -6,7 +6,7 @@ import logfire
 from httpx import HTTPStatusError
 from loguru import logger
 from fastmcp import Context
-from mcp.server.fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ToolError
 from pydantic import AliasChoices, BeforeValidator, Field
 
 if TYPE_CHECKING:  # pragma: no cover

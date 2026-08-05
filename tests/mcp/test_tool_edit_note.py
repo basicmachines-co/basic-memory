@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import httpx
 import pytest
-from mcp.server.fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.clients import KnowledgeClient
 from basic_memory.mcp.tools.edit_note import _resolve_after_disk_recovery, edit_note

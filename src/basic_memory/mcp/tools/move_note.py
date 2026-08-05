@@ -6,7 +6,7 @@ from typing import Any, Annotated, Optional, Literal
 
 from loguru import logger
 from fastmcp import Context
-from mcp.server.fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ToolError
 from pydantic import AliasChoices, Field
 
 from basic_memory.config import ConfigManager
