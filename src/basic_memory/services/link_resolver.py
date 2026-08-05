@@ -71,6 +71,20 @@ async def detect_project_from_workspace_identifier_prefix(
     return workspace_resolution.project_identifier
 
 
+def normalize_link_text(link_text: str) -> tuple[str, str | None]:
+    """Strip wikilink syntax and return the target text plus optional alias."""
+    text = link_text.strip()
+    if text.startswith("[[") and text.endswith("]]"):
+        text = text[2:-2]
+
+    alias = None
+    if "|" in text:
+        text, alias = text.split("|", 1)
+        alias = alias.strip()
+
+    return text.strip(), alias
+
+
 class LinkResolver:
     """Service for resolving markdown links to permalinks.
 
@@ -269,24 +283,7 @@ class LinkResolver:
         Returns:
             Tuple of (normalized_text, alias or None)
         """
-        # Strip whitespace
-        text = link_text.strip()
-
-        # Remove enclosing brackets if present
-        if text.startswith("[[") and text.endswith("]]"):
-            text = text[2:-2]
-
-        # Handle wiki link aliases (format: [[actual|alias]])
-        alias = None
-        if "|" in text:
-            text, alias = text.split("|", 1)
-            text = text.strip()
-            alias = alias.strip()
-        else:
-            # Strip whitespace from text even if no alias
-            text = text.strip()
-
-        return text, alias
+        return normalize_link_text(link_text)
 
     async def _resolve_in_project(
         self,

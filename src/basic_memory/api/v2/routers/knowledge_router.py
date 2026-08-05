@@ -23,6 +23,7 @@ from loguru import logger
 import logfire
 from basic_memory import db
 from basic_memory.services.exceptions import AmbiguousIdentifierError
+from basic_memory.services.link_resolver import normalize_link_text
 from basic_memory.services.directory_deletes import DirectoryDeleteServiceError
 from basic_memory.services.note_content_writes import NoteContentMutationServiceError
 from basic_memory.ignore_utils import (
@@ -351,7 +352,8 @@ async def resolve_identifier(
                 # qualified miss into an unrelated entity from the route project.
                 # Outcome: allow an exact local title/path/permalink first, but reject the miss
                 # before fuzzy fallback and direct the caller to source-aware link resolution.
-                normalized_identifier = normalize_project_reference(data.identifier).strip("/")
+                link_identifier, _ = normalize_link_text(data.identifier)
+                normalized_identifier = normalize_project_reference(link_identifier).strip("/")
                 project_prefix, separator, _ = normalized_identifier.partition("/")
                 referenced_project = None
                 if separator:

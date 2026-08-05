@@ -81,6 +81,10 @@ async def test_strict_entity_resolution_rejects_legacy_cross_project_path_after_
         f"{v2_project_url}/knowledge/resolve",
         json={"identifier": "other-project/docs/missing"},
     )
+    aliased_qualified_miss_response = await client.post(
+        f"{v2_project_url}/knowledge/resolve",
+        json={"identifier": " [[other-project/docs/missing|Missing label]] "},
+    )
     namespaced_title_response = await client.post(
         f"{v2_project_url}/knowledge/resolve",
         json={"identifier": "C++::ABI", "strict": True},
@@ -97,3 +101,5 @@ async def test_strict_entity_resolution_rejects_legacy_cross_project_path_after_
     assert "/knowledge/links/resolve" in qualified_miss_response.json()["detail"]
     assert non_strict_qualified_miss_response.status_code == 400
     assert "/knowledge/links/resolve" in non_strict_qualified_miss_response.json()["detail"]
+    assert aliased_qualified_miss_response.status_code == 400
+    assert "/knowledge/links/resolve" in aliased_qualified_miss_response.json()["detail"]
