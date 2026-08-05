@@ -86,7 +86,11 @@ from basic_memory.schemas.v2 import (
 )
 from basic_memory.workspace_context import current_workspace_permalink_context
 from basic_memory.schemas.response import DirectoryMoveResult
-from basic_memory.utils import validate_project_path
+from basic_memory.utils import (
+    generate_permalink,
+    normalize_project_reference,
+    validate_project_path,
+)
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge-v2"])
 
@@ -276,6 +280,7 @@ async def resolve_identifier(
     data: EntityResolveRequest,
     link_resolver: LinkResolverV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
+    project_repository: ProjectRepositoryDep,
     session: SessionDep,
     read_cache: ResolveReadCacheDep,
 ) -> EntityResolveResponse:
@@ -374,6 +379,33 @@ async def resolve_identifier(
                         resolution_method = "path"
 
             if not entity:
+                # Trigger: local resolution missed and the first path segment names another
+                # project through the legacy ``project/note`` syntax.
+                # Why: a mutation caller treats a 404 as permission to create locally, which
+                # can turn a cross-project reference into a misleading note in this project.
+                # Outcome: direct the caller to source-aware link resolution before returning
+                # the ordinary not-found response for genuinely local identifiers.
+                normalized_identifier = normalize_project_reference(data.identifier).strip("/")
+                project_prefix, separator, _ = normalized_identifier.partition("/")
+                referenced_project = None
+                if separator:
+                    referenced_project = await project_repository.get_by_name(
+                        session, project_prefix
+                    )
+                    if referenced_project is None:
+                        referenced_project = await project_repository.get_by_name_case_insensitive(
+                            session, project_prefix
+                        )
+                    if referenced_project is None:
+                        referenced_project = await project_repository.get_by_permalink(
+                            session, generate_permalink(project_prefix)
+                        )
+                if referenced_project is not None and referenced_project.id != project_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Qualified project references must use /knowledge/links/resolve",
+                    )
+
                 raise HTTPException(
                     status_code=404,
                     detail=f"Entity not found: '{data.identifier}'",
