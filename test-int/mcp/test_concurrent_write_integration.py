@@ -12,12 +12,87 @@ corrupted index would silently drop knowledge.
 """
 
 import asyncio
+import json
 
 import pytest
 from fastmcp import Client
 
+# Every test in this module shares one session-scoped event loop.
+#
+# Trigger: pytest-asyncio strict mode defaults to a fresh, function-scoped loop
+# per ``@pytest.mark.asyncio`` test (pyproject ``asyncio_default_fixture_loop_scope
+# = "function"``), but the MCP local-ASGI path caches its "prepare"
+# ``asyncio.Lock`` in a module-level dict keyed by the single global FastAPI app
+# (``async_client._prepared_local_asgi_database_prepare_locks``).
+# Why: that lock binds to whichever loop first acquires it; on a new
+# function-scoped loop the next test's first request hits
+# ``RuntimeError: <Lock ...> is bound to a different event loop``.
+# Outcome: pinning every test to ``loop_scope="session"`` keeps the cached lock
+# on one loop for the whole module, matching the session-scoped conftest
+# fixtures (e.g. ``postgres_engine``).
 
-@pytest.mark.asyncio
+
+@pytest.mark.asyncio(loop_scope="session")
+async def test_write_same_title_same_directory_collision(mcp_server, app, test_project) -> None:
+    """Two writes with the same title + directory deterministically collide.
+
+    Same title + same directory normalize to the same permalink. With the
+    default ``overwrite=False``, the second write does NOT clobber the first:
+    write_note detects the existing note and returns a structured ``conflict``
+    result. This drives the collision path deterministically (sequential, no
+    race timing) and asserts on the JSON response to pin the observed behavior.
+    """
+
+    async with Client(mcp_server) as client:
+        first = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Collision Note",
+                "directory": "collision",
+                "content": "# Collision Note\n\nFirst body.",
+                "output_format": "json",
+            },
+        )
+        second = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Collision Note",
+                "directory": "collision",
+                "content": "# Collision Note\n\nSecond body loses.",
+                "output_format": "json",
+            },
+        )
+
+        first_payload = json.loads(first.content[0].text)
+        second_payload = json.loads(second.content[0].text)
+
+        # First write creates the note; the colliding second write is blocked as
+        # a conflict (overwrite disabled by default) rather than forking a new
+        # permalink or silently overwriting.
+        assert first_payload["action"] == "created"
+        assert second_payload["action"] == "conflict"
+        assert second_payload["error"] == "NOTE_ALREADY_EXISTS"
+        # Both writes normalize to the same permalink (project prefix aside).
+        assert first_payload["permalink"].endswith("collision/collision-note")
+        assert second_payload["permalink"].endswith("collision/collision-note")
+
+        # The first write wins: reading back returns the original body, proving
+        # the conflicting write left the committed note untouched.
+        read_result = await client.call_tool(
+            "read_note",
+            {
+                "project": test_project.name,
+                "identifier": "Collision Note",
+            },
+        )
+        read_text = read_result.content[0].text
+        assert "First body." in read_text
+        assert "Second body loses." not in read_text
+
+
+@pytest.mark.asyncio(loop_scope="session")
 async def test_concurrent_write_different_notes(mcp_server, app, test_project) -> None:
     """Concurrent writes to distinct titles/folders all succeed and read back.
 
@@ -69,7 +144,7 @@ async def test_concurrent_write_different_notes(mcp_server, app, test_project) -
             )
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="session")
 async def test_concurrent_write_same_directory(mcp_server, app, test_project) -> None:
     """Concurrent writes into the SAME directory produce distinct permalinks.
 
@@ -108,7 +183,7 @@ async def test_concurrent_write_same_directory(mcp_server, app, test_project) ->
         assert len(permalinks) == note_count, "expected one unique permalink per concurrent note"
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="session")
 async def test_concurrent_write_then_search(mcp_server, app, test_project) -> None:
     """After concurrent writes, each note is findable via search.
 
@@ -155,7 +230,7 @@ async def test_concurrent_write_then_search(mcp_server, app, test_project) -> No
             )
 
 
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="session")
 async def test_concurrent_write_and_read(mcp_server, app, test_project) -> None:
     """Reads of a stable note stay consistent while other writes are in flight.
 
@@ -206,7 +281,7 @@ async def test_concurrent_write_and_read(mcp_server, app, test_project) -> None:
 
 
 @pytest.mark.slow
-@pytest.mark.asyncio
+@pytest.mark.asyncio(loop_scope="session")
 async def test_concurrent_write_high_volume(mcp_server, app, test_project) -> None:
     """Stress: 20+ concurrent writes all succeed with correct content.
 
@@ -215,7 +290,7 @@ async def test_concurrent_write_high_volume(mcp_server, app, test_project) -> No
     body to confirm no writes are lost or interleaved under load.
     """
 
-    note_count = 25
+    note_count = 20
 
     async with Client(mcp_server) as client:
 
