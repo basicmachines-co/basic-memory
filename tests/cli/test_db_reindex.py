@@ -323,6 +323,93 @@ async def test_reindex_embeddings_only_full_passes_force_full_to_vector_reindex(
 
 
 @pytest.mark.asyncio
+async def test_reindex_embeddings_only_warns_when_project_has_no_indexed_entities(
+    monkeypatch,
+    session_maker,
+):
+    """Embeddings-only mode explains that it cannot discover project files."""
+    app_config = _stub_app_config()
+    project = SimpleNamespace(id=1, name="foo", path="/tmp/foo")
+    printed_lines: list[str] = []
+
+    class StubProjectRepository:
+        async def get_active_projects(self, session):
+            return [project]
+
+    class StubSearchService:
+        def __init__(self, search_repository, entity_repository, file_service, *, session_maker):
+            pass
+
+        async def reindex_vectors(self, *, progress_callback=None, force_full: bool = False):
+            return {"total_entities": 0, "embedded": 0, "skipped": 0, "errors": 0}
+
+    class SilentProgress:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def add_task(self, description, total=None):
+            return 1
+
+        def update(self, task_id, **kwargs):
+            pass
+
+    monkeypatch.setattr(
+        "basic_memory.services.initialization.reconcile_projects_with_config", AsyncMock()
+    )
+    monkeypatch.setattr(
+        "basic_memory.db.get_or_create_db",
+        AsyncMock(return_value=(None, session_maker)),
+    )
+    monkeypatch.setattr("basic_memory.db.shutdown_db", AsyncMock())
+    monkeypatch.setattr("basic_memory.repository.ProjectRepository", StubProjectRepository)
+    monkeypatch.setattr(
+        "basic_memory.repository.search_repository.create_search_repository",
+        lambda *args, **kwargs: object(),
+    )
+    monkeypatch.setattr(
+        "basic_memory.repository.EntityRepository", lambda *args, **kwargs: object()
+    )
+    monkeypatch.setattr(
+        "basic_memory.markdown.entity_parser.EntityParser",
+        lambda *args, **kwargs: object(),
+    )
+    monkeypatch.setattr(
+        "basic_memory.markdown.markdown_processor.MarkdownProcessor",
+        lambda *args, **kwargs: object(),
+    )
+    monkeypatch.setattr(
+        "basic_memory.services.file_service.FileService", lambda *args, **kwargs: object()
+    )
+    monkeypatch.setattr("basic_memory.services.search_service.SearchService", StubSearchService)
+    monkeypatch.setattr(db_cmd, "Progress", SilentProgress)
+    monkeypatch.setattr(
+        db_cmd.console,
+        "print",
+        lambda message="", *args, **kwargs: printed_lines.append(str(message)),
+    )
+
+    await db_cmd._reindex(
+        app_config,
+        search=False,
+        embeddings=True,
+        full=False,
+        project="foo",
+    )
+
+    output = "\n".join(printed_lines)
+    assert "0 entities embedded" in output
+    assert "No indexed entities found" in output
+    assert "--embeddings" in output
+    assert "bm reindex" in output
+
+
+@pytest.mark.asyncio
 async def test_reindex_recovers_stuck_materializations_before_scan(monkeypatch, session_maker):
     """The scan reconciles deletes against the filesystem, so a note whose accepted
     file write a crash left stuck ('writing'/'pending'/'failed') would be destroyed

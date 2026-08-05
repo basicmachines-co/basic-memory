@@ -460,6 +460,16 @@ async def _reindex(
                     f"{stats['skipped']} skipped, "
                     f"{stats['errors']} errors"
                 )
+                if stats["total_entities"] == 0 and not search:
+                    # Trigger: embeddings-only mode found no database entities.
+                    # Why: this mode rebuilds derived vectors; it does not discover files.
+                    # Outcome: explain the prerequisite instead of reporting a silent no-op.
+                    console.print(
+                        "  [yellow]No indexed entities found.[/yellow] "
+                        "[cyan]--embeddings[/cyan] only processes notes already in the "
+                        "database. Run [green]bm reindex[/green] to index project files first, "
+                        "or start the MCP server and retry after its initial index completes."
+                    )
 
         console.print("\n[green]Reindex complete![/green]")
     finally:

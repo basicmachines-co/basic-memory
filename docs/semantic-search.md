@@ -80,11 +80,14 @@ pip install basic-memory
 export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
 ```
 
-3. Build vector embeddings for your existing content:
+3. Index your project files and build vector embeddings:
 
 ```bash
-bm reindex --embeddings
+bm reindex
 ```
+
+Use `bm reindex --embeddings` only after the notes have already been indexed. That flag rebuilds
+derived vectors from database entities; it does not discover new files on disk.
 
 4. Search using semantic modes:
 
@@ -450,11 +453,15 @@ not change stored embeddings, so it does not require `bm reindex --embeddings`.
 
 The `bm reindex` command rebuilds search indexes without dropping the database.
 
+Plain `bm reindex` runs the project index before embeddings, so use it for a new project or for
+files written directly to disk. `bm reindex --embeddings` intentionally skips file discovery and
+only rebuilds vectors for entities already present in the database.
+
 ```bash
 # Rebuild everything (FTS + embeddings if semantic is enabled)
 bm reindex
 
-# Only rebuild vector embeddings
+# Only rebuild vector embeddings (notes must already be indexed)
 bm reindex --embeddings
 
 # Only rebuild the full-text search index
