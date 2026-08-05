@@ -76,9 +76,18 @@ class NoteContentRepository(Repository[NoteContent]):
 
         return NoteContent(**model_data), set(model_data)
 
-    async def _load_entity_identity(self, session: AsyncSession, entity_id: int) -> Entity:
+    async def _load_entity_identity(
+        self,
+        session: AsyncSession,
+        entity_id: int,
+        *,
+        lock_for_update: bool = False,
+    ) -> Entity:
         """Load the owning entity so duplicated identity fields stay aligned."""
-        result = await session.execute(select(Entity).where(Entity.id == entity_id))
+        query = select(Entity).where(Entity.id == entity_id)
+        if lock_for_update:
+            query = query.with_for_update()
+        result = await session.execute(query)
         entity = result.scalar_one_or_none()
         if entity is None:
             raise ValueError(f"Entity {entity_id} does not exist")
@@ -295,7 +304,14 @@ class NoteContentRepository(Repository[NoteContent]):
             # from the entity (rather than mutating the ORM row) so the whole
             # write is the single conditional UPDATE whose rowcount decides the
             # race, portably across SQLite and Postgres.
-            entity = await self._load_entity_identity(session, entity_id)
+            # Materialization publishes NoteContent state and then updates Entity
+            # file metadata in the same transaction. Lock Entity first so that
+            # path cannot invert an Entity -> NoteContent indexing transaction.
+            entity = await self._load_entity_identity(
+                session,
+                entity_id,
+                lock_for_update=True,
+            )
             result = cast(
                 CursorResult[Any],
                 await session.execute(
