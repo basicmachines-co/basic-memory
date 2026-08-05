@@ -24,7 +24,7 @@ from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.runtime.note_content import NOTE_CONTENT_BASE_CHECKSUM_HEADER
 from basic_memory.schemas import DeleteEntitiesResponse
 from basic_memory.schemas.response import DirectoryMoveResult, DirectoryDeleteResult
-from basic_memory.schemas.v2 import EntityResponseV2, EntityResolveResponse
+from basic_memory.schemas.v2 import EntityResponseV2, EntityResolveResponse, LinkResolveResponse
 from basic_memory.services.search_service import SearchService
 
 
@@ -79,13 +79,13 @@ async def test_resolve_identifier_by_permalink(
 
 
 @pytest.mark.asyncio
-async def test_resolve_identifier_returns_target_project_external_id_for_cross_project_link(
+async def test_entity_and_link_resolution_use_distinct_project_contracts(
     client: AsyncClient,
     session_maker,
     tmp_path,
     v2_project_url,
 ):
-    """Cross-project resolves should expose the owning project external ID."""
+    """Entity lookup stays local while link lookup exposes its cross-project target."""
     project_repository = ProjectRepository()
     now = datetime.now(timezone.utc)
     async with db.scoped_session(session_maker) as session:
@@ -114,15 +114,21 @@ async def test_resolve_identifier_returns_target_project_external_id_for_cross_p
             ),
         )
 
-    response = await client.post(
+    entity_response = await client.post(
         f"{v2_project_url}/knowledge/resolve",
         json={"identifier": "other-project::Cross Project Note", "strict": True},
     )
+    link_response = await client.post(
+        f"{v2_project_url}/knowledge/links/resolve",
+        json={"identifier": "other-project::Cross Project Note", "strict": True},
+    )
 
-    assert response.status_code == 200
-    resolved = EntityResolveResponse.model_validate(response.json())
+    assert entity_response.status_code == 400
+    assert "/knowledge/links/resolve" in entity_response.json()["detail"]
+    assert link_response.status_code == 200
+    resolved = LinkResolveResponse.model_validate(link_response.json())
     assert resolved.entity_id == target.id
-    assert resolved.project_external_id == other_project.external_id
+    assert resolved.target_project_external_id == other_project.external_id
 
 
 @pytest.mark.asyncio
@@ -187,9 +193,7 @@ async def test_resolve_identifier_no_fuzzy_match(client: AsyncClient, v2_project
 
 
 @pytest.mark.asyncio
-async def test_resolve_identifier_with_source_path_no_fuzzy_match(
-    client: AsyncClient, v2_project_url
-):
+async def test_resolve_link_with_source_path_no_fuzzy_match(client: AsyncClient, v2_project_url):
     """Test that context-aware resolution also uses strict mode.
 
     Even with source_path for context-aware resolution, nonexistent
@@ -209,12 +213,13 @@ async def test_resolve_identifier_with_source_path_no_fuzzy_match(
     resolve_data = {
         "identifier": "nonexistent",
         "source_path": "testing/nested/other-note.md",
+        "strict": True,
     }
-    response = await client.post(f"{v2_project_url}/knowledge/resolve", json=resolve_data)
+    response = await client.post(f"{v2_project_url}/knowledge/links/resolve", json=resolve_data)
 
     # Must return 404, not a fuzzy match
     assert response.status_code == 404
-    assert "Entity not found" in response.json()["detail"]
+    assert "Link target not found" in response.json()["detail"]
 
 
 @pytest.mark.asyncio

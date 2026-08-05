@@ -9,7 +9,7 @@ from basic_memory.schemas.response import ObservationResponse, RelationResponse
 
 
 class EntityResolveRequest(BaseModel):
-    """Request to resolve a string identifier to an entity ID.
+    """Request to resolve a string identifier inside one target project.
 
     Supports resolution of:
     - Permalinks (e.g., "specs/search")
@@ -17,7 +17,7 @@ class EntityResolveRequest(BaseModel):
     - File paths (e.g., "specs/search.md")
 
     When source_path is provided, resolution prefers notes closer to the source
-    (context-aware resolution for duplicate titles).
+    within the same project. Qualified references never change the target project.
     """
 
     identifier: str = Field(
@@ -38,9 +38,9 @@ class EntityResolveRequest(BaseModel):
 
 
 class EntityResolveResponse(BaseModel):
-    """Response from identifier resolution.
+    """Response from project-scoped entity resolution.
 
-    Returns the entity ID and associated metadata for the resolved entity.
+    The owning project always matches the target project in the request route.
     """
 
     external_id: str = Field(..., description="External UUID (primary API identifier)")
@@ -51,6 +51,47 @@ class EntityResolveResponse(BaseModel):
     title: str = Field(..., description="Entity title")
     resolution_method: Literal["external_id", "permalink", "title", "path", "search"] = Field(
         ..., description="How the identifier was resolved"
+    )
+
+
+class LinkResolveRequest(BaseModel):
+    """Request to resolve a wikilink from one explicit source project."""
+
+    identifier: str = Field(
+        ...,
+        description="Wikilink or identifier to resolve from the source project",
+        min_length=1,
+        max_length=500,
+    )
+    source_path: Optional[str] = Field(
+        None,
+        description="Path of the source note within the route project",
+        max_length=500,
+    )
+    strict: bool = Field(
+        False,
+        description="If True, only exact matches are allowed (no fuzzy search fallback)",
+    )
+
+
+class LinkResolveResponse(BaseModel):
+    """Response from source-aware wikilink resolution.
+
+    Hosted callers must separately authorize ``target_project_external_id`` before exposing
+    target metadata. Authorization of the source project in the request route is not sufficient.
+    """
+
+    external_id: str = Field(..., description="External UUID of the resolved entity")
+    entity_id: int = Field(..., description="Numeric entity ID (internal identifier)")
+    target_project_external_id: str = Field(
+        ...,
+        description="External UUID of the resolved target project; authorize it separately",
+    )
+    permalink: Optional[str] = Field(None, description="Resolved entity permalink")
+    file_path: str = Field(..., description="Resolved entity path in the target project")
+    title: str = Field(..., description="Resolved entity title")
+    resolution_method: Literal["external_id", "permalink", "title", "path", "search"] = Field(
+        ..., description="How the wikilink was resolved"
     )
 
 

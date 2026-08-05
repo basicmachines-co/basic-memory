@@ -62,6 +62,17 @@ which graph and search projections attach.
 - Parsed metadata and indexed text describe synchronized state; they are not independent
   knowledge sources.
 
+### Resolution Contracts
+
+Project-scoped entity resolution treats the route project as the target. It may use a source path
+to disambiguate notes inside that project, but it must never return an entity owned by another
+project.
+
+Source-aware wikilink resolution treats the route project as the source/default context. A
+qualified reference may select another target project, and the response names that target project
+explicitly. Hosted callers must authorize the target project separately; authorization of the
+source project does not grant access to the resolved target.
+
 ### Observation
 
 An observation is a categorized semantic statement owned by one source entity. It contains

@@ -3,6 +3,8 @@
 from basic_memory.schemas.v2.entity import (
     EntityResolveRequest,
     EntityResolveResponse,
+    LinkResolveRequest,
+    LinkResolveResponse,
     EntityResponseV2,
     MoveEntityRequestV2,
     MoveDirectoryRequestV2,
@@ -25,6 +27,8 @@ from basic_memory.schemas.v2.project_index import (
 __all__ = [
     "EntityResolveRequest",
     "EntityResolveResponse",
+    "LinkResolveRequest",
+    "LinkResolveResponse",
     "EntityResponseV2",
     "MoveEntityRequestV2",
     "MoveDirectoryRequestV2",

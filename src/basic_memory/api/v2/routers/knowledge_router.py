@@ -72,6 +72,8 @@ from basic_memory.schemas.request import EditEntityRequest
 from basic_memory.schemas.v2 import (
     EntityResolveRequest,
     EntityResolveResponse,
+    LinkResolveRequest,
+    LinkResolveResponse,
     EntityResponseV2,
     GraphEdge,
     GraphNode,
@@ -274,14 +276,14 @@ async def resolve_identifier(
     data: EntityResolveRequest,
     link_resolver: LinkResolverV2ExternalDep,
     entity_repository: EntityRepositoryV2ExternalDep,
-    project_repository: ProjectRepositoryDep,
     session: SessionDep,
     read_cache: ResolveReadCacheDep,
 ) -> EntityResolveResponse:
-    """Resolve a string identifier (external_id, permalink, title, or path) to entity info.
+    """Resolve an entity inside the target project named in the route.
 
     This endpoint provides a bridge between v1-style identifiers and v2 external_ids.
-    Use this to convert existing references to the new UUID-based format.
+    Qualified identifiers cannot escape the route project. Use ``/links/resolve`` for
+    source-aware cross-project wikilinks.
 
     Args:
         data: Request containing the identifier to resolve
@@ -315,6 +317,17 @@ async def resolve_identifier(
     ):
         logger.info(f"API v2 request: resolve_identifier for '{data.identifier}'")
 
+        # Trigger: the identifier explicitly names a project with ``project::note`` syntax.
+        # Why: this route's project is the target and must never be reinterpreted as source
+        # context. A 400 also prevents mutation callers from treating the miss as permission to
+        # auto-create a misleading note in the active project.
+        # Outcome: callers migrate qualified references to the source-aware link endpoint.
+        if "::" in data.identifier:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Qualified project references must use /knowledge/links/resolve",
+            )
+
         workspace_context = current_workspace_permalink_context()
         cache_key = ReadCacheKey(
             project_id=project_external_id,
@@ -339,7 +352,7 @@ async def resolve_identifier(
 
             if not entity:
                 try:
-                    entity = await link_resolver.resolve_link(
+                    entity = await link_resolver.resolve_entity(
                         data.identifier,
                         source_path=data.source_path,
                         strict=data.strict,
@@ -366,17 +379,15 @@ async def resolve_identifier(
                     detail=f"Entity not found: '{data.identifier}'",
                 )
 
-            owner_project = await project_repository.get_by_id(session, entity.project_id)
-            if not owner_project:  # pragma: no cover
+            if entity.project_id != project_id:  # pragma: no cover
                 raise HTTPException(
-                    status_code=500,
-                    detail="Resolved entity references an unknown project",
+                    status_code=404, detail=f"Entity not found: '{data.identifier}'"
                 )
 
             result = EntityResolveResponse(
                 external_id=entity.external_id,
                 entity_id=entity.id,
-                project_external_id=owner_project.external_id,
+                project_external_id=project_external_id,
                 permalink=entity.permalink,
                 file_path=entity.file_path,
                 title=entity.title,
@@ -386,11 +397,83 @@ async def resolve_identifier(
                 f"API v2 response: resolved '{data.identifier}' "
                 f"to external_id={result.external_id} via {resolution_method}"
             )
-            # Cross-project references depend on two projects. Keep phase-one
-            # generation invalidation exact by caching only local resolutions.
-            cached.cacheable = result.project_external_id == project_external_id
             cached.value = result
             return result
+
+
+@router.post("/links/resolve", response_model=LinkResolveResponse)
+async def resolve_link(
+    project_id: ProjectExternalIdPathDep,
+    source_project_external_id: Annotated[
+        str,
+        Path(
+            alias="project_id",
+            description="Source/default project external UUID for wikilink resolution",
+        ),
+    ],
+    data: LinkResolveRequest,
+    link_resolver: LinkResolverV2ExternalDep,
+    project_repository: ProjectRepositoryDep,
+    session: SessionDep,
+) -> LinkResolveResponse:
+    """Resolve a wikilink from the route project and return its explicit target project.
+
+    The route project is the source/default context and owns ``source_path``. A qualified
+    reference may select another target project. Hosted callers must authorize the returned
+    ``target_project_external_id`` separately before exposing target metadata.
+
+    This endpoint is intentionally not stored in the project read cache: a cross-project result
+    depends on both source and target generations, while entity resolution depends on one target.
+    """
+    with logfire.span(
+        "api.request.knowledge.resolve_link",
+        entrypoint="api",
+        domain="knowledge",
+        action="resolve_link",
+        source_project_id=project_id,
+        source_project_external_id=source_project_external_id,
+    ):
+        logger.info(f"API v2 request: resolve_link for '{data.identifier}'")
+
+        try:
+            entity = await link_resolver.resolve_link(
+                data.identifier,
+                source_path=data.source_path,
+                strict=data.strict,
+                session=session,
+            )
+        except AmbiguousIdentifierError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+        if not entity:
+            raise HTTPException(
+                status_code=404, detail=f"Link target not found: '{data.identifier}'"
+            )
+
+        target_project = await project_repository.get_by_id(session, entity.project_id)
+        if not target_project:  # pragma: no cover
+            raise HTTPException(
+                status_code=500,
+                detail="Resolved link target references an unknown project",
+            )
+
+        resolution_method = "search"
+        if entity.permalink == data.identifier:
+            resolution_method = "permalink"
+        elif entity.title == data.identifier:
+            resolution_method = "title"
+        elif entity.file_path == data.identifier:
+            resolution_method = "path"
+
+        return LinkResolveResponse(
+            external_id=entity.external_id,
+            entity_id=entity.id,
+            target_project_external_id=target_project.external_id,
+            permalink=entity.permalink,
+            file_path=entity.file_path,
+            title=entity.title,
+            resolution_method=resolution_method,
+        )
 
 
 ## Single-file indexing endpoint
