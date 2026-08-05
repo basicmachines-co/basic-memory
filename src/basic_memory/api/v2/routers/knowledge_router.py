@@ -322,17 +322,6 @@ async def resolve_identifier(
     ):
         logger.info(f"API v2 request: resolve_identifier for '{data.identifier}'")
 
-        # Trigger: the identifier explicitly names a project with ``project::note`` syntax.
-        # Why: this route's project is the target and must never be reinterpreted as source
-        # context. A 400 also prevents mutation callers from treating the miss as permission to
-        # auto-create a misleading note in the active project.
-        # Outcome: callers migrate qualified references to the source-aware link endpoint.
-        if "::" in data.identifier:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Qualified project references must use /knowledge/links/resolve",
-            )
-
         workspace_context = current_workspace_permalink_context()
         cache_key = ReadCacheKey(
             project_id=project_external_id,

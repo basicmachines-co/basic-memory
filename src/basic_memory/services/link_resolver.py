@@ -120,7 +120,6 @@ class LinkResolver:
         repository. This is the target-project contract used by entity read and mutation flows.
         """
         clean_text, _ = self._normalize_link_text(identifier)
-        clean_text = normalize_project_reference(clean_text)
 
         async with db.scoped_session(self.session_maker, session) as active_session:
             try:
