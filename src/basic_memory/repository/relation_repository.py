@@ -233,16 +233,23 @@ class RelationRepository(Repository[Relation]):
             return ResolvedRelationWriteResult(frozenset(), ())
 
         ordered_writes = sorted(writes, key=lambda write: write.relation_id)
-        # PostgreSQL row locks preserve snapshotted targets until commit. SQLite
-        # ignores FOR UPDATE, so each first mutation also checks the external ID
-        # before acquiring SQLite's transaction-wide write lock.
-        target_result = await session.execute(
-            select(Entity.id, Entity.external_id)
-            .where(Entity.id.in_({write.target_id for write in ordered_writes}))
-            .order_by(Entity.id)
-            .with_for_update()
-        )
-        current_target_identities = set(target_result.tuples().all())
+        # PostgreSQL row locks preserve snapshotted targets until commit. Bound
+        # the locking reads as well as writes so a large collision domain never
+        # exceeds backend parameter limits. SQLite ignores FOR UPDATE, so each
+        # first mutation also checks the external ID before its write lock.
+        current_target_identities: set[tuple[int, str]] = set()
+        target_ids = sorted({write.target_id for write in ordered_writes})
+        for target_id_batch in batched(
+            target_ids,
+            RESOLVED_RELATION_WRITE_STATEMENT_SIZE,
+        ):
+            target_result = await session.execute(
+                select(Entity.id, Entity.external_id)
+                .where(Entity.id.in_(target_id_batch))
+                .order_by(Entity.id)
+                .with_for_update()
+            )
+            current_target_identities.update(target_result.tuples().all())
         requested_source_entity_ids = {write.from_id for write in ordered_writes}
         result = await session.execute(
             select(
