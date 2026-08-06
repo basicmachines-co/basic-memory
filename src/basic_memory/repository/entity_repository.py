@@ -83,26 +83,43 @@ class EntityRepository(Repository[Entity]):
         return entity
 
     async def get_by_id(
-        self, session: AsyncSession, entity_id: int, *, load_relations: bool = True
+        self,
+        session: AsyncSession,
+        entity_id: int,
+        *,
+        load_relations: bool = True,
+        lock_for_update: bool = False,
     ) -> Optional[Entity]:
         """Get entity by numeric ID.
 
         Args:
             entity_id: Numeric entity ID
+            load_relations: Eager load observations and relations
+            lock_for_update: Lock the entity row for the current transaction
 
         Returns:
             Entity if found, None otherwise
         """
-        if not load_relations:
-            result = await session.execute(self.select().where(Entity.id == entity_id))
-            return result.scalars().one_or_none()
-
-        return await self.select_by_id(session, entity_id)
+        query = self.select().where(Entity.id == entity_id)
+        return await self._find_one_by_query(
+            session,
+            query,
+            load_relations=load_relations,
+            lock_for_update=lock_for_update,
+        )
 
     async def _find_one_by_query(
-        self, session: AsyncSession, query, *, load_relations: bool
+        self,
+        session: AsyncSession,
+        query,
+        *,
+        load_relations: bool,
+        lock_for_update: bool = False,
     ) -> Optional[Entity]:
-        """Return one entity row with optional eager loading."""
+        """Return one entity row with optional eager loading and row locking."""
+        if lock_for_update:
+            query = query.with_for_update()
+
         if load_relations:
             return await self.find_one(session, query)
 
@@ -155,15 +172,27 @@ class EntityRepository(Repository[Entity]):
         return list(result.scalars().all())
 
     async def get_by_file_path(
-        self, session: AsyncSession, file_path: Union[Path, str], *, load_relations: bool = True
+        self,
+        session: AsyncSession,
+        file_path: Union[Path, str],
+        *,
+        load_relations: bool = True,
+        lock_for_update: bool = False,
     ) -> Optional[Entity]:
         """Get entity by file_path.
 
         Args:
             file_path: Path to the entity file (will be converted to string internally)
+            load_relations: Eager load observations and relations
+            lock_for_update: Lock the entity row for the current transaction
         """
         query = self.select().where(Entity.file_path == Path(file_path).as_posix())
-        return await self._find_one_by_query(session, query, load_relations=load_relations)
+        return await self._find_one_by_query(
+            session,
+            query,
+            load_relations=load_relations,
+            lock_for_update=lock_for_update,
+        )
 
     # -------------------------------------------------------------------------
     # Lightweight methods for permalink resolution (no eager loading)

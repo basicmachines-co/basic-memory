@@ -607,16 +607,20 @@ class EntityService(BaseService[EntityModel]):
                     active_session,
                     existing_entity.id,
                     load_relations=False,
+                    lock_for_update=True,
                 )
             else:
                 db_entity = await self.repository.get_by_file_path(
                     active_session,
                     file_path.as_posix(),
                     load_relations=False,
+                    lock_for_update=True,
                 )
             if db_entity is None:  # pragma: no cover
                 raise EntityNotFoundError(f"Entity not found for file path: {file_path}")
 
+            # Accepted writes already lock Entity before replacing its graph. Indexing must use
+            # the same order so PostgreSQL cannot deadlock the two paths on Entity/Observation.
             # Observations are owned by the markdown file, so re-indexing replaces the old set.
             # We only need the entity id here; loading the old relationship collection is wasted work.
             await self.observation_repository.delete_by_fields(
