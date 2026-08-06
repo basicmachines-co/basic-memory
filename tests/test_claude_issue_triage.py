@@ -17,6 +17,7 @@ def _run_triage_helper(
     *arguments: str,
     current_labels: tuple[str, ...] = (),
     fail_label_read: bool = False,
+    fail_label_add: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], list[list[str]]]:
     event_path = tmp_path / "event.json"
     event_path.write_text(json.dumps({"issue": {"number": 1205}}), encoding="utf-8")
@@ -29,7 +30,12 @@ def _run_triage_helper(
         """#!/usr/bin/env bash
 set -euo pipefail
 
-if [[ " $* " == *" --method DELETE "* || " $* " == *" --method POST "* ]]; then
+if [[ " $* " == *" --method POST "* ]]; then
+    printf '%s\n' "__CALL__" "$@" >> "${GH_ARGUMENTS_PATH:?}"
+    if [[ "${GH_FAIL_LABEL_ADD:-false}" == "true" ]]; then
+        exit 1
+    fi
+elif [[ " $* " == *" --method DELETE "* ]]; then
     printf '%s\n' "__CALL__" "$@" >> "${GH_ARGUMENTS_PATH:?}"
 elif [[ "${GH_FAIL_LABEL_READ:-false}" == "true" ]]; then
     exit 1
@@ -46,6 +52,7 @@ fi
         {
             "GH_ARGUMENTS_PATH": str(gh_arguments_path),
             "GH_CURRENT_LABELS": "\n".join(current_labels),
+            "GH_FAIL_LABEL_ADD": "true" if fail_label_add else "false",
             "GH_FAIL_LABEL_READ": "true" if fail_label_read else "false",
             "GITHUB_EVENT_PATH": str(event_path),
             "GITHUB_REPOSITORY": "basicmachines-co/basic-memory",
@@ -90,6 +97,15 @@ def test_triage_helper_updates_only_owned_labels_without_replacing_other_labels(
         [
             "api",
             "--method",
+            "POST",
+            "repos/basicmachines-co/basic-memory/issues/1205/labels",
+            "-f",
+            "labels[]=enhancement",
+            "--silent",
+        ],
+        [
+            "api",
+            "--method",
             "DELETE",
             "repos/basicmachines-co/basic-memory/issues/1205/labels/bug",
             "--silent",
@@ -99,15 +115,6 @@ def test_triage_helper_updates_only_owned_labels_without_replacing_other_labels(
             "--method",
             "DELETE",
             "repos/basicmachines-co/basic-memory/issues/1205/labels/cloud",
-            "--silent",
-        ],
-        [
-            "api",
-            "--method",
-            "POST",
-            "repos/basicmachines-co/basic-memory/issues/1205/labels",
-            "-f",
-            "labels[]=enhancement",
             "--silent",
         ],
     ]
@@ -135,6 +142,17 @@ def test_triage_helper_keeps_only_one_type_and_cloud_component(tmp_path: Path) -
         [
             "api",
             "--method",
+            "POST",
+            "repos/basicmachines-co/basic-memory/issues/1205/labels",
+            "-f",
+            "labels[]=question",
+            "-f",
+            "labels[]=cloud",
+            "--silent",
+        ],
+        [
+            "api",
+            "--method",
             "DELETE",
             "repos/basicmachines-co/basic-memory/issues/1205/labels/bug",
             "--silent",
@@ -151,17 +169,6 @@ def test_triage_helper_keeps_only_one_type_and_cloud_component(tmp_path: Path) -
             "--method",
             "DELETE",
             "repos/basicmachines-co/basic-memory/issues/1205/labels/documentation",
-            "--silent",
-        ],
-        [
-            "api",
-            "--method",
-            "POST",
-            "repos/basicmachines-co/basic-memory/issues/1205/labels",
-            "-f",
-            "labels[]=question",
-            "-f",
-            "labels[]=cloud",
             "--silent",
         ],
     ]
@@ -183,6 +190,31 @@ def test_triage_helper_does_not_update_labels_when_current_labels_cannot_be_read
     assert result.returncode != 0
     assert "unable to read current issue labels" in result.stderr
     assert gh_calls == []
+
+
+def test_triage_helper_does_not_delete_prior_labels_when_add_fails(tmp_path: Path) -> None:
+    result, gh_calls = _run_triage_helper(
+        tmp_path,
+        "--type",
+        "enhancement",
+        "--component",
+        "none",
+        current_labels=("bug", "cloud", "production"),
+        fail_label_add=True,
+    )
+
+    assert result.returncode != 0
+    assert gh_calls == [
+        [
+            "api",
+            "--method",
+            "POST",
+            "repos/basicmachines-co/basic-memory/issues/1205/labels",
+            "-f",
+            "labels[]=enhancement",
+            "--silent",
+        ]
+    ]
 
 
 @pytest.mark.parametrize(
@@ -222,4 +254,6 @@ def test_triage_workflow_defines_one_semantic_mutation() -> None:
     assert "--type TYPE --component COMPONENT" in prompt
     assert "Do not probe labels" in prompt
     assert "Priority and complexity are prose assessments only" in prompt
+    assert "MCP identifies a component, not a TYPE" in prompt
+    assert "MCP tool issue (specific to MCP functionality)" not in prompt
     assert "--add-label" not in workflow_text

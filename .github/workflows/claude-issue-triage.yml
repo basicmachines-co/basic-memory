@@ -56,7 +56,6 @@ jobs:
                - Enhancement (improvement to existing feature)
                - Documentation (docs improvement)
                - Question/Support (user help)
-               - MCP tool issue (specific to MCP functionality)
 
             2. **Priority Assessment:**
                - Critical: Security issues, data loss, complete breakage
@@ -88,6 +87,8 @@ jobs:
             **Triage Helper Contract:**
             - TYPE must be exactly one of: `bug`, `enhancement`, `documentation`, `question`.
               Map feature requests and improvements to `enhancement`.
+            - MCP identifies a component, not a TYPE. Classify an MCP issue by its behavior using
+              one of the four TYPE values and record the MCP component in prose.
             - COMPONENT must be `cloud` only when the issue directly concerns Cloud behavior;
               otherwise use `none`. Record other components in prose because they do not have
               repository labels.
@@ -96,7 +97,7 @@ jobs:
             - If an issue is a duplicate, link the original in the comment. Do not add a
               `duplicate` label or close the issue.
             - Do not probe labels, try candidate calls, or use the helper for discovery. It is a
-              mutating command. One final call replaces only triage-owned labels and preserves
+              mutating command. One final call updates only triage-owned labels and preserves
               every label outside that owned set.
 
             Read the issue carefully, apply the triage classification, and post a concise comment.

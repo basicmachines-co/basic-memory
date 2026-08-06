@@ -92,10 +92,6 @@ while IFS= read -r label; do
     esac
 done <<< "$current_labels"
 
-for label in "${obsolete_labels[@]}"; do
-    gh api --method DELETE "$labels_url/$label" --silent
-done
-
 desired_labels=("$type_label")
 if [[ "$component" == "cloud" ]]; then
     desired_labels+=("cloud")
@@ -106,5 +102,13 @@ for label in "${desired_labels[@]}"; do
     api_args+=(-f "labels[]=$label")
 done
 
+# Add the desired classification before removing obsolete values. A failed additive request
+# therefore leaves the prior classification intact; a later rerun can converge after a delete
+# failure without losing unrelated labels.
 gh api "${api_args[@]}" --silent
+
+for label in "${obsolete_labels[@]}"; do
+    gh api --method DELETE "$labels_url/$label" --silent
+done
+
 echo "Set triage labels: type=$type_label component=$component"
