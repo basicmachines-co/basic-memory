@@ -20,11 +20,11 @@ from basic_memory.repository.relation_repository import (
     ResolvedRelationWrite,
     ResolvedRelationWriteResult,
 )
-from basic_memory.services.exceptions import AmbiguousIdentifierError
 
 type EntityId = int
 type AffectedEntityIds = set[EntityId]
 RESOLVE_RELATIONS_DEBOUNCE_SECONDS = 10
+RELATION_RESOLUTION_WRITE_CHUNK_SIZE = 250
 
 
 class RelationResolutionRuntime(Protocol):
@@ -145,16 +145,15 @@ class BatchRelationResolutionNoteContentRepository(Protocol):
 
 
 class RelationResolutionLinkResolver(Protocol):
-    """Capability for resolving a relation target by link text."""
+    """Capability for resolving a project-wide batch of relation targets."""
 
-    async def resolve_link(
+    async def resolve_relation_targets(
         self,
-        link_text: str,
+        link_texts: Sequence[str],
         *,
-        strict: bool,
         session: AsyncSession,
-    ) -> ResolvedRelationTarget | None:
-        """Resolve a link text to an entity target."""
+    ) -> Mapping[str, ResolvedRelationTarget | None]:
+        """Resolve strict link targets without per-target database round-trips."""
 
 
 class RelationResolutionEntityIndexer(Protocol):
@@ -208,7 +207,6 @@ class RepositoryRelationResolutionRuntime:
         entity_id: EntityId | None = None,
     ) -> AffectedEntityIds:
         """Resolve visible forward references and refresh affected entities."""
-        resolved_targets_by_link_text: dict[str, ResolvedRelationTarget | None] = {}
         async with db.scoped_session(self.session_maker) as session:
             if entity_id is None:
                 unresolved_relations = await self.relation_repository.find_unresolved_relations(
@@ -227,60 +225,72 @@ class RepositoryRelationResolutionRuntime:
                     count=len(unresolved_relations),
                 )
 
-            writes: list[ResolvedRelationWrite] = []
-            for relation in unresolved_relations:
-                logger.trace(
-                    "Attempting to resolve relation "
-                    f"relation_id={relation.id} "
-                    f"from_id={relation.from_id} "
-                    f"to_name={relation.to_name}"
+            target_names = list(
+                dict.fromkeys(relation.to_name for relation in unresolved_relations)
+            )
+            resolved_targets_by_link_text = (
+                await self.link_resolver.resolve_relation_targets(
+                    target_names,
+                    session=session,
                 )
-                if relation.to_name not in resolved_targets_by_link_text:
-                    try:
-                        resolved_targets_by_link_text[
-                            relation.to_name
-                        ] = await self.link_resolver.resolve_link(
-                            relation.to_name,
-                            strict=True,
-                            session=session,
-                        )
-                    except AmbiguousIdentifierError:
-                        # The target title is shared by several notes; we can't safely pick one,
-                        # so leave this relation a forward reference (as if unresolved) instead of
-                        # aborting the whole pass and stranding other resolvable relations (#1148).
-                        resolved_targets_by_link_text[relation.to_name] = None
-                resolved_entity = resolved_targets_by_link_text[relation.to_name]
-                if resolved_entity is None or resolved_entity.id == relation.from_id:
-                    continue
+                if target_names
+                else {}
+            )
 
-                logger.debug(
-                    "Resolved forward reference "
-                    f"relation_id={relation.id} "
-                    f"from_id={relation.from_id} "
-                    f"to_name={relation.to_name} "
-                    f"resolved_id={resolved_entity.id} "
-                    f"resolved_title={resolved_entity.title}",
-                )
-                writes.append(
-                    ResolvedRelationWrite(
-                        relation_id=relation.id,
-                        from_id=relation.from_id,
-                        target_id=resolved_entity.id,
-                        target_name=resolved_entity.title,
-                        relation_type=relation.relation_type,
-                    )
-                )
-            write_result = await self.relation_repository.apply_resolved_targets(session, writes)
+        writes: list[ResolvedRelationWrite] = []
+        for relation in unresolved_relations:
+            logger.trace(
+                "Attempting to resolve relation "
+                f"relation_id={relation.id} "
+                f"from_id={relation.from_id} "
+                f"to_name={relation.to_name}"
+            )
+            resolved_entity = resolved_targets_by_link_text[relation.to_name]
+            if resolved_entity is None or resolved_entity.id == relation.from_id:
+                continue
 
-        if write_result.duplicate_relation_ids:
+            logger.debug(
+                "Resolved forward reference "
+                f"relation_id={relation.id} "
+                f"from_id={relation.from_id} "
+                f"to_name={relation.to_name} "
+                f"resolved_id={resolved_entity.id} "
+                f"resolved_title={resolved_entity.title}",
+            )
+            writes.append(
+                ResolvedRelationWrite(
+                    relation_id=relation.id,
+                    from_id=relation.from_id,
+                    target_id=resolved_entity.id,
+                    target_name=resolved_entity.title,
+                    relation_type=relation.relation_type,
+                )
+            )
+
+        # Each chunk commits independently. If a worker is interrupted, the next attempt sees
+        # only the still-unresolved rows instead of repeating already completed target writes.
+        write_chunks = [
+            writes[start : start + RELATION_RESOLUTION_WRITE_CHUNK_SIZE]
+            for start in range(0, len(writes), RELATION_RESOLUTION_WRITE_CHUNK_SIZE)
+        ] or [[]]
+        duplicate_relation_ids: list[int] = []
+        for write_chunk in write_chunks:
+            async with db.scoped_session(self.session_maker) as session:
+                write_result = await self.relation_repository.apply_resolved_targets(
+                    session,
+                    write_chunk,
+                )
+                duplicate_relation_ids.extend(write_result.duplicate_relation_ids)
+
+        if duplicate_relation_ids:
             with logfire.span(
                 "indexing.relation.resolve_conflicts",
-                relation_ids=write_result.duplicate_relation_ids,
-                conflict_count=len(write_result.duplicate_relation_ids),
+                relation_ids=duplicate_relation_ids,
+                conflict_count=len(duplicate_relation_ids),
             ):
                 logger.debug(
                     "Removed redundant unresolved relations",
-                    relation_ids=write_result.duplicate_relation_ids,
+                    relation_ids=duplicate_relation_ids,
                 )
 
         async with db.scoped_session(self.session_maker) as session:

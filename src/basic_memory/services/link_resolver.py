@@ -1,5 +1,7 @@
 """Service and helpers for resolving markdown links and permalink-like identifiers."""
 
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
 import uuid as uuid_mod
 from typing import Any, Optional, Tuple, Dict
 
@@ -21,6 +23,44 @@ from basic_memory.utils import (
     normalize_project_reference,
 )
 from basic_memory.workspace_context import current_workspace_permalink_context
+
+
+@dataclass(frozen=True, slots=True)
+class _StrictLinkResolutionIndex:
+    """Project-scoped entity identities used by batch strict resolution."""
+
+    by_external_id: dict[str, Entity]
+    by_permalink: dict[str, Entity]
+    by_title: dict[str, tuple[Entity, ...]]
+    by_file_path: dict[str, Entity]
+
+    @classmethod
+    def from_entities(cls, entities: Sequence[Entity]) -> "_StrictLinkResolutionIndex":
+        """Build deterministic exact-match indexes without loading graph relationships."""
+        by_title_lists: dict[str, list[Entity]] = {}
+        by_external_id: dict[str, Entity] = {}
+        by_permalink: dict[str, Entity] = {}
+        by_file_path: dict[str, Entity] = {}
+
+        for entity in entities:
+            by_external_id[entity.external_id] = entity
+            if entity.permalink is not None:
+                by_permalink[entity.permalink] = entity
+            by_title_lists.setdefault(entity.title, []).append(entity)
+            by_file_path[entity.file_path] = entity
+
+        by_title = {
+            title: tuple(
+                sorted(matches, key=lambda entity: (len(entity.file_path), entity.file_path))
+            )
+            for title, matches in by_title_lists.items()
+        }
+        return cls(
+            by_external_id=by_external_id,
+            by_permalink=by_permalink,
+            by_title=by_title,
+            by_file_path=by_file_path,
+        )
 
 
 def is_workspace_qualified_plain_identifier(identifier: str) -> bool:
@@ -273,6 +313,214 @@ class LinkResolver:
                 project_permalink=project.permalink,
                 load_relations=load_relations,
             )
+
+    async def resolve_relation_targets(
+        self,
+        link_texts: Sequence[str],
+        *,
+        session: AsyncSession,
+    ) -> dict[str, Entity | None]:
+        """Resolve project-wide relation targets from bounded identity snapshots.
+
+        Relation repair has no source-path context and always uses strict matching. Loading each
+        referenced project's lightweight entity identities once preserves that contract while
+        making SQL round-trips depend on referenced projects instead of target-string count.
+        Ambiguous titles stay unresolved, matching the relation repair behavior of
+        :meth:`resolve_link`.
+        """
+        current_project_id = self.entity_repository.project_id
+        if current_project_id is None:  # pragma: no cover
+            raise RuntimeError("Relation target resolution requires a project-scoped repository")
+
+        projects = list(
+            await self._project_repository.find_all(
+                session,
+                use_load_options=False,
+            )
+        )
+        projects_by_id = {project.id: project for project in projects}
+        current_project = projects_by_id.get(current_project_id)
+        if current_project is None:
+            raise RuntimeError(f"Current project {current_project_id} does not exist")
+
+        indexes_by_project_id: dict[int, _StrictLinkResolutionIndex] = {}
+
+        async def get_project_index(project: Project) -> _StrictLinkResolutionIndex:
+            existing_index = indexes_by_project_id.get(project.id)
+            if existing_index is not None:
+                return existing_index
+
+            if project.id == current_project_id:
+                repository = self.entity_repository
+            else:
+                repository = self._entity_repository_cache.get(project.id)
+                if repository is None:
+                    repository = EntityRepository(project_id=project.id)
+                    self._entity_repository_cache[project.id] = repository
+
+            entities = await repository.find_all(session, use_load_options=False)
+            project_index = _StrictLinkResolutionIndex.from_entities(entities)
+            indexes_by_project_id[project.id] = project_index
+            return project_index
+
+        current_index = await get_project_index(current_project)
+        resolved_targets: dict[str, Entity | None] = {}
+
+        for link_text in dict.fromkeys(link_texts):
+            clean_text, _ = self._normalize_link_text(link_text)
+            explicit_project_reference = "::" in clean_text
+            clean_text = normalize_project_reference(clean_text)
+
+            try:
+                canonical_id = str(uuid_mod.UUID(clean_text))
+                external_id_match = current_index.by_external_id.get(canonical_id)
+                if external_id_match is not None:
+                    resolved_targets[link_text] = external_id_match
+                    continue
+            except ValueError:
+                pass
+
+            if explicit_project_reference:
+                project_prefix, remainder = self._split_project_prefix(clean_text)
+                project = (
+                    self._find_project_in_batch(projects, project_prefix)
+                    if project_prefix is not None
+                    else None
+                )
+                resolved_targets[link_text] = await self._resolve_relation_target_in_project(
+                    project=project,
+                    link_text=remainder,
+                    get_project_index=get_project_index,
+                )
+                continue
+
+            try:
+                resolved = self._resolve_strict_from_index(
+                    clean_text,
+                    project_permalink=current_project.permalink,
+                    index=current_index,
+                )
+            except AmbiguousIdentifierError:
+                # Ambiguous relation targets remain forward references; project/path fallback
+                # must not turn an ambiguous local title into a different-project match.
+                resolved_targets[link_text] = None
+                continue
+
+            if resolved is not None:
+                resolved_targets[link_text] = resolved
+                continue
+
+            project_prefix, remainder = self._split_project_prefix(clean_text)
+            project = (
+                self._find_project_in_batch(projects, project_prefix)
+                if project_prefix is not None
+                else None
+            )
+            if project is None or project.id == current_project_id:
+                resolved_targets[link_text] = None
+                continue
+
+            resolved_targets[link_text] = await self._resolve_relation_target_in_project(
+                project=project,
+                link_text=remainder,
+                get_project_index=get_project_index,
+            )
+
+        return resolved_targets
+
+    async def _resolve_relation_target_in_project(
+        self,
+        *,
+        project: Project | None,
+        link_text: str,
+        get_project_index: Callable[[Project], Awaitable[_StrictLinkResolutionIndex]],
+    ) -> Entity | None:
+        """Resolve one strict relation target in an already identified project."""
+        if project is None:
+            return None
+
+        project_index = await get_project_index(project)
+        try:
+            return self._resolve_strict_from_index(
+                link_text,
+                project_permalink=project.permalink,
+                index=project_index,
+            )
+        except AmbiguousIdentifierError:
+            return None
+
+    def _find_project_in_batch(
+        self,
+        projects: Sequence[Project],
+        identifier: str,
+    ) -> Project | None:
+        """Match the serial project lookup precedence against one project snapshot."""
+        exact_name = next((project for project in projects if project.name == identifier), None)
+        if exact_name is not None:
+            return exact_name
+
+        casefolded_identifier = identifier.casefold()
+        case_insensitive_name = next(
+            (project for project in projects if project.name.casefold() == casefolded_identifier),
+            None,
+        )
+        if case_insensitive_name is not None:
+            return case_insensitive_name
+
+        permalink = generate_permalink(identifier)
+        return next((project for project in projects if project.permalink == permalink), None)
+
+    def _resolve_strict_from_index(
+        self,
+        clean_text: str,
+        *,
+        project_permalink: str | None,
+        index: _StrictLinkResolutionIndex,
+    ) -> Entity | None:
+        """Apply strict LinkResolver precedence to one in-memory project identity index."""
+        workspace_context = current_workspace_permalink_context()
+        workspace_permalink = (
+            workspace_context.workspace_slug
+            if workspace_context and workspace_context.should_prefix_permalinks
+            else None
+        )
+        permalink_candidates = build_permalink_resolution_candidates(
+            clean_text,
+            project_permalink,
+            include_project=self._include_project_permalinks(),
+            workspace_permalink=workspace_permalink,
+        )
+        title_matches = index.by_title.get(clean_text, ())
+        ambiguous_title = len(title_matches) > 1
+        exact_identifier = normalize_project_reference(clean_text).strip("/")
+
+        for candidate_permalink in permalink_candidates:
+            entity = index.by_permalink.get(candidate_permalink)
+            if entity is None:
+                continue
+            if ambiguous_title and candidate_permalink != exact_identifier:
+                break
+            return entity
+
+        if len(title_matches) == 1:
+            return title_matches[0]
+
+        found_path = index.by_file_path.get(clean_text)
+        if found_path is not None:
+            return found_path
+
+        if not clean_text.endswith(".md") and "/" in clean_text:
+            found_path_with_md = index.by_file_path.get(f"{clean_text}.md")
+            if found_path_with_md is not None:
+                return found_path_with_md
+
+        if ambiguous_title:
+            raise AmbiguousIdentifierError(
+                clean_text,
+                [(entity.permalink, entity.file_path) for entity in title_matches],
+            )
+
+        return None
 
     def _normalize_link_text(self, link_text: str) -> Tuple[str, Optional[str]]:
         """Normalize link text and extract alias if present.

@@ -2630,14 +2630,13 @@ class RuntimeFactoryRelationRepository:
 
 
 class RuntimeFactoryLinkResolver:
-    async def resolve_link(
+    async def resolve_relation_targets(
         self,
-        link_text: str,
+        link_texts: Sequence[str],
         *,
-        strict: bool,
         session: AsyncSession,
-    ) -> ResolvedRelationTarget | None:
-        return None
+    ) -> Mapping[str, ResolvedRelationTarget | None]:
+        return {link_text: None for link_text in link_texts}
 
 
 class RuntimeFactoryEntityService:

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory.indexing.relation_resolution import (
     IndexFileRelationResolutionContext,
     ProjectIndexRelationResolutionContext,
+    RELATION_RESOLUTION_WRITE_CHUNK_SIZE,
     RESOLVE_RELATIONS_DEBOUNCE_SECONDS,
     RepositoryRelationResolutionRuntime,
     ResolveRelationsJobRequest,
@@ -215,16 +216,15 @@ class StubLinkResolver:
         self.targets = targets
         self.calls: list[tuple[str, bool]] = []
 
-    async def resolve_link(
+    async def resolve_relation_targets(
         self,
-        link_text: str,
+        link_texts: Sequence[str],
         *,
-        strict: bool,
         session: AsyncSession,
-    ) -> FakeResolvedEntity | None:
+    ) -> Mapping[str, FakeResolvedEntity | None]:
         assert isinstance(session, FakeSession)
-        self.calls.append((link_text, strict))
-        return self.targets.get(link_text)
+        self.calls.extend((link_text, True) for link_text in link_texts)
+        return {link_text: self.targets.get(link_text) for link_text in link_texts}
 
 
 class StubEntityIndexer:
@@ -582,7 +582,83 @@ async def test_repository_runtime_batches_resolution_and_entity_refresh_sessions
             FakeResolvedEntity(id=11, title="Source B"),
         )
     ]
-    assert FakeSession.created_count == 3
+    assert FakeSession.created_count == 4
+
+
+@pytest.mark.asyncio
+async def test_repository_runtime_commits_write_chunks_and_resumes_after_interruption() -> None:
+    relations = [
+        FakeRelation(
+            id=relation_id,
+            from_id=10,
+            to_name=f"Target {relation_id}",
+        )
+        for relation_id in range(1, RELATION_RESOLUTION_WRITE_CHUNK_SIZE + 2)
+    ]
+
+    class InterruptingRelationRepository(StubRelationRepository):
+        def __init__(self) -> None:
+            super().__init__([relations])
+            self.remaining = list(relations)
+            self.apply_attempts = 0
+
+        @override
+        async def find_unresolved_relations(
+            self,
+            session: AsyncSession,
+        ) -> list[FakeRelation]:
+            assert isinstance(session, FakeSession)
+            return list(self.remaining)
+
+        @override
+        async def apply_resolved_targets(
+            self,
+            session: AsyncSession,
+            writes: Sequence[ResolvedRelationWrite],
+        ) -> ResolvedRelationWriteResult:
+            self.apply_attempts += 1
+            if self.apply_attempts == 2:
+                raise RuntimeError("worker interrupted between committed chunks")
+
+            result = await super().apply_resolved_targets(session, writes)
+            completed_ids = {write.relation_id for write in writes}
+            self.remaining = [
+                relation for relation in self.remaining if relation.id not in completed_ids
+            ]
+            return result
+
+    repository = InterruptingRelationRepository()
+    link_resolver = StubLinkResolver(
+        {
+            relation.to_name: FakeResolvedEntity(
+                id=1_000 + relation.id,
+                title=relation.to_name,
+            )
+            for relation in relations
+        }
+    )
+    runtime = build_repository_runtime(
+        repository,
+        link_resolver,
+        StubEntityIndexer(),
+    )
+
+    with pytest.raises(RuntimeError, match="interrupted between committed chunks"):
+        await runtime.resolve_relations()
+
+    assert len(repository.remaining) == 1
+    assert len(repository.write_batches) == 1
+    assert len(repository.write_batches[0]) == RELATION_RESOLUTION_WRITE_CHUNK_SIZE
+
+    link_resolver.calls.clear()
+    assert await runtime.resolve_relations() == {10}
+
+    assert link_resolver.calls == [(relations[-1].to_name, True)]
+    assert repository.remaining == []
+    assert [len(batch) for batch in repository.write_batches] == [
+        RELATION_RESOLUTION_WRITE_CHUNK_SIZE,
+        1,
+    ]
 
 
 @pytest.mark.asyncio
@@ -640,7 +716,6 @@ async def test_resolve_relations_skips_ambiguous_target_without_aborting_pass() 
     notes. The repair pass must treat that as an unresolved forward reference rather than let the
     exception abort the whole batch and strand other resolvable relations.
     """
-    from basic_memory.services.exceptions import AmbiguousIdentifierError
 
     class AmbiguousStubLinkResolver(StubLinkResolver):
         def __init__(
@@ -652,18 +727,18 @@ async def test_resolve_relations_skips_ambiguous_target_without_aborting_pass() 
             self.ambiguous = ambiguous
 
         @override
-        async def resolve_link(
+        async def resolve_relation_targets(
             self,
-            link_text: str,
+            link_texts: Sequence[str],
             *,
-            strict: bool,
             session: AsyncSession,
-        ) -> FakeResolvedEntity | None:
+        ) -> Mapping[str, FakeResolvedEntity | None]:
             assert isinstance(session, FakeSession)
-            self.calls.append((link_text, strict))
-            if link_text in self.ambiguous:
-                raise AmbiguousIdentifierError(link_text, [("dup-a", "a.md"), ("dup-b", "b.md")])
-            return self.targets.get(link_text)
+            self.calls.extend((link_text, True) for link_text in link_texts)
+            return {
+                link_text: None if link_text in self.ambiguous else self.targets.get(link_text)
+                for link_text in link_texts
+            }
 
     repo = StubRelationRepository(
         [
