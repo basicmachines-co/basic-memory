@@ -17,7 +17,7 @@ def _run_triage_helper(
     *arguments: str,
     current_labels: tuple[str, ...] = (),
     fail_label_read: bool = False,
-) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+) -> tuple[subprocess.CompletedProcess[str], list[list[str]]]:
     event_path = tmp_path / "event.json"
     event_path.write_text(json.dumps({"issue": {"number": 1205}}), encoding="utf-8")
 
@@ -29,8 +29,8 @@ def _run_triage_helper(
         """#!/usr/bin/env bash
 set -euo pipefail
 
-if [[ " $* " == *" --method PUT "* ]]; then
-    printf '%s\n' "$@" > "${GH_ARGUMENTS_PATH:?}"
+if [[ " $* " == *" --method DELETE "* || " $* " == *" --method POST "* ]]; then
+    printf '%s\n' "__CALL__" "$@" >> "${GH_ARGUMENTS_PATH:?}"
 elif [[ "${GH_FAIL_LABEL_READ:-false}" == "true" ]]; then
     exit 1
 else
@@ -60,16 +60,23 @@ fi
         capture_output=True,
         text=True,
     )
-    gh_arguments = (
+    gh_calls: list[list[str]] = []
+    for line in (
         gh_arguments_path.read_text(encoding="utf-8").splitlines()
         if gh_arguments_path.exists()
         else []
-    )
-    return result, gh_arguments
+    ):
+        if line == "__CALL__":
+            gh_calls.append([])
+        else:
+            gh_calls[-1].append(line)
+    return result, gh_calls
 
 
-def test_triage_helper_replaces_owned_labels_and_preserves_other_labels(tmp_path: Path) -> None:
-    result, gh_arguments = _run_triage_helper(
+def test_triage_helper_updates_only_owned_labels_without_replacing_other_labels(
+    tmp_path: Path,
+) -> None:
+    result, gh_calls = _run_triage_helper(
         tmp_path,
         "--type",
         "enhancement",
@@ -79,23 +86,35 @@ def test_triage_helper_replaces_owned_labels_and_preserves_other_labels(tmp_path
     )
 
     assert result.returncode == 0, result.stderr
-    assert gh_arguments == [
-        "api",
-        "--method",
-        "PUT",
-        "repos/basicmachines-co/basic-memory/issues/1205/labels",
-        "-f",
-        "labels[]=production",
-        "-f",
-        "labels[]=arch-review",
-        "-f",
-        "labels[]=enhancement",
-        "--silent",
+    assert gh_calls == [
+        [
+            "api",
+            "--method",
+            "DELETE",
+            "repos/basicmachines-co/basic-memory/issues/1205/labels/bug",
+            "--silent",
+        ],
+        [
+            "api",
+            "--method",
+            "DELETE",
+            "repos/basicmachines-co/basic-memory/issues/1205/labels/cloud",
+            "--silent",
+        ],
+        [
+            "api",
+            "--method",
+            "POST",
+            "repos/basicmachines-co/basic-memory/issues/1205/labels",
+            "-f",
+            "labels[]=enhancement",
+            "--silent",
+        ],
     ]
 
 
 def test_triage_helper_keeps_only_one_type_and_cloud_component(tmp_path: Path) -> None:
-    result, gh_arguments = _run_triage_helper(
+    result, gh_calls = _run_triage_helper(
         tmp_path,
         "--type",
         "question",
@@ -112,18 +131,46 @@ def test_triage_helper_keeps_only_one_type_and_cloud_component(tmp_path: Path) -
     )
 
     assert result.returncode == 0, result.stderr
-    assert "labels[]=bug" not in gh_arguments
-    assert "labels[]=enhancement" not in gh_arguments
-    assert "labels[]=documentation" not in gh_arguments
-    assert gh_arguments.count("labels[]=question") == 1
-    assert gh_arguments.count("labels[]=cloud") == 1
-    assert "labels[]=production" in gh_arguments
+    assert gh_calls == [
+        [
+            "api",
+            "--method",
+            "DELETE",
+            "repos/basicmachines-co/basic-memory/issues/1205/labels/bug",
+            "--silent",
+        ],
+        [
+            "api",
+            "--method",
+            "DELETE",
+            "repos/basicmachines-co/basic-memory/issues/1205/labels/enhancement",
+            "--silent",
+        ],
+        [
+            "api",
+            "--method",
+            "DELETE",
+            "repos/basicmachines-co/basic-memory/issues/1205/labels/documentation",
+            "--silent",
+        ],
+        [
+            "api",
+            "--method",
+            "POST",
+            "repos/basicmachines-co/basic-memory/issues/1205/labels",
+            "-f",
+            "labels[]=question",
+            "-f",
+            "labels[]=cloud",
+            "--silent",
+        ],
+    ]
 
 
 def test_triage_helper_does_not_update_labels_when_current_labels_cannot_be_read(
     tmp_path: Path,
 ) -> None:
-    result, gh_arguments = _run_triage_helper(
+    result, gh_calls = _run_triage_helper(
         tmp_path,
         "--type",
         "bug",
@@ -135,7 +182,7 @@ def test_triage_helper_does_not_update_labels_when_current_labels_cannot_be_read
 
     assert result.returncode != 0
     assert "unable to read current issue labels" in result.stderr
-    assert gh_arguments == []
+    assert gh_calls == []
 
 
 @pytest.mark.parametrize(
@@ -157,11 +204,11 @@ def test_triage_helper_rejects_probe_and_unsupported_arguments(
     arguments: tuple[str, ...],
     expected_error: str,
 ) -> None:
-    result, gh_arguments = _run_triage_helper(tmp_path, *arguments)
+    result, gh_calls = _run_triage_helper(tmp_path, *arguments)
 
     assert result.returncode != 0
     assert expected_error in result.stderr
-    assert gh_arguments == []
+    assert gh_calls == []
 
 
 def test_triage_workflow_defines_one_semantic_mutation() -> None:

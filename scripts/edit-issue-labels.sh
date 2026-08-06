@@ -71,29 +71,38 @@ esac
 repository=${GITHUB_REPOSITORY:?GITHUB_REPOSITORY not set}
 labels_url="repos/$repository/issues/$issue_number/labels"
 
-# The triage bot owns only the four type labels and the cloud component label. Preserve every
-# label outside that owned set while replacing prior triage output.
+# The triage bot owns only the four type labels and the cloud component label. Read current
+# labels only to find obsolete bot-owned values; targeted mutations leave every other label
+# untouched, including labels added concurrently after this read.
 if ! current_labels=$(gh api "repos/$repository/issues/$issue_number" --jq '.labels[].name'); then
     echo "Error: unable to read current issue labels" >&2
     exit 1
 fi
 
-labels=()
+obsolete_labels=()
 while IFS= read -r label; do
     case "$label" in
-        bug|enhancement|documentation|question|cloud) ;;
-        "") ;;
-        *) labels+=("$label") ;;
+        "$type_label") ;;
+        cloud)
+            if [[ "$component" != "cloud" ]]; then
+                obsolete_labels+=("$label")
+            fi
+            ;;
+        bug|enhancement|documentation|question) obsolete_labels+=("$label") ;;
     esac
 done <<< "$current_labels"
 
-labels+=("$type_label")
+for label in "${obsolete_labels[@]}"; do
+    gh api --method DELETE "$labels_url/$label" --silent
+done
+
+desired_labels=("$type_label")
 if [[ "$component" == "cloud" ]]; then
-    labels+=("cloud")
+    desired_labels+=("cloud")
 fi
 
-api_args=(--method PUT "$labels_url")
-for label in "${labels[@]}"; do
+api_args=(--method POST "$labels_url")
+for label in "${desired_labels[@]}"; do
     api_args+=(-f "labels[]=$label")
 done
 
