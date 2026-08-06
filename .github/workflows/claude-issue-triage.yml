@@ -45,7 +45,8 @@ jobs:
 
             **Scope Boundary:**
             - Do not implement a fix, edit repository files, run tests, create a branch, commit, or push.
-            - The only permitted write actions are adding issue labels and posting issue comments.
+            - The only permitted write actions are setting triage-owned issue labels and posting
+              issue comments.
             - Even when the issue includes a root cause, suggested fix, or acceptance criteria, stop after triage.
 
             **Issue Analysis:**
@@ -77,22 +78,30 @@ jobs:
                - Complex: Major feature work, architectural changes
 
             **Actions to Take:**
-            1. Add appropriate labels using:
-               `./scripts/edit-issue-labels.sh --add-label label1 --add-label label2`
+            1. After finishing the analysis, call the triage helper exactly once:
+               `./scripts/edit-issue-labels.sh --type TYPE --component COMPONENT`
             2. Check for duplicates using: `gh search issues`
             3. If duplicate found, comment mentioning the original issue
             4. For feature requests, ask clarifying questions if needed
             5. For bugs, request reproduction steps if missing
 
-            **Available Labels:**
-            - Type: bug, enhancement, feature, documentation, question, mcp-tool
-            - Priority: critical, high, medium, low
-            - Component: cli, mcp, database, cloud, docs, testing
-            - Complexity: simple, medium, complex
-            - Status: needs-reproduction, needs-clarification, duplicate
+            **Triage Helper Contract:**
+            - TYPE must be exactly one of: `bug`, `enhancement`, `documentation`, `question`.
+              Map feature requests and improvements to `enhancement`.
+            - COMPONENT must be `cloud` only when the issue directly concerns Cloud behavior;
+              otherwise use `none`. Record other components in prose because they do not have
+              repository labels.
+            - Priority and complexity are prose assessments only. They do not have repository
+              labels.
+            - If an issue is a duplicate, link the original in the comment. Do not add a
+              `duplicate` label or close the issue.
+            - Do not probe labels, try candidate calls, or use the helper for discovery. It is a
+              mutating command. One final call replaces only triage-owned labels and preserves
+              every label outside that owned set.
 
-            Read the issue carefully, apply appropriate labels, post any necessary triage comment,
-            and then stop. Do not begin implementation work.
+            Read the issue carefully, apply the triage classification, and post a concise comment.
+            Do not include tool logs, label-taxonomy discussion, or a task checklist. Then stop;
+            do not begin implementation work.
           claude_args: |
             --permission-mode dontAsk
             --allowedTools "Bash(./scripts/edit-issue-labels.sh:*),Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh search issues:*),Read,Grep,Glob"

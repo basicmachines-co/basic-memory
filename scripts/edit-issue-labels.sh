@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# Limit automated issue triage to labels on the issue that triggered the workflow.
+# Apply one semantic triage classification to the issue that triggered the workflow.
 set -euo pipefail
 
 issue_number=$(jq -r '.issue.number // empty' "${GITHUB_EVENT_PATH:?GITHUB_EVENT_PATH not set}")
@@ -9,49 +9,88 @@ if ! [[ "$issue_number" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
-labels=()
+type_label=""
+component=""
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --add-label)
+        --type)
             if [[ $# -lt 2 ]]; then
-                echo "Error: --add-label requires a label" >&2
+                echo "Error: --type requires a value" >&2
                 exit 1
             fi
-            labels+=("$2")
+            if [[ -n "$type_label" ]]; then
+                echo "Error: --type may be provided only once" >&2
+                exit 1
+            fi
+            type_label="$2"
+            shift 2
+            ;;
+        --component)
+            if [[ $# -lt 2 ]]; then
+                echo "Error: --component requires a value" >&2
+                exit 1
+            fi
+            if [[ -n "$component" ]]; then
+                echo "Error: --component may be provided only once" >&2
+                exit 1
+            fi
+            component="$2"
             shift 2
             ;;
         *)
-            echo "Error: only --add-label is accepted" >&2
+            echo "Error: only --type and --component are accepted" >&2
             exit 1
             ;;
     esac
 done
 
-if [[ ${#labels[@]} -eq 0 ]]; then
-    echo "Error: at least one label is required" >&2
-    exit 1
-fi
+case "$type_label" in
+    bug|enhancement|documentation|question) ;;
+    "")
+        echo "Error: --type is required" >&2
+        exit 1
+        ;;
+    *)
+        echo "Error: unsupported triage type: $type_label" >&2
+        exit 1
+        ;;
+esac
 
-valid_labels=$(gh label list --limit 500 --json name --jq '.[].name')
-filtered_labels=()
-for label in "${labels[@]}"; do
-    if grep -qxF "$label" <<<"$valid_labels"; then
-        filtered_labels+=("$label")
-    else
-        echo "Ignoring unknown label: $label" >&2
-    fi
-done
-
-if [[ ${#filtered_labels[@]} -eq 0 ]]; then
-    exit 0
-fi
+case "$component" in
+    cloud|none) ;;
+    "")
+        echo "Error: --component is required" >&2
+        exit 1
+        ;;
+    *)
+        echo "Error: unsupported triage component: $component" >&2
+        exit 1
+        ;;
+esac
 
 repository=${GITHUB_REPOSITORY:?GITHUB_REPOSITORY not set}
 labels_url="repos/$repository/issues/$issue_number/labels"
-api_args=(--method POST "$labels_url")
-for label in "${filtered_labels[@]}"; do
+
+# The triage bot owns only the four type labels and the cloud component label. Preserve every
+# label outside that owned set while replacing prior triage output.
+labels=()
+while IFS= read -r label; do
+    case "$label" in
+        bug|enhancement|documentation|question|cloud) ;;
+        "") ;;
+        *) labels+=("$label") ;;
+    esac
+done < <(gh api "repos/$repository/issues/$issue_number" --jq '.labels[].name')
+
+labels+=("$type_label")
+if [[ "$component" == "cloud" ]]; then
+    labels+=("cloud")
+fi
+
+api_args=(--method PUT "$labels_url")
+for label in "${labels[@]}"; do
     api_args+=(-f "labels[]=$label")
 done
 
 gh api "${api_args[@]}" --silent
-echo "Added: ${filtered_labels[*]}"
+echo "Set triage labels: type=$type_label component=$component"
