@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from basic_memory import db
@@ -865,6 +866,81 @@ async def test_apply_resolved_targets_preserves_canonical_name_swaps(
         (first_relation_id, related_entity.id, related_entity.title),
         (second_relation_id, target_entity.id, target_entity.title),
     }
+
+
+@pytest.mark.asyncio
+async def test_apply_resolved_targets_bounds_sql_for_oversized_collision_domain(
+    relation_repository: RelationRepository,
+    source_entity: Entity,
+    test_project: Project,
+    session_maker,
+):
+    """One large name-swap domain stays atomic without unbounded SQL expressions."""
+    domain_size = 1_100
+    now = datetime.now(timezone.utc)
+    target_entities = [
+        Entity(
+            project_id=test_project.id,
+            title=f"Large Domain Target {index}",
+            note_type="test",
+            permalink=f"large-domain/target-{index}",
+            file_path=f"large-domain/target-{index}.md",
+            content_type="text/markdown",
+            created_at=now,
+            updated_at=now,
+        )
+        for index in range(domain_size)
+    ]
+    async with db.scoped_session(session_maker) as session:
+        session.add_all(target_entities)
+        await session.flush()
+        unresolved_relations = [
+            Relation(
+                project_id=test_project.id,
+                from_id=source_entity.id,
+                to_id=None,
+                to_name=target_entities[(index + 1) % domain_size].title,
+                relation_type="large_domain",
+            )
+            for index in range(domain_size)
+        ]
+        session.add_all(unresolved_relations)
+        await session.flush()
+        writes = [
+            ResolvedRelationWrite(
+                relation_id=relation.id,
+                from_id=source_entity.id,
+                original_target_name=relation.to_name,
+                target_id=target.id,
+                target_name=target.title,
+                relation_type=relation.relation_type,
+            )
+            for relation, target in zip(unresolved_relations, target_entities, strict=True)
+        ]
+        expected_targets = {(target.id, target.title) for target in target_entities}
+
+    async with db.scoped_session(session_maker) as session:
+        result = await relation_repository.apply_resolved_targets(session, writes)
+
+    assert result == ResolvedRelationWriteResult(
+        affected_entity_ids=frozenset({source_entity.id}),
+        duplicate_relation_ids=(),
+    )
+    async with db.scoped_session(session_maker) as session:
+        resolved_targets = set(
+            (
+                await session.execute(
+                    select(Relation.to_id, Relation.to_name).where(
+                        Relation.project_id == test_project.id,
+                        Relation.relation_type == "large_domain",
+                    )
+                )
+            )
+            .tuples()
+            .all()
+        )
+
+    assert resolved_targets == expected_targets
 
 
 @pytest.mark.asyncio

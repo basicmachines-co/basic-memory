@@ -1,6 +1,7 @@
 """Repository for managing Relation objects."""
 
 from dataclasses import dataclass
+from itertools import batched
 from typing import override, Sequence, List, Optional, Any, cast
 
 from sqlalchemy import and_, case, delete, or_, select, update
@@ -14,6 +15,9 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from basic_memory.models import Entity, Relation, RelationSearchRefresh
 from basic_memory.repository.repository import Repository
+
+
+RESOLVED_RELATION_WRITE_STATEMENT_SIZE = 250
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,29 +277,27 @@ class RelationRepository(Repository[Relation]):
             occupied_name_keys.add(name_key)
 
         duplicate_relation_ids: list[int] = []
-        if planned_duplicate_writes:
+        for write_batch in batched(
+            planned_duplicate_writes,
+            RESOLVED_RELATION_WRITE_STATEMENT_SIZE,
+        ):
             delete_result = await session.execute(
                 delete(Relation)
                 .where(
                     Relation.project_id == self.project_id,
-                    or_(
-                        *(
-                            unresolved_relation_write_predicate(write)
-                            for write in planned_duplicate_writes
-                        )
-                    ),
+                    or_(*(unresolved_relation_write_predicate(write) for write in write_batch)),
                 )
                 .returning(Relation.id)
             )
             deleted_relation_ids = set(delete_result.scalars().all())
-            duplicate_relation_ids = [
+            duplicate_relation_ids.extend(
                 write.relation_id
-                for write in planned_duplicate_writes
+                for write in write_batch
                 if write.relation_id in deleted_relation_ids
-            ]
+            )
             stale_relation_ids.extend(
                 write.relation_id
-                for write in planned_duplicate_writes
+                for write in write_batch
                 if write.relation_id not in deleted_relation_ids
             )
 
@@ -314,20 +316,29 @@ class RelationRepository(Repository[Relation]):
             # row inside a multi-row UPDATE. The identity predicates make this
             # first mutation a compare-and-set, so a reused relation ID cannot
             # redirect a stale resolution command onto a replacement edge.
-            stage_result = await session.execute(
-                update(Relation)
-                .where(
-                    Relation.project_id == self.project_id,
-                    or_(*(unresolved_relation_write_predicate(write) for write in accepted_writes)),
+            staged_relation_ids: set[int] = set()
+            for write_batch in batched(
+                accepted_writes,
+                RESOLVED_RELATION_WRITE_STATEMENT_SIZE,
+            ):
+                batch_temporary_names = {
+                    write.relation_id: temporary_names_by_relation_id[write.relation_id]
+                    for write in write_batch
+                }
+                stage_result = await session.execute(
+                    update(Relation)
+                    .where(
+                        Relation.project_id == self.project_id,
+                        or_(*(unresolved_relation_write_predicate(write) for write in write_batch)),
+                    )
+                    .values(
+                        to_id=None,
+                        to_name=case(batch_temporary_names, value=Relation.id),
+                    )
+                    .returning(Relation.id)
+                    .execution_options(synchronize_session=False)
                 )
-                .values(
-                    to_id=None,
-                    to_name=case(temporary_names_by_relation_id, value=Relation.id),
-                )
-                .returning(Relation.id)
-                .execution_options(synchronize_session=False)
-            )
-            staged_relation_ids = set(stage_result.scalars().all())
+                staged_relation_ids.update(stage_result.scalars().all())
             staged_writes = [
                 write for write in accepted_writes if write.relation_id in staged_relation_ids
             ]
@@ -338,25 +349,30 @@ class RelationRepository(Repository[Relation]):
             )
 
         if staged_writes:
-            staged_relation_ids = [write.relation_id for write in staged_writes]
-            await session.execute(
-                update(Relation)
-                .where(
-                    Relation.project_id == self.project_id,
-                    Relation.id.in_(staged_relation_ids),
+            # Keep the whole collision domain in this transaction, but bound
+            # each SQL expression below SQLite's expression-depth limit.
+            for write_batch in batched(
+                staged_writes,
+                RESOLVED_RELATION_WRITE_STATEMENT_SIZE,
+            ):
+                await session.execute(
+                    update(Relation)
+                    .where(
+                        Relation.project_id == self.project_id,
+                        Relation.id.in_(write.relation_id for write in write_batch),
+                    )
+                    .values(
+                        to_id=case(
+                            {write.relation_id: write.target_id for write in write_batch},
+                            value=Relation.id,
+                        ),
+                        to_name=case(
+                            {write.relation_id: write.target_name for write in write_batch},
+                            value=Relation.id,
+                        ),
+                    )
+                    .execution_options(synchronize_session=False)
                 )
-                .values(
-                    to_id=case(
-                        {write.relation_id: write.target_id for write in staged_writes},
-                        value=Relation.id,
-                    ),
-                    to_name=case(
-                        {write.relation_id: write.target_name for write in staged_writes},
-                        value=Relation.id,
-                    ),
-                )
-                .execution_options(synchronize_session=False)
-            )
 
         writes_by_id = {write.relation_id: write for write in current_writes}
         mutated_relation_ids = set(duplicate_relation_ids)
