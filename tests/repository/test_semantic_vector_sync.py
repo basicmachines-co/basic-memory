@@ -1,5 +1,6 @@
 """Focused edge-case coverage for shared semantic vector synchronization."""
 
+import hashlib
 from contextlib import asynccontextmanager
 from datetime import datetime
 from types import SimpleNamespace
@@ -90,10 +91,24 @@ class _TestRepository(SearchRepositoryBase):
         return 1.0 / (1.0 + max(distance, 0.0))
 
 
+def _pending_job(
+    entity_id: int = 1,
+    row_id: int = 10,
+    chunk_text: str = "chunk",
+) -> semantic_vector_sync.PendingEmbeddingJob:
+    return semantic_vector_sync.PendingEmbeddingJob(
+        entity_id=entity_id,
+        chunk_row_id=row_id,
+        chunk_key=f"entity:{entity_id}:0",
+        chunk_text=chunk_text,
+        source_hash=hashlib.sha256(chunk_text.encode("utf-8")).hexdigest(),
+    )
+
+
 def _prepared_entity(
     entity_id: int = 1,
     *,
-    embedding_jobs: list[tuple[int, str]] | None = None,
+    embedding_jobs: list[semantic_vector_sync.PendingEmbeddingJob] | None = None,
     entity_complete: bool = True,
 ) -> semantic_vector_sync.PreparedEntityVectorSync:
     return semantic_vector_sync.PreparedEntityVectorSync(
@@ -182,7 +197,7 @@ async def test_vector_sync_propagates_prepare_and_threshold_flush_errors(
 
     flush_repository = _batch_repository(
         monkeypatch,
-        [_prepared_entity(embedding_jobs=[(10, "chunk")])],
+        [_prepared_entity(embedding_jobs=[_pending_job()])],
         batch_size=1,
     )
     monkeypatch.setattr(
@@ -205,7 +220,7 @@ async def test_vector_sync_handles_final_flush_errors_and_orphan_runtime(
 ) -> None:
     failed_repository = _batch_repository(
         monkeypatch,
-        [_prepared_entity(embedding_jobs=[(10, "chunk")])],
+        [_prepared_entity(embedding_jobs=[_pending_job()])],
     )
     monkeypatch.setattr(
         failed_repository,
@@ -224,7 +239,7 @@ async def test_vector_sync_handles_final_flush_errors_and_orphan_runtime(
 
     strict_repository = _batch_repository(
         monkeypatch,
-        [_prepared_entity(embedding_jobs=[(10, "chunk")])],
+        [_prepared_entity(embedding_jobs=[_pending_job()])],
     )
     monkeypatch.setattr(
         strict_repository,
@@ -241,7 +256,7 @@ async def test_vector_sync_handles_final_flush_errors_and_orphan_runtime(
 
     orphan_repository = _batch_repository(
         monkeypatch,
-        [_prepared_entity(embedding_jobs=[(10, "chunk")])],
+        [_prepared_entity(embedding_jobs=[_pending_job()])],
         batch_size=1,
     )
     orphan_result = await semantic_vector_sync.sync_entity_vectors_internal(
@@ -586,11 +601,7 @@ async def test_flush_embedding_jobs_handles_empty_mismatch_and_missing_runtime(m
         0.0,
     )
 
-    job = semantic_vector_sync.PendingEmbeddingJob(
-        entity_id=1,
-        chunk_row_id=10,
-        chunk_text="chunk",
-    )
+    job = _pending_job()
     with pytest.raises(RuntimeError, match="unexpected number"):
         await semantic_vector_sync.flush_embedding_jobs(repository, [job], {}, set())
 

@@ -72,7 +72,7 @@ class PreparedEntityVectorSync:
     entity_id: int
     sync_start: float
     source_rows_count: int
-    embedding_jobs: list[tuple[int, str]]
+    embedding_jobs: list[PendingEmbeddingJob]
     chunks_total: int = 0
     chunks_skipped: int = 0
     entity_skipped: bool = False
@@ -146,13 +146,23 @@ class UpsertEntityVectorPreparePlan:
 type EntityVectorPreparePlan = DeleteEntityVectorPreparePlan | UpsertEntityVectorPreparePlan
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class PendingEmbeddingJob:
     """Pending embedding write entry with entity ownership metadata."""
 
     entity_id: int
     chunk_row_id: int
+    chunk_key: str
     chunk_text: str
+    source_hash: str
+
+
+@dataclass(frozen=True, slots=True)
+class EmbeddingPersistenceResult:
+    """Manifest generations persisted or superseded during one adapter write."""
+
+    persisted_row_ids: frozenset[int] = frozenset()
+    superseded_row_ids: frozenset[int] = frozenset()
 
 
 @dataclass
@@ -176,6 +186,7 @@ class EntitySyncRuntime:
     prepare_seconds: float = 0.0
     embed_seconds: float = 0.0
     write_seconds: float = 0.0
+    superseded: bool = False
 
 
 @dataclass(frozen=True)
@@ -396,14 +407,7 @@ async def sync_entity_vectors_internal(
                     remaining_jobs_after_shard=prepared.remaining_jobs_after_shard,
                     prepare_seconds=prepared.prepare_seconds,
                 )
-                pending_jobs.extend(
-                    PendingEmbeddingJob(
-                        entity_id=entity_id,
-                        chunk_row_id=row_id,
-                        chunk_text=chunk_text,
-                    )
-                    for row_id, chunk_text in prepared.embedding_jobs
-                )
+                pending_jobs.extend(prepared.embedding_jobs)
 
                 while len(pending_jobs) >= repository._semantic_embedding_sync_batch_size:
                     flush_jobs = pending_jobs[: repository._semantic_embedding_sync_batch_size]
@@ -1074,7 +1078,7 @@ async def apply_entity_vector_prepare_plan(
             },
         )
 
-    embedding_jobs: list[tuple[int, str]] = []
+    embedding_jobs: list[PendingEmbeddingJob] = []
     if plan.scheduled_records:
         embedding_jobs = await repository._upsert_scheduled_chunk_records(
             session,
@@ -1115,7 +1119,7 @@ async def upsert_scheduled_chunk_records(
     existing_by_key: dict[str, VectorChunkState],
     entity_fingerprint: str,
     embedding_model: str,
-) -> list[tuple[int, str]]:
+) -> list[PendingEmbeddingJob]:
     """Upsert scheduled chunk rows and return embedding jobs."""
     repository._assert_manifest_vector_ownership(
         current.vector_index
@@ -1123,7 +1127,7 @@ async def upsert_scheduled_chunk_records(
         if (current := existing_by_key.get(record["chunk_key"])) is not None
     )
     timestamp_expr = repository._timestamp_now_expr()
-    embedding_jobs: list[tuple[int, str]] = []
+    embedding_jobs: list[PendingEmbeddingJob] = []
     for record in scheduled_records:
         current = existing_by_key.get(record["chunk_key"])
         if current:
@@ -1154,7 +1158,15 @@ async def upsert_scheduled_chunk_records(
                         "vector_index": repository._semantic_vector_index_name,
                     },
                 )
-            embedding_jobs.append((current.id, record["chunk_text"]))
+            embedding_jobs.append(
+                PendingEmbeddingJob(
+                    entity_id=entity_id,
+                    chunk_row_id=current.id,
+                    chunk_key=record["chunk_key"],
+                    chunk_text=record["chunk_text"],
+                    source_hash=record["source_hash"],
+                )
+            )
             continue
 
         inserted = await session.execute(
@@ -1180,7 +1192,15 @@ async def upsert_scheduled_chunk_records(
                 "vector_index": repository._semantic_vector_index_name,
             },
         )
-        embedding_jobs.append((int(inserted.scalar_one()), record["chunk_text"]))
+        embedding_jobs.append(
+            PendingEmbeddingJob(
+                entity_id=entity_id,
+                chunk_row_id=int(inserted.scalar_one()),
+                chunk_key=record["chunk_key"],
+                chunk_text=record["chunk_text"],
+                source_hash=record["source_hash"],
+            )
+        )
     return embedding_jobs
 
 
@@ -1203,14 +1223,22 @@ async def flush_embedding_jobs(
         raise RuntimeError("Embedding provider returned an unexpected number of vectors.")
 
     write_start = time.perf_counter()
-    write_jobs = [(job.chunk_row_id, job.chunk_text) for job in flush_jobs]
-    await repository._persist_embeddings(write_jobs, embeddings)
+    persistence = await repository._persist_embeddings(flush_jobs, embeddings)
     write_seconds = time.perf_counter() - write_start
+
+    expected_row_ids = {job.chunk_row_id for job in flush_jobs}
+    classified_row_ids = persistence.persisted_row_ids | persistence.superseded_row_ids
+    if classified_row_ids != expected_row_ids:
+        raise RuntimeError("Embedding persistence did not classify every manifest row.")
 
     flush_size = len(flush_jobs)
     entity_job_counts: dict[int, int] = {}
     for job in flush_jobs:
         entity_job_counts[job.entity_id] = entity_job_counts.get(job.entity_id, 0) + 1
+        if job.chunk_row_id in persistence.superseded_row_ids:
+            runtime = entity_runtime.get(job.entity_id)
+            if runtime is not None:
+                runtime.superseded = True
 
     for entity_id, entity_job_count in entity_job_counts.items():
         runtime = entity_runtime.get(entity_id)
@@ -1223,7 +1251,7 @@ async def flush_embedding_jobs(
         runtime.embed_seconds += embed_seconds * flush_share
         runtime.write_seconds += write_seconds * flush_share
 
-        if runtime.remaining_jobs <= 0 and runtime.entity_complete:
+        if runtime.remaining_jobs <= 0 and runtime.entity_complete and not runtime.superseded:
             synced_entity_ids.add(entity_id)
 
     return embed_seconds, write_seconds
@@ -1243,7 +1271,7 @@ def finalize_completed_entity_syncs(
         if runtime.remaining_jobs > 0:
             continue
 
-        if runtime.entity_complete:
+        if runtime.entity_complete and not runtime.superseded:
             synced_entity_ids.add(entity_id)
         else:
             deferred_entity_ids.add(entity_id)

@@ -48,6 +48,7 @@ from basic_memory.repository.semantic_vector_index import (
     VectorRecord,
 )
 from basic_memory.repository.semantic_vector_sync import (
+    EmbeddingPersistenceResult as _EmbeddingPersistenceResult,
     EntitySyncRuntime as _EntitySyncRuntime,
     EntityVectorShardPlan as _EntityVectorShardPlan,
     PendingEmbeddingJob as _PendingEmbeddingJob,
@@ -338,12 +339,23 @@ class SearchRepositoryBase(ABC):
 
     async def _persist_embeddings(
         self,
-        jobs: list[tuple[int, str]],
+        jobs: Sequence[_PendingEmbeddingJob],
         embeddings: list[list[float]],
-    ) -> None:
+    ) -> _EmbeddingPersistenceResult:
         """Write vectors through the adapter, then make their manifest rows ready."""
         if not jobs:
-            return
+            return _EmbeddingPersistenceResult()
+        if len(jobs) != len(embeddings):
+            raise RuntimeError("Embedding provider returned an unexpected number of vectors.")
+
+        for job in jobs:
+            expected_source_hash = hashlib.sha256(job.chunk_text.encode("utf-8")).hexdigest()
+            if job.source_hash != expected_source_hash:
+                raise RuntimeError(
+                    f"Embedding job source hash does not match its chunk text: {job.chunk_row_id}"
+                )
+
+        job_pairs = [(job.chunk_row_id, job.chunk_text) for job in jobs]
 
         # Compatibility: focused orchestration tests and third-party subclasses
         # from before the adapter contract may still override the private writer.
@@ -352,11 +364,13 @@ class SearchRepositoryBase(ABC):
         if not hasattr(self, "_semantic_vector_index"):
             async with db.scoped_session(self.session_maker) as session:
                 await self._prepare_vector_session(session)
-                await self._write_embeddings(session, jobs, embeddings)
+                await self._write_embeddings(session, job_pairs, embeddings)
                 await session.commit()
-            return
+            return _EmbeddingPersistenceResult(
+                persisted_row_ids=frozenset(row_id for row_id, _chunk_text in job_pairs)
+            )
 
-        row_ids = [row_id for row_id, _ in jobs]
+        row_ids = [row_id for row_id, _chunk_text in job_pairs]
         lookup_params = {f"row_id_{index}": row_id for index, row_id in enumerate(row_ids)}
         lookup_placeholders = ", ".join(f":row_id_{index}" for index in range(len(row_ids)))
         async with db.scoped_session(self.session_maker) as session:
@@ -392,40 +406,73 @@ class SearchRepositoryBase(ABC):
             )
             rows_by_id = {int(row["id"]): row for row in result.mappings().all()}
 
-            missing_row_ids = [row_id for row_id in row_ids if row_id not in rows_by_id]
-            if missing_row_ids:
+            missing_jobs = [job for job in jobs if job.chunk_row_id not in rows_by_id]
+            superseded_row_ids: set[int] = set()
+            missing_current_row_ids: list[int] = []
+            if missing_jobs:
+                entity_ids = sorted({job.entity_id for job in missing_jobs})
+                source_rows_by_entity = await self._fetch_prepare_window_source_rows(
+                    session,
+                    entity_ids,
+                )
+                current_generations = {
+                    (entity_id, record["chunk_key"], record["source_hash"])
+                    for entity_id, source_rows in source_rows_by_entity.items()
+                    for record in self._build_chunk_records(source_rows)
+                }
+                for job in missing_jobs:
+                    generation = (job.entity_id, job.chunk_key, job.source_hash)
+                    if generation in current_generations:
+                        missing_current_row_ids.append(job.chunk_row_id)
+                    else:
+                        superseded_row_ids.add(job.chunk_row_id)
+
+            if missing_current_row_ids:
                 raise RuntimeError(
-                    f"Vector manifest rows disappeared before write: {missing_row_ids}"
+                    "Vector manifest rows disappeared before write: "
+                    f"{sorted(missing_current_row_ids)}"
                 )
 
-            current_jobs: list[tuple[int, str, str, list[float]]] = []
-            for (row_id, chunk_text), embedding in zip(jobs, embeddings, strict=True):
-                expected_source_hash = hashlib.sha256(chunk_text.encode("utf-8")).hexdigest()
-                if str(rows_by_id[row_id]["source_hash"]) != expected_source_hash:
+            current_jobs: list[tuple[_PendingEmbeddingJob, list[float]]] = []
+            for job, embedding in zip(jobs, embeddings, strict=True):
+                row = rows_by_id.get(job.chunk_row_id)
+                if row is None:
                     continue
-                current_jobs.append((row_id, chunk_text, expected_source_hash, embedding))
+                if int(row["entity_id"]) != job.entity_id or str(row["chunk_key"]) != job.chunk_key:
+                    raise RuntimeError(
+                        f"Vector manifest row identity changed before write: {job.chunk_row_id}"
+                    )
+                if str(row["source_hash"]) != job.source_hash:
+                    superseded_row_ids.add(job.chunk_row_id)
+                    continue
+                current_jobs.append((job, embedding))
             if not current_jobs:
-                return
+                return _EmbeddingPersistenceResult(superseded_row_ids=frozenset(superseded_row_ids))
 
             params: dict[str, object] = {}
             generation_predicates: list[str] = []
             records = [
                 VectorRecord(
                     key=VectorKey(
-                        entity_id=int(rows_by_id[row_id]["entity_id"]),
-                        chunk_key=str(rows_by_id[row_id]["chunk_key"]),
+                        entity_id=job.entity_id,
+                        chunk_key=job.chunk_key,
                     ),
-                    source_hash=source_hash,
+                    source_hash=job.source_hash,
                     values=tuple(embedding),
                 )
-                for row_id, _chunk_text, source_hash, embedding in current_jobs
+                for job, embedding in current_jobs
             ]
-            for index, (row_id, _chunk_text, source_hash, _embedding) in enumerate(current_jobs):
-                params[f"row_id_{index}"] = row_id
-                params[f"source_hash_{index}"] = source_hash
+            for index, (job, _embedding) in enumerate(current_jobs):
+                params[f"row_id_{index}"] = job.chunk_row_id
+                params[f"source_hash_{index}"] = job.source_hash
                 generation_predicates.append(
                     f"(id = :row_id_{index} AND source_hash = :source_hash_{index})"
                 )
+
+            persistence = _EmbeddingPersistenceResult(
+                persisted_row_ids=frozenset(job.chunk_row_id for job, _embedding in current_jobs),
+                superseded_row_ids=frozenset(superseded_row_ids),
+            )
 
             if lock_external_write:
                 # Constraint: extension adapters use stable logical keys outside
@@ -439,7 +486,7 @@ class SearchRepositoryBase(ABC):
                     generation_predicates=generation_predicates,
                 )
                 await session.commit()
-                return
+                return persistence
 
         # Built-in adapters share the authoritative database. They verify and lock
         # each record's source_hash inside the same transaction as their vector write.
@@ -451,6 +498,7 @@ class SearchRepositoryBase(ABC):
                 generation_predicates=generation_predicates,
             )
             await session.commit()
+        return persistence
 
     async def _mark_embedding_jobs_ready(
         self,
@@ -1390,7 +1438,7 @@ class SearchRepositoryBase(ABC):
         existing_by_key: dict[str, VectorChunkState],
         entity_fingerprint: str,
         embedding_model: str,
-    ) -> list[tuple[int, str]]:
+    ) -> list[_PendingEmbeddingJob]:
         """Upsert scheduled chunk rows and return embedding jobs."""
         return await semantic_vector_sync.upsert_scheduled_chunk_records(
             self,

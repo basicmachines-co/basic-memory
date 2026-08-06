@@ -28,7 +28,10 @@ from basic_memory.repository.search_repository_base import (
 from basic_memory.repository.metadata_filters import parse_metadata_filters
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.semantic_vector_index import SemanticVectorIndex
-from basic_memory.repository.semantic_vector_sync import StagedVectorDeletion
+from basic_memory.repository.semantic_vector_sync import (
+    PendingEmbeddingJob,
+    StagedVectorDeletion,
+)
 from basic_memory.repository.semantic_vector_index_factory import (
     build_vector_index_scope,
     resolve_semantic_vector_index_name,
@@ -412,7 +415,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         existing_by_key: dict[str, VectorChunkState],
         entity_fingerprint: str,
         embedding_model: str,
-    ) -> list[tuple[int, str]]:
+    ) -> list[PendingEmbeddingJob]:
         """Use Postgres UPSERT to rewrite only the scheduled chunk rows."""
         if not scheduled_records:
             return []
@@ -475,7 +478,13 @@ class PostgresSearchRepository(SearchRepositoryBase):
             str(row["chunk_key"]): int(row["id"]) for row in upsert_result.mappings().all()
         }
         return [
-            (upserted_ids_by_key[record["chunk_key"]], record["chunk_text"])
+            PendingEmbeddingJob(
+                entity_id=entity_id,
+                chunk_row_id=upserted_ids_by_key[record["chunk_key"]],
+                chunk_key=record["chunk_key"],
+                chunk_text=record["chunk_text"],
+                source_hash=record["source_hash"],
+            )
             for record in scheduled_records
         ]
 

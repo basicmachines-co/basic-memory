@@ -5,7 +5,9 @@ covering utility functions, formatting helpers, and constructor paths that
 are difficult to reach in integration tests.
 """
 
+import hashlib
 from contextlib import asynccontextmanager
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -23,7 +25,7 @@ from basic_memory.repository.semantic_errors import (
     SemanticSearchDisabledError,
     SemanticVectorIndexExtensionError,
 )
-from typing import Any
+from basic_memory.repository.semantic_vector_sync import PendingEmbeddingJob
 
 
 # --- Helpers ---------------------------------------------------------------
@@ -40,6 +42,16 @@ class StubEmbeddingProvider:
 
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         return [[0.0] * 4 for _ in texts]
+
+
+def _pending_job(entity_id: int, row_id: int, chunk_text: str) -> PendingEmbeddingJob:
+    return PendingEmbeddingJob(
+        entity_id=entity_id,
+        chunk_row_id=row_id,
+        chunk_key=f"entity:{entity_id}:0",
+        chunk_text=chunk_text,
+        source_hash=hashlib.sha256(chunk_text.encode("utf-8")).hexdigest(),
+    )
 
 
 def _make_repo(
@@ -424,7 +436,7 @@ async def test_postgres_batch_sync_tracks_prepare_and_queue_wait(monkeypatch):
                 entity_id=entity_id,
                 sync_start=0.0,
                 source_rows_count=1,
-                embedding_jobs=[(200 + entity_id, f"chunk-{entity_id}")],
+                embedding_jobs=[_pending_job(entity_id, 200 + entity_id, f"chunk-{entity_id}")],
                 prepare_seconds=1.0,
             )
             for entity_id in entity_ids
@@ -494,7 +506,10 @@ async def test_postgres_batch_sync_tracks_deferred_oversized_entities(monkeypatc
                         entity_id=entity_id,
                         sync_start=0.0,
                         source_rows_count=1,
-                        embedding_jobs=[(201, "chunk-1a"), (202, "chunk-1b")],
+                        embedding_jobs=[
+                            _pending_job(1, 201, "chunk-1a"),
+                            _pending_job(1, 202, "chunk-1b"),
+                        ],
                         chunks_total=5,
                         pending_jobs_total=5,
                         entity_complete=False,
@@ -510,7 +525,7 @@ async def test_postgres_batch_sync_tracks_deferred_oversized_entities(monkeypatc
                     entity_id=entity_id,
                     sync_start=0.0,
                     source_rows_count=1,
-                    embedding_jobs=[(301, "chunk-2a")],
+                    embedding_jobs=[_pending_job(2, 301, "chunk-2a")],
                     chunks_total=1,
                     pending_jobs_total=1,
                     entity_complete=True,

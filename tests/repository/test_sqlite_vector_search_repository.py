@@ -27,6 +27,7 @@ from basic_memory.repository.semantic_vector_index import (
     VectorRecord,
 )
 from basic_memory.repository.semantic_vector_sync import (
+    PendingEmbeddingJob,
     PreparedEntityVectorSync,
     StagedVectorDeletion,
 )
@@ -125,6 +126,23 @@ class RecordingVectorIndex:
         if self.fail_search:
             raise RuntimeError("adapter query failed")
         return [VectorMatch(key=key, similarity=1.0) for key in list(self.records)[:limit]]
+
+
+def _pending_job(
+    entity_id: int,
+    row_id: int,
+    chunk_text: str,
+    *,
+    chunk_key: str | None = None,
+    source_hash: str | None = None,
+) -> PendingEmbeddingJob:
+    return PendingEmbeddingJob(
+        entity_id=entity_id,
+        chunk_row_id=row_id,
+        chunk_key=chunk_key or f"entity:{entity_id}:0",
+        chunk_text=chunk_text,
+        source_hash=source_hash or hashlib.sha256(chunk_text.encode("utf-8")).hexdigest(),
+    )
 
 
 def _entity_row(
@@ -668,7 +686,7 @@ async def test_ready_commit_failure_retries_same_stable_adapter_key(
     )
     with pytest.raises(RuntimeError, match="ready commit failed"):
         await search_repository._persist_embeddings(
-            [(row_id, "ready commit retry")],
+            [_pending_job(115, row_id, "ready commit retry")],
             [[1.0, 0.0, 0.0, 0.0]],
         )
     monkeypatch.setattr(
@@ -685,7 +703,7 @@ async def test_ready_commit_failure_retries_same_stable_adapter_key(
         assert failed_status.scalar_one() == "pending"
 
     await search_repository._persist_embeddings(
-        [(row_id, "ready commit retry")],
+        [_pending_job(115, row_id, "ready commit retry")],
         [[1.0, 0.0, 0.0, 0.0]],
     )
 
@@ -1135,7 +1153,15 @@ async def test_sqlite_prepare_window_uses_shared_reads_and_serialized_write_scop
         embedding_model: str,
     ):
         await asyncio.sleep(0)
-        return [(entity_id * 100, scheduled_records[0]["chunk_text"])]
+        return [
+            _pending_job(
+                entity_id,
+                entity_id * 100,
+                scheduled_records[0]["chunk_text"],
+                chunk_key=scheduled_records[0]["chunk_key"],
+                source_hash=scheduled_records[0]["source_hash"],
+            )
+        ]
 
     @asynccontextmanager
     async def fake_scoped_session(session_maker):
@@ -1204,7 +1230,15 @@ async def test_sqlite_prepare_window_does_not_deadlock_when_vec_loading_inside_w
         entity_fingerprint: str,
         embedding_model: str,
     ):
-        return [(entity_id * 100, scheduled_records[0]["chunk_text"])]
+        return [
+            _pending_job(
+                entity_id,
+                entity_id * 100,
+                scheduled_records[0]["chunk_text"],
+                chunk_key=scheduled_records[0]["chunk_key"],
+                source_hash=scheduled_records[0]["source_hash"],
+            )
+        ]
 
     @asynccontextmanager
     async def fake_scoped_session(session_maker):

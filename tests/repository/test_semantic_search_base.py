@@ -30,10 +30,21 @@ from basic_memory.repository.semantic_vector_index import (
     VectorMatch,
     VectorRecord,
 )
+from basic_memory.repository.semantic_vector_sync import PendingEmbeddingJob
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 
 # --- Helpers ---
+
+
+def _pending_job(entity_id: int, row_id: int, chunk_text: str) -> PendingEmbeddingJob:
+    return PendingEmbeddingJob(
+        entity_id=entity_id,
+        chunk_row_id=row_id,
+        chunk_key=f"entity:{entity_id}:0",
+        chunk_text=chunk_text,
+        source_hash=hashlib.sha256(chunk_text.encode("utf-8")).hexdigest(),
+    )
 
 
 class _ConcreteRepo(SearchRepositoryBase):
@@ -245,7 +256,10 @@ async def test_embedding_persistence_skips_stale_source_generation(monkeypatch) 
 
     monkeypatch.setattr(search_repository_base_module.db, "scoped_session", fake_scoped_session)
 
-    await repo._persist_embeddings([(7, "old chunk text")], [[1.0, 0.0, 0.0, 0.0]])
+    await repo._persist_embeddings(
+        [_pending_job(41, 7, "old chunk text")],
+        [[1.0, 0.0, 0.0, 0.0]],
+    )
 
     assert adapter.upserted_records == []
     assert session.execute.await_count == 1
@@ -284,7 +298,10 @@ async def test_embedding_ready_update_requires_source_generation(monkeypatch) ->
 
     monkeypatch.setattr(search_repository_base_module.db, "scoped_session", fake_scoped_session)
 
-    await repo._persist_embeddings([(7, chunk_text)], [[1.0, 0.0, 0.0, 0.0]])
+    await repo._persist_embeddings(
+        [_pending_job(41, 7, chunk_text)],
+        [[1.0, 0.0, 0.0, 0.0]],
+    )
 
     assert len(adapter.upserted_records) == 1
     ready_statement, ready_params = session.execute.await_args_list[1].args
@@ -332,7 +349,10 @@ async def test_external_postgres_upsert_holds_manifest_lock_through_ready_commit
 
     monkeypatch.setattr(search_repository_base_module.db, "scoped_session", fake_scoped_session)
 
-    await repo._persist_embeddings([(7, chunk_text)], [[1.0, 0.0, 0.0, 0.0]])
+    await repo._persist_embeddings(
+        [_pending_job(41, 7, chunk_text)],
+        [[1.0, 0.0, 0.0, 0.0]],
+    )
 
     project_lock_statement = session.execute.await_args_list[0].args[0]
     manifest_lock_statement = session.execute.await_args_list[1].args[0]
@@ -386,7 +406,10 @@ async def test_external_sqlite_upsert_holds_write_lock_through_ready_commit(
 
     monkeypatch.setattr(search_repository_base_module.db, "scoped_session", fake_scoped_session)
 
-    await repo._persist_embeddings([(7, chunk_text)], [[1.0, 0.0, 0.0, 0.0]])
+    await repo._persist_embeddings(
+        [_pending_job(41, 7, chunk_text)],
+        [[1.0, 0.0, 0.0, 0.0]],
+    )
 
     project_lock_statement = session.execute.await_args_list[0].args[0]
     manifest_lock_statement = session.execute.await_args_list[1].args[0]
@@ -942,9 +965,9 @@ async def test_sync_entity_vectors_batch_flushes_at_configured_threshold(monkeyp
     repo._semantic_embedding_sync_batch_size = 2
 
     prepared_by_entity = {
-        1: _PreparedEntityVectorSync(1, 1.0, 1, [(101, "chunk-1")]),
-        2: _PreparedEntityVectorSync(2, 2.0, 1, [(102, "chunk-2")]),
-        3: _PreparedEntityVectorSync(3, 3.0, 1, [(103, "chunk-3")]),
+        1: _PreparedEntityVectorSync(1, 1.0, 1, [_pending_job(1, 101, "chunk-1")]),
+        2: _PreparedEntityVectorSync(2, 2.0, 1, [_pending_job(2, 102, "chunk-2")]),
+        3: _PreparedEntityVectorSync(3, 3.0, 1, [_pending_job(3, 103, "chunk-3")]),
     }
     flush_sizes: list[int] = []
 
@@ -1021,8 +1044,8 @@ async def test_sync_entity_vectors_batch_progress_tracks_terminal_entities(monke
 
     prepared_by_entity = {
         1: _PreparedEntityVectorSync(1, 1.0, 1, []),
-        2: _PreparedEntityVectorSync(2, 2.0, 1, [(102, "chunk-2")]),
-        3: _PreparedEntityVectorSync(3, 3.0, 1, [(103, "chunk-3")]),
+        2: _PreparedEntityVectorSync(2, 2.0, 1, [_pending_job(2, 102, "chunk-2")]),
+        3: _PreparedEntityVectorSync(3, 3.0, 1, [_pending_job(3, 103, "chunk-3")]),
     }
     progress_events: list[tuple[int, int, int]] = []
 
@@ -1071,7 +1094,10 @@ async def test_sync_entity_vectors_batch_continue_on_error(monkeypatch):
                 continue
             prepared.append(
                 _PreparedEntityVectorSync(
-                    entity_id, float(entity_id), 1, [(100 + entity_id, "chunk")]
+                    entity_id,
+                    float(entity_id),
+                    1,
+                    [_pending_job(entity_id, 100 + entity_id, "chunk")],
                 )
             )
         return prepared
@@ -1129,7 +1155,7 @@ async def test_sync_entity_vectors_batch_only_attributes_queue_wait_to_flushed_e
                     entity_id=2,
                     sync_start=0.0,
                     source_rows_count=1,
-                    embedding_jobs=[(102, "chunk-2")],
+                    embedding_jobs=[_pending_job(2, 102, "chunk-2")],
                     prepare_seconds=1.0,
                 )
             )
@@ -1176,7 +1202,7 @@ async def test_sync_entity_vectors_batch_tracks_prepare_and_queue_wait_seconds(m
                 entity_id=entity_id,
                 sync_start=0.0,
                 source_rows_count=1,
-                embedding_jobs=[(100 + entity_id, f"chunk-{entity_id}")],
+                embedding_jobs=[_pending_job(entity_id, 100 + entity_id, f"chunk-{entity_id}")],
                 prepare_seconds=1.0,
             )
             for entity_id in entity_ids
@@ -1292,7 +1318,7 @@ async def test_sync_entity_vectors_batch_records_entity_granularity_histograms(m
                 entity_id=entity_id,
                 sync_start=0.0,
                 source_rows_count=1,
-                embedding_jobs=[(100 + entity_id, f"chunk-{entity_id}")],
+                embedding_jobs=[_pending_job(entity_id, 100 + entity_id, f"chunk-{entity_id}")],
                 prepare_seconds=1.0,
             )
             for entity_id in entity_ids
