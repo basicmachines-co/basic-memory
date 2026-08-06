@@ -413,7 +413,7 @@ class LocalWatchEventIndexRuntimeFactory:
                     note_content_repository=NoteContentRepository(
                         project_id=dependencies.project_id
                     ),
-                    link_resolver=dependencies.link_resolver,
+                    target_resolver=dependencies.link_resolver,
                     entity_indexer=dependencies.search_service,
                 ),
                 index_embeddings=self.index_embeddings,

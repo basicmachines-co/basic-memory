@@ -509,53 +509,6 @@ async def test_exact_match_types_in_strict_mode(link_resolver, test_entities, pr
 
 
 @pytest.mark.asyncio
-async def test_relation_target_batch_matches_strict_resolution(
-    link_resolver,
-    test_entities,
-):
-    """Batch relation targets preserve exact strict lookup precedence on both backends."""
-    from basic_memory.services.exceptions import AmbiguousIdentifierError
-
-    link_texts = [
-        test_entities[2].external_id.upper(),
-        "Auth Service",
-        "components/auth-service",
-        "components/Auth Service.md",
-        "components/Auth Service",
-        "Image.png",
-        "Does Not Exist",
-        "Core Service",
-    ]
-
-    async with db.scoped_session(link_resolver.session_maker) as session:
-        batch_results = await link_resolver.resolve_relation_targets(
-            link_texts,
-            session=session,
-        )
-
-        for link_text in link_texts[:-1]:
-            serial_result = await link_resolver.resolve_link(
-                link_text,
-                strict=True,
-                load_relations=False,
-                session=session,
-            )
-            batch_result = batch_results[link_text]
-            assert (batch_result.id if batch_result else None) == (
-                serial_result.id if serial_result else None
-            )
-
-        with pytest.raises(AmbiguousIdentifierError):
-            await link_resolver.resolve_link(
-                "Core Service",
-                strict=True,
-                load_relations=False,
-                session=session,
-            )
-        assert batch_results["Core Service"] is None
-
-
-@pytest.mark.asyncio
 async def test_fuzzy_matching_blocked_in_strict_mode(link_resolver, test_entities):
     """Test that various fuzzy matching scenarios are blocked in strict mode."""
 
@@ -819,22 +772,6 @@ async def test_cross_project_link_resolution(
     assert resolved is not None
     assert resolved.id == target.id
     assert resolved.project_id == other_project.id
-
-    async with db.scoped_session(session_maker) as session:
-        batch_results = await resolver.resolve_relation_targets(
-            [
-                "other-project::Cross Project Note",
-                "other-project/docs/cross-project-note",
-            ],
-            session=session,
-        )
-
-    explicit_result = batch_results["other-project::Cross Project Note"]
-    path_result = batch_results["other-project/docs/cross-project-note"]
-    assert explicit_result is not None
-    assert path_result is not None
-    assert explicit_result.id == target.id
-    assert path_result.id == target.id
 
 
 # ============================================================================

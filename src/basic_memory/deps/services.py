@@ -85,6 +85,7 @@ from basic_memory.services import EntityService, ProjectService
 from basic_memory.services.context_service import ContextService
 from basic_memory.services.directory_service import DirectoryService
 from basic_memory.services.file_service import FileService
+from basic_memory.services.bulk_link_resolver import BulkLinkResolver
 from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.search_service import SearchService
 
@@ -445,7 +446,6 @@ async def get_relation_resolution_scheduler(
     session_maker: SessionMakerDep,
     entity_repository: EntityRepositoryV2ExternalDep,
     relation_repository: RelationRepositoryV2ExternalDep,
-    link_resolver: LinkResolverV2ExternalDep,
     search_service: SearchServiceV2ExternalDep,
     app_config: AppConfigDep,
     read_cache: ReadCacheDep,
@@ -460,7 +460,10 @@ async def get_relation_resolution_scheduler(
         relation_repository=relation_repository,
         entity_repository=entity_repository,
         note_content_repository=NoteContentRepository(project_id=project_id),
-        link_resolver=link_resolver,
+        target_resolver=BulkLinkResolver(
+            entity_repository=entity_repository,
+            app_config=app_config,
+        ),
         entity_indexer=search_service,
     )
     return LocalRelationResolutionScheduler(

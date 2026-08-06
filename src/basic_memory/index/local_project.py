@@ -679,7 +679,7 @@ class LocalProjectIndexRuntimeFactory:
                 relation_repository=dependencies.relation_repository,
                 entity_repository=dependencies.entity_repository,
                 note_content_repository=NoteContentRepository(project_id=dependencies.project_id),
-                link_resolver=dependencies.link_resolver,
+                target_resolver=dependencies.link_resolver,
                 entity_indexer=dependencies.search_service,
             ),
             embedding_vector_sync=local_project_embedding_vector_sync(dependencies),

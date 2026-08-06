@@ -21,6 +21,7 @@ from basic_memory.repository.search_repository import SearchRepository, create_s
 from basic_memory.runtime.storage import ProjectId
 from basic_memory.services.entity_service import EntityService
 from basic_memory.services.file_service import FileService
+from basic_memory.services.bulk_link_resolver import BulkLinkResolver
 from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.search_service import SearchService
 
@@ -55,6 +56,7 @@ class BasicMemoryProjectRuntimeBundle:
     search_repository: SearchRepository
     search_service: SearchService
     link_resolver: LinkResolver
+    bulk_link_resolver: BulkLinkResolver
     entity_service: EntityService
     relation_resolution: RepositoryRelationResolutionRuntime
 
@@ -135,6 +137,11 @@ def build_default_project_runtime_bundle(
         session_maker=session_maker,
         app_config=app_config,
     )
+    bulk_link_resolver = BulkLinkResolver(
+        entity_repository=entity_repository,
+        app_config=app_config,
+        project_repository=project_repository,
+    )
 
     if entity_service_factory is None:
         entity_service = EntityService(
@@ -166,7 +173,7 @@ def build_default_project_runtime_bundle(
         relation_repository=relation_resolution_repository,
         entity_repository=entity_repository,
         note_content_repository=NoteContentRepository(project_id=project_id),
-        link_resolver=link_resolver,
+        target_resolver=bulk_link_resolver,
         entity_indexer=search_service,
     )
 
@@ -179,6 +186,7 @@ def build_default_project_runtime_bundle(
         search_repository=search_repository,
         search_service=search_service,
         link_resolver=link_resolver,
+        bulk_link_resolver=bulk_link_resolver,
         entity_service=entity_service,
         relation_resolution=relation_resolution,
     )

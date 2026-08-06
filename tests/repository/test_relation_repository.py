@@ -799,3 +799,64 @@ async def test_apply_resolved_targets_batches_updates_and_duplicate_cleanup(
         (target_entity.id, target_entity.title)
     ]
     assert redundant is None
+
+
+@pytest.mark.asyncio
+async def test_apply_resolved_targets_preserves_canonical_name_swaps(
+    relation_repository: RelationRepository,
+    source_entity: Entity,
+    target_entity: Entity,
+    related_entity: Entity,
+    test_project: Project,
+    session_maker,
+):
+    """Relations exchanging occupied names remain valid when planned together."""
+    first_relation = Relation(
+        project_id=test_project.id,
+        from_id=source_entity.id,
+        to_id=None,
+        to_name=target_entity.title,
+        relation_type="renames_to",
+    )
+    second_relation = Relation(
+        project_id=test_project.id,
+        from_id=source_entity.id,
+        to_id=None,
+        to_name=related_entity.title,
+        relation_type="renames_to",
+    )
+    async with db.scoped_session(session_maker) as session:
+        session.add_all([first_relation, second_relation])
+        await session.flush()
+        first_relation_id = first_relation.id
+        second_relation_id = second_relation.id
+
+    async with db.scoped_session(session_maker) as session:
+        result = await relation_repository.apply_resolved_targets(
+            session,
+            [
+                ResolvedRelationWrite(
+                    relation_id=first_relation_id,
+                    from_id=source_entity.id,
+                    target_id=related_entity.id,
+                    target_name=related_entity.title,
+                    relation_type="renames_to",
+                ),
+                ResolvedRelationWrite(
+                    relation_id=second_relation_id,
+                    from_id=source_entity.id,
+                    target_id=target_entity.id,
+                    target_name=target_entity.title,
+                    relation_type="renames_to",
+                ),
+            ],
+        )
+
+    assert result.duplicate_relation_ids == ()
+    async with db.scoped_session(session_maker) as session:
+        relations = await relation_repository.find_by_type(session, "renames_to")
+
+    assert {(relation.id, relation.to_id, relation.to_name) for relation in relations} == {
+        (first_relation_id, related_entity.id, related_entity.title),
+        (second_relation_id, target_entity.id, target_entity.title),
+    }

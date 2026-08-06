@@ -50,6 +50,7 @@ def test_build_default_project_runtime_bundle_wires_sync_free_project_graph(
     assert bundle.search_service.entity_repository is bundle.entity_repository
     assert bundle.search_service.file_service is file_service
     assert bundle.link_resolver.entity_repository is bundle.entity_repository
+    assert bundle.bulk_link_resolver.entity_repository is bundle.entity_repository
     assert bundle.entity_service.__class__ is CustomEntityService
     assert bundle.entity_service.repository is bundle.entity_repository
     assert bundle.entity_service.relation_repository is bundle.relation_repository
@@ -57,7 +58,7 @@ def test_build_default_project_runtime_bundle_wires_sync_free_project_graph(
     assert bundle.entity_service.search_service is bundle.search_service
     assert bundle.relation_resolution.relation_repository is relation_resolution_repository
     assert bundle.relation_resolution.entity_repository is bundle.entity_repository
-    assert bundle.relation_resolution.link_resolver is bundle.link_resolver
+    assert bundle.relation_resolution.target_resolver is bundle.bulk_link_resolver
     assert bundle.relation_resolution.entity_indexer is bundle.search_service
     assert not hasattr(bundle, "sync_service")
 

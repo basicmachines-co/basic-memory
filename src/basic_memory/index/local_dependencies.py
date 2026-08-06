@@ -50,7 +50,7 @@ from basic_memory.indexing.relation_resolution import (
     BatchRelationResolutionEntityRepository,
     RelationResolutionEntityIndexer,
     RelationResolutionEntityRepository,
-    RelationResolutionLinkResolver,
+    RelationTargetBatchResolver,
     RelationResolutionRelationRepository,
 )
 from basic_memory.indexing.note_content_reconciler import (
@@ -71,6 +71,7 @@ from basic_memory.repository.search_repository import create_search_repository
 from basic_memory.runtime.storage import ProjectId, RuntimeFilePath
 from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.services import EntityService, FileService
+from basic_memory.services.bulk_link_resolver import BulkLinkResolver
 from basic_memory.services.exceptions import FileOperationError
 from basic_memory.services.link_resolver import LinkResolver
 from basic_memory.services.search_service import SearchService
@@ -214,7 +215,7 @@ class LocalIndexProjectDependencies:
     project_id: ProjectId
     entity_repository: LocalIndexEntityRepository
     relation_repository: RelationResolutionRelationRepository
-    link_resolver: RelationResolutionLinkResolver
+    link_resolver: RelationTargetBatchResolver
     search_service: LocalIndexSearchService
     entity_service: LocalIndexEntityService
     external_vector_cleaner: ProjectIndexExternalVectorCleaner | None = None
@@ -647,6 +648,7 @@ async def build_local_index_project_dependencies(
         session_maker,
     )
     link_resolver = LinkResolver(entity_repository, search_service, session_maker, app_config)
+    bulk_link_resolver = BulkLinkResolver(entity_repository, app_config)
     entity_service = EntityService(
         entity_parser,
         entity_repository,
@@ -695,7 +697,7 @@ async def build_local_index_project_dependencies(
         project_id=project.id,
         entity_repository=entity_repository,
         relation_repository=relation_repository,
-        link_resolver=link_resolver,
+        link_resolver=bulk_link_resolver,
         search_service=search_service,
         entity_service=entity_service,
         external_vector_cleaner=search_repository,

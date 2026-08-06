@@ -24,7 +24,47 @@ from basic_memory.repository.relation_repository import (
 type EntityId = int
 type AffectedEntityIds = set[EntityId]
 RESOLVE_RELATIONS_DEBOUNCE_SECONDS = 10
-RELATION_RESOLUTION_WRITE_CHUNK_SIZE = 250
+RELATION_RESOLUTION_WRITE_BATCH_SIZE = 250
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedRelationWriteBatch:
+    """Independently committable writes whose uniqueness domains remain intact."""
+
+    writes: tuple[ResolvedRelationWrite, ...]
+
+
+def plan_resolved_relation_write_batches(
+    writes: Sequence[ResolvedRelationWrite],
+    *,
+    target_size: int = RELATION_RESOLUTION_WRITE_BATCH_SIZE,
+) -> tuple[ResolvedRelationWriteBatch, ...]:
+    """Pack writes without splitting a source/relation-type collision domain.
+
+    Both relation uniqueness constraints include ``from_id`` and ``relation_type``. Writes in
+    that shared domain must be planned together so aliases can exchange their canonical names
+    without a later batch appearing to occupy the destination. A single domain may exceed the
+    target size; correctness takes precedence over the preferred commit size.
+    """
+    if target_size < 1:
+        raise ValueError("Relation write batch target size must be positive")
+
+    writes_by_collision_domain: dict[tuple[int, str], list[ResolvedRelationWrite]] = {}
+    for write in sorted(writes, key=lambda item: item.relation_id):
+        collision_domain = (write.from_id, write.relation_type)
+        writes_by_collision_domain.setdefault(collision_domain, []).append(write)
+
+    batches: list[ResolvedRelationWriteBatch] = []
+    pending_batch: list[ResolvedRelationWrite] = []
+    for collision_domain_writes in writes_by_collision_domain.values():
+        if pending_batch and len(pending_batch) + len(collision_domain_writes) > target_size:
+            batches.append(ResolvedRelationWriteBatch(tuple(pending_batch)))
+            pending_batch = []
+        pending_batch.extend(collision_domain_writes)
+
+    if pending_batch:
+        batches.append(ResolvedRelationWriteBatch(tuple(pending_batch)))
+    return tuple(batches)
 
 
 class RelationResolutionRuntime(Protocol):
@@ -144,8 +184,8 @@ class BatchRelationResolutionNoteContentRepository(Protocol):
         """Return accepted note content by source entity id."""
 
 
-class RelationResolutionLinkResolver(Protocol):
-    """Capability for resolving a project-wide batch of relation targets."""
+class RelationTargetBatchResolver(Protocol):
+    """Capability for resolving one project-wide batch of relation targets."""
 
     async def resolve_relation_targets(
         self,
@@ -194,7 +234,7 @@ class RepositoryRelationResolutionRuntime:
     relation_repository: RelationResolutionRelationRepository
     entity_repository: BatchRelationResolutionEntityRepository
     note_content_repository: BatchRelationResolutionNoteContentRepository
-    link_resolver: RelationResolutionLinkResolver
+    target_resolver: RelationTargetBatchResolver
     entity_indexer: BatchRelationResolutionEntityIndexer
 
     async def count_unresolved_relations(self) -> int:
@@ -229,7 +269,7 @@ class RepositoryRelationResolutionRuntime:
                 dict.fromkeys(relation.to_name for relation in unresolved_relations)
             )
             resolved_targets_by_link_text = (
-                await self.link_resolver.resolve_relation_targets(
+                await self.target_resolver.resolve_relation_targets(
                     target_names,
                     session=session,
                 )
@@ -267,18 +307,12 @@ class RepositoryRelationResolutionRuntime:
                 )
             )
 
-        # Each chunk commits independently. If a worker is interrupted, the next attempt sees
-        # only the still-unresolved rows instead of repeating already completed target writes.
-        write_chunks = [
-            writes[start : start + RELATION_RESOLUTION_WRITE_CHUNK_SIZE]
-            for start in range(0, len(writes), RELATION_RESOLUTION_WRITE_CHUNK_SIZE)
-        ] or [[]]
         duplicate_relation_ids: list[int] = []
-        for write_chunk in write_chunks:
+        for write_batch in plan_resolved_relation_write_batches(writes):
             async with db.scoped_session(self.session_maker) as session:
                 write_result = await self.relation_repository.apply_resolved_targets(
                     session,
-                    write_chunk,
+                    write_batch.writes,
                 )
                 duplicate_relation_ids.extend(write_result.duplicate_relation_ids)
 

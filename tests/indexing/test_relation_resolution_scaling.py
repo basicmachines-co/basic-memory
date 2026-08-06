@@ -16,8 +16,7 @@ from basic_memory.indexing.relation_resolution import (
 from basic_memory.models import Entity, Relation
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.relation_repository import RelationRepository
-from basic_memory.services.link_resolver import LinkResolver
-from basic_memory.services.search_service import SearchService
+from basic_memory.services.bulk_link_resolver import BulkLinkResolver
 
 
 class QueryBudgetExceeded(RuntimeError):
@@ -56,7 +55,6 @@ class RecordingEntityIndexer:
 async def test_postgres_ten_thousand_targets_use_a_bounded_query_budget(
     engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
     entity_repository: EntityRepository,
-    search_service: SearchService,
     app_config: BasicMemoryConfig,
 ) -> None:
     """A production-sized missing-target pass must not issue one lookup sequence per target."""
@@ -121,12 +119,7 @@ async def test_postgres_ten_thousand_targets_use_a_bounded_query_budget(
         relation_repository=relation_repository,
         entity_repository=entity_repository,
         note_content_repository=EmptyNoteContentRepository(),
-        link_resolver=LinkResolver(
-            entity_repository,
-            search_service,
-            session_maker,
-            app_config,
-        ),
+        target_resolver=BulkLinkResolver(entity_repository, app_config),
         entity_indexer=entity_indexer,
     )
 
