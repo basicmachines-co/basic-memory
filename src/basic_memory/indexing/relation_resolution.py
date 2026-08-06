@@ -301,6 +301,7 @@ class RepositoryRelationResolutionRuntime:
                 ResolvedRelationWrite(
                     relation_id=relation.id,
                     from_id=relation.from_id,
+                    original_target_name=relation.to_name,
                     target_id=resolved_entity.id,
                     target_name=resolved_entity.title,
                     relation_type=relation.relation_type,
@@ -308,6 +309,7 @@ class RepositoryRelationResolutionRuntime:
             )
 
         duplicate_relation_ids: list[int] = []
+        stale_relation_ids: list[int] = []
         for write_batch in plan_resolved_relation_write_batches(writes):
             async with db.scoped_session(self.session_maker) as session:
                 write_result = await self.relation_repository.apply_resolved_targets(
@@ -315,6 +317,7 @@ class RepositoryRelationResolutionRuntime:
                     write_batch.writes,
                 )
                 duplicate_relation_ids.extend(write_result.duplicate_relation_ids)
+                stale_relation_ids.extend(write_result.stale_relation_ids)
 
         if duplicate_relation_ids:
             with logfire.span(
@@ -325,6 +328,17 @@ class RepositoryRelationResolutionRuntime:
                 logger.debug(
                     "Removed redundant unresolved relations",
                     relation_ids=duplicate_relation_ids,
+                )
+
+        if stale_relation_ids:
+            with logfire.span(
+                "indexing.relation.skip_stale_writes",
+                relation_ids=stale_relation_ids,
+                stale_count=len(stale_relation_ids),
+            ):
+                logger.debug(
+                    "Skipped relation writes whose unresolved identity changed",
+                    relation_ids=stale_relation_ids,
                 )
 
         async with db.scoped_session(self.session_maker) as session:

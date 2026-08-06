@@ -408,6 +408,7 @@ def test_relation_write_batch_plan_keeps_collision_domains_together() -> None:
         ResolvedRelationWrite(
             relation_id=relation_id,
             from_id=relation_id,
+            original_target_name=f"Original {relation_id}",
             target_id=1_000 + relation_id,
             target_name=f"Target {relation_id}",
             relation_type="related_to",
@@ -418,6 +419,7 @@ def test_relation_write_batch_plan_keeps_collision_domains_together() -> None:
         ResolvedRelationWrite(
             relation_id=RELATION_RESOLUTION_WRITE_BATCH_SIZE,
             from_id=999,
+            original_target_name="Alias A",
             target_id=2_000,
             target_name="Canonical B",
             relation_type="related_to",
@@ -425,6 +427,7 @@ def test_relation_write_batch_plan_keeps_collision_domains_together() -> None:
         ResolvedRelationWrite(
             relation_id=RELATION_RESOLUTION_WRITE_BATCH_SIZE + 1,
             from_id=999,
+            original_target_name="Alias B",
             target_id=2_001,
             target_name="Canonical A",
             relation_type="related_to",
@@ -526,6 +529,7 @@ async def test_project_relation_resolution_uses_repository_runtime_and_counts_re
             ResolvedRelationWrite(
                 relation_id=1,
                 from_id=10,
+                original_target_name="Target A",
                 target_id=20,
                 target_name="Target A",
                 relation_type="related_to",
@@ -533,6 +537,7 @@ async def test_project_relation_resolution_uses_repository_runtime_and_counts_re
             ResolvedRelationWrite(
                 relation_id=2,
                 from_id=11,
+                original_target_name="Target B",
                 target_id=21,
                 target_name="Target B",
                 relation_type="related_to",

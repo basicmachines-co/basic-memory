@@ -757,6 +757,7 @@ async def test_apply_resolved_targets_batches_updates_and_duplicate_cleanup(
                 ResolvedRelationWrite(
                     relation_id=accepted_related_id,
                     from_id=source_entity.id,
+                    original_target_name="Related Alias",
                     target_id=related_entity.id,
                     target_name=related_entity.title,
                     relation_type="references",
@@ -764,6 +765,7 @@ async def test_apply_resolved_targets_batches_updates_and_duplicate_cleanup(
                 ResolvedRelationWrite(
                     relation_id=redundant_unresolved_id,
                     from_id=source_entity.id,
+                    original_target_name="Duplicate Target Alias",
                     target_id=target_entity.id,
                     target_name=target_entity.title,
                     relation_type="links_to",
@@ -771,6 +773,7 @@ async def test_apply_resolved_targets_batches_updates_and_duplicate_cleanup(
                 ResolvedRelationWrite(
                     relation_id=accepted_target_id,
                     from_id=source_entity.id,
+                    original_target_name="Target Alias",
                     target_id=target_entity.id,
                     target_name=target_entity.title,
                     relation_type="documents",
@@ -838,6 +841,7 @@ async def test_apply_resolved_targets_preserves_canonical_name_swaps(
                 ResolvedRelationWrite(
                     relation_id=first_relation_id,
                     from_id=source_entity.id,
+                    original_target_name=target_entity.title,
                     target_id=related_entity.id,
                     target_name=related_entity.title,
                     relation_type="renames_to",
@@ -845,6 +849,7 @@ async def test_apply_resolved_targets_preserves_canonical_name_swaps(
                 ResolvedRelationWrite(
                     relation_id=second_relation_id,
                     from_id=source_entity.id,
+                    original_target_name=related_entity.title,
                     target_id=target_entity.id,
                     target_name=target_entity.title,
                     relation_type="renames_to",
@@ -860,3 +865,68 @@ async def test_apply_resolved_targets_preserves_canonical_name_swaps(
         (first_relation_id, related_entity.id, related_entity.title),
         (second_relation_id, target_entity.id, target_entity.title),
     }
+
+
+@pytest.mark.asyncio
+async def test_apply_resolved_targets_skips_reused_relation_identity(
+    relation_repository: RelationRepository,
+    source_entity: Entity,
+    target_entity: Entity,
+    test_project: Project,
+    session_maker,
+):
+    """A stale command cannot resolve a replacement row that reused its database ID."""
+    original_relation = Relation(
+        project_id=test_project.id,
+        from_id=source_entity.id,
+        to_id=None,
+        to_name="Original Alias",
+        relation_type="documents",
+    )
+    async with db.scoped_session(session_maker) as session:
+        session.add(original_relation)
+        await session.flush()
+        reused_relation_id = original_relation.id
+
+    stale_write = ResolvedRelationWrite(
+        relation_id=reused_relation_id,
+        from_id=source_entity.id,
+        original_target_name=original_relation.to_name,
+        target_id=target_entity.id,
+        target_name=target_entity.title,
+        relation_type=original_relation.relation_type,
+    )
+
+    # Trigger: accepted-note replacement deletes the old unresolved row before repair writes.
+    # Why: SQLite may reuse the deleted row ID for a different outgoing relation.
+    # Outcome: the replacement deliberately carries the same ID but a different identity.
+    async with db.scoped_session(session_maker) as session:
+        assert await relation_repository.delete(session, reused_relation_id)
+        session.add(
+            Relation(
+                id=reused_relation_id,
+                project_id=test_project.id,
+                from_id=source_entity.id,
+                to_id=None,
+                to_name="Replacement Alias",
+                relation_type="supersedes",
+            )
+        )
+
+    async with db.scoped_session(session_maker) as session:
+        result = await relation_repository.apply_resolved_targets(session, [stale_write])
+
+    assert result == ResolvedRelationWriteResult(
+        affected_entity_ids=frozenset(),
+        duplicate_relation_ids=(),
+        stale_relation_ids=(reused_relation_id,),
+    )
+    async with db.scoped_session(session_maker) as session:
+        replacement = await relation_repository.find_by_id(session, reused_relation_id)
+        pending_refreshes = await relation_repository.list_pending_search_refreshes(session)
+
+    assert replacement is not None
+    assert replacement.to_id is None
+    assert replacement.to_name == "Replacement Alias"
+    assert replacement.relation_type == "supersedes"
+    assert pending_refreshes == []

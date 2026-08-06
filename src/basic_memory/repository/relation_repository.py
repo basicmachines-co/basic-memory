@@ -3,13 +3,14 @@
 from dataclasses import dataclass
 from typing import override, Sequence, List, Optional, Any, cast
 
-from sqlalchemy import and_, case, delete, select, update
+from sqlalchemy import and_, case, delete, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, aliased
 from sqlalchemy.orm.interfaces import LoaderOption
+from sqlalchemy.sql.elements import ColumnElement
 
 from basic_memory.models import Entity, Relation, RelationSearchRefresh
 from basic_memory.repository.repository import Repository
@@ -33,13 +34,25 @@ class AcceptedRelationWrite:
 
 @dataclass(frozen=True, slots=True)
 class ResolvedRelationWrite:
-    """One unresolved relation with its canonical resolved target."""
+    """Compare-and-set command for one unresolved relation target."""
 
     relation_id: int
     from_id: int
+    original_target_name: str
     target_id: int
     target_name: str
     relation_type: str
+
+    @property
+    def unresolved_identity(self) -> tuple[int, int, None, str, str]:
+        """Return the row identity that must still exist before mutation."""
+        return (
+            self.relation_id,
+            self.from_id,
+            None,
+            self.original_target_name,
+            self.relation_type,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,6 +61,20 @@ class ResolvedRelationWriteResult:
 
     affected_entity_ids: frozenset[int]
     duplicate_relation_ids: tuple[int, ...]
+    stale_relation_ids: tuple[int, ...] = ()
+
+
+def unresolved_relation_write_predicate(
+    write: ResolvedRelationWrite,
+) -> ColumnElement[bool]:
+    """Build the database compare-and-set predicate for one resolution command."""
+    return and_(
+        Relation.id == write.relation_id,
+        Relation.from_id == write.from_id,
+        Relation.to_id.is_(None),
+        Relation.to_name == write.original_target_name,
+        Relation.relation_type == write.relation_type,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,8 +219,7 @@ class RelationRepository(Repository[Relation]):
             return ResolvedRelationWriteResult(frozenset(), ())
 
         ordered_writes = sorted(writes, key=lambda write: write.relation_id)
-        relation_ids = {write.relation_id for write in ordered_writes}
-        source_entity_ids = {write.from_id for write in ordered_writes}
+        requested_source_entity_ids = {write.from_id for write in ordered_writes}
         result = await session.execute(
             select(
                 Relation.id,
@@ -203,10 +229,24 @@ class RelationRepository(Repository[Relation]):
                 Relation.relation_type,
             ).where(
                 Relation.project_id == self.project_id,
-                Relation.from_id.in_(source_entity_ids),
+                Relation.from_id.in_(requested_source_entity_ids),
             )
         )
         existing_relations = result.tuples().all()
+        existing_relations_by_id = {
+            relation_id: (relation_id, from_id, to_id, to_name, relation_type)
+            for relation_id, from_id, to_id, to_name, relation_type in existing_relations
+        }
+
+        current_writes: list[ResolvedRelationWrite] = []
+        stale_relation_ids: list[int] = []
+        for write in ordered_writes:
+            if existing_relations_by_id.get(write.relation_id) != write.unresolved_identity:
+                stale_relation_ids.append(write.relation_id)
+                continue
+            current_writes.append(write)
+
+        relation_ids = {write.relation_id for write in current_writes}
 
         occupied_target_keys: set[tuple[int, int, str]] = set()
         occupied_name_keys: set[tuple[int, str, str]] = set()
@@ -221,27 +261,46 @@ class RelationRepository(Repository[Relation]):
                 occupied_target_keys.add((from_id, to_id, relation_type))
 
         accepted_writes: list[ResolvedRelationWrite] = []
-        duplicate_relation_ids: list[int] = []
-        for write in ordered_writes:
+        planned_duplicate_writes: list[ResolvedRelationWrite] = []
+        for write in current_writes:
             target_key = (write.from_id, write.target_id, write.relation_type)
             name_key = (write.from_id, write.target_name, write.relation_type)
             if target_key in occupied_target_keys or name_key in occupied_name_keys:
-                duplicate_relation_ids.append(write.relation_id)
+                planned_duplicate_writes.append(write)
                 continue
             accepted_writes.append(write)
             occupied_target_keys.add(target_key)
             occupied_name_keys.add(name_key)
 
-        if duplicate_relation_ids:
-            await session.execute(
-                delete(Relation).where(
+        duplicate_relation_ids: list[int] = []
+        if planned_duplicate_writes:
+            delete_result = await session.execute(
+                delete(Relation)
+                .where(
                     Relation.project_id == self.project_id,
-                    Relation.id.in_(duplicate_relation_ids),
+                    or_(
+                        *(
+                            unresolved_relation_write_predicate(write)
+                            for write in planned_duplicate_writes
+                        )
+                    ),
                 )
+                .returning(Relation.id)
+            )
+            deleted_relation_ids = set(delete_result.scalars().all())
+            duplicate_relation_ids = [
+                write.relation_id
+                for write in planned_duplicate_writes
+                if write.relation_id in deleted_relation_ids
+            ]
+            stale_relation_ids.extend(
+                write.relation_id
+                for write in planned_duplicate_writes
+                if write.relation_id not in deleted_relation_ids
             )
 
+        staged_writes: list[ResolvedRelationWrite] = []
         if accepted_writes:
-            accepted_relation_ids = [write.relation_id for write in accepted_writes]
             temporary_names_by_relation_id: dict[int, str] = {}
             for write in accepted_writes:
                 temporary_name = f"__basic_memory_resolving_relation_{write.relation_id}__"
@@ -252,37 +311,59 @@ class RelationRepository(Repository[Relation]):
 
             # Clear both unique keys before assigning canonical targets. This
             # makes alias swaps safe on databases that check uniqueness row by
-            # row inside a multi-row UPDATE.
-            await session.execute(
+            # row inside a multi-row UPDATE. The identity predicates make this
+            # first mutation a compare-and-set, so a reused relation ID cannot
+            # redirect a stale resolution command onto a replacement edge.
+            stage_result = await session.execute(
                 update(Relation)
                 .where(
                     Relation.project_id == self.project_id,
-                    Relation.id.in_(accepted_relation_ids),
+                    or_(*(unresolved_relation_write_predicate(write) for write in accepted_writes)),
                 )
                 .values(
                     to_id=None,
                     to_name=case(temporary_names_by_relation_id, value=Relation.id),
                 )
+                .returning(Relation.id)
                 .execution_options(synchronize_session=False)
             )
+            staged_relation_ids = set(stage_result.scalars().all())
+            staged_writes = [
+                write for write in accepted_writes if write.relation_id in staged_relation_ids
+            ]
+            stale_relation_ids.extend(
+                write.relation_id
+                for write in accepted_writes
+                if write.relation_id not in staged_relation_ids
+            )
+
+        if staged_writes:
+            staged_relation_ids = [write.relation_id for write in staged_writes]
             await session.execute(
                 update(Relation)
                 .where(
                     Relation.project_id == self.project_id,
-                    Relation.id.in_(accepted_relation_ids),
+                    Relation.id.in_(staged_relation_ids),
                 )
                 .values(
                     to_id=case(
-                        {write.relation_id: write.target_id for write in accepted_writes},
+                        {write.relation_id: write.target_id for write in staged_writes},
                         value=Relation.id,
                     ),
                     to_name=case(
-                        {write.relation_id: write.target_name for write in accepted_writes},
+                        {write.relation_id: write.target_name for write in staged_writes},
                         value=Relation.id,
                     ),
                 )
                 .execution_options(synchronize_session=False)
             )
+
+        writes_by_id = {write.relation_id: write for write in current_writes}
+        mutated_relation_ids = set(duplicate_relation_ids)
+        mutated_relation_ids.update(write.relation_id for write in staged_writes)
+        source_entity_ids = {
+            writes_by_id[relation_id].from_id for relation_id in mutated_relation_ids
+        }
 
         # Trigger: relation targets changed or duplicate edges were removed.
         # Why: a later storage/search failure must not consume the only evidence
@@ -300,6 +381,7 @@ class RelationRepository(Repository[Relation]):
         return ResolvedRelationWriteResult(
             affected_entity_ids=frozenset(source_entity_ids),
             duplicate_relation_ids=tuple(duplicate_relation_ids),
+            stale_relation_ids=tuple(sorted(stale_relation_ids)),
         )
 
     async def add_all_ignore_duplicates(
