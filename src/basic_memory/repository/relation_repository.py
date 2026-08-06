@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from itertools import batched
 from typing import override, Sequence, List, Optional, Any, cast
 
-from sqlalchemy import and_, case, delete, or_, select, update
+from sqlalchemy import and_, case, delete, exists, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -44,6 +44,7 @@ class ResolvedRelationWrite:
     from_id: int
     original_target_name: str
     target_id: int
+    target_external_id: str
     target_name: str
     relation_type: str
 
@@ -58,6 +59,11 @@ class ResolvedRelationWrite:
             self.relation_type,
         )
 
+    @property
+    def target_identity(self) -> tuple[int, str]:
+        """Return the stable target identity that must survive until mutation."""
+        return self.target_id, self.target_external_id
+
 
 @dataclass(frozen=True, slots=True)
 class ResolvedRelationWriteResult:
@@ -68,16 +74,20 @@ class ResolvedRelationWriteResult:
     stale_relation_ids: tuple[int, ...] = ()
 
 
-def unresolved_relation_write_predicate(
+def current_resolved_relation_write_predicate(
     write: ResolvedRelationWrite,
 ) -> ColumnElement[bool]:
-    """Build the database compare-and-set predicate for one resolution command."""
+    """Require both the unresolved edge and its snapshotted target to remain current."""
     return and_(
         Relation.id == write.relation_id,
         Relation.from_id == write.from_id,
         Relation.to_id.is_(None),
         Relation.to_name == write.original_target_name,
         Relation.relation_type == write.relation_type,
+        exists().where(
+            Entity.id == write.target_id,
+            Entity.external_id == write.target_external_id,
+        ),
     )
 
 
@@ -223,6 +233,16 @@ class RelationRepository(Repository[Relation]):
             return ResolvedRelationWriteResult(frozenset(), ())
 
         ordered_writes = sorted(writes, key=lambda write: write.relation_id)
+        # PostgreSQL row locks preserve snapshotted targets until commit. SQLite
+        # ignores FOR UPDATE, so each first mutation also checks the external ID
+        # before acquiring SQLite's transaction-wide write lock.
+        target_result = await session.execute(
+            select(Entity.id, Entity.external_id)
+            .where(Entity.id.in_({write.target_id for write in ordered_writes}))
+            .order_by(Entity.id)
+            .with_for_update()
+        )
+        current_target_identities = set(target_result.tuples().all())
         requested_source_entity_ids = {write.from_id for write in ordered_writes}
         result = await session.execute(
             select(
@@ -245,7 +265,10 @@ class RelationRepository(Repository[Relation]):
         current_writes: list[ResolvedRelationWrite] = []
         stale_relation_ids: list[int] = []
         for write in ordered_writes:
-            if existing_relations_by_id.get(write.relation_id) != write.unresolved_identity:
+            if (
+                existing_relations_by_id.get(write.relation_id) != write.unresolved_identity
+                or write.target_identity not in current_target_identities
+            ):
                 stale_relation_ids.append(write.relation_id)
                 continue
             current_writes.append(write)
@@ -285,7 +308,9 @@ class RelationRepository(Repository[Relation]):
                 delete(Relation)
                 .where(
                     Relation.project_id == self.project_id,
-                    or_(*(unresolved_relation_write_predicate(write) for write in write_batch)),
+                    or_(
+                        *(current_resolved_relation_write_predicate(write) for write in write_batch)
+                    ),
                 )
                 .returning(Relation.id)
             )
@@ -329,7 +354,12 @@ class RelationRepository(Repository[Relation]):
                     update(Relation)
                     .where(
                         Relation.project_id == self.project_id,
-                        or_(*(unresolved_relation_write_predicate(write) for write in write_batch)),
+                        or_(
+                            *(
+                                current_resolved_relation_write_predicate(write)
+                                for write in write_batch
+                            )
+                        ),
                     )
                     .values(
                         to_id=None,

@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from basic_memory import db
@@ -760,6 +760,7 @@ async def test_apply_resolved_targets_batches_updates_and_duplicate_cleanup(
                     from_id=source_entity.id,
                     original_target_name="Related Alias",
                     target_id=related_entity.id,
+                    target_external_id=related_entity.external_id,
                     target_name=related_entity.title,
                     relation_type="references",
                 ),
@@ -768,6 +769,7 @@ async def test_apply_resolved_targets_batches_updates_and_duplicate_cleanup(
                     from_id=source_entity.id,
                     original_target_name="Duplicate Target Alias",
                     target_id=target_entity.id,
+                    target_external_id=target_entity.external_id,
                     target_name=target_entity.title,
                     relation_type="links_to",
                 ),
@@ -776,6 +778,7 @@ async def test_apply_resolved_targets_batches_updates_and_duplicate_cleanup(
                     from_id=source_entity.id,
                     original_target_name="Target Alias",
                     target_id=target_entity.id,
+                    target_external_id=target_entity.external_id,
                     target_name=target_entity.title,
                     relation_type="documents",
                 ),
@@ -844,6 +847,7 @@ async def test_apply_resolved_targets_preserves_canonical_name_swaps(
                     from_id=source_entity.id,
                     original_target_name=target_entity.title,
                     target_id=related_entity.id,
+                    target_external_id=related_entity.external_id,
                     target_name=related_entity.title,
                     relation_type="renames_to",
                 ),
@@ -852,6 +856,7 @@ async def test_apply_resolved_targets_preserves_canonical_name_swaps(
                     from_id=source_entity.id,
                     original_target_name=related_entity.title,
                     target_id=target_entity.id,
+                    target_external_id=target_entity.external_id,
                     target_name=target_entity.title,
                     relation_type="renames_to",
                 ),
@@ -912,6 +917,7 @@ async def test_apply_resolved_targets_bounds_sql_for_oversized_collision_domain(
                 from_id=source_entity.id,
                 original_target_name=relation.to_name,
                 target_id=target.id,
+                target_external_id=target.external_id,
                 target_name=target.title,
                 relation_type=relation.relation_type,
             )
@@ -944,6 +950,75 @@ async def test_apply_resolved_targets_bounds_sql_for_oversized_collision_domain(
 
 
 @pytest.mark.asyncio
+async def test_apply_resolved_targets_skips_reused_target_identity(
+    relation_repository: RelationRepository,
+    source_entity: Entity,
+    target_entity: Entity,
+    test_project: Project,
+    session_maker,
+):
+    """A stale target ID cannot connect an edge to a replacement entity."""
+    unresolved_relation = Relation(
+        project_id=test_project.id,
+        from_id=source_entity.id,
+        to_id=None,
+        to_name="Original Target Alias",
+        relation_type="documents",
+    )
+    async with db.scoped_session(session_maker) as session:
+        session.add(unresolved_relation)
+        await session.flush()
+        relation_id = unresolved_relation.id
+
+    stale_write = ResolvedRelationWrite(
+        relation_id=relation_id,
+        from_id=source_entity.id,
+        original_target_name=unresolved_relation.to_name,
+        target_id=target_entity.id,
+        target_external_id=target_entity.external_id,
+        target_name=target_entity.title,
+        relation_type=unresolved_relation.relation_type,
+    )
+
+    # Trigger: the snapshotted target is deleted before relation repair commits.
+    # Why: SQLite can reuse its numeric ID for an unrelated entity.
+    # Outcome: the replacement has the same database ID but a new stable external ID.
+    now = datetime.now(timezone.utc)
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(delete(Entity).where(Entity.id == target_entity.id))
+        replacement = Entity(
+            id=target_entity.id,
+            project_id=test_project.id,
+            title="Replacement Target",
+            note_type="test",
+            permalink="target/replacement-target",
+            file_path="target/replacement_target.md",
+            content_type="text/markdown",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(replacement)
+        await session.flush()
+        replacement_external_id = replacement.external_id
+
+    async with db.scoped_session(session_maker) as session:
+        result = await relation_repository.apply_resolved_targets(session, [stale_write])
+
+    assert result == ResolvedRelationWriteResult(
+        affected_entity_ids=frozenset(),
+        duplicate_relation_ids=(),
+        stale_relation_ids=(relation_id,),
+    )
+    assert replacement_external_id != stale_write.target_external_id
+    async with db.scoped_session(session_maker) as session:
+        relation = await relation_repository.find_by_id(session, relation_id)
+
+    assert relation is not None
+    assert relation.to_id is None
+    assert relation.to_name == "Original Target Alias"
+
+
+@pytest.mark.asyncio
 async def test_apply_resolved_targets_skips_reused_relation_identity(
     relation_repository: RelationRepository,
     source_entity: Entity,
@@ -969,6 +1044,7 @@ async def test_apply_resolved_targets_skips_reused_relation_identity(
         from_id=source_entity.id,
         original_target_name=original_relation.to_name,
         target_id=target_entity.id,
+        target_external_id=target_entity.external_id,
         target_name=target_entity.title,
         relation_type=original_relation.relation_type,
     )

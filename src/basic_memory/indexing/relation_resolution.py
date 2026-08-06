@@ -100,6 +100,9 @@ class ResolvedRelationTarget(Protocol):
     def id(self) -> int: ...
 
     @property
+    def external_id(self) -> str: ...
+
+    @property
     def title(self) -> str: ...
 
 
@@ -303,6 +306,7 @@ class RepositoryRelationResolutionRuntime:
                     from_id=relation.from_id,
                     original_target_name=relation.to_name,
                     target_id=resolved_entity.id,
+                    target_external_id=resolved_entity.external_id,
                     target_name=resolved_entity.title,
                     relation_type=relation.relation_type,
                 )
@@ -337,7 +341,7 @@ class RepositoryRelationResolutionRuntime:
                 stale_count=len(stale_relation_ids),
             ):
                 logger.debug(
-                    "Skipped relation writes whose unresolved identity changed",
+                    "Skipped relation writes whose source or target identity changed",
                     relation_ids=stale_relation_ids,
                 )
 

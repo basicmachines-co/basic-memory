@@ -83,6 +83,10 @@ class FakeResolvedEntity:
     id: int
     title: str
 
+    @property
+    def external_id(self) -> str:
+        return f"external-{self.id}"
+
 
 class StubRelationRepository:
     """Returns scripted ``find_unresolved_relations`` results, in call order."""
@@ -410,6 +414,7 @@ def test_relation_write_batch_plan_keeps_collision_domains_together() -> None:
             from_id=relation_id,
             original_target_name=f"Original {relation_id}",
             target_id=1_000 + relation_id,
+            target_external_id=f"external-{1_000 + relation_id}",
             target_name=f"Target {relation_id}",
             relation_type="related_to",
         )
@@ -421,6 +426,7 @@ def test_relation_write_batch_plan_keeps_collision_domains_together() -> None:
             from_id=999,
             original_target_name="Alias A",
             target_id=2_000,
+            target_external_id="external-2000",
             target_name="Canonical B",
             relation_type="related_to",
         ),
@@ -429,6 +435,7 @@ def test_relation_write_batch_plan_keeps_collision_domains_together() -> None:
             from_id=999,
             original_target_name="Alias B",
             target_id=2_001,
+            target_external_id="external-2001",
             target_name="Canonical A",
             relation_type="related_to",
         ),
@@ -531,6 +538,7 @@ async def test_project_relation_resolution_uses_repository_runtime_and_counts_re
                 from_id=10,
                 original_target_name="Target A",
                 target_id=20,
+                target_external_id="external-20",
                 target_name="Target A",
                 relation_type="related_to",
             ),
@@ -539,6 +547,7 @@ async def test_project_relation_resolution_uses_repository_runtime_and_counts_re
                 from_id=11,
                 original_target_name="Target B",
                 target_id=21,
+                target_external_id="external-21",
                 target_name="Target B",
                 relation_type="related_to",
             ),
