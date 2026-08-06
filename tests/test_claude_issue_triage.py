@@ -16,6 +16,7 @@ def _run_triage_helper(
     tmp_path: Path,
     *arguments: str,
     current_labels: tuple[str, ...] = (),
+    fail_label_read: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
     event_path = tmp_path / "event.json"
     event_path.write_text(json.dumps({"issue": {"number": 1205}}), encoding="utf-8")
@@ -30,6 +31,8 @@ set -euo pipefail
 
 if [[ " $* " == *" --method PUT "* ]]; then
     printf '%s\n' "$@" > "${GH_ARGUMENTS_PATH:?}"
+elif [[ "${GH_FAIL_LABEL_READ:-false}" == "true" ]]; then
+    exit 1
 else
     printf '%s\n' "${GH_CURRENT_LABELS:-}"
 fi
@@ -43,6 +46,7 @@ fi
         {
             "GH_ARGUMENTS_PATH": str(gh_arguments_path),
             "GH_CURRENT_LABELS": "\n".join(current_labels),
+            "GH_FAIL_LABEL_READ": "true" if fail_label_read else "false",
             "GITHUB_EVENT_PATH": str(event_path),
             "GITHUB_REPOSITORY": "basicmachines-co/basic-memory",
             "PATH": f"{bin_path}{os.pathsep}{env['PATH']}",
@@ -114,6 +118,24 @@ def test_triage_helper_keeps_only_one_type_and_cloud_component(tmp_path: Path) -
     assert gh_arguments.count("labels[]=question") == 1
     assert gh_arguments.count("labels[]=cloud") == 1
     assert "labels[]=production" in gh_arguments
+
+
+def test_triage_helper_does_not_update_labels_when_current_labels_cannot_be_read(
+    tmp_path: Path,
+) -> None:
+    result, gh_arguments = _run_triage_helper(
+        tmp_path,
+        "--type",
+        "bug",
+        "--component",
+        "none",
+        current_labels=("production",),
+        fail_label_read=True,
+    )
+
+    assert result.returncode != 0
+    assert "unable to read current issue labels" in result.stderr
+    assert gh_arguments == []
 
 
 @pytest.mark.parametrize(

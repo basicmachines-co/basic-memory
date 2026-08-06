@@ -73,6 +73,11 @@ labels_url="repos/$repository/issues/$issue_number/labels"
 
 # The triage bot owns only the four type labels and the cloud component label. Preserve every
 # label outside that owned set while replacing prior triage output.
+if ! current_labels=$(gh api "repos/$repository/issues/$issue_number" --jq '.labels[].name'); then
+    echo "Error: unable to read current issue labels" >&2
+    exit 1
+fi
+
 labels=()
 while IFS= read -r label; do
     case "$label" in
@@ -80,7 +85,7 @@ while IFS= read -r label; do
         "") ;;
         *) labels+=("$label") ;;
     esac
-done < <(gh api "repos/$repository/issues/$issue_number" --jq '.labels[].name')
+done <<< "$current_labels"
 
 labels+=("$type_label")
 if [[ "$component" == "cloud" ]]; then
