@@ -40,8 +40,10 @@ VALID_NOTE_OBJECT_ACTOR_KINDS: frozenset[RuntimeNoteActorKind] = frozenset(
 # collaboration_relay = a relay service persisting a live collaboration
 # document with its service credential (issue #1445); the webhook-canonical
 # note.updated event echoes this source as the write's actor origin.
+# document_ingestion = a hosted worker accepting a deterministic document
+# extraction or ingestion-run note through the canonical note mutation path.
 VALID_NOTE_OBJECT_SOURCES: frozenset[RuntimeNoteChangeSource] = frozenset(
-    {"api", "collaboration_relay", "mcp", "s3_webhook", "web_v2"}
+    {"api", "collaboration_relay", "document_ingestion", "mcp", "s3_webhook", "web_v2"}
 )
 # Named because the accepted-note write path special-cases relay writes: the
 # relay superseding its own prior write is never a real conflict (#1589).
