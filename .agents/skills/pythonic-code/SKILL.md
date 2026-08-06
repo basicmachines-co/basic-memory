@@ -2,15 +2,20 @@
 name: pythonic-code
 description: >-
   Write, refactor, and review Python for clarity, explicit behavior, local reasoning, strong
-  types, and minimal abstraction. Use when creating or changing nontrivial Python, simplifying
-  object-heavy or helper-heavy code, evaluating whether code is Pythonic, or reviewing Python
-  maintainability in Basic Memory repositories.
+  types, constructive domain modeling, and minimal abstraction. Use when creating or changing
+  nontrivial Python, simplifying object-heavy, helper-heavy, or overly procedural code,
+  evaluating whether code is Pythonic, or reviewing Python maintainability in Basic Memory
+  repositories.
 ---
 
 # Pythonic Code
 
 Write Python that makes domain behavior obvious to human and AI readers. Apply a WWGD lens:
 choose the simplest correct design that feels native to Python and is easy to verify.
+
+The preferred design method is **Constructive Domain Modeling**: define the valid values and
+outcomes a program can construct, then let their types carry obligations to the code that
+consumes them.
 
 ## Orient Before Coding
 
@@ -32,6 +37,30 @@ Let local project rules override generic style advice.
 4. Choose the smallest abstraction that reduces cognitive load now.
 5. Use Python idioms when they clarify intent rather than merely shorten code.
 6. Prove the result with types, tests, and repository tooling.
+
+## Model The Positive Space
+
+Constructive Domain Modeling describes what the program supports instead of starting with a
+broad representation and a growing list of invalid combinations.
+
+- Represent one valid state with a product of required fields, usually a frozen dataclass.
+- Represent meaningful alternatives with a closed union using a Python 3.12 `type` alias.
+- Use Pydantic models and discriminated unions at API, CLI, MCP, configuration, and persistence
+  boundaries where untrusted values require runtime validation or serialization.
+- Parse or classify a broad boundary shape once, then pass the narrower domain value internally.
+  Do not make every consumer rediscover the invariant through checks and casts.
+- Consume a closed union with explicit `match` cases. Use `typing.assert_never` when it proves
+  exhaustive handling, and avoid catch-all cases that hide a newly added variant.
+- Prefer a total function over a partial one. When a case is expected, either narrow the input so
+  the case is impossible or widen the return union so the caller must handle it.
+- Return explicit variants for recoverable domain outcomes when callers can respond differently.
+  Keep exceptions for broken invariants, cancellation, and unpredictable filesystem, network,
+  queue, or database failures.
+- Choose the simplest model that rules out a real error. Do not add wrapper-only IDs, Result
+  types around every operation, or maximum-precision unions that cost more than they clarify.
+
+Before narrowing an ORM model or compatibility schema, trace its writers and serialized forms.
+Storage may remain broad while a parser constructs a safer domain value for the core workflow.
 
 ## Prefer Functions Before Hierarchies
 
@@ -75,13 +104,15 @@ local.
 - Name values after the domain concept they carry.
 - Use full annotations and narrow types. Do not hide uncertainty with `Any`, broad casts,
   speculative `getattr`, or unstructured dictionaries.
-- Use dataclasses for internal values and Pydantic at validation and serialization boundaries.
+- Use frozen dataclasses for internal domain values and Pydantic at validation and serialization
+  boundaries. A Pydantic model is not automatically the best internal state representation.
 - Prefer direct iteration, context managers, standard-library building blocks, and simple
   comprehensions where their meaning is immediate.
 - Distinguish absence from falsiness; use truth-value testing only when empty values share the
   intended meaning.
 - Keep async work, resource ownership, cancellation, and cleanup visible.
-- Fail fast with specific errors. Do not add silent fallbacks or broad exception handling.
+- Fail fast with specific errors when an invariant or external operation fails. Do not use
+  exceptions for ordinary domain branching, or add silent fallbacks and broad exception handling.
 - Comment decisions and constraints, not mechanics.
 - Optimize measured hot paths; do not trade readability for hypothetical performance.
 
@@ -89,25 +120,33 @@ local.
 
 ### Write
 
-Establish the contract and domain values first. Implement the direct path, then add only the
-abstractions required by real variation, state, or boundaries.
+Establish the valid states, outcomes, and boundary parser first. Implement the direct path, make
+closed variants exhaustive, then add only the abstractions required by real variation, state, or
+boundaries.
 
 ### Refactor
 
 Preserve observable behavior, keep the diff focused, and add or update a regression test when
-the behavior is risky. Do not mechanically rewrite already-clear code to apply an idiom.
+the behavior is risky. Look for status strings coupled to optional fields, repeated validation,
+"should never happen" branches, and expected outcomes carried by exceptions. Replace them only
+when a smaller constructive model removes a real unsupported state. Do not mechanically rewrite
+already-clear code, convert I/O failures to Result types, or reshape persisted data before tracing
+its writers.
 
 ### Review
 
 Report concrete readability, abstraction, typing, lifecycle, and domain-model risks. Explain the
-smallest practical improvement. Do not edit unless the user asks for fixes.
+smallest practical improvement. Ask which invalid state or unhandled obligation a proposed type
+actually removes; stronger-looking types without a concrete payoff are not an improvement. Do not
+edit unless the user asks for fixes.
 
 ## Verify The Result
 
 Run the narrowest command that proves the change, then widen according to risk:
 
 1. Focused tests for the changed behavior.
-2. Formatter, linter, and type checker configured by the project.
+2. Formatter, linter, and type checker configured by the project. Use the type checker to prove
+   exhaustive consumers where the domain is a closed union.
 3. Repository health, package, integration, or full gates when boundaries are affected.
 
 Lead the final response with the outcome and verification. Explain design choices only when they

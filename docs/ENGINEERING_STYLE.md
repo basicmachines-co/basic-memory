@@ -4,6 +4,10 @@ Style is how we make code easier to verify. Prefer explicit, typed, local-first 
 Markdown as the canonical product representation while the file materialization, database, API,
 and MCP surfaces stay in sync.
 
+Our default design method is **Constructive Domain Modeling**: describe the states and outcomes
+the product supports, construct those values at trusted boundaries, and let their types carry
+obligations through the program.
+
 ## Design Center
 
 - Basic Memory is local-first. In local flows, Markdown files are the durable source and
@@ -16,6 +20,39 @@ and MCP surfaces stay in sync.
   clients, not reach around into services.
 - Prefer small, explicit abstractions that match a real domain boundary. Avoid object
   hierarchies when a function, dataclass, type alias, or protocol describes the concept better.
+
+## Constructive Domain Modeling
+
+Constructive Domain Modeling defines a domain by its **positive space**: the values that can be
+constructed and handled correctly. It is a practical Python application of product types, sum
+types, parsing, and exhaustive handling—not a mandate to eliminate classes or exceptions.
+
+- Model one valid state with a small value whose required fields are always present. Model
+  meaningful alternatives as a closed union of values, rather than one record with a status
+  string and mutually conditional optional fields.
+- Prefer frozen dataclasses for internal domain values and Python 3.12 `type` aliases for closed
+  unions. At JSON-facing boundaries, use Pydantic discriminated unions when runtime validation,
+  serialization, or generated schemas need to preserve the alternatives.
+- Parse and classify external data once at the boundary. After construction, internal functions
+  should accept the domain value instead of repeatedly validating the same invariant.
+- Consume closed unions with an explicit `match`. Use `typing.assert_never` when it lets the type
+  checker prove that every variant is handled; avoid a catch-all branch that silently absorbs a
+  future domain case.
+- Make functions total over their declared input when practical. If a recoverable case is part of
+  normal operation, strengthen the input type or include that case in a structured return type
+  instead of raising a "should never happen" exception deep in the workflow.
+- Return explicit variants for expected domain outcomes when callers can make a meaningful
+  decision about them. Keep exceptions for broken invariants, cancellation, and unpredictable
+  resource failures such as filesystem, network, queue, or database errors.
+- Choose the least precise model that removes a real unsupported state. Do not introduce wrapper
+  types, Result types, or elaborate unions merely to make the type graph look stronger.
+- Before reshaping persisted state, trace every writer and compatibility constraint. ORM rows and
+  old payloads may need a parser that converts their broad storage shape into a narrower domain
+  value.
+
+For example, prefer separate `Completed(result)` and `Failed(reason)` values joined by a
+`type OperationOutcome = Completed | Failed` alias over a single `Operation` record where
+`result` and `reason` are both optional and their validity depends on a status string.
 
 ## Functions Before Hierarchies
 
@@ -52,6 +89,8 @@ and MCP surfaces stay in sync.
 
 - Fail fast when an invariant is broken. Do not swallow exceptions, add warning-only error
   handling, or introduce fallback behavior unless the user explicitly agrees to that behavior.
+- Do not use exceptions as ordinary branching for expected domain outcomes. Translate a typed
+  outcome to HTTP, CLI, or MCP errors at the outer adapter that owns that presentation contract.
 - Keep control flow simple and close to the domain decision. Push `if` statements up into the
   function that owns orchestration; keep leaf helpers focused on computation or one side effect.
 - Make async/resource boundaries visible with context managers and explicit lifecycles. Do not
@@ -87,6 +126,9 @@ and MCP surfaces stay in sync.
   relevant doc/repo hygiene checks.
 - Prefer tests that exercise real code paths. Use mocks, doubles, or `monkeypatch` only when
   the external boundary would be slow, nondeterministic, or impossible to trigger directly.
+- Test every meaningful domain variant and the boundary that constructs it. Let the type checker
+  enforce exhaustive consumers; use runtime tests for behavior and compatibility, not to
+  compensate for an unnecessarily broad internal state model.
 - Keep coverage at 100% for new code. Use `# pragma: no cover` only for code that would require
   disproportionate mocking and is covered through an integration or runtime path.
 - Start with targeted commands, then widen as risk grows: focused pytest, `just fast-check`,
