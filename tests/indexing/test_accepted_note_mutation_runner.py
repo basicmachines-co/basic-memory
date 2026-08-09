@@ -144,6 +144,7 @@ class _MutationSession:
         self.deleted: list[object] = []
         self.added: list[object] = []
         self.flush_count = 0
+        self.scalar_count = 0
         self.bind = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
 
     async def delete(self, value: object) -> None:
@@ -155,6 +156,11 @@ class _MutationSession:
     async def execute(self, query: object) -> _EmptyResult:
         # No existing note_file_vacate marker for this test; the move records a fresh one via add().
         return _EmptyResult()
+
+    async def scalar(self, statement: object) -> int:
+        assert statement is not None
+        self.scalar_count += 1
+        return 42
 
     async def flush(self) -> None:
         self.flush_count += 1
@@ -1704,6 +1710,7 @@ async def test_run_accepted_note_delete_removes_entity_and_returns_cleanup() -> 
     assert session.deleted == [entity]
     assert search_repository.deleted_entity_ids == [entity.id]
     assert search_repository.deleted_vector_entity_ids == [entity.id]
+    assert session.scalar_count == 1
     assert change.status_code == 200
     assert change.file_delete is not None
     assert change.file_delete.file_path == "notes/accepted.md"

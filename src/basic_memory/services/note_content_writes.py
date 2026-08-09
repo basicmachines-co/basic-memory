@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Literal, Protocol
 from uuid import UUID
 
+from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.indexing.accepted_note_mutation_runner import (
@@ -181,7 +182,20 @@ class NoteContentMutationService:
         result: AcceptedNoteMutationResult,
     ) -> AcceptedNoteChange:
         """Run post-commit relation publication and expose the accepted response."""
-        await self._publish_relation_generation(result.relation_publication)
+        try:
+            await self._publish_relation_generation(result.relation_publication)
+        except Exception:
+            publication = result.relation_publication
+            # Trigger: derived relation publication fails after accepted content committed.
+            # Why: failing the response would strand file materialization even though the
+            # canonical DB write succeeded; a later index pass can republish the same generation.
+            # Outcome: preserve the accepted change and surface the repairable failure in logs.
+            logger.exception(
+                "Relation publication failed after accepted note commit; continuing "
+                "materialization: entity_id={} generation={}",
+                publication.entity_id if publication is not None else None,
+                publication.generation if publication is not None else None,
+            )
         return result.change
 
     @asynccontextmanager

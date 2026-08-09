@@ -206,7 +206,13 @@ def test_accepted_note_write_repositories_name_persistence_behavior() -> None:
 class _DeleteSession:
     def __init__(self, events: list[tuple[str, int]] | None = None) -> None:
         self.deleted: list[object] = []
+        self.scalar_count = 0
         self.events = events
+
+    async def scalar(self, statement: object) -> int:
+        assert statement is not None
+        self.scalar_count += 1
+        return 42
 
     async def delete(self, entity: object) -> None:
         self.deleted.append(entity)
@@ -1131,6 +1137,7 @@ async def test_delete_accepted_note_plans_cleanup_and_deletes_entity() -> None:
 
     assert search_repository.deleted_entity_ids == [entity.id]
     assert search_repository.deleted_vector_entity_ids == [entity.id]
+    assert session.scalar_count == 1
     assert session.deleted == [entity]
     assert events == [
         ("search", entity.id),

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Protocol
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory import file_utils
@@ -740,6 +741,23 @@ async def delete_accepted_note_entity(
     await session.delete(entity)
 
 
+async def lock_accepted_note_content_for_delete(
+    session: AsyncSession,
+    *,
+    project_id: ProjectId,
+    entity_id: RuntimeEntityId,
+) -> None:
+    """Lock the source generation before deleting its entity and cascaded graph."""
+    await session.scalar(
+        select(NoteContent.entity_id)
+        .where(
+            NoteContent.project_id == project_id,
+            NoteContent.entity_id == entity_id,
+        )
+        .with_for_update()
+    )
+
+
 async def delete_accepted_note(
     session: AsyncSession,
     *,
@@ -755,6 +773,14 @@ async def delete_accepted_note(
         note_content=note_content,
     )
     if entity is not None:
+        if note_content is not None:
+            # Relation publication locks NoteContent before its Entity foreign-key check.
+            # Taking the same order here prevents delete/publication from holding opposite locks.
+            await lock_accepted_note_content_for_delete(
+                session,
+                project_id=project_id,
+                entity_id=entity.id,
+            )
         await delete_accepted_note_search_index(
             session,
             project_id=project_id,

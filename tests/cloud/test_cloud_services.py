@@ -590,6 +590,62 @@ async def test_note_content_mutation_service_publishes_relations_after_commit(mo
 
 
 @pytest.mark.asyncio
+async def test_note_content_mutation_service_continues_after_relation_publication_failure(
+    monkeypatch,
+) -> None:
+    """Derived graph failure cannot suppress the committed change's materialization."""
+    returned = cast(Any, SimpleNamespace(status_code=201, payload={"ok": True}))
+    publication = RelationGenerationPublication(
+        project_id=7,
+        entity_id=42,
+        generation=3,
+        relations=(),
+    )
+
+    class WriteRepositories:
+        def relation_repository(self, project_id: int) -> object:
+            assert project_id == publication.project_id
+            return object()
+
+    dependencies = cast(
+        AcceptedNoteMutationDependencies,
+        SimpleNamespace(write_repositories=WriteRepositories()),
+    )
+
+    async def fake_runner(*args, **kwargs) -> AcceptedNoteMutationResult:
+        _ = args, kwargs
+        return AcceptedNoteMutationResult(
+            change=returned,
+            relation_publication=publication,
+        )
+
+    class FailingPublisher:
+        def __init__(self, *, relation_repository: object, session_maker: object) -> None:
+            assert relation_repository is not None
+            assert session_maker is not None
+
+        async def publish(self, **kwargs: object) -> bool:
+            assert kwargs["entity_id"] == publication.entity_id
+            raise RuntimeError("relation publication unavailable")
+
+    monkeypatch.setattr(note_content_writes, "run_accepted_note_create", fake_runner)
+    monkeypatch.setattr(note_content_writes, "RelationGenerationPublisher", FailingPublisher)
+    service = NoteContentMutationService(
+        session_maker=cast(async_sessionmaker[AsyncSession], FakeSessionMaker()),
+        mutation_dependencies=dependencies,
+    )
+
+    accepted = await service.create_note(
+        project_external_id="project-123",
+        data=EntitySchema(title="Created", directory="notes", content="# Created"),
+        user_profile_id=None,
+        source="api",
+    )
+
+    assert accepted is returned
+
+
+@pytest.mark.asyncio
 async def test_note_content_mutation_service_uses_injected_actor_resolver(monkeypatch) -> None:
     """A runtime adapter can replace route-passed actor values with its own
     request-derived identity without subclassing the service."""
