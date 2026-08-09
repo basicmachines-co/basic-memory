@@ -98,6 +98,27 @@ For example, prefer separate `Completed(result)` and `Failed(reason)` values joi
 - Keep file mutations centralized through the existing file utilities/services so checksum,
   atomic write, and index synchronization behavior stays coherent.
 
+## Database Writes And Concurrency
+
+- Let the database arbitrate ordinary write contention. Express idempotency and uniqueness with
+  constraints plus `INSERT ... ON CONFLICT DO NOTHING` or `DO UPDATE`, and return an explicit
+  inserted, existing, or updated outcome when callers need to distinguish them.
+- Use optimistic concurrency for replacement semantics: compare a checksum, version, or
+  generation in the write itself, then treat a mismatch as an expected conflict that can be
+  retried, surfaced, or reconciled.
+- Avoid `SELECT ... FOR UPDATE`, advisory locks, and other pessimistic application locking unless
+  constraints, upserts, and optimistic compare-and-swap cannot preserve a named invariant.
+  When a lock is truly necessary, document that invariant, keep its scope narrow, and prove the
+  lock ordering with a concurrent PostgreSQL regression test.
+- Keep transactions owned by one aggregate or work item. Do not hold one entity lock while
+  resolving or updating unrelated entities; move cross-entity projections and relation
+  resolution into separate idempotent work.
+- Prefer eventual consistency with observable, retryable reconciliation over a synchronous
+  multi-entity transaction that can deadlock. A temporarily unresolved relation is safer than a
+  failed note write or an indexing job that exhausts its retries.
+- When a deadlock occurs, inspect the transaction and foreign-key lock graph first. Sorting one
+  batch, adding a broader lock, or retrying the same pessimistic design is not a root-cause fix.
+
 ## Local Reasoning And Abstraction Budget
 
 - Keep a straightforward workflow together when reading it top-to-bottom is clearer than
