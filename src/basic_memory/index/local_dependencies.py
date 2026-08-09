@@ -292,7 +292,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
         source: str,
     ) -> FileIndexResult:
         """Read, persist, search-index, and reconcile one markdown file."""
-        logger.info(f"Indexing markdown file: {file_path}")
+        logger.info("Indexing markdown file: {}", file_path)
 
         async with db.scoped_session(self.session_maker) as session:
             existing = await self.entity_repository.get_by_file_path(
@@ -343,7 +343,8 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             )
 
         logger.info(
-            f"Indexed markdown file: {file_path}",
+            "Indexed markdown file: {}",
+            file_path,
             entity_id=synced.entity.id,
             checksum=synced.checksum,
             operation=operation,
@@ -367,7 +368,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
         source: str,
     ) -> FileIndexResult:
         """Read, persist, and search-index one regular file entity."""
-        logger.info(f"Indexing regular file: {file_path}", source=source)
+        logger.info("Indexing regular file: {}", file_path, source=source)
 
         async with db.scoped_session(self.session_maker) as session:
             existing = await self.entity_repository.get_by_file_path(
@@ -411,7 +412,8 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
 
         entity = refreshed_entities[0]
         logger.info(
-            f"Indexed regular file: {file_path}",
+            "Indexed regular file: {}",
+            file_path,
             entity_id=entity.id,
             checksum=indexed.checksum,
             operation=operation,
@@ -436,7 +438,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
         refresh_unchanged_derived_state: bool,
     ) -> SyncedMarkdownFile:
         """Index the current local markdown bytes and return canonical file state."""
-        logger.debug(f"Parsing markdown file, path: {path}, new: {new}")
+        logger.debug("Parsing markdown file, path: {}, new: {}", path, new)
 
         try:
             initial_markdown_bytes = await self.file_service.read_file_bytes(path)
@@ -473,8 +475,10 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
                 )
 
             logger.debug(
-                f"Markdown index skipped unchanged file: path={path}, "
-                f"entity_id={existing_entity.id}, checksum={initial_checksum[:8]}"
+                "Markdown index skipped unchanged file: path={}, entity_id={}, checksum={}",
+                path,
+                existing_entity.id,
+                initial_checksum[:8],
             )
             return SyncedMarkdownFile(
                 entity=existing_entity,
@@ -506,8 +510,10 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
     ) -> SyncedMarkdownFile:
         """Refresh derived DB/search state for a markdown file with unchanged bytes."""
         logger.debug(
-            f"Markdown index refreshing unchanged derived state: path={input_file.path}, "
-            f"entity_id={existing_entity.id}, checksum={input_file.checksum[:8] if input_file.checksum else None}"
+            "Markdown index refreshing unchanged derived state: path={}, entity_id={}, checksum={}",
+            input_file.path,
+            existing_entity.id,
+            input_file.checksum[:8] if input_file.checksum else None,
         )
         indexed = await self.batch_indexer.index_markdown_file(
             input_file,
@@ -580,9 +586,13 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             )
 
         logger.debug(
-            f"Markdown index completed: path={input_file.path}, entity_id={updated_entity.id}, "
-            f"observation_count={len(updated_entity.observations)}, "
-            f"relation_count={len(updated_entity.relations)}, checksum={indexed.checksum[:8]}"
+            "Markdown index completed: path={}, entity_id={}, observation_count={}, "
+            "relation_count={}, checksum={}",
+            input_file.path,
+            updated_entity.id,
+            len(updated_entity.observations),
+            len(updated_entity.relations),
+            indexed.checksum[:8],
         )
         return SyncedMarkdownFile(
             entity=updated_entity,

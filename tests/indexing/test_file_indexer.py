@@ -7,6 +7,7 @@ from typing import cast
 from unittest.mock import ANY, AsyncMock, Mock
 
 import pytest
+from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.indexing.file_indexer import (
@@ -231,9 +232,12 @@ async def test_file_indexer_indexes_existing_markdown_file() -> None:
 
 @pytest.mark.asyncio
 async def test_file_indexer_reindexes_current_file_after_anchor_becomes_stale() -> None:
-    """A stale pass must repair derived state from the current file before succeeding."""
+    """A stale pass must retry and log brace-bearing customer identity safely."""
+    file_path = "notes/{AG} Plan.md"
     existing_entity = _entity(entity_id=7, checksum="older-checksum")
+    existing_entity.title = "{AG} Plan"
     current_entity = _entity(entity_id=7, checksum="current-checksum")
+    current_entity.title = "{AG} Plan"
     stale_file = _synced_file(entity=existing_entity)
     current_file = _synced_file(entity=current_entity, checksum="current-checksum")
 
@@ -251,11 +255,26 @@ async def test_file_indexer_reindexes_current_file_after_anchor_becomes_stale() 
     ]
     note_content_reconciler.reconcile.side_effect = ["stale", "current"]
 
-    result = await file_indexer.index_markdown_file("notes/note.md")
+    rendered_messages: list[str] = []
+    sink_id = logger.add(
+        lambda message: rendered_messages.append(str(message).strip()),
+        format="{message}",
+        level="INFO",
+    )
+    try:
+        result = await file_indexer.index_markdown_file(file_path, bound_logger=logger)
+    finally:
+        logger.remove(sink_id)
 
     assert markdown_indexer.index_current_markdown_file.await_count == 2
     assert note_content_reconciler.capture_anchor.await_args_list[0].args == (7,)
     assert note_content_reconciler.capture_anchor.await_args_list[1].args == (7,)
+    assert f"Retrying markdown index after concurrent accepted note write: {file_path}" in (
+        rendered_messages
+    )
+    assert f"Indexed markdown file: {file_path}" in rendered_messages
+    assert result.file_path == file_path
+    assert result.title == "{AG} Plan"
     assert result.checksum == "current-checksum"
 
 
@@ -362,7 +381,7 @@ async def test_file_indexer_reports_refreshed_derived_counts_after_unchanged_rep
 
     assert result.entity_id == refreshed_entity.id
     final_log = bound_logger.info.call_args_list[-1]
-    assert final_log.args == ("Indexed markdown file: notes/note.md",)
+    assert final_log.args == ("Indexed markdown file: {}", "notes/note.md")
     assert final_log.kwargs["observation_count"] == 2
     assert final_log.kwargs["relation_count"] == 1
 
