@@ -42,6 +42,7 @@ from basic_memory.indexing.models import (
     IndexFileJobStatus,
     IndexInputFile,
     IndexedEntity,
+    IndexedRelation,
     IndexingBatchResult,
 )
 from basic_memory.indexing.project_index_coordinator import (
@@ -58,6 +59,7 @@ from basic_memory.indexing.relation_resolution import (
     ResolvedRelationTarget,
     UnresolvedRelation,
 )
+from basic_memory.indexing.relation_persistence import RelationGenerationPublisher
 from basic_memory.models import Entity, Project, Relation
 from basic_memory.repository import EntityRepository
 from basic_memory.repository.note_content_repository import (
@@ -1722,6 +1724,7 @@ async def test_local_relation_resolution_refreshes_pending_source_without_markdo
     test_project: Project,
     project_config,
     entity_repository,
+    relation_repository,
     session_maker: async_sessionmaker[AsyncSession],
     search_service,
     config_manager,
@@ -1780,12 +1783,13 @@ async def test_local_relation_resolution_refreshes_pending_source_without_markdo
                 "updated_at": accepted_at,
             },
         )
+        accepted_generation = current_note_content.db_version + 1
         await note_content_repository.accept_write(
             session,
             AcceptedNoteContentWrite(
                 entity_id=source.id,
                 markdown_content=accepted_markdown,
-                db_version=current_note_content.db_version + 1,
+                db_version=accepted_generation,
                 db_checksum=accepted_checksum,
                 last_source="test",
                 updated_at=accepted_at,
@@ -1793,6 +1797,22 @@ async def test_local_relation_resolution_refreshes_pending_source_without_markdo
         )
         source_id = source.id
         target_id = target.id
+
+    generation_is_current = await RelationGenerationPublisher(
+        relation_repository=relation_repository,
+        session_maker=session_maker,
+    ).publish(
+        entity_id=source_id,
+        generation=accepted_generation,
+        relations=(
+            IndexedRelation(
+                relation_type="relates_to",
+                target_name="Pending Target",
+                context=None,
+            ),
+        ),
+    )
+    assert generation_is_current
 
     # The accepted database state is durable, but its Markdown projection is
     # intentionally absent when relation resolution refreshes the source.

@@ -39,6 +39,7 @@ from basic_memory.repository import EntityRepository, RelationRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.runtime.storage import (
+    ProjectId,
     RUNTIME_MARKDOWN_CONTENT_TYPE,
     runtime_file_path_is_markdown_note,
 )
@@ -115,6 +116,7 @@ class BatchIndexer:
     def __init__(
         self,
         *,
+        project_id: ProjectId,
         app_config: BasicMemoryConfig,
         entity_service: EntityService,
         entity_repository: EntityRepository,
@@ -138,9 +140,7 @@ class BatchIndexer:
             session_maker=session_maker,
             relation_repository=relation_repository,
             entity_repository=entity_repository,
-            note_content_repository=NoteContentRepository(
-                project_id=relation_repository.project_id
-            ),
+            note_content_repository=NoteContentRepository(project_id=project_id),
             target_resolver=BulkLinkResolver(
                 entity_repository=entity_repository,
                 app_config=app_config,

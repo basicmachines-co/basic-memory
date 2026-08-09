@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
+from hashlib import sha256
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +11,10 @@ from basic_memory import db
 from basic_memory.indexing.relation_resolution import RepositoryRelationResolutionRuntime
 from basic_memory.models import Entity, Relation, RelationSearchRefresh
 from basic_memory.repository.entity_repository import EntityRepository
-from basic_memory.repository.note_content_repository import NoteContentRepository
+from basic_memory.repository.note_content_repository import (
+    AcceptedNoteContentWrite,
+    NoteContentRepository,
+)
 from basic_memory.repository.relation_repository import RelationRepository
 from basic_memory.schemas.search import SearchItemType
 
@@ -75,7 +79,7 @@ async def test_clearing_observed_refresh_preserves_newer_work(
 
 
 @pytest.mark.asyncio
-async def test_relation_refresh_retries_after_storage_read_failure_and_runtime_restart(
+async def test_relation_refresh_retries_after_search_write_failure_and_runtime_restart(
     entity_repository: EntityRepository,
     relation_repository: RelationRepository,
     search_service,
@@ -85,6 +89,8 @@ async def test_relation_refresh_retries_after_storage_read_failure_and_runtime_r
 ) -> None:
     """Committed relation work survives a failed refresh and a new runtime instance."""
     now = datetime.now(timezone.utc)
+    source_content = "# Retry Source\n\nThe last valid search projection."
+    source_checksum = sha256(source_content.encode("utf-8")).hexdigest()
     source = Entity(
         project_id=test_project.id,
         title="Retry Source",
@@ -108,6 +114,17 @@ async def test_relation_refresh_retries_after_storage_read_failure_and_runtime_r
     async with db.scoped_session(session_maker) as session:
         session.add_all([source, target])
         await session.flush()
+        await NoteContentRepository(project_id=test_project.id).accept_write(
+            session,
+            AcceptedNoteContentWrite(
+                entity_id=source.id,
+                markdown_content=source_content,
+                db_version=1,
+                db_checksum=source_checksum,
+                last_source="test",
+                updated_at=now,
+            ),
+        )
         session.add(
             Relation(
                 project_id=test_project.id,
@@ -115,6 +132,7 @@ async def test_relation_refresh_retries_after_storage_read_failure_and_runtime_r
                 to_id=None,
                 to_name=target.title,
                 relation_type="relates_to",
+                generation=1,
             )
         )
         await session.flush()
@@ -124,20 +142,28 @@ async def test_relation_refresh_retries_after_storage_read_failure_and_runtime_r
     async with db.scoped_session(session_maker) as session:
         indexed_source = await entity_repository.find_by_id(session, source_id)
     assert indexed_source is not None
-    source_content = "# Retry Source\n\nThe last valid search projection."
     await search_service.index_entity_data(indexed_source, content=source_content)
 
-    read_attempts = 0
+    refresh_attempts = 0
+    original_index_entities = search_service.index_entities
 
-    async def fail_once_read(entity: Entity) -> str:
-        nonlocal read_attempts
-        assert entity.id == source_id
-        read_attempts += 1
-        if read_attempts == 1:
-            raise OSError("transient object-storage read failure")
-        return source_content
+    async def fail_once_index_entities(
+        entities: Sequence[Entity],
+        *,
+        content_by_entity_id: Mapping[int, str],
+    ) -> None:
+        nonlocal refresh_attempts
+        assert [entity.id for entity in entities] == [source_id]
+        assert content_by_entity_id == {source_id: source_content}
+        refresh_attempts += 1
+        if refresh_attempts == 1:
+            raise OSError("transient search refresh failure")
+        await original_index_entities(
+            entities,
+            content_by_entity_id=content_by_entity_id,
+        )
 
-    monkeypatch.setattr(search_service.file_service, "read_entity_content", fail_once_read)
+    monkeypatch.setattr(search_service, "index_entities", fail_once_index_entities)
     first_resolver = StaticLinkResolver({target.title: target})
     first_runtime = RepositoryRelationResolutionRuntime(
         session_maker=session_maker,
@@ -148,7 +174,7 @@ async def test_relation_refresh_retries_after_storage_read_failure_and_runtime_r
         entity_indexer=search_service,
     )
 
-    with pytest.raises(OSError, match="transient object-storage read failure"):
+    with pytest.raises(OSError, match="transient search refresh failure"):
         await first_runtime.resolve_relations()
 
     async with db.scoped_session(session_maker) as session:
@@ -188,7 +214,7 @@ async def test_relation_refresh_retries_after_storage_read_failure_and_runtime_r
 
     assert affected == {source_id}
     assert retry_resolver.calls == 0
-    assert read_attempts == 2
+    assert refresh_attempts == 2
     async with db.scoped_session(session_maker) as session:
         remaining_refreshes = await relation_repository.list_pending_search_refreshes(session)
     assert remaining_refreshes == []

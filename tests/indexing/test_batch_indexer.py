@@ -54,6 +54,7 @@ def _make_batch_indexer(
     app_config, entity_service, entity_repository, relation_repository, search_service, file_service
 ) -> BatchIndexer:
     return BatchIndexer(
+        project_id=relation_repository.project_id,
         app_config=app_config,
         entity_service=entity_service,
         entity_repository=entity_repository,

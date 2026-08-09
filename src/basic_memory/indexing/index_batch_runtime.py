@@ -162,6 +162,7 @@ def build_default_index_batch_runtime[FileInfoT: LoadedIndexFile](
     # Wrapping it in a markdown-only filter here regressed full/startup scans:
     # non-markdown files were persisted but never added to the search index.
     batch_indexer = BatchIndexer(
+        project_id=project_id,
         app_config=app_config,
         entity_service=entity_service,
         entity_repository=entity_repository,

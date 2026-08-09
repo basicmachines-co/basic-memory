@@ -714,6 +714,7 @@ async def build_local_index_project_dependencies(
         app_config=app_config,
     )
     batch_indexer = BatchIndexer(
+        project_id=project.id,
         app_config=app_config,
         entity_service=entity_service,
         entity_repository=entity_repository,

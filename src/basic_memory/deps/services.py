@@ -283,6 +283,7 @@ async def get_index_file_executor_v2_external(
         raise RuntimeError("Index file executor requires a project-scoped entity repository")
 
     batch_indexer = BatchIndexer(
+        project_id=project_id,
         app_config=app_config,
         entity_service=entity_service,
         entity_repository=entity_repository,
