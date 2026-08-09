@@ -104,10 +104,15 @@ def test_setup_logging_survives_a_stale_log_deleted_mid_cleanup(monkeypatch, tmp
 
     vanishing = log_dir / "basic-memory-1003.log"
     real_stat = Path.stat
+    already_deleted = False
 
     def stat_with_a_racing_deletion(self: Path, *args: Any, **kwargs: Any) -> Any:
         # Stand in for another launch pruning the same shared directory between the glob and the stat.
-        if self == vanishing and vanishing.exists():
+        # A one-shot flag rather than an existence check: Path.exists() is implemented by calling stat(),
+        # which is the method being patched here, so asking it would recurse.
+        nonlocal already_deleted
+        if self == vanishing and not already_deleted:
+            already_deleted = True
             vanishing.unlink()
         return real_stat(self, *args, **kwargs)
 
