@@ -44,6 +44,7 @@ else
 fi
 """,
         encoding="utf-8",
+        newline="\n",
     )
     gh_path.chmod(0o755)
 
@@ -60,7 +61,8 @@ fi
         }
     )
     result = subprocess.run(
-        [str(TRIAGE_SCRIPT), *arguments],
+        # Windows cannot execute a POSIX script directly; hosted runners provide Git Bash.
+        ["bash", str(TRIAGE_SCRIPT), *arguments],
         cwd=REPO_ROOT,
         env=env,
         check=False,
