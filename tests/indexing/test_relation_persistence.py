@@ -81,6 +81,7 @@ async def test_relation_generation_publisher_commits_sorted_chunks_before_cleanu
             relation_type="links_to",
             target_name=f"Target {index:03d}",
             context=None,
+            target_id=42 if index == 0 else None,
         )
         for index in reversed(range(251))
     ]
@@ -101,6 +102,13 @@ async def test_relation_generation_publisher_commits_sorted_chunks_before_cleanu
         for relation in relation_chunk
     ]
     assert published_names == sorted(published_names)
+    published_targets = [
+        relation.target_id
+        for operation, _, relation_chunk in store.calls
+        if operation == "upsert"
+        for relation in relation_chunk
+    ]
+    assert published_targets.count(42) == 1
     assert len(sessions) == 3
     assert len({id(session) for session in sessions}) == 3
 
@@ -141,3 +149,22 @@ async def test_relation_generation_publisher_stops_when_source_fence_is_stale(
     assert not generation_is_current
     assert [call[0] for call in store.calls] == ["upsert"]
     assert transaction_count == 1
+
+
+@pytest.mark.asyncio
+async def test_relation_generation_publisher_rejects_non_self_pre_resolved_target() -> None:
+    """Ordinary targets remain resolver-owned even when a caller supplies an ID."""
+    store = RecordingRelationGenerationStore()
+    publisher = RelationGenerationPublisher(
+        relation_repository=store,
+        session_maker=cast(async_sessionmaker[AsyncSession], object()),
+    )
+
+    with pytest.raises(ValueError, match="Only the source entity"):
+        await publisher.publish(
+            entity_id=42,
+            generation=7,
+            relations=[IndexedRelation("links_to", "Target", None, target_id=99)],
+        )
+
+    assert store.calls == []

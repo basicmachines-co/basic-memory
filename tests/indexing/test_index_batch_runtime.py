@@ -42,6 +42,22 @@ class FakeFileInfo:
     content: bytes | None
 
 
+@dataclass(frozen=True, slots=True)
+class FixedReconcileFileReader:
+    """Expose a rewritten file snapshot at the reconciliation boundary."""
+
+    content: bytes
+    last_modified: datetime | None
+
+    async def get_file(self, path: str) -> FakeFileInfo:
+        return FakeFileInfo(
+            size=len(self.content),
+            checksum=f"reread-{path}",
+            last_modified=self.last_modified,
+            content=self.content,
+        )
+
+
 class PathContentTypeProvider:
     def content_type(self, path: str) -> str:
         if path.endswith(".md"):
@@ -263,6 +279,68 @@ async def test_index_batch_runtime_indexes_loaded_files_and_reconciles_note_cont
     assert result.relations_resolved == 2
     assert result.relations_unresolved == 3
     assert result.search_indexed == 2
+
+
+@pytest.mark.asyncio
+async def test_rewrite_between_scan_and_reconcile_publishes_no_stale_relations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fresh content claim never stamps relations parsed from older scan bytes."""
+    observed_at = datetime(2026, 6, 19, 12, 0, tzinfo=UTC)
+    session = cast(AsyncSession, object())
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    repository = FakeEntityRepository(entities=[FakeEntity(id=10)])
+    reconciler = RecordingNoteContentReconciler()
+    batch_indexer = RecordingBatchIndexer(
+        result=IndexingBatchResult(
+            indexed=[
+                IndexedEntity(
+                    path="rewritten.md",
+                    entity_id=10,
+                    permalink="rewritten",
+                    checksum="scan-checksum",
+                    content_type="text/markdown",
+                    markdown_content="# Scan snapshot\n- links_to [[Old Target]]\n",
+                )
+            ]
+        )
+    )
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[AsyncSession]:
+        assert scoped_session_maker is session_maker
+        yield session
+
+    monkeypatch.setattr(batch_reconciliation_module.db, "scoped_session", fake_scoped_session)
+    rewritten_content = b"# Rewritten snapshot\n- links_to [[New Target]]\n"
+    runtime = IndexBatchRuntime(
+        batch_indexer=batch_indexer,
+        content_type_provider=PathContentTypeProvider(),
+        entity_repository=repository,
+        session_maker=session_maker,
+        note_content_reconciler=reconciler,
+        timestamp_provider=recording_indexed_note_content_timestamps,
+        file_reader=FixedReconcileFileReader(rewritten_content, observed_at),
+    )
+
+    await runtime.index_loaded_files(
+        {
+            "rewritten.md": FakeFileInfo(
+                size=1,
+                checksum="scan-checksum",
+                last_modified=observed_at,
+                content=b"scan bytes are already parsed by the fake indexer",
+            )
+        },
+        max_concurrent=1,
+    )
+
+    assert reconciler.calls == [
+        (FakeEntity(id=10), rewritten_content.decode(), observed_at, "index")
+    ]
+    assert batch_indexer.published_generation_by_entity_id == {}
 
 
 def test_count_search_indexed_entities_uses_markdown_content_presence() -> None:

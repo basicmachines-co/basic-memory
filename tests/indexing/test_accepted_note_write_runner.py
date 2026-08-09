@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from hashlib import sha256
 from pathlib import Path
@@ -325,6 +325,23 @@ class _MovePreparer:
         destination_file_path: str,
     ) -> None:
         return None
+
+
+@dataclass(slots=True)
+class _SelfRelationResolver:
+    """Resolve the exact self-link names selected by one focused test."""
+
+    resolved_names: set[str] = field(default_factory=set)
+    calls: list[tuple[str, Entity, AsyncSession | None]] = field(default_factory=list)
+
+    async def resolve_deferred_self_relation(
+        self,
+        target: str,
+        entity: Entity,
+        session: AsyncSession | None = None,
+    ) -> Entity | None:
+        self.calls.append((target, entity, session))
+        return entity if target in self.resolved_names else None
 
 
 def _unexpected_pending_entity_repository(_project_id: int) -> _PendingEntityRepository:
@@ -959,6 +976,7 @@ async def test_persist_accepted_note_snapshot_emits_relation_generation() -> Non
         observations=(observation,),
         relations=(relation,),
     )
+    self_relation_resolver = _SelfRelationResolver()
 
     result = await persist_accepted_note_snapshot(
         session,
@@ -971,6 +989,7 @@ async def test_persist_accepted_note_snapshot_emits_relation_generation() -> Non
         existing_file_path="notes/old.md",
         accepted_file_path="notes/new.md",
         source_file_checksum="db-checksum",
+        self_relation_resolver=self_relation_resolver,
         repositories=_repository_provider(
             note_content_repository=content_repository,
             search_repository=search_repository,
@@ -1010,6 +1029,8 @@ async def test_persist_accepted_note_snapshot_emits_relation_generation() -> Non
     assert result.relation_publication.generation == 5
     assert result.relation_publication.relations[0].relation_type == "documents"
     assert result.relation_publication.relations[0].target_name == "Another Note"
+    assert result.relation_publication.relations[0].target_id is None
+    assert self_relation_resolver.calls == [("Another Note", entity, session)]
 
 
 @pytest.mark.asyncio
@@ -1047,6 +1068,7 @@ async def test_persist_accepted_note_move_emits_relation_generation() -> None:
         updated_at=datetime(2026, 6, 19, 14, 0, tzinfo=UTC),
         current_note_content=current_note_content,
         existing_file_path="notes/old.md",
+        self_relation_resolver=_SelfRelationResolver(),
         repositories=_repository_provider(
             note_content_repository=content_repository,
             search_repository=search_repository,
@@ -1132,8 +1154,8 @@ async def test_delete_accepted_note_plans_cleanup_and_deletes_entity() -> None:
 
 
 @pytest.mark.asyncio
-async def test_persist_accepted_note_snapshot_keeps_original_self_relation_name() -> None:
-    """Persistence leaves self-link resolution to the generation-guarded resolver."""
+async def test_persist_accepted_note_snapshot_pre_resolves_unambiguous_self_relation() -> None:
+    """Accepted publication keeps the authored alias and safe self target together."""
     entity = _entity()
     prepared = _prepared(
         markdown_content="# Accepted\n",
@@ -1156,13 +1178,16 @@ async def test_persist_accepted_note_snapshot_keeps_original_self_relation_name(
             )
         ],
     )
+    session = cast(AsyncSession, object())
+    resolver = _SelfRelationResolver(resolved_names={"notes/accepted"})
     result = await persist_accepted_note_snapshot(
-        cast(AsyncSession, object()),
+        session,
         entity=entity,
         prepared=prepared,
         db_checksum="snapshot-checksum",
         last_source="api",
         updated_at=entity.updated_at,
+        self_relation_resolver=resolver,
         repositories=_repository_provider(
             note_content_repository=_NoteContentRepository(_note_content()),
             search_repository=_SearchRepository(),
@@ -1172,6 +1197,8 @@ async def test_persist_accepted_note_snapshot_keeps_original_self_relation_name(
 
     assert result.relation_publication is not None
     assert result.relation_publication.relations[0].target_name == "notes/accepted"
+    assert result.relation_publication.relations[0].target_id == entity.id
+    assert resolver.calls == [("notes/accepted", entity, session)]
 
 
 @pytest.mark.asyncio
@@ -1194,6 +1221,7 @@ async def test_persist_accepted_note_snapshot_emits_empty_relation_generation() 
         db_checksum="snapshot-checksum",
         last_source="api",
         updated_at=entity.updated_at,
+        self_relation_resolver=_SelfRelationResolver(),
         repositories=repositories,
     )
 

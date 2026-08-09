@@ -565,6 +565,46 @@ async def test_upsert_relation_generation_resets_resolver_owned_target(
 
 
 @pytest.mark.asyncio
+async def test_upsert_relation_generation_persists_pre_resolved_self_target(
+    relation_repository: RelationRepository,
+    source_entity: Entity,
+    test_project: Project,
+    session_maker,
+) -> None:
+    """Publication preserves the only target resolved safely from accepted bytes."""
+    await set_note_content_generation(
+        session_maker,
+        source_entity=source_entity,
+        test_project=test_project,
+        generation=1,
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        result = await relation_repository.upsert_relation_generation(
+            session,
+            entity_id=source_entity.id,
+            generation=1,
+            relations=[
+                AcceptedRelationWrite(
+                    relation_type="documents",
+                    target_name=source_entity.file_path,
+                    context=None,
+                    target_id=source_entity.id,
+                )
+            ],
+        )
+
+    assert result.generation_is_current
+    async with db.scoped_session(session_maker) as session:
+        relation = (await relation_repository.find_by_type(session, "documents"))[0]
+        unresolved = await relation_repository.find_unresolved_relations(session)
+
+    assert relation.to_id == source_entity.id
+    assert relation.to_name == source_entity.file_path
+    assert unresolved == []
+
+
+@pytest.mark.asyncio
 async def test_stale_relation_generation_cannot_reinsert_absent_key_or_cleanup_newer_rows(
     relation_repository: RelationRepository,
     source_entity: Entity,

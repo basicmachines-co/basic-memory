@@ -211,12 +211,14 @@ class IndexedNoteContentReconciliationTask[
                 return None
             markdown_content = fresh.content.decode("utf-8")
             observed_at = fresh.last_modified
+            publication_matches_indexed_snapshot = markdown_content == self.indexed.markdown_content
         else:
             markdown_content = self.indexed.markdown_content
             observed_at = self.timestamp_provider(
                 self.indexed,
                 self.file_infos.get(self.indexed.path),
             )
+            publication_matches_indexed_snapshot = True
 
         try:
             result = await self.note_content_reconciler.reconcile(
@@ -226,6 +228,11 @@ class IndexedNoteContentReconciliationTask[
                 source=self.source,
             )
             if result.generation is None:
+                return None
+            # Trigger: local reconciliation observed bytes newer than the parsed scan payload.
+            # Why: a generation must identify the exact bytes that produced its relations.
+            # Outcome: keep the fresh content claim, but withhold stale relation publication.
+            if not publication_matches_indexed_snapshot:
                 return None
             return IndexedNoteContentGeneration(
                 path=self.indexed.path,

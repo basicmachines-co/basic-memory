@@ -1791,15 +1791,23 @@ async def test_run_accepted_note_create_persists_graph_rows() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_accepted_note_create_defers_self_relation_resolution() -> None:
-    """Create preserves original self-link names for resolver-owned backfill."""
+async def test_run_accepted_note_create_pre_resolves_only_unambiguous_self_links() -> None:
+    """Safe self aliases resolve inline while ambiguous title aliases stay deferred."""
     session = cast(AsyncSession, object())
     self_relation = AcceptedRelationWrite(
         relation_type="documents",
         target_name="accepted",
         context=None,
     )
-    prepared = _prepared_with_graph(observations=[], relations=[self_relation])
+    ambiguous_relation = AcceptedRelationWrite(
+        relation_type="mentions",
+        target_name="Accepted",
+        context=None,
+    )
+    prepared = _prepared_with_graph(
+        observations=[],
+        relations=[self_relation, ambiguous_relation],
+    )
     entity = _entity()
     note_content = _note_content(entity)
     preparer = _CreatePreparer(prepared)
@@ -1827,10 +1835,17 @@ async def test_run_accepted_note_create_defers_self_relation_resolution() -> Non
 
     change = result.change
     assert change.status_code == 201
-    assert preparer.self_relation_calls == []
+    assert preparer.self_relation_calls == [
+        ("accepted", entity, session),
+        ("Accepted", entity, session),
+    ]
     assert relation_repository.calls == []
     assert result.relation_publication is not None
-    assert result.relation_publication.relations[0].target_name == "accepted"
+    relations_by_name = {
+        relation.target_name: relation for relation in result.relation_publication.relations
+    }
+    assert relations_by_name["accepted"].target_id == entity.id
+    assert relations_by_name["Accepted"].target_id is None
 
 
 @pytest.mark.asyncio

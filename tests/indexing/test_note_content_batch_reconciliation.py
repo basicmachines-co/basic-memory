@@ -400,7 +400,9 @@ async def test_batch_reader_reconciles_fresh_content_not_scan_snapshot(
         file_reader=reader,
     )
 
-    assert [claim.generation for claim in reconciliation.generations] == [5]
+    # The reread preserved accepted content, but its generation cannot authorize
+    # relations parsed from the older scan snapshot.
+    assert reconciliation.generations == ()
     assert reconciliation.errors == ()
     async with db.scoped_session(session_maker) as session:
         row = await repository.get_by_entity_id(session, sample_entity.id)

@@ -38,11 +38,16 @@ RELATION_GENERATION_WRITE_STATEMENT_SIZE = 250
 
 @dataclass(frozen=True, slots=True)
 class AcceptedRelationWrite:
-    """One unresolved outgoing relation parsed from accepted markdown."""
+    """One outgoing relation parsed from accepted markdown.
+
+    ``target_id`` is reserved for an ambiguity-safe self-link. Other targets
+    stay unresolved so the generation-fenced resolver owns their backfill.
+    """
 
     relation_type: str
     target_name: str
     context: str | None
+    target_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -297,6 +302,7 @@ class RelationRepository(Repository[Relation]):
         desired_relations = union_all(
             *(
                 select(
+                    literal(relation.target_id, type_=Integer).label("to_id"),
                     literal(relation.target_name, type_=String).label("to_name"),
                     literal(relation.relation_type, type_=String).label("relation_type"),
                     literal(relation.context, type_=Text).label("context"),
@@ -313,7 +319,7 @@ class RelationRepository(Repository[Relation]):
             select(
                 literal(self.project_id).label("project_id"),
                 literal(entity_id).label("from_id"),
-                literal(None, type_=Integer).label("to_id"),
+                desired_relations.c.to_id,
                 desired_relations.c.to_name,
                 desired_relations.c.relation_type,
                 desired_relations.c.context,
@@ -343,7 +349,7 @@ class RelationRepository(Repository[Relation]):
             set_={
                 "generation": insert_statement.excluded.generation,
                 "context": insert_statement.excluded.context,
-                "to_id": None,
+                "to_id": insert_statement.excluded.to_id,
             },
             where=Relation.generation < insert_statement.excluded.generation,
         )

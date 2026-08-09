@@ -117,6 +117,17 @@ class AcceptedNoteMovePreparer(Protocol):
     ) -> None: ...
 
 
+class AcceptedNoteSelfRelationResolver(Protocol):
+    """Resolve only ambiguity-safe self-links while accepted bytes are in hand."""
+
+    async def resolve_deferred_self_relation(
+        self,
+        target: str,
+        entity: Entity,
+        session: AsyncSession | None = ...,
+    ) -> Entity | None: ...
+
+
 class AcceptedNoteDeleteEntitySource(RuntimeDeletedNoteFileDeleteEntitySource, Protocol):
     """Entity identity required to delete one accepted note row."""
 
@@ -592,25 +603,41 @@ async def _replace_accepted_note_observations(
     )
 
 
-def accepted_relation_generation_publication(
+async def accepted_relation_generation_publication(
+    session: AsyncSession,
     *,
     entity: Entity,
     note_content: NoteContent,
     relations: Sequence[AcceptedRelationWrite],
+    self_relation_resolver: AcceptedNoteSelfRelationResolver,
 ) -> RelationGenerationPublication:
-    """Carry original target names into resolver-owned relation publication."""
-    return RelationGenerationPublication(
-        project_id=entity.project_id,
-        entity_id=entity.id,
-        generation=note_content.db_version,
-        relations=tuple(
+    """Carry original target names plus ambiguity-safe self targets into publication."""
+    indexed_relations: list[IndexedRelation] = []
+    for relation in relations:
+        target_id = relation.target_id
+        if target_id is None:
+            target = await self_relation_resolver.resolve_deferred_self_relation(
+                relation.target_name,
+                entity,
+                session=session,
+            )
+            target_id = target.id if target is not None else None
+        if target_id is not None and target_id != entity.id:
+            raise ValueError("Accepted relation pre-resolution is restricted to self-links")
+        indexed_relations.append(
             IndexedRelation(
                 relation_type=relation.relation_type,
                 target_name=relation.target_name,
                 context=relation.context,
+                target_id=target_id,
             )
-            for relation in relations
-        ),
+        )
+
+    return RelationGenerationPublication(
+        project_id=entity.project_id,
+        entity_id=entity.id,
+        generation=note_content.db_version,
+        relations=tuple(indexed_relations),
     )
 
 
@@ -626,6 +653,7 @@ async def persist_accepted_note_snapshot(
     existing_file_path: RuntimeFilePath | None = None,
     accepted_file_path: RuntimeFilePath | None = None,
     source_file_checksum: RuntimeFileChecksum | None = None,
+    self_relation_resolver: AcceptedNoteSelfRelationResolver,
     repositories: AcceptedNoteWriteRepositories,
 ) -> AcceptedPersistedNoteWrite:
     """Persist one complete accepted Markdown snapshot in the caller's transaction."""
@@ -652,10 +680,12 @@ async def persist_accepted_note_snapshot(
     return AcceptedPersistedNoteWrite(
         note_content=persisted.note_content,
         previous_file_delete=persisted.previous_file_delete,
-        relation_publication=accepted_relation_generation_publication(
+        relation_publication=await accepted_relation_generation_publication(
+            session,
             entity=entity,
             note_content=persisted.note_content,
             relations=prepared.relations,
+            self_relation_resolver=self_relation_resolver,
         ),
     )
 
@@ -670,6 +700,7 @@ async def persist_accepted_note_move(
     current_note_content: RuntimeAcceptedNoteContentWriteSource,
     existing_file_path: RuntimeFilePath,
     source_file_checksum: RuntimeFileChecksum | None = None,
+    self_relation_resolver: AcceptedNoteSelfRelationResolver,
     repositories: AcceptedNoteWriteRepositories,
 ) -> AcceptedPersistedNoteWrite:
     """Persist the explicitly narrower content/search state for an accepted move."""
@@ -690,10 +721,12 @@ async def persist_accepted_note_move(
     return AcceptedPersistedNoteWrite(
         note_content=persisted.note_content,
         previous_file_delete=persisted.previous_file_delete,
-        relation_publication=accepted_relation_generation_publication(
+        relation_publication=await accepted_relation_generation_publication(
+            session,
             entity=entity,
             note_content=persisted.note_content,
             relations=prepared.relations,
+            self_relation_resolver=self_relation_resolver,
         ),
     )
 

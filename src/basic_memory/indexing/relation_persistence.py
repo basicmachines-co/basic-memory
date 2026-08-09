@@ -67,6 +67,8 @@ class RelationGenerationPublisher:
         """Return whether every statement retained ownership of ``generation``."""
         relations_by_identity: dict[tuple[str, str], IndexedRelation] = {}
         for relation in relations:
+            if relation.target_id is not None and relation.target_id != entity_id:
+                raise ValueError("Only the source entity may be pre-resolved during publication")
             identity = relation.relation_type, relation.target_name
             relations_by_identity.setdefault(identity, relation)
 
@@ -75,6 +77,7 @@ class RelationGenerationPublisher:
                 relation_type=relation.relation_type,
                 target_name=relation.target_name,
                 context=relation.context,
+                target_id=relation.target_id,
             )
             for _, relation in sorted(relations_by_identity.items())
         ]

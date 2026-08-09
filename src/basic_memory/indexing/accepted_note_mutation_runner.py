@@ -18,6 +18,7 @@ from basic_memory.indexing.accepted_note_write_runner import (
     AcceptedNoteMovePreparer,
     AcceptedPreparedNoteWrite,
     AcceptedNoteReplacePreparer,
+    AcceptedNoteSelfRelationResolver,
     AcceptedNoteWriteRepositories,
     create_accepted_pending_entity,
     delete_accepted_note,
@@ -247,6 +248,7 @@ class AcceptedNoteMutationPreparer(
     AcceptedNoteReplacePreparer,
     AcceptedNoteEditPreparer,
     AcceptedNoteMovePreparer,
+    AcceptedNoteSelfRelationResolver,
     Protocol,
 ):
     """Combined Basic Memory prepare capability for accepted note mutations."""
@@ -532,6 +534,7 @@ async def _run_accepted_note_create(
         db_checksum=prepared_write.db_checksum,
         last_source=request.source,
         updated_at=now,
+        self_relation_resolver=preparer,
         repositories=dependencies.write_repositories,
     )
     return AcceptedNoteMutationResult(
@@ -710,6 +713,7 @@ async def _run_accepted_note_update(
         existing_file_path=existing_file_path,
         accepted_file_path=entity.file_path,
         source_file_checksum=vacated_source[1] if vacated_source is not None else None,
+        self_relation_resolver=preparer,
         repositories=dependencies.write_repositories,
     )
     if (
@@ -783,6 +787,7 @@ async def _run_accepted_note_edit(
         updated_at=now,
         current_note_content=current_note_content,
         accepted_file_path=entity.file_path,
+        self_relation_resolver=preparer,
         repositories=dependencies.write_repositories,
     )
     return AcceptedNoteMutationResult(
@@ -884,6 +889,7 @@ async def _run_accepted_note_move(
         current_note_content=current_note_content,
         existing_file_path=existing_file_path,
         source_file_checksum=vacated_source_checksum,
+        self_relation_resolver=preparer,
         repositories=dependencies.write_repositories,
     )
     # Trigger: storage confirms which source bytes this move vacated.

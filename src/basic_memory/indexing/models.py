@@ -111,6 +111,7 @@ class IndexedRelation:
     relation_type: str
     target_name: str
     context: str | None
+    target_id: int | None = None
 
 
 @dataclass(slots=True)
