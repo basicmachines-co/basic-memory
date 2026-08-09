@@ -13,9 +13,13 @@ from basic_memory.indexing.relation_resolution import (
     RelationResolutionNoteContent,
     RepositoryRelationResolutionRuntime,
 )
-from basic_memory.models import Entity, Relation
+from basic_memory.models import Entity, NoteContent
 from basic_memory.repository.entity_repository import EntityRepository
-from basic_memory.repository.relation_repository import RelationRepository
+from basic_memory.repository.relation_repository import (
+    AcceptedRelationWrite,
+    RELATION_GENERATION_WRITE_STATEMENT_SIZE,
+    RelationRepository,
+)
 from basic_memory.services.bulk_link_resolver import BulkLinkResolver
 
 
@@ -93,15 +97,27 @@ async def test_postgres_ten_thousand_targets_use_a_bounded_query_budget(
                 project_id=project_id,
             ),
         )
-        for start in range(0, 10_000, 1_000):
-            await relation_repository.add_all_ignore_duplicates(
+        session.add(
+            NoteContent(
+                entity_id=source.id,
+                project_id=project_id,
+                external_id=source.external_id,
+                file_path=source.file_path,
+                markdown_content="# Relation Resolution Source\n",
+                db_version=1,
+                db_checksum="source-generation-1",
+                file_write_status="synced",
+            )
+        )
+        await session.flush()
+        for start in range(0, 10_000, RELATION_GENERATION_WRITE_STATEMENT_SIZE):
+            result = await relation_repository.upsert_relation_generation(
                 session,
-                [
-                    Relation(
-                        project_id=project_id,
-                        from_id=source.id,
-                        to_id=None,
-                        to_name=(
+                entity_id=source.id,
+                generation=1,
+                relations=[
+                    AcceptedRelationWrite(
+                        target_name=(
                             target.title
                             if target_index == 0
                             else f"Missing Target {target_index:05d}"
@@ -109,9 +125,13 @@ async def test_postgres_ten_thousand_targets_use_a_bounded_query_budget(
                         relation_type="related_to",
                         context=None,
                     )
-                    for target_index in range(start, start + 1_000)
+                    for target_index in range(
+                        start,
+                        start + RELATION_GENERATION_WRITE_STATEMENT_SIZE,
+                    )
                 ],
             )
+            assert result.generation_is_current
 
     entity_indexer = RecordingEntityIndexer()
     runtime = RepositoryRelationResolutionRuntime(

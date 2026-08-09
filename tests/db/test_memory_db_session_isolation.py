@@ -59,7 +59,7 @@ async def test_concurrent_session_rollback_does_not_destroy_uncommitted_writes()
         write_in_flight = asyncio.Event()
 
         async def writer() -> None:
-            # Mirrors RelationRepository.add_all_ignore_duplicates: INSERT executed,
+            # Mirrors relation-generation publication: INSERT executed,
             # commit only happens at scoped_session exit several awaits later.
             async with db.scoped_session(session_maker) as session:
                 await session.execute(
