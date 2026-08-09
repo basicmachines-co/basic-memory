@@ -969,7 +969,7 @@ async def test_relation_publication_search_failure_leaves_retry_marker(
     path = "notes/retry-relation-search.md"
     await _create_file(
         project_config.home / path,
-        "# Retry Relation Search\n",
+        "# Retry Relation Search\n\n- [note] Exact observation snapshot\n",
     )
     batch_indexer = _make_batch_indexer(
         app_config,
@@ -1009,9 +1009,17 @@ async def test_relation_publication_search_failure_leaves_retry_marker(
             entity_id=indexed.entity_id,
         )
     assert [refresh.entity_id for refresh in pending_after_failure] == [indexed.entity_id]
+    async with db.scoped_session(search_service.session_maker) as session:
+        note_content = await NoteContentRepository(
+            project_id=relation_repository.project_id
+        ).get_by_entity_id(session, indexed.entity_id)
+    assert note_content is not None
 
     monkeypatch.setattr(search_service, "index_entity_data", original_index_entity_data)
-    await batch_indexer.refresh_indexed_entity_search(indexed)
+    await batch_indexer.refresh_indexed_entity_search(
+        indexed,
+        generation=note_content.db_version,
+    )
 
     async with db.scoped_session(search_service.session_maker) as session:
         pending_after_retry = await relation_repository.list_pending_search_refreshes(
@@ -1019,6 +1027,81 @@ async def test_relation_publication_search_failure_leaves_retry_marker(
             entity_id=indexed.entity_id,
         )
     assert pending_after_retry == []
+
+
+@pytest.mark.asyncio
+async def test_relation_search_refresh_skips_superseded_publication_generation(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+    monkeypatch,
+):
+    """Generation N must not refresh search from its payload after N+1 is accepted."""
+    path = "notes/superseded-relation-search.md"
+    await _create_file(project_config.home / path, "# Generation N\n")
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+    indexed = await batch_indexer.index_markdown_file(
+        await _load_input(file_service, path),
+        index_search=False,
+        resolve_relations=False,
+    )
+    async with db.scoped_session(search_service.session_maker) as session:
+        entities = await entity_repository.find_by_ids(session, [indexed.entity_id])
+    assert len(entities) == 1
+
+    reconciler = NoteContentReconciler(
+        note_content_repository=NoteContentRepository(
+            project_id=relation_repository.project_id,
+        ),
+        session_maker=search_service.session_maker,
+    )
+    generation_n = await reconciler.reconcile(
+        entity=entities[0],
+        markdown_content=indexed.markdown_content or "",
+        observed_at=datetime.now(tz=UTC),
+        source="test",
+    )
+    assert generation_n.generation is not None
+    assert await batch_indexer.publish_relation_generation(
+        indexed,
+        generation=generation_n.generation,
+    )
+
+    generation_n_plus_one = await reconciler.reconcile(
+        entity=entities[0],
+        markdown_content="# Generation N+1\n",
+        observed_at=datetime.now(tz=UTC),
+        source="test",
+    )
+    assert generation_n_plus_one.generation == generation_n.generation + 1
+
+    search_write = AsyncMock(side_effect=AssertionError("superseded refresh must be terminal"))
+    monkeypatch.setattr(search_service, "index_entity_data", search_write)
+
+    refreshed = await batch_indexer.refresh_indexed_entity_search(
+        indexed,
+        generation=generation_n.generation,
+    )
+
+    assert refreshed is indexed
+    search_write.assert_not_awaited()
+    async with db.scoped_session(search_service.session_maker) as session:
+        pending = await relation_repository.list_pending_search_refreshes(
+            session,
+            entity_id=indexed.entity_id,
+        )
+    assert [refresh.entity_id for refresh in pending] == [indexed.entity_id]
 
 
 @pytest.mark.asyncio

@@ -174,7 +174,7 @@ async def test_write_unicode_content(tmp_path: Path, file_service: FileService):
 async def test_update_frontmatter_checksum_matches_windows_crlf_persisted_bytes(
     tmp_path: Path, file_service: FileService, monkeypatch
 ):
-    """Windows-style CRLF writes should hash the stored file, not the pre-write string."""
+    """Windows-style CRLF writes return the exact payload and hash that reached disk."""
     test_path = tmp_path / "note.md"
     test_path.write_text("# Note\nBody\n", encoding="utf-8")
 
@@ -196,6 +196,8 @@ async def test_update_frontmatter_checksum_matches_windows_crlf_persisted_bytes(
     )
 
     assert result.checksum == await file_service.compute_checksum(test_path)
+    assert result.content.encode("utf-8") == test_path.read_bytes()
+    assert "\r\n" in result.content
     with pytest.raises(FrozenInstanceError):
         setattr(result, "checksum", "changed")
 

@@ -468,7 +468,10 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
                 max_concurrent=1,
             )
         if generation_is_current:
-            await self.batch_indexer.refresh_indexed_entity_search(indexed)
+            await self.batch_indexer.refresh_indexed_entity_search(
+                indexed,
+                generation=generation,
+            )
         return generation_is_current
 
     async def index_current_markdown_file(

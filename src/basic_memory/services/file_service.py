@@ -29,7 +29,7 @@ from loguru import logger
 
 @dataclass(frozen=True, slots=True)
 class FrontmatterUpdateResult:
-    """Final content emitted by a frontmatter rewrite without a follow-up reread."""
+    """Exact persisted UTF-8 content and checksum from a frontmatter rewrite."""
 
     checksum: str
     content: str
@@ -504,21 +504,21 @@ class FileService:
             await file_utils.write_file_atomic(full_path, final_content)
 
             # Format file if configured
-            content_for_checksum = final_content
             if self.app_config:
-                formatted_content = await file_utils.format_file(
+                await file_utils.format_file(
                     full_path, self.app_config, is_markdown=self.is_markdown(path)
                 )
-                if formatted_content is not None:
-                    content_for_checksum = formatted_content  # pragma: no cover
 
             # Trigger: frontmatter normalization may persist bytes that differ from the
             # in-memory string because of formatter output or platform newline handling.
-            # Why: follow-up scans and checksum-based move detection read raw bytes from disk.
-            # Outcome: the returned checksum always matches the file that was just written.
+            # Why: generation publication must parse the same bytes whose checksum and
+            #   note_content generation are claimed; an LF payload paired with CRLF disk
+            #   bytes is not one coherent snapshot.
+            # Outcome: one binary read supplies both the exact decoded payload and checksum.
+            persisted_bytes = await self.read_file_bytes(full_path)
             return FrontmatterUpdateResult(
-                checksum=await self.compute_checksum(full_path),
-                content=content_for_checksum,
+                checksum=await file_utils.compute_checksum(persisted_bytes),
+                content=persisted_bytes.decode("utf-8"),
             )
 
         except FileOperationError:

@@ -554,12 +554,13 @@ async def test_repository_project_index_maintenance_store_applies_move_batch(
         moved_entity_ids=frozenset({10}),
         missing_paths=("notes/b.md",),
     )
-    assert len(session.statements) == 5
+    assert len(session.statements) == 6
     assert "SELECT entity.id, entity.file_path" in str(session.statements[0])
     assert "SELECT entity.id, entity.file_path" in str(session.statements[1])
-    assert "UPDATE entity" in str(session.statements[2])
-    assert "UPDATE note_content" in str(session.statements[3])
-    assert "UPDATE search_index" in str(session.statements[4])
+    assert "ORDER BY note_content.entity_id" in str(session.statements[2])
+    assert "UPDATE entity" in str(session.statements[3])
+    assert "UPDATE note_content" in str(session.statements[4])
+    assert "UPDATE search_index" in str(session.statements[5])
 
 
 @pytest.mark.asyncio
@@ -626,6 +627,8 @@ async def test_repository_project_index_maintenance_store_deletes_replaced_move_
                     {"id": 20, "file_path": "doc.pdf"},
                 ]
             ),
+            FakeProjectIndexResult(),  # complete move-set NoteContent fence
+            FakeProjectIndexResult(),  # replacement-delete NoteContent fence
             FakeProjectIndexResult(scalar_values=[99]),
         ]
     )
@@ -661,16 +664,18 @@ async def test_repository_project_index_maintenance_store_deletes_replaced_move_
         replaced_entity_ids=frozenset({20}),
         relation_cleanup_entity_ids=frozenset({99}),
     )
-    assert len(session.statements) == 9
+    assert len(session.statements) == 11
     assert "SELECT entity.id, entity.file_path" in str(session.statements[0])
     assert "SELECT entity.id, entity.file_path" in str(session.statements[1])
-    assert "SELECT DISTINCT relation.from_id" in str(session.statements[2])
-    assert "DELETE FROM search_index" in str(session.statements[3])
-    assert "sqlite_master" in str(session.statements[4])
-    assert "DELETE FROM entity" in str(session.statements[5])
-    assert "UPDATE entity" in str(session.statements[6])
-    assert "UPDATE note_content" in str(session.statements[7])
-    assert "UPDATE search_index" in str(session.statements[8])
+    assert "ORDER BY note_content.entity_id" in str(session.statements[2])
+    assert "ORDER BY note_content.entity_id" in str(session.statements[3])
+    assert "SELECT DISTINCT relation.from_id" in str(session.statements[4])
+    assert "DELETE FROM search_index" in str(session.statements[5])
+    assert "sqlite_master" in str(session.statements[6])
+    assert "DELETE FROM entity" in str(session.statements[7])
+    assert "UPDATE entity" in str(session.statements[8])
+    assert "UPDATE note_content" in str(session.statements[9])
+    assert "UPDATE search_index" in str(session.statements[10])
 
 
 @pytest.mark.asyncio
@@ -762,6 +767,8 @@ async def test_repository_project_index_maintenance_store_replaces_destination_w
                     {"id": 20, "file_path": "archive/a.md", "checksum": "moved-checksum"},
                 ]
             ),
+            FakeProjectIndexResult(),  # complete move-set NoteContent fence
+            FakeProjectIndexResult(),  # replacement-delete NoteContent fence
             FakeProjectIndexResult(scalar_values=[99]),
         ]
     )
@@ -864,15 +871,16 @@ async def test_repository_project_index_maintenance_store_applies_move_content_u
         )
     ]
     assert content_updater.written == [(content_updater.seen_files[0], content_updater.updates[10])]
-    assert len(session.statements) == 6
-    assert "checksum" in str(session.statements[2])
-    assert "permalink" in str(session.statements[2])
-    assert "markdown_content" in str(session.statements[3])
-    assert "db_checksum" in str(session.statements[3])
-    assert "file_checksum" in str(session.statements[3])
-    assert "UPDATE search_index" in str(session.statements[4])
-    assert "search_index.type" in str(session.statements[5])
-    assert "permalink" in str(session.statements[5])
+    assert len(session.statements) == 7
+    assert "ORDER BY note_content.entity_id" in str(session.statements[2])
+    assert "checksum" in str(session.statements[3])
+    assert "permalink" in str(session.statements[3])
+    assert "markdown_content" in str(session.statements[4])
+    assert "db_checksum" in str(session.statements[4])
+    assert "file_checksum" in str(session.statements[4])
+    assert "UPDATE search_index" in str(session.statements[5])
+    assert "search_index.type" in str(session.statements[6])
+    assert "permalink" in str(session.statements[6])
 
 
 @dataclass(frozen=True, slots=True)
@@ -1174,6 +1182,7 @@ async def test_repository_project_index_maintenance_store_applies_delete_batch(
                     {"id": 20, "file_path": "notes/b.md"},
                 ]
             ),
+            FakeProjectIndexResult(),  # sorted NoteContent lock fence
             FakeProjectIndexResult(scalar_values=[99]),
         ]
     )
@@ -1208,12 +1217,13 @@ async def test_repository_project_index_maintenance_store_applies_delete_batch(
         relation_cleanup_entity_ids=frozenset({99}),
         missing_paths=("notes/missing.md",),
     )
-    assert len(session.statements) == 5
+    assert len(session.statements) == 6
     assert "SELECT entity.id, entity.file_path" in str(session.statements[0])
-    assert "SELECT DISTINCT relation.from_id" in str(session.statements[1])
-    assert "DELETE FROM search_index" in str(session.statements[2])
-    assert "sqlite_master" in str(session.statements[3])
-    assert "DELETE FROM entity" in str(session.statements[4])
+    assert "ORDER BY note_content.entity_id" in str(session.statements[1])
+    assert "SELECT DISTINCT relation.from_id" in str(session.statements[2])
+    assert "DELETE FROM search_index" in str(session.statements[3])
+    assert "sqlite_master" in str(session.statements[4])
+    assert "DELETE FROM entity" in str(session.statements[5])
 
 
 @pytest.mark.asyncio
@@ -1228,6 +1238,7 @@ async def test_repository_project_index_maintenance_store_deletes_vector_embeddi
                     {"id": 10, "file_path": "notes/a.md"},
                 ]
             ),
+            FakeProjectIndexResult(),
             FakeProjectIndexResult(scalar_values=[]),
             FakeProjectIndexResult(),
             FakeProjectIndexResult(
@@ -1302,6 +1313,7 @@ async def test_repository_project_index_maintenance_store_skips_vector_cleanup_w
                     {"id": 10, "file_path": "notes/a.md"},
                 ]
             ),
+            FakeProjectIndexResult(),
             FakeProjectIndexResult(scalar_values=[]),
             FakeProjectIndexResult(),
             FakeProjectIndexResult(scalar_values=[]),

@@ -16,6 +16,9 @@ from basic_memory.indexing.accepted_note_write_runner import (
     lock_accepted_note_content_for_entity_mutation,
 )
 from basic_memory.indexing.batch_indexer import BatchIndexer
+from basic_memory.indexing.directory_delete_runner import (
+    RepositoryDirectoryDeleteAcceptanceStore,
+)
 from basic_memory.indexing.index_batch_runtime import build_default_index_batch_runtime
 from basic_memory.indexing.models import IndexInputFile
 from basic_memory.markdown import EntityParser, MarkdownProcessor
@@ -69,6 +72,101 @@ class EntityUpdateRendezvous:
         if self.arrivals == 2:
             self.ready.set()
         await asyncio.wait_for(self.ready.wait(), timeout=5)
+
+
+@pytest.mark.asyncio
+async def test_relation_publication_and_directory_delete_share_note_content_first_lock_order(
+    engine_factory,
+    test_project,
+) -> None:
+    """A bulk directory delete never holds Entity while waiting on publication's source."""
+    engine, session_maker = engine_factory
+    if engine.dialect.name != "postgresql":
+        pytest.skip("row-lock deadlock regression requires PostgreSQL")
+
+    now = datetime.now(tz=UTC)
+    async with db.scoped_session(session_maker) as session:
+        entities: list[Entity] = []
+        for title in ("Directory sibling", "Directory source"):
+            entity = Entity(
+                project_id=test_project.id,
+                title=title,
+                note_type="note",
+                permalink=f"directory-race/{title.lower().replace(' ', '-')}",
+                file_path=f"directory-race/{title.lower().replace(' ', '-')}.md",
+                content_type="text/markdown",
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(entity)
+            await session.flush()
+            session.add(
+                NoteContent(
+                    entity_id=entity.id,
+                    project_id=test_project.id,
+                    external_id=entity.external_id,
+                    file_path=entity.file_path,
+                    markdown_content=f"# {title}\n",
+                    db_version=1,
+                    db_checksum=f"generation-{entity.id}",
+                    file_write_status="synced",
+                )
+            )
+            entities.append(entity)
+    sibling_id, source_id = (entity.id for entity in entities)
+
+    source_locked = asyncio.Event()
+    directory_snapshot_loaded = asyncio.Event()
+    relation_repository = RelationRepository(project_id=test_project.id)
+    store = RepositoryDirectoryDeleteAcceptanceStore()
+
+    async def publish_relation() -> None:
+        async with session_maker() as session:
+            async with session.begin():
+                locked_entity_id = await session.scalar(
+                    current_relation_generation_statement(
+                        project_id=test_project.id,
+                        entity_id=source_id,
+                        generation=1,
+                    )
+                )
+                assert locked_entity_id == source_id
+                source_locked.set()
+                await asyncio.wait_for(directory_snapshot_loaded.wait(), timeout=5)
+                result = await relation_repository.upsert_relation_generation(
+                    session,
+                    entity_id=source_id,
+                    generation=1,
+                    relations=[AcceptedRelationWrite("links_to", "Target", None)],
+                )
+                assert result.generation_is_current
+
+    async def delete_directory() -> None:
+        await asyncio.wait_for(source_locked.wait(), timeout=5)
+        async with session_maker() as session:
+            async with session.begin():
+                snapshots = await store.load_directory_file_snapshots(
+                    session,
+                    project_id=test_project.id,
+                    directory="directory-race",
+                )
+                assert {snapshot.entity_id for snapshot in snapshots} == {sibling_id, source_id}
+                directory_snapshot_loaded.set()
+                await store.delete_directory_entities(
+                    session,
+                    project_id=test_project.id,
+                    entity_ids=[source_id, sibling_id],
+                )
+
+    await asyncio.wait_for(
+        asyncio.gather(publish_relation(), delete_directory()),
+        timeout=10,
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        assert await session.get(Entity, sibling_id) is None
+        assert await session.get(Entity, source_id) is None
+        assert await relation_repository.find_all(session) == []
 
 
 @pytest.mark.asyncio

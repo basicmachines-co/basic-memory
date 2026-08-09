@@ -18,6 +18,9 @@ from basic_memory.indexing.relation_resolution import (
     UnresolvedRelation,
 )
 from basic_memory.models import Relation
+from basic_memory.repository.relation_repository import (
+    lock_note_content_before_entity_mutation,
+)
 
 
 class ForwardReferenceRelationSource(Protocol):
@@ -140,6 +143,14 @@ class RepositoryForwardReferenceResolutionRuntime:
         }
 
         async with db.scoped_session(self.session_maker) as session:
+            # This compatibility runtime is not the composed resolver, but its direct
+            # Relation update still obeys the canonical order documented by
+            # current_relation_generation_statement.
+            await lock_note_content_before_entity_mutation(
+                session,
+                project_id=self.project_id,
+                entity_ids=tuple(update.source_entity_id for update in updates),
+            )
             stmt = (
                 update(Relation)
                 .where(Relation.id.in_(relation_ids))

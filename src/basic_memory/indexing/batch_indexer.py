@@ -597,7 +597,10 @@ class BatchIndexer:
         _, refresh_errors = await self._run_bounded(
             [path for path in sorted(published) if published[path]],
             limit=max_concurrent,
-            worker=lambda path: self.refresh_indexed_entity_search(indexed_by_path[path]),
+            worker=lambda path: self.refresh_indexed_entity_search(
+                indexed_by_path[path],
+                generation=generation_by_entity_id[indexed_by_path[path].entity_id],
+            ),
         )
         errors.update(refresh_errors)
 
@@ -616,16 +619,26 @@ class BatchIndexer:
         """Resolve newly published relations through the shared guarded resolver."""
         return await self._resolve_batch_relations(entity_ids, max_concurrent=max_concurrent)
 
-    async def refresh_indexed_entity_search(self, indexed: IndexedEntity) -> IndexedEntity:
-        """Refresh relation-dependent search rows after generation publication."""
+    async def refresh_indexed_entity_search(
+        self,
+        indexed: IndexedEntity,
+        *,
+        generation: int,
+    ) -> IndexedEntity:
+        """Refresh search only while this publication generation remains accepted."""
         async with db.scoped_session(self.session_maker) as session:
-            entities = await self.entity_repository.find_by_ids(session, [indexed.entity_id])
-            pending_refreshes = await self.relation_repository.list_pending_search_refreshes(
+            refresh = await self.relation_repository.load_search_refresh_for_generation(
                 session,
                 entity_id=indexed.entity_id,
+                generation=generation,
             )
-        if len(entities) != 1:  # pragma: no cover
-            raise ValueError(f"Failed to reload relation-published entity {indexed.entity_id}")
+        # Trigger: a newer accepted note generation won after this publication.
+        # Why: combining generation-N parsed markdown with N+1 entity state would
+        # produce a search row that never represented one coherent note version.
+        # Outcome: terminal-wins; N+1 owns its refresh and this pass leaves durable
+        # marker IDs untouched for a later retry.
+        if refresh is None:
+            return indexed
 
         try:
             search_content = (
@@ -647,12 +660,12 @@ class BatchIndexer:
             relations=indexed.relations,
             resolve_relations=indexed.resolve_relations,
         )
-        refreshed = await self._refresh_search_index(prepared, entities[0])
-        if pending_refreshes:
+        refreshed = await self._refresh_search_index(prepared, refresh.entity)
+        if refresh.refresh_ids:
             async with db.scoped_session(self.session_maker) as session:
                 await self.relation_repository.clear_pending_search_refreshes(
                     session,
-                    [refresh.id for refresh in pending_refreshes],
+                    refresh.refresh_ids,
                 )
         return refreshed
 

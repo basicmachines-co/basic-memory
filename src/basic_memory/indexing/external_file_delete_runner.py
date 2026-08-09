@@ -11,6 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory import db
 from basic_memory.models import Relation
 from basic_memory.read_cache import ReadCacheInvalidator, invalidate_cache
+from basic_memory.repository.relation_repository import (
+    lock_note_content_before_entity_mutation,
+)
 from basic_memory.runtime.cleanup import RuntimeExternalFileDeletePlan
 from basic_memory.runtime.note_content import (
     RuntimeDeletedNoteEntityDeleteSource,
@@ -109,6 +112,13 @@ class RepositoryExternalFileDeleteEntities(ExternalFileDeleteEntities):
             raise RuntimeError("External file delete requires a project-scoped entity repository")
 
         async with db.scoped_session(self.session_maker) as session:
+            # See current_relation_generation_statement: a delete may cascade through
+            # Entity and Relation, so claim its accepted NoteContent source first.
+            await lock_note_content_before_entity_mutation(
+                session,
+                project_id=self.entity_repository.project_id,
+                entity_ids=(entity_id,),
+            )
             relation_cleanup_entity_ids = await relation_cleanup_sources_for_deleted_entity(
                 session,
                 project_id=self.entity_repository.project_id,

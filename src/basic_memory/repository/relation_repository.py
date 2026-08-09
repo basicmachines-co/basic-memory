@@ -22,13 +22,13 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload, aliased
+from sqlalchemy.orm import joinedload, selectinload, aliased
 from sqlalchemy.orm.attributes import InstrumentedAttribute
 from sqlalchemy.orm.interfaces import LoaderOption
 from sqlalchemy.sql import Select
 from sqlalchemy.sql.elements import ColumnElement
 
-from basic_memory.models import Entity, NoteContent, Relation, RelationSearchRefresh
+from basic_memory.models import Entity, NoteContent, Observation, Relation, RelationSearchRefresh
 from basic_memory.repository.repository import Repository
 
 
@@ -66,10 +66,12 @@ def current_relation_generation_statement(
 ) -> Select[tuple[int]]:
     """Build the source-generation fence acquired before a projection write.
 
-    Lock-order invariant: every transaction that can lock both ``NoteContent``
-    and ``Entity`` acquires ``NoteContent`` first. Relation publication may then
-    lock ``Entity`` through foreign-key enforcement; accepted note mutations
-    must claim the same source before preparing or flushing entity changes.
+    Lock-order invariant: every transaction that can reach a note's
+    ``NoteContent`` and then lock its ``Entity`` or ``Relation`` rows acquires
+    all relevant ``NoteContent`` rows first, sorted by entity ID for bulk work.
+    Relation publication may lock ``Entity`` through foreign-key enforcement;
+    accepted mutations and cascading deletes must claim the same sources before
+    preparing or flushing later-table changes.
 
     PostgreSQL renders ``FOR UPDATE`` and holds the note-content row through the
     relation statement. SQLite intentionally omits the clause; its first guarded
@@ -82,6 +84,53 @@ def current_relation_generation_statement(
             NoteContent.entity_id == entity_id,
             NoteContent.db_version == generation,
         )
+        .with_for_update()
+    )
+
+
+async def lock_note_content_before_entity_mutation(
+    session: AsyncSession,
+    *,
+    project_id: int,
+    entity_ids: Sequence[int],
+) -> None:
+    """Lock accepted note rows in canonical order before mutating their entities.
+
+    See ``current_relation_generation_statement`` for the authoritative
+    NoteContent-before-Entity lock-order invariant. Sorting the complete set
+    before the first entity mutation also keeps overlapping bulk operations
+    from acquiring source fences in opposite orders.
+    """
+    ordered_entity_ids = tuple(sorted(set(entity_ids)))
+    if not ordered_entity_ids:
+        return
+
+    await session.execute(
+        select(NoteContent.entity_id)
+        .where(
+            NoteContent.project_id == project_id,
+            NoteContent.entity_id.in_(ordered_entity_ids),
+        )
+        .order_by(NoteContent.entity_id)
+        .with_for_update()
+    )
+
+
+async def lock_project_note_content_before_project_mutation(
+    session: AsyncSession,
+    *,
+    project_id: int,
+) -> None:
+    """Lock a project's accepted notes before a cascading project mutation.
+
+    See ``current_relation_generation_statement`` for the canonical lock-order
+    invariant. A project hard delete can cascade through Entity and Relation,
+    so it claims every NoteContent source in sorted order before locking Project.
+    """
+    await session.execute(
+        select(NoteContent.entity_id)
+        .where(NoteContent.project_id == project_id)
+        .order_by(NoteContent.entity_id)
         .with_for_update()
     )
 
@@ -235,6 +284,14 @@ class PendingRelationSearchRefresh:
 
     id: int
     entity_id: int
+
+
+@dataclass(frozen=True, slots=True)
+class CurrentRelationGenerationSearchRefresh:
+    """One generation-coherent entity snapshot and its visible refresh work."""
+
+    entity: Entity
+    refresh_ids: tuple[int, ...]
 
 
 class RelationRepository(Repository[Relation]):
@@ -560,6 +617,58 @@ class RelationRepository(Repository[Relation]):
             PendingRelationSearchRefresh(id=refresh_id, entity_id=refresh_entity_id)
             for refresh_id, refresh_entity_id in result.tuples().all()
         ]
+
+    async def load_search_refresh_for_generation(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+        generation: int,
+    ) -> CurrentRelationGenerationSearchRefresh | None:
+        """Load refresh inputs only while the published generation is still accepted.
+
+        Entity state, the generation fence, and the exact pending marker IDs are
+        observed by one statement. If a newer accepted generation already won,
+        the old publisher performs no search write and leaves all markers for the
+        newer flow or the durable resolver retry.
+        """
+        result = await session.execute(
+            select(Entity, RelationSearchRefresh.id)
+            .join(
+                NoteContent,
+                and_(
+                    NoteContent.project_id == Entity.project_id,
+                    NoteContent.entity_id == Entity.id,
+                ),
+            )
+            .outerjoin(
+                RelationSearchRefresh,
+                and_(
+                    RelationSearchRefresh.project_id == Entity.project_id,
+                    RelationSearchRefresh.entity_id == Entity.id,
+                    RelationSearchRefresh.publication_generation.is_(None),
+                ),
+            )
+            .where(
+                Entity.project_id == self.project_id,
+                Entity.id == entity_id,
+                NoteContent.db_version == generation,
+            )
+            .options(
+                joinedload(Entity.observations).joinedload(Observation.entity),
+                joinedload(Entity.outgoing_relations).joinedload(Relation.from_entity),
+                joinedload(Entity.outgoing_relations).joinedload(Relation.to_entity),
+            )
+            .order_by(RelationSearchRefresh.id)
+        )
+        rows = result.unique().tuples().all()
+        if not rows:
+            return None
+
+        return CurrentRelationGenerationSearchRefresh(
+            entity=rows[0][0],
+            refresh_ids=tuple(refresh_id for _, refresh_id in rows if refresh_id is not None),
+        )
 
     async def clear_pending_search_refreshes(
         self,

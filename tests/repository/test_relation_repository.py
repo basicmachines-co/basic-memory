@@ -1,12 +1,14 @@
 """Tests for the RelationRepository."""
 
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import delete, select
 from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory import db
 from basic_memory.models import Entity, NoteContent, Project, Relation, RelationSearchRefresh
@@ -17,6 +19,7 @@ from basic_memory.repository.relation_repository import (
     ResolvedRelationWrite,
     ResolvedRelationWriteResult,
     current_relation_generation_statement,
+    lock_note_content_before_entity_mutation,
 )
 
 
@@ -468,6 +471,33 @@ def test_current_relation_generation_fence_is_portable() -> None:
 
     assert "FOR UPDATE" in postgres_sql
     assert "FOR UPDATE" not in sqlite_sql
+
+
+@pytest.mark.asyncio
+async def test_bulk_note_content_fence_sorts_ids_and_is_portable() -> None:
+    """Bulk mutation fences share PostgreSQL locking and SQLite omission semantics."""
+    session = AsyncMock(spec=AsyncSession)
+
+    await lock_note_content_before_entity_mutation(
+        session,
+        project_id=1,
+        entity_ids=[3, 1, 2, 2],
+    )
+
+    statement = session.execute.await_args.args[0]
+    statement_params = statement.compile().params
+    assert [1, 2, 3] in statement_params.values()
+    assert "ORDER BY note_content.entity_id" in str(statement.compile(dialect=postgresql.dialect()))
+    assert "FOR UPDATE" in str(statement.compile(dialect=postgresql.dialect()))
+    assert "FOR UPDATE" not in str(statement.compile(dialect=sqlite.dialect()))
+
+    session.reset_mock()
+    await lock_note_content_before_entity_mutation(
+        session,
+        project_id=1,
+        entity_ids=(),
+    )
+    session.execute.assert_not_awaited()
 
 
 @pytest.mark.asyncio

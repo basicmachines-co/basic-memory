@@ -16,6 +16,9 @@ from basic_memory.repository.accepted_note_vector_cleanup import (
     ProjectIndexExternalVectorCleaner,
     delete_project_index_vector_rows,
 )
+from basic_memory.repository.relation_repository import (
+    lock_note_content_before_entity_mutation,
+)
 from basic_memory.read_cache import ReadCacheInvalidator, invalidate_cache
 from basic_memory.runtime.storage import ProjectExternalId, ProjectId
 
@@ -361,9 +364,18 @@ async def delete_project_index_entities(
     external_vector_cleaner: ProjectIndexExternalVectorCleaner | None = None,
 ) -> frozenset[int]:
     """Delete indexed entities and return surviving relation sources needing repair."""
-    deleted_entity_ids = tuple(entity_ids)
+    deleted_entity_ids = tuple(sorted(set(entity_ids)))
     if not deleted_entity_ids:
         return frozenset()
+
+    # See current_relation_generation_statement for the canonical lock order.
+    # Entity deletion can cascade into Relation, so accepted sources are claimed
+    # in sorted order before either table can be locked by this transaction.
+    await lock_note_content_before_entity_mutation(
+        session,
+        project_id=project_id,
+        entity_ids=deleted_entity_ids,
+    )
 
     surviving_relation_sources = await session.execute(
         select(Relation.from_id)
@@ -632,6 +644,15 @@ class RepositoryProjectIndexMaintenanceStore:
                 int(row["id"]): target_paths_by_old_path[str(row["file_path"])]
                 for row in target_rows
             }
+            replaced_entity_ids = frozenset(int(row["id"]) for row in replacement_rows)
+            # A move updates NoteContent and Entity while also deleting any replaced
+            # destination entities. Claim the complete union once, in canonical order,
+            # before content planning or any mutation can acquire a later lock.
+            await lock_note_content_before_entity_mutation(
+                session,
+                project_id=self.project_id,
+                entity_ids=(*target_paths_by_entity_id, *replaced_entity_ids),
+            )
             content_plan = await self._plan_move_content_updates(
                 session,
                 target_rows=target_rows,
@@ -639,10 +660,8 @@ class RepositoryProjectIndexMaintenanceStore:
             )
 
             # --- Apply the batched replacement deletes and path/content updates ---
-            replaced_entity_ids: frozenset[int] = frozenset()
             relation_cleanup_entity_ids: frozenset[int] = frozenset()
             if updated_old_paths:
-                replaced_entity_ids = frozenset(int(row["id"]) for row in replacement_rows)
                 relation_cleanup_entity_ids = await delete_project_index_entities(
                     session,
                     project_id=self.project_id,

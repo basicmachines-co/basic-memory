@@ -17,6 +17,9 @@ from basic_memory.repository import ProjectRepository
 from basic_memory.repository.accepted_note_vector_cleanup import (
     project_external_vector_index_names,
 )
+from basic_memory.repository.relation_repository import (
+    lock_project_note_content_before_project_mutation,
+)
 from basic_memory.repository.semantic_errors import SemanticVectorIndexExtensionError
 from basic_memory.runtime.cleanup import (
     RuntimeDeleteStatus,
@@ -217,6 +220,13 @@ class RepositoryProjectHardDeleter:
         request: RuntimeProjectDeleteJobRequest,
     ) -> ProjectHardDeleteOutcome:
         async with db.scoped_session(self.session_maker) as session:
+            # A project delete cascades through Entity and Relation. Claim all accepted
+            # sources first; current_relation_generation_statement documents the
+            # canonical NoteContent-first lock-order invariant.
+            await lock_project_note_content_before_project_mutation(
+                session,
+                project_id=request.project_id,
+            )
             # Trigger: the project was reactivated while the per-file cleanup loop ran.
             # Why: preflight checked is_active once, potentially long before this
             #   transaction; hard-deleting a reactivated project destroys live data.

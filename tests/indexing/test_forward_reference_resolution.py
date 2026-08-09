@@ -8,6 +8,7 @@ from typing import cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.sql import Select
 
 import basic_memory.indexing.forward_reference_resolution as forward_resolution_module
 from basic_memory.indexing.forward_reference_resolution import (
@@ -343,8 +344,13 @@ async def test_repository_forward_reference_runtime_applies_updates(
         )
     )
 
-    assert len(session.statements) == 1
-    statement_text = str(session.statements[0])
+    assert len(session.statements) == 2
+    lock_statement = cast(Select[tuple[int]], session.statements[0])
+    lock_statement_text = str(lock_statement)
+    assert "FROM note_content" in lock_statement_text
+    assert "ORDER BY note_content.entity_id" in lock_statement_text
+    assert [10, 11] in lock_statement.compile().params.values()
+    statement_text = str(session.statements[1])
     assert "UPDATE relation" in statement_text
     assert "relation.id IN" in statement_text
 

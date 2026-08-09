@@ -15,6 +15,9 @@ from basic_memory.repository.accepted_note_vector_cleanup import (
     ProjectIndexExternalVectorCleaner,
     delete_project_index_vector_rows,
 )
+from basic_memory.repository.relation_repository import (
+    lock_note_content_before_entity_mutation,
+)
 from basic_memory.runtime.cleanup import (
     RuntimeDeleteStatus,
     RuntimeDirectoryFileSnapshot,
@@ -185,9 +188,7 @@ class RepositoryDirectoryDeleteAcceptanceStore:
             escaped_directory = directory_delete_like_prefix(directory)
             query = query.where(Entity.file_path.like(f"{escaped_directory}/%", escape="\\"))
 
-        result = await session.execute(
-            query.order_by(Entity.file_path.asc()).with_for_update(of=Entity)
-        )
+        result = await session.execute(query.order_by(Entity.file_path.asc()))
         return [
             plan_directory_file_snapshot(
                 entity_id=int(row.id),
@@ -212,7 +213,17 @@ class RepositoryDirectoryDeleteAcceptanceStore:
     ) -> frozenset[int]:
         if not entity_ids:
             return frozenset()
-        deleted_entity_ids = tuple(entity_ids)
+        deleted_entity_ids = tuple(sorted(set(entity_ids)))
+
+        # The directory snapshot is intentionally a plain read. Claim every accepted
+        # source here, immediately before the first operation that can lock Entity or
+        # Relation rows. See current_relation_generation_statement for the canonical
+        # NoteContent-first invariant shared with relation publication.
+        await lock_note_content_before_entity_mutation(
+            session,
+            project_id=project_id,
+            entity_ids=deleted_entity_ids,
+        )
 
         # Capture surviving sources before the delete: Relation.to_id CASCADE will drop
         # the relation table rows for incoming links from entities outside the directory,

@@ -456,6 +456,7 @@ async def test_repository_directory_delete_store_captures_relation_sources() -> 
         AsyncSession,
         FakeExecuteSession(
             [
+                FakeExecuteResult(),  # sorted note_content lock fence
                 FakeExecuteResult(scalar_values=[42, 99]),  # surviving relation sources
                 FakeExecuteResult(),  # search_index delete
                 FakeExecuteResult(scalar_values=[]),  # vector rows
@@ -517,6 +518,7 @@ async def test_repository_directory_delete_store_maps_note_content_snapshots() -
                         )()
                     ]
                 ),
+                FakeExecuteResult(),  # sorted note_content lock fence
                 FakeExecuteResult(scalar_values=[]),  # surviving relation sources
                 FakeExecuteResult(),  # search_index delete
                 FakeExecuteResult(scalar_values=[]),  # vector rows
@@ -553,7 +555,9 @@ async def test_repository_directory_delete_store_maps_note_content_snapshots() -
         )
     ]
     assert relation_cleanup_entity_ids == frozenset()
-    assert len(fake_session.queries) == 6
+    assert len(fake_session.queries) == 7
+    assert "FOR UPDATE" not in str(fake_session.queries[1][0])
+    assert "ORDER BY note_content.entity_id" in str(fake_session.queries[2][0])
 
 
 @pytest.mark.asyncio
@@ -564,6 +568,7 @@ async def test_repository_directory_delete_store_clears_vectors_before_entities(
         AsyncSession,
         FakeExecuteSession(
             [
+                FakeExecuteResult(),  # sorted note_content lock fence
                 FakeExecuteResult(scalar_values=[]),  # surviving relation sources
                 FakeExecuteResult(),  # search_index delete
                 FakeExecuteResult(),  # entity delete
@@ -603,9 +608,10 @@ async def test_repository_directory_delete_store_clears_vectors_before_entities(
         entity_ids=[7, 8],
     )
 
-    # Vector rows are cleared after the relation-source select and search_index delete
-    # (2 queries so far) but before the entity delete, so CASCADE cannot race the rows.
-    assert vector_calls == [(session, 3, (7, 8), 2)]
+    # Vector rows are cleared after the NoteContent fence, relation-source select,
+    # and search_index delete, but before Entity CASCADE can race those rows.
+    assert vector_calls == [(session, 3, (7, 8), 3)]
     statements = [str(query) for query, _ in fake_session.queries]
-    assert "DELETE FROM search_index" in statements[1]
-    assert "DELETE FROM entity" in statements[2]
+    assert "ORDER BY note_content.entity_id" in statements[0]
+    assert "DELETE FROM search_index" in statements[2]
+    assert "DELETE FROM entity" in statements[3]

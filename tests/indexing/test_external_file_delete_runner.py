@@ -114,6 +114,7 @@ async def test_repository_external_file_delete_entities_use_scoped_sessions(
     session_maker = cast(async_sessionmaker[AsyncSession], object())
     scoped_session_calls: list[async_sessionmaker[AsyncSession]] = []
     relation_cleanup_calls: list[tuple[object, int, int]] = []
+    note_content_lock_calls: list[tuple[object, int, tuple[int, ...]]] = []
 
     def fake_scoped_session(
         scoped_session_maker: async_sessionmaker[AsyncSession],
@@ -130,6 +131,14 @@ async def test_repository_external_file_delete_entities_use_scoped_sessions(
         relation_cleanup_calls.append((cleanup_session, project_id, entity_id))
         return frozenset({7})
 
+    async def fake_lock_note_content_before_entity_mutation(
+        lock_session: AsyncSession,
+        *,
+        project_id: int,
+        entity_ids: tuple[int, ...],
+    ) -> None:
+        note_content_lock_calls.append((lock_session, project_id, entity_ids))
+
     monkeypatch.setattr(
         external_file_delete_runner.db,
         "scoped_session",
@@ -139,6 +148,11 @@ async def test_repository_external_file_delete_entities_use_scoped_sessions(
         external_file_delete_runner,
         "relation_cleanup_sources_for_deleted_entity",
         fake_relation_cleanup_sources_for_deleted_entity,
+    )
+    monkeypatch.setattr(
+        external_file_delete_runner,
+        "lock_note_content_before_entity_mutation",
+        fake_lock_note_content_before_entity_mutation,
     )
 
     entity = FakeDeletedEntity(
@@ -165,6 +179,7 @@ async def test_repository_external_file_delete_entities_use_scoped_sessions(
     assert scoped_session_calls == [session_maker, session_maker]
     assert repository.get_calls == [(session, "notes/deleted.md")]
     assert repository.delete_calls == [(session, {"id": 42, "file_path": "notes/deleted.md"})]
+    assert note_content_lock_calls == [(session, 1, (42,))]
     assert relation_cleanup_calls == [(session, 1, 42)]
 
 
