@@ -35,6 +35,37 @@ async def test_create_entity_with_content_returns_full_and_search_content(
 
 
 @pytest.mark.asyncio
+async def test_create_entity_publishes_relations_from_persisted_snapshot(
+    entity_service,
+    file_service,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A concurrent file replacement cannot stamp prepared relations with newer bytes."""
+    persisted_content = "# Persisted Snapshot\n\n- links_to [[Persisted Target]]\n"
+    original_read = file_service.read_file_content
+
+    async def replace_before_read(file_path) -> str:
+        (file_service.base_path / file_path).write_text(persisted_content, encoding="utf-8")
+        return await original_read(file_path)
+
+    monkeypatch.setattr(file_service, "read_file_content", replace_before_read)
+
+    result = await entity_service.create_entity_with_content(
+        EntitySchema(
+            title="Persisted Snapshot",
+            directory="notes",
+            note_type="note",
+            content="# Prepared Snapshot\n\n- links_to [[Prepared Target]]\n",
+        )
+    )
+
+    assert result.content == persisted_content
+    assert [relation.to_name for relation in result.entity.outgoing_relations] == [
+        "Persisted Target"
+    ]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("permalink_line", ["permalink:", "permalink: null", 'permalink: ""'])
 async def test_create_entity_ignores_empty_frontmatter_permalink(
     entity_service, file_service, permalink_line: str

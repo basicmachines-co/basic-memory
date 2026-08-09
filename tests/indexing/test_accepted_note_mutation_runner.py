@@ -872,6 +872,7 @@ async def test_run_accepted_note_update_replaces_existing_note_content(
     ]
     assert note_content_lookup_repository.calls == [(cast(AsyncSession, session), entity.id)]
     assert preparer.replace_calls == [(entity, schema, "# Old\n", cast(AsyncSession, session))]
+    assert session.scalar_count == 1
     assert session.flush_count == 1
     assert note_content_accept_repository.calls[0][1].db_version == 2
     assert note_content_accept_repository.calls[0][1].markdown_content == "# Replacement\n"

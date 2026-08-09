@@ -22,6 +22,7 @@ from basic_memory.indexing.accepted_note_write_runner import (
     AcceptedNoteWriteRepositories,
     create_accepted_pending_entity,
     delete_accepted_note,
+    lock_accepted_note_content_for_entity_mutation,
     persist_accepted_note_move,
     persist_accepted_note_snapshot,
     prepare_accepted_note_create,
@@ -656,11 +657,9 @@ async def _run_accepted_note_update(
         # Optimistic-concurrency precondition: the caller sent the db_checksum it
         # last synced; if the accepted row has advanced to a different write,
         # reject with the current checksum so the client rebases instead of
-        # clobbering the newer write (issue #1445). Cloud main checked this under
-        # SELECT ... FOR UPDATE; core needs no row lock because accept_write's
-        # compare-and-set on db_version already guarantees a write planned against
-        # this read cannot land stale — a write slipping in between this check and
-        # the CAS trips the CAS and surfaces the concurrent-write 409 instead.
+        # clobbering the newer write (issue #1445). The source row lock establishes
+        # NoteContent -> Entity ordering with relation publication on PostgreSQL;
+        # accept_write's compare-and-set remains the portable stale-write guard.
         if (
             request.base_checksum is not None
             and current_note_content.db_checksum != request.base_checksum
@@ -986,6 +985,14 @@ async def load_required_accepted_note_content(
     missing_kind: AcceptedNoteMutationRejectKind,
 ) -> NoteContent:
     """Load required accepted DB note content or reject the mutation."""
+    # Relation publication locks NoteContent before its Entity foreign-key check.
+    # Existing accepted updates, edits, and moves take the same order before any
+    # prepare helper can flush changed Entity fields.
+    await lock_accepted_note_content_for_entity_mutation(
+        session,
+        project_id=project_id,
+        entity_id=entity_id,
+    )
     note_content = await load_accepted_note_content(
         session,
         project_id=project_id,

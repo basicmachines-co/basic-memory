@@ -13,6 +13,7 @@ from basic_memory import db
 from basic_memory.index.local_dependencies import build_local_markdown_file_indexer
 from basic_memory.indexing.accepted_note_write_runner import (
     lock_accepted_note_content_for_delete,
+    lock_accepted_note_content_for_entity_mutation,
 )
 from basic_memory.indexing.batch_indexer import BatchIndexer
 from basic_memory.indexing.index_batch_runtime import build_default_index_batch_runtime
@@ -20,6 +21,7 @@ from basic_memory.indexing.models import IndexInputFile
 from basic_memory.markdown import EntityParser, MarkdownProcessor
 from basic_memory.models import Entity, NoteContent
 from basic_memory.repository import (
+    AcceptedNoteContentWrite,
     EntityRepository,
     NoteContentRepository,
     ObservationRepository,
@@ -161,6 +163,116 @@ async def test_relation_publication_and_delete_share_note_content_first_lock_ord
         assert await session.get(Entity, source_entity_id) is None
         assert await session.get(NoteContent, source_entity_id) is None
         assert await relation_repository.find_all(session) == []
+
+
+@pytest.mark.asyncio
+async def test_relation_publication_and_update_share_note_content_first_lock_order(
+    engine_factory,
+    test_project,
+) -> None:
+    """A same-note publisher and update complete without a NoteContent/Entity lock cycle."""
+    engine, session_maker = engine_factory
+    if engine.dialect.name != "postgresql":
+        pytest.skip("row-lock deadlock regression requires PostgreSQL")
+
+    now = datetime.now(tz=UTC)
+    async with db.scoped_session(session_maker) as session:
+        source_entity = Entity(
+            project_id=test_project.id,
+            title="Update race source",
+            note_type="note",
+            permalink="update-race/source",
+            file_path="update-race/source.md",
+            content_type="text/markdown",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(source_entity)
+        await session.flush()
+        source_entity_id = source_entity.id
+        session.add(
+            NoteContent(
+                entity_id=source_entity_id,
+                project_id=test_project.id,
+                external_id=source_entity.external_id,
+                file_path=source_entity.file_path,
+                markdown_content="# Generation 1\n",
+                db_version=1,
+                db_checksum="generation-1",
+                file_write_status="synced",
+            )
+        )
+
+    source_locked = asyncio.Event()
+    update_waiting = asyncio.Event()
+    relation_repository = RelationRepository(project_id=test_project.id)
+    note_content_repository = NoteContentRepository(project_id=test_project.id)
+
+    async def publish_relation() -> None:
+        async with session_maker() as session:
+            async with session.begin():
+                locked_entity_id = await session.scalar(
+                    current_relation_generation_statement(
+                        project_id=test_project.id,
+                        entity_id=source_entity_id,
+                        generation=1,
+                    )
+                )
+                assert locked_entity_id == source_entity_id
+                source_locked.set()
+                await asyncio.wait_for(update_waiting.wait(), timeout=5)
+                result = await relation_repository.upsert_relation_generation(
+                    session,
+                    entity_id=source_entity_id,
+                    generation=1,
+                    relations=[AcceptedRelationWrite("links_to", "Target", None)],
+                )
+                assert result.generation_is_current
+
+    async def update_source() -> None:
+        await asyncio.wait_for(source_locked.wait(), timeout=5)
+        async with session_maker() as session:
+            async with session.begin():
+                entity = await session.get(Entity, source_entity_id)
+                assert entity is not None
+                lock_task = asyncio.create_task(
+                    lock_accepted_note_content_for_entity_mutation(
+                        session,
+                        project_id=test_project.id,
+                        entity_id=source_entity_id,
+                    )
+                )
+                # The accepted writer queues on NoteContent before changing Entity,
+                # so the publisher can take its source foreign-key lock and commit.
+                await asyncio.sleep(0)
+                update_waiting.set()
+                await lock_task
+                entity.title = "Updated without deadlock"
+                await session.flush()
+                await note_content_repository.accept_write(
+                    session,
+                    AcceptedNoteContentWrite(
+                        entity_id=source_entity_id,
+                        markdown_content="# Generation 2\n",
+                        db_version=2,
+                        db_checksum="generation-2",
+                        last_source="test",
+                        updated_at=datetime.now(tz=UTC),
+                    ),
+                )
+
+    await asyncio.wait_for(
+        asyncio.gather(publish_relation(), update_source()),
+        timeout=10,
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        entity = await session.get(Entity, source_entity_id)
+        note_content = await session.get(NoteContent, source_entity_id)
+    assert entity is not None
+    assert entity.title == "Updated without deadlock"
+    assert note_content is not None
+    assert note_content.db_version == 2
 
 
 @pytest.mark.asyncio

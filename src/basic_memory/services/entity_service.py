@@ -157,15 +157,22 @@ class EntityService(BaseService[EntityModel]):
         else:
             source_schema._permalink = prepared.entity_fields.permalink
 
-    async def _read_persisted_write_content(self, file_path: Path) -> tuple[str, str]:
-        """Read the stored markdown after write-time formatting has finished."""
+    async def _read_persisted_write_snapshot(
+        self,
+        file_path: Path,
+    ) -> tuple[EntityMarkdown, str, str]:
+        """Read and parse the stored markdown after write-time formatting has finished."""
         # Trigger: format-on-save or platform-specific text writes can change the stored markdown
         # after prepare accepted the request.
-        # Why: API responses and inline search indexing should describe the note that actually
-        #      landed on disk, not the pre-write snapshot.
-        # Outcome: write helpers return persisted markdown plus search content derived from it.
+        # Why: responses, search, and relation generations must all describe the same bytes that
+        #      landed on disk, not the pre-write parse paired with a later file snapshot.
+        # Outcome: callers publish relations reparsed from the exact persisted markdown.
         persisted_content = await self.file_service.read_file_content(file_path)
-        return persisted_content, remove_frontmatter(persisted_content)
+        persisted_markdown = await self.entity_parser.parse_markdown_content(
+            file_path=file_path,
+            content=persisted_content,
+        )
+        return persisted_markdown, persisted_content, remove_frontmatter(persisted_content)
 
     def _paths_share_storage_target(self, left: Path, right: Path) -> bool:
         """Return whether two relative project paths point at the same stored file."""
@@ -470,12 +477,14 @@ class EntityService(BaseService[EntityModel]):
             if not updated:  # pragma: no cover
                 raise ValueError(f"Failed to update entity checksum after create: {entity.id}")
 
-        persisted_content, search_content = await self._read_persisted_write_content(
-            prepared.file_path
-        )
+        (
+            persisted_markdown,
+            persisted_content,
+            search_content,
+        ) = await self._read_persisted_write_snapshot(prepared.file_path)
         updated = await self._publish_markdown_relations(
             entity=updated,
-            markdown=prepared.entity_markdown,
+            markdown=persisted_markdown,
             markdown_content=persisted_content,
             anchor=relation_anchor,
         )
@@ -541,12 +550,14 @@ class EntityService(BaseService[EntityModel]):
                     f"Failed to update entity checksum after update: {prepared.file_path}"
                 )
 
-        persisted_content, search_content = await self._read_persisted_write_content(
-            prepared.file_path
-        )
+        (
+            persisted_markdown,
+            persisted_content,
+            search_content,
+        ) = await self._read_persisted_write_snapshot(prepared.file_path)
         updated = await self._publish_markdown_relations(
             entity=updated,
-            markdown=prepared.entity_markdown,
+            markdown=persisted_markdown,
             markdown_content=persisted_content,
             anchor=relation_anchor,
         )
@@ -834,10 +845,14 @@ class EntityService(BaseService[EntityModel]):
             if not updated:  # pragma: no cover
                 raise ValueError(f"Failed to update entity checksum after edit: {file_path}")
 
-        persisted_content, search_content = await self._read_persisted_write_content(file_path)
+        (
+            persisted_markdown,
+            persisted_content,
+            search_content,
+        ) = await self._read_persisted_write_snapshot(file_path)
         updated = await self._publish_markdown_relations(
             entity=updated,
-            markdown=prepared.entity_markdown,
+            markdown=persisted_markdown,
             markdown_content=persisted_content,
             anchor=relation_anchor,
         )

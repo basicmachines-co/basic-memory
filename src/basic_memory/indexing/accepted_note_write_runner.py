@@ -741,13 +741,13 @@ async def delete_accepted_note_entity(
     await session.delete(entity)
 
 
-async def lock_accepted_note_content_for_delete(
+async def lock_accepted_note_content_for_entity_mutation(
     session: AsyncSession,
     *,
     project_id: ProjectId,
     entity_id: RuntimeEntityId,
 ) -> None:
-    """Lock the source generation before deleting its entity and cascaded graph."""
+    """Lock the source generation before mutating its entity or cascaded graph."""
     await session.scalar(
         select(NoteContent.entity_id)
         .where(
@@ -755,6 +755,20 @@ async def lock_accepted_note_content_for_delete(
             NoteContent.entity_id == entity_id,
         )
         .with_for_update()
+    )
+
+
+async def lock_accepted_note_content_for_delete(
+    session: AsyncSession,
+    *,
+    project_id: ProjectId,
+    entity_id: RuntimeEntityId,
+) -> None:
+    """Compatibility name for the accepted-delete lock-order boundary."""
+    await lock_accepted_note_content_for_entity_mutation(
+        session,
+        project_id=project_id,
+        entity_id=entity_id,
     )
 
 
