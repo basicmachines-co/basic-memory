@@ -71,26 +71,12 @@ esac
 repository=${GITHUB_REPOSITORY:?GITHUB_REPOSITORY not set}
 labels_url="repos/$repository/issues/$issue_number/labels"
 
-# The triage bot owns only the four type labels and the cloud component label. Read current
-# labels only to find obsolete bot-owned values; targeted mutations leave every other label
-# untouched, including labels added concurrently after this read.
-if ! current_labels=$(gh api "repos/$repository/issues/$issue_number" --jq '.labels[].name'); then
+# The triage bot owns only the four type labels and the cloud component label. Verify reads before
+# the first mutation so a permissions or API failure cannot strand the issue in a partial state.
+if ! gh api "repos/$repository/issues/$issue_number" --jq '.labels[].name' >/dev/null; then
     echo "Error: unable to read current issue labels" >&2
     exit 1
 fi
-
-obsolete_labels=()
-while IFS= read -r label; do
-    case "$label" in
-        "$type_label") ;;
-        cloud)
-            if [[ "$component" != "cloud" ]]; then
-                obsolete_labels+=("$label")
-            fi
-            ;;
-        bug|enhancement|documentation|question) obsolete_labels+=("$label") ;;
-    esac
-done <<< "$current_labels"
 
 desired_labels=("$type_label")
 if [[ "$component" == "cloud" ]]; then
@@ -106,6 +92,26 @@ done
 # therefore leaves the prior classification intact; a later rerun can converge after a delete
 # failure without losing unrelated labels.
 gh api "${api_args[@]}" --silent
+
+# A competing triage run can add an owned label after the preflight read. Re-read after the POST
+# so targeted deletes reconcile against the state that includes both additive operations.
+if ! current_labels=$(gh api "repos/$repository/issues/$issue_number" --jq '.labels[].name'); then
+    echo "Error: unable to reconcile current issue labels" >&2
+    exit 1
+fi
+
+obsolete_labels=()
+while IFS= read -r label; do
+    case "$label" in
+        "$type_label") ;;
+        cloud)
+            if [[ "$component" != "cloud" ]]; then
+                obsolete_labels+=("$label")
+            fi
+            ;;
+        bug|enhancement|documentation|question) obsolete_labels+=("$label") ;;
+    esac
+done <<< "$current_labels"
 
 for label in "${obsolete_labels[@]}"; do
     gh api --method DELETE "$labels_url/$label" --silent
