@@ -65,6 +65,11 @@ def current_relation_generation_statement(
 ) -> Select[tuple[int]]:
     """Build the source-generation fence acquired before a projection write.
 
+    Lock-order invariant: every transaction that can lock both ``NoteContent``
+    and ``Entity`` acquires ``NoteContent`` first. Relation publication may then
+    lock ``Entity`` through foreign-key enforcement; accepted note mutations
+    must claim the same source before preparing or flushing entity changes.
+
     PostgreSQL renders ``FOR UPDATE`` and holds the note-content row through the
     relation statement. SQLite intentionally omits the clause; its first guarded
     relation mutation then enters SQLite's single-writer serialization.

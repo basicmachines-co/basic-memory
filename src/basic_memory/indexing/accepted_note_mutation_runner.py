@@ -657,9 +657,9 @@ async def _run_accepted_note_update(
         # Optimistic-concurrency precondition: the caller sent the db_checksum it
         # last synced; if the accepted row has advanced to a different write,
         # reject with the current checksum so the client rebases instead of
-        # clobbering the newer write (issue #1445). The source row lock establishes
-        # NoteContent -> Entity ordering with relation publication on PostgreSQL;
-        # accept_write's compare-and-set remains the portable stale-write guard.
+        # clobbering the newer write (issue #1445). The lock order is defined by
+        # current_relation_generation_statement; accept_write's compare-and-set
+        # remains the portable stale-write guard.
         if (
             request.base_checksum is not None
             and current_note_content.db_checksum != request.base_checksum
@@ -985,9 +985,8 @@ async def load_required_accepted_note_content(
     missing_kind: AcceptedNoteMutationRejectKind,
 ) -> NoteContent:
     """Load required accepted DB note content or reject the mutation."""
-    # Relation publication locks NoteContent before its Entity foreign-key check.
-    # Existing accepted updates, edits, and moves take the same order before any
-    # prepare helper can flush changed Entity fields.
+    # Claim the source before preparation; current_relation_generation_statement
+    # is the canonical authority for the cross-table lock order.
     await lock_accepted_note_content_for_entity_mutation(
         session,
         project_id=project_id,

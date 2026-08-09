@@ -747,7 +747,7 @@ async def lock_accepted_note_content_for_entity_mutation(
     project_id: ProjectId,
     entity_id: RuntimeEntityId,
 ) -> None:
-    """Lock the source generation before mutating its entity or cascaded graph."""
+    """Lock the source before entity mutation; see current_relation_generation_statement."""
     await session.scalar(
         select(NoteContent.entity_id)
         .where(
