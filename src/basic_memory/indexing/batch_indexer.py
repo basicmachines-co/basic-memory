@@ -6,7 +6,7 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Awaitable, Callable, Mapping, TypeVar
+from typing import Awaitable, Callable, Mapping, Sequence, TypeVar
 
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
@@ -32,16 +32,19 @@ from basic_memory.indexing.models import (
     IndexInputFile,
     RelationGenerationBatchResult,
 )
+from basic_memory.indexing.relation_resolution import RepositoryRelationResolutionRuntime
 from basic_memory.indexing.relation_persistence import RelationGenerationPublisher
-from basic_memory.models import Entity, Relation
+from basic_memory.models import Entity
+from basic_memory.repository import EntityRepository, RelationRepository
+from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.runtime.storage import (
     RUNTIME_MARKDOWN_CONTENT_TYPE,
     runtime_file_path_is_markdown_note,
 )
 from basic_memory.services import EntityService
+from basic_memory.services.bulk_link_resolver import BulkLinkResolver
 from basic_memory.services.exceptions import SyncFatalError
-from basic_memory.repository import EntityRepository, RelationRepository
 
 T = TypeVar("T")
 
@@ -57,6 +60,25 @@ class MarkdownOnlyIndexEntitySearchWriter:
             return
 
         await self.search_writer.index_entity_data(entity, content=content)
+
+
+@dataclass(frozen=True, slots=True)
+class RelationResolutionSearchWriter:
+    """Adapt the portable single-entity writer to resolver batch refreshes."""
+
+    search_writer: IndexEntitySearchWriter
+
+    async def index_entities(
+        self,
+        entities: Sequence[Entity],
+        *,
+        content_by_entity_id: Mapping[int, str],
+    ) -> None:
+        for entity in sorted(entities, key=lambda item: item.id):
+            await self.search_writer.index_entity_data(
+                entity,
+                content=content_by_entity_id.get(entity.id),
+            )
 
 
 @dataclass(slots=True)
@@ -111,6 +133,19 @@ class BatchIndexer:
         self.relation_generation_publisher = RelationGenerationPublisher(
             relation_repository=relation_repository,
             session_maker=session_maker,
+        )
+        self.relation_resolution = RepositoryRelationResolutionRuntime(
+            session_maker=session_maker,
+            relation_repository=relation_repository,
+            entity_repository=entity_repository,
+            note_content_repository=NoteContentRepository(
+                project_id=relation_repository.project_id
+            ),
+            target_resolver=BulkLinkResolver(
+                entity_repository=entity_repository,
+                app_config=app_config,
+            ),
+            entity_indexer=RelationResolutionSearchWriter(search_service),
         )
 
     async def index_files(
@@ -578,7 +613,7 @@ class BatchIndexer:
         *,
         max_concurrent: int,
     ) -> tuple[int, int]:
-        """Resolve newly published relations through the legacy bounded resolver."""
+        """Resolve newly published relations through the shared guarded resolver."""
         return await self._resolve_batch_relations(entity_ids, max_concurrent=max_concurrent)
 
     async def refresh_indexed_entity_search(self, indexed: IndexedEntity) -> IndexedEntity:
@@ -616,68 +651,29 @@ class BatchIndexer:
         *,
         max_concurrent: int,
     ) -> tuple[int, int]:
+        if max_concurrent < 1:
+            raise ValueError("max_concurrent must be greater than zero")
+
+        ordered_entity_ids = sorted(set(entity_ids))
         unresolved_relation_lists = await asyncio.gather(
-            *(self._find_unresolved_relations_for_entity(entity_id) for entity_id in entity_ids)
+            *(
+                self._find_unresolved_relations_for_entity(entity_id)
+                for entity_id in ordered_entity_ids
+            )
         )
-        unresolved_relations = [
-            relation for relation_list in unresolved_relation_lists for relation in relation_list
-        ]
+        unresolved_before = sum(len(relations) for relations in unresolved_relation_lists)
 
-        if not unresolved_relations:
-            return 0, 0
-
-        semaphore = asyncio.Semaphore(max_concurrent)
-
-        async def resolve_relation(relation: Relation) -> int:
-            async with semaphore:
-                try:
-                    # strict=True for deferred resolution: only fill in to_id on an
-                    # exact permalink/title/file_path match. Fuzzy fallback would silently
-                    # resolve ambiguous links to whichever entity shares tokens with the
-                    # link text, mismatching this with the sync_service forward-reference
-                    # path and producing confidently-wrong graph edges. See
-                    # sync_service.resolve_forward_references for the same change.
-                    async with db.scoped_session(self.session_maker) as session:
-                        resolved_entity = await self.entity_service.link_resolver.resolve_link(
-                            relation.to_name, strict=True, session=session
-                        )
-                    if resolved_entity is None or resolved_entity.id == relation.from_id:
-                        return 0
-
-                    try:
-                        async with db.scoped_session(self.session_maker) as session:
-                            await self.relation_repository.update(
-                                session,
-                                relation.id,
-                                {
-                                    "to_id": resolved_entity.id,
-                                    "to_name": resolved_entity.title,
-                                },
-                            )
-                    except IntegrityError:
-                        async with db.scoped_session(self.session_maker) as session:
-                            await self.relation_repository.delete(session, relation.id)
-                    return 1
-                except Exception as exc:  # pragma: no cover - defensive logging
-                    logger.warning(
-                        "Batch relation resolution failed",
-                        relation_id=relation.id,
-                        from_id=relation.from_id,
-                        to_name=relation.to_name,
-                        error=str(exc),
-                    )
-                    return 0
-
-        resolved_counts = await asyncio.gather(
-            *(resolve_relation(relation) for relation in unresolved_relations)
-        )
+        for entity_id in ordered_entity_ids:
+            await self.relation_resolution.resolve_relations(entity_id=entity_id)
 
         remaining_relation_lists = await asyncio.gather(
-            *(self._find_unresolved_relations_for_entity(entity_id) for entity_id in entity_ids)
+            *(
+                self._find_unresolved_relations_for_entity(entity_id)
+                for entity_id in ordered_entity_ids
+            )
         )
         remaining_unresolved = sum(len(relations) for relations in remaining_relation_lists)
-
-        return sum(resolved_counts), remaining_unresolved
+        return max(0, unresolved_before - remaining_unresolved), remaining_unresolved
 
     async def _find_unresolved_relations_for_entity(self, entity_id: int):
         """Load unresolved relations for one entity in a service-owned session."""

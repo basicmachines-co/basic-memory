@@ -76,6 +76,7 @@ class FakeRelation:
     from_id: int
     to_name: str
     relation_type: str = "related_to"
+    generation: int = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -412,10 +413,10 @@ def test_relation_write_batch_plan_keeps_collision_domains_together() -> None:
         ResolvedRelationWrite(
             relation_id=relation_id,
             from_id=relation_id,
+            generation=1,
             original_target_name=f"Original {relation_id}",
             target_id=1_000 + relation_id,
             target_external_id=f"external-{1_000 + relation_id}",
-            target_name=f"Target {relation_id}",
             relation_type="related_to",
         )
         for relation_id in range(1, RELATION_RESOLUTION_WRITE_BATCH_SIZE)
@@ -424,19 +425,19 @@ def test_relation_write_batch_plan_keeps_collision_domains_together() -> None:
         ResolvedRelationWrite(
             relation_id=RELATION_RESOLUTION_WRITE_BATCH_SIZE,
             from_id=999,
+            generation=1,
             original_target_name="Alias A",
             target_id=2_000,
             target_external_id="external-2000",
-            target_name="Canonical B",
             relation_type="related_to",
         ),
         ResolvedRelationWrite(
             relation_id=RELATION_RESOLUTION_WRITE_BATCH_SIZE + 1,
             from_id=999,
+            generation=1,
             original_target_name="Alias B",
             target_id=2_001,
             target_external_id="external-2001",
-            target_name="Canonical A",
             relation_type="related_to",
         ),
     ]
@@ -536,19 +537,19 @@ async def test_project_relation_resolution_uses_repository_runtime_and_counts_re
             ResolvedRelationWrite(
                 relation_id=1,
                 from_id=10,
+                generation=1,
                 original_target_name="Target A",
                 target_id=20,
                 target_external_id="external-20",
-                target_name="Target A",
                 relation_type="related_to",
             ),
             ResolvedRelationWrite(
                 relation_id=2,
                 from_id=11,
+                generation=1,
                 original_target_name="Target B",
                 target_id=21,
                 target_external_id="external-21",
-                target_name="Target B",
                 relation_type="related_to",
             ),
         ),

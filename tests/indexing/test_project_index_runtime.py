@@ -39,6 +39,7 @@ class StubUnresolvedRelation:
     from_id: int
     to_name: str
     relation_type: str = "related_to"
+    generation: int = 1
 
 
 @dataclass(slots=True)

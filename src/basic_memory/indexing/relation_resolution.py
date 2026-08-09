@@ -39,12 +39,11 @@ def plan_resolved_relation_write_batches(
     *,
     target_size: int = RELATION_RESOLUTION_WRITE_BATCH_SIZE,
 ) -> tuple[ResolvedRelationWriteBatch, ...]:
-    """Pack writes without splitting a source/relation-type collision domain.
+    """Pack writes without splitting a source/relation-type target collision domain.
 
-    Both relation uniqueness constraints include ``from_id`` and ``relation_type``. Writes in
-    that shared domain must be planned together so aliases can exchange their canonical names
-    without a later batch appearing to occupy the destination. A single domain may exceed the
-    target size; correctness takes precedence over the preferred commit size.
+    Resolved uniqueness includes ``from_id`` and ``relation_type``. Aliases that
+    resolve to the same target must be planned together so one deterministic
+    winner is chosen before any batch commits.
     """
     if target_size < 1:
         raise ValueError("Relation write batch target size must be positive")
@@ -85,6 +84,9 @@ class UnresolvedRelation(Protocol):
 
     @property
     def from_id(self) -> int: ...
+
+    @property
+    def generation(self) -> int: ...
 
     @property
     def to_name(self) -> str: ...
@@ -304,10 +306,10 @@ class RepositoryRelationResolutionRuntime:
                 ResolvedRelationWrite(
                     relation_id=relation.id,
                     from_id=relation.from_id,
+                    generation=relation.generation,
                     original_target_name=relation.to_name,
                     target_id=resolved_entity.id,
                     target_external_id=resolved_entity.external_id,
-                    target_name=resolved_entity.title,
                     relation_type=relation.relation_type,
                 )
             )

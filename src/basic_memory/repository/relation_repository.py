@@ -15,6 +15,7 @@ from sqlalchemy import (
     literal,
     or_,
     select,
+    tuple_,
     union_all,
     update,
 )
@@ -23,6 +24,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, aliased
+from sqlalchemy.orm.attributes import InstrumentedAttribute
 from sqlalchemy.orm.interfaces import LoaderOption
 from sqlalchemy.sql import Select
 from sqlalchemy.sql.elements import ColumnElement
@@ -77,8 +79,8 @@ def current_relation_generation_statement(
 def current_relation_generation_predicate(
     *,
     project_id: int,
-    entity_id: int,
-    generation: int,
+    entity_id: int | InstrumentedAttribute[int],
+    generation: int | InstrumentedAttribute[int],
 ) -> ColumnElement[bool]:
     """Require the source's accepted generation inside each mutation statement."""
     return exists().where(
@@ -94,14 +96,14 @@ class ResolvedRelationWrite:
 
     relation_id: int
     from_id: int
+    generation: int
     original_target_name: str
     target_id: int
     target_external_id: str
-    target_name: str
     relation_type: str
 
     @property
-    def unresolved_identity(self) -> tuple[int, int, None, str, str]:
+    def unresolved_identity(self) -> tuple[int, int, None, str, str, int]:
         """Return the row identity that must still exist before mutation."""
         return (
             self.relation_id,
@@ -109,6 +111,7 @@ class ResolvedRelationWrite:
             None,
             self.original_target_name,
             self.relation_type,
+            self.generation,
         )
 
     @property
@@ -128,17 +131,72 @@ class ResolvedRelationWriteResult:
 
 def current_resolved_relation_write_predicate(
     write: ResolvedRelationWrite,
+    *,
+    project_id: int,
 ) -> ColumnElement[bool]:
-    """Require both the unresolved edge and its snapshotted target to remain current."""
+    """Require source generation, unresolved edge, and target identity to remain current."""
     return and_(
+        Relation.project_id == project_id,
         Relation.id == write.relation_id,
         Relation.from_id == write.from_id,
         Relation.to_id.is_(None),
         Relation.to_name == write.original_target_name,
         Relation.relation_type == write.relation_type,
+        Relation.generation == write.generation,
+        current_relation_generation_predicate(
+            project_id=project_id,
+            entity_id=write.from_id,
+            generation=write.generation,
+        ),
         exists().where(
             Entity.id == write.target_id,
             Entity.external_id == write.target_external_id,
+            Entity.project_id == project_id,
+        ),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ExistingRelationSnapshot:
+    """Locked relation identity used for guarded resolver cleanup."""
+
+    relation_id: int
+    from_id: int
+    to_id: int | None
+    to_name: str
+    relation_type: str
+    generation: int
+
+    @property
+    def target_key(self) -> tuple[int, int, str] | None:
+        """Return the resolved uniqueness identity when this row has a target."""
+        if self.to_id is None:
+            return None
+        return self.from_id, self.to_id, self.relation_type
+
+
+def current_relation_snapshot_predicate(
+    snapshot: ExistingRelationSnapshot,
+    *,
+    project_id: int,
+    expected_generation: int,
+) -> ColumnElement[bool]:
+    """Delete a snapshotted row only while its source still owns the planned generation."""
+    target_predicate = (
+        Relation.to_id.is_(None) if snapshot.to_id is None else Relation.to_id == snapshot.to_id
+    )
+    return and_(
+        Relation.project_id == project_id,
+        Relation.id == snapshot.relation_id,
+        Relation.from_id == snapshot.from_id,
+        target_predicate,
+        Relation.to_name == snapshot.to_name,
+        Relation.relation_type == snapshot.relation_type,
+        Relation.generation == snapshot.generation,
+        current_relation_generation_predicate(
+            project_id=project_id,
+            entity_id=snapshot.from_id,
+            generation=expected_generation,
         ),
     )
 
@@ -338,8 +396,15 @@ class RelationRepository(Repository[Relation]):
         return RelationGenerationWriteResult(generation_is_current=True)
 
     async def find_unresolved_relations(self, session: AsyncSession) -> Sequence[Relation]:
-        """Find all unresolved relations, where to_id is null."""
-        query = self.select().filter(Relation.to_id.is_(None))
+        """Find unresolved relations owned by their source's current generation."""
+        query = self.select().filter(
+            Relation.to_id.is_(None),
+            current_relation_generation_predicate(
+                project_id=self.project_id,
+                entity_id=Relation.from_id,
+                generation=Relation.generation,
+            ),
+        )
         result = await self.execute_query(session, query)
         return result.scalars().all()
 
@@ -354,7 +419,15 @@ class RelationRepository(Repository[Relation]):
         Returns:
             List of unresolved relations where this entity is the source.
         """
-        query = self.select().filter(Relation.from_id == entity_id, Relation.to_id.is_(None))
+        query = self.select().filter(
+            Relation.from_id == entity_id,
+            Relation.to_id.is_(None),
+            current_relation_generation_predicate(
+                project_id=self.project_id,
+                entity_id=Relation.from_id,
+                generation=Relation.generation,
+            ),
+        )
         result = await self.execute_query(session, query)
         return result.scalars().all()
 
@@ -396,36 +469,67 @@ class RelationRepository(Repository[Relation]):
         session: AsyncSession,
         writes: Sequence[ResolvedRelationWrite],
     ) -> ResolvedRelationWriteResult:
-        """Resolve relation targets in one transaction without duplicate edges.
-
-        Both relation uniqueness constraints can collide when aliases resolve to
-        the same canonical entity. The old row-at-a-time path handled that by
-        deleting the later unresolved row after an ``IntegrityError``. Planning
-        the accepted and redundant rows up front preserves that behavior while
-        allowing the mutations to run as set-based statements.
-        """
+        """Backfill targets only while each source relation generation remains current."""
         if not writes:
             return ResolvedRelationWriteResult(frozenset(), ())
 
         ordered_writes = sorted(writes, key=lambda write: write.relation_id)
-        # PostgreSQL row locks preserve snapshotted targets until commit. Bound
-        # the locking reads as well as writes so a large collision domain never
-        # exceeds backend parameter limits. SQLite ignores FOR UPDATE, so each
-        # first mutation also checks the external ID before its write lock.
+
+        # Lock acquisition order is source note_content -> target entity -> relation.
+        # Publishers take the same source lock before touching relation rows, so
+        # mutual links cannot invert source/target lock order across transactions.
+        requested_source_entity_ids = sorted({write.from_id for write in ordered_writes})
+        source_result = await session.execute(
+            select(NoteContent.entity_id, NoteContent.db_version)
+            .where(
+                NoteContent.project_id == self.project_id,
+                NoteContent.entity_id.in_(requested_source_entity_ids),
+            )
+            .order_by(NoteContent.entity_id)
+            .with_for_update()
+        )
+        current_generation_by_source = dict(source_result.tuples().all())
+
+        stale_relation_ids = [
+            write.relation_id
+            for write in ordered_writes
+            if current_generation_by_source.get(write.from_id) != write.generation
+        ]
+        generation_current_writes = [
+            write
+            for write in ordered_writes
+            if current_generation_by_source.get(write.from_id) == write.generation
+        ]
+        if not generation_current_writes:
+            return ResolvedRelationWriteResult(
+                affected_entity_ids=frozenset(),
+                duplicate_relation_ids=(),
+                stale_relation_ids=tuple(sorted(stale_relation_ids)),
+            )
+
+        # PostgreSQL holds target identities through the mutation. SQLite omits
+        # FOR UPDATE and repeats the external-ID predicate in each target update;
+        # its first mutation then enters single-writer serialization.
         current_target_identities: set[tuple[int, str]] = set()
-        target_ids = sorted({write.target_id for write in ordered_writes})
+        target_ids = sorted({write.target_id for write in generation_current_writes})
         for target_id_batch in batched(
             target_ids,
             RESOLVED_RELATION_WRITE_STATEMENT_SIZE,
         ):
             target_result = await session.execute(
                 select(Entity.id, Entity.external_id)
-                .where(Entity.id.in_(target_id_batch))
+                .where(
+                    Entity.project_id == self.project_id,
+                    Entity.id.in_(target_id_batch),
+                )
                 .order_by(Entity.id)
                 .with_for_update()
             )
             current_target_identities.update(target_result.tuples().all())
-        requested_source_entity_ids = {write.from_id for write in ordered_writes}
+
+        collision_domains = sorted(
+            {(write.from_id, write.relation_type) for write in generation_current_writes}
+        )
         result = await session.execute(
             select(
                 Relation.id,
@@ -433,57 +537,135 @@ class RelationRepository(Repository[Relation]):
                 Relation.to_id,
                 Relation.to_name,
                 Relation.relation_type,
-            ).where(
-                Relation.project_id == self.project_id,
-                Relation.from_id.in_(requested_source_entity_ids),
+                Relation.generation,
             )
+            .where(
+                Relation.project_id == self.project_id,
+                tuple_(Relation.from_id, Relation.relation_type).in_(collision_domains),
+            )
+            .order_by(Relation.id)
+            .with_for_update()
         )
-        existing_relations = result.tuples().all()
+        existing_relations = [
+            ExistingRelationSnapshot(
+                relation_id=relation_id,
+                from_id=from_id,
+                to_id=to_id,
+                to_name=to_name,
+                relation_type=relation_type,
+                generation=generation,
+            )
+            for relation_id, from_id, to_id, to_name, relation_type, generation in result.tuples()
+        ]
         existing_relations_by_id = {
-            relation_id: (relation_id, from_id, to_id, to_name, relation_type)
-            for relation_id, from_id, to_id, to_name, relation_type in existing_relations
+            snapshot.relation_id: snapshot for snapshot in existing_relations
         }
 
         current_writes: list[ResolvedRelationWrite] = []
-        stale_relation_ids: list[int] = []
-        for write in ordered_writes:
+        for write in generation_current_writes:
+            snapshot = existing_relations_by_id.get(write.relation_id)
             if (
-                existing_relations_by_id.get(write.relation_id) != write.unresolved_identity
+                snapshot is None
+                or (
+                    snapshot.relation_id,
+                    snapshot.from_id,
+                    snapshot.to_id,
+                    snapshot.to_name,
+                    snapshot.relation_type,
+                    snapshot.generation,
+                )
+                != write.unresolved_identity
                 or write.target_identity not in current_target_identities
             ):
                 stale_relation_ids.append(write.relation_id)
                 continue
             current_writes.append(write)
 
-        relation_ids = {write.relation_id for write in current_writes}
+        resolved_snapshots_by_target: dict[
+            tuple[int, int, str], list[ExistingRelationSnapshot]
+        ] = {}
+        for snapshot in existing_relations:
+            current_source_generation = current_generation_by_source[snapshot.from_id]
+            if snapshot.generation > current_source_generation:
+                raise RuntimeError(
+                    "Relation generation cannot be newer than its source note_content: "
+                    f"relation_id={snapshot.relation_id}, "
+                    f"relation_generation={snapshot.generation}, "
+                    f"source_generation={current_source_generation}"
+                )
+            if snapshot.target_key is not None:
+                resolved_snapshots_by_target.setdefault(snapshot.target_key, []).append(snapshot)
 
-        occupied_target_keys: set[tuple[int, int, str]] = set()
-        occupied_name_keys: set[tuple[int, str, str]] = set()
-        all_name_keys: set[tuple[int, str, str]] = set()
-        for relation_id, from_id, to_id, to_name, relation_type in existing_relations:
-            name_key = (from_id, to_name, relation_type)
-            all_name_keys.add(name_key)
-            if relation_id in relation_ids:
-                continue
-            occupied_name_keys.add(name_key)
-            if to_id is not None:
-                occupied_target_keys.add((from_id, to_id, relation_type))
+        writes_by_target: dict[tuple[int, int, str], list[ResolvedRelationWrite]] = {}
+        for write in current_writes:
+            key = (write.from_id, write.target_id, write.relation_type)
+            writes_by_target.setdefault(key, []).append(write)
 
         accepted_writes: list[ResolvedRelationWrite] = []
-        planned_duplicate_writes: list[ResolvedRelationWrite] = []
-        for write in current_writes:
-            target_key = (write.from_id, write.target_id, write.relation_type)
-            name_key = (write.from_id, write.target_name, write.relation_type)
-            if target_key in occupied_target_keys or name_key in occupied_name_keys:
-                planned_duplicate_writes.append(write)
-                continue
-            accepted_writes.append(write)
-            occupied_target_keys.add(target_key)
-            occupied_name_keys.add(name_key)
+        duplicate_writes: list[ResolvedRelationWrite] = []
+        duplicate_snapshot_deletes: list[tuple[ExistingRelationSnapshot, int]] = []
+        superseded_snapshot_deletes: list[tuple[ExistingRelationSnapshot, int]] = []
+        for target_key, target_writes in sorted(writes_by_target.items()):
+            source_id = target_key[0]
+            expected_generation = current_generation_by_source[source_id]
+            target_snapshots = resolved_snapshots_by_target.get(target_key, [])
+            current_snapshots: list[ExistingRelationSnapshot] = []
+            for snapshot in target_snapshots:
+                if snapshot.generation < expected_generation:
+                    superseded_snapshot_deletes.append((snapshot, expected_generation))
+                else:
+                    current_snapshots.append(snapshot)
 
-        duplicate_relation_ids: list[int] = []
+            winner_id = min(
+                [write.relation_id for write in target_writes]
+                + [snapshot.relation_id for snapshot in current_snapshots]
+            )
+            for write in target_writes:
+                if write.relation_id == winner_id:
+                    accepted_writes.append(write)
+                else:
+                    duplicate_writes.append(write)
+            duplicate_snapshot_deletes.extend(
+                (snapshot, expected_generation)
+                for snapshot in current_snapshots
+                if snapshot.relation_id != winner_id
+            )
+
+        deleted_snapshot_ids: set[int] = set()
+        snapshot_delete_commands = [
+            *superseded_snapshot_deletes,
+            *duplicate_snapshot_deletes,
+        ]
+        for delete_batch in batched(
+            snapshot_delete_commands,
+            RESOLVED_RELATION_WRITE_STATEMENT_SIZE,
+        ):
+            delete_result = await session.execute(
+                delete(Relation)
+                .where(
+                    or_(
+                        *(
+                            current_relation_snapshot_predicate(
+                                snapshot,
+                                project_id=self.project_id,
+                                expected_generation=expected_generation,
+                            )
+                            for snapshot, expected_generation in delete_batch
+                        )
+                    )
+                )
+                .returning(Relation.id)
+            )
+            deleted_snapshot_ids.update(delete_result.scalars().all())
+
+        duplicate_relation_ids = {
+            snapshot.relation_id
+            for snapshot, _ in duplicate_snapshot_deletes
+            if snapshot.relation_id in deleted_snapshot_ids
+        }
+        deleted_duplicate_write_ids: set[int] = set()
         for write_batch in batched(
-            planned_duplicate_writes,
+            duplicate_writes,
             RESOLVED_RELATION_WRITE_STATEMENT_SIZE,
         ):
             delete_result = await session.execute(
@@ -491,13 +673,20 @@ class RelationRepository(Repository[Relation]):
                 .where(
                     Relation.project_id == self.project_id,
                     or_(
-                        *(current_resolved_relation_write_predicate(write) for write in write_batch)
+                        *(
+                            current_resolved_relation_write_predicate(
+                                write,
+                                project_id=self.project_id,
+                            )
+                            for write in write_batch
+                        )
                     ),
                 )
                 .returning(Relation.id)
             )
             deleted_relation_ids = set(delete_result.scalars().all())
-            duplicate_relation_ids.extend(
+            deleted_duplicate_write_ids.update(deleted_relation_ids)
+            duplicate_relation_ids.update(
                 write.relation_id
                 for write in write_batch
                 if write.relation_id in deleted_relation_ids
@@ -508,90 +697,52 @@ class RelationRepository(Repository[Relation]):
                 if write.relation_id not in deleted_relation_ids
             )
 
-        staged_writes: list[ResolvedRelationWrite] = []
-        if accepted_writes:
-            temporary_names_by_relation_id: dict[int, str] = {}
-            for write in accepted_writes:
-                temporary_name = f"__basic_memory_resolving_relation_{write.relation_id}__"
-                while (write.from_id, temporary_name, write.relation_type) in all_name_keys:
-                    temporary_name += "_"
-                temporary_names_by_relation_id[write.relation_id] = temporary_name
-                all_name_keys.add((write.from_id, temporary_name, write.relation_type))
-
-            # Clear both unique keys before assigning canonical targets. This
-            # makes alias swaps safe on databases that check uniqueness row by
-            # row inside a multi-row UPDATE. The identity predicates make this
-            # first mutation a compare-and-set, so a reused relation ID cannot
-            # redirect a stale resolution command onto a replacement edge.
-            staged_relation_ids: set[int] = set()
-            for write_batch in batched(
-                accepted_writes,
-                RESOLVED_RELATION_WRITE_STATEMENT_SIZE,
-            ):
-                batch_temporary_names = {
-                    write.relation_id: temporary_names_by_relation_id[write.relation_id]
-                    for write in write_batch
-                }
-                stage_result = await session.execute(
-                    update(Relation)
-                    .where(
-                        Relation.project_id == self.project_id,
-                        or_(
-                            *(
-                                current_resolved_relation_write_predicate(write)
-                                for write in write_batch
+        updated_relation_ids: set[int] = set()
+        for write_batch in batched(
+            accepted_writes,
+            RESOLVED_RELATION_WRITE_STATEMENT_SIZE,
+        ):
+            update_result = await session.execute(
+                update(Relation)
+                .where(
+                    or_(
+                        *(
+                            current_resolved_relation_write_predicate(
+                                write,
+                                project_id=self.project_id,
                             )
-                        ),
+                            for write in write_batch
+                        )
                     )
-                    .values(
-                        to_id=None,
-                        to_name=case(batch_temporary_names, value=Relation.id),
-                    )
-                    .returning(Relation.id)
-                    .execution_options(synchronize_session=False)
                 )
-                staged_relation_ids.update(stage_result.scalars().all())
-            staged_writes = [
-                write for write in accepted_writes if write.relation_id in staged_relation_ids
-            ]
+                .values(
+                    to_id=case(
+                        {write.relation_id: write.target_id for write in write_batch},
+                        value=Relation.id,
+                    )
+                )
+                .returning(Relation.id)
+                .execution_options(synchronize_session=False)
+            )
+            batch_updated_relation_ids = set(update_result.scalars().all())
+            updated_relation_ids.update(batch_updated_relation_ids)
             stale_relation_ids.extend(
                 write.relation_id
-                for write in accepted_writes
-                if write.relation_id not in staged_relation_ids
+                for write in write_batch
+                if write.relation_id not in batch_updated_relation_ids
             )
 
-        if staged_writes:
-            # Keep the whole collision domain in this transaction, but bound
-            # each SQL expression below SQLite's expression-depth limit.
-            for write_batch in batched(
-                staged_writes,
-                RESOLVED_RELATION_WRITE_STATEMENT_SIZE,
-            ):
-                await session.execute(
-                    update(Relation)
-                    .where(
-                        Relation.project_id == self.project_id,
-                        Relation.id.in_(write.relation_id for write in write_batch),
-                    )
-                    .values(
-                        to_id=case(
-                            {write.relation_id: write.target_id for write in write_batch},
-                            value=Relation.id,
-                        ),
-                        to_name=case(
-                            {write.relation_id: write.target_name for write in write_batch},
-                            value=Relation.id,
-                        ),
-                    )
-                    .execution_options(synchronize_session=False)
-                )
-
         writes_by_id = {write.relation_id: write for write in current_writes}
-        mutated_relation_ids = set(duplicate_relation_ids)
-        mutated_relation_ids.update(write.relation_id for write in staged_writes)
         source_entity_ids = {
-            writes_by_id[relation_id].from_id for relation_id in mutated_relation_ids
+            writes_by_id[relation_id].from_id
+            for relation_id in deleted_duplicate_write_ids | updated_relation_ids
         }
+        deleted_snapshots_by_id = {
+            snapshot.relation_id: snapshot for snapshot, _ in snapshot_delete_commands
+        }
+        source_entity_ids.update(
+            deleted_snapshots_by_id[relation_id].from_id for relation_id in deleted_snapshot_ids
+        )
 
         # Trigger: relation targets changed or duplicate edges were removed.
         # Why: a later storage/search failure must not consume the only evidence
@@ -608,7 +759,7 @@ class RelationRepository(Repository[Relation]):
 
         return ResolvedRelationWriteResult(
             affected_entity_ids=frozenset(source_entity_ids),
-            duplicate_relation_ids=tuple(duplicate_relation_ids),
+            duplicate_relation_ids=tuple(sorted(duplicate_relation_ids)),
             stale_relation_ids=tuple(sorted(stale_relation_ids)),
         )
 

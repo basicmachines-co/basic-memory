@@ -954,7 +954,7 @@ async def test_batch_indexer_index_markdown_file_can_defer_relation_resolution(
 
 
 @pytest.mark.asyncio
-async def test_batch_indexer_uses_strict_link_resolution_for_deferred_relations(
+async def test_batch_indexer_uses_exact_bulk_resolution_for_deferred_relations(
     app_config,
     entity_service,
     entity_repository,
@@ -964,14 +964,7 @@ async def test_batch_indexer_uses_strict_link_resolution_for_deferred_relations(
     project_config,
     monkeypatch,
 ):
-    """Regression: batch indexer's deferred relation resolution must call
-    resolve_link with strict=True.
-
-    Mirror of sync_service.resolve_forward_references. Fuzzy fallback in the
-    deferred path silently fills in to_id from BM25/ts_rank results, polluting
-    the graph with confidently-wrong edges. Entity-creation already uses
-    strict=True; this is the other deferred path.
-    """
+    """Deferred relations use the shared exact-match bulk resolver."""
     path = "notes/source.md"
     await _create_file(
         project_config.home / path,
@@ -998,14 +991,15 @@ async def test_batch_indexer_uses_strict_link_resolution_for_deferred_relations(
         file_service,
     )
 
-    original_resolve_link = entity_service.link_resolver.resolve_link
-    seen_strict: list[object] = []
+    target_resolver_type = type(batch_indexer.relation_resolution.target_resolver)
+    original_resolve_targets = target_resolver_type.resolve_relation_targets
+    seen_target_batches: list[tuple[str, ...]] = []
 
-    async def spy_resolve_link(*args, **kwargs):
-        seen_strict.append(kwargs.get("strict", False))
-        return await original_resolve_link(*args, **kwargs)
+    async def spy_resolve_targets(self, link_texts, *, session):
+        seen_target_batches.append(tuple(link_texts))
+        return await original_resolve_targets(self, link_texts, session=session)
 
-    monkeypatch.setattr(entity_service.link_resolver, "resolve_link", spy_resolve_link)
+    monkeypatch.setattr(target_resolver_type, "resolve_relation_targets", spy_resolve_targets)
 
     result = await batch_indexer.index_files(
         {path: await _load_input(file_service, path)},
@@ -1020,10 +1014,7 @@ async def test_batch_indexer_uses_strict_link_resolution_for_deferred_relations(
         max_concurrent=1,
     )
 
-    assert seen_strict, "batch indexer did not invoke link_resolver.resolve_link"
-    assert all(strict is True for strict in seen_strict), (
-        f"Deferred resolution must call resolve_link(strict=True). Observed: {seen_strict!r}"
-    )
+    assert seen_target_batches == [("never-resolves-target",)]
 
     # The unresolvable relation stayed unresolved.
     async with db.scoped_session(search_service.session_maker) as session:
