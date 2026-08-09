@@ -847,6 +847,110 @@ async def test_apply_resolved_targets_accepts_empty_plan(
 
 
 @pytest.mark.asyncio
+async def test_legacy_relation_without_note_content_remains_resolvable(
+    relation_repository: RelationRepository,
+    source_entity: Entity,
+    target_entity: Entity,
+    test_project: Project,
+    session_maker,
+) -> None:
+    """Migration-era generation-zero relations remain live until source bootstrap."""
+    legacy_relation = Relation(
+        project_id=test_project.id,
+        from_id=source_entity.id,
+        to_id=None,
+        to_name=target_entity.title,
+        relation_type="documents",
+        generation=0,
+    )
+    async with db.scoped_session(session_maker) as session:
+        session.add(legacy_relation)
+        await session.flush()
+        relation_id = legacy_relation.id
+
+    async with db.scoped_session(session_maker) as session:
+        unresolved = await relation_repository.find_unresolved_relations(session)
+    assert [relation.id for relation in unresolved] == [relation_id]
+
+    async with db.scoped_session(session_maker) as session:
+        result = await relation_repository.apply_resolved_targets(
+            session,
+            [
+                ResolvedRelationWrite(
+                    relation_id=relation_id,
+                    from_id=source_entity.id,
+                    generation=0,
+                    original_target_name=target_entity.title,
+                    target_id=target_entity.id,
+                    target_external_id=target_entity.external_id,
+                    relation_type="documents",
+                )
+            ],
+        )
+
+    assert result == ResolvedRelationWriteResult(
+        affected_entity_ids=frozenset({source_entity.id}),
+        duplicate_relation_ids=(),
+    )
+    async with db.scoped_session(session_maker) as session:
+        relation = await relation_repository.find_by_id(session, relation_id)
+
+    assert relation is not None
+    assert relation.to_id == target_entity.id
+    assert relation.generation == 0
+
+
+@pytest.mark.asyncio
+async def test_legacy_relation_becomes_stale_after_note_content_bootstrap(
+    relation_repository: RelationRepository,
+    source_entity: Entity,
+    target_entity: Entity,
+    test_project: Project,
+    session_maker,
+) -> None:
+    """Bootstrapping the source closes the generation-zero compatibility path."""
+    legacy_relation = Relation(
+        project_id=test_project.id,
+        from_id=source_entity.id,
+        to_id=None,
+        to_name=target_entity.title,
+        relation_type="documents",
+        generation=0,
+    )
+    async with db.scoped_session(session_maker) as session:
+        session.add(legacy_relation)
+        await session.flush()
+        relation_id = legacy_relation.id
+
+    await set_note_content_generation(
+        session_maker,
+        source_entity=source_entity,
+        test_project=test_project,
+        generation=1,
+    )
+    write = ResolvedRelationWrite(
+        relation_id=relation_id,
+        from_id=source_entity.id,
+        generation=0,
+        original_target_name=target_entity.title,
+        target_id=target_entity.id,
+        target_external_id=target_entity.external_id,
+        relation_type="documents",
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        unresolved = await relation_repository.find_unresolved_relations(session)
+        result = await relation_repository.apply_resolved_targets(session, [write])
+
+    assert unresolved == []
+    assert result == ResolvedRelationWriteResult(
+        affected_entity_ids=frozenset(),
+        duplicate_relation_ids=(),
+        stale_relation_ids=(relation_id,),
+    )
+
+
+@pytest.mark.asyncio
 async def test_apply_resolved_targets_batches_updates_and_duplicate_cleanup(
     relation_repository: RelationRepository,
     source_entity: Entity,

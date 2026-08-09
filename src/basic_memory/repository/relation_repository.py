@@ -34,6 +34,7 @@ from basic_memory.repository.repository import Repository
 
 RESOLVED_RELATION_WRITE_STATEMENT_SIZE = 250
 RELATION_GENERATION_WRITE_STATEMENT_SIZE = 250
+LEGACY_RELATION_GENERATION = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,11 +92,29 @@ def current_relation_generation_predicate(
     entity_id: int | InstrumentedAttribute[int],
     generation: int | InstrumentedAttribute[int],
 ) -> ColumnElement[bool]:
-    """Require the source's accepted generation inside each mutation statement."""
-    return exists().where(
+    """Require an accepted generation or an unbootstrapped legacy source.
+
+    The note-content migration did not backfill existing entities. Its relation
+    rows remain at generation zero until canonical markdown is reconciled. Keep
+    those rows usable only while the source still has no ``NoteContent``; once
+    bootstrapped, the ordinary generation fence owns every subsequent mutation.
+    """
+    source_has_note_content = exists().where(
         NoteContent.project_id == project_id,
         NoteContent.entity_id == entity_id,
-        NoteContent.db_version == generation,
+    )
+    generation_is_legacy = (
+        literal(generation) == LEGACY_RELATION_GENERATION
+        if isinstance(generation, int)
+        else generation == LEGACY_RELATION_GENERATION
+    )
+    return or_(
+        exists().where(
+            NoteContent.project_id == project_id,
+            NoteContent.entity_id == entity_id,
+            NoteContent.db_version == generation,
+        ),
+        and_(generation_is_legacy, ~source_has_note_content),
     )
 
 
@@ -529,6 +548,19 @@ class RelationRepository(Repository[Relation]):
             .with_for_update()
         )
         current_generation_by_source = dict(source_result.tuples().all())
+
+        # The statement guards below repeat the no-NoteContent condition, so a
+        # concurrent bootstrap closes this compatibility path before mutation.
+        legacy_source_entity_ids = {
+            write.from_id
+            for write in ordered_writes
+            if write.generation == LEGACY_RELATION_GENERATION
+            and write.from_id not in current_generation_by_source
+        }
+        current_generation_by_source.update(
+            (source_entity_id, LEGACY_RELATION_GENERATION)
+            for source_entity_id in legacy_source_entity_ids
+        )
 
         stale_relation_ids = [
             write.relation_id
