@@ -84,6 +84,50 @@ def test_setup_logging_trims_stale_windows_pid_logs(monkeypatch, tmp_path) -> No
     ]
 
 
+def test_setup_logging_survives_a_stale_log_deleted_mid_cleanup(monkeypatch, tmp_path) -> None:
+    """Regression guard for #1211: a stale log that disappears mid-cleanup must not kill the process.
+
+    Windows log files are per-PID, so every launch prunes the same shared directory and concurrent launches
+    are the normal case for the Claude Code plugin. The ``unlink`` below is guarded against exactly that race;
+    the ``stat`` in the sort key that precedes it was not, so ``FileNotFoundError`` escaped through
+    ``setup_logging`` and ended the process during logging setup. When that process was the MCP server, the
+    client saw the stdio connection close and the session silently had no basic-memory tools at all.
+    """
+    log_dir = tmp_path / ".basic-memory"
+    log_dir.mkdir()
+
+    for index in range(6):
+        log_path = log_dir / f"basic-memory-{1000 + index}.log"
+        log_path.write_text("old log", encoding="utf-8")
+        mtime = 1_000 + index
+        os.utime(log_path, (mtime, mtime))
+
+    vanishing = log_dir / "basic-memory-1003.log"
+    real_stat = Path.stat
+
+    def stat_with_a_racing_deletion(self: Path, *args: Any, **kwargs: Any) -> Any:
+        # Stand in for another launch pruning the same shared directory between the glob and the stat.
+        if self == vanishing and vanishing.exists():
+            vanishing.unlink()
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setenv("BASIC_MEMORY_ENV", "dev")
+    monkeypatch.delenv("BASIC_MEMORY_CONFIG_DIR", raising=False)
+    monkeypatch.setattr(utils.os, "name", "nt")
+    monkeypatch.setattr(utils.os, "getpid", lambda: 4242)
+    monkeypatch.setattr(utils.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(utils.Path, "stat", stat_with_a_racing_deletion)
+    monkeypatch.setattr(utils.logger, "remove", lambda *args, **kwargs: None)
+    monkeypatch.setattr(utils.logger, "add", lambda *args, **kwargs: None)
+    monkeypatch.setattr(utils.telemetry, "get_logfire_handler", lambda: None)
+
+    utils.setup_logging(log_to_file=True)
+
+    # The point is that logging came up at all; the pruning itself is covered by the test above.
+    remaining = sorted(path.name for path in log_dir.glob("basic-memory-*.log*"))
+    assert "basic-memory-1003.log" not in remaining
+
+
 def test_setup_logging_honors_basic_memory_config_dir(monkeypatch, tmp_path) -> None:
     """Regression guard for #742: log path must follow BASIC_MEMORY_CONFIG_DIR.
 

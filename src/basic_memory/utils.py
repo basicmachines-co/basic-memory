@@ -501,7 +501,15 @@ def _cleanup_windows_log_files(log_dir: Path, current_log_name: str) -> None:
     # Trigger: per-process log filenames avoid Windows rename contention but fragment retention.
     # Why: loguru retention applies per sink, not across the whole basic-memory log directory.
     # Outcome: keep only the newest stale PID logs so repeated CLI/server launches stay bounded.
-    stale_logs.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    def _mtime(path: Path) -> float:
+        try:
+            return path.stat().st_mtime
+        except OSError:
+            # Another launch pruned it between the glob above and this read. Sorting it last means it lands in
+            # the delete slice, where unlink() is already guarded against the same race.
+            return -1.0
+
+    stale_logs.sort(key=_mtime, reverse=True)
     for stale_log in stale_logs[WINDOWS_LOG_FILE_RETENTION - 1 :]:
         try:
             stale_log.unlink()
