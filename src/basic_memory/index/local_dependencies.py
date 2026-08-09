@@ -329,6 +329,12 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
                 source=source,
                 anchor=anchor,
             )
+            # Trigger: the indexed file is older than the accepted DB generation.
+            # Why: retrying identical bytes cannot make that file lineage current.
+            # Outcome: preserve accepted relations and finish without publishing this pass.
+            if reconciliation.status == "deferred":
+                break
+
             if reconciliation.generation is not None:
                 generation_is_current = await self.publish_relation_generation(
                     synced,

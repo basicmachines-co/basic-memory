@@ -294,6 +294,22 @@ async def test_file_indexer_reindexes_current_file_after_anchor_becomes_stale() 
 
 
 @pytest.mark.asyncio
+async def test_file_indexer_preserves_relations_when_file_lineage_is_deferred() -> None:
+    """An older file cannot publish relations or become current by retrying identical bytes."""
+    existing_entity = _entity(entity_id=7)
+    file_indexer, markdown_indexer, note_content_reconciler = _file_indexer(
+        existing_entity=existing_entity,
+    )
+    note_content_reconciler.reconcile.return_value = NoteContentReconciliationResult.deferred()
+
+    result = await file_indexer.index_markdown_file("notes/note.md")
+
+    markdown_indexer.index_current_markdown_file.assert_awaited_once()
+    markdown_indexer.publish_relation_generation.assert_not_awaited()
+    assert result.checksum == CHECKSUM
+
+
+@pytest.mark.asyncio
 async def test_file_indexer_retries_when_generation_changes_before_relation_publish() -> None:
     """Losing the repository source fence retries instead of reporting partial publication."""
     existing_entity = _entity(entity_id=7)
