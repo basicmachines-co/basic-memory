@@ -145,7 +145,12 @@ class FakeRepositorySession:
 
     async def scalar(self, statement: object) -> object | None:
         self.scalar_statements.append(statement)
-        return self.entity
+        statement_text = str(statement)
+        if "FROM note_content" in statement_text:
+            return self.note_content
+        if "FROM entity" in statement_text:
+            return self.entity
+        raise AssertionError(f"unexpected scalar statement: {statement_text}")
 
     async def get(self, model: type[object], identity: int) -> object | None:
         assert identity == 42
@@ -568,8 +573,10 @@ async def test_repository_note_materialization_publisher_updates_current_written
         file_checksum="new-file-sum",
     )
     assert session_lock.calls == [(cast(AsyncSession, session), 7, 42)]
-    assert len(session.scalar_statements) == 1
-    assert "FOR UPDATE" in str(session.scalar_statements[0])
+    assert len(session.scalar_statements) == 2
+    assert "FROM note_content" in str(session.scalar_statements[0])
+    assert "FROM entity" in str(session.scalar_statements[1])
+    assert all("FOR UPDATE" in str(statement) for statement in session.scalar_statements)
     assert repository.calls == [
         (
             cast(AsyncSession, session),

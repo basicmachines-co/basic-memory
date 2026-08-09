@@ -428,8 +428,17 @@ class RepositoryNoteMaterializationPublisher:
             )
 
             # Materialization publishes NoteContent and Entity in one transaction.
-            # Lock Entity before reading the publish state so an Entity-first move
-            # cannot change the destination path while this publisher waits.
+            # The canonical order lives in current_relation_generation_statement:
+            # claim NoteContent before any Entity lock so publication, accepted
+            # mutation, deletion, and materialization cannot form a lock cycle.
+            note_content = await session.scalar(
+                select(NoteContent)
+                .where(
+                    NoteContent.entity_id == request.entity_id,
+                    NoteContent.project_id == request.project_id,
+                )
+                .with_for_update()
+            )
             entity = await session.scalar(
                 select(Entity)
                 .where(
@@ -438,7 +447,6 @@ class RepositoryNoteMaterializationPublisher:
                 )
                 .with_for_update()
             )
-            note_content = await session.get(NoteContent, request.entity_id)
             publish_plan = plan_written_note_materialization_publish(
                 request=request,
                 prepared_write=prepared_write,

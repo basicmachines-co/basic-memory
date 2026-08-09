@@ -1,4 +1,4 @@
-"""Postgres regression coverage for Entity-NoteContent materialization lock order."""
+"""Postgres regression coverage for NoteContent-Entity materialization lock order."""
 
 from __future__ import annotations
 
@@ -15,6 +15,9 @@ from basic_memory import db
 from basic_memory.indexing.note_materialization_runner import (
     NoteMaterializationSessionLock,
     RepositoryNoteMaterializationPublisher,
+)
+from basic_memory.indexing.accepted_note_write_runner import (
+    lock_accepted_note_content_for_entity_mutation,
 )
 from basic_memory.models import Entity, NoteContent, Project
 from basic_memory.repository.note_content_repository import NoteContentRepository
@@ -45,48 +48,14 @@ class StartedMaterializationLock(NoteMaterializationSessionLock):
         self.started.set()
 
 
-class PausingNoteContentRepository(NoteContentRepository):
-    """Hold the materializer after NoteContent is updated but before Entity flush."""
-
-    def __init__(self, project_id: int) -> None:
-        super().__init__(project_id)
-        self.update_applied = asyncio.Event()
-        self.release_update = asyncio.Event()
-
-    @override
-    async def update_state_fields(
-        self,
-        session: AsyncSession,
-        entity_id: int,
-        *,
-        expected_db_version: int | None = None,
-        **updates: Any,
-    ) -> NoteContent | None:
-        note_content = await super().update_state_fields(
-            session,
-            entity_id,
-            expected_db_version=expected_db_version,
-            **updates,
-        )
-        self.update_applied.set()
-        await self.release_update.wait()
-        return note_content
-
-
 @pytest.mark.asyncio
 @pytest.mark.parametrize("move_during_wait", [False, True], ids=["stable-path", "moved-path"])
-async def test_materialization_waits_for_entity_before_updating_note_content(
+async def test_materialization_and_accepted_mutation_share_note_content_first_order(
     engine_factory,
     test_project: Project,
     move_during_wait: bool,
 ) -> None:
-    """An Entity-first reconciliation transaction must not deadlock materialization.
-
-    Before the fix, the publisher reaches ``update_applied`` while this test owns
-    the Entity row. An Entity-first reconciliation update would then wait on the
-    publisher's NoteContent lock while the publisher waits on Entity: the exact
-    deadlock cycle reported in #1187.
-    """
+    """An accepted mutation can take Entity while materialization waits on NoteContent."""
     engine, session_maker = engine_factory
     if engine.dialect.name != "postgresql":
         pytest.skip("row-lock ordering requires PostgreSQL")
@@ -140,21 +109,20 @@ async def test_materialization_waits_for_entity_before_updating_note_content(
         file_updated_at=datetime(2026, 8, 5, 1, 1, tzinfo=UTC),
     )
     session_lock = StartedMaterializationLock()
-    note_content_repository = PausingNoteContentRepository(test_project.id)
     publisher = RepositoryNoteMaterializationPublisher(
         session_maker=session_maker,
         session_lock=session_lock,
-        note_content_store=lambda _project_id: note_content_repository,
     )
 
     publish_task: asyncio.Task[Any] | None = None
-    async with session_maker() as reconciliation_session:
-        await reconciliation_session.begin()
+    async with session_maker() as mutation_session:
+        await mutation_session.begin()
         try:
-            locked_entity = await reconciliation_session.scalar(
-                select(Entity).where(Entity.id == entity_id).with_for_update()
+            await lock_accepted_note_content_for_entity_mutation(
+                mutation_session,
+                project_id=test_project.id,
+                entity_id=entity_id,
             )
-            assert locked_entity is not None
 
             publish_task = asyncio.create_task(
                 publisher.publish_written_file_state(
@@ -164,34 +132,38 @@ async def test_materialization_waits_for_entity_before_updating_note_content(
                 )
             )
             await asyncio.wait_for(session_lock.started.wait(), timeout=2)
+            # Let PostgreSQL enqueue the materializer's NoteContent lock. With
+            # the old Entity-first order, the next lock request closes a cycle.
+            await asyncio.sleep(0.1)
 
-            with pytest.raises(TimeoutError):
-                await asyncio.wait_for(
-                    note_content_repository.update_applied.wait(),
-                    timeout=0.5,
-                )
+            locked_entity = await asyncio.wait_for(
+                mutation_session.scalar(
+                    select(Entity).where(Entity.id == entity_id).with_for_update()
+                ),
+                timeout=2,
+            )
+            assert locked_entity is not None
 
             if move_during_wait:
                 locked_entity.file_path = "notes/moved-during-materialization.md"
-                await reconciliation_session.execute(
+                await mutation_session.execute(
                     update(NoteContent)
                     .where(NoteContent.entity_id == entity_id)
                     .values(file_path=locked_entity.file_path)
                 )
             else:
-                await reconciliation_session.execute(
+                locked_entity.title = "Accepted mutation completed"
+                await mutation_session.execute(
                     update(NoteContent)
                     .where(NoteContent.entity_id == entity_id)
-                    .values(last_materialization_error="entity-first reconciliation")
+                    .values(last_materialization_error="accepted mutation overlap")
                 )
-            await reconciliation_session.commit()
+            await mutation_session.commit()
 
-            note_content_repository.release_update.set()
             result = await asyncio.wait_for(publish_task, timeout=2)
         finally:
-            note_content_repository.release_update.set()
-            if reconciliation_session.in_transaction():
-                await reconciliation_session.rollback()
+            if mutation_session.in_transaction():
+                await mutation_session.rollback()
             if publish_task is not None and not publish_task.done():
                 publish_task.cancel()
                 with suppress(asyncio.CancelledError):
@@ -213,6 +185,7 @@ async def test_materialization_waits_for_entity_before_updating_note_content(
         assert entity.mtime != written_file.file_updated_at.timestamp()
     else:
         assert result.status is RuntimeNoteMaterializationStatus.written
+        assert entity.title == "Accepted mutation completed"
         assert note_content.file_version == 1
         assert note_content.file_checksum == "materialized-checksum"
         assert note_content.file_write_status == "synced"

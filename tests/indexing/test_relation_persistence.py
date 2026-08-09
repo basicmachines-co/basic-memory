@@ -18,7 +18,7 @@ from basic_memory.indexing.change_detector import ChangeDetector
 import basic_memory.indexing.relation_persistence as relation_persistence_module
 from basic_memory.indexing.models import IndexedRelation
 from basic_memory.indexing.relation_persistence import RelationGenerationPublisher
-from basic_memory.models import Entity, RelationSearchRefresh
+from basic_memory.models import Entity, Relation, RelationSearchRefresh
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.note_content_repository import (
     AcceptedNoteContentWrite,
@@ -390,3 +390,66 @@ async def test_failed_relation_publication_forces_change_detection_retry(
             entity_id=sample_entity.id,
         )
     assert [refresh.entity_id for refresh in refreshes] == [sample_entity.id, sample_entity.id]
+
+
+@pytest.mark.asyncio
+async def test_generation_zero_relation_forces_generation_publication(
+    sample_entity: Entity,
+    entity_repository: EntityRepository,
+    relation_repository: RelationRepository,
+    session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    """A rolling-deploy legacy write cannot make unchanged source bytes look complete."""
+    content = "# Rolling relation write\n\n- links_to [[Target]]\n"
+    checksum = sha256(content.encode()).hexdigest()
+    async with db.scoped_session(session_maker) as session:
+        entity = await entity_repository.get_by_id(
+            session,
+            sample_entity.id,
+            load_relations=False,
+        )
+        assert entity is not None
+        entity.checksum = checksum
+        await NoteContentRepository(project_id=sample_entity.project_id).accept_write(
+            session,
+            AcceptedNoteContentWrite(
+                entity_id=sample_entity.id,
+                markdown_content=content,
+                db_version=1,
+                db_checksum=checksum,
+                last_source="test",
+                updated_at=datetime.now(tz=UTC),
+            ),
+        )
+        session.add(
+            Relation(
+                project_id=sample_entity.project_id,
+                from_id=sample_entity.id,
+                to_id=None,
+                to_name="Target",
+                relation_type="links_to",
+                generation=0,
+            )
+        )
+
+    change_detector = ChangeDetector(entity_repository, session_maker)
+    assert await change_detector.load_indexed_file_checksums((sample_entity.file_path,)) == {
+        sample_entity.file_path: None
+    }
+
+    publisher = RelationGenerationPublisher(
+        relation_repository=relation_repository,
+        session_maker=session_maker,
+    )
+    assert await publisher.publish(
+        entity_id=sample_entity.id,
+        generation=1,
+        relations=[IndexedRelation("links_to", "Target", None)],
+    )
+
+    assert await change_detector.load_indexed_file_checksums((sample_entity.file_path,)) == {
+        sample_entity.file_path: checksum
+    }
+    async with db.scoped_session(session_maker) as session:
+        relations = await relation_repository.find_by_type(session, "links_to")
+    assert [(relation.to_name, relation.generation) for relation in relations] == [("Target", 1)]

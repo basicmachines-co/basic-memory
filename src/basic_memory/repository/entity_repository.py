@@ -7,7 +7,7 @@ from typing import override, List, Optional, Sequence, Union, Any
 
 
 from loguru import logger
-from sqlalchemy import case, exists, func, select
+from sqlalchemy import case, exists, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only, selectinload
@@ -349,8 +349,16 @@ class EntityRepository(Repository[Entity]):
             RelationSearchRefresh.entity_id == Entity.id,
             RelationSearchRefresh.publication_generation.is_not(None),
         )
+        # Generation zero is the server default for old binaries during the
+        # drain window. Force a new-code scan to replace those rows from the
+        # canonical file instead of letting them evade the generation fence.
+        legacy_relation_pending = exists().where(
+            Relation.project_id == Entity.project_id,
+            Relation.from_id == Entity.id,
+            Relation.generation == 0,
+        )
         indexed_checksum = case(
-            (publication_pending, None),
+            (or_(publication_pending, legacy_relation_pending), None),
             else_=Entity.checksum,
         ).label("checksum")
         query = select(Entity.file_path, indexed_checksum).where(  # pragma: no cover
