@@ -178,6 +178,19 @@ class EntityService(BaseService[EntityModel]):
         except OSError:
             return False
 
+    async def resolve_deferred_self_relation(
+        self,
+        target: str,
+        entity: EntityModel,
+        session: AsyncSession | None = None,
+    ) -> EntityModel | None:
+        """Resolve only the source aliases that the background resolver intentionally skips."""
+        return await self._note_preparation.resolve_deferred_self_relation(
+            target,
+            entity,
+            session=session,
+        )
+
     async def _publish_markdown_relations(
         self,
         *,
@@ -203,6 +216,18 @@ class EntityService(BaseService[EntityModel]):
         if reconciliation.generation is None:
             return entity
 
+        indexed_relations: list[IndexedRelation] = []
+        for relation in markdown.relations:
+            resolved = await self.resolve_deferred_self_relation(relation.target, entity)
+            indexed_relations.append(
+                IndexedRelation(
+                    relation_type=relation.type,
+                    target_name=relation.target,
+                    context=relation.context,
+                    target_id=resolved.id if resolved else None,
+                )
+            )
+
         publisher = RelationGenerationPublisher(
             relation_repository=self.relation_repository,
             session_maker=self.session_maker,
@@ -210,14 +235,7 @@ class EntityService(BaseService[EntityModel]):
         published = await publisher.publish(
             entity_id=entity.id,
             generation=reconciliation.generation,
-            relations=tuple(
-                IndexedRelation(
-                    relation_type=relation.type,
-                    target_name=relation.target,
-                    context=relation.context,
-                )
-                for relation in markdown.relations
-            ),
+            relations=indexed_relations,
         )
         if not published:
             return entity

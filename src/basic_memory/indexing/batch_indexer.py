@@ -281,7 +281,7 @@ class BatchIndexer:
         if len(refreshed) != 1:  # pragma: no cover
             raise ValueError(f"Failed to reload indexed entity for {file.path}")
         entity = refreshed[0]
-        prepared_entity = self._build_prepared_entity(
+        prepared_entity = await self._build_prepared_entity(
             persisted.prepared,
             entity,
             resolve_relations=resolve_relations,
@@ -465,7 +465,7 @@ class BatchIndexer:
 
     async def _upsert_markdown_file(self, prepared: _PreparedMarkdownFile) -> _PreparedEntity:
         persisted = await self._persist_markdown_file(prepared)
-        return self._build_prepared_entity(persisted.prepared, persisted.entity)
+        return await self._build_prepared_entity(persisted.prepared, persisted.entity)
 
     async def _upsert_regular_file(self, file: IndexInputFile) -> _PreparedEntity:
         checksum = await self._resolve_checksum(file)
@@ -796,13 +796,28 @@ class BatchIndexer:
             file_contains_frontmatter=prepared.file_contains_frontmatter,
         )
 
-    def _build_prepared_entity(
+    async def _build_prepared_entity(
         self,
         prepared: _PreparedMarkdownFile,
         entity: Entity,
         *,
         resolve_relations: bool = True,
     ) -> _PreparedEntity:
+        indexed_relations: list[IndexedRelation] = []
+        for relation in prepared.markdown.relations:
+            resolved = await self.entity_service.resolve_deferred_self_relation(
+                relation.target,
+                entity,
+            )
+            indexed_relations.append(
+                IndexedRelation(
+                    relation_type=relation.type,
+                    target_name=relation.target,
+                    context=relation.context,
+                    target_id=resolved.id if resolved else None,
+                )
+            )
+
         return _PreparedEntity(
             path=prepared.file.path,
             entity_id=entity.id,
@@ -815,14 +830,7 @@ class BatchIndexer:
                 else remove_frontmatter(prepared.content)
             ),
             markdown_content=prepared.content,
-            relations=tuple(
-                IndexedRelation(
-                    relation_type=relation.type,
-                    target_name=relation.target,
-                    context=relation.context,
-                )
-                for relation in prepared.markdown.relations
-            ),
+            relations=tuple(indexed_relations),
             resolve_relations=resolve_relations,
         )
 

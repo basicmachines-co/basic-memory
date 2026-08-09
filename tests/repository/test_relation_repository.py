@@ -605,6 +605,68 @@ async def test_upsert_relation_generation_persists_pre_resolved_self_target(
 
 
 @pytest.mark.asyncio
+async def test_upsert_relation_generation_replaces_pre_resolved_self_alias(
+    relation_repository: RelationRepository,
+    source_entity: Entity,
+    test_project: Project,
+    session_maker,
+) -> None:
+    """A newer authored alias replaces the same self-edge without crossing unique domains."""
+    await set_note_content_generation(
+        session_maker,
+        source_entity=source_entity,
+        test_project=test_project,
+        generation=1,
+    )
+    async with db.scoped_session(session_maker) as session:
+        first = await relation_repository.upsert_relation_generation(
+            session,
+            entity_id=source_entity.id,
+            generation=1,
+            relations=[
+                AcceptedRelationWrite(
+                    relation_type="documents",
+                    target_name=source_entity.file_path,
+                    context=None,
+                    target_id=source_entity.id,
+                )
+            ],
+        )
+    assert first.generation_is_current
+
+    await set_note_content_generation(
+        session_maker,
+        source_entity=source_entity,
+        test_project=test_project,
+        generation=2,
+    )
+    async with db.scoped_session(session_maker) as session:
+        second = await relation_repository.upsert_relation_generation(
+            session,
+            entity_id=source_entity.id,
+            generation=2,
+            relations=[
+                AcceptedRelationWrite(
+                    relation_type="documents",
+                    target_name=source_entity.title,
+                    context="new alias",
+                    target_id=source_entity.id,
+                )
+            ],
+        )
+    assert second.generation_is_current
+
+    async with db.scoped_session(session_maker) as session:
+        relations = await relation_repository.find_by_type(session, "documents")
+
+    assert len(relations) == 1
+    assert relations[0].generation == 2
+    assert relations[0].to_id == source_entity.id
+    assert relations[0].to_name == source_entity.title
+    assert relations[0].context == "new alias"
+
+
+@pytest.mark.asyncio
 async def test_stale_relation_generation_cannot_reinsert_absent_key_or_cleanup_newer_rows(
     relation_repository: RelationRepository,
     source_entity: Entity,

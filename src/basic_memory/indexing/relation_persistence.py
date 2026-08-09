@@ -72,15 +72,25 @@ class RelationGenerationPublisher:
             identity = relation.relation_type, relation.target_name
             relations_by_identity.setdefault(identity, relation)
 
-        ordered_relations = [
-            AcceptedRelationWrite(
-                relation_type=relation.relation_type,
-                target_name=relation.target_name,
-                context=relation.context,
-                target_id=relation.target_id,
+        ordered_relations: list[AcceptedRelationWrite] = []
+        resolved_identities: set[tuple[str, int]] = set()
+        for _, relation in sorted(relations_by_identity.items()):
+            if relation.target_id is not None:
+                resolved_identity = relation.relation_type, relation.target_id
+                # Constraint: safe aliases have distinct authored-name identities but share the
+                # resolved relation uniqueness domain. Keep the lexical first alias so input order
+                # cannot decide which valid source representation is published.
+                if resolved_identity in resolved_identities:
+                    continue
+                resolved_identities.add(resolved_identity)
+            ordered_relations.append(
+                AcceptedRelationWrite(
+                    relation_type=relation.relation_type,
+                    target_name=relation.target_name,
+                    context=relation.context,
+                    target_id=relation.target_id,
+                )
             )
-            for _, relation in sorted(relations_by_identity.items())
-        ]
 
         for relation_chunk in batched(
             ordered_relations,

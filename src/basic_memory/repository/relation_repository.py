@@ -277,9 +277,21 @@ class RelationRepository(Repository[Relation]):
         """Publish one bounded relation chunk only while its source generation is current."""
         relations_by_identity: dict[tuple[str, str], AcceptedRelationWrite] = {}
         for relation in relations:
+            if relation.target_id is not None and relation.target_id != entity_id:
+                raise ValueError("Only the source entity may be pre-resolved during publication")
             identity = relation.relation_type, relation.target_name
             relations_by_identity.setdefault(identity, relation)
-        ordered_relations = [relations_by_identity[key] for key in sorted(relations_by_identity)]
+
+        ordered_relations: list[AcceptedRelationWrite] = []
+        resolved_identities: set[tuple[str, int]] = set()
+        for identity in sorted(relations_by_identity):
+            relation = relations_by_identity[identity]
+            if relation.target_id is not None:
+                resolved_identity = relation.relation_type, relation.target_id
+                if resolved_identity in resolved_identities:
+                    continue
+                resolved_identities.add(resolved_identity)
+            ordered_relations.append(relation)
 
         if not ordered_relations:
             raise ValueError("Relation generation upsert requires at least one relation")
@@ -298,6 +310,35 @@ class RelationRepository(Repository[Relation]):
         )
         if current_generation is None:
             return RelationGenerationWriteResult(generation_is_current=False)
+
+        pre_resolved_relations = [
+            relation for relation in ordered_relations if relation.target_id is not None
+        ]
+        if pre_resolved_relations:
+            # Constraint: name identity is the upsert arbiter, while safe self-links also occupy
+            # the resolved identity domain. Replace an older alias in this same transaction so
+            # changing the authored self-link cannot collide before generation cleanup runs.
+            await session.execute(
+                delete(Relation).where(
+                    Relation.project_id == self.project_id,
+                    Relation.from_id == entity_id,
+                    or_(
+                        *(
+                            and_(
+                                Relation.to_id == relation.target_id,
+                                Relation.relation_type == relation.relation_type,
+                                Relation.to_name != relation.target_name,
+                            )
+                            for relation in pre_resolved_relations
+                        )
+                    ),
+                    current_relation_generation_predicate(
+                        project_id=self.project_id,
+                        entity_id=entity_id,
+                        generation=generation,
+                    ),
+                )
+            )
 
         desired_relations = union_all(
             *(

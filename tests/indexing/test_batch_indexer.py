@@ -955,6 +955,113 @@ async def test_batch_indexer_index_markdown_file_can_defer_relation_resolution(
 
 
 @pytest.mark.asyncio
+async def test_batch_indexer_publishes_only_ambiguity_safe_self_relations(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+):
+    """File indexing preserves safe self-links without guessing ambiguous title targets."""
+    path = "notes/self-links.md"
+    content = dedent(
+        """
+        ---
+        title: Self Links
+        type: note
+        ---
+
+        # Self Links
+
+        - links_to [[Self Links]]
+        - links_to [[notes/self-links.md]]
+        - mentions [[Self Links]]
+        """
+    ).strip()
+    await _create_file(project_config.home / path, content)
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+
+    indexed = await batch_indexer.index_markdown_file(
+        await _load_input(file_service, path),
+        index_search=False,
+        resolve_relations=False,
+    )
+    assert {relation.target_id for relation in indexed.relations} == {indexed.entity_id}
+
+    await _claim_and_publish_relations(
+        batch_indexer,
+        IndexingBatchResult(indexed=[indexed]),
+        entity_repository=entity_repository,
+        relation_repository=relation_repository,
+        session_maker=search_service.session_maker,
+        max_concurrent=1,
+    )
+    async with db.scoped_session(search_service.session_maker) as session:
+        source = await entity_repository.get_by_file_path(session, path)
+    assert source is not None
+    assert sorted(
+        (relation.relation_type, relation.to_name, relation.to_id)
+        for relation in source.outgoing_relations
+    ) == [
+        ("links_to", "Self Links", source.id),
+        ("mentions", "Self Links", source.id),
+    ]
+
+    await entity_service.create_entity_with_content(
+        EntitySchema(
+            title="Self Links",
+            directory="duplicates",
+            content="# Self Links\n\nA different note with the same title.\n",
+        )
+    )
+    await _create_file(project_config.home / path, f"{content}\n\nUpdated source bytes.\n")
+
+    ambiguous = await batch_indexer.index_markdown_file(
+        await _load_input(file_service, path),
+        index_search=False,
+        resolve_relations=False,
+    )
+    target_ids = {
+        (relation.relation_type, relation.target_name): relation.target_id
+        for relation in ambiguous.relations
+    }
+    assert target_ids == {
+        ("links_to", "Self Links"): None,
+        ("links_to", "notes/self-links.md"): source.id,
+        ("mentions", "Self Links"): None,
+    }
+
+    await _claim_and_publish_relations(
+        batch_indexer,
+        IndexingBatchResult(indexed=[ambiguous]),
+        entity_repository=entity_repository,
+        relation_repository=relation_repository,
+        session_maker=search_service.session_maker,
+        max_concurrent=1,
+    )
+    async with db.scoped_session(search_service.session_maker) as session:
+        reloaded = await entity_repository.get_by_file_path(session, path)
+    assert reloaded is not None
+    assert sorted(
+        (relation.relation_type, relation.to_name, relation.to_id)
+        for relation in reloaded.outgoing_relations
+    ) == [
+        ("links_to", "Self Links", None),
+        ("links_to", "notes/self-links.md", source.id),
+        ("mentions", "Self Links", None),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_batch_indexer_uses_exact_bulk_resolution_for_deferred_relations(
     app_config,
     entity_service,

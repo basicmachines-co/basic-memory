@@ -152,6 +152,54 @@ async def test_relation_generation_publisher_stops_when_source_fence_is_stale(
 
 
 @pytest.mark.asyncio
+async def test_relation_generation_publisher_deduplicates_pre_resolved_aliases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Safe source aliases cannot collide in the resolved relation uniqueness domain."""
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[AsyncSession]:
+        assert session_maker is not None
+        yield cast(AsyncSession, object())
+
+    monkeypatch.setattr(
+        relation_persistence_module.db,
+        "scoped_session",
+        fake_scoped_session,
+    )
+    store = RecordingRelationGenerationStore()
+    publisher = RelationGenerationPublisher(
+        relation_repository=store,
+        session_maker=cast(async_sessionmaker[AsyncSession], object()),
+    )
+
+    generation_is_current = await publisher.publish(
+        entity_id=42,
+        generation=7,
+        relations=[
+            IndexedRelation("links_to", "source/path", "path alias", target_id=42),
+            IndexedRelation("links_to", "Source Title", "title alias", target_id=42),
+            IndexedRelation("documents", "Source Title", None, target_id=42),
+        ],
+    )
+
+    assert generation_is_current
+    assert store.calls == [
+        (
+            "upsert",
+            7,
+            (
+                AcceptedRelationWrite("documents", "Source Title", None, target_id=42),
+                AcceptedRelationWrite("links_to", "Source Title", "title alias", target_id=42),
+            ),
+        ),
+        ("cleanup", 7, ()),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_relation_generation_publisher_rejects_non_self_pre_resolved_target() -> None:
     """Ordinary targets remain resolver-owned even when a caller supplies an ID."""
     store = RecordingRelationGenerationStore()
