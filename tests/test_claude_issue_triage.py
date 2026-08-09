@@ -360,6 +360,10 @@ def test_triage_workflow_defines_one_semantic_mutation() -> None:
     action_step = workflow["jobs"]["triage"]["steps"][1]
     prompt = action_step["with"]["prompt"]
 
+    assert workflow["concurrency"] == {
+        "group": "claude-issue-triage-${{ github.event.issue.number }}",
+        "cancel-in-progress": False,
+    }
     assert action_step["uses"] == "anthropics/claude-code-action@v1"
     assert "call the triage helper exactly once" in prompt
     assert "--type TYPE --component COMPONENT" in prompt

@@ -7,6 +7,10 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
+concurrency:
+  group: claude-issue-triage-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
 jobs:
   triage:
     runs-on: ubuntu-latest
