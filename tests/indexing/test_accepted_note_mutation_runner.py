@@ -485,15 +485,6 @@ class _RelationRepository:
     def __init__(self) -> None:
         self.calls: list[tuple[int, Sequence[AcceptedRelationWrite]]] = []
 
-    async def replace_accepted_outgoing_relations(
-        self,
-        session: AsyncSession,
-        entity_id: int,
-        relations: Sequence[AcceptedRelationWrite],
-    ) -> None:
-        _ = session
-        self.calls.append((entity_id, list(relations)))
-
     async def upsert_relation_generation(
         self,
         session: AsyncSession,

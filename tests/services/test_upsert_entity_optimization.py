@@ -1,133 +1,26 @@
-"""Tests proving upsert_entity_from_markdown optimizations.
-
-Verifies that:
-1. Redundant get_by_file_path call is eliminated (entity passed directly)
-2. Final reload uses find_by_ids (PK lookup) instead of get_by_file_path (string lookup)
-3. Telemetry sub-spans are emitted for each DB phase
-4. Correctness is preserved for create, update, and edit flows
-"""
+"""Tests for the generation-safe EntityService write compatibility surface."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, TYPE_CHECKING
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-from loguru import logger
+from sqlalchemy import select
 
-from basic_memory.markdown.schemas import (
-    EntityFrontmatter,
-    EntityMarkdown,
-    Observation as MarkdownObservation,
-    Relation as MarkdownRelation,
-)
+from basic_memory import db
+from basic_memory.models import NoteContent, Relation
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services.entity_service import EntityService
-
-if TYPE_CHECKING:
-    from loguru import Record
-
-# --- Helpers ---
-
-
-def _make_markdown(
-    title: str = "Test Entity",
-    observations: list[MarkdownObservation] | None = None,
-    relations: list[MarkdownRelation] | None = None,
-) -> EntityMarkdown:
-    frontmatter = EntityFrontmatter(metadata={"title": title, "type": "note"})
-    return EntityMarkdown(
-        frontmatter=frontmatter,
-        observations=observations or [],
-        relations=relations or [],
-        created=datetime.now(timezone.utc),
-        modified=datetime.now(timezone.utc),
-    )
-
-
-# --- Optimization 1: No redundant get_by_file_path in update_entity_relations ---
-
-
-@pytest.mark.asyncio
-async def test_upsert_update_does_not_refetch_entity(entity_service: EntityService, monkeypatch):
-    """update_entity_relations should NOT call get_by_file_path — entity is passed directly."""
-    # Create an entity first
-    entity = await entity_service.create_entity(
-        EntitySchema(
-            title="Refetch Test",
-            directory="notes",
-            note_type="note",
-            content="# Refetch Test\n\n## Observations\n- [fact] some fact",
-        )
-    )
-
-    # Spy on get_by_file_path calls
-    original_get_by_file_path = entity_service.repository.get_by_file_path
-    call_count = 0
-
-    async def spy_get_by_file_path(*args, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        return await original_get_by_file_path(*args, **kwargs)
-
-    monkeypatch.setattr(entity_service.repository, "get_by_file_path", spy_get_by_file_path)
-
-    # Run upsert with is_new=False — this calls update_entity_and_observations + update_entity_relations
-    markdown = _make_markdown(
-        title="Refetch Test",
-        observations=[MarkdownObservation(content="updated fact", category="fact")],
-    )
-    await entity_service.upsert_entity_from_markdown(Path(entity.file_path), markdown, is_new=False)
-
-    # update_entity_and_observations calls get_by_file_path once (to load the entity)
-    # update_entity_relations should NOT call it at all (entity passed directly)
-    assert call_count == 1, (
-        f"Expected 1 get_by_file_path call (in update_entity_and_observations only), "
-        f"got {call_count}. update_entity_relations should not re-fetch."
-    )
-
-
-# --- Optimization 2: Final reload uses find_by_ids (PK) not get_by_file_path ---
-
-
-@pytest.mark.asyncio
-async def test_update_entity_relations_uses_pk_reload(entity_service: EntityService, monkeypatch):
-    """update_entity_relations should use find_by_ids for the final reload, not get_by_file_path."""
-    entity = await entity_service.create_entity(
-        EntitySchema(
-            title="PK Reload Test",
-            directory="notes",
-            note_type="note",
-            content="# PK Reload Test",
-        )
-    )
-
-    # Spy on find_by_ids calls
-    original_find_by_ids = entity_service.repository.find_by_ids
-    find_by_ids_calls = []
-
-    async def spy_find_by_ids(session, ids):
-        find_by_ids_calls.append(ids)
-        return await original_find_by_ids(session, ids)
-
-    monkeypatch.setattr(entity_service.repository, "find_by_ids", spy_find_by_ids)
-
-    markdown = _make_markdown(title="PK Reload Test")
-    await entity_service.upsert_entity_from_markdown(Path(entity.file_path), markdown, is_new=False)
-
-    # update_entity_relations should call find_by_ids once with the entity's PK
-    assert len(find_by_ids_calls) == 1
-    assert find_by_ids_calls[0] == [entity.id]
 
 
 @pytest.mark.asyncio
 async def test_create_or_update_entity_uses_lightweight_exact_resolution(
-    entity_service: EntityService, monkeypatch
-):
-    """create_or_update_entity should use strict lookups without eager relation loading."""
+    entity_service: EntityService,
+    monkeypatch,
+) -> None:
+    """Compatibility writes resolve exact file/permalink identities without graph loading."""
     schema = EntitySchema(
         title="Create Or Update",
         directory="notes",
@@ -157,306 +50,62 @@ async def test_create_or_update_entity_uses_lightweight_exact_resolution(
 
 
 @pytest.mark.asyncio
-async def test_upsert_with_relations_uses_lightweight_exact_resolution(
-    entity_service: EntityService, monkeypatch
-):
-    """Relation target resolution should skip eager loading during upsert."""
-    target = await entity_service.create_entity(
-        EntitySchema(
-            title="Lightweight Target",
-            directory="notes",
-            note_type="note",
-            content="# Lightweight Target",
-        )
-    )
-    source = await entity_service.create_entity(
-        EntitySchema(
-            title="Lightweight Source",
-            directory="notes",
-            note_type="note",
-            content="# Lightweight Source",
-        )
-    )
-    resolve_calls: list[tuple[str, dict[str, Any]]] = []
-
-    async def fake_resolve_link(link_text: str, **kwargs):
-        resolve_calls.append((link_text, kwargs))
-        return target
-
-    monkeypatch.setattr(entity_service.link_resolver, "resolve_link", fake_resolve_link)
-
-    markdown = _make_markdown(
-        title="Lightweight Source",
-        relations=[MarkdownRelation(type="links_to", target="Lightweight Target")],
-    )
-    await entity_service.upsert_entity_from_markdown(Path(source.file_path), markdown, is_new=False)
-
-    assert len(resolve_calls) == 1
-    link_text, kwargs = resolve_calls[0]
-    assert link_text == "Lightweight Target"
-    assert kwargs["strict"] is True
-    assert kwargs["load_relations"] is False
-    assert "session" in kwargs
-
-
-@pytest.mark.asyncio
-async def test_upsert_can_defer_relation_target_resolution(
-    entity_service: EntityService, monkeypatch
-):
-    """Cloud one-file indexing can store unresolved relation rows for later repair."""
-    await entity_service.create_entity(
-        EntitySchema(
-            title="Deferred Target",
-            directory="notes",
-            note_type="note",
-            content="# Deferred Target",
-        )
-    )
-    source = await entity_service.create_entity(
-        EntitySchema(
-            title="Deferred Source",
-            directory="notes",
-            note_type="note",
-            content="# Deferred Source",
-        )
-    )
-    resolve_link = AsyncMock(side_effect=AssertionError("relation lookup should be deferred"))
-    monkeypatch.setattr(entity_service.link_resolver, "resolve_link", resolve_link)
-
-    markdown = _make_markdown(
-        title="Deferred Source",
-        relations=[MarkdownRelation(type="links_to", target="Deferred Target")],
-    )
-    updated = await entity_service.upsert_entity_from_markdown(
-        Path(source.file_path),
-        markdown,
-        is_new=False,
-        resolve_relations=False,
-    )
-
-    resolve_link.assert_not_awaited()
-    outgoing = updated.outgoing_relations
-    assert len(outgoing) == 1
-    assert outgoing[0].to_id is None
-    assert outgoing[0].to_name == "Deferred Target"
-
-
-@pytest.mark.asyncio
-async def test_upsert_deferred_relation_resolution_keeps_self_links_resolved(
-    entity_service: EntityService, monkeypatch
-):
-    """Deferred relation mode should still resolve self-links without a target lookup."""
-    source = await entity_service.create_entity(
-        EntitySchema(
-            title="Deferred Self",
-            directory="notes",
-            note_type="note",
-            content="# Deferred Self",
-        )
-    )
-    resolve_link = AsyncMock(side_effect=AssertionError("relation lookup should be deferred"))
-    monkeypatch.setattr(entity_service.link_resolver, "resolve_link", resolve_link)
-
-    markdown = _make_markdown(
-        title="Deferred Self",
-        relations=[MarkdownRelation(type="links_to", target="Deferred Self")],
-    )
-    updated = await entity_service.upsert_entity_from_markdown(
-        Path(source.file_path),
-        markdown,
-        is_new=False,
-        resolve_relations=False,
-    )
-
-    resolve_link.assert_not_awaited()
-    outgoing = updated.outgoing_relations
-    assert len(outgoing) == 1
-    assert outgoing[0].to_id == source.id
-    assert outgoing[0].to_name == "Deferred Self"
-
-
-@pytest.mark.asyncio
-async def test_upsert_deferred_relation_resolution_does_not_guess_duplicate_titles(
-    entity_service: EntityService, monkeypatch
-):
-    """Deferred relation mode should not treat duplicate titles as guaranteed self-links."""
-    source = await entity_service.create_entity(
-        EntitySchema(
-            title="Duplicate Title",
-            directory="notes/source",
-            note_type="note",
-            content="# Duplicate Title",
-        )
-    )
-    await entity_service.create_entity(
-        EntitySchema(
-            title="Duplicate Title",
-            directory="notes/other",
-            note_type="note",
-            content="# Duplicate Title",
-        )
-    )
-    resolve_link = AsyncMock(side_effect=AssertionError("relation lookup should be deferred"))
-    monkeypatch.setattr(entity_service.link_resolver, "resolve_link", resolve_link)
-
-    markdown = _make_markdown(
-        title="Duplicate Title",
-        relations=[MarkdownRelation(type="links_to", target="Duplicate Title")],
-    )
-    updated = await entity_service.upsert_entity_from_markdown(
-        Path(source.file_path),
-        markdown,
-        is_new=False,
-        resolve_relations=False,
-    )
-
-    resolve_link.assert_not_awaited()
-    outgoing = updated.outgoing_relations
-    assert len(outgoing) == 1
-    assert outgoing[0].to_id is None
-    assert outgoing[0].to_name == "Duplicate Title"
-
-
-@pytest.mark.asyncio
-async def test_resolve_failure_is_logged_and_degrades_to_forward_reference(
-    entity_service: EntityService, monkeypatch
-):
-    """A raising relation lookup must be logged (not silently swallowed) and still
-    degrade to a forward reference while the surrounding write succeeds."""
-    source = await entity_service.create_entity(
-        EntitySchema(
-            title="Failing Resolve Source",
-            directory="notes",
-            note_type="note",
-            content="# Failing Resolve Source",
-        )
-    )
-
-    async def failing_resolve_link(link_text: str, **kwargs):
-        raise RuntimeError("lookup exploded")
-
-    monkeypatch.setattr(entity_service.link_resolver, "resolve_link", failing_resolve_link)
-
-    records: list[Record] = []
-    sink_id = logger.add(lambda message: records.append(message.record), level="WARNING")
-    try:
-        markdown = _make_markdown(
-            title="Failing Resolve Source",
-            relations=[MarkdownRelation(type="links_to", target="Missing Target")],
-        )
-        updated = await entity_service.upsert_entity_from_markdown(
-            Path(source.file_path),
-            markdown,
-            is_new=False,
-        )
-    finally:
-        logger.remove(sink_id)
-
-    # The write survived the failed lookup and stored a forward reference.
-    outgoing = updated.outgoing_relations
-    assert len(outgoing) == 1
-    assert outgoing[0].to_id is None
-    assert outgoing[0].to_name == "Missing Target"
-
-    warnings = [
-        record
-        for record in records
-        if "Relation target resolution failed for 'Missing Target'" in record["message"]
-    ]
-    assert len(warnings) == 1
-    assert warnings[0]["extra"]["error"] == "lookup exploded"
-    assert warnings[0]["extra"]["entity_id"] == source.id
-
-
-# --- Correctness: full round-trip ---
-
-
-@pytest.mark.asyncio
-async def test_upsert_update_preserves_observations(entity_service: EntityService):
-    """After upsert (update path), observations should be correctly replaced."""
+async def test_entity_service_writes_publish_relations_by_note_generation(
+    entity_service: EntityService,
+    session_maker,
+) -> None:
+    """The retained service surface cannot create generation-zero relation rows."""
     entity = await entity_service.create_entity(
         EntitySchema(
-            title="Obs Test",
+            title="Generation Source",
             directory="notes",
             note_type="note",
-            content="# Obs Test\n\n## Observations\n- [fact] original fact",
+            content=("# Generation Source\n\n## Relations\n- documents [[First Target]]\n"),
         )
     )
-    assert len(entity.observations) == 1
 
-    markdown = _make_markdown(
-        title="Obs Test",
-        observations=[
-            MarkdownObservation(content="new fact 1", category="fact"),
-            MarkdownObservation(content="new fact 2", category="idea"),
-        ],
-    )
-    updated = await entity_service.upsert_entity_from_markdown(
-        Path(entity.file_path), markdown, is_new=False
-    )
+    async with db.scoped_session(session_maker) as session:
+        note_content = await session.get(NoteContent, entity.id)
+        first_rows = list(
+            (await session.execute(select(Relation).where(Relation.from_id == entity.id)))
+            .scalars()
+            .all()
+        )
 
-    assert updated.id == entity.id
-    assert len(updated.observations) == 2
-    obs_contents = {o.content for o in updated.observations}
-    assert obs_contents == {"new fact 1", "new fact 2"}
+    assert note_content is not None
+    assert note_content.db_version == 1
+    assert [(row.to_name, row.to_id, row.generation) for row in first_rows] == [
+        ("First Target", None, 1)
+    ]
 
-
-@pytest.mark.asyncio
-async def test_upsert_update_preserves_relations(entity_service: EntityService):
-    """After upsert (update path), relations should be correctly replaced."""
-    target = await entity_service.create_entity(
+    await entity_service.update_entity(
+        entity,
         EntitySchema(
-            title="Relation Target",
+            title="Generation Source",
             directory="notes",
             note_type="note",
-            content="# Relation Target",
-        )
-    )
-    source = await entity_service.create_entity(
-        EntitySchema(
-            title="Relation Source",
-            directory="notes",
-            note_type="note",
-            content="# Relation Source\n\n## Relations\n- links_to [[Relation Target]]",
-        )
-    )
-    assert len(source.relations) == 1
-
-    markdown = _make_markdown(
-        title="Relation Source",
-        relations=[MarkdownRelation(type="references", target="Relation Target")],
-    )
-    updated = await entity_service.upsert_entity_from_markdown(
-        Path(source.file_path), markdown, is_new=False
+            content=("# Generation Source\n\n## Relations\n- documents [[Second Target]]\n"),
+        ),
     )
 
-    assert updated.id == source.id
-    # Old relation replaced with new one
-    outgoing = [r for r in updated.relations if r.from_id == source.id]
-    assert len(outgoing) == 1
-    assert outgoing[0].relation_type == "references"
-    assert outgoing[0].to_id == target.id
+    async with db.scoped_session(session_maker) as session:
+        note_content = await session.get(NoteContent, entity.id)
+        second_rows = list(
+            (await session.execute(select(Relation).where(Relation.from_id == entity.id)))
+            .scalars()
+            .all()
+        )
+
+    assert note_content is not None
+    assert note_content.db_version == 2
+    assert [(row.to_name, row.to_id, row.generation) for row in second_rows] == [
+        ("Second Target", None, 2)
+    ]
 
 
 @pytest.mark.asyncio
-async def test_upsert_create_path_works(entity_service: EntityService):
-    """The is_new=True path should still work correctly."""
-    markdown = _make_markdown(
-        title="Create Path Test",
-        observations=[MarkdownObservation(content="a fact", category="fact")],
-    )
-    result = await entity_service.upsert_entity_from_markdown(
-        Path("notes/create-path-test.md"), markdown, is_new=True
-    )
-
-    assert result.title == "Create Path Test"
-    assert len(result.observations) == 1
-    assert result.observations[0].content == "a fact"
-
-
-@pytest.mark.asyncio
-async def test_edit_entity_end_to_end(entity_service: EntityService):
-    """Full edit_entity flow uses optimized upsert and returns correct entity."""
+async def test_edit_entity_end_to_end(entity_service: EntityService) -> None:
+    """Compatibility edits still rebuild observations and finish the checksum."""
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Edit E2E",
@@ -475,15 +124,15 @@ async def test_edit_entity_end_to_end(entity_service: EntityService):
     assert updated.id == entity.id
     assert len(updated.observations) == 1
     assert updated.observations[0].content == "appended fact"
-    # Checksum should be set (not None) after edit completes
     assert updated.checksum is not None
 
 
 @pytest.mark.asyncio
 async def test_edit_entity_uses_lightweight_identifier_resolution(
-    entity_service: EntityService, monkeypatch
-):
-    """edit_entity should resolve the target note without eager relation loading."""
+    entity_service: EntityService,
+    monkeypatch,
+) -> None:
+    """Compatibility edits resolve the note without eager relation loading."""
     entity = await entity_service.create_entity(
         EntitySchema(
             title="Edit Lightweight",

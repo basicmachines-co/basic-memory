@@ -480,7 +480,6 @@ async def test_upsert_relation_generation_resets_resolver_owned_target(
         relation_type="documents",
         target_name="Target Alias",
         context="generation one",
-        target_id=target_entity.id,
     )
     async with db.scoped_session(session_maker) as session:
         result = await relation_repository.upsert_relation_generation(
@@ -511,7 +510,6 @@ async def test_upsert_relation_generation_resets_resolver_owned_target(
                     relation_type="documents",
                     target_name="Target Alias",
                     context="generation two",
-                    target_id=target_entity.id,
                 )
             ],
         )
@@ -860,127 +858,6 @@ async def test_add_all_ignore_duplicates_with_context(
         )
         assert len(found) == 1
         assert found[0].context == "some context here"
-
-
-@pytest.mark.asyncio
-async def test_replace_accepted_outgoing_relations_inserts_unresolved(
-    relation_repository: RelationRepository,
-    source_entity: Entity,
-    session_maker,
-):
-    """Accepted-write graph persistence inserts relations unresolved (to_id None)."""
-    writes = [
-        AcceptedRelationWrite(
-            relation_type="works_at",
-            target_name="XSYS Target",
-            context="employment",
-        ),
-        AcceptedRelationWrite(relation_type="knows", target_name="Ada", context=None),
-    ]
-    async with db.scoped_session(session_maker) as session:
-        await relation_repository.replace_accepted_outgoing_relations(
-            session, source_entity.id, writes
-        )
-
-    async with db.scoped_session(session_maker) as session:
-        relations = await relation_repository.find_by_type(session, "works_at")
-        knows = await relation_repository.find_by_type(session, "knows")
-
-    assert len(relations) == 1
-    works_at = relations[0]
-    assert works_at.from_id == source_entity.id
-    # Targets are written unresolved; the forward-reference job links to_id later.
-    assert works_at.to_id is None
-    assert works_at.to_name == "XSYS Target"
-    assert works_at.context == "employment"
-    assert len(knows) == 1
-    assert knows[0].to_name == "Ada"
-
-
-@pytest.mark.asyncio
-async def test_replace_accepted_outgoing_relations_persists_resolved_target(
-    relation_repository: RelationRepository,
-    source_entity: Entity,
-    session_maker,
-):
-    """Accepted self-links retain the safe target ID resolved by the runner."""
-    write = AcceptedRelationWrite(
-        relation_type="documents",
-        target_name=source_entity.title,
-        context=None,
-        target_id=source_entity.id,
-    )
-    async with db.scoped_session(session_maker) as session:
-        await relation_repository.replace_accepted_outgoing_relations(
-            session,
-            source_entity.id,
-            [write],
-        )
-
-    async with db.scoped_session(session_maker) as session:
-        relations = await relation_repository.find_by_entities(
-            session,
-            source_entity.id,
-            source_entity.id,
-        )
-
-    assert len(relations) == 1
-    assert relations[0].to_id == source_entity.id
-    assert relations[0].to_name == source_entity.title
-
-
-@pytest.mark.asyncio
-async def test_replace_accepted_outgoing_relations_replaces_existing_set(
-    relation_repository: RelationRepository,
-    source_entity: Entity,
-    session_maker,
-):
-    """A second accepted write replaces the prior outgoing relation set atomically."""
-    async with db.scoped_session(session_maker) as session:
-        await relation_repository.replace_accepted_outgoing_relations(
-            session,
-            source_entity.id,
-            [AcceptedRelationWrite(relation_type="old_rel", target_name="Old", context=None)],
-        )
-
-    async with db.scoped_session(session_maker) as session:
-        await relation_repository.replace_accepted_outgoing_relations(
-            session,
-            source_entity.id,
-            [AcceptedRelationWrite(relation_type="new_rel", target_name="New", context=None)],
-        )
-
-    async with db.scoped_session(session_maker) as session:
-        old = await relation_repository.find_by_type(session, "old_rel")
-        new = await relation_repository.find_by_type(session, "new_rel")
-
-    assert old == []
-    assert [rel.to_name for rel in new] == ["New"]
-
-
-@pytest.mark.asyncio
-async def test_replace_accepted_outgoing_relations_clears_when_empty(
-    relation_repository: RelationRepository,
-    source_entity: Entity,
-    session_maker,
-):
-    """An empty accepted relation set clears any prior outgoing rows for the entity."""
-    async with db.scoped_session(session_maker) as session:
-        await relation_repository.replace_accepted_outgoing_relations(
-            session,
-            source_entity.id,
-            [AcceptedRelationWrite(relation_type="stale", target_name="Gone", context=None)],
-        )
-
-    async with db.scoped_session(session_maker) as session:
-        await relation_repository.replace_accepted_outgoing_relations(session, source_entity.id, [])
-
-    async with db.scoped_session(session_maker) as session:
-        remaining = await relation_repository.find_unresolved_relations_for_entity(
-            session, source_entity.id
-        )
-
-    assert remaining == []
 
 
 @pytest.mark.asyncio

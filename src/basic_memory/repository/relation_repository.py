@@ -37,18 +37,11 @@ RELATION_GENERATION_WRITE_STATEMENT_SIZE = 250
 
 @dataclass(frozen=True, slots=True)
 class AcceptedRelationWrite:
-    """One outgoing relation parsed from accepted markdown, ready to persist.
-
-    Most targets are carried by name and left for forward-reference resolution.
-    Safe self-relations can carry ``target_id`` because the general resolver
-    deliberately skips them; persisting that ID in the accepted transaction
-    keeps DB-first writes consistent with the normal indexing path (issue #1076).
-    """
+    """One unresolved outgoing relation parsed from accepted markdown."""
 
     relation_type: str
     target_name: str
     context: str | None
-    target_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -670,40 +663,6 @@ class RelationRepository(Repository[Relation]):
             stmt = stmt.on_conflict_do_nothing()
             result = cast(CursorResult[Any], await session.execute(stmt))
             return result.rowcount if result.rowcount > 0 else 0
-
-    async def replace_accepted_outgoing_relations(
-        self,
-        session: AsyncSession,
-        entity_id: int,
-        relations: Sequence[AcceptedRelationWrite],
-    ) -> None:
-        """Replace an entity's outgoing relations with the accepted markdown set.
-
-        Delete-then-insert mirrors ``EntityService.update_entity_relations``:
-        the markdown file owns its outgoing links, so an accepted write replaces
-        the prior set. Ordinary targets are written unresolved and linked by the
-        forward-reference job. Safe self-relations already carry their resolved
-        ID because that job intentionally skips self targets. Runs inside the
-        caller's transaction so the graph commits atomically with
-        note_content/search (issue #1076).
-        """
-        await self.delete_outgoing_relations_from_entity(session, entity_id)
-        if not relations:
-            return
-        rows = [
-            Relation(
-                project_id=self.project_id,
-                from_id=entity_id,
-                to_id=rel.target_id,
-                to_name=rel.target_name,
-                relation_type=rel.relation_type,
-                context=rel.context,
-            )
-            for rel in relations
-        ]
-        # A single markdown file can repeat the same link; ignore-duplicates keeps
-        # the unique (from_id, to_name, relation_type) constraint from aborting.
-        await self.add_all_ignore_duplicates(session, rows)
 
     @override
     def get_load_options(self) -> List[LoaderOption]:
