@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer
 from sqlalchemy.orm import Mapped, mapped_column
 
 from basic_memory.models.base import Base
@@ -20,6 +20,11 @@ class RelationSearchRefresh(Base):
     __table_args__ = (
         Index("ix_relation_search_refresh_project_id", "project_id"),
         Index("ix_relation_search_refresh_entity_id", "entity_id"),
+        Index(
+            "ix_relation_search_refresh_project_publication_generation",
+            "project_id",
+            "publication_generation",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -33,6 +38,7 @@ class RelationSearchRefresh(Base):
         ForeignKey("entity.id", ondelete="CASCADE"),
         nullable=False,
     )
+    publication_generation: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now().astimezone(),

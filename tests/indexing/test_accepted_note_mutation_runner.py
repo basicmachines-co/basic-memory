@@ -491,6 +491,17 @@ class _RelationRepository:
     def __init__(self) -> None:
         self.calls: list[tuple[int, Sequence[AcceptedRelationWrite]]] = []
 
+    async def begin_relation_generation_publication(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+        generation: int,
+    ) -> RelationGenerationWriteResult:
+        raise AssertionError(
+            "relation publication was not expected inside the accepted transaction"
+        )
+
     async def upsert_relation_generation(
         self,
         session: AsyncSession,

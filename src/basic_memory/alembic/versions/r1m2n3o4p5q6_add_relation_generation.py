@@ -21,6 +21,16 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """Backfill relation rows with their source note's accepted generation."""
     op.add_column(
+        "relation_search_refresh",
+        sa.Column("publication_generation", sa.BigInteger(), nullable=True),
+    )
+    op.create_index(
+        "ix_relation_search_refresh_project_publication_generation",
+        "relation_search_refresh",
+        ["project_id", "publication_generation"],
+        unique=False,
+    )
+    op.add_column(
         "relation",
         sa.Column(
             "generation",
@@ -73,3 +83,13 @@ def downgrade() -> None:
     else:
         with op.batch_alter_table("relation") as batch_op:
             batch_op.drop_column("generation")
+
+    op.drop_index(
+        "ix_relation_search_refresh_project_publication_generation",
+        table_name="relation_search_refresh",
+    )
+    if op.get_bind().dialect.name == "postgresql":
+        op.drop_column("relation_search_refresh", "publication_generation")
+    else:
+        with op.batch_alter_table("relation_search_refresh") as batch_op:
+            batch_op.drop_column("publication_generation")

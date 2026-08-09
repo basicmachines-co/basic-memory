@@ -421,6 +421,33 @@ class RelationRepository(Repository[Relation]):
         await session.execute(statement)
         return RelationGenerationWriteResult(generation_is_current=True)
 
+    async def begin_relation_generation_publication(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+        generation: int,
+    ) -> RelationGenerationWriteResult:
+        """Persist retry work before publishing any relation chunk."""
+        current_generation = await session.scalar(
+            current_relation_generation_statement(
+                project_id=self.project_id,
+                entity_id=entity_id,
+                generation=generation,
+            )
+        )
+        if current_generation is None:
+            return RelationGenerationWriteResult(generation_is_current=False)
+
+        session.add(
+            RelationSearchRefresh(
+                project_id=self.project_id,
+                entity_id=entity_id,
+                publication_generation=generation,
+            )
+        )
+        return RelationGenerationWriteResult(generation_is_current=True)
+
     async def cleanup_relation_generations(
         self,
         session: AsyncSession,
@@ -451,6 +478,28 @@ class RelationRepository(Repository[Relation]):
                 ),
             )
         )
+
+        # Successful cleanup converts every retry for this or an older generation
+        # into search-refresh work in the same transaction. A newer generation's
+        # marker remains pending for its own publisher.
+        converted = await session.execute(
+            update(RelationSearchRefresh)
+            .where(
+                RelationSearchRefresh.project_id == self.project_id,
+                RelationSearchRefresh.entity_id == entity_id,
+                RelationSearchRefresh.publication_generation.is_not(None),
+                RelationSearchRefresh.publication_generation <= generation,
+            )
+            .values(publication_generation=None)
+            .returning(RelationSearchRefresh.id)
+        )
+        if converted.scalars().first() is None:
+            session.add(
+                RelationSearchRefresh(
+                    project_id=self.project_id,
+                    entity_id=entity_id,
+                )
+            )
         return RelationGenerationWriteResult(generation_is_current=True)
 
     async def find_unresolved_relations(self, session: AsyncSession) -> Sequence[Relation]:
@@ -498,7 +547,10 @@ class RelationRepository(Repository[Relation]):
         """Return committed relation changes whose source projection needs refresh."""
         query = (
             select(RelationSearchRefresh.id, RelationSearchRefresh.entity_id)
-            .where(RelationSearchRefresh.project_id == self.project_id)
+            .where(
+                RelationSearchRefresh.project_id == self.project_id,
+                RelationSearchRefresh.publication_generation.is_(None),
+            )
             .order_by(RelationSearchRefresh.id)
         )
         if entity_id is not None:

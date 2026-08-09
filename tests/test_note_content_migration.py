@@ -165,6 +165,12 @@ def test_relation_generation_migration_backfills_source_db_version(tmp_path, mon
             "SELECT id, generation FROM relation ORDER BY id"
         ).fetchall()
         indexes = {row[1] for row in connection.execute("PRAGMA index_list(relation)")}
+        refresh_columns = {
+            row[1]: row for row in connection.execute("PRAGMA table_info(relation_search_refresh)")
+        }
+        refresh_indexes = {
+            row[1] for row in connection.execute("PRAGMA index_list(relation_search_refresh)")
+        }
     finally:
         connection.close()
 
@@ -173,3 +179,6 @@ def test_relation_generation_migration_backfills_source_db_version(tmp_path, mon
     assert generation_column[4] == "0"
     assert generations == [(1, 17), (2, 0)]
     assert "ix_relation_project_from_generation" in indexes
+    assert refresh_columns["publication_generation"][2].upper() == "BIGINT"
+    assert refresh_columns["publication_generation"][3] == 0
+    assert "ix_relation_search_refresh_project_publication_generation" in refresh_indexes

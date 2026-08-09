@@ -9,7 +9,7 @@ from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.exc import IntegrityError
 
 from basic_memory import db
-from basic_memory.models import Entity, NoteContent, Project, Relation
+from basic_memory.models import Entity, NoteContent, Project, Relation, RelationSearchRefresh
 from basic_memory.repository.relation_repository import (
     AcceptedRelationWrite,
     RELATION_GENERATION_WRITE_STATEMENT_SIZE,
@@ -1622,3 +1622,39 @@ async def test_apply_resolved_targets_skips_reused_relation_identity(
     assert replacement.to_name == "Replacement Alias"
     assert replacement.relation_type == "supersedes"
     assert pending_refreshes == []
+
+
+@pytest.mark.asyncio
+async def test_stale_generation_cannot_begin_relation_publication(
+    relation_repository: RelationRepository,
+    source_entity: Entity,
+    test_project: Project,
+    session_maker,
+):
+    """A stale generation cannot create retry work that would mask a newer snapshot."""
+    await set_note_content_generation(
+        session_maker,
+        source_entity=source_entity,
+        test_project=test_project,
+        generation=2,
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        result = await relation_repository.begin_relation_generation_publication(
+            session,
+            entity_id=source_entity.id,
+            generation=1,
+        )
+
+    assert not result.generation_is_current
+    async with db.scoped_session(session_maker) as session:
+        markers = list(
+            (
+                await session.scalars(
+                    select(RelationSearchRefresh).where(
+                        RelationSearchRefresh.entity_id == source_entity.id
+                    )
+                )
+            ).all()
+        )
+    assert markers == []

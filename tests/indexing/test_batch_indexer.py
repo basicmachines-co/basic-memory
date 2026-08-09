@@ -955,6 +955,73 @@ async def test_batch_indexer_index_markdown_file_can_defer_relation_resolution(
 
 
 @pytest.mark.asyncio
+async def test_relation_publication_search_failure_leaves_retry_marker(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+    monkeypatch,
+):
+    """A failed post-publication search write remains discoverable after this batch exits."""
+    path = "notes/retry-relation-search.md"
+    await _create_file(
+        project_config.home / path,
+        "# Retry Relation Search\n",
+    )
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+    indexed = await batch_indexer.index_markdown_file(
+        await _load_input(file_service, path),
+        index_search=False,
+        resolve_relations=False,
+    )
+    original_index_entity_data = search_service.index_entity_data
+
+    async def fail_search_refresh(*args, **kwargs):
+        del args, kwargs
+        raise OSError("relation search refresh failed")
+
+    monkeypatch.setattr(search_service, "index_entity_data", fail_search_refresh)
+    publication = await _claim_and_publish_relations(
+        batch_indexer,
+        IndexingBatchResult(indexed=[indexed]),
+        entity_repository=entity_repository,
+        relation_repository=relation_repository,
+        session_maker=search_service.session_maker,
+        max_concurrent=1,
+    )
+
+    assert [(error_path, str(error)) for error_path, error in publication.errors] == [
+        (path, "relation search refresh failed")
+    ]
+    async with db.scoped_session(search_service.session_maker) as session:
+        pending_after_failure = await relation_repository.list_pending_search_refreshes(
+            session,
+            entity_id=indexed.entity_id,
+        )
+    assert [refresh.entity_id for refresh in pending_after_failure] == [indexed.entity_id]
+
+    monkeypatch.setattr(search_service, "index_entity_data", original_index_entity_data)
+    await batch_indexer.refresh_indexed_entity_search(indexed)
+
+    async with db.scoped_session(search_service.session_maker) as session:
+        pending_after_retry = await relation_repository.list_pending_search_refreshes(
+            session,
+            entity_id=indexed.entity_id,
+        )
+    assert pending_after_retry == []
+
+
+@pytest.mark.asyncio
 async def test_batch_indexer_publishes_only_ambiguity_safe_self_relations(
     app_config,
     entity_service,

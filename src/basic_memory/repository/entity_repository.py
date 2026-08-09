@@ -7,7 +7,7 @@ from typing import override, List, Optional, Sequence, Union, Any
 
 
 from loguru import logger
-from sqlalchemy import exists, func, select
+from sqlalchemy import case, exists, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only, selectinload
@@ -15,6 +15,7 @@ from sqlalchemy.orm.interfaces import LoaderOption
 from sqlalchemy.engine import Row
 
 from basic_memory.models.knowledge import Entity, Observation, Relation
+from basic_memory.models.relation_search_refresh import RelationSearchRefresh
 from basic_memory.repository.repository import Repository
 
 type EntityMetadata = dict[str, Any] | None
@@ -340,8 +341,19 @@ class EntityRepository(Repository[Entity]):
         # Convert all paths to POSIX strings for consistent comparison
         posix_paths = [Path(fp).as_posix() for fp in file_paths]  # pragma: no cover
 
-        # Query ONLY file_path and checksum columns (not full Entity objects)
-        query = select(Entity.file_path, Entity.checksum).where(  # pragma: no cover
+        # A pending relation publication means the file projection is incomplete even
+        # when its content checksum already matches. Mask it as unknown so the normal
+        # change detector re-drives the exact canonical bytes on the next scan.
+        publication_pending = exists().where(
+            RelationSearchRefresh.project_id == Entity.project_id,
+            RelationSearchRefresh.entity_id == Entity.id,
+            RelationSearchRefresh.publication_generation.is_not(None),
+        )
+        indexed_checksum = case(
+            (publication_pending, None),
+            else_=Entity.checksum,
+        ).label("checksum")
+        query = select(Entity.file_path, indexed_checksum).where(  # pragma: no cover
             Entity.file_path.in_(posix_paths)
         )
         query = self._add_project_filter(query)  # pragma: no cover

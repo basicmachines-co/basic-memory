@@ -22,6 +22,14 @@ from basic_memory.runtime.storage import ProjectId, RuntimeEntityId, RuntimeNote
 class RelationGenerationStore(Protocol):
     """Repository operations needed to publish one relation generation."""
 
+    async def begin_relation_generation_publication(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+        generation: int,
+    ) -> RelationGenerationWriteResult: ...
+
     async def upsert_relation_generation(
         self,
         session: AsyncSession,
@@ -91,6 +99,17 @@ class RelationGenerationPublisher:
                     target_id=relation.target_id,
                 )
             )
+
+        # Commit retry intent before the first independently committed chunk. If
+        # any later statement fails, change detection will re-drive this source.
+        async with db.scoped_session(self.session_maker) as session:
+            publication = await self.relation_repository.begin_relation_generation_publication(
+                session,
+                entity_id=entity_id,
+                generation=generation,
+            )
+        if not publication.generation_is_current:
+            return False
 
         for relation_chunk in batched(
             ordered_relations,

@@ -620,6 +620,10 @@ class BatchIndexer:
         """Refresh relation-dependent search rows after generation publication."""
         async with db.scoped_session(self.session_maker) as session:
             entities = await self.entity_repository.find_by_ids(session, [indexed.entity_id])
+            pending_refreshes = await self.relation_repository.list_pending_search_refreshes(
+                session,
+                entity_id=indexed.entity_id,
+            )
         if len(entities) != 1:  # pragma: no cover
             raise ValueError(f"Failed to reload relation-published entity {indexed.entity_id}")
 
@@ -643,7 +647,14 @@ class BatchIndexer:
             relations=indexed.relations,
             resolve_relations=indexed.resolve_relations,
         )
-        return await self._refresh_search_index(prepared, entities[0])
+        refreshed = await self._refresh_search_index(prepared, entities[0])
+        if pending_refreshes:
+            async with db.scoped_session(self.session_maker) as session:
+                await self.relation_repository.clear_pending_search_refreshes(
+                    session,
+                    [refresh.id for refresh in pending_refreshes],
+                )
+        return refreshed
 
     async def _resolve_batch_relations(
         self,
