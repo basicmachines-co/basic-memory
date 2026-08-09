@@ -280,7 +280,7 @@ async def test_file_indexer_reindexes_current_file_after_anchor_becomes_stale() 
     assert markdown_indexer.index_current_markdown_file.await_count == 2
     assert note_content_reconciler.capture_anchor.await_args_list[0].args == (7,)
     assert note_content_reconciler.capture_anchor.await_args_list[1].args == (7,)
-    assert f"Retrying markdown index after concurrent accepted note write: {file_path}" in (
+    assert f"Retrying markdown index without a current relation generation: {file_path}" in (
         rendered_messages
     )
     assert f"Indexed markdown file: {file_path}" in rendered_messages

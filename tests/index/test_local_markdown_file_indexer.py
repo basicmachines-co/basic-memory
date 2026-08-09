@@ -17,6 +17,7 @@ from basic_memory.index.local_dependencies import (
 from basic_memory.indexing.batch_indexer import BatchIndexer
 from basic_memory.indexing.file_indexer import IndexMarkdownNoteContentReconciler
 from basic_memory.indexing.models import IndexEntitySearchWriter, SyncedMarkdownFile
+from basic_memory.indexing.note_content_reconciliation import NoteContentReconciliationResult
 from basic_memory.services import FileService
 
 
@@ -61,12 +62,21 @@ async def test_local_file_indexer_logs_brace_path_through_retry(
     entity_repository.get_by_file_path = AsyncMock(return_value=entity)
     note_content_reconciler = Mock()
     note_content_reconciler.capture_anchor = AsyncMock(return_value=None)
-    note_content_reconciler.reconcile = AsyncMock(side_effect=["stale", "current"])
+    note_content_reconciler.reconcile = AsyncMock(
+        side_effect=[
+            NoteContentReconciliationResult.stale(),
+            NoteContentReconciliationResult.current(3),
+        ]
+    )
+    batch_indexer = Mock()
+    batch_indexer.publish_relation_generation = AsyncMock(return_value=True)
+    batch_indexer.resolve_relation_targets = AsyncMock()
+    batch_indexer.refresh_indexed_entity_search = AsyncMock()
     indexer = LocalMarkdownFileIndexer(
         file_service=cast(FileService, Mock()),
         session_maker=cast(async_sessionmaker[AsyncSession], _FakeSession),
         entity_repository=cast(LocalIndexEntityRepository, entity_repository),
-        batch_indexer=cast(BatchIndexer, Mock()),
+        batch_indexer=cast(BatchIndexer, batch_indexer),
         search_service=cast(IndexEntitySearchWriter, Mock()),
         note_content_reconciler=cast(
             IndexMarkdownNoteContentReconciler,
@@ -91,7 +101,7 @@ async def test_local_file_indexer_logs_brace_path_through_retry(
         logger.remove(sink_id)
 
     assert note_content_reconciler.reconcile.await_count == 2
-    assert f"Retrying markdown index after concurrent accepted note write: {file_path}" in (
+    assert f"Retrying markdown index without a current relation generation: {file_path}" in (
         rendered_messages
     )
     assert f"Indexed markdown file: {file_path}" in rendered_messages
