@@ -343,6 +343,12 @@ class Relation(Base):
         Index("ix_relation_type", "relation_type"),
         Index("ix_relation_from_id", "from_id"),  # Add FK indexes
         Index("ix_relation_to_id", "to_id"),
+        Index(
+            "ix_relation_project_from_generation",
+            "project_id",
+            "from_id",
+            "generation",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)  # pyright: ignore [reportIncompatibleVariableOverride]
@@ -354,6 +360,14 @@ class Relation(Base):
     to_name: Mapped[str] = mapped_column(String)
     relation_type: Mapped[str] = mapped_column(String)
     context: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Relation rows are a projection of one accepted note-content generation.
+    # Zero is reserved for rows written by pre-generation binaries during a rolling deploy.
+    generation: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
 
     # Relationships
     from_entity = relationship(

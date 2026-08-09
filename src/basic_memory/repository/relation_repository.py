@@ -4,20 +4,35 @@ from dataclasses import dataclass
 from itertools import batched
 from typing import override, Sequence, List, Optional, Any, cast
 
-from sqlalchemy import and_, case, delete, exists, or_, select, update
+from sqlalchemy import (
+    Integer,
+    String,
+    Text,
+    and_,
+    case,
+    delete,
+    exists,
+    literal,
+    or_,
+    select,
+    union_all,
+    update,
+)
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, aliased
 from sqlalchemy.orm.interfaces import LoaderOption
+from sqlalchemy.sql import Select
 from sqlalchemy.sql.elements import ColumnElement
 
-from basic_memory.models import Entity, Relation, RelationSearchRefresh
+from basic_memory.models import Entity, NoteContent, Relation, RelationSearchRefresh
 from basic_memory.repository.repository import Repository
 
 
 RESOLVED_RELATION_WRITE_STATEMENT_SIZE = 250
+RELATION_GENERATION_WRITE_STATEMENT_SIZE = 250
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +49,50 @@ class AcceptedRelationWrite:
     target_name: str
     context: str | None
     target_id: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class RelationGenerationWriteResult:
+    """Whether one guarded relation-generation statement still owned its source."""
+
+    generation_is_current: bool
+
+
+def current_relation_generation_statement(
+    *,
+    project_id: int,
+    entity_id: int,
+    generation: int,
+) -> Select[tuple[int]]:
+    """Build the source-generation fence acquired before a projection write.
+
+    PostgreSQL renders ``FOR UPDATE`` and holds the note-content row through the
+    relation statement. SQLite intentionally omits the clause; its first guarded
+    relation mutation then enters SQLite's single-writer serialization.
+    """
+    return (
+        select(NoteContent.entity_id)
+        .where(
+            NoteContent.project_id == project_id,
+            NoteContent.entity_id == entity_id,
+            NoteContent.db_version == generation,
+        )
+        .with_for_update()
+    )
+
+
+def current_relation_generation_predicate(
+    *,
+    project_id: int,
+    entity_id: int,
+    generation: int,
+) -> ColumnElement[bool]:
+    """Require the source's accepted generation inside each mutation statement."""
+    return exists().where(
+        NoteContent.project_id == project_id,
+        NoteContent.entity_id == entity_id,
+        NoteContent.db_version == generation,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +161,8 @@ class PendingRelationSearchRefresh:
 class RelationRepository(Repository[Relation]):
     """Repository for Relation model with memory-specific operations."""
 
+    project_id: int
+
     def __init__(self, project_id: int):
         """Initialize with project_id filter.
 
@@ -161,6 +222,127 @@ class RelationRepository(Repository[Relation]):
         query = delete(Relation).where(Relation.from_id == entity_id)
         query = query.where(Relation.project_id == self.project_id)
         await session.execute(query)
+
+    async def upsert_relation_generation(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+        generation: int,
+        relations: Sequence[AcceptedRelationWrite],
+    ) -> RelationGenerationWriteResult:
+        """Publish one bounded relation chunk only while its source generation is current."""
+        relations_by_identity: dict[tuple[str, str], AcceptedRelationWrite] = {}
+        for relation in relations:
+            identity = relation.relation_type, relation.target_name
+            relations_by_identity.setdefault(identity, relation)
+        ordered_relations = [relations_by_identity[key] for key in sorted(relations_by_identity)]
+
+        if not ordered_relations:
+            raise ValueError("Relation generation upsert requires at least one relation")
+        if len(ordered_relations) > RELATION_GENERATION_WRITE_STATEMENT_SIZE:
+            raise ValueError(
+                "Relation generation upsert exceeds the bounded statement size "
+                f"of {RELATION_GENERATION_WRITE_STATEMENT_SIZE}"
+            )
+
+        current_generation = await session.scalar(
+            current_relation_generation_statement(
+                project_id=self.project_id,
+                entity_id=entity_id,
+                generation=generation,
+            )
+        )
+        if current_generation is None:
+            return RelationGenerationWriteResult(generation_is_current=False)
+
+        desired_relations = union_all(
+            *(
+                select(
+                    literal(relation.target_name, type_=String).label("to_name"),
+                    literal(relation.relation_type, type_=String).label("relation_type"),
+                    literal(relation.context, type_=Text).label("context"),
+                )
+                for relation in ordered_relations
+            )
+        ).subquery()
+        generation_is_current = current_relation_generation_predicate(
+            project_id=self.project_id,
+            entity_id=entity_id,
+            generation=generation,
+        )
+        rows = (
+            select(
+                literal(self.project_id).label("project_id"),
+                literal(entity_id).label("from_id"),
+                literal(None, type_=Integer).label("to_id"),
+                desired_relations.c.to_name,
+                desired_relations.c.relation_type,
+                desired_relations.c.context,
+                literal(generation).label("generation"),
+            )
+            .select_from(desired_relations)
+            .where(generation_is_current)
+        )
+
+        dialect_name = session.bind.dialect.name if session.bind else "sqlite"
+        insert_statement = (
+            pg_insert(Relation) if dialect_name == "postgresql" else sqlite_insert(Relation)
+        ).from_select(
+            [
+                Relation.project_id,
+                Relation.from_id,
+                Relation.to_id,
+                Relation.to_name,
+                Relation.relation_type,
+                Relation.context,
+                Relation.generation,
+            ],
+            rows,
+        )
+        statement = insert_statement.on_conflict_do_update(
+            index_elements=[Relation.from_id, Relation.to_name, Relation.relation_type],
+            set_={
+                "generation": insert_statement.excluded.generation,
+                "context": insert_statement.excluded.context,
+                "to_id": None,
+            },
+            where=Relation.generation < insert_statement.excluded.generation,
+        )
+        await session.execute(statement)
+        return RelationGenerationWriteResult(generation_is_current=True)
+
+    async def cleanup_relation_generations(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+        generation: int,
+    ) -> RelationGenerationWriteResult:
+        """Delete superseded rows only while the cleanup generation remains current."""
+        current_generation = await session.scalar(
+            current_relation_generation_statement(
+                project_id=self.project_id,
+                entity_id=entity_id,
+                generation=generation,
+            )
+        )
+        if current_generation is None:
+            return RelationGenerationWriteResult(generation_is_current=False)
+
+        await session.execute(
+            delete(Relation).where(
+                Relation.project_id == self.project_id,
+                Relation.from_id == entity_id,
+                Relation.generation < generation,
+                current_relation_generation_predicate(
+                    project_id=self.project_id,
+                    entity_id=entity_id,
+                    generation=generation,
+                ),
+            )
+        )
+        return RelationGenerationWriteResult(generation_is_current=True)
 
     async def find_unresolved_relations(self, session: AsyncSession) -> Sequence[Relation]:
         """Find all unresolved relations, where to_id is null."""

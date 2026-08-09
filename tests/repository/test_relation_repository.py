@@ -5,15 +5,17 @@ from datetime import datetime, timezone
 import pytest
 import pytest_asyncio
 from sqlalchemy import delete, select
+from sqlalchemy.dialects import postgresql, sqlite
 from sqlalchemy.exc import IntegrityError
 
 from basic_memory import db
-from basic_memory.models import Entity, Project, Relation
+from basic_memory.models import Entity, NoteContent, Project, Relation
 from basic_memory.repository.relation_repository import (
     AcceptedRelationWrite,
     RelationRepository,
     ResolvedRelationWrite,
     ResolvedRelationWriteResult,
+    current_relation_generation_statement,
 )
 
 
@@ -95,6 +97,36 @@ async def related_entity(entity_repository, session_maker):
     }
     async with db.scoped_session(session_maker) as session:
         return await entity_repository.create(session, entity_data)
+
+
+async def set_note_content_generation(
+    session_maker,
+    *,
+    source_entity: Entity,
+    test_project: Project,
+    generation: int,
+) -> None:
+    """Create or advance the authoritative generation for one relation source."""
+    async with db.scoped_session(session_maker) as session:
+        note_content = await session.get(NoteContent, source_entity.id)
+        if note_content is None:
+            session.add(
+                NoteContent(
+                    entity_id=source_entity.id,
+                    project_id=test_project.id,
+                    external_id=source_entity.external_id,
+                    file_path=source_entity.file_path,
+                    markdown_content=f"# Generation {generation}\n",
+                    db_version=generation,
+                    db_checksum=f"checksum-{generation}",
+                    file_write_status="synced",
+                )
+            )
+            return
+
+        note_content.markdown_content = f"# Generation {generation}\n"
+        note_content.db_version = generation
+        note_content.db_checksum = f"checksum-{generation}"
 
 
 @pytest_asyncio.fixture(scope="function")
@@ -412,6 +444,213 @@ async def test_delete_nonexistent_relation(relation_repository, session_maker):
 # -------------------------------------------------------------------------
 # Tests for add_all_ignore_duplicates
 # -------------------------------------------------------------------------
+
+
+def test_current_relation_generation_fence_is_portable() -> None:
+    """Postgres locks the source row while SQLite safely omits unsupported syntax."""
+    statement = current_relation_generation_statement(
+        project_id=1,
+        entity_id=2,
+        generation=3,
+    )
+
+    postgres_sql = str(statement.compile(dialect=postgresql.dialect()))
+    sqlite_sql = str(statement.compile(dialect=sqlite.dialect()))
+
+    assert "FOR UPDATE" in postgres_sql
+    assert "FOR UPDATE" not in sqlite_sql
+
+
+@pytest.mark.asyncio
+async def test_upsert_relation_generation_resets_resolver_owned_target(
+    relation_repository: RelationRepository,
+    source_entity: Entity,
+    target_entity: Entity,
+    test_project: Project,
+    session_maker,
+) -> None:
+    """A newer accepted generation owns context while resolution remains derived."""
+    await set_note_content_generation(
+        session_maker,
+        source_entity=source_entity,
+        test_project=test_project,
+        generation=1,
+    )
+    write = AcceptedRelationWrite(
+        relation_type="documents",
+        target_name="Target Alias",
+        context="generation one",
+        target_id=target_entity.id,
+    )
+    async with db.scoped_session(session_maker) as session:
+        result = await relation_repository.upsert_relation_generation(
+            session,
+            entity_id=source_entity.id,
+            generation=1,
+            relations=[write],
+        )
+
+    assert result.generation_is_current
+    async with db.scoped_session(session_maker) as session:
+        relation = (await relation_repository.find_by_type(session, "documents"))[0]
+        relation.to_id = target_entity.id
+
+    await set_note_content_generation(
+        session_maker,
+        source_entity=source_entity,
+        test_project=test_project,
+        generation=2,
+    )
+    async with db.scoped_session(session_maker) as session:
+        result = await relation_repository.upsert_relation_generation(
+            session,
+            entity_id=source_entity.id,
+            generation=2,
+            relations=[
+                AcceptedRelationWrite(
+                    relation_type="documents",
+                    target_name="Target Alias",
+                    context="generation two",
+                    target_id=target_entity.id,
+                )
+            ],
+        )
+
+    assert result.generation_is_current
+    async with db.scoped_session(session_maker) as session:
+        relation = (await relation_repository.find_by_type(session, "documents"))[0]
+
+    assert relation.generation == 2
+    assert relation.context == "generation two"
+    assert relation.to_id is None
+    assert relation.to_name == "Target Alias"
+
+
+@pytest.mark.asyncio
+async def test_stale_relation_generation_cannot_reinsert_absent_key_or_cleanup_newer_rows(
+    relation_repository: RelationRepository,
+    source_entity: Entity,
+    test_project: Project,
+    session_maker,
+) -> None:
+    """The source fence makes every statement from an already-stale writer inert."""
+    await set_note_content_generation(
+        session_maker,
+        source_entity=source_entity,
+        test_project=test_project,
+        generation=2,
+    )
+    async with db.scoped_session(session_maker) as session:
+        current = await relation_repository.upsert_relation_generation(
+            session,
+            entity_id=source_entity.id,
+            generation=2,
+            relations=[
+                AcceptedRelationWrite(
+                    relation_type="current",
+                    target_name="Current Target",
+                    context=None,
+                )
+            ],
+        )
+    assert current.generation_is_current
+
+    async with db.scoped_session(session_maker) as session:
+        stale_upsert = await relation_repository.upsert_relation_generation(
+            session,
+            entity_id=source_entity.id,
+            generation=1,
+            relations=[
+                AcceptedRelationWrite(
+                    relation_type="removed",
+                    target_name="Removed Target",
+                    context=None,
+                )
+            ],
+        )
+    async with db.scoped_session(session_maker) as session:
+        stale_cleanup = await relation_repository.cleanup_relation_generations(
+            session,
+            entity_id=source_entity.id,
+            generation=1,
+        )
+
+    assert not stale_upsert.generation_is_current
+    assert not stale_cleanup.generation_is_current
+    async with db.scoped_session(session_maker) as session:
+        relations = await relation_repository.find_all(session)
+
+    assert [(relation.relation_type, relation.generation) for relation in relations] == [
+        ("current", 2)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_newer_relation_generation_replaces_then_cleans_older_set(
+    relation_repository: RelationRepository,
+    source_entity: Entity,
+    test_project: Project,
+    session_maker,
+) -> None:
+    """A later generation updates retained identities before removing superseded rows."""
+    await set_note_content_generation(
+        session_maker,
+        source_entity=source_entity,
+        test_project=test_project,
+        generation=1,
+    )
+    async with db.scoped_session(session_maker) as session:
+        await relation_repository.upsert_relation_generation(
+            session,
+            entity_id=source_entity.id,
+            generation=1,
+            relations=[
+                AcceptedRelationWrite("old", "Old Target", None),
+                AcceptedRelationWrite("shared", "Shared Target", "old context"),
+            ],
+        )
+    async with db.scoped_session(session_maker) as session:
+        await relation_repository.cleanup_relation_generations(
+            session,
+            entity_id=source_entity.id,
+            generation=1,
+        )
+
+    await set_note_content_generation(
+        session_maker,
+        source_entity=source_entity,
+        test_project=test_project,
+        generation=2,
+    )
+    async with db.scoped_session(session_maker) as session:
+        current = await relation_repository.upsert_relation_generation(
+            session,
+            entity_id=source_entity.id,
+            generation=2,
+            relations=[
+                AcceptedRelationWrite("new", "New Target", None),
+                AcceptedRelationWrite("shared", "Shared Target", "new context"),
+            ],
+        )
+    async with db.scoped_session(session_maker) as session:
+        cleanup = await relation_repository.cleanup_relation_generations(
+            session,
+            entity_id=source_entity.id,
+            generation=2,
+        )
+
+    assert current.generation_is_current
+    assert cleanup.generation_is_current
+    async with db.scoped_session(session_maker) as session:
+        relations = sorted(await relation_repository.find_all(session), key=lambda row: row.to_name)
+
+    assert [
+        (relation.relation_type, relation.to_name, relation.context, relation.generation)
+        for relation in relations
+    ] == [
+        ("new", "New Target", None, 2),
+        ("shared", "Shared Target", "new context", 2),
+    ]
 
 
 @pytest.mark.asyncio

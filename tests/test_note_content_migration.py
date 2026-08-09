@@ -73,3 +73,103 @@ def test_alembic_upgrade_creates_note_content_table(tmp_path, monkeypatch):
         assert "ix_note_content_external_id" in indexes
     finally:
         connection.close()
+
+
+def test_relation_generation_migration_backfills_source_db_version(tmp_path, monkeypatch):
+    """Existing relations inherit their source note generation during upgrade."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("BASIC_MEMORY_HOME", str(tmp_path / "basic-memory"))
+
+    database_path = tmp_path / "relation-generation-migration.db"
+    config = sqlite_alembic_config(database_path)
+    command.upgrade(config, "q0l1m2n3o4p5")
+
+    connection = sqlite3.connect(database_path)
+    try:
+        timestamp = "2026-08-09 00:00:00"
+        connection.execute(
+            """
+            INSERT INTO project (
+                id, name, permalink, path, is_active, is_default,
+                created_at, updated_at, external_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (1, "test", "test", "/test", True, True, timestamp, timestamp, "project-1"),
+        )
+        connection.executemany(
+            """
+            INSERT INTO entity (
+                id, title, note_type, content_type, file_path,
+                created_at, updated_at, project_id, external_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    entity_id,
+                    f"Source {entity_id}",
+                    "note",
+                    "text/markdown",
+                    f"source-{entity_id}.md",
+                    timestamp,
+                    timestamp,
+                    1,
+                    f"entity-{entity_id}",
+                )
+                for entity_id in (1, 2)
+            ],
+        )
+        connection.execute(
+            """
+            INSERT INTO note_content (
+                entity_id, project_id, external_id, file_path, markdown_content,
+                db_version, db_checksum, file_write_status, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                1,
+                1,
+                "content-1",
+                "source-1.md",
+                "# Source 1",
+                17,
+                "checksum",
+                "synced",
+                timestamp,
+            ),
+        )
+        connection.executemany(
+            """
+            INSERT INTO relation (
+                id, from_id, to_name, relation_type, project_id
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (1, 1, "Target A", "links_to", 1),
+                (2, 2, "Target B", "links_to", 1),
+            ],
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    command.upgrade(config, "head")
+
+    connection = sqlite3.connect(database_path)
+    try:
+        generation_column = next(
+            row
+            for row in connection.execute("PRAGMA table_info(relation)")
+            if row[1] == "generation"
+        )
+        generations = connection.execute(
+            "SELECT id, generation FROM relation ORDER BY id"
+        ).fetchall()
+        indexes = {row[1] for row in connection.execute("PRAGMA index_list(relation)")}
+    finally:
+        connection.close()
+
+    assert generation_column[2].upper() == "BIGINT"
+    assert generation_column[3] == 1
+    assert generation_column[4] == "0"
+    assert generations == [(1, 17), (2, 0)]
+    assert "ix_relation_project_from_generation" in indexes
