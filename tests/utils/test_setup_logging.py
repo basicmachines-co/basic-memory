@@ -104,10 +104,13 @@ def test_setup_logging_survives_a_stale_log_deleted_mid_cleanup(monkeypatch, tmp
 
     vanishing = log_dir / "basic-memory-1003.log"
     real_stat = Path.stat
+    race_triggered = False
 
     def stat_with_a_racing_deletion(self: Path, *args: Any, **kwargs: Any) -> Any:
+        nonlocal race_triggered
         # Stand in for another launch pruning the same shared directory between the glob and the stat.
-        if self == vanishing and vanishing.exists():
+        if self == vanishing and not race_triggered:
+            race_triggered = True
             vanishing.unlink()
         return real_stat(self, *args, **kwargs)
 
@@ -116,6 +119,8 @@ def test_setup_logging_survives_a_stale_log_deleted_mid_cleanup(monkeypatch, tmp
     monkeypatch.setattr(utils.os, "name", "nt")
     monkeypatch.setattr(utils.os, "getpid", lambda: 4242)
     monkeypatch.setattr(utils.Path, "home", lambda: tmp_path)
+    # Keep file enumeration on the real filesystem so the simulated race occurs in the sort key.
+    monkeypatch.setattr(utils.Path, "is_file", lambda path: os.path.isfile(path))
     monkeypatch.setattr(utils.Path, "stat", stat_with_a_racing_deletion)
     monkeypatch.setattr(utils.logger, "remove", lambda *args, **kwargs: None)
     monkeypatch.setattr(utils.logger, "add", lambda *args, **kwargs: None)
@@ -125,6 +130,7 @@ def test_setup_logging_survives_a_stale_log_deleted_mid_cleanup(monkeypatch, tmp
 
     # The point is that logging came up at all; the pruning itself is covered by the test above.
     remaining = sorted(path.name for path in log_dir.glob("basic-memory-*.log*"))
+    assert race_triggered
     assert "basic-memory-1003.log" not in remaining
 
 
