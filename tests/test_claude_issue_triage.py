@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -10,6 +11,24 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[1]
 TRIAGE_SCRIPT = REPO_ROOT / "scripts" / "edit-issue-labels.sh"
 TRIAGE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "claude-issue-triage.yml"
+
+
+def _bash_executable() -> str:
+    if os.name != "nt":
+        return "bash"
+
+    git_executable = shutil.which("git")
+    if git_executable is None:
+        raise RuntimeError("Git for Windows is required to run the triage helper tests")
+
+    git_directory = Path(git_executable).parent
+    git_bin_directory = (
+        git_directory if git_directory.name.casefold() == "bin" else git_directory.parent / "bin"
+    )
+    git_bash = git_bin_directory / "bash.exe"
+    if not git_bash.is_file():
+        raise RuntimeError(f"Git Bash was not found at {git_bash}")
+    return str(git_bash)
 
 
 def _run_triage_helper(
@@ -51,18 +70,18 @@ fi
     env = os.environ.copy()
     env.update(
         {
-            "GH_ARGUMENTS_PATH": str(gh_arguments_path),
+            "GH_ARGUMENTS_PATH": gh_arguments_path.as_posix(),
             "GH_CURRENT_LABELS": "\n".join(current_labels),
             "GH_FAIL_LABEL_ADD": "true" if fail_label_add else "false",
             "GH_FAIL_LABEL_READ": "true" if fail_label_read else "false",
-            "GITHUB_EVENT_PATH": str(event_path),
+            "GITHUB_EVENT_PATH": event_path.as_posix(),
             "GITHUB_REPOSITORY": "basicmachines-co/basic-memory",
             "PATH": f"{bin_path}{os.pathsep}{env['PATH']}",
         }
     )
     result = subprocess.run(
-        # Windows cannot execute a POSIX script directly; hosted runners provide Git Bash.
-        ["bash", str(TRIAGE_SCRIPT), *arguments],
+        # Windows' plain bash command launches WSL; select Git Bash for the POSIX helper instead.
+        [_bash_executable(), TRIAGE_SCRIPT.as_posix(), *arguments],
         cwd=REPO_ROOT,
         env=env,
         check=False,
