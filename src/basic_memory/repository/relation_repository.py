@@ -475,9 +475,10 @@ class RelationRepository(Repository[Relation]):
 
         ordered_writes = sorted(writes, key=lambda write: write.relation_id)
 
-        # Lock acquisition order is source note_content -> target entity -> relation.
-        # Publishers take the same source lock before touching relation rows, so
-        # mutual links cannot invert source/target lock order across transactions.
+        # Publishers and resolvers both acquire the source NoteContent lock before
+        # relation rows. Targets remain an identity snapshot: explicitly locking a
+        # mutual target Entity here would invert with the source-Entity key-share
+        # lock required by the durable search-refresh marker.
         requested_source_entity_ids = sorted({write.from_id for write in ordered_writes})
         source_result = await session.execute(
             select(NoteContent.entity_id, NoteContent.db_version)
@@ -507,9 +508,9 @@ class RelationRepository(Repository[Relation]):
                 stale_relation_ids=tuple(sorted(stale_relation_ids)),
             )
 
-        # PostgreSQL holds target identities through the mutation. SQLite omits
-        # FOR UPDATE and repeats the external-ID predicate in each target update;
-        # its first mutation then enters single-writer serialization.
+        # The guarded UPDATE repeats the target external-ID predicate. PostgreSQL's
+        # FK check then acquires the target key-share lock only for the accepted
+        # mutation; SQLite's first mutation enters single-writer serialization.
         current_target_identities: set[tuple[int, str]] = set()
         target_ids = sorted({write.target_id for write in generation_current_writes})
         for target_id_batch in batched(
@@ -523,7 +524,6 @@ class RelationRepository(Repository[Relation]):
                     Entity.id.in_(target_id_batch),
                 )
                 .order_by(Entity.id)
-                .with_for_update()
             )
             current_target_identities.update(target_result.tuples().all())
 
