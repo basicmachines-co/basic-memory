@@ -13,6 +13,15 @@ TRIAGE_SCRIPT = REPO_ROOT / "scripts" / "edit-issue-labels.sh"
 TRIAGE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "claude-issue-triage.yml"
 
 
+def _git_bash_candidates(git_executable: Path) -> tuple[Path, ...]:
+    git_directory = git_executable.parent
+    return (
+        git_directory / "bash.exe",
+        git_directory.parent / "bin" / "bash.exe",
+        git_directory.parent.parent / "bin" / "bash.exe",
+    )
+
+
 def _bash_executable() -> str:
     if os.name != "nt":
         return "bash"
@@ -21,14 +30,10 @@ def _bash_executable() -> str:
     if git_executable is None:
         raise RuntimeError("Git for Windows is required to run the triage helper tests")
 
-    git_directory = Path(git_executable).parent
-    git_bin_directory = (
-        git_directory if git_directory.name.casefold() == "bin" else git_directory.parent / "bin"
-    )
-    git_bash = git_bin_directory / "bash.exe"
-    if not git_bash.is_file():
-        raise RuntimeError(f"Git Bash was not found at {git_bash}")
-    return str(git_bash)
+    for git_bash in _git_bash_candidates(Path(git_executable)):
+        if git_bash.is_file():
+            return str(git_bash)
+    raise RuntimeError(f"Git Bash was not found near {git_executable}")
 
 
 def _run_triage_helper(
@@ -113,6 +118,12 @@ fi
         else:
             gh_calls[-1].append(line)
     return result, gh_calls
+
+
+def test_git_bash_candidates_include_launcher_for_mingw_git() -> None:
+    git_executable = Path("Git") / "mingw64" / "bin" / "git.exe"
+
+    assert Path("Git") / "bin" / "bash.exe" in _git_bash_candidates(git_executable)
 
 
 def test_triage_helper_updates_only_owned_labels_without_replacing_other_labels(
