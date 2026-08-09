@@ -39,6 +39,7 @@ from basic_memory.indexing.models import (
     FileIndexOperation,
     FileIndexResult,
     IndexEntitySearchWriter,
+    IndexedEntity,
     IndexInputFile,
     IndexingBatchResult,
     StorageIndexFileWriter,
@@ -321,21 +322,27 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
                 resolve_relations=True,
                 refresh_unchanged_derived_state=existing is not None,
             )
-            outcome = await self.note_content_reconciler.reconcile(
+            reconciliation = await self.note_content_reconciler.reconcile(
                 entity=synced.entity,
                 markdown_content=synced.markdown_content,
                 observed_at=synced.updated_at,
                 source=source,
                 anchor=anchor,
             )
-            if outcome == "current":
-                break
+            if reconciliation.generation is not None:
+                generation_is_current = await self.publish_relation_generation(
+                    synced,
+                    generation=reconciliation.generation,
+                )
+                if generation_is_current:
+                    break
 
             logger.info(
-                "Retrying markdown index after concurrent accepted note write: {}",
+                "Retrying markdown index without a current relation generation: {}",
                 file_path,
                 entity_id=synced.entity.id,
                 attempt=attempt + 1,
+                reconciliation_status=reconciliation.status,
             )
         else:
             raise NoteContentChangedDuringIndexError(
@@ -428,6 +435,36 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             operation=operation,
         )
 
+    async def publish_relation_generation(
+        self,
+        synced: SyncedMarkdownFile,
+        *,
+        generation: int,
+    ) -> bool:
+        """Publish one claimed relation set, then preserve legacy inline resolution."""
+        indexed = IndexedEntity(
+            path=synced.file_path,
+            entity_id=synced.entity.id,
+            permalink=synced.entity.permalink,
+            checksum=synced.checksum,
+            content_type=synced.content_type,
+            markdown_content=synced.markdown_content,
+            relations=synced.relations,
+            resolve_relations=synced.resolve_relations,
+        )
+        generation_is_current = await self.batch_indexer.publish_relation_generation(
+            indexed,
+            generation=generation,
+        )
+        if generation_is_current and synced.resolve_relations:
+            await self.batch_indexer.resolve_relation_targets(
+                [synced.entity.id],
+                max_concurrent=1,
+            )
+        if generation_is_current:
+            await self.batch_indexer.refresh_indexed_entity_search(indexed)
+        return generation_is_current
+
     async def index_current_markdown_file(
         self,
         path: RuntimeFilePath,
@@ -488,6 +525,8 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
                 content_type=self.file_service.content_type(path),
                 updated_at=file_metadata.modified_at,
                 size=file_metadata.size,
+                relations=(),
+                resolve_relations=resolve_relations,
             )
 
         return await self.index_changed_markdown_file(
@@ -536,6 +575,8 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             content_type=self.file_service.content_type(input_file.path),
             updated_at=file_metadata.modified_at,
             size=file_metadata.size,
+            relations=indexed.relations,
+            resolve_relations=resolve_relations,
         )
 
     async def index_changed_markdown_file(
@@ -602,6 +643,8 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             content_type=self.file_service.content_type(input_file.path),
             updated_at=file_metadata.modified_at,
             size=file_metadata.size,
+            relations=indexed.relations,
+            resolve_relations=resolve_relations,
         )
 
 

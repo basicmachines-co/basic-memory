@@ -15,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory import db
 from basic_memory.indexing.file_index_planning import FileIndexPath
 from basic_memory.indexing.models import IndexedEntity
-from basic_memory.indexing.note_content_reconciliation import NoteContentReconciliationOutcome
+from basic_memory.indexing.note_content_reconciliation import NoteContentReconciliationResult
 from basic_memory.indexing.note_content_reconciler import NoteContentReconcileFileReader
 
 
@@ -73,7 +73,7 @@ class IndexedNoteContentReconciler(Protocol[EntityT]):
         markdown_content: str,
         observed_at: datetime | None,
         source: str,
-    ) -> NoteContentReconciliationOutcome | None:
+    ) -> NoteContentReconciliationResult:
         """Apply the note_content state change for one markdown entity."""
 
 
@@ -87,6 +87,23 @@ class IndexedNoteContentReconciliationError:
     def as_tuple(self) -> tuple[FileIndexPath, str]:
         """Return the existing IndexingBatchResult error tuple shape."""
         return self.path, self.message
+
+
+@dataclass(frozen=True, slots=True)
+class IndexedNoteContentGeneration:
+    """Exact note-content generation claimed for one indexed markdown entity."""
+
+    path: FileIndexPath
+    entity_id: int
+    generation: int
+
+
+@dataclass(frozen=True, slots=True)
+class IndexedNoteContentBatchReconciliation:
+    """Generation claims and per-file failures produced after one batch index."""
+
+    generations: tuple[IndexedNoteContentGeneration, ...]
+    errors: tuple[IndexedNoteContentReconciliationError, ...]
 
 
 def indexed_note_content_utc_now() -> datetime:
@@ -164,7 +181,9 @@ class IndexedNoteContentReconciliationTask[
     source: str
     file_reader: NoteContentReconcileFileReader | None = None
 
-    async def run(self) -> IndexedNoteContentReconciliationError | None:
+    async def run(
+        self,
+    ) -> IndexedNoteContentGeneration | IndexedNoteContentReconciliationError | None:
         if self.indexed.markdown_content is None:
             return None
 
@@ -200,13 +219,19 @@ class IndexedNoteContentReconciliationTask[
             )
 
         try:
-            await self.note_content_reconciler.reconcile(
+            result = await self.note_content_reconciler.reconcile(
                 entity=entity,
                 markdown_content=markdown_content,
                 observed_at=observed_at,
                 source=self.source,
             )
-            return None
+            if result.generation is None:
+                return None
+            return IndexedNoteContentGeneration(
+                path=self.indexed.path,
+                entity_id=self.indexed.entity_id,
+                generation=result.generation,
+            )
         except Exception as exc:  # pragma: no cover - defensive logging
             # The entity/search writes are already durable by this point. Report
             # the note_content follow-up failure as a per-file indexing error.
@@ -228,13 +253,13 @@ async def reconcile_indexed_note_content_batch[
     timestamp_provider: IndexedNoteContentObservedAt[FileInfoT] = indexed_note_content_observed_at,
     source: str = "index",
     file_reader: NoteContentReconcileFileReader | None = None,
-) -> tuple[IndexedNoteContentReconciliationError, ...]:
+) -> IndexedNoteContentBatchReconciliation:
     """Hydrate note_content rows for indexed markdown entities after batch indexing."""
     markdown_entities = tuple(
         indexed for indexed in indexed_entities if indexed.markdown_content is not None
     )
     if not markdown_entities:
-        return ()
+        return IndexedNoteContentBatchReconciliation(generations=(), errors=())
 
     async with db.scoped_session(session_maker) as session:
         stored_entities = await entity_repository.find_by_ids(
@@ -259,10 +284,16 @@ async def reconcile_indexed_note_content_batch[
         max_concurrent=max_concurrent,
     )
 
+    generations: list[IndexedNoteContentGeneration] = []
     errors: list[IndexedNoteContentReconciliationError] = []
     for indexed, result in zip(markdown_entities, results, strict=True):
         if isinstance(result, BaseException):
             errors.append(IndexedNoteContentReconciliationError(indexed.path, str(result)))
-        elif result is not None:
+        elif isinstance(result, IndexedNoteContentReconciliationError):
             errors.append(result)
-    return tuple(errors)
+        elif result is not None:
+            generations.append(result)
+    return IndexedNoteContentBatchReconciliation(
+        generations=tuple(generations),
+        errors=tuple(errors),
+    )

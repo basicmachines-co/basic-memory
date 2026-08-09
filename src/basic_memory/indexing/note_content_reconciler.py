@@ -22,7 +22,7 @@ from basic_memory.indexing.note_content_reconciliation import (
     NoteContentPromoted,
     NoteContentReconciliationAnchor,
     NoteContentReconciliationDeferred,
-    NoteContentReconciliationOutcome,
+    NoteContentReconciliationResult,
     NoteContentState,
     NoteContentSource,
     NoteContentWriteStatus,
@@ -317,7 +317,7 @@ class NoteContentReconciler:
         observed_at: datetime | None,
         source: NoteContentSource,
         anchor: NoteContentReconciliationAnchor | None = None,
-    ) -> NoteContentReconciliationOutcome:
+    ) -> NoteContentReconciliationResult:
         """Apply the shared file-vs-DB rule for one markdown entity."""
         observed_checksum = await file_utils.compute_checksum(markdown_content)
         observed_timestamp = observed_at or datetime.now(tz=UTC)
@@ -347,7 +347,7 @@ class NoteContentReconciler:
                         "accepted state changed during indexing",
                         entity.id,
                     )
-                    return "stale"
+                    return NoteContentReconciliationResult.stale()
 
             if note_content is None:
                 plan = plan_note_content_reconciliation(None, observed)
@@ -359,7 +359,7 @@ class NoteContentReconciler:
                         session,
                         note_content_from_bootstrap(entity.id, plan),
                     )
-                    return "current"
+                    return NoteContentReconciliationResult.current(plan.db_version)
                 except IntegrityError:
                     # Concurrent repair/index workers can both observe a missing row before
                     # one wins the insert. Reload the winner and let normal reconciliation
@@ -379,7 +379,7 @@ class NoteContentReconciler:
                             "accepted state was created during indexing",
                             entity.id,
                         )
-                        return "stale"
+                        return NoteContentReconciliationResult.stale()
 
             # The plan is computed from the row read above; guard the write on
             # that db_version so a concurrent accepted API mutation that advanced
@@ -401,7 +401,7 @@ class NoteContentReconciler:
                     current_state.file_version,
                     current_state.file_write_status,
                 )
-                return "current"
+                return NoteContentReconciliationResult.deferred()
 
             applied = await apply_note_content_update_plan(
                 self._note_content_repository,
@@ -417,9 +417,18 @@ class NoteContentReconciler:
                     expected_db_version,
                     entity.id,
                 )
-                return "stale"
+                return NoteContentReconciliationResult.stale()
 
-            return "current"
+            if isinstance(plan, NoteContentFileObserved):
+                # The observed bytes describe an older materialized file while DB content is
+                # already ahead. They may update file bookkeeping, but they cannot publish
+                # semantic relations under the newer accepted generation.
+                return NoteContentReconciliationResult.deferred()
+
+            claimed_generation = (
+                plan.db_version if isinstance(plan, NoteContentPromoted) else expected_db_version
+            )
+            return NoteContentReconciliationResult.current(claimed_generation)
 
 
 async def reconcile_note_content_for_entity(

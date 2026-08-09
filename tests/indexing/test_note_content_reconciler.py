@@ -105,7 +105,8 @@ async def test_reconciler_converges_after_concurrent_create_conflict() -> None:
         )
 
     repository.create.assert_awaited_once()
-    assert outcome == "current"
+    assert outcome.status == "current"
+    assert outcome.generation == 2
     assert session.rollback_count == 1
     assert repository.get_by_entity_id.await_count == 2
     repository.update_state_fields.assert_awaited_once_with(
@@ -169,7 +170,8 @@ async def test_reconciler_skips_stale_plan_when_version_guard_loses() -> None:
         )
 
     repository.create.assert_not_awaited()
-    assert outcome == "stale"
+    assert outcome.status == "stale"
+    assert outcome.generation is None
     assert repository.update_state_fields.await_count == 1
     _, kwargs = repository.update_state_fields.await_args
     assert kwargs["expected_db_version"] == 3
@@ -227,7 +229,8 @@ async def test_reconciler_skips_observation_when_anchor_changed_during_indexing(
 
     repository.create.assert_not_awaited()
     repository.update_state_fields.assert_not_awaited()
-    assert outcome == "stale"
+    assert outcome.status == "stale"
+    assert outcome.generation is None
 
 
 @pytest.mark.asyncio
@@ -269,7 +272,8 @@ async def test_reconciler_treats_initial_absence_as_stale_when_content_appears()
             anchor=NoteContentReconciliationAnchor(entity_id=None, state=None),
         )
 
-    assert outcome == "stale"
+    assert outcome.status == "stale"
+    assert outcome.generation is None
     repository.create.assert_not_awaited()
     repository.update_state_fields.assert_not_awaited()
 
@@ -315,7 +319,51 @@ async def test_reconciler_defers_unrelated_file_while_materialization_is_pending
 
     repository.create.assert_not_awaited()
     repository.update_state_fields.assert_not_awaited()
-    assert outcome == "current"
+    assert outcome.status == "deferred"
+    assert outcome.generation is None
+
+
+@pytest.mark.asyncio
+async def test_reconciler_does_not_claim_newer_db_generation_for_older_file() -> None:
+    """File bookkeeping may advance without lending DB generation 9 to version 8 bytes."""
+    older_content = "# Older materialized file\n"
+    older_checksum = await file_utils.compute_checksum(older_content)
+    repository = SimpleNamespace(
+        get_by_entity_id=AsyncMock(
+            return_value=SimpleNamespace(
+                db_version=9,
+                db_checksum="new-db-checksum",
+                file_version=8,
+                file_checksum=older_checksum,
+                file_write_status="pending",
+            )
+        ),
+        create=AsyncMock(),
+        update_state_fields=AsyncMock(return_value=SimpleNamespace()),
+    )
+
+    @asynccontextmanager
+    async def fake_scoped_session(_session_maker: object):
+        yield FakeSession()
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_content_reconciler.db.scoped_session",
+            fake_scoped_session,
+        )
+        outcome = await NoteContentReconciler(
+            note_content_repository=cast(Any, repository),
+            session_maker=cast(Any, object()),
+        ).reconcile(
+            entity=cast(Entity, SimpleNamespace(id=42)),
+            markdown_content=older_content,
+            observed_at=datetime(2026, 4, 13, 15, 0, tzinfo=UTC),
+            source="index",
+        )
+
+    assert outcome.status == "deferred"
+    assert outcome.generation is None
+    repository.update_state_fields.assert_awaited_once()
 
 
 @pytest.mark.asyncio

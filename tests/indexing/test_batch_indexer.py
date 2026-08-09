@@ -15,7 +15,14 @@ from sqlalchemy import text
 from basic_memory import db
 from basic_memory.file_utils import remove_frontmatter
 from basic_memory.indexing.batch_indexer import BatchIndexer
-from basic_memory.indexing.models import IndexInputFile, StorageIndexFileWriter
+from basic_memory.indexing.models import (
+    IndexingBatchResult,
+    IndexInputFile,
+    RelationGenerationBatchResult,
+    StorageIndexFileWriter,
+)
+from basic_memory.indexing.note_content_reconciler import NoteContentReconciler
+from basic_memory.repository import NoteContentRepository
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.schemas.search import SearchItemType, SearchQuery
@@ -55,6 +62,53 @@ def _make_batch_indexer(
         file_writer=StorageIndexFileWriter(storage=file_service),
         session_maker=search_service.session_maker,
     )
+
+
+async def _claim_and_publish_relations(
+    batch_indexer: BatchIndexer,
+    result: IndexingBatchResult,
+    *,
+    entity_repository,
+    relation_repository,
+    session_maker,
+    max_concurrent: int,
+) -> RelationGenerationBatchResult:
+    """Exercise the post-index generation claim and relation publication boundary."""
+    markdown_entities = [
+        indexed for indexed in result.indexed if indexed.markdown_content is not None
+    ]
+    async with db.scoped_session(session_maker) as session:
+        entities = await entity_repository.find_by_ids(
+            session,
+            [indexed.entity_id for indexed in markdown_entities],
+        )
+    entity_by_id = {entity.id: entity for entity in entities}
+    reconciler = NoteContentReconciler(
+        note_content_repository=NoteContentRepository(
+            project_id=relation_repository.project_id,
+        ),
+        session_maker=session_maker,
+    )
+    generation_by_entity_id: dict[int, int] = {}
+    for indexed in markdown_entities:
+        reconciliation = await reconciler.reconcile(
+            entity=entity_by_id[indexed.entity_id],
+            markdown_content=indexed.markdown_content or "",
+            observed_at=datetime.now(tz=UTC),
+            source="test",
+        )
+        assert reconciliation.generation is not None
+        generation_by_entity_id[indexed.entity_id] = reconciliation.generation
+
+    publication = await batch_indexer.publish_relation_generations(
+        result.indexed,
+        generation_by_entity_id=generation_by_entity_id,
+        max_concurrent=max_concurrent,
+    )
+    result.errors.extend(publication.errors)
+    result.relations_resolved = publication.relations_resolved
+    result.relations_unresolved = publication.relations_unresolved
+    return publication
 
 
 @pytest.mark.asyncio
@@ -450,6 +504,22 @@ async def test_batch_indexer_resolves_relations_and_refreshes_search(
         max_concurrent=2,
         parse_max_concurrent=2,
     )
+    async with db.scoped_session(search_service.session_maker) as session:
+        source_before_claim = await entity_repository.get_by_file_path(session, source_path)
+    assert source_before_claim is not None
+    assert source_before_claim.outgoing_relations == []
+    indexed_source = next(indexed for indexed in result.indexed if indexed.path == source_path)
+    assert [
+        (relation.relation_type, relation.target_name) for relation in indexed_source.relations
+    ] == [("depends_on", "Target")]
+    await _claim_and_publish_relations(
+        batch_indexer,
+        result,
+        entity_repository=entity_repository,
+        relation_repository=relation_repository,
+        session_maker=search_service.session_maker,
+        max_concurrent=2,
+    )
 
     async with db.scoped_session(search_service.session_maker) as session:
         source = await entity_repository.get_by_file_path(session, source_path)
@@ -646,6 +716,14 @@ async def test_batch_indexer_uses_parsed_markdown_body_for_malformed_frontmatter
         files,
         max_concurrent=1,
         parse_max_concurrent=1,
+    )
+    await _claim_and_publish_relations(
+        batch_indexer,
+        result,
+        entity_repository=entity_repository,
+        relation_repository=relation_repository,
+        session_maker=search_service.session_maker,
+        max_concurrent=1,
     )
 
     # Trigger: malformed frontmatter should pass through without normalization.
@@ -852,10 +930,18 @@ async def test_batch_indexer_index_markdown_file_can_defer_relation_resolution(
         file_service,
     )
 
-    await batch_indexer.index_markdown_file(
+    indexed = await batch_indexer.index_markdown_file(
         await _load_input(file_service, path),
         index_search=False,
         resolve_relations=False,
+    )
+    await _claim_and_publish_relations(
+        batch_indexer,
+        IndexingBatchResult(indexed=[indexed]),
+        entity_repository=entity_repository,
+        relation_repository=relation_repository,
+        session_maker=search_service.session_maker,
+        max_concurrent=1,
     )
 
     resolve_link.assert_not_awaited()
@@ -921,8 +1007,16 @@ async def test_batch_indexer_uses_strict_link_resolution_for_deferred_relations(
 
     monkeypatch.setattr(entity_service.link_resolver, "resolve_link", spy_resolve_link)
 
-    await batch_indexer.index_files(
+    result = await batch_indexer.index_files(
         {path: await _load_input(file_service, path)},
+        max_concurrent=1,
+    )
+    await _claim_and_publish_relations(
+        batch_indexer,
+        result,
+        entity_repository=entity_repository,
+        relation_repository=relation_repository,
+        session_maker=search_service.session_maker,
         max_concurrent=1,
     )
 

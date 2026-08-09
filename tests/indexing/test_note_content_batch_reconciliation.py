@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 import basic_memory.indexing.note_content_batch_reconciliation as batch_reconciliation_module
 from basic_memory import db, file_utils
 from basic_memory.indexing.models import IndexedEntity
+from basic_memory.indexing.note_content_reconciliation import NoteContentReconciliationResult
 from basic_memory.indexing.note_content_batch_reconciliation import (
     indexed_note_content_observed_at,
     reconcile_indexed_note_content_batch,
@@ -126,7 +127,7 @@ async def test_reconcile_indexed_note_content_batch_reports_per_file_errors(
         markdown_content: str,
         observed_at: datetime | None,
         source: str,
-    ) -> None:
+    ) -> NoteContentReconciliationResult:
         await reconcile(
             entity=entity,
             markdown_content=markdown_content,
@@ -135,6 +136,7 @@ async def test_reconcile_indexed_note_content_batch_reports_per_file_errors(
         )
         if entity.id == 43:
             raise RuntimeError("note_content failed")
+        return NoteContentReconciliationResult.current(7)
 
     monkeypatch.setattr(
         batch_reconciliation_module.db,
@@ -142,7 +144,7 @@ async def test_reconcile_indexed_note_content_batch_reports_per_file_errors(
         fake_scoped_session,
     )
 
-    errors = await reconcile_indexed_note_content_batch(
+    reconciliation = await reconcile_indexed_note_content_batch(
         [
             IndexedEntity(
                 path="ok.md",
@@ -187,10 +189,17 @@ async def test_reconcile_indexed_note_content_batch_reports_per_file_errors(
         ("ok.md", FakeFileInfo(observed_at=observed_at)),
         ("bad.md", None),
     ]
-    assert [error.as_tuple() for error in errors] == [
+    assert [error.as_tuple() for error in reconciliation.errors] == [
         ("missing.md", "Entity 404 not found after indexing"),
         ("bad.md", "note_content failed"),
     ]
+    assert reconciliation.generations == (
+        batch_reconciliation_module.IndexedNoteContentGeneration(
+            path="ok.md",
+            entity_id=42,
+            generation=7,
+        ),
+    )
     assert reconcile.await_args_list[0].kwargs == {
         "entity": FakeEntity(id=42),
         "markdown_content": "# OK\n",
@@ -295,7 +304,7 @@ async def test_batch_reader_skips_reconcile_when_file_removed(
 
     monkeypatch.setattr(batch_reconciliation_module.db, "scoped_session", fake_scoped_session)
 
-    errors = await reconcile_indexed_note_content_batch(
+    reconciliation = await reconcile_indexed_note_content_batch(
         [
             IndexedEntity(
                 path="gone.md",
@@ -315,7 +324,8 @@ async def test_batch_reader_skips_reconcile_when_file_removed(
         file_reader=StubReconcileFileReader(StubReconcileFile(content=None, last_modified=None)),
     )
 
-    assert errors == ()
+    assert reconciliation.generations == ()
+    assert reconciliation.errors == ()
     reconcile.assert_not_awaited()
 
 
@@ -371,7 +381,7 @@ async def test_batch_reader_reconciles_fresh_content_not_scan_snapshot(
         StubReconcileFile(content=accepted_content.encode("utf-8"), last_modified=now)
     )
 
-    errors = await reconcile_indexed_note_content_batch(
+    reconciliation = await reconcile_indexed_note_content_batch(
         [
             IndexedEntity(
                 path=sample_entity.file_path,
@@ -390,7 +400,8 @@ async def test_batch_reader_reconciles_fresh_content_not_scan_snapshot(
         file_reader=reader,
     )
 
-    assert errors == ()
+    assert [claim.generation for claim in reconciliation.generations] == [5]
+    assert reconciliation.errors == ()
     async with db.scoped_session(session_maker) as session:
         row = await repository.get_by_entity_id(session, sample_entity.id)
     assert row is not None
@@ -446,7 +457,7 @@ async def test_batch_without_reader_reverts_to_scan_snapshot(
         session_maker=session_maker,
     )
 
-    errors = await reconcile_indexed_note_content_batch(
+    reconciliation = await reconcile_indexed_note_content_batch(
         [
             IndexedEntity(
                 path=sample_entity.file_path,
@@ -464,7 +475,8 @@ async def test_batch_without_reader_reverts_to_scan_snapshot(
         source="index",
     )
 
-    assert errors == ()
+    assert [claim.generation for claim in reconciliation.generations] == [6]
+    assert reconciliation.errors == ()
     async with db.scoped_session(session_maker) as session:
         row = await repository.get_by_entity_id(session, sample_entity.id)
     assert row is not None

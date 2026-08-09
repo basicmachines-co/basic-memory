@@ -104,6 +104,15 @@ class IndexFrontmatterWriteResult:
     content: str
 
 
+@dataclass(frozen=True, slots=True)
+class IndexedRelation:
+    """One parsed outgoing relation waiting for generation-owned publication."""
+
+    relation_type: str
+    target_name: str
+    context: str | None
+
+
 @dataclass(slots=True)
 class IndexedEntity:
     """Stable output describing one file that finished indexing successfully."""
@@ -114,6 +123,17 @@ class IndexedEntity:
     checksum: str
     content_type: str | None = None
     markdown_content: str | None = None
+    relations: tuple[IndexedRelation, ...] = ()
+    resolve_relations: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class RelationGenerationBatchResult:
+    """Relation publication and legacy resolution outcome for one indexed batch."""
+
+    errors: tuple[tuple[str, str], ...] = ()
+    relations_resolved: int = 0
+    relations_unresolved: int = 0
 
 
 class FileIndexOperation(StrEnum):
@@ -801,6 +821,8 @@ class SyncedMarkdownFile:
     content_type: str
     updated_at: datetime
     size: int
+    relations: tuple[IndexedRelation, ...] = ()
+    resolve_relations: bool = True
 
 
 @dataclass(slots=True)

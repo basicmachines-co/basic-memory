@@ -654,6 +654,44 @@ async def test_newer_relation_generation_replaces_then_cleans_older_set(
 
 
 @pytest.mark.asyncio
+async def test_empty_relation_generation_cleanup_removes_the_older_set(
+    relation_repository: RelationRepository,
+    source_entity: Entity,
+    test_project: Project,
+    session_maker,
+) -> None:
+    """An accepted empty relation set still publishes through guarded cleanup."""
+    await set_note_content_generation(
+        session_maker,
+        source_entity=source_entity,
+        test_project=test_project,
+        generation=2,
+    )
+    async with db.scoped_session(session_maker) as session:
+        await relation_repository.add(
+            session,
+            Relation(
+                project_id=test_project.id,
+                from_id=source_entity.id,
+                to_name="Removed Target",
+                relation_type="removed",
+                generation=1,
+            ),
+        )
+
+    async with db.scoped_session(session_maker) as session:
+        cleanup = await relation_repository.cleanup_relation_generations(
+            session,
+            entity_id=source_entity.id,
+            generation=2,
+        )
+
+    assert cleanup.generation_is_current
+    async with db.scoped_session(session_maker) as session:
+        assert await relation_repository.find_all(session) == []
+
+
+@pytest.mark.asyncio
 async def test_add_all_ignore_duplicates_basic(
     relation_repository: RelationRepository,
     sample_entity: Entity,

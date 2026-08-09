@@ -21,6 +21,7 @@ from basic_memory.indexing.models import (
     IndexFrontmatterStorage,
     IndexingBatchResult,
     IndexInputFile,
+    RelationGenerationBatchResult,
     StorageIndexFileWriter,
 )
 from basic_memory.indexing.note_content_batch_reconciliation import (
@@ -52,6 +53,16 @@ class IndexInputBatchExecutor(Protocol):
         parse_max_concurrent: int | None = None,
     ) -> IndexingBatchResult:
         """Index one batch of storage-neutral input files."""
+
+    async def publish_relation_generations(
+        self,
+        indexed_entities: list[IndexedEntity],
+        *,
+        generation_by_entity_id: Mapping[int, int],
+        max_concurrent: int,
+    ) -> RelationGenerationBatchResult:
+        """Publish relation projections only for claimed note generations."""
+        ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,7 +101,7 @@ class IndexBatchRuntime[EntityT: IndexedNoteContentEntity, FileInfoT: LoadedInde
             max_concurrent=max_concurrent,
             parse_max_concurrent=parse_max_concurrent,
         )
-        note_content_errors = await reconcile_indexed_note_content_batch(
+        reconciliation = await reconcile_indexed_note_content_batch(
             result.indexed,
             file_infos=files,
             entity_repository=self.entity_repository,
@@ -101,7 +112,17 @@ class IndexBatchRuntime[EntityT: IndexedNoteContentEntity, FileInfoT: LoadedInde
             source=self.note_content_source,
             file_reader=self.file_reader,
         )
-        result.errors.extend(error.as_tuple() for error in note_content_errors)
+        relation_result = await self.batch_indexer.publish_relation_generations(
+            result.indexed,
+            generation_by_entity_id={
+                claim.entity_id: claim.generation for claim in reconciliation.generations
+            },
+            max_concurrent=metadata_update_max_concurrent or max_concurrent,
+        )
+        result.errors.extend(error.as_tuple() for error in reconciliation.errors)
+        result.errors.extend(relation_result.errors)
+        result.relations_resolved = relation_result.relations_resolved
+        result.relations_unresolved = relation_result.relations_unresolved
         result.search_indexed = count_search_indexed_entities(result.indexed)
         return result
 

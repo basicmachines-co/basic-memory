@@ -2,6 +2,8 @@
 
 from datetime import UTC, datetime
 
+import pytest
+
 from basic_memory.indexing.note_content_reconciliation import (
     AcceptedNoteContentVersion,
     MaterializedNoteContentFile,
@@ -13,12 +15,24 @@ from basic_memory.indexing.note_content_reconciliation import (
     NoteContentMaterializationStatusUpdate,
     NoteContentPromoted,
     NoteContentReconciliationDeferred,
+    NoteContentReconciliationResult,
     NoteContentState,
     ObservedNoteContent,
     plan_note_content_materialization_publish,
     plan_note_content_materialization_status,
     plan_note_content_reconciliation,
 )
+
+
+def test_reconciliation_result_requires_generation_only_for_current_status() -> None:
+    assert NoteContentReconciliationResult.current(3).generation == 3
+    assert NoteContentReconciliationResult.stale().generation is None
+    assert NoteContentReconciliationResult.deferred().generation is None
+
+    with pytest.raises(ValueError, match="Only current"):
+        NoteContentReconciliationResult(status="current")
+    with pytest.raises(ValueError, match="positive"):
+        NoteContentReconciliationResult.current(0)
 
 
 def _observed(checksum: str = "observed-checksum") -> ObservedNoteContent:

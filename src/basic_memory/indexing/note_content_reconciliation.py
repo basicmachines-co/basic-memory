@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Self
 
 type NoteContentChecksum = str
 type NoteContentSource = str
-type NoteContentReconciliationOutcome = Literal["current", "stale"]
+type NoteContentReconciliationStatus = Literal["current", "stale", "deferred"]
 type NoteContentWriteStatus = Literal[
     "pending",
     "writing",
@@ -16,6 +16,36 @@ type NoteContentWriteStatus = Literal[
     "failed",
     "external_change_detected",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class NoteContentReconciliationResult:
+    """Whether observed bytes claimed an exact accepted note generation."""
+
+    status: NoteContentReconciliationStatus
+    generation: int | None = None
+
+    def __post_init__(self) -> None:
+        generation_is_claimed = self.generation is not None
+        if generation_is_claimed != (self.status == "current"):
+            raise ValueError("Only current note-content reconciliation can claim a generation")
+
+    @classmethod
+    def current(cls, generation: int) -> Self:
+        """Return a successful claim for one authoritative database generation."""
+        if generation < 1:
+            raise ValueError("Claimed note-content generation must be positive")
+        return cls(status="current", generation=generation)
+
+    @classmethod
+    def stale(cls) -> Self:
+        """Return an observation superseded by a concurrent accepted write."""
+        return cls(status="stale")
+
+    @classmethod
+    def deferred(cls) -> Self:
+        """Return an observation whose DB/file lineage is not safe to promote."""
+        return cls(status="deferred")
 
 
 @dataclass(frozen=True, slots=True)

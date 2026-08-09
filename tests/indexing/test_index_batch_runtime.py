@@ -24,8 +24,10 @@ from basic_memory.indexing.models import (
     IndexFrontmatterWriteResult,
     IndexingBatchResult,
     IndexInputFile,
+    RelationGenerationBatchResult,
     StorageIndexFileWriter,
 )
+from basic_memory.indexing.note_content_reconciliation import NoteContentReconciliationResult
 from basic_memory.indexing.note_content_reconciler import NoteContentReconciler
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository, RelationRepository
@@ -72,6 +74,8 @@ class RecordingBatchIndexer:
     calls: list[dict[str, IndexInputFile]] = field(default_factory=list)
     max_concurrent: int | None = None
     parse_max_concurrent: int | None = None
+    published_generation_by_entity_id: dict[int, int] | None = None
+    publish_max_concurrent: int | None = None
 
     async def index_files(
         self,
@@ -84,6 +88,21 @@ class RecordingBatchIndexer:
         self.max_concurrent = max_concurrent
         self.parse_max_concurrent = parse_max_concurrent
         return self.result
+
+    async def publish_relation_generations(
+        self,
+        indexed_entities: list[IndexedEntity],
+        *,
+        generation_by_entity_id: Mapping[int, int],
+        max_concurrent: int,
+    ) -> RelationGenerationBatchResult:
+        assert indexed_entities is self.result.indexed
+        self.published_generation_by_entity_id = dict(generation_by_entity_id)
+        self.publish_max_concurrent = max_concurrent
+        return RelationGenerationBatchResult(
+            relations_resolved=2,
+            relations_unresolved=3,
+        )
 
 
 @dataclass(slots=True)
@@ -113,10 +132,11 @@ class RecordingNoteContentReconciler:
         markdown_content: str,
         observed_at: datetime | None,
         source: str,
-    ) -> None:
+    ) -> NoteContentReconciliationResult:
         self.calls.append((entity, markdown_content, observed_at, source))
         if entity.id in self.failing_entity_ids:
             raise RuntimeError(f"note_content failed for {entity.id}")
+        return NoteContentReconciliationResult.current(5)
 
 
 def recording_indexed_note_content_timestamps(
@@ -234,10 +254,14 @@ async def test_index_batch_runtime_indexes_loaded_files_and_reconciles_note_cont
     assert batch_indexer.calls[0]["image.png"].content_type == "application/octet-stream"
     assert repository.loaded_ids == [10, 20]
     assert reconciler.calls[0] == (FakeEntity(id=10), "# OK\n", observed_at, "index")
+    assert batch_indexer.published_generation_by_entity_id == {10: 5}
+    assert batch_indexer.publish_max_concurrent == 1
     assert result.errors == [
         ("preexisting.md", "parse failed"),
         ("bad.md", "note_content failed for 20"),
     ]
+    assert result.relations_resolved == 2
+    assert result.relations_unresolved == 3
     assert result.search_indexed == 2
 
 
