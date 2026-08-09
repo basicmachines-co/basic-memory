@@ -98,6 +98,7 @@ class PreparedEntityMove:
     markdown_content: str
     search_content: str
     permalink: str | None
+    relations: tuple[AcceptedRelationWrite, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -793,6 +794,7 @@ async def prepare_move_entity_content(
     current_content: str,
     destination_path: str,
     *,
+    should_update_permalink: bool | None = None,
     session: AsyncSession | None = None,
 ) -> PreparedEntityMove:
     from basic_memory.indexing.accepted_note_search import accepted_search_content_from_markdown
@@ -800,22 +802,40 @@ async def prepare_move_entity_content(
     file_path = Path(normalize_note_move_destination_path(destination_path))
     markdown_content = current_content
     permalink = entity.permalink
-    disable_permalinks = bool(
-        dependencies.app_config and dependencies.app_config.disable_permalinks
-    )
-    update_permalinks_on_move = bool(
-        dependencies.app_config and dependencies.app_config.update_permalinks_on_move
-    )
-    if not disable_permalinks and (update_permalinks_on_move or entity.permalink is None):
+    update_permalink = should_update_permalink
+    if update_permalink is None:
+        disable_permalinks = bool(
+            dependencies.app_config and dependencies.app_config.disable_permalinks
+        )
+        update_permalinks_on_move = bool(
+            dependencies.app_config and dependencies.app_config.update_permalinks_on_move
+        )
+        update_permalink = not disable_permalinks and (
+            update_permalinks_on_move or entity.permalink is None
+        )
+    if update_permalink:
         permalink = await resolve_permalink(dependencies, file_path, session=session)
         post = frontmatter.loads(markdown_content)
         post.metadata["permalink"] = permalink
         markdown_content = dump_frontmatter(post)
+    entity_markdown = await dependencies.entity_parser.parse_markdown_content(
+        file_path=file_path,
+        content=markdown_content,
+        ctime=entity.created_at.timestamp() if entity.created_at is not None else None,
+    )
     return PreparedEntityMove(
         file_path=file_path,
         markdown_content=markdown_content,
         search_content=accepted_search_content_from_markdown(markdown_content),
         permalink=permalink,
+        relations=tuple(
+            AcceptedRelationWrite(
+                relation_type=relation.type,
+                target_name=relation.target,
+                context=relation.context,
+            )
+            for relation in entity_markdown.relations
+        ),
     )
 
 
@@ -973,6 +993,7 @@ class NotePreparation:
         current_content: str,
         destination_path: str,
         *,
+        should_update_permalink: bool | None = None,
         session: AsyncSession | None = None,
     ) -> PreparedEntityMove:
         return await prepare_move_entity_content(
@@ -980,6 +1001,7 @@ class NotePreparation:
             entity,
             current_content,
             destination_path,
+            should_update_permalink=should_update_permalink,
             session=session,
         )
 

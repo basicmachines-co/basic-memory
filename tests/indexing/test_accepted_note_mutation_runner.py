@@ -46,6 +46,7 @@ from basic_memory.repository import (
     AcceptedObservationWrite,
     AcceptedRelationWrite,
 )
+from basic_memory.repository.relation_repository import RelationGenerationWriteResult
 from basic_memory.repository.entity_repository import AcceptedPendingEntityWrite
 from basic_memory.runtime.note_content import RuntimeAcceptedNoteResponse
 from basic_memory.schemas.base import Entity as EntitySchema
@@ -195,7 +196,7 @@ class _CreatePreparer:
                 AsyncSession | None,
             ]
         ] = []
-        self.move_calls: list[tuple[Entity, str, str, AsyncSession | None]] = []
+        self.move_calls: list[tuple[Entity, str, str, bool, AsyncSession | None]] = []
         self.self_relation_calls: list[tuple[str, Entity, AsyncSession | None]] = []
 
     async def prepare_create_entity_content(
@@ -266,9 +267,12 @@ class _CreatePreparer:
         current_content: str,
         destination_path: str,
         *,
+        should_update_permalink: bool,
         session: AsyncSession | None = None,
     ) -> PreparedEntityMove:
-        self.move_calls.append((entity, current_content, destination_path, session))
+        self.move_calls.append(
+            (entity, current_content, destination_path, should_update_permalink, session)
+        )
         return self.prepared_move
 
     async def verify_move_destination_absent(
@@ -490,6 +494,27 @@ class _RelationRepository:
         _ = session
         self.calls.append((entity_id, list(relations)))
 
+    async def upsert_relation_generation(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+        generation: int,
+        relations: Sequence[AcceptedRelationWrite],
+    ) -> RelationGenerationWriteResult:
+        raise AssertionError(
+            "relation publication was not expected inside the accepted transaction"
+        )
+
+    async def cleanup_relation_generations(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+        generation: int,
+    ) -> RelationGenerationWriteResult:
+        raise AssertionError("relation cleanup was not expected inside the accepted transaction")
+
 
 @dataclass(frozen=True, slots=True)
 class _MutationWriteRepositories:
@@ -678,7 +703,7 @@ async def test_run_accepted_note_create_persists_prepared_markdown(
     note_content_accept_repository = _NoteContentAcceptRepository(note_content)
     search_repository = _SearchRepository()
 
-    change = await run_accepted_note_create(
+    result = await run_accepted_note_create(
         session,
         request=AcceptedNoteCreateMutation(
             project_external_id="project-123",
@@ -701,6 +726,7 @@ async def test_run_accepted_note_create_persists_prepared_markdown(
         ),
     )
 
+    change = result.change
     assert project_repository.calls == [(session, "project-123")]
     assert entity_lookup_repository.file_path_calls == [(session, "notes/Accepted.md", False)]
     assert preparer_factory.projects == [project]
@@ -723,6 +749,8 @@ async def test_run_accepted_note_create_persists_prepared_markdown(
     assert change.materialization.actor_kind == "user"
     assert change.materialization.actor_name == "Ada"
     assert change.materialization.previous_file_path is None
+    assert result.relation_publication is not None
+    assert result.relation_publication.generation == 1
     assert persistence_calls[0].await_count == 1
     assert persistence_calls[1].await_count == 0
 
@@ -777,7 +805,7 @@ async def test_run_accepted_note_create_allows_equivalent_non_markdown_resource_
         filename_conflicts=["notes/accepted.png"],
     )
 
-    change = await run_accepted_note_create(
+    result = await run_accepted_note_create(
         session,
         request=AcceptedNoteCreateMutation(
             project_external_id="project-123",
@@ -796,6 +824,7 @@ async def test_run_accepted_note_create_allows_equivalent_non_markdown_resource_
         ),
     )
 
+    change = result.change
     assert change.status_code == 201
     assert preparer.conflict_calls == [("notes/Accepted.md", False, session)]
     assert preparer.skip_conflict_checks == [True]
@@ -820,7 +849,7 @@ async def test_run_accepted_note_update_replaces_existing_note_content(
     note_content_accept_repository = _NoteContentAcceptRepository(note_content)
     search_repository = _SearchRepository()
 
-    change = await run_accepted_note_update(
+    result = await run_accepted_note_update(
         cast(AsyncSession, session),
         request=AcceptedNoteUpdateMutation(
             project_external_id="project-123",
@@ -840,6 +869,7 @@ async def test_run_accepted_note_update_replaces_existing_note_content(
         ),
     )
 
+    change = result.change
     assert entity_lookup_repository.external_id_calls == [
         (cast(AsyncSession, session), "note-123", False)
     ]
@@ -856,6 +886,8 @@ async def test_run_accepted_note_update_replaces_existing_note_content(
     assert change.materialization is not None
     assert change.materialization.db_version == 2
     assert change.materialization.previous_file_path is None
+    assert result.relation_publication is not None
+    assert result.relation_publication.generation == 2
     assert persistence_calls[0].await_count == 1
     assert persistence_calls[1].await_count == 0
 
@@ -879,7 +911,7 @@ async def test_run_accepted_note_update_accepts_matching_base_checksum() -> None
     note_content_accept_repository = _NoteContentAcceptRepository(note_content)
     search_repository = _SearchRepository()
 
-    change = await run_accepted_note_update(
+    result = await run_accepted_note_update(
         cast(AsyncSession, session),
         request=AcceptedNoteUpdateMutation(
             project_external_id="project-123",
@@ -900,6 +932,7 @@ async def test_run_accepted_note_update_accepts_matching_base_checksum() -> None
         ),
     )
 
+    change = result.change
     assert change.status_code == 200
     assert note_content_accept_repository.calls[0][1].db_version == 2
     assert note_content_accept_repository.calls[0][1].markdown_content == "# Replacement\n"
@@ -985,7 +1018,7 @@ async def test_run_accepted_note_update_accepts_relay_self_supersede_on_stale_ba
     note_content_accept_repository = _NoteContentAcceptRepository(note_content)
     search_repository = _SearchRepository()
 
-    change = await run_accepted_note_update(
+    result = await run_accepted_note_update(
         cast(AsyncSession, session),
         request=AcceptedNoteUpdateMutation(
             project_external_id="project-123",
@@ -1006,6 +1039,7 @@ async def test_run_accepted_note_update_accepts_relay_self_supersede_on_stale_ba
         ),
     )
 
+    change = result.change
     assert change.status_code == 200
     assert note_content_accept_repository.calls[0][1].db_version == 2
     assert note_content_accept_repository.calls[0][1].markdown_content == "# Replacement\n"
@@ -1034,7 +1068,7 @@ async def test_run_accepted_note_update_relay_supersedes_foreign_head() -> None:
     note_content_accept_repository = _NoteContentAcceptRepository(note_content)
     search_repository = _SearchRepository()
 
-    change = await run_accepted_note_update(
+    result = await run_accepted_note_update(
         cast(AsyncSession, session),
         request=AcceptedNoteUpdateMutation(
             project_external_id="project-123",
@@ -1055,6 +1089,7 @@ async def test_run_accepted_note_update_relay_supersedes_foreign_head() -> None:
         ),
     )
 
+    change = result.change
     assert change.status_code == 200
     assert note_content_accept_repository.calls[0][1].db_version == 2
 
@@ -1236,7 +1271,7 @@ async def test_run_accepted_note_update_creates_missing_entity_without_base_chec
     note_content_accept_repository = _NoteContentAcceptRepository(note_content)
     search_repository = _SearchRepository()
 
-    change = await run_accepted_note_update(
+    result = await run_accepted_note_update(
         cast(AsyncSession, session),
         request=AcceptedNoteUpdateMutation(
             project_external_id="project-123",
@@ -1256,6 +1291,7 @@ async def test_run_accepted_note_update_creates_missing_entity_without_base_chec
         ),
     )
 
+    change = result.change
     assert change.status_code == 201
     assert len(pending_entity_repository.calls) == 1
     assert note_content_accept_repository.calls[0][1].db_version == 1
@@ -1380,7 +1416,7 @@ async def test_run_accepted_note_edit_applies_patch_against_db_content(
     note_content_accept_repository = _NoteContentAcceptRepository(note_content)
     search_repository = _SearchRepository()
 
-    change = await run_accepted_note_edit(
+    result = await run_accepted_note_edit(
         cast(AsyncSession, session),
         request=AcceptedNoteEditMutation(
             project_external_id="project-123",
@@ -1405,6 +1441,7 @@ async def test_run_accepted_note_edit_applies_patch_against_db_content(
         ),
     )
 
+    change = result.change
     assert preparer.edit_calls == [
         (
             entity,
@@ -1546,7 +1583,7 @@ async def test_run_accepted_note_move_carries_previous_path_and_materialized_cle
     note_content_accept_repository = _NoteContentAcceptRepository(note_content)
     search_repository = _SearchRepository()
 
-    change = await run_accepted_note_move(
+    result = await run_accepted_note_move(
         cast(AsyncSession, session),
         request=AcceptedNoteMoveMutation(
             project_external_id="project-123",
@@ -1574,8 +1611,9 @@ async def test_run_accepted_note_move_carries_previous_path_and_materialized_cle
         ),
     )
 
+    change = result.change
     assert preparer.move_calls == [
-        (entity, "# Old\n", "archive/accepted.md", cast(AsyncSession, session))
+        (entity, "# Old\n", "archive/accepted.md", True, cast(AsyncSession, session))
     ]
     assert entity.file_path == "archive/accepted.md"
     assert entity.permalink == "archive/accepted"
@@ -1594,6 +1632,8 @@ async def test_run_accepted_note_move_carries_previous_path_and_materialized_cle
     assert preparer_factory.checksum_calls == [(project, "notes/accepted.md")]
     assert persistence_calls[0].await_count == 0
     assert persistence_calls[1].await_count == 1
+    assert result.relation_publication is not None
+    assert result.relation_publication.generation == note_content.db_version
 
 
 @pytest.mark.asyncio
@@ -1652,7 +1692,7 @@ async def test_run_accepted_note_delete_removes_entity_and_returns_cleanup() -> 
     note_content_accept_repository = _NoteContentAcceptRepository(note_content)
     search_repository = _SearchRepository()
 
-    change = await run_accepted_note_delete(
+    result = await run_accepted_note_delete(
         cast(AsyncSession, session),
         request=AcceptedNoteDeleteMutation(
             project_external_id="project-123",
@@ -1669,6 +1709,7 @@ async def test_run_accepted_note_delete_removes_entity_and_returns_cleanup() -> 
         ),
     )
 
+    change = result.change
     assert session.deleted == [entity]
     assert search_repository.deleted_entity_ids == [entity.id]
     assert search_repository.deleted_vector_entity_ids == [entity.id]
@@ -1676,6 +1717,7 @@ async def test_run_accepted_note_delete_removes_entity_and_returns_cleanup() -> 
     assert change.file_delete is not None
     assert change.file_delete.file_path == "notes/accepted.md"
     assert change.file_delete.file_checksum == "file-checksum"
+    assert result.relation_publication is None
 
 
 def _prepared_with_graph(
@@ -1726,7 +1768,7 @@ async def test_run_accepted_note_create_persists_graph_rows() -> None:
     observation_repository = _ObservationRepository()
     relation_repository = _RelationRepository()
 
-    change = await run_accepted_note_create(
+    result = await run_accepted_note_create(
         session,
         request=AcceptedNoteCreateMutation(
             project_external_id="project-123",
@@ -1747,15 +1789,19 @@ async def test_run_accepted_note_create_persists_graph_rows() -> None:
         ),
     )
 
+    change = result.change
     assert change.status_code == 201
-    # The parsed graph is persisted against the new entity in the same transaction.
+    # Observations stay with accepted content; relations publish after commit.
     assert observation_repository.calls == [(entity.id, observations)]
-    assert relation_repository.calls == [(entity.id, relations)]
+    assert relation_repository.calls == []
+    assert result.relation_publication is not None
+    assert result.relation_publication.generation == note_content.db_version
+    assert result.relation_publication.relations[0].target_name == "XSYS Target"
 
 
 @pytest.mark.asyncio
-async def test_run_accepted_note_create_resolves_self_relation_in_transaction() -> None:
-    """Create resolves its own safe permalink before persisting the graph."""
+async def test_run_accepted_note_create_defers_self_relation_resolution() -> None:
+    """Create preserves original self-link names for resolver-owned backfill."""
     session = cast(AsyncSession, object())
     self_relation = AcceptedRelationWrite(
         relation_type="documents",
@@ -1768,7 +1814,7 @@ async def test_run_accepted_note_create_resolves_self_relation_in_transaction() 
     preparer = _CreatePreparer(prepared)
     relation_repository = _RelationRepository()
 
-    change = await run_accepted_note_create(
+    result = await run_accepted_note_create(
         session,
         request=AcceptedNoteCreateMutation(
             project_external_id="project-123",
@@ -1788,21 +1834,12 @@ async def test_run_accepted_note_create_resolves_self_relation_in_transaction() 
         ),
     )
 
+    change = result.change
     assert change.status_code == 201
-    assert [call[0] for call in preparer.self_relation_calls] == ["accepted"]
-    assert relation_repository.calls == [
-        (
-            entity.id,
-            [
-                AcceptedRelationWrite(
-                    relation_type="documents",
-                    target_name=entity.title,
-                    context=None,
-                    target_id=entity.id,
-                )
-            ],
-        )
-    ]
+    assert preparer.self_relation_calls == []
+    assert relation_repository.calls == []
+    assert result.relation_publication is not None
+    assert result.relation_publication.relations[0].target_name == "accepted"
 
 
 @pytest.mark.asyncio
@@ -1821,7 +1858,7 @@ async def test_run_accepted_note_update_replaces_graph_rows() -> None:
     observation_repository = _ObservationRepository()
     relation_repository = _RelationRepository()
 
-    change = await run_accepted_note_update(
+    result = await run_accepted_note_update(
         cast(AsyncSession, session),
         request=AcceptedNoteUpdateMutation(
             project_external_id="project-123",
@@ -1843,9 +1880,12 @@ async def test_run_accepted_note_update_replaces_graph_rows() -> None:
         ),
     )
 
+    change = result.change
     assert change.status_code == 200
     assert observation_repository.calls == [(entity.id, observations)]
-    assert relation_repository.calls == [(entity.id, relations)]
+    assert relation_repository.calls == []
+    assert result.relation_publication is not None
+    assert result.relation_publication.relations[0].target_name == "Other"
 
 
 @pytest.mark.asyncio
@@ -1858,7 +1898,7 @@ async def test_run_accepted_note_edit_clears_graph_when_markdown_drops_it() -> N
     observation_repository = _ObservationRepository()
     relation_repository = _RelationRepository()
 
-    change = await run_accepted_note_edit(
+    result = await run_accepted_note_edit(
         cast(AsyncSession, session),
         request=AcceptedNoteEditMutation(
             project_external_id="project-123",
@@ -1885,7 +1925,10 @@ async def test_run_accepted_note_edit_clears_graph_when_markdown_drops_it() -> N
         ),
     )
 
+    change = result.change
     assert change.status_code == 200
-    # An empty parsed set still hits the repos so stale rows are cleared, not left behind.
+    # Empty observations clear in the transaction; empty relations still emit cleanup work.
     assert observation_repository.calls == [(entity.id, [])]
-    assert relation_repository.calls == [(entity.id, [])]
+    assert relation_repository.calls == []
+    assert result.relation_publication is not None
+    assert result.relation_publication.relations == ()

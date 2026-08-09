@@ -17,8 +17,10 @@ from basic_memory.indexing.accepted_note_mutation_runner import (
     AcceptedNoteMutationRejectKind,
     AcceptedNoteMutationRejected,
     AcceptedNoteMutationRejection,
+    AcceptedNoteMutationResult,
     AcceptedNoteUpdateMutation,
 )
+from basic_memory.indexing.relation_persistence import RelationGenerationPublication
 from basic_memory.indexing.directory_delete_runner import (
     DirectoryDeleteRejectKind,
     DirectoryDeleteRuntime,
@@ -442,6 +444,7 @@ async def test_note_content_mutation_service_delegates_create_to_core_runner(mon
     user_profile_id = uuid4()
     data = EntitySchema(title="Created", directory="notes", content="# Created")
     returned = SimpleNamespace(status_code=201, payload={"ok": True})
+    mutation_result = AcceptedNoteMutationResult(change=cast(Any, returned))
     calls: list[tuple[AsyncSession, AcceptedNoteCreateMutation, object]] = []
 
     async def fake_runner(
@@ -451,7 +454,7 @@ async def test_note_content_mutation_service_delegates_create_to_core_runner(mon
         dependencies: AcceptedNoteMutationDependencies,
     ):
         calls.append((repository_session, request, dependencies))
-        return returned
+        return mutation_result
 
     monkeypatch.setattr(note_content_writes, "run_accepted_note_create", fake_runner)
 
@@ -482,6 +485,111 @@ async def test_note_content_mutation_service_delegates_create_to_core_runner(mon
 
 
 @pytest.mark.asyncio
+async def test_note_content_mutation_service_publishes_relations_after_commit(monkeypatch) -> None:
+    events: list[str] = []
+    returned = cast(Any, SimpleNamespace(status_code=201, payload={"ok": True}))
+    publication = RelationGenerationPublication(
+        project_id=7,
+        entity_id=42,
+        generation=3,
+        relations=(),
+    )
+
+    class RecordingTransaction:
+        async def __aenter__(self):
+            events.append("transaction_enter")
+            return self
+
+        async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
+            events.append("transaction_exit")
+
+    class RecordingSession:
+        async def __aenter__(self):
+            events.append("session_enter")
+            return self
+
+        async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
+            events.append("session_exit")
+
+        def begin(self) -> RecordingTransaction:
+            return RecordingTransaction()
+
+    class RecordingSessionMaker:
+        def __call__(self) -> RecordingSession:
+            return RecordingSession()
+
+    relation_repository = object()
+
+    class WriteRepositories:
+        def relation_repository(self, project_id: int) -> object:
+            assert project_id == publication.project_id
+            events.append("repository")
+            return relation_repository
+
+    dependencies = cast(
+        AcceptedNoteMutationDependencies,
+        SimpleNamespace(write_repositories=WriteRepositories()),
+    )
+
+    async def fake_runner(
+        repository_session: AsyncSession,
+        *,
+        request: AcceptedNoteCreateMutation,
+        dependencies: AcceptedNoteMutationDependencies,
+    ) -> AcceptedNoteMutationResult:
+        _ = repository_session, request, dependencies
+        events.append("runner")
+        return AcceptedNoteMutationResult(
+            change=returned,
+            relation_publication=publication,
+        )
+
+    class RecordingPublisher:
+        def __init__(self, *, relation_repository: object, session_maker: object) -> None:
+            assert relation_repository is not None
+            assert session_maker is not None
+
+        async def publish(
+            self,
+            *,
+            entity_id: int,
+            generation: int,
+            relations: object,
+        ) -> bool:
+            assert entity_id == publication.entity_id
+            assert generation == publication.generation
+            assert relations == publication.relations
+            events.append("publish")
+            return True
+
+    monkeypatch.setattr(note_content_writes, "run_accepted_note_create", fake_runner)
+    monkeypatch.setattr(note_content_writes, "RelationGenerationPublisher", RecordingPublisher)
+
+    service = NoteContentMutationService(
+        session_maker=cast(async_sessionmaker[AsyncSession], RecordingSessionMaker()),
+        mutation_dependencies=dependencies,
+    )
+
+    accepted = await service.create_note(
+        project_external_id="project-123",
+        data=EntitySchema(title="Created", directory="notes", content="# Created"),
+        user_profile_id=None,
+        source="api",
+    )
+
+    assert accepted is returned
+    assert events == [
+        "session_enter",
+        "transaction_enter",
+        "runner",
+        "transaction_exit",
+        "session_exit",
+        "repository",
+        "publish",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_note_content_mutation_service_uses_injected_actor_resolver(monkeypatch) -> None:
     """A runtime adapter can replace route-passed actor values with its own
     request-derived identity without subclassing the service."""
@@ -499,7 +607,9 @@ async def test_note_content_mutation_service_uses_injected_actor_resolver(monkey
         dependencies: AcceptedNoteMutationDependencies,
     ):
         calls.append(request)
-        return SimpleNamespace(status_code=201, payload={"ok": True})
+        return AcceptedNoteMutationResult(
+            change=cast(Any, SimpleNamespace(status_code=201, payload={"ok": True}))
+        )
 
     monkeypatch.setattr(note_content_writes, "run_accepted_note_create", fake_runner)
 
@@ -564,6 +674,7 @@ async def test_note_content_mutation_service_delegates_remaining_methods_to_core
         expected_replacements=1,
     )
     returned = SimpleNamespace(status_code=200, payload={"ok": True})
+    mutation_result = AcceptedNoteMutationResult(change=cast(Any, returned))
     calls: list[tuple[str, AsyncSession, object, object]] = []
 
     def runner(name: str):
@@ -574,7 +685,7 @@ async def test_note_content_mutation_service_delegates_remaining_methods_to_core
             dependencies: object,
         ):
             calls.append((name, repository_session, request, dependencies))
-            return returned
+            return mutation_result
 
         return fake_runner
 

@@ -16,6 +16,7 @@ from basic_memory.repository.relation_repository import (
     AcceptedRelationWrite,
     RelationGenerationWriteResult,
 )
+from basic_memory.runtime.storage import ProjectId, RuntimeEntityId, RuntimeNoteContentVersion
 
 
 class RelationGenerationStore(Protocol):
@@ -37,6 +38,16 @@ class RelationGenerationStore(Protocol):
         entity_id: int,
         generation: int,
     ) -> RelationGenerationWriteResult: ...
+
+
+@dataclass(frozen=True, slots=True)
+class RelationGenerationPublication:
+    """Relation intent authorized by one accepted note-content generation."""
+
+    project_id: ProjectId
+    entity_id: RuntimeEntityId
+    generation: RuntimeNoteContentVersion
+    relations: tuple[IndexedRelation, ...]
 
 
 @dataclass(frozen=True, slots=True)

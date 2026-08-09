@@ -16,7 +16,6 @@ from basic_memory.indexing.accepted_note_write_runner import (
     AcceptedNoteCreatePreparer,
     AcceptedNoteEditPreparer,
     AcceptedNoteMovePreparer,
-    AcceptedNoteSelfRelationResolver,
     AcceptedPreparedNoteWrite,
     AcceptedNoteReplacePreparer,
     AcceptedNoteWriteRepositories,
@@ -29,6 +28,7 @@ from basic_memory.indexing.accepted_note_write_runner import (
     prepare_accepted_note_move,
     prepare_accepted_note_replace,
 )
+from basic_memory.indexing.relation_persistence import RelationGenerationPublication
 from basic_memory.models import Entity, NoteContent, Project
 from basic_memory.repository import NoteContentVersionConflict
 from basic_memory.repository.note_file_vacate_repository import NoteFileVacateRepository
@@ -247,7 +247,6 @@ class AcceptedNoteMutationPreparer(
     AcceptedNoteReplacePreparer,
     AcceptedNoteEditPreparer,
     AcceptedNoteMovePreparer,
-    AcceptedNoteSelfRelationResolver,
     Protocol,
 ):
     """Combined Basic Memory prepare capability for accepted note mutations."""
@@ -303,6 +302,14 @@ class AcceptedNoteMutationDependencies:
     #   materialization, so it keeps DB-first acceptance.
     # Outcome: local creates reject the conflict up front (409) instead.
     verify_storage_absent_on_create: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptedNoteMutationResult:
+    """Accepted response plus relation work that must run after commit."""
+
+    change: AcceptedNoteMutationChange
+    relation_publication: RelationGenerationPublication | None = None
 
 
 def accepted_note_integrity_rejection(error: IntegrityError) -> AcceptedNoteMutationRejection:
@@ -374,7 +381,7 @@ async def run_accepted_note_create(
     *,
     request: AcceptedNoteCreateMutation,
     dependencies: AcceptedNoteMutationDependencies,
-) -> AcceptedNoteMutationChange:
+) -> AcceptedNoteMutationResult:
     """Accept a new markdown note into DB state without materializing its file."""
     try:
         return await _run_accepted_note_create(session, request=request, dependencies=dependencies)
@@ -387,7 +394,7 @@ async def run_accepted_note_update(
     *,
     request: AcceptedNoteUpdateMutation,
     dependencies: AcceptedNoteMutationDependencies,
-) -> AcceptedNoteMutationChange:
+) -> AcceptedNoteMutationResult:
     """Accept a PUT create-or-replace into DB state without materializing its file."""
     try:
         return await _run_accepted_note_update(session, request=request, dependencies=dependencies)
@@ -402,7 +409,7 @@ async def run_accepted_note_edit(
     *,
     request: AcceptedNoteEditMutation,
     dependencies: AcceptedNoteMutationDependencies,
-) -> AcceptedNoteMutationChange:
+) -> AcceptedNoteMutationResult:
     """Accept a partial note edit into DB state without materializing its file."""
     try:
         return await _run_accepted_note_edit(session, request=request, dependencies=dependencies)
@@ -417,7 +424,7 @@ async def run_accepted_note_move(
     *,
     request: AcceptedNoteMoveMutation,
     dependencies: AcceptedNoteMutationDependencies,
-) -> AcceptedNoteMutationChange:
+) -> AcceptedNoteMutationResult:
     """Accept a note move into DB state without materializing its file."""
     try:
         return await _run_accepted_note_move(session, request=request, dependencies=dependencies)
@@ -432,7 +439,7 @@ async def run_accepted_note_delete(
     *,
     request: AcceptedNoteDeleteMutation,
     dependencies: AcceptedNoteMutationDependencies,
-) -> AcceptedNoteMutationChange:
+) -> AcceptedNoteMutationResult:
     """Delete one accepted note and return any materialized-file cleanup."""
     project = await load_accepted_note_mutation_project(
         session,
@@ -446,11 +453,13 @@ async def run_accepted_note_delete(
         load_relations=False,
     )
     if entity is None:
-        return await delete_accepted_note(
-            session,
-            project_id=project.id,
-            entity=None,
-            repositories=dependencies.write_repositories,
+        return AcceptedNoteMutationResult(
+            change=await delete_accepted_note(
+                session,
+                project_id=project.id,
+                entity=None,
+                repositories=dependencies.write_repositories,
+            )
         )
 
     note_content = await load_accepted_note_content(
@@ -460,12 +469,14 @@ async def run_accepted_note_delete(
         dependencies=dependencies,
         missing_kind=None,
     )
-    return await delete_accepted_note(
-        session,
-        project_id=project.id,
-        entity=entity,
-        note_content=note_content,
-        repositories=dependencies.write_repositories,
+    return AcceptedNoteMutationResult(
+        change=await delete_accepted_note(
+            session,
+            project_id=project.id,
+            entity=entity,
+            note_content=note_content,
+            repositories=dependencies.write_repositories,
+        )
     )
 
 
@@ -474,7 +485,7 @@ async def _run_accepted_note_create(
     *,
     request: AcceptedNoteCreateMutation,
     dependencies: AcceptedNoteMutationDependencies,
-) -> AcceptedNoteMutationChange:
+) -> AcceptedNoteMutationResult:
     ensure_accepted_note_markdown_entity(request.data)
 
     now = accepted_note_mutation_utc_now()
@@ -519,19 +530,21 @@ async def _run_accepted_note_create(
         entity=entity,
         prepared=prepared,
         db_checksum=prepared_write.db_checksum,
-        self_relation_resolver=preparer,
         last_source=request.source,
         updated_at=now,
         repositories=dependencies.write_repositories,
     )
-    return plan_accepted_note_write_change(
-        status_code=201,
-        entity=entity,
-        note_content=persisted.note_content,
-        actor_user_profile_id=request.actor.user_profile_id,
-        actor_kind=request.actor.kind,
-        actor_name=request.actor.name,
-        fallback_source=request.source,
+    return AcceptedNoteMutationResult(
+        change=plan_accepted_note_write_change(
+            status_code=201,
+            entity=entity,
+            note_content=persisted.note_content,
+            actor_user_profile_id=request.actor.user_profile_id,
+            actor_kind=request.actor.kind,
+            actor_name=request.actor.name,
+            fallback_source=request.source,
+        ),
+        relation_publication=persisted.relation_publication,
     )
 
 
@@ -540,7 +553,7 @@ async def _run_accepted_note_update(
     *,
     request: AcceptedNoteUpdateMutation,
     dependencies: AcceptedNoteMutationDependencies,
-) -> AcceptedNoteMutationChange:
+) -> AcceptedNoteMutationResult:
     ensure_accepted_note_markdown_entity(request.data)
 
     now = accepted_note_mutation_utc_now()
@@ -691,7 +704,6 @@ async def _run_accepted_note_update(
         entity=entity,
         prepared=prepared,
         db_checksum=prepared_write.db_checksum,
-        self_relation_resolver=preparer,
         last_source=request.source,
         updated_at=now,
         current_note_content=current_note_content,
@@ -711,15 +723,18 @@ async def _run_accepted_note_update(
             file_path=vacated_source[0],
             file_checksum=vacated_source[1],
         )
-    return plan_accepted_note_write_change(
-        status_code=201 if created else 200,
-        entity=entity,
-        note_content=persisted.note_content,
-        actor_user_profile_id=request.actor.user_profile_id,
-        actor_kind=request.actor.kind,
-        actor_name=request.actor.name,
-        cleanup_after_write=persisted.previous_file_delete,
-        fallback_source=request.source,
+    return AcceptedNoteMutationResult(
+        change=plan_accepted_note_write_change(
+            status_code=201 if created else 200,
+            entity=entity,
+            note_content=persisted.note_content,
+            actor_user_profile_id=request.actor.user_profile_id,
+            actor_kind=request.actor.kind,
+            actor_name=request.actor.name,
+            cleanup_after_write=persisted.previous_file_delete,
+            fallback_source=request.source,
+        ),
+        relation_publication=persisted.relation_publication,
     )
 
 
@@ -728,7 +743,7 @@ async def _run_accepted_note_edit(
     *,
     request: AcceptedNoteEditMutation,
     dependencies: AcceptedNoteMutationDependencies,
-) -> AcceptedNoteMutationChange:
+) -> AcceptedNoteMutationResult:
     now = accepted_note_mutation_utc_now()
     user_profile_value = (
         str(request.actor.user_profile_id) if request.actor.user_profile_id is not None else None
@@ -764,21 +779,23 @@ async def _run_accepted_note_edit(
         entity=entity,
         prepared=prepared,
         db_checksum=prepared_write.db_checksum,
-        self_relation_resolver=preparer,
         last_source=request.source,
         updated_at=now,
         current_note_content=current_note_content,
         accepted_file_path=entity.file_path,
         repositories=dependencies.write_repositories,
     )
-    return plan_accepted_note_write_change(
-        status_code=200,
-        entity=entity,
-        note_content=persisted.note_content,
-        actor_user_profile_id=request.actor.user_profile_id,
-        actor_kind=request.actor.kind,
-        actor_name=request.actor.name,
-        fallback_source=request.source,
+    return AcceptedNoteMutationResult(
+        change=plan_accepted_note_write_change(
+            status_code=200,
+            entity=entity,
+            note_content=persisted.note_content,
+            actor_user_profile_id=request.actor.user_profile_id,
+            actor_kind=request.actor.kind,
+            actor_name=request.actor.name,
+            fallback_source=request.source,
+        ),
+        relation_publication=persisted.relation_publication,
     )
 
 
@@ -787,7 +804,7 @@ async def _run_accepted_note_move(
     *,
     request: AcceptedNoteMoveMutation,
     dependencies: AcceptedNoteMutationDependencies,
-) -> AcceptedNoteMutationChange:
+) -> AcceptedNoteMutationResult:
     try:
         accepted_file_path = normalize_note_move_destination_path(request.destination_path)
     except ValueError as error:
@@ -847,7 +864,7 @@ async def _run_accepted_note_move(
             reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.conflict, str(error))
     try:
         prepared_move = await prepare_accepted_note_move(
-            preparer if should_update_permalink else None,
+            preparer,
             session,
             entity=entity,
             current_note_content=current_note_content,
@@ -880,16 +897,19 @@ async def _run_accepted_note_move(
             file_path=existing_file_path,
             file_checksum=vacated_source_checksum,
         )
-    return plan_accepted_note_write_change(
-        status_code=200,
-        entity=entity,
-        note_content=persisted.note_content,
-        actor_user_profile_id=request.actor.user_profile_id,
-        actor_kind=request.actor.kind,
-        actor_name=request.actor.name,
-        previous_file_path=existing_file_path,
-        cleanup_after_write=persisted.previous_file_delete,
-        fallback_source=request.source,
+    return AcceptedNoteMutationResult(
+        change=plan_accepted_note_write_change(
+            status_code=200,
+            entity=entity,
+            note_content=persisted.note_content,
+            actor_user_profile_id=request.actor.user_profile_id,
+            actor_kind=request.actor.kind,
+            actor_name=request.actor.name,
+            previous_file_path=existing_file_path,
+            cleanup_after_write=persisted.previous_file_delete,
+            fallback_source=request.source,
+        ),
+        relation_publication=persisted.relation_publication,
     )
 
 
