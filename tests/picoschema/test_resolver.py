@@ -85,7 +85,7 @@ class TestInlineSchema:
             "settings": {"validation": "banana"},
         }
 
-        with pytest.raises(ValueError, match="warn.*strict.*off.*error"):
+        with pytest.raises(ValueError, match="warn.*strict.*error"):
             await resolve_schema(frontmatter, mock_search_fn)
 
 

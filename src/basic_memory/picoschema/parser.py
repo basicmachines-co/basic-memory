@@ -23,7 +23,7 @@ from typing import Any, Literal
 
 # --- Data Model ---
 
-type ValidationMode = Literal["warn", "strict", "off"]
+type ValidationMode = Literal["warn", "strict"]
 
 
 @dataclass
@@ -76,15 +76,13 @@ def parse_validation_mode(value: object = "warn") -> ValidationMode:
             return "warn"
         case "strict":
             return "strict"
-        case "off":
-            return "off"
         case "error":
             # Compatibility: early schema guidance used "error" for enforcing validation.
             return "strict"
         case _:
             raise ValueError(
                 f"Invalid settings.validation value {value!r}; expected one of: "
-                "'warn', 'strict', 'off', or 'error' (alias for 'strict')"
+                "'warn', 'strict', or 'error' (alias for 'strict')"
             )
 
 
@@ -309,7 +307,7 @@ def parse_schema_note(frontmatter: dict[str, Any]) -> SchemaDefinition:
       - entity: the entity type this schema describes
       - version: schema version number
       - schema: the Picoschema dict
-      - settings.validation: validation mode (warn/strict/off)
+      - settings.validation: validation mode (warn/strict)
 
     Args:
         frontmatter: The complete YAML frontmatter dict from a schema note.

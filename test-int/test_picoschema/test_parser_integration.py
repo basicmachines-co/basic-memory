@@ -1,8 +1,11 @@
 """Integration tests for the Picoschema parser using real fixture files."""
 
+from pathlib import Path
+
 import pytest
 
 from basic_memory.picoschema.parser import parse_schema_note
+from test_picoschema.helpers import parse_frontmatter
 
 
 class TestPersonSchemaParsing:
@@ -73,6 +76,15 @@ class TestStrictSchemaParsing:
 
 class TestSchemaParsingErrors:
     """Verify parser raises on invalid frontmatter."""
+
+    def test_bare_off_from_markdown_is_rejected(self, schemas_dir: Path):
+        frontmatter = parse_frontmatter(schemas_dir / "InvalidOffSchema.md")
+
+        # PyYAML follows YAML 1.1 here, so a bare `off` crosses the Markdown
+        # boundary as False. The parser must reject that undocumented mode.
+        assert frontmatter["settings"]["validation"] is False
+        with pytest.raises(ValueError, match="expected one of: 'warn', 'strict', or 'error'"):
+            parse_schema_note(frontmatter)
 
     def test_missing_entity_raises(self):
         with pytest.raises(ValueError, match="entity"):

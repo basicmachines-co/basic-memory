@@ -409,8 +409,8 @@ class TestParseSchemaNote:
         result = parse_schema_note(frontmatter)
         assert result.validation_mode == "strict"
 
-    @pytest.mark.parametrize("validation_mode", ["banana", 42, None])
-    def test_unknown_validation_mode_raises(self, validation_mode):
+    @pytest.mark.parametrize("validation_mode", ["banana", "off", False, 42, None])
+    def test_unknown_validation_mode_raises(self, validation_mode: object):
         frontmatter = {
             "entity": "Person",
             "schema": {"name": "string"},
@@ -419,7 +419,7 @@ class TestParseSchemaNote:
 
         with pytest.raises(
             ValueError,
-            match="expected one of: 'warn', 'strict', 'off', or 'error'",
+            match="expected one of: 'warn', 'strict', or 'error'",
         ):
             parse_schema_note(frontmatter)
 

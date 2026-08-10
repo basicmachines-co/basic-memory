@@ -368,7 +368,6 @@ Schema notes are regular notes — they show up in search, can have observations
 |------|----------|
 | `warn` | Warnings in output, doesn't block (default) |
 | `strict` | Errors that block sync, for CI/CD enforcement |
-| `off` | No validation |
 
 `strict` is the canonical enforcing mode. `error` is accepted as a compatibility alias and is
 normalized to `strict`. Any other value is rejected when the schema definition is parsed.

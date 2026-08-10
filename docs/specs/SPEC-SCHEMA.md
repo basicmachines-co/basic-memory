@@ -99,7 +99,7 @@ schema:
   works_at?: Organization, employer
   expertise?(array): string, areas of knowledge
 settings:
-  validation: warn    # warn | strict | off
+  validation: warn    # warn | strict
   frontmatter:
     tags?(array): string, note categories
     status?(enum): [draft, review, published]
@@ -211,7 +211,6 @@ Configured in the schema's `settings.validation`:
 
 | Mode | Behavior |
 |------|----------|
-| `off` | No validation |
 | `warn` | Warnings in output, doesn't block (default) |
 | `strict` | Errors that block sync, for CI/CD enforcement |
 

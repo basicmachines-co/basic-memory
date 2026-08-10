@@ -113,7 +113,7 @@ description. Status moves open → in-progress → done; blocked is a holding st
 
 Key points:
 
-- **`validation: warn`, not `strict`** — the modes are `warn`, `strict`, and `off`. Warn logs findings without blocking anything; `strict` escalates the same findings to errors. Start every schema on warn — a new user fighting rejected writes will abandon the system. Move a schema to `strict` only if something automated consumes the notes and malformed ones break it.
+- **`validation: warn`, not `strict`** — the modes are `warn` and `strict`. Warn logs findings without blocking anything; `strict` escalates the same findings to errors. Start every schema on warn — a new user fighting rejected writes will abandon the system. Move a schema to `strict` only if something automated consumes the notes and malformed ones break it.
 - **Content notes declare their type** via `note_type` matching the schema's entity (e.g. `note_type="task"`).
 - **Scalar, enum, and array fields must appear as observations** in the note body (`- [status] open`) to satisfy validation — frontmatter-only values don't count. Putting them in both places gives you metadata search *and* schema validation. **Entity-reference fields are different**: they're satisfied by a relation, not an observation — a line in `## Relations` whose type matches the field name (`project?: Project` is satisfied by `- project [[Kitchen Renovation]]`).
 - **Version in metadata** — bump on breaking changes (new required field, removed field, type change). Additive optional fields don't need a bump.

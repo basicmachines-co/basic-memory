@@ -115,14 +115,6 @@ class TestValidateRequiredFields:
         assert len(result.errors) == 1
         assert result.warnings == []
 
-    def test_required_field_missing_off_mode_has_no_diagnostics(self):
-        schema = _make_schema([_scalar_field("name")], validation_mode="off")
-        result = validate_note("test-note", schema, [], [])
-
-        assert result.passed is True
-        assert result.warnings == []
-        assert result.errors == []
-
     def test_invalid_internal_validation_mode_raises(self):
         schema = _make_schema([_scalar_field("name")])
         schema.validation_mode = cast(ValidationMode, "banana")

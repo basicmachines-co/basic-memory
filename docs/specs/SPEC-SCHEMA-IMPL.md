@@ -63,7 +63,7 @@ class SchemaDefinition:
     entity: str                  # The entity type this schema describes
     version: int                 # Schema version
     fields: list[SchemaField]    # Parsed fields
-    validation_mode: str         # "warn" | "strict" | "off"
+    validation_mode: str         # "warn" | "strict"
     frontmatter_fields: list[SchemaField]  # From settings.frontmatter (default: [])
 
 

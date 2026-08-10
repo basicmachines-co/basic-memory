@@ -306,8 +306,6 @@ def _record_validation_issue(
 ) -> None:
     """Record a validation finding according to the schema's validated mode."""
     match validation_mode:
-        case "off":
-            return
         case "warn":
             result.warnings.append(message)
         case "strict":
