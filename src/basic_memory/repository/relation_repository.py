@@ -683,6 +683,46 @@ class RelationRepository(Repository[Relation]):
             )
         )
 
+    async def complete_search_refresh_for_generation(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+        generation: int,
+        refresh_ids: Sequence[int],
+    ) -> bool:
+        """Retire observed work only if the rendered generation is still current.
+
+        Search storage is intentionally outside this repository transaction. A
+        newer accepted generation can therefore win while the caller is rendering
+        the older snapshot. Repeating the generation predicate in the marker
+        mutation makes that race visible: stale writers leave fresh durable work
+        for the winning generation instead of consuming the final repair signal.
+        """
+        generation_is_current = current_relation_generation_predicate(
+            project_id=self.project_id,
+            entity_id=entity_id,
+            generation=generation,
+        )
+        if refresh_ids:
+            await session.execute(
+                delete(RelationSearchRefresh).where(
+                    RelationSearchRefresh.project_id == self.project_id,
+                    RelationSearchRefresh.id.in_(refresh_ids),
+                    generation_is_current,
+                )
+            )
+
+        is_current = bool(await session.scalar(select(generation_is_current)))
+        if not is_current:
+            session.add(
+                RelationSearchRefresh(
+                    project_id=self.project_id,
+                    entity_id=entity_id,
+                )
+            )
+        return is_current
+
     async def apply_resolved_targets(
         self,
         session: AsyncSession,

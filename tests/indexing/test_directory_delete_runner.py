@@ -7,7 +7,9 @@ from typing import cast
 
 import basic_memory.indexing.directory_delete_runner as directory_delete_runner_module
 import pytest
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.dml import Delete
 
 from basic_memory import db
 from basic_memory.indexing.directory_delete_runner import (
@@ -24,7 +26,7 @@ from basic_memory.indexing.directory_delete_runner import (
     normalize_directory_delete_path,
     run_directory_delete,
 )
-from basic_memory.models import Entity, NoteContent
+from basic_memory.models import Entity, NoteContent, Relation
 from basic_memory.runtime.cleanup import (
     RuntimeDirectoryFileSnapshot,
     RuntimeFileDeleteResult,
@@ -123,6 +125,9 @@ class FakeExecuteResult:
 
     def scalars(self) -> FakeScalarResult:
         return FakeScalarResult(self.scalar_value, self.scalar_values)
+
+    def tuples(self) -> "FakeExecuteResult":
+        return self
 
     def all(self) -> list[object]:
         return self.rows
@@ -469,10 +474,10 @@ async def test_repository_directory_delete_store_captures_relation_sources() -> 
             [
                 FakeExecuteResult(),  # sorted note_content lock fence
                 FakeExecuteResult(scalar_values=[7, 8]),  # current directory members
-                FakeExecuteResult(scalar_values=[42, 99]),  # surviving relation sources
+                FakeExecuteResult(rows=[(101, 7, 42), (102, 8, 99)]),
+                FakeExecuteResult(scalar_values=[7, 8]),  # guarded entity delete
                 FakeExecuteResult(),  # search_index delete
                 FakeExecuteResult(scalar_values=[]),  # vector rows
-                FakeExecuteResult(scalar_values=[7, 8]),  # guarded entity delete
             ]
         ),
     )
@@ -536,10 +541,10 @@ async def test_repository_directory_delete_store_maps_note_content_snapshots() -
                 ),
                 FakeExecuteResult(),  # sorted note_content lock fence
                 FakeExecuteResult(scalar_values=[7]),  # current directory members
-                FakeExecuteResult(scalar_values=[]),  # surviving relation sources
+                FakeExecuteResult(rows=[]),  # incoming relation snapshot
+                FakeExecuteResult(scalar_values=[7]),  # guarded entity delete
                 FakeExecuteResult(),  # search_index delete
                 FakeExecuteResult(scalar_values=[]),  # vector rows
-                FakeExecuteResult(scalar_values=[7]),  # guarded entity delete
             ]
         ),
     )
@@ -579,14 +584,15 @@ async def test_repository_directory_delete_store_maps_note_content_snapshots() -
     assert "FOR UPDATE" not in str(fake_session.queries[1][0])
     assert "ORDER BY note_content.entity_id" in str(fake_session.queries[2][0])
     assert "entity.file_path LIKE" in str(fake_session.queries[3][0])
-    guarded_entity_delete = str(fake_session.queries[7][0])
+    guarded_entity_delete = str(fake_session.queries[5][0])
     assert "entity.id IN" in guarded_entity_delete
     assert "entity.project_id" in guarded_entity_delete
     assert "entity.file_path LIKE" in guarded_entity_delete
+    assert "NOT (EXISTS" in guarded_entity_delete
 
 
 @pytest.mark.asyncio
-async def test_repository_directory_delete_store_clears_vectors_before_entities(
+async def test_repository_directory_delete_store_clears_vectors_for_deleted_entities(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = cast(
@@ -595,9 +601,9 @@ async def test_repository_directory_delete_store_clears_vectors_before_entities(
             [
                 FakeExecuteResult(),  # sorted note_content lock fence
                 FakeExecuteResult(scalar_values=[7, 8]),  # current directory members
-                FakeExecuteResult(scalar_values=[]),  # surviving relation sources
-                FakeExecuteResult(),  # search_index delete
+                FakeExecuteResult(rows=[]),  # incoming relation snapshot
                 FakeExecuteResult(scalar_values=[7, 8]),  # guarded entity delete
+                FakeExecuteResult(),  # search_index delete
             ]
         ),
     )
@@ -635,13 +641,12 @@ async def test_repository_directory_delete_store_clears_vectors_before_entities(
         entity_ids=[7, 8],
     )
 
-    # Vector rows are cleared after the NoteContent fence, membership revalidation,
-    # relation-source select, and search_index delete, before Entity CASCADE.
-    assert vector_calls == [(session, 3, (7, 8), 4)]
+    # Projection cleanup uses only ids returned by the guarded Entity mutation.
+    assert vector_calls == [(session, 3, (7, 8), 5)]
     statements = [str(query) for query, _ in fake_session.queries]
     assert "ORDER BY note_content.entity_id" in statements[0]
-    assert "DELETE FROM search_index" in statements[3]
-    assert "DELETE FROM entity" in statements[4]
+    assert "DELETE FROM entity" in statements[3]
+    assert "DELETE FROM search_index" in statements[4]
 
 
 @pytest.mark.asyncio
@@ -711,3 +716,103 @@ async def test_repository_directory_delete_revalidates_membership_after_move_out
     assert moved_note.file_path == "archive/move-out-survivor.md"
     assert note_content is not None
     assert note_content.file_path == "archive/move-out-survivor.md"
+
+
+@pytest.mark.asyncio
+async def test_repository_directory_delete_rejects_uncaptured_incoming_relation(
+    session_maker,
+    test_project,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A relation resolved after capture keeps its target and repair source intact."""
+    now = datetime.now(tz=UTC)
+    async with db.scoped_session(session_maker) as session:
+        source = Entity(
+            project_id=test_project.id,
+            title="Surviving source",
+            note_type="note",
+            file_path="outside/source.md",
+            content_type="text/markdown",
+            created_at=now,
+            updated_at=now,
+        )
+        target = Entity(
+            project_id=test_project.id,
+            title="Delete target",
+            note_type="note",
+            file_path="notes/target.md",
+            content_type="text/markdown",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add_all([source, target])
+        await session.flush()
+        session.add(
+            NoteContent(
+                entity_id=target.id,
+                project_id=test_project.id,
+                external_id=target.external_id,
+                file_path=target.file_path,
+                markdown_content="# Delete target\n",
+                db_version=1,
+                db_checksum="generation-1",
+                file_write_status="synced",
+            )
+        )
+        relation = Relation(
+            project_id=test_project.id,
+            from_id=source.id,
+            to_id=None,
+            to_name=target.title,
+            relation_type="related_to",
+            generation=0,
+        )
+        session.add(relation)
+        await session.flush()
+        target_id = target.id
+        relation_id = relation.id
+
+    store = RepositoryDirectoryDeleteAcceptanceStore()
+    async with db.scoped_session(session_maker) as session:
+        snapshots = await store.load_directory_file_snapshots(
+            session,
+            project_id=test_project.id,
+            directory="notes",
+        )
+    assert [snapshot.entity_id for snapshot in snapshots] == [target_id]
+
+    async with db.scoped_session(session_maker) as session:
+        original_execute = session.execute
+        relation_resolved = False
+
+        async def execute_with_relation_race(statement, *args, **kwargs):
+            nonlocal relation_resolved
+            if (
+                not relation_resolved
+                and isinstance(statement, Delete)
+                and statement.table.name == Entity.__tablename__
+            ):
+                relation_resolved = True
+                await original_execute(
+                    update(Relation).where(Relation.id == relation_id).values(to_id=target_id)
+                )
+            return await original_execute(statement, *args, **kwargs)
+
+        monkeypatch.setattr(session, "execute", execute_with_relation_race)
+        delete_result = await store.delete_directory_entities(
+            session,
+            project_id=test_project.id,
+            directory="notes",
+            entity_ids=[target_id],
+        )
+
+    assert relation_resolved is True
+    assert delete_result == DirectoryEntityDeleteResult()
+    async with db.scoped_session(session_maker) as session:
+        target = await session.get(Entity, target_id)
+        note_content = await session.get(NoteContent, target_id)
+        relation = await session.get(Relation, relation_id)
+    assert target is not None
+    assert note_content is not None
+    assert relation is not None
+    assert relation.to_id == target_id

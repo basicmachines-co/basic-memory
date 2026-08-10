@@ -330,12 +330,16 @@ async def test_project_index_runtime_resolves_forward_refs_and_refreshes_targets
             source_entity_id=10,
             target_entity_id=100,
             link_text="Target",
+            source_generation=1,
+            relation_type="related_to",
         ),
         ForwardReferenceUpdate(
             relation_id=3,
             source_entity_id=12,
             target_entity_id=200,
             link_text="Fails",
+            source_generation=1,
+            relation_type="related_to",
         ),
     )
     assert set(refresher.calls) == {100, 200}

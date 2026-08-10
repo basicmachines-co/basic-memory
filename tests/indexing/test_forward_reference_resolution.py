@@ -3,14 +3,15 @@
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import FrozenInstanceError, dataclass
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import cast
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-from sqlalchemy.sql import Select
 
 import basic_memory.indexing.forward_reference_resolution as forward_resolution_module
+from basic_memory import db
 from basic_memory.indexing.forward_reference_resolution import (
     ForwardReferenceResolutionPlan,
     ForwardReferenceResolutionRun,
@@ -23,7 +24,7 @@ from basic_memory.indexing.forward_reference_resolution import (
     run_forward_reference_entity_refresh,
     run_forward_reference_resolution,
 )
-from basic_memory.models import Entity
+from basic_memory.models import Entity, NoteContent, Relation
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,11 +104,20 @@ class FakeForwardReferenceScalarResult:
 class FakeForwardReferenceResult:
     """Minimal SQLAlchemy result stand-in for repository runtime tests."""
 
-    def __init__(self, *, scalar_values: list[object] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        scalar_values: list[object] | None = None,
+        tuple_values: list[tuple[object, ...]] | None = None,
+    ) -> None:
         self.scalar_values = scalar_values or []
+        self.tuple_values = tuple_values or []
 
     def scalars(self) -> FakeForwardReferenceScalarResult:
         return FakeForwardReferenceScalarResult(self.scalar_values)
+
+    def tuples(self) -> FakeForwardReferenceScalarResult:
+        return FakeForwardReferenceScalarResult(list(self.tuple_values))
 
 
 class FakeForwardReferenceSession:
@@ -117,7 +127,12 @@ class FakeForwardReferenceSession:
         self.results = results or []
         self.statements: list[object] = []
 
-    async def execute(self, statement: object) -> FakeForwardReferenceResult:
+    async def execute(
+        self,
+        statement: object,
+        params: object | None = None,
+    ) -> FakeForwardReferenceResult:
+        del params
         self.statements.append(statement)
         if self.results:
             return self.results.pop(0)
@@ -163,12 +178,16 @@ def test_plan_forward_reference_resolution_filters_only_exact_safe_updates() -> 
                 source_entity_id=10,
                 target_entity_id=99,
                 link_text="Target",
+                source_generation=1,
+                relation_type="related_to",
             ),
             ForwardReferenceUpdate(
                 relation_id=5,
                 source_entity_id=14,
                 target_entity_id=99,
                 link_text="Target",
+                source_generation=1,
+                relation_type="related_to",
             ),
         ),
         entity_ids_to_refresh=frozenset({99}),
@@ -208,6 +227,8 @@ async def test_run_forward_reference_resolution_applies_updates_once() -> None:
                     source_entity_id=10,
                     target_entity_id=20,
                     link_text="Target",
+                    source_generation=1,
+                    relation_type="related_to",
                 ),
             ),
             entity_ids_to_refresh=frozenset({20}),
@@ -311,7 +332,24 @@ async def test_repository_forward_reference_runtime_applies_updates(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session_maker = cast(async_sessionmaker[AsyncSession], object())
-    session = FakeForwardReferenceSession()
+    session = FakeForwardReferenceSession(
+        results=[FakeForwardReferenceResult(tuple_values=[(20, "target-20"), (21, "target-21")])]
+    )
+    applied_writes: list[tuple[object, tuple[object, ...]]] = []
+
+    async def fake_apply_resolved_targets(
+        repository: object,
+        active_session: object,
+        writes: Sequence[object],
+    ) -> None:
+        del repository
+        applied_writes.append((active_session, tuple(writes)))
+
+    monkeypatch.setattr(
+        forward_resolution_module.RelationRepository,
+        "apply_resolved_targets",
+        fake_apply_resolved_targets,
+    )
 
     @asynccontextmanager
     async def fake_scoped_session(
@@ -334,25 +372,47 @@ async def test_repository_forward_reference_runtime_applies_updates(
                 source_entity_id=10,
                 target_entity_id=20,
                 link_text="Target",
+                source_generation=1,
+                relation_type="related_to",
             ),
             ForwardReferenceUpdate(
                 relation_id=2,
                 source_entity_id=11,
                 target_entity_id=21,
                 link_text="Other",
+                source_generation=1,
+                relation_type="related_to",
             ),
         )
     )
 
-    assert len(session.statements) == 2
-    lock_statement = cast(Select[tuple[int]], session.statements[0])
-    lock_statement_text = str(lock_statement)
-    assert "FROM note_content" in lock_statement_text
-    assert "ORDER BY note_content.entity_id" in lock_statement_text
-    assert [10, 11] in lock_statement.compile().params.values()
-    statement_text = str(session.statements[1])
-    assert "UPDATE relation" in statement_text
-    assert "relation.id IN" in statement_text
+    assert len(session.statements) == 1
+    assert "FROM entity" in str(session.statements[0])
+    assert applied_writes == [
+        (
+            session,
+            (
+                forward_resolution_module.ResolvedRelationWrite(
+                    relation_id=1,
+                    from_id=10,
+                    generation=1,
+                    original_target_name="Target",
+                    target_id=20,
+                    target_external_id="target-20",
+                    relation_type="related_to",
+                ),
+                forward_resolution_module.ResolvedRelationWrite(
+                    relation_id=2,
+                    from_id=11,
+                    generation=1,
+                    original_target_name="Other",
+                    target_id=21,
+                    target_external_id="target-21",
+                    relation_type="related_to",
+                ),
+            ),
+        )
+    ]
 
 
 @pytest.mark.asyncio
@@ -374,6 +434,87 @@ async def test_repository_forward_reference_runtime_skips_empty_updates(
     )
 
     await runtime.apply_forward_reference_updates(())
+
+
+@pytest.mark.asyncio
+async def test_repository_forward_reference_runtime_rejects_stale_source_generation(
+    session_maker,
+    test_project,
+) -> None:
+    """The project-index compatibility resolver shares the canonical source fence."""
+    now = datetime.now(tz=UTC)
+    async with db.scoped_session(session_maker) as session:
+        source = Entity(
+            project_id=test_project.id,
+            title="Generation source",
+            note_type="note",
+            file_path="generation-source.md",
+            content_type="text/markdown",
+            created_at=now,
+            updated_at=now,
+        )
+        target = Entity(
+            project_id=test_project.id,
+            title="Generation target",
+            note_type="note",
+            file_path="generation-target.md",
+            content_type="text/markdown",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add_all([source, target])
+        await session.flush()
+        session.add(
+            NoteContent(
+                entity_id=source.id,
+                project_id=test_project.id,
+                external_id=source.external_id,
+                file_path=source.file_path,
+                markdown_content="# Generation source\n",
+                db_version=2,
+                db_checksum="generation-2",
+                file_write_status="synced",
+            )
+        )
+        stale_relation = Relation(
+            project_id=test_project.id,
+            from_id=source.id,
+            to_id=None,
+            to_name=target.title,
+            relation_type="related_to",
+            generation=1,
+        )
+        session.add(stale_relation)
+        await session.flush()
+        source_id = source.id
+        target_id = target.id
+        target_external_id = target.external_id
+        stale_relation_id = stale_relation.id
+
+    runtime = RepositoryForwardReferenceResolutionRuntime(
+        session_maker=session_maker,
+        project_id=test_project.id,
+    )
+    await runtime.apply_forward_reference_updates(
+        (
+            ForwardReferenceUpdate(
+                relation_id=stale_relation_id,
+                source_entity_id=source_id,
+                target_entity_id=target_id,
+                link_text="Generation target",
+                source_generation=1,
+                relation_type="related_to",
+            ),
+        )
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        relation = await session.get(Relation, stale_relation_id)
+        target = await session.get(Entity, target_id)
+    assert relation is not None
+    assert relation.to_id is None
+    assert target is not None
+    assert target.external_id == target_external_id
 
 
 @pytest.mark.asyncio

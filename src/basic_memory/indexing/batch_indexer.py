@@ -661,12 +661,19 @@ class BatchIndexer:
             resolve_relations=indexed.resolve_relations,
         )
         refreshed = await self._refresh_search_index(prepared, refresh.entity)
-        if refresh.refresh_ids:
-            async with db.scoped_session(self.session_maker) as session:
-                await self.relation_repository.clear_pending_search_refreshes(
-                    session,
-                    refresh.refresh_ids,
-                )
+        async with db.scoped_session(self.session_maker) as session:
+            # Trigger: N+1 can be accepted after N loaded its coherent snapshot but
+            # before N finishes the external search write.
+            # Why: N must not consume the last repair marker after rendering stale
+            # bytes; N+1 owns convergence and may already have completed its pass.
+            # Outcome: the guarded completion either retires N's observed markers or
+            # leaves fresh durable work that repairs a late stale write.
+            await self.relation_repository.complete_search_refresh_for_generation(
+                session,
+                entity_id=indexed.entity_id,
+                generation=generation,
+                refresh_ids=refresh.refresh_ids,
+            )
         return refreshed
 
     async def _resolve_batch_relations(

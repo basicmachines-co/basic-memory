@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal, NotRequired, Protocol, TypedDict
 
-from sqlalchemy import bindparam, delete, select, text
+from sqlalchemy import bindparam, delete, exists, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory.models import Entity, NoteContent, Project, Relation
@@ -262,17 +262,54 @@ class RepositoryDirectoryDeleteAcceptanceStore:
         # the relation table rows for incoming links from entities outside the directory,
         # but those sources own the matching search_index relation rows and are never in
         # the deleted set, so the caller must reindex them to clear the stale rows.
-        surviving_relation_sources = await session.execute(
-            select(Relation.from_id)
-            .where(
+        incoming_relations = await session.execute(
+            select(Relation.id, Relation.to_id, Relation.from_id).where(
                 Relation.project_id == project_id,
                 Relation.to_id.in_(current_directory_entity_ids),
                 Relation.from_id.not_in(current_directory_entity_ids),
             )
-            .distinct()
         )
+        incoming_relation_snapshots_list: list[tuple[int, int, int]] = []
+        for relation_id, target_id, source_id in incoming_relations.tuples().all():
+            if target_id is None:  # pragma: no cover
+                raise RuntimeError("Resolved incoming relation is missing its target id")
+            incoming_relation_snapshots_list.append(
+                (int(relation_id), int(target_id), int(source_id))
+            )
+        incoming_relation_snapshots = tuple(incoming_relation_snapshots_list)
+        incoming_relation_ids = tuple(
+            relation_id for relation_id, _, _ in incoming_relation_snapshots
+        )
+
+        uncaptured_incoming_relation = select(Relation.id).where(
+            Relation.project_id == project_id,
+            Relation.to_id == Entity.id,
+            Relation.from_id.not_in(current_directory_entity_ids),
+        )
+        if incoming_relation_ids:
+            uncaptured_incoming_relation = uncaptured_incoming_relation.where(
+                Relation.id.not_in(incoming_relation_ids)
+            )
+
+        # Trigger: a resolver can publish an incoming edge after the unlocked capture.
+        # Why: deleting its target would cascade that edge without scheduling its source
+        # for search repair. The lock budget deliberately excludes target Entity locks.
+        # Outcome: optimistic deletion rejects only targets with uncaptured incoming work;
+        # a later directory pass can retry from a fresh snapshot.
+        guarded_entity_delete = delete(Entity).where(
+            *membership_predicates,
+            ~exists(uncaptured_incoming_relation.correlate(Entity)),
+        )
+        deleted_entities = await session.execute(guarded_entity_delete.returning(Entity.id))
+        deleted_entity_ids = frozenset(int(entity_id) for entity_id in deleted_entities.scalars())
+        if not deleted_entity_ids:
+            return DirectoryEntityDeleteResult()
+        ordered_deleted_entity_ids = tuple(sorted(deleted_entity_ids))
+
         relation_cleanup_entity_ids = frozenset(
-            int(source_id) for source_id in surviving_relation_sources.scalars()
+            source_id
+            for _, target_id, source_id in incoming_relation_snapshots
+            if target_id in deleted_entity_ids
         )
 
         await session.execute(
@@ -282,28 +319,23 @@ class RepositoryDirectoryDeleteAcceptanceStore:
                 WHERE project_id = :project_id AND entity_id IN :entity_ids
                 """
             ).bindparams(bindparam("entity_ids", expanding=True)),
-            {"project_id": project_id, "entity_ids": current_directory_entity_ids},
+            {"project_id": project_id, "entity_ids": ordered_deleted_entity_ids},
         )
         if self.external_vector_cleaner is None:
             await delete_project_index_vector_rows(
                 session,
                 project_id=project_id,
-                entity_ids=current_directory_entity_ids,
+                entity_ids=ordered_deleted_entity_ids,
             )
         else:
             await delete_project_index_vector_rows(
                 session,
                 project_id=project_id,
-                entity_ids=current_directory_entity_ids,
+                entity_ids=ordered_deleted_entity_ids,
                 external_vector_cleaner=self.external_vector_cleaner,
             )
-        deleted_entities = await session.execute(
-            delete(Entity).where(*membership_predicates).returning(Entity.id)
-        )
         return DirectoryEntityDeleteResult(
-            deleted_entity_ids=frozenset(
-                int(entity_id) for entity_id in deleted_entities.scalars()
-            ),
+            deleted_entity_ids=deleted_entity_ids,
             relation_cleanup_entity_ids=relation_cleanup_entity_ids,
         )
 

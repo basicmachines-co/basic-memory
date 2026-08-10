@@ -6,7 +6,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from sqlalchemy import case, select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -17,9 +17,10 @@ from basic_memory.indexing.relation_resolution import (
     RelationResolutionEntityRepository,
     UnresolvedRelation,
 )
-from basic_memory.models import Relation
+from basic_memory.models import Entity
 from basic_memory.repository.relation_repository import (
-    lock_note_content_before_entity_mutation,
+    RelationRepository,
+    ResolvedRelationWrite,
 )
 
 
@@ -50,6 +51,8 @@ class ForwardReferenceUpdate:
     source_entity_id: EntityId
     target_entity_id: EntityId
     link_text: LinkText
+    source_generation: int
+    relation_type: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,13 +107,11 @@ class RepositoryForwardReferenceRelationSource:
         self,
     ) -> tuple[UnresolvedRelation, ...]:
         async with db.scoped_session(self.session_maker) as session:
-            result = await session.execute(
-                select(Relation).where(
-                    Relation.project_id == self.project_id,
-                    Relation.to_id.is_(None),
+            return tuple(
+                await RelationRepository(project_id=self.project_id).find_unresolved_relations(
+                    session
                 )
             )
-            return tuple(result.scalars().all())
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,26 +138,31 @@ class RepositoryForwardReferenceResolutionRuntime:
         if not updates:
             return
 
-        relation_ids = [update.relation_id for update in updates]
-        target_entity_ids_by_relation_id = {
-            update.relation_id: update.target_entity_id for update in updates
-        }
-
         async with db.scoped_session(self.session_maker) as session:
-            # This compatibility runtime is not the composed resolver, but its direct
-            # Relation update still obeys the canonical order documented by
-            # current_relation_generation_statement.
-            await lock_note_content_before_entity_mutation(
+            target_entities = await session.execute(
+                select(Entity.id, Entity.external_id).where(
+                    Entity.project_id == self.project_id,
+                    Entity.id.in_(sorted({update.target_entity_id for update in updates})),
+                )
+            )
+            target_external_id_by_id = dict(target_entities.tuples().all())
+            writes = tuple(
+                ResolvedRelationWrite(
+                    relation_id=update.relation_id,
+                    from_id=update.source_entity_id,
+                    generation=update.source_generation,
+                    original_target_name=update.link_text,
+                    target_id=update.target_entity_id,
+                    target_external_id=target_external_id_by_id[update.target_entity_id],
+                    relation_type=update.relation_type,
+                )
+                for update in updates
+                if update.target_entity_id in target_external_id_by_id
+            )
+            await RelationRepository(project_id=self.project_id).apply_resolved_targets(
                 session,
-                project_id=self.project_id,
-                entity_ids=tuple(update.source_entity_id for update in updates),
+                writes,
             )
-            stmt = (
-                update(Relation)
-                .where(Relation.id.in_(relation_ids))
-                .values(to_id=case(target_entity_ids_by_relation_id, value=Relation.id))
-            )
-            await session.execute(stmt)
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,6 +274,8 @@ def plan_forward_reference_resolution(
                 source_entity_id=relation.from_id,
                 target_entity_id=target_entity_id,
                 link_text=link_text,
+                source_generation=relation.generation,
+                relation_type=relation.relation_type,
             )
         )
         entity_ids_to_refresh.add(target_entity_id)

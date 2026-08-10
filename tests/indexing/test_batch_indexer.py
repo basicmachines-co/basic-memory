@@ -664,12 +664,12 @@ async def test_batch_indexer_assigns_unique_permalinks_for_batch_local_conflicts
     assert indexed_by_path[path_two].markdown_content is not None
     assert indexed_by_path[path_one].markdown_content != original_contents[path_one]
     assert indexed_by_path[path_two].markdown_content != original_contents[path_two]
-    assert indexed_by_path[path_one].markdown_content == await file_service.read_file_content(
-        path_one
-    )
-    assert indexed_by_path[path_two].markdown_content == await file_service.read_file_content(
-        path_two
-    )
+    assert indexed_by_path[path_one].markdown_content == (
+        project_config.home / path_one
+    ).read_bytes().decode("utf-8")
+    assert indexed_by_path[path_two].markdown_content == (
+        project_config.home / path_two
+    ).read_bytes().decode("utf-8")
 
     async with db.scoped_session(search_service.session_maker) as session:
         entities = await entity_repository.find_all(session)
@@ -880,7 +880,7 @@ async def test_batch_indexer_index_markdown_file_rewrites_permalink_after_reposi
         index_search=False,
     )
 
-    persisted_content = await file_service.read_file_content(path)
+    persisted_content = (project_config.home / path).read_bytes().decode("utf-8")
     assert indexed.permalink == f"{conflicting_permalink}-1"
     assert indexed.markdown_content == persisted_content
 
@@ -1073,9 +1073,10 @@ async def test_relation_search_refresh_skips_superseded_publication_generation(
         source="test",
     )
     assert generation_n.generation is not None
+    generation_n_value = generation_n.generation
     assert await batch_indexer.publish_relation_generation(
         indexed,
-        generation=generation_n.generation,
+        generation=generation_n_value,
     )
 
     generation_n_plus_one = await reconciler.reconcile(
@@ -1084,18 +1085,109 @@ async def test_relation_search_refresh_skips_superseded_publication_generation(
         observed_at=datetime.now(tz=UTC),
         source="test",
     )
-    assert generation_n_plus_one.generation == generation_n.generation + 1
+    assert generation_n_plus_one.generation == generation_n_value + 1
 
     search_write = AsyncMock(side_effect=AssertionError("superseded refresh must be terminal"))
     monkeypatch.setattr(search_service, "index_entity_data", search_write)
 
     refreshed = await batch_indexer.refresh_indexed_entity_search(
         indexed,
-        generation=generation_n.generation,
+        generation=generation_n_value,
     )
 
     assert refreshed is indexed
     search_write.assert_not_awaited()
+    async with db.scoped_session(search_service.session_maker) as session:
+        pending = await relation_repository.list_pending_search_refreshes(
+            session,
+            entity_id=indexed.entity_id,
+        )
+    assert [refresh.entity_id for refresh in pending] == [indexed.entity_id]
+
+
+@pytest.mark.asyncio
+async def test_relation_search_refresh_requeues_generation_lost_during_write(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+    monkeypatch,
+):
+    """A late N write cannot consume the final repair signal after N+1 wins."""
+    path = "notes/search-generation-race.md"
+    await _create_file(project_config.home / path, "# Generation N\n")
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+    indexed = await batch_indexer.index_markdown_file(
+        await _load_input(file_service, path),
+        index_search=False,
+        resolve_relations=False,
+    )
+    async with db.scoped_session(search_service.session_maker) as session:
+        entities = await entity_repository.find_by_ids(session, [indexed.entity_id])
+    assert len(entities) == 1
+
+    reconciler = NoteContentReconciler(
+        note_content_repository=NoteContentRepository(
+            project_id=relation_repository.project_id,
+        ),
+        session_maker=search_service.session_maker,
+    )
+    generation_n = await reconciler.reconcile(
+        entity=entities[0],
+        markdown_content=indexed.markdown_content or "",
+        observed_at=datetime.now(tz=UTC),
+        source="test",
+    )
+    assert generation_n.generation is not None
+    generation_n_value = generation_n.generation
+    assert await batch_indexer.publish_relation_generation(
+        indexed,
+        generation=generation_n_value,
+    )
+
+    async def accept_newer_generation_during_search(*args, **kwargs) -> None:
+        del args, kwargs
+        generation_n_plus_one = await reconciler.reconcile(
+            entity=entities[0],
+            markdown_content="# Generation N+1\n",
+            observed_at=datetime.now(tz=UTC),
+            source="test",
+        )
+        assert generation_n_plus_one.generation == generation_n_value + 1
+
+        # Model N+1 completing its own refresh before N returns from the external
+        # search writer. N's post-write guard must create later repair work.
+        async with db.scoped_session(search_service.session_maker) as session:
+            observed = await relation_repository.list_pending_search_refreshes(
+                session,
+                entity_id=indexed.entity_id,
+            )
+            await relation_repository.clear_pending_search_refreshes(
+                session,
+                [refresh.id for refresh in observed],
+            )
+
+    monkeypatch.setattr(
+        search_service,
+        "index_entity_data",
+        accept_newer_generation_during_search,
+    )
+
+    await batch_indexer.refresh_indexed_entity_search(
+        indexed,
+        generation=generation_n_value,
+    )
+
     async with db.scoped_session(search_service.session_maker) as session:
         pending = await relation_repository.list_pending_search_refreshes(
             session,
