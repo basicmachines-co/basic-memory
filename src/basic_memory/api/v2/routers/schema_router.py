@@ -11,7 +11,7 @@ Flow: Entity loaded with eager observations/relations -> convert to tuples -> co
 from pathlib import Path as FilePath
 
 import frontmatter
-from fastapi import APIRouter, Path, Query
+from fastapi import APIRouter, HTTPException, Path, Query, status
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,7 +33,8 @@ from basic_memory.schemas.schema import (
     DriftFieldResponse,
     TypeValidationSummary,
 )
-from basic_memory.picoschema.resolver import resolve_schema
+from basic_memory.picoschema.resolver import SchemaSearchFn, resolve_schema
+from basic_memory.picoschema.parser import SchemaDefinition
 from basic_memory.picoschema.validator import validate_note
 from basic_memory.picoschema.inference import infer_schema, NoteData, ObservationData, RelationData
 from basic_memory.picoschema.diff import diff_schema
@@ -131,6 +132,20 @@ async def _schema_frontmatter_from_file(
 # --- Validation ---
 
 
+async def _resolve_schema_for_api(
+    frontmatter: dict[str, Any],
+    search_fn: SchemaSearchFn,
+) -> SchemaDefinition | None:
+    """Resolve a schema and expose authoring errors as client errors."""
+    try:
+        return await resolve_schema(frontmatter, search_fn)
+    except ValueError as exc:
+        # Trigger: user-authored schema frontmatter contains an invalid definition
+        # Why: the configuration error is actionable by the caller, not a server failure
+        # Outcome: API and MCP clients receive the parser's precise message as HTTP 400
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
 @router.post("/schema/validate", response_model=ValidationReport)
 async def validate_schema(
     entity_repository: EntityRepositoryV2ExternalDep,
@@ -174,7 +189,7 @@ async def validate_schema(
             )
             return [await _schema_frontmatter_from_file(file_service, e) for e in entities]
 
-        schema_def = await resolve_schema(frontmatter, search_fn)
+        schema_def = await _resolve_schema_for_api(frontmatter, search_fn)
         if schema_def:
             result = validate_note(
                 entity.title or entity.permalink or identifier,
@@ -319,7 +334,7 @@ async def diff_schema_endpoint(
     # Resolve schema by note type
     canonical_note_type = normalize_note_type(note_type)
     schema_frontmatter = {"type": canonical_note_type}
-    schema_def = await resolve_schema(schema_frontmatter, search_fn)
+    schema_def = await _resolve_schema_for_api(schema_frontmatter, search_fn)
 
     if not schema_def:
         return DriftReport(note_type=canonical_note_type, schema_found=False)
@@ -385,7 +400,7 @@ async def _validate_note_entities(
             )
             return [await _schema_frontmatter_from_file(file_service, e) for e in found]
 
-        schema_def = await resolve_schema(frontmatter, search_fn)
+        schema_def = await _resolve_schema_for_api(frontmatter, search_fn)
         if schema_def:
             result = validate_note(
                 entity.title or entity.permalink or entity.file_path,

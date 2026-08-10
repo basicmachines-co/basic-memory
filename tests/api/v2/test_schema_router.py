@@ -224,6 +224,45 @@ async def test_validate_with_inline_schema(
 
 
 @pytest.mark.asyncio
+async def test_validate_invalid_mode_returns_client_error(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_service,
+    search_service,
+):
+    """Invalid inline schema modes are configuration errors, not HTTP 500s."""
+    entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Invalid Mode Note",
+            directory="people",
+            note_type="invalid_mode",
+            entity_metadata={
+                "schema": {"name": "string"},
+                "settings": {"validation": "banana"},
+            },
+            content="## Observations\n- [name] Invalid Mode\n",
+        )
+    )
+    await search_service.index_entity(entity)
+
+    responses = [
+        await client.post(
+            f"{v2_project_url}/schema/validate",
+            params={"identifier": entity.permalink},
+        ),
+        await client.post(
+            f"{v2_project_url}/schema/validate",
+            params={"note_type": "invalid_mode"},
+        ),
+    ]
+
+    for response in responses:
+        assert response.status_code == 400
+        assert "Invalid settings.validation value 'banana'" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_validate_with_explicit_schema_reference_by_permalink_slug(
     client: AsyncClient,
     test_project: Project,
@@ -908,6 +947,36 @@ async def test_diff_with_schema_note(
     assert isinstance(data["new_fields"], list)
     assert isinstance(data["dropped_fields"], list)
     assert isinstance(data["cardinality_changes"], list)
+
+
+@pytest.mark.asyncio
+async def test_diff_invalid_mode_returns_client_error(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_service,
+    search_service,
+):
+    """Invalid file-backed schema modes return their actionable parser error."""
+    schema_entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Invalid Diff Schema",
+            directory="schemas",
+            note_type="schema",
+            entity_metadata={
+                "entity": "invalid_diff",
+                "schema": {"name": "string"},
+                "settings": {"validation": "banana"},
+            },
+            content="## Observations\n- [note] Invalid mode fixture\n",
+        )
+    )
+    await search_service.index_entity(schema_entity)
+
+    response = await client.get(f"{v2_project_url}/schema/diff/invalid_diff")
+
+    assert response.status_code == 400
+    assert "Invalid settings.validation value 'banana'" in response.json()["detail"]
 
 
 # --- File-based schema frontmatter tests ---
