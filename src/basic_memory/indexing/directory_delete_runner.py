@@ -92,6 +92,14 @@ class DirectoryDeleteAcceptance:
         return tuple(file_snapshot.file_path for file_snapshot in self.files)
 
 
+@dataclass(frozen=True, slots=True)
+class DirectoryEntityDeleteResult:
+    """Rows accepted by the guarded directory delete and their repair work."""
+
+    deleted_entity_ids: frozenset[int] = frozenset()
+    relation_cleanup_entity_ids: frozenset[int] = frozenset()
+
+
 class DirectoryDeleteAcceptanceStore(Protocol):
     """Repository capability for accepting directory deletes into DB state."""
 
@@ -116,12 +124,13 @@ class DirectoryDeleteAcceptanceStore(Protocol):
         session: AsyncSession,
         *,
         project_id: ProjectId,
+        directory: RuntimeFilePath,
         entity_ids: Sequence[int],
-    ) -> frozenset[int]:
-        """Delete the accepted entity rows and return surviving relation sources.
+    ) -> DirectoryEntityDeleteResult:
+        """Delete current directory members and return accepted rows plus repair work.
 
-        The returned ids are entities OUTSIDE the deleted set whose relations pointed
-        into it; their search rows need reindexing to drop now-dangling relations.
+        Relation cleanup ids are entities OUTSIDE the deleted set whose relations
+        pointed into it; their search rows need reindexing to drop dangling relations.
         """
 
 
@@ -209,11 +218,12 @@ class RepositoryDirectoryDeleteAcceptanceStore:
         session: AsyncSession,
         *,
         project_id: ProjectId,
+        directory: RuntimeFilePath,
         entity_ids: Sequence[int],
-    ) -> frozenset[int]:
+    ) -> DirectoryEntityDeleteResult:
         if not entity_ids:
-            return frozenset()
-        deleted_entity_ids = tuple(sorted(set(entity_ids)))
+            return DirectoryEntityDeleteResult()
+        snapshotted_entity_ids = tuple(sorted(set(entity_ids)))
 
         # The directory snapshot is intentionally a plain read. Claim every accepted
         # source here, immediately before the first operation that can lock Entity or
@@ -222,8 +232,31 @@ class RepositoryDirectoryDeleteAcceptanceStore:
         await lock_note_content_before_entity_mutation(
             session,
             project_id=project_id,
-            entity_ids=deleted_entity_ids,
+            entity_ids=snapshotted_entity_ids,
         )
+
+        membership_predicates = [
+            Entity.id.in_(snapshotted_entity_ids),
+            Entity.project_id == project_id,
+        ]
+        if directory not in {"", "/"}:
+            escaped_directory = directory_delete_like_prefix(directory)
+            membership_predicates.append(
+                Entity.file_path.like(f"{escaped_directory}/%", escape="\\")
+            )
+
+        # The NoteContent fence is this flow's only lock construct. Re-read current
+        # membership without locking so projection cleanup follows only rows still in
+        # the directory, then repeat the predicate in DELETE so the stale snapshot
+        # itself never authorizes mutation.
+        current_directory_entities = await session.execute(
+            select(Entity.id).where(*membership_predicates).order_by(Entity.id)
+        )
+        current_directory_entity_ids = tuple(
+            int(entity_id) for entity_id in current_directory_entities.scalars()
+        )
+        if not current_directory_entity_ids:
+            return DirectoryEntityDeleteResult()
 
         # Capture surviving sources before the delete: Relation.to_id CASCADE will drop
         # the relation table rows for incoming links from entities outside the directory,
@@ -233,8 +266,8 @@ class RepositoryDirectoryDeleteAcceptanceStore:
             select(Relation.from_id)
             .where(
                 Relation.project_id == project_id,
-                Relation.to_id.in_(deleted_entity_ids),
-                Relation.from_id.not_in(deleted_entity_ids),
+                Relation.to_id.in_(current_directory_entity_ids),
+                Relation.from_id.not_in(current_directory_entity_ids),
             )
             .distinct()
         )
@@ -249,23 +282,30 @@ class RepositoryDirectoryDeleteAcceptanceStore:
                 WHERE project_id = :project_id AND entity_id IN :entity_ids
                 """
             ).bindparams(bindparam("entity_ids", expanding=True)),
-            {"project_id": project_id, "entity_ids": deleted_entity_ids},
+            {"project_id": project_id, "entity_ids": current_directory_entity_ids},
         )
         if self.external_vector_cleaner is None:
             await delete_project_index_vector_rows(
                 session,
                 project_id=project_id,
-                entity_ids=deleted_entity_ids,
+                entity_ids=current_directory_entity_ids,
             )
         else:
             await delete_project_index_vector_rows(
                 session,
                 project_id=project_id,
-                entity_ids=deleted_entity_ids,
+                entity_ids=current_directory_entity_ids,
                 external_vector_cleaner=self.external_vector_cleaner,
             )
-        await session.execute(delete(Entity).where(Entity.id.in_(deleted_entity_ids)))
-        return relation_cleanup_entity_ids
+        deleted_entities = await session.execute(
+            delete(Entity).where(*membership_predicates).returning(Entity.id)
+        )
+        return DirectoryEntityDeleteResult(
+            deleted_entity_ids=frozenset(
+                int(entity_id) for entity_id in deleted_entities.scalars()
+            ),
+            relation_cleanup_entity_ids=relation_cleanup_entity_ids,
+        )
 
 
 def normalize_directory_delete_path(directory: str) -> RuntimeFilePath:
@@ -504,15 +544,21 @@ async def accept_directory_delete(
     if not file_snapshots:
         return DirectoryDeleteAcceptance(project_id=project_id, files=())
 
-    relation_cleanup_entity_ids = await store.delete_directory_entities(
+    delete_result = await store.delete_directory_entities(
         session,
         project_id=project_id,
+        directory=directory,
         entity_ids=[snapshot.entity_id for snapshot in file_snapshots],
+    )
+    deleted_file_snapshots = tuple(
+        snapshot
+        for snapshot in file_snapshots
+        if snapshot.entity_id in delete_result.deleted_entity_ids
     )
     return DirectoryDeleteAcceptance(
         project_id=project_id,
-        files=file_snapshots,
-        relation_cleanup_entity_ids=relation_cleanup_entity_ids,
+        files=deleted_file_snapshots,
+        relation_cleanup_entity_ids=delete_result.relation_cleanup_entity_ids,
     )
 
 

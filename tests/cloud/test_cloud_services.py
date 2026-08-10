@@ -22,6 +22,7 @@ from basic_memory.indexing.accepted_note_mutation_runner import (
 )
 from basic_memory.indexing.relation_persistence import RelationGenerationPublication
 from basic_memory.indexing.directory_delete_runner import (
+    DirectoryEntityDeleteResult,
     DirectoryDeleteRejectKind,
     DirectoryDeleteRuntime,
 )
@@ -109,13 +110,15 @@ class FakeDirectoryDeleteStore:
         session: AsyncSession,
         *,
         project_id: int,
+        directory: str,
         entity_ids,
-    ) -> frozenset[int]:
+    ) -> DirectoryEntityDeleteResult:
         assert session is not None
         assert project_id == 3
+        assert directory == "notes"
         assert list(entity_ids) == [7]
         # No surviving relation sources point into this directory in the fixture.
-        return frozenset()
+        return DirectoryEntityDeleteResult(deleted_entity_ids=frozenset({7}))
 
 
 class FakeDirectoryFileDeleteEnqueuer:
@@ -969,14 +972,19 @@ async def test_directory_delete_service_refreshes_surviving_relation_sources(
             session: AsyncSession,
             *,
             project_id: int,
+            directory: str,
             entity_ids,
-        ) -> frozenset[int]:
+        ) -> DirectoryEntityDeleteResult:
             await super().delete_directory_entities(
                 session,
                 project_id=project_id,
+                directory=directory,
                 entity_ids=entity_ids,
             )
-            return frozenset({99, 42})
+            return DirectoryEntityDeleteResult(
+                deleted_entity_ids=frozenset(entity_ids),
+                relation_cleanup_entity_ids=frozenset({99, 42}),
+            )
 
     refresher = RecordingRelationCleanupRefresher()
     service = DirectoryDeleteService(
