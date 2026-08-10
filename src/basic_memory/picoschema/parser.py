@@ -18,10 +18,12 @@ Syntax reference:
 
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 
 # --- Data Model ---
+
+type ValidationMode = Literal["warn", "strict", "off"]
 
 
 @dataclass
@@ -52,7 +54,7 @@ class SchemaDefinition:
     entity: str  # The entity type this schema describes
     version: int  # Schema version
     fields: list[SchemaField]  # Parsed fields
-    validation_mode: str  # "warn" | "strict" | "off"
+    validation_mode: ValidationMode
     frontmatter_fields: list[SchemaField] = field(default_factory=list)  # From settings.frontmatter
 
 
@@ -62,6 +64,28 @@ class SchemaDefinition:
 
 SCALAR_TYPES = frozenset({"string", "integer", "number", "boolean", "any"})
 MODIFIER_TYPES = frozenset({"array", "enum", "object"})
+
+
+# --- Validation Mode Parsing ---
+
+
+def parse_validation_mode(value: object = "warn") -> ValidationMode:
+    """Parse a schema validation setting into its canonical closed vocabulary."""
+    match value:
+        case "warn":
+            return "warn"
+        case "strict":
+            return "strict"
+        case "off":
+            return "off"
+        case "error":
+            # Compatibility: early schema guidance used "error" for enforcing validation.
+            return "strict"
+        case _:
+            raise ValueError(
+                f"Invalid settings.validation value {value!r}; expected one of: "
+                "'warn', 'strict', 'off', or 'error' (alias for 'strict')"
+            )
 
 
 # --- Field Name Parsing ---
@@ -306,7 +330,8 @@ def parse_schema_note(frontmatter: dict[str, Any]) -> SchemaDefinition:
 
     version = frontmatter.get("version", 1)
     settings = frontmatter.get("settings", {})
-    validation_mode = settings.get("validation", "warn") if isinstance(settings, dict) else "warn"
+    validation_value = settings.get("validation", "warn") if isinstance(settings, dict) else "warn"
+    validation_mode = parse_validation_mode(validation_value)
 
     fields = parse_picoschema(schema_dict)
 

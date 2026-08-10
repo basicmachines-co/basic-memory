@@ -66,6 +66,28 @@ class TestInlineSchema:
         assert result is not None
         assert result.validation_mode == "strict"
 
+    @pytest.mark.asyncio
+    async def test_inline_schema_normalizes_error_validation_mode(self, mock_search_fn):
+        frontmatter = {
+            "type": "Test",
+            "schema": {"name": "string"},
+            "settings": {"validation": "error"},
+        }
+        result = await resolve_schema(frontmatter, mock_search_fn)
+        assert result is not None
+        assert result.validation_mode == "strict"
+
+    @pytest.mark.asyncio
+    async def test_inline_schema_rejects_unknown_validation_mode(self, mock_search_fn):
+        frontmatter = {
+            "type": "Test",
+            "schema": {"name": "string"},
+            "settings": {"validation": "banana"},
+        }
+
+        with pytest.raises(ValueError, match="warn.*strict.*off.*error"):
+            await resolve_schema(frontmatter, mock_search_fn)
+
 
 # --- Explicit reference (priority 2) ---
 

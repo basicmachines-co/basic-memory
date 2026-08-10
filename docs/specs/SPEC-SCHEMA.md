@@ -215,6 +215,9 @@ Configured in the schema's `settings.validation`:
 | `warn` | Warnings in output, doesn't block (default) |
 | `strict` | Errors that block sync, for CI/CD enforcement |
 
+`strict` is the canonical enforcing mode. `error` remains accepted as a compatibility alias and
+is normalized to `strict`. Schema parsing rejects every other value instead of failing open.
+
 ### Validation Output
 
 For a note missing required fields:

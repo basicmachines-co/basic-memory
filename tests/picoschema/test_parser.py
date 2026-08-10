@@ -400,6 +400,29 @@ class TestParseSchemaNote:
         result = parse_schema_note(frontmatter)
         assert result.validation_mode == "strict"
 
+    def test_error_validation_mode_aliases_strict(self):
+        frontmatter = {
+            "entity": "Person",
+            "schema": {"name": "string"},
+            "settings": {"validation": "error"},
+        }
+        result = parse_schema_note(frontmatter)
+        assert result.validation_mode == "strict"
+
+    @pytest.mark.parametrize("validation_mode", ["banana", 42, None])
+    def test_unknown_validation_mode_raises(self, validation_mode):
+        frontmatter = {
+            "entity": "Person",
+            "schema": {"name": "string"},
+            "settings": {"validation": validation_mode},
+        }
+
+        with pytest.raises(
+            ValueError,
+            match="expected one of: 'warn', 'strict', 'off', or 'error'",
+        ):
+            parse_schema_note(frontmatter)
+
     def test_missing_entity_raises(self):
         with pytest.raises(ValueError, match="entity"):
             parse_schema_note({"schema": {"name": "string"}})

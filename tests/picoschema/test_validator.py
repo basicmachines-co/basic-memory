@@ -1,7 +1,16 @@
 """Tests for basic_memory.picoschema.validator -- note validation against schemas."""
 
+from typing import cast
+
+import pytest
+
 from basic_memory.picoschema.inference import ObservationData, RelationData
-from basic_memory.picoschema.parser import SchemaField, SchemaDefinition
+from basic_memory.picoschema.parser import (
+    SchemaDefinition,
+    SchemaField,
+    ValidationMode,
+    parse_schema_note,
+)
 from basic_memory.picoschema.validator import validate_note
 
 # Short aliases for test readability
@@ -50,7 +59,7 @@ def _enum_field(
 
 def _make_schema(
     fields: list[SchemaField],
-    validation_mode: str = "warn",
+    validation_mode: ValidationMode = "warn",
     entity: str = "TestEntity",
 ) -> SchemaDefinition:
     return SchemaDefinition(
@@ -91,6 +100,35 @@ class TestValidateRequiredFields:
         assert result.passed is False
         assert len(result.errors) == 1
         assert "name" in result.errors[0]
+
+    def test_error_alias_missing_required_field_fails(self):
+        schema = parse_schema_note(
+            {
+                "entity": "TestEntity",
+                "schema": {"name": "string"},
+                "settings": {"validation": "error"},
+            }
+        )
+        result = validate_note("test-note", schema, [], [])
+
+        assert result.passed is False
+        assert len(result.errors) == 1
+        assert result.warnings == []
+
+    def test_required_field_missing_off_mode_has_no_diagnostics(self):
+        schema = _make_schema([_scalar_field("name")], validation_mode="off")
+        result = validate_note("test-note", schema, [], [])
+
+        assert result.passed is True
+        assert result.warnings == []
+        assert result.errors == []
+
+    def test_invalid_internal_validation_mode_raises(self):
+        schema = _make_schema([_scalar_field("name")])
+        schema.validation_mode = cast(ValidationMode, "banana")
+
+        with pytest.raises(AssertionError, match="Expected code to be unreachable"):
+            validate_note("test-note", schema, [], [])
 
 
 # --- Optional field behavior ---
@@ -253,7 +291,7 @@ class TestValidateFrontmatterFields:
     def _make_fm_schema(
         self,
         frontmatter_fields: list[SchemaField],
-        validation_mode: str = "warn",
+        validation_mode: ValidationMode = "warn",
     ) -> SchemaDefinition:
         return SchemaDefinition(
             entity="TestEntity",

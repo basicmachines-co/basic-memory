@@ -83,8 +83,10 @@ Relations create edges in the knowledge graph, linking notes together.
 
 ```yaml
 settings:
-  validation: warn    # warn (log issues) or error (strict)
+  validation: warn    # warn (log issues), strict (errors), or off
 ```
+
+Use `strict` as the canonical enforcing mode. `error` is accepted only as a compatibility alias.
 
 ### Complete Example
 
@@ -183,7 +185,8 @@ Validation reports:
 ### Handling Validation Results
 
 - **`warn` mode**: Review warnings periodically. Fix notes that are clearly wrong; add optional fields to the schema for legitimate new patterns.
-- **`error` mode**: Use for strict schemas where conformance matters (e.g., automated pipelines consuming notes).
+- **`strict` mode**: Use where conformance matters (e.g., automated pipelines consuming notes).
+- **`off` mode**: Disable validation diagnostics for the schema.
 
 ## Detecting Drift
 

@@ -16,10 +16,10 @@ are informational, not errors -- schemas are a subset, not a straitjacket.
 """
 
 from dataclasses import dataclass, field as dataclass_field
+from typing import Any, assert_never
 
 from basic_memory.picoschema.inference import ObservationData, RelationData
-from basic_memory.picoschema.parser import SchemaDefinition, SchemaField
-from typing import Any
+from basic_memory.picoschema.parser import SchemaDefinition, SchemaField, ValidationMode
 
 
 # --- Result Data Model ---
@@ -102,19 +102,11 @@ def validate_note(
         # Outcome: only required missing fields produce diagnostics
         if field_result.status == "missing" and schema_field.required:
             msg = _missing_field_message(schema_field)
-            if schema.validation_mode == "strict":
-                result.errors.append(msg)
-                result.passed = False
-            else:
-                result.warnings.append(msg)
+            _record_validation_issue(result, msg, schema.validation_mode)
 
         elif field_result.status == "enum_mismatch":
             msg = field_result.message or f"Field '{schema_field.name}' has invalid enum value"
-            if schema.validation_mode == "strict":
-                result.errors.append(msg)
-                result.passed = False
-            else:
-                result.warnings.append(msg)
+            _record_validation_issue(result, msg, schema.validation_mode)
 
     # --- Validate frontmatter fields ---
     # Trigger: schema has frontmatter_fields and caller provided frontmatter dict
@@ -127,21 +119,13 @@ def validate_note(
 
             if field_result.status == "missing" and fm_field.required:
                 msg = f"Missing required frontmatter key: {fm_field.name}"
-                if schema.validation_mode == "strict":
-                    result.errors.append(msg)
-                    result.passed = False
-                else:
-                    result.warnings.append(msg)
+                _record_validation_issue(result, msg, schema.validation_mode)
 
             elif field_result.status == "enum_mismatch":
                 msg = field_result.message or (
                     f"Frontmatter key '{fm_field.name}' has invalid enum value"
                 )
-                if schema.validation_mode == "strict":
-                    result.errors.append(msg)
-                    result.passed = False
-                else:
-                    result.warnings.append(msg)
+                _record_validation_issue(result, msg, schema.validation_mode)
 
     # --- Collect unmatched observations ---
     for category, values in obs_by_category.items():
@@ -313,6 +297,24 @@ def _validate_frontmatter_field(
 
 
 # --- Helper Functions ---
+
+
+def _record_validation_issue(
+    result: ValidationResult,
+    message: str,
+    validation_mode: ValidationMode,
+) -> None:
+    """Record a validation finding according to the schema's validated mode."""
+    match validation_mode:
+        case "off":
+            return
+        case "warn":
+            result.warnings.append(message)
+        case "strict":
+            result.errors.append(message)
+            result.passed = False
+        case unreachable:
+            assert_never(unreachable)
 
 
 def _group_observations(observations: list[ObservationData]) -> dict[str, list[str]]:

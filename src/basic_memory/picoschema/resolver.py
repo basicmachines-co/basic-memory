@@ -13,7 +13,12 @@ data access layer.
 
 from collections.abc import Callable, Awaitable
 
-from basic_memory.picoschema.parser import SchemaDefinition, parse_picoschema, parse_schema_note
+from basic_memory.picoschema.parser import (
+    SchemaDefinition,
+    parse_picoschema,
+    parse_schema_note,
+    parse_validation_mode,
+)
 from typing import Any
 
 
@@ -86,7 +91,8 @@ def _schema_from_inline(
     fields = parse_picoschema(schema_dict)
     entity = frontmatter.get("type", "unknown")
     settings = frontmatter.get("settings", {})
-    validation_mode = settings.get("validation", "warn") if isinstance(settings, dict) else "warn"
+    validation_value = settings.get("validation", "warn") if isinstance(settings, dict) else "warn"
+    validation_mode = parse_validation_mode(validation_value)
 
     return SchemaDefinition(
         entity=entity,
