@@ -7,6 +7,7 @@ data for performance comparison across backends and providers.
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -111,6 +112,38 @@ class QualityMetrics:
         }
 
 
+@dataclass
+class LatencyMetrics:
+    """Warm-search latency samples for one retrieval mode and reranker state."""
+
+    configuration: str
+    mode: str
+    latencies: list[float] = field(default_factory=list)
+
+    @property
+    def p50_ms(self) -> float:
+        return _percentile_ms(self.latencies, 0.50)
+
+    @property
+    def p95_ms(self) -> float:
+        return _percentile_ms(self.latencies, 0.95)
+
+
+def _percentile_ms(samples: list[float], quantile: float) -> float:
+    """Return a linearly interpolated percentile in milliseconds."""
+    if not samples:
+        return 0.0
+    ordered = sorted(samples)
+    position = (len(ordered) - 1) * quantile
+    lower_index = math.floor(position)
+    upper_index = math.ceil(position)
+    if lower_index == upper_index:
+        return ordered[lower_index] * 1000
+    fraction = position - lower_index
+    interpolated = ordered[lower_index] + (ordered[upper_index] - ordered[lower_index]) * fraction
+    return interpolated * 1000
+
+
 # --- Comparison table ---
 
 
@@ -152,6 +185,20 @@ def format_reranker_quality_table(all_metrics: list[QualityMetrics]) -> str:
             f"{'delta':<16} {reranked.hit_at_1 - baseline.hit_at_1:>+7.3f} "
             f"{reranked.hit_at_5 - baseline.hit_at_5:>+7.3f} "
             f"{reranked.mrr_at_10 - baseline.mrr_at_10:>+7.3f}"
+        )
+    lines.append(separator)
+    return "\n".join(lines)
+
+
+def format_latency_table(all_metrics: list[LatencyMetrics]) -> str:
+    """Format P50/P95 search latency for each mode and reranker state."""
+    header = f"{'Configuration':<16} {'Mode':<8} {'N':>4} {'P50 ms':>10} {'P95 ms':>10}"
+    separator = "-" * len(header)
+    lines = [separator, header, separator]
+    for metrics in all_metrics:
+        lines.append(
+            f"{metrics.configuration:<16} {metrics.mode:<8} {len(metrics.latencies):>4} "
+            f"{metrics.p50_ms:>10.2f} {metrics.p95_ms:>10.2f}"
         )
     lines.append(separator)
     return "\n".join(lines)
