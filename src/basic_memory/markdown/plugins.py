@@ -1,16 +1,30 @@
 """Markdown-it plugins for Basic Memory markdown parsing."""
 
+import re
 from typing import List, Any, Dict
 
 from basic_memory.utils import normalize_project_reference
 from markdown_it import MarkdownIt
 from markdown_it.token import Token
 
+# Transcript timecodes like [00:00:11] or [1:02:03.500] share the bracket shape of
+# observation categories, so indexed transcripts would mint one junk observation per
+# spoken line. A category that is purely a clock value is never a semantic category;
+# those bracket prefixes stay ordinary content (issue #1219).
+_TIMESTAMP_CATEGORY = re.compile(r"^\d{1,3}:\d{2}(:\d{2})?([.,]\d{1,3})?$")
+
+
+def _observation_category_match(content: str) -> re.Match[str] | None:
+    """Match ``[category] content``, rejecting timestamp-shaped categories."""
+    match = re.match(r"^\[([^\[\]()]+)\]\s+(.+)", content)
+    if match and _TIMESTAMP_CATEGORY.match(match.group(1).strip()):
+        return None
+    return match
+
 
 # Observation handling functions
 def is_observation(token: Token) -> bool:
     """Check if token looks like our observation format."""
-    import re
 
     if token.type != "inline":  # pragma: no cover
         return False
@@ -31,7 +45,7 @@ def is_observation(token: Token) -> bool:
         return False
 
     # Check for proper observation format: [category] content
-    match = re.match(r"^\[([^\[\]()]+)\]\s+(.+)", content)
+    match = _observation_category_match(content)
     # Check for standalone hashtags (words starting with #)
     # This excludes # in HTML attributes like color="#4285F4"
     has_tags = any(part.startswith("#") for part in content.split())
@@ -40,13 +54,13 @@ def is_observation(token: Token) -> bool:
 
 def parse_observation(token: Token) -> Dict[str, Any]:
     """Extract observation parts from token."""
-    import re
 
     # Use token.tag which contains the actual content for test tokens, fallback to content
     content = (token.tag or token.content).strip()
 
-    # Parse [category] with regex
-    match = re.match(r"^\[([^\[\]()]+)\]\s+(.+)", content)
+    # Parse [category] with regex; a timestamp-shaped prefix is not a category, so a
+    # hashtag-promoted transcript line keeps its timecode inside the content instead.
+    match = _observation_category_match(content)
     category = None
     if match:
         category = match.group(1).strip()

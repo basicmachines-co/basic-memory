@@ -127,3 +127,62 @@ def test_unicode_content():
     observation = Observation.model_validate(obs)
     assert "中文" in observation.content
     assert "👍" in observation.content
+
+
+def test_timestamp_prefixes_are_not_observation_categories():
+    """Transcript timecodes must not mint observations (issue #1219)."""
+    md = MarkdownIt().use(observation_plugin)
+
+    # The issue's repro: list-item and bare transcript lines plus one real observation.
+    tokens = md.parse(
+        "[00:00:11] Speaker: We chose the safer option.\n"
+        "- [00:01:42] Speaker: Follow up next week.\n"
+        "- [decision] Use the safer option.\n"
+    )
+    observations = [t.meta["observation"] for t in tokens if t.meta and "observation" in t.meta]
+    assert len(observations) == 1
+    assert observations[0]["category"] == "decision"
+    assert observations[0]["content"] == "Use the safer option."
+
+
+def test_timestamp_shapes_rejected_across_formats():
+    """MM:SS, HH:MM:SS, and fractional-second timecodes all stay ordinary content."""
+    md = MarkdownIt().use(observation_plugin)
+
+    for line in (
+        "- [1:02] short timecode",
+        "- [00:00:11] plain timecode",
+        "- [1:02:03.500] fractional seconds",
+        "- [100:02:11] long recording hours",
+        "- [12:03,250] comma milliseconds",
+    ):
+        tokens = md.parse(line)
+        assert not any(t.meta and "observation" in t.meta for t in tokens), line
+
+
+def test_hashtag_promoted_timestamp_line_keeps_timecode_in_content():
+    """A tagged transcript line is an observation via its hashtag, never via the timecode."""
+    md = MarkdownIt().use(observation_plugin)
+
+    tokens = md.parse("- [00:00:11] Speaker: decision recorded #meeting")
+    token = next(t for t in tokens if t.type == "inline")
+    obs = parse_observation(token)
+    assert obs["category"] is None
+    assert obs["content"].startswith("[00:00:11] Speaker:")
+    assert obs["tags"] == ["meeting"]
+
+
+def test_numeric_but_non_timestamp_categories_still_parse():
+    """Only pure clock values are rejected; other numeric categories keep working."""
+    md = MarkdownIt().use(observation_plugin)
+
+    for line, category in (
+        ("- [2024] year in review", "2024"),
+        ("- [v1:2] odd but not a clock", "v1:2"),
+        ("- [10:30am] time-of-day words", "10:30am"),
+    ):
+        tokens = md.parse(line)
+        token = next(t for t in tokens if t.type == "inline")
+        obs = token.meta.get("observation") if token.meta else None
+        assert obs is not None, line
+        assert obs["category"] == category
