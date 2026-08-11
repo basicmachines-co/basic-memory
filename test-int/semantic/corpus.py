@@ -10,9 +10,12 @@ embedding quality actually differentiates providers.
 from __future__ import annotations
 
 import random
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from basic_memory import db
+from basic_memory.models import Entity
+from basic_memory.services.search_service import SearchService
 
 
 # --- Topic vocabulary ---
@@ -260,6 +263,15 @@ class QueryCase:
     expected_topic: str
 
 
+@dataclass(frozen=True)
+class RankingDocument:
+    """A fixed note whose exact identity matters to a ranking assertion."""
+
+    title: str
+    permalink: str
+    content: str
+
+
 # --- Query suites ---
 # Lexical queries use keywords that appear in the content but require
 # disambiguation when topics share vocabulary.
@@ -415,6 +427,32 @@ Related concepts: {keyword_line}.
         if search_service.repository._semantic_enabled:
             await search_service.sync_entity_vectors(entity.id)
 
+        entities.append(entity)
+
+    return entities
+
+
+async def seed_ranking_documents(
+    search_service: SearchService,
+    documents: Sequence[RankingDocument],
+) -> list[Entity]:
+    """Index a small exact-note corpus through the production semantic path."""
+    entities: list[Entity] = []
+    for document in documents:
+        async with db.scoped_session(search_service.session_maker) as session:
+            entity = await search_service.entity_repository.create(
+                session,
+                {
+                    "title": document.title,
+                    "note_type": "benchmark",
+                    "entity_metadata": {"tags": ["benchmark", "ranking"]},
+                    "content_type": "text/markdown",
+                    "permalink": document.permalink,
+                    "file_path": f"{document.permalink}.md",
+                },
+            )
+        await search_service.index_entity_data(entity, content=document.content)
+        await search_service.sync_entity_vectors(entity.id)
         entities.append(entity)
 
     return entities
