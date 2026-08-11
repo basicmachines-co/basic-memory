@@ -455,6 +455,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             checksum=synced.checksum,
             content_type=synced.content_type,
             markdown_content=synced.markdown_content,
+            observations=synced.observations,
             relations=synced.relations,
             resolve_relations=synced.resolve_relations,
         )
@@ -584,6 +585,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             content_type=self.file_service.content_type(input_file.path),
             updated_at=file_metadata.modified_at,
             size=file_metadata.size,
+            observations=indexed.observations,
             relations=indexed.relations,
             resolve_relations=resolve_relations,
         )
@@ -652,6 +654,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             content_type=self.file_service.content_type(input_file.path),
             updated_at=file_metadata.modified_at,
             size=file_metadata.size,
+            observations=indexed.observations,
             relations=indexed.relations,
             resolve_relations=resolve_relations,
         )
@@ -727,6 +730,7 @@ async def build_local_index_project_dependencies(
         app_config=app_config,
         entity_service=entity_service,
         entity_repository=entity_repository,
+        observation_repository=observation_repository,
         relation_repository=relation_repository,
         search_service=search_service,
         file_writer=StorageIndexFileWriter(storage=file_service),
@@ -737,6 +741,7 @@ async def build_local_index_project_dependencies(
         app_config=app_config,
         entity_service=entity_service,
         entity_repository=entity_repository,
+        observation_repository=observation_repository,
         relation_repository=relation_repository,
         search_writer=search_service,
         frontmatter_storage=file_service,

@@ -37,7 +37,12 @@ from basic_memory.indexing.note_content_reconciler import (
     NoteContentReconciler,
 )
 from basic_memory.models import Entity
-from basic_memory.repository import EntityRepository, NoteContentRepository, RelationRepository
+from basic_memory.repository import (
+    EntityRepository,
+    NoteContentRepository,
+    ObservationRepository,
+    RelationRepository,
+)
 from basic_memory.runtime.storage import ProjectId
 from basic_memory.services import EntityService
 
@@ -138,6 +143,7 @@ def build_default_index_batch_runtime[FileInfoT: LoadedIndexFile](
     app_config: BasicMemoryConfig,
     entity_service: EntityService,
     entity_repository: EntityRepository,
+    observation_repository: ObservationRepository,
     relation_repository: RelationRepository,
     search_writer: IndexEntitySearchWriter,
     frontmatter_storage: IndexFrontmatterStorage,
@@ -166,6 +172,7 @@ def build_default_index_batch_runtime[FileInfoT: LoadedIndexFile](
         app_config=app_config,
         entity_service=entity_service,
         entity_repository=entity_repository,
+        observation_repository=observation_repository,
         relation_repository=relation_repository,
         search_service=search_writer,
         file_writer=StorageIndexFileWriter(storage=frontmatter_storage),

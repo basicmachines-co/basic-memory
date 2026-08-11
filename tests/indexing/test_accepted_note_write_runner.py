@@ -44,6 +44,7 @@ from basic_memory.repository import (
     AcceptedObservationWrite,
     AcceptedRelationWrite,
 )
+from basic_memory.repository.observation_repository import ObservationGenerationWriteResult
 from basic_memory.repository.relation_repository import RelationGenerationWriteResult
 from basic_memory.repository.entity_repository import AcceptedPendingEntityWrite
 from basic_memory.schemas.base import Entity as EntitySchema
@@ -135,13 +136,16 @@ class _ObservationRepository:
     def __init__(self) -> None:
         self.calls: list[tuple[int, Sequence[AcceptedObservationWrite]]] = []
 
-    async def replace_accepted_observations(
+    async def replace_observations_for_generation(
         self,
         session: AsyncSession,
+        *,
         entity_id: int,
+        generation: int,
         observations: Sequence[AcceptedObservationWrite],
-    ) -> None:
+    ) -> ObservationGenerationWriteResult:
         self.calls.append((entity_id, observations))
+        return ObservationGenerationWriteResult(generation_is_current=True)
 
 
 class _RelationRepository:
@@ -1038,12 +1042,14 @@ async def test_persist_accepted_note_snapshot_emits_relation_generation() -> Non
     assert len(search_repository.calls) == 1
     assert search_repository.calls[0].entity_id == entity.id
     assert search_repository.calls[0].content_snippet == "New body"
-    assert observation_repository.calls == [(entity.id, prepared.observations)]
+    assert observation_repository.calls == []
     assert relation_repository.calls == []
     assert result.relation_publication is not None
     assert result.relation_publication.project_id == entity.project_id
     assert result.relation_publication.entity_id == entity.id
     assert result.relation_publication.generation == 5
+    assert result.relation_publication.observations[0].content == "Snapshot is complete"
+    assert result.relation_publication.observations[0].category == "status"
     assert result.relation_publication.relations[0].relation_type == "documents"
     assert result.relation_publication.relations[0].target_name == "Another Note"
     assert result.relation_publication.relations[0].target_id is None
@@ -1065,6 +1071,14 @@ async def test_persist_accepted_note_move_emits_relation_generation() -> None:
             markdown_content=str(current_note_content.markdown_content),
             search_content=str(current_note_content.markdown_content),
             permalink=entity.permalink,
+            observations=(
+                AcceptedObservationWrite(
+                    content="Move keeps this",
+                    category="fact",
+                    context=None,
+                    tags=["move"],
+                ),
+            ),
         )
     )
     prepared = await prepare_accepted_note_move(
@@ -1096,6 +1110,8 @@ async def test_persist_accepted_note_move_emits_relation_generation() -> None:
     assert len(search_repository.calls) == 1
     assert result.relation_publication is not None
     assert result.relation_publication.generation == result.note_content.db_version
+    assert result.relation_publication.observations[0].content == "Move keeps this"
+    assert result.relation_publication.observations[0].tags == ["move"]
     assert result.relation_publication.relations == ()
 
 
@@ -1243,7 +1259,8 @@ async def test_persist_accepted_note_snapshot_emits_empty_relation_generation() 
         repositories=repositories,
     )
 
-    assert observation_repository.calls == [(42, [])]
+    assert observation_repository.calls == []
     assert relation_repository.calls == []
     assert result.relation_publication is not None
+    assert result.relation_publication.observations == ()
     assert result.relation_publication.relations == ()

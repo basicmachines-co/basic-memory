@@ -160,38 +160,45 @@ class NoteContentMutationService:
         self,
         publication: RelationGenerationPublication | None,
     ) -> None:
-        """Publish accepted relation intent only after note-content commit."""
+        """Publish accepted graph intent only after note-content commit."""
         if publication is None:
             return
 
         repository = self.mutation_dependencies.write_repositories.relation_repository(
             publication.project_id
         )
+        observation_repository = (
+            self.mutation_dependencies.write_repositories.observation_repository(
+                publication.project_id
+            )
+        )
         publisher = RelationGenerationPublisher(
             relation_repository=repository,
+            observation_repository=observation_repository,
             session_maker=self.session_maker,
         )
         await publisher.publish(
             entity_id=publication.entity_id,
             generation=publication.generation,
             relations=publication.relations,
+            observations=publication.observations,
         )
 
     async def _finish_mutation(
         self,
         result: AcceptedNoteMutationResult,
     ) -> AcceptedNoteChange:
-        """Run post-commit relation publication and expose the accepted response."""
+        """Run post-commit graph publication and expose the accepted response."""
         try:
             await self._publish_relation_generation(result.relation_publication)
         except Exception:
             publication = result.relation_publication
-            # Trigger: derived relation publication fails after accepted content committed.
+            # Trigger: derived graph publication fails after accepted content committed.
             # Why: failing the response would strand file materialization even though the
             # canonical DB write succeeded; a later index pass can republish the same generation.
             # Outcome: preserve the accepted change and surface the repairable failure in logs.
             logger.exception(
-                "Relation publication failed after accepted note commit; continuing "
+                "Graph publication failed after accepted note commit; continuing "
                 "materialization: entity_id={} generation={}",
                 publication.entity_id if publication is not None else None,
                 publication.generation if publication is not None else None,

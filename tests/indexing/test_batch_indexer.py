@@ -58,6 +58,7 @@ def _make_batch_indexer(
         app_config=app_config,
         entity_service=entity_service,
         entity_repository=entity_repository,
+        observation_repository=entity_service.observation_repository,
         relation_repository=relation_repository,
         search_service=search_service,
         file_writer=StorageIndexFileWriter(storage=file_service),

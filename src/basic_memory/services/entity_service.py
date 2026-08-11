@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory import db
 from basic_memory.config import ProjectConfig, BasicMemoryConfig
 from basic_memory.file_utils import remove_frontmatter
-from basic_memory.indexing.models import IndexedRelation
+from basic_memory.indexing.models import IndexedObservation, IndexedRelation
 from basic_memory.indexing.note_content_reconciliation import NoteContentReconciliationAnchor
 from basic_memory.indexing.note_content_reconciler import NoteContentReconciler
 from basic_memory.indexing.relation_persistence import RelationGenerationPublisher
@@ -23,7 +23,6 @@ from basic_memory.markdown.entity_parser import (
 )
 from basic_memory.markdown.utils import entity_model_from_markdown
 from basic_memory.models import Entity as EntityModel
-from basic_memory.models import Observation
 from basic_memory.repository import ObservationRepository, RelationRepository
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
@@ -198,7 +197,7 @@ class EntityService(BaseService[EntityModel]):
             session=session,
         )
 
-    async def _publish_markdown_relations(
+    async def _publish_markdown_graph(
         self,
         *,
         entity: EntityModel,
@@ -206,7 +205,7 @@ class EntityService(BaseService[EntityModel]):
         markdown_content: str,
         anchor: NoteContentReconciliationAnchor,
     ) -> EntityModel:
-        """Claim the stored note generation, then publish its unresolved relations."""
+        """Claim the stored note generation, then publish its derived graph."""
         # Constraint: this public service surface and normal indexers can touch the same project DB.
         # There is no single-writer exemption: every path must claim note_content before publishing.
         reconciler = NoteContentReconciler(
@@ -223,6 +222,15 @@ class EntityService(BaseService[EntityModel]):
         if reconciliation.generation is None:
             return entity
 
+        indexed_observations = tuple(
+            IndexedObservation(
+                content=observation.content,
+                category=observation.category,
+                context=observation.context,
+                tags=observation.tags,
+            )
+            for observation in markdown.observations
+        )
         indexed_relations: list[IndexedRelation] = []
         for relation in markdown.relations:
             resolved = await self.resolve_deferred_self_relation(relation.target, entity)
@@ -237,12 +245,14 @@ class EntityService(BaseService[EntityModel]):
 
         publisher = RelationGenerationPublisher(
             relation_repository=self.relation_repository,
+            observation_repository=self.observation_repository,
             session_maker=self.session_maker,
         )
         published = await publisher.publish(
             entity_id=entity.id,
             generation=reconciliation.generation,
             relations=indexed_relations,
+            observations=indexed_observations,
         )
         if not published:
             return entity
@@ -482,7 +492,7 @@ class EntityService(BaseService[EntityModel]):
             persisted_content,
             search_content,
         ) = await self._read_persisted_write_snapshot(prepared.file_path)
-        updated = await self._publish_markdown_relations(
+        updated = await self._publish_markdown_graph(
             entity=updated,
             markdown=persisted_markdown,
             markdown_content=persisted_content,
@@ -535,7 +545,7 @@ class EntityService(BaseService[EntityModel]):
                 prepared.file_path,
                 prepared.markdown_content,
             )
-            entity = await self.update_entity_and_observations(
+            entity = await self.update_markdown_entity_fields(
                 prepared.file_path,
                 prepared.entity_markdown,
                 existing_entity=entity,
@@ -555,7 +565,7 @@ class EntityService(BaseService[EntityModel]):
             persisted_content,
             search_content,
         ) = await self._read_persisted_write_snapshot(prepared.file_path)
-        updated = await self._publish_markdown_relations(
+        updated = await self._publish_markdown_graph(
             entity=updated,
             markdown=persisted_markdown,
             markdown_content=persisted_content,
@@ -681,7 +691,7 @@ class EntityService(BaseService[EntityModel]):
                 logger.error(f"Failed to upsert entity for {file_path}: {e}")
                 raise EntityCreationError(f"Failed to create entity: {str(e)}") from e
 
-    async def update_entity_and_observations(
+    async def update_markdown_entity_fields(
         self,
         file_path: Path,
         markdown: EntityMarkdown,
@@ -689,12 +699,8 @@ class EntityService(BaseService[EntityModel]):
         existing_entity: EntityModel | None = None,
         session: AsyncSession | None = None,
     ) -> EntityModel:
-        """Update entity fields and observations.
-
-        Updates everything except relations and sets null checksum
-        to indicate sync not complete.
-        """
-        logger.debug(f"Updating entity and observations: {file_path}")
+        """Update markdown entity fields and mark its derived state incomplete."""
+        logger.debug(f"Updating markdown entity fields: {file_path}")
 
         async with db.scoped_session(self.session_maker, session) as active_session:
             if existing_entity is not None:
@@ -714,27 +720,8 @@ class EntityService(BaseService[EntityModel]):
             if db_entity is None:  # pragma: no cover
                 raise EntityNotFoundError(f"Entity not found for file path: {file_path}")
 
-            # Accepted writes already lock Entity before replacing its graph. Indexing must use
-            # the same order so PostgreSQL cannot deadlock the two paths on Entity/Observation.
-            # Observations are owned by the markdown file, so re-indexing replaces the old set.
-            # We only need the entity id here; loading the old relationship collection is wasted work.
-            await self.observation_repository.delete_by_fields(
-                active_session, entity_id=db_entity.id
-            )
-
-            observations = [
-                Observation(
-                    project_id=self.observation_repository.project_id,
-                    entity_id=db_entity.id,
-                    content=obs.content,
-                    category=obs.category,
-                    context=obs.context,
-                    tags=obs.tags,
-                )
-                for obs in markdown.observations
-            ]
-            await self.observation_repository.add_all_no_return(active_session, observations)
-
+            # Graph projections publish after this transaction commits. Their short transactions
+            # claim NoteContent first, preserving the canonical NoteContent-before-Entity order.
             self._apply_markdown_entity_fields(db_entity, file_path, markdown)
 
             # checksum value is None == not finished with sync
@@ -835,7 +822,7 @@ class EntityService(BaseService[EntityModel]):
                 file_path,
                 prepared.markdown_content,
             )
-            entity = await self.update_entity_and_observations(
+            entity = await self.update_markdown_entity_fields(
                 file_path,
                 prepared.entity_markdown,
                 existing_entity=entity,
@@ -850,7 +837,7 @@ class EntityService(BaseService[EntityModel]):
             persisted_content,
             search_content,
         ) = await self._read_persisted_write_snapshot(file_path)
-        updated = await self._publish_markdown_relations(
+        updated = await self._publish_markdown_graph(
             entity=updated,
             markdown=persisted_markdown,
             markdown_content=persisted_content,

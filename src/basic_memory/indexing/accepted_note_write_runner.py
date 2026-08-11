@@ -12,8 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory import file_utils
 from basic_memory.indexing.accepted_note_search import build_accepted_note_search_row
-from basic_memory.indexing.models import IndexedRelation
+from basic_memory.indexing.models import IndexedObservation, IndexedRelation
 from basic_memory.indexing.relation_persistence import (
+    ObservationGenerationStore,
     RelationGenerationPublication,
     RelationGenerationStore,
 )
@@ -175,15 +176,8 @@ class AcceptedNoteSearchRowRepository(Protocol):
     ) -> None: ...
 
 
-class AcceptedNoteObservationRepository(Protocol):
-    """Repository capability for replacing one accepted note's observations."""
-
-    async def replace_accepted_observations(
-        self,
-        session: AsyncSession,
-        entity_id: RuntimeEntityId,
-        observations: Sequence[AcceptedObservationWrite],
-    ) -> None: ...
+class AcceptedNoteObservationRepository(ObservationGenerationStore, Protocol):
+    """Generation-fenced observation persistence for accepted note writes."""
 
 
 class AcceptedNoteRelationRepository(RelationGenerationStore, Protocol):
@@ -236,6 +230,7 @@ class AcceptedPreparedNoteMove:
     search_content: str
     permalink: str | None
     db_checksum: RuntimeNoteContentChecksum
+    observations: tuple[AcceptedObservationWrite, ...]
     relations: tuple[AcceptedRelationWrite, ...]
 
 
@@ -365,6 +360,7 @@ async def prepare_accepted_note_move(
         search_content=prepared.search_content,
         permalink=prepared.permalink,
         db_checksum=await file_utils.compute_checksum(prepared.markdown_content),
+        observations=prepared.observations,
         relations=prepared.relations,
     )
     entity.file_path = result.file_path
@@ -583,36 +579,25 @@ async def _persist_accepted_note_content_and_search(
     )
 
 
-async def _replace_accepted_note_observations(
-    session: AsyncSession,
-    *,
-    entity: Entity,
-    prepared: PreparedEntityWrite,
-    repositories: AcceptedNoteWriteRepositories,
-) -> None:
-    """Persist observations alongside the accepted note-content generation.
-
-    The accepted markdown was already parsed during prepare, so the graph rows
-    are committed alongside note_content and search. Relations use a separate
-    generation-fenced publication after this transaction commits.
-    """
-    observation_repository = repositories.observation_repository(entity.project_id)
-    await observation_repository.replace_accepted_observations(
-        session,
-        entity.id,
-        prepared.observations,
-    )
-
-
 async def accepted_relation_generation_publication(
     session: AsyncSession,
     *,
     entity: Entity,
     note_content: NoteContent,
+    observations: Sequence[AcceptedObservationWrite],
     relations: Sequence[AcceptedRelationWrite],
     self_relation_resolver: AcceptedNoteSelfRelationResolver,
 ) -> RelationGenerationPublication:
-    """Carry original target names plus ambiguity-safe self targets into publication."""
+    """Carry the parsed graph plus ambiguity-safe self targets into publication."""
+    indexed_observations = tuple(
+        IndexedObservation(
+            content=observation.content,
+            category=observation.category,
+            context=observation.context,
+            tags=observation.tags,
+        )
+        for observation in observations
+    )
     indexed_relations: list[IndexedRelation] = []
     for relation in relations:
         target_id = relation.target_id
@@ -639,6 +624,7 @@ async def accepted_relation_generation_publication(
         entity_id=entity.id,
         generation=note_content.db_version,
         relations=tuple(indexed_relations),
+        observations=indexed_observations,
     )
 
 
@@ -672,12 +658,6 @@ async def persist_accepted_note_snapshot(
         source_file_checksum=source_file_checksum,
         repositories=repositories,
     )
-    await _replace_accepted_note_observations(
-        session,
-        entity=entity,
-        prepared=prepared,
-        repositories=repositories,
-    )
     return AcceptedPersistedNoteWrite(
         note_content=persisted.note_content,
         previous_file_delete=persisted.previous_file_delete,
@@ -685,6 +665,7 @@ async def persist_accepted_note_snapshot(
             session,
             entity=entity,
             note_content=persisted.note_content,
+            observations=prepared.observations,
             relations=prepared.relations,
             self_relation_resolver=self_relation_resolver,
         ),
@@ -726,6 +707,7 @@ async def persist_accepted_note_move(
             session,
             entity=entity,
             note_content=persisted.note_content,
+            observations=prepared.observations,
             relations=prepared.relations,
             self_relation_resolver=self_relation_resolver,
         ),

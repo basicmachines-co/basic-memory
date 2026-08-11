@@ -488,7 +488,7 @@ async def test_note_content_mutation_service_delegates_create_to_core_runner(mon
 
 
 @pytest.mark.asyncio
-async def test_note_content_mutation_service_publishes_relations_after_commit(monkeypatch) -> None:
+async def test_note_content_mutation_service_publishes_graph_after_commit(monkeypatch) -> None:
     events: list[str] = []
     returned = cast(Any, SimpleNamespace(status_code=201, payload={"ok": True}))
     publication = RelationGenerationPublication(
@@ -521,12 +521,18 @@ async def test_note_content_mutation_service_publishes_relations_after_commit(mo
         def __call__(self) -> RecordingSession:
             return RecordingSession()
 
+    observation_repository = object()
     relation_repository = object()
 
     class WriteRepositories:
+        def observation_repository(self, project_id: int) -> object:
+            assert project_id == publication.project_id
+            events.append("observation_repository")
+            return observation_repository
+
         def relation_repository(self, project_id: int) -> object:
             assert project_id == publication.project_id
-            events.append("repository")
+            events.append("relation_repository")
             return relation_repository
 
     dependencies = cast(
@@ -548,7 +554,14 @@ async def test_note_content_mutation_service_publishes_relations_after_commit(mo
         )
 
     class RecordingPublisher:
-        def __init__(self, *, relation_repository: object, session_maker: object) -> None:
+        def __init__(
+            self,
+            *,
+            observation_repository: object,
+            relation_repository: object,
+            session_maker: object,
+        ) -> None:
+            assert observation_repository is not None
             assert relation_repository is not None
             assert session_maker is not None
 
@@ -557,10 +570,12 @@ async def test_note_content_mutation_service_publishes_relations_after_commit(mo
             *,
             entity_id: int,
             generation: int,
+            observations: object,
             relations: object,
         ) -> bool:
             assert entity_id == publication.entity_id
             assert generation == publication.generation
+            assert observations == publication.observations
             assert relations == publication.relations
             events.append("publish")
             return True
@@ -587,13 +602,14 @@ async def test_note_content_mutation_service_publishes_relations_after_commit(mo
         "runner",
         "transaction_exit",
         "session_exit",
-        "repository",
+        "relation_repository",
+        "observation_repository",
         "publish",
     ]
 
 
 @pytest.mark.asyncio
-async def test_note_content_mutation_service_continues_after_relation_publication_failure(
+async def test_note_content_mutation_service_continues_after_graph_publication_failure(
     monkeypatch,
 ) -> None:
     """Derived graph failure cannot suppress the committed change's materialization."""
@@ -606,6 +622,10 @@ async def test_note_content_mutation_service_continues_after_relation_publicatio
     )
 
     class WriteRepositories:
+        def observation_repository(self, project_id: int) -> object:
+            assert project_id == publication.project_id
+            return object()
+
         def relation_repository(self, project_id: int) -> object:
             assert project_id == publication.project_id
             return object()
@@ -623,7 +643,14 @@ async def test_note_content_mutation_service_continues_after_relation_publicatio
         )
 
     class FailingPublisher:
-        def __init__(self, *, relation_repository: object, session_maker: object) -> None:
+        def __init__(
+            self,
+            *,
+            observation_repository: object,
+            relation_repository: object,
+            session_maker: object,
+        ) -> None:
+            assert observation_repository is not None
             assert relation_repository is not None
             assert session_maker is not None
 

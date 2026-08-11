@@ -1724,6 +1724,7 @@ async def test_local_relation_resolution_refreshes_pending_source_without_markdo
     test_project: Project,
     project_config,
     entity_repository,
+    observation_repository,
     relation_repository,
     session_maker: async_sessionmaker[AsyncSession],
     search_service,
@@ -1799,6 +1800,7 @@ async def test_local_relation_resolution_refreshes_pending_source_without_markdo
         target_id = target.id
 
     generation_is_current = await RelationGenerationPublisher(
+        observation_repository=observation_repository,
         relation_repository=relation_repository,
         session_maker=session_maker,
     ).publish(

@@ -114,6 +114,16 @@ class IndexedRelation:
     target_id: int | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class IndexedObservation:
+    """One parsed observation waiting for generation-owned publication."""
+
+    content: str
+    category: str | None
+    context: str | None
+    tags: list[str] | None
+
+
 @dataclass(slots=True)
 class IndexedEntity:
     """Stable output describing one file that finished indexing successfully."""
@@ -124,6 +134,7 @@ class IndexedEntity:
     checksum: str
     content_type: str | None = None
     markdown_content: str | None = None
+    observations: tuple[IndexedObservation, ...] = ()
     relations: tuple[IndexedRelation, ...] = ()
     resolve_relations: bool = True
 
@@ -822,6 +833,7 @@ class SyncedMarkdownFile:
     content_type: str
     updated_at: datetime
     size: int
+    observations: tuple[IndexedObservation, ...] = ()
     relations: tuple[IndexedRelation, ...] = ()
     resolve_relations: bool = True
 

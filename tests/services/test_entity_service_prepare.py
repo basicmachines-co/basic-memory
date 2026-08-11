@@ -370,7 +370,7 @@ async def test_prepare_move_entity_content_updates_permalink_when_move_policy_en
             title="Prepared Move",
             directory="notes",
             note_type="note",
-            content="Move body",
+            content="Move body\n\n- [fact] Move keeps this #move",
         )
     )
     entity_service.app_config.update_permalinks_on_move = True
@@ -387,6 +387,14 @@ async def test_prepare_move_entity_content_updates_permalink_when_move_policy_en
     assert prepared.permalink == "test-project/archive/prepared-move"
     assert prepared_frontmatter["permalink"] == "test-project/archive/prepared-move"
     assert prepared.search_content == remove_frontmatter(prepared.markdown_content)
+    assert prepared.observations == (
+        AcceptedObservationWrite(
+            content="Move keeps this #move",
+            category="fact",
+            context=None,
+            tags=["move"],
+        ),
+    )
 
 
 @pytest.mark.asyncio

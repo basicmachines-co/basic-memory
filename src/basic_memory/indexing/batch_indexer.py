@@ -25,6 +25,7 @@ from basic_memory.markdown.schemas import EntityMarkdown
 from basic_memory.indexing.models import (
     IndexEntitySearchWriter,
     IndexedEntity,
+    IndexedObservation,
     IndexedRelation,
     IndexFileWriter,
     IndexFrontmatterUpdate,
@@ -35,7 +36,7 @@ from basic_memory.indexing.models import (
 from basic_memory.indexing.relation_resolution import RepositoryRelationResolutionRuntime
 from basic_memory.indexing.relation_persistence import RelationGenerationPublisher
 from basic_memory.models import Entity
-from basic_memory.repository import EntityRepository, RelationRepository
+from basic_memory.repository import EntityRepository, ObservationRepository, RelationRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.runtime.storage import (
@@ -100,6 +101,7 @@ class _PreparedEntity:
     content_type: str | None
     search_content: str | None
     markdown_content: str | None = None
+    observations: tuple[IndexedObservation, ...] = ()
     relations: tuple[IndexedRelation, ...] = ()
     resolve_relations: bool = True
 
@@ -120,6 +122,7 @@ class BatchIndexer:
         app_config: BasicMemoryConfig,
         entity_service: EntityService,
         entity_repository: EntityRepository,
+        observation_repository: ObservationRepository,
         relation_repository: RelationRepository,
         search_service: IndexEntitySearchWriter,
         file_writer: IndexFileWriter,
@@ -128,12 +131,14 @@ class BatchIndexer:
         self.app_config = app_config
         self.entity_service = entity_service
         self.entity_repository = entity_repository
+        self.observation_repository = observation_repository
         self.relation_repository = relation_repository
         self.search_service = search_service
         self.file_writer = file_writer
         self.session_maker = session_maker
         self.relation_generation_publisher = RelationGenerationPublisher(
             relation_repository=relation_repository,
+            observation_repository=observation_repository,
             session_maker=session_maker,
         )
         self.relation_resolution = RepositoryRelationResolutionRuntime(
@@ -302,6 +307,7 @@ class BatchIndexer:
             checksum=prepared_entity.checksum,
             content_type=prepared_entity.content_type,
             markdown_content=prepared_entity.markdown_content,
+            observations=prepared_entity.observations,
             relations=prepared_entity.relations,
             resolve_relations=prepared_entity.resolve_relations,
         )
@@ -541,6 +547,7 @@ class BatchIndexer:
             content_type=file.content_type,
             search_content=None,
             markdown_content=None,
+            observations=(),
             relations=(),
             resolve_relations=False,
         )
@@ -553,11 +560,12 @@ class BatchIndexer:
         *,
         generation: int,
     ) -> bool:
-        """Publish one indexed entity's parsed relations after generation claim."""
+        """Publish one indexed entity's parsed graph after generation claim."""
         return await self.relation_generation_publisher.publish(
             entity_id=indexed.entity_id,
             generation=generation,
             relations=indexed.relations,
+            observations=indexed.observations,
         )
 
     async def publish_relation_generations(
@@ -657,6 +665,7 @@ class BatchIndexer:
             content_type=indexed.content_type,
             search_content=search_content,
             markdown_content=indexed.markdown_content,
+            observations=indexed.observations,
             relations=indexed.relations,
             resolve_relations=indexed.resolve_relations,
         )
@@ -736,6 +745,7 @@ class BatchIndexer:
             checksum=prepared.checksum,
             content_type=prepared.content_type,
             markdown_content=prepared.markdown_content,
+            observations=prepared.observations,
             relations=prepared.relations,
             resolve_relations=prepared.resolve_relations,
         )
@@ -763,7 +773,7 @@ class BatchIndexer:
                     session=session,
                 )
             else:
-                entity = await self.entity_service.update_entity_and_observations(
+                entity = await self.entity_service.update_markdown_entity_fields(
                     Path(prepared.file.path),
                     prepared.markdown,
                     existing_entity=existing,
@@ -834,6 +844,15 @@ class BatchIndexer:
         *,
         resolve_relations: bool = True,
     ) -> _PreparedEntity:
+        indexed_observations = tuple(
+            IndexedObservation(
+                content=observation.content,
+                category=observation.category,
+                context=observation.context,
+                tags=observation.tags,
+            )
+            for observation in prepared.markdown.observations
+        )
         indexed_relations: list[IndexedRelation] = []
         for relation in prepared.markdown.relations:
             resolved = await self.entity_service.resolve_deferred_self_relation(
@@ -861,6 +880,7 @@ class BatchIndexer:
                 else remove_frontmatter(prepared.content)
             ),
             markdown_content=prepared.content,
+            observations=indexed_observations,
             relations=tuple(indexed_relations),
             resolve_relations=resolve_relations,
         )

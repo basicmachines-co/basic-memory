@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.exc import IntegrityError
 
 from basic_memory import db
-from basic_memory.models import Entity, Observation, Project
+from basic_memory.models import Entity, NoteContent, Observation, Project
 from basic_memory.repository.observation_repository import (
     AcceptedObservationWrite,
     ObservationRepository,
@@ -32,6 +32,27 @@ async def sample_observation(repo, sample_entity: Entity, session_maker):
     }
     async with db.scoped_session(session_maker) as session:
         return await repo.create(session, observation_data)
+
+
+async def _add_note_content_generation(
+    session_maker: async_sessionmaker[AsyncSession],
+    entity: Entity,
+    *,
+    generation: int,
+) -> None:
+    async with db.scoped_session(session_maker) as session:
+        session.add(
+            NoteContent(
+                entity_id=entity.id,
+                project_id=entity.project_id,
+                external_id=f"content-{entity.external_id}",
+                file_path=entity.file_path,
+                markdown_content="# Current\n",
+                db_version=generation,
+                db_checksum=f"checksum-{generation}",
+                file_write_status="synced",
+            )
+        )
 
 
 @pytest.mark.asyncio
@@ -553,12 +574,12 @@ async def test_observation_permalink_disambiguates_truncated_content(
 
 
 @pytest.mark.asyncio
-async def test_replace_accepted_observations_inserts_full_set(
+async def test_replace_observations_for_current_generation_inserts_full_set(
     observation_repository: ObservationRepository,
     sample_entity: Entity,
-    session_maker,
-):
-    """Accepted-write graph persistence inserts the full parsed observation set."""
+    session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    """The current generation replaces the complete parsed observation set."""
     writes = [
         AcceptedObservationWrite(
             content="Pour over gives clarity",
@@ -573,15 +594,20 @@ async def test_replace_accepted_observations_inserts_full_set(
             tags=None,
         ),
     ]
+    await _add_note_content_generation(session_maker, sample_entity, generation=7)
     async with db.scoped_session(session_maker) as session:
-        await observation_repository.replace_accepted_observations(
-            session, sample_entity.id, writes
+        result = await observation_repository.replace_observations_for_generation(
+            session,
+            entity_id=sample_entity.id,
+            generation=7,
+            observations=writes,
         )
 
+    assert result.generation_is_current
     async with db.scoped_session(session_maker) as session:
         observations = await observation_repository.find_by_entity(session, sample_entity.id)
 
-    by_content = {obs.content: obs for obs in observations}
+    by_content = {observation.content: observation for observation in observations}
     assert set(by_content) == {"Pour over gives clarity", "Water at 205F"}
     assert by_content["Pour over gives clarity"].category == "method"
     assert by_content["Pour over gives clarity"].context == "brewing"
@@ -590,17 +616,19 @@ async def test_replace_accepted_observations_inserts_full_set(
 
 
 @pytest.mark.asyncio
-async def test_replace_accepted_observations_uses_model_default_for_missing_category(
+async def test_replace_observations_for_generation_uses_default_for_missing_category(
     observation_repository: ObservationRepository,
     sample_entity: Entity,
-    session_maker,
-):
+    session_maker: async_sessionmaker[AsyncSession],
+) -> None:
     """Category-less markdown keeps the existing ``note`` persistence default."""
+    await _add_note_content_generation(session_maker, sample_entity, generation=3)
     async with db.scoped_session(session_maker) as session:
-        await observation_repository.replace_accepted_observations(
+        result = await observation_repository.replace_observations_for_generation(
             session,
-            sample_entity.id,
-            [
+            entity_id=sample_entity.id,
+            generation=3,
+            observations=[
                 AcceptedObservationWrite(
                     content="Remember this #todo",
                     category=None,
@@ -610,58 +638,176 @@ async def test_replace_accepted_observations_uses_model_default_for_missing_cate
             ],
         )
 
+    assert result.generation_is_current
     async with db.scoped_session(session_maker) as session:
         observations = await observation_repository.find_by_entity(session, sample_entity.id)
-
     assert len(observations) == 1
     assert observations[0].category == "note"
 
 
 @pytest.mark.asyncio
-async def test_replace_accepted_observations_replaces_existing_set(
+async def test_replace_observations_for_generation_preserves_duplicate_lines(
     observation_repository: ObservationRepository,
     sample_entity: Entity,
-    session_maker,
-):
-    """A second accepted write replaces the prior observation set, not merges it."""
+    session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    """Exact duplicate source lines remain distinct rows for Markdown fidelity."""
+    await _add_note_content_generation(session_maker, sample_entity, generation=4)
+    duplicate = AcceptedObservationWrite(
+        content="same source line",
+        category="note",
+        context=None,
+        tags=["exact"],
+    )
     async with db.scoped_session(session_maker) as session:
-        await observation_repository.replace_accepted_observations(
+        result = await observation_repository.replace_observations_for_generation(
             session,
-            sample_entity.id,
-            [AcceptedObservationWrite(content="old", category="note", context=None, tags=None)],
+            entity_id=sample_entity.id,
+            generation=4,
+            observations=[duplicate, duplicate],
         )
 
-    async with db.scoped_session(session_maker) as session:
-        await observation_repository.replace_accepted_observations(
-            session,
-            sample_entity.id,
-            [AcceptedObservationWrite(content="new", category="note", context=None, tags=None)],
-        )
-
+    assert result.generation_is_current
     async with db.scoped_session(session_maker) as session:
         observations = await observation_repository.find_by_entity(session, sample_entity.id)
-
-    assert [obs.content for obs in observations] == ["new"]
+    assert [observation.content for observation in observations] == [
+        "same source line",
+        "same source line",
+    ]
 
 
 @pytest.mark.asyncio
-async def test_replace_accepted_observations_clears_when_empty(
+async def test_replace_observations_for_generation_clears_when_empty(
     observation_repository: ObservationRepository,
     sample_entity: Entity,
-    session_maker,
-):
-    """An empty accepted observation set clears any prior rows for the entity."""
+    session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    """An empty desired set is a legitimate current-generation wipe."""
+    await _add_note_content_generation(session_maker, sample_entity, generation=5)
     async with db.scoped_session(session_maker) as session:
-        await observation_repository.replace_accepted_observations(
-            session,
-            sample_entity.id,
-            [AcceptedObservationWrite(content="stale", category="note", context=None, tags=None)],
+        session.add(
+            Observation(
+                project_id=sample_entity.project_id,
+                entity_id=sample_entity.id,
+                content="stale",
+            )
         )
 
     async with db.scoped_session(session_maker) as session:
-        await observation_repository.replace_accepted_observations(session, sample_entity.id, [])
+        result = await observation_repository.replace_observations_for_generation(
+            session,
+            entity_id=sample_entity.id,
+            generation=5,
+            observations=[],
+        )
 
+    assert result.generation_is_current
     async with db.scoped_session(session_maker) as session:
         observations = await observation_repository.find_by_entity(session, sample_entity.id)
-
     assert observations == []
+
+
+@pytest.mark.asyncio
+async def test_replace_observations_for_stale_generation_is_noop(
+    observation_repository: ObservationRepository,
+    sample_entity: Entity,
+    session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    """A stale fence cannot delete the current rows or insert its desired set."""
+    await _add_note_content_generation(session_maker, sample_entity, generation=8)
+    async with db.scoped_session(session_maker) as session:
+        existing = Observation(
+            project_id=sample_entity.project_id,
+            entity_id=sample_entity.id,
+            content="current",
+        )
+        session.add(existing)
+        await session.flush()
+        existing_id = existing.id
+
+    async with db.scoped_session(session_maker) as session:
+        result = await observation_repository.replace_observations_for_generation(
+            session,
+            entity_id=sample_entity.id,
+            generation=7,
+            observations=[
+                AcceptedObservationWrite(
+                    content="stale",
+                    category="note",
+                    context=None,
+                    tags=None,
+                )
+            ],
+        )
+
+    assert not result.generation_is_current
+    async with db.scoped_session(session_maker) as session:
+        observations = await observation_repository.find_by_entity(session, sample_entity.id)
+    assert [(observation.id, observation.content) for observation in observations] == [
+        (existing_id, "current")
+    ]
+
+
+@pytest.mark.asyncio
+async def test_replace_observations_for_generation_is_project_scoped(
+    observation_repository: ObservationRepository,
+    sample_entity: Entity,
+    session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    """A repository cannot claim another project's note_content fence."""
+    del sample_entity
+    async with db.scoped_session(session_maker) as session:
+        other_project = Project(
+            name="other-observation-project",
+            permalink="other-observation-project",
+            path="/other-observation-project",
+        )
+        session.add(other_project)
+        await session.flush()
+        other_entity = Entity(
+            project_id=other_project.id,
+            title="Other",
+            note_type="note",
+            permalink="other",
+            file_path="other.md",
+            content_type="text/markdown",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        session.add(other_entity)
+        await session.flush()
+        session.add_all(
+            [
+                NoteContent(
+                    entity_id=other_entity.id,
+                    project_id=other_project.id,
+                    external_id=f"content-{other_entity.external_id}",
+                    file_path=other_entity.file_path,
+                    markdown_content="# Other\n",
+                    db_version=2,
+                    db_checksum="other-checksum",
+                    file_write_status="synced",
+                ),
+                Observation(
+                    project_id=other_project.id,
+                    entity_id=other_entity.id,
+                    content="other current",
+                ),
+            ]
+        )
+        other_project_id = other_project.id
+        other_entity_id = other_entity.id
+
+    async with db.scoped_session(session_maker) as session:
+        result = await observation_repository.replace_observations_for_generation(
+            session,
+            entity_id=other_entity_id,
+            generation=2,
+            observations=[],
+        )
+
+    assert not result.generation_is_current
+    other_repository = ObservationRepository(project_id=other_project_id)
+    async with db.scoped_session(session_maker) as session:
+        observations = await other_repository.find_by_entity(session, other_entity_id)
+    assert [observation.content for observation in observations] == ["other current"]

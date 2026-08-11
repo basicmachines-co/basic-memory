@@ -41,7 +41,10 @@ from basic_memory.services.link_resolver import LinkResolver
 async def write_note(path: Path, *, title: str, target: str | None, version: str) -> None:
     """Write one deterministic note generation for the concurrency exercise."""
     relation = f"\n- links_to [[{target}]]\n" if target is not None else ""
-    content = f"---\ntitle: {title}\ntype: note\n---\n\n# {title}\n\n{version}\n{relation}"
+    observation = f"- [generation] {version} observation\n"
+    content = (
+        f"---\ntitle: {title}\ntype: note\n---\n\n# {title}\n\n{version}\n\n{observation}{relation}"
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
 
@@ -424,6 +427,7 @@ async def test_mutual_relation_generations_complete_under_concurrent_persistence
         app_config=app_config,
         entity_service=entity_service,
         entity_repository=entity_repository,
+        observation_repository=observation_repository,
         relation_repository=relation_repository,
         search_writer=search_service,
         frontmatter_storage=file_service,
@@ -453,7 +457,7 @@ async def test_mutual_relation_generations_complete_under_concurrent_persistence
     )
     assert seed_result.errors == []
 
-    original_update = entity_service.update_entity_and_observations
+    original_update = entity_service.update_markdown_entity_fields
 
     # Batch direction: both persistence transactions hold their source Entity lock
     # before continuing. The old path then inserted A -> B and B -> A in those same
@@ -468,7 +472,7 @@ async def test_mutual_relation_generations_complete_under_concurrent_persistence
 
     monkeypatch.setattr(
         entity_service,
-        "update_entity_and_observations",
+        "update_markdown_entity_fields",
         synchronized_batch_update,
     )
     await write_note(
@@ -508,7 +512,7 @@ async def test_mutual_relation_generations_complete_under_concurrent_persistence
 
     monkeypatch.setattr(
         entity_service,
-        "update_entity_and_observations",
+        "update_markdown_entity_fields",
         synchronized_single_file_update,
     )
     await write_note(
@@ -542,12 +546,46 @@ async def test_mutual_relation_generations_complete_under_concurrent_persistence
             session,
             [alpha.id, beta.id],
         )
+        observations_by_entity_id = {
+            alpha.id: await observation_repository.find_by_entity(session, alpha.id),
+            beta.id: await observation_repository.find_by_entity(session, beta.id),
+        }
         relations = await relation_repository.find_all(session)
 
     generation_by_entity_id = {
         note_content.entity_id: note_content.db_version for note_content in note_contents
     }
     assert generation_by_entity_id == {alpha.id: 3, beta.id: 3}
+    expected_observation = {
+        ("generation", "Single-file generation observation", None, ()),
+    }
+    assert {
+        entity_id: {
+            (
+                observation.category,
+                observation.content,
+                observation.context,
+                tuple(observation.tags or ()),
+            )
+            for observation in observations
+        }
+        for entity_id, observations in observations_by_entity_id.items()
+    } == {
+        alpha.id: expected_observation,
+        beta.id: expected_observation,
+    }
+    observation_keys = [
+        (
+            entity_id,
+            observation.category,
+            observation.content,
+            observation.context,
+            tuple(observation.tags or ()),
+        )
+        for entity_id, observations in observations_by_entity_id.items()
+        for observation in observations
+    ]
+    assert len(observation_keys) == len(set(observation_keys))
     assert {
         (
             relation.from_id,

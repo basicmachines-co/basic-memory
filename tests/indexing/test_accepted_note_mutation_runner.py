@@ -46,8 +46,9 @@ from basic_memory.repository import (
     AcceptedObservationWrite,
     AcceptedRelationWrite,
 )
-from basic_memory.repository.relation_repository import RelationGenerationWriteResult
 from basic_memory.repository.entity_repository import AcceptedPendingEntityWrite
+from basic_memory.repository.observation_repository import ObservationGenerationWriteResult
+from basic_memory.repository.relation_repository import RelationGenerationWriteResult
 from basic_memory.runtime.note_content import RuntimeAcceptedNoteResponse
 from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.schemas.request import EditEntityRequest
@@ -474,17 +475,17 @@ class _MutationLookupRepositories:
 
 
 class _ObservationRepository:
-    def __init__(self) -> None:
-        self.calls: list[tuple[int, Sequence[AcceptedObservationWrite]]] = []
-
-    async def replace_accepted_observations(
+    async def replace_observations_for_generation(
         self,
         session: AsyncSession,
+        *,
         entity_id: int,
+        generation: int,
         observations: Sequence[AcceptedObservationWrite],
-    ) -> None:
-        _ = session
-        self.calls.append((entity_id, list(observations)))
+    ) -> ObservationGenerationWriteResult:
+        raise AssertionError(
+            "observation publication was not expected inside the accepted transaction"
+        )
 
 
 class _RelationRepository:
@@ -1755,12 +1756,8 @@ def _prepared_with_graph(
 
 
 @pytest.mark.asyncio
-async def test_run_accepted_note_create_persists_graph_rows() -> None:
-    """Create persists observations/relations in the accept transaction (issue #1076).
-
-    Regression for the DB-first write that returned 201 but left the observation
-    and relation tables empty until a later index_file pass.
-    """
+async def test_run_accepted_note_create_returns_graph_publication() -> None:
+    """Create returns the complete graph for fenced post-commit publication."""
     session = cast(AsyncSession, object())
     observations = [
         AcceptedObservationWrite(
@@ -1801,11 +1798,13 @@ async def test_run_accepted_note_create_persists_graph_rows() -> None:
 
     change = result.change
     assert change.status_code == 201
-    # Observations stay with accepted content; relations publish after commit.
-    assert observation_repository.calls == [(entity.id, observations)]
     assert relation_repository.calls == []
     assert result.relation_publication is not None
     assert result.relation_publication.generation == note_content.db_version
+    assert [observation.content for observation in result.relation_publication.observations] == [
+        "Ada Acceptance",
+        "Engineer",
+    ]
     assert result.relation_publication.relations[0].target_name == "XSYS Target"
 
 
@@ -1868,8 +1867,8 @@ async def test_run_accepted_note_create_pre_resolves_only_unambiguous_self_links
 
 
 @pytest.mark.asyncio
-async def test_run_accepted_note_update_replaces_graph_rows() -> None:
-    """A PUT replace rewrites the note's full observation/relation set (issue #1076)."""
+async def test_run_accepted_note_update_returns_replacement_graph() -> None:
+    """A PUT returns the note's full replacement graph for fenced publication."""
     session = _MutationSession()
     observations = [
         AcceptedObservationWrite(content="Replaced", category="note", context=None, tags=None)
@@ -1907,15 +1906,15 @@ async def test_run_accepted_note_update_replaces_graph_rows() -> None:
 
     change = result.change
     assert change.status_code == 200
-    assert observation_repository.calls == [(entity.id, observations)]
     assert relation_repository.calls == []
     assert result.relation_publication is not None
+    assert result.relation_publication.observations[0].content == "Replaced"
     assert result.relation_publication.relations[0].target_name == "Other"
 
 
 @pytest.mark.asyncio
-async def test_run_accepted_note_edit_clears_graph_when_markdown_drops_it() -> None:
-    """An edit that removes all observations/relations clears the graph rows (issue #1076)."""
+async def test_run_accepted_note_edit_returns_empty_replacement_graph() -> None:
+    """An edit that drops the graph returns empty sets for fenced cleanup."""
     session = _MutationSession()
     prepared = _prepared_with_graph(observations=[], relations=[])
     entity = _entity(file_path="notes/accepted.md")
@@ -1952,8 +1951,7 @@ async def test_run_accepted_note_edit_clears_graph_when_markdown_drops_it() -> N
 
     change = result.change
     assert change.status_code == 200
-    # Empty observations clear in the transaction; empty relations still emit cleanup work.
-    assert observation_repository.calls == [(entity.id, [])]
     assert relation_repository.calls == []
     assert result.relation_publication is not None
+    assert result.relation_publication.observations == ()
     assert result.relation_publication.relations == ()

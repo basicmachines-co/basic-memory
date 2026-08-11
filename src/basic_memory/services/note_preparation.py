@@ -98,6 +98,7 @@ class PreparedEntityMove:
     markdown_content: str
     search_content: str
     permalink: str | None
+    observations: tuple[AcceptedObservationWrite, ...] = ()
     relations: tuple[AcceptedRelationWrite, ...] = ()
 
 
@@ -828,6 +829,15 @@ async def prepare_move_entity_content(
         markdown_content=markdown_content,
         search_content=accepted_search_content_from_markdown(markdown_content),
         permalink=permalink,
+        observations=tuple(
+            AcceptedObservationWrite(
+                content=observation.content,
+                category=observation.category,
+                context=observation.context,
+                tags=observation.tags,
+            )
+            for observation in entity_markdown.observations
+        ),
         relations=tuple(
             AcceptedRelationWrite(
                 relation_type=relation.type,

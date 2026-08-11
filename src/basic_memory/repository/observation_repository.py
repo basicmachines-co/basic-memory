@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.interfaces import LoaderOption
 
 from basic_memory.models import Observation
+from basic_memory.repository.relation_repository import current_relation_generation_statement
 from basic_memory.repository.repository import Repository
 
 
@@ -27,8 +28,17 @@ class AcceptedObservationWrite:
     tags: list[str] | None
 
 
+@dataclass(frozen=True, slots=True)
+class ObservationGenerationWriteResult:
+    """Whether a guarded observation replacement still owned its source generation."""
+
+    generation_is_current: bool
+
+
 class ObservationRepository(Repository[Observation]):
     """Repository for Observation model with memory-specific operations."""
+
+    project_id: int
 
     def __init__(self, project_id: int):
         """Initialize with project_id filter.
@@ -96,23 +106,30 @@ class ObservationRepository(Repository[Observation]):
 
         return observations_by_entity
 
-    async def replace_accepted_observations(
+    async def replace_observations_for_generation(
         self,
         session: AsyncSession,
+        *,
         entity_id: int,
+        generation: int,
         observations: Sequence[AcceptedObservationWrite],
-    ) -> None:
-        """Replace an entity's observations with the accepted markdown set.
+    ) -> ObservationGenerationWriteResult:
+        """Replace observations only while the accepted content generation is current."""
+        # This helper is a shared note_content fence despite its historical relation name.
+        current_generation = await session.scalar(
+            current_relation_generation_statement(
+                project_id=self.project_id,
+                entity_id=entity_id,
+                generation=generation,
+            )
+        )
+        # Trigger: a newer accepted note generation won before this transaction acquired the row.
+        # Why: replacing here would publish stale observations over the newer Markdown projection.
+        # Outcome: leave every existing observation untouched and let the current writer publish.
+        if current_generation is None:
+            return ObservationGenerationWriteResult(generation_is_current=False)
 
-        Observations are owned by the markdown file, so an accepted write
-        replaces the prior set rather than merging — the same delete-then-insert
-        semantics ``EntityService.update_entity_and_observations`` uses for the
-        file-indexing path. Runs inside the caller's transaction so the graph
-        commits atomically with the note_content and search rows (issue #1076).
-        """
         await self.delete_by_fields(session, entity_id=entity_id)
-        if not observations:
-            return
         rows = [
             Observation(
                 project_id=self.project_id,
@@ -125,3 +142,4 @@ class ObservationRepository(Repository[Observation]):
             for obs in observations
         ]
         await self.add_all_no_return(session, rows)
+        return ObservationGenerationWriteResult(generation_is_current=True)

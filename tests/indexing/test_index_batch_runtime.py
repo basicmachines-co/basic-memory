@@ -30,7 +30,7 @@ from basic_memory.indexing.models import (
 from basic_memory.indexing.note_content_reconciliation import NoteContentReconciliationResult
 from basic_memory.indexing.note_content_reconciler import NoteContentReconciler
 from basic_memory.models import Entity
-from basic_memory.repository import EntityRepository, RelationRepository
+from basic_memory.repository import EntityRepository, ObservationRepository, RelationRepository
 from basic_memory.services import EntityService
 
 
@@ -371,6 +371,7 @@ def test_build_default_index_batch_runtime_composes_repository_backed_stack() ->
     app_config = cast(BasicMemoryConfig, object())
     entity_service = cast(EntityService, object())
     entity_repository = cast(EntityRepository, object())
+    observation_repository = cast(ObservationRepository, object())
     relation_repository = cast(RelationRepository, object())
     search_writer = RecordingSearchWriter()
     storage = RecordingFrontmatterStorage()
@@ -382,6 +383,7 @@ def test_build_default_index_batch_runtime_composes_repository_backed_stack() ->
         app_config=app_config,
         entity_service=entity_service,
         entity_repository=entity_repository,
+        observation_repository=observation_repository,
         relation_repository=relation_repository,
         search_writer=search_writer,
         frontmatter_storage=storage,
@@ -400,6 +402,7 @@ def test_build_default_index_batch_runtime_composes_repository_backed_stack() ->
     assert batch_indexer.app_config is app_config
     assert batch_indexer.entity_service is entity_service
     assert batch_indexer.entity_repository is entity_repository
+    assert batch_indexer.observation_repository is observation_repository
     assert batch_indexer.relation_repository is relation_repository
     assert batch_indexer.session_maker is session_maker
     # Regression: the batch/scan path must pass the search writer straight through
@@ -440,6 +443,7 @@ async def test_build_default_index_batch_runtime_search_indexes_non_markdown_ent
         app_config=cast(BasicMemoryConfig, object()),
         entity_service=cast(EntityService, object()),
         entity_repository=cast(EntityRepository, object()),
+        observation_repository=cast(ObservationRepository, object()),
         relation_repository=cast(RelationRepository, object()),
         search_writer=search_writer,
         frontmatter_storage=RecordingFrontmatterStorage(),
