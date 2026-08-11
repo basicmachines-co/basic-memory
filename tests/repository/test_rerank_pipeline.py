@@ -6,9 +6,18 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import basic_memory.repository.postgres_search_repository as postgres_search_repository_module
+import basic_memory.repository.search_repository as search_repository_module
+import basic_memory.repository.sqlite_search_repository as sqlite_search_repository_module
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
+from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.search_index_row import SearchIndexRow
-from basic_memory.repository.rerank_provider import demote_tail_scores, validate_rerank_scores
+from basic_memory.repository.rerank_provider import (
+    build_rerank_document,
+    demote_tail_scores,
+    validate_rerank_scores,
+)
+from basic_memory.repository.search_repository import create_search_repository
 from basic_memory.repository.search_repository_base import RERANK_POOL_CHUNK_FANOUT
 from basic_memory.repository.semantic_errors import (
     RerankProviderContractError,
@@ -17,6 +26,8 @@ from basic_memory.repository.semantic_errors import (
 )
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
+
+type BackendSearchRepository = SQLiteSearchRepository | PostgresSearchRepository
 
 
 class _StubEmbeddingProvider:
@@ -59,9 +70,11 @@ class _FakeReranker:
     def __init__(self, score_by_marker: dict[str, float]):
         self.score_by_marker = score_by_marker
         self.calls = 0
+        self.document_batches: list[list[str]] = []
 
     async def rerank(self, query: str, documents: list[str]) -> list[float]:
         self.calls += 1
+        self.document_batches.append(documents)
         scores = []
         for doc in documents:
             score = 0.0
@@ -90,7 +103,11 @@ class _ExplodingReranker:
 
     model_name = "boom"
 
+    def __init__(self) -> None:
+        self.calls = 0
+
     async def rerank(self, query: str, documents: list[str]) -> list[float]:
+        self.calls += 1
         raise RerankTransientError("cross-encoder backend unreachable")
 
     def runtime_log_attrs(self) -> dict[str, Any]:
@@ -485,22 +502,45 @@ async def test_rerank_paginate_surfaces_permanent_faults(exc):
         await repo._rerank_and_paginate("auth", [_row(id=1), _row(id=2)], offset=0, limit=10)
 
 
-# --- End-to-end through the SQLite repo ---
+# --- End-to-end through both repository backends ---
 
 
-def _enable_semantic(repo: SQLiteSearchRepository) -> None:
-    try:
-        import sqlite_vec  # noqa: F401
-    except ImportError:  # pragma: no cover
-        pytest.skip("sqlite-vec dependency is required for vector search tests.")
-    repo._semantic_enabled = True
-    repo._embedding_provider = _StubEmbeddingProvider()
-    repo._vector_dimensions = 4
-    repo._vector_tables_initialized = False
-    repo._semantic_min_similarity = 0.0
+def _semantic_search_repository(
+    session_maker: Any,
+    project_id: int,
+    app_config: BasicMemoryConfig,
+    **config_updates: object,
+) -> BackendSearchRepository:
+    config = app_config.model_copy(
+        update={
+            "semantic_search_enabled": True,
+            "semantic_min_similarity": 0.0,
+            **config_updates,
+        }
+    )
+    repository_type = (
+        PostgresSearchRepository
+        if config.database_backend == DatabaseBackend.POSTGRES
+        else SQLiteSearchRepository
+    )
+    return repository_type(
+        session_maker,
+        project_id=project_id,
+        app_config=config,
+        embedding_provider=_StubEmbeddingProvider(),
+    )
 
 
-async def _index_two_auth_notes(repo: SQLiteSearchRepository) -> None:
+@pytest.fixture
+def rerank_search_repository(
+    session_maker: Any,
+    test_project: Any,
+    app_config: BasicMemoryConfig,
+) -> BackendSearchRepository:
+    return _semantic_search_repository(session_maker, test_project.id, app_config)
+
+
+async def _index_two_auth_notes(repo: BackendSearchRepository) -> None:
     await repo.init_search_index()
     await repo.bulk_index_items(
         [
@@ -525,17 +565,13 @@ async def _index_two_auth_notes(repo: SQLiteSearchRepository) -> None:
 
 
 @pytest.mark.asyncio
-async def test_vector_search_applies_reranker(search_repository):
-    if not isinstance(search_repository, SQLiteSearchRepository):
-        pytest.skip("sqlite-vec repository behavior is local SQLite-only.")
-
-    _enable_semantic(search_repository)
-    await _index_two_auth_notes(search_repository)
+async def test_vector_search_applies_reranker(rerank_search_repository):
+    await _index_two_auth_notes(rerank_search_repository)
     # Promote the note that vector similarity alone leaves tied/second.
     reranker = _FakeReranker({"Alpha": 0.1, "Bravo": 0.9})
-    search_repository._rerank_provider = reranker
+    rerank_search_repository._rerank_provider = reranker
 
-    results = await search_repository.search(
+    results = await rerank_search_repository.search(
         search_text="auth session token",
         retrieval_mode=SearchRetrievalMode.VECTOR,
         limit=5,
@@ -552,21 +588,17 @@ async def test_vector_search_applies_reranker(search_repository):
 
 @pytest.mark.asyncio
 async def test_vector_search_expands_tail_from_stable_rerank_pool(
-    search_repository,
+    rerank_search_repository,
     monkeypatch,
 ):
     """Vector retrieval keeps its fixed prefix when a request also needs tail rows."""
-    if not isinstance(search_repository, SQLiteSearchRepository):
-        pytest.skip("sqlite-vec repository behavior is local SQLite-only.")
-
-    _enable_semantic(search_repository)
-    await _index_two_auth_notes(search_repository)
-    search_repository._semantic_vector_k = 5
-    search_repository._reranker_candidates = 2
-    search_repository._rerank_provider = _FakeReranker({"Alpha": 0.1, "Bravo": 0.9})
+    await _index_two_auth_notes(rerank_search_repository)
+    rerank_search_repository._semantic_vector_k = 5
+    rerank_search_repository._reranker_candidates = 2
+    rerank_search_repository._rerank_provider = _FakeReranker({"Alpha": 0.1, "Bravo": 0.9})
 
     candidate_limits: list[int] = []
-    run_vector_query = search_repository._run_vector_query
+    run_vector_query = rerank_search_repository._run_vector_query
 
     async def record_vector_query(
         session: Any,
@@ -576,9 +608,9 @@ async def test_vector_search_expands_tail_from_stable_rerank_pool(
         candidate_limits.append(candidate_limit)
         return await run_vector_query(session, query_embedding, candidate_limit)
 
-    monkeypatch.setattr(search_repository, "_run_vector_query", record_vector_query)
+    monkeypatch.setattr(rerank_search_repository, "_run_vector_query", record_vector_query)
 
-    results = await search_repository.search(
+    results = await rerank_search_repository.search(
         search_text="auth session token",
         retrieval_mode=SearchRetrievalMode.VECTOR,
         limit=3,
@@ -589,12 +621,8 @@ async def test_vector_search_expands_tail_from_stable_rerank_pool(
 
 
 @pytest.mark.asyncio
-async def test_vector_slow_query_timing_includes_reranker(search_repository, monkeypatch):
-    if not isinstance(search_repository, SQLiteSearchRepository):
-        pytest.skip("sqlite-vec repository behavior is local SQLite-only.")
-
-    _enable_semantic(search_repository)
-    await _index_two_auth_notes(search_repository)
+async def test_vector_slow_query_timing_includes_reranker(rerank_search_repository, monkeypatch):
+    await _index_two_auth_notes(rerank_search_repository)
     clock = {"now": 0.0}
     reranker = _FakeReranker({"Alpha": 0.1, "Bravo": 0.9})
     original_rerank = reranker.rerank
@@ -603,7 +631,7 @@ async def test_vector_slow_query_timing_includes_reranker(search_repository, mon
         clock["now"] = 3.0
         return await original_rerank(query, documents)
 
-    search_repository._rerank_provider = reranker
+    rerank_search_repository._rerank_provider = reranker
     monkeypatch.setattr(reranker, "rerank", slow_rerank)
     monkeypatch.setattr(
         "basic_memory.repository.search_repository_base.time.perf_counter",
@@ -615,7 +643,7 @@ async def test_vector_slow_query_timing_includes_reranker(search_repository, mon
         warning,
     )
 
-    await search_repository.search(
+    await rerank_search_repository.search(
         search_text="auth session token",
         retrieval_mode=SearchRetrievalMode.VECTOR,
         limit=5,
@@ -627,17 +655,13 @@ async def test_vector_slow_query_timing_includes_reranker(search_repository, mon
 
 
 @pytest.mark.asyncio
-async def test_hybrid_search_reranks_once(search_repository):
+async def test_hybrid_search_reranks_once(rerank_search_repository):
     """Hybrid reranks the fused result exactly once — not again inside its vector leg."""
-    if not isinstance(search_repository, SQLiteSearchRepository):
-        pytest.skip("sqlite-vec repository behavior is local SQLite-only.")
-
-    _enable_semantic(search_repository)
-    await _index_two_auth_notes(search_repository)
+    await _index_two_auth_notes(rerank_search_repository)
     reranker = _FakeReranker({"Alpha": 0.1, "Bravo": 0.9})
-    search_repository._rerank_provider = reranker
+    rerank_search_repository._rerank_provider = reranker
 
-    results = await search_repository.search(
+    results = await rerank_search_repository.search(
         search_text="auth session token",
         retrieval_mode=SearchRetrievalMode.HYBRID,
         limit=5,
@@ -652,21 +676,17 @@ async def test_hybrid_search_reranks_once(search_repository):
 
 @pytest.mark.asyncio
 async def test_hybrid_search_preserves_candidate_windows(
-    search_repository,
+    rerank_search_repository,
     monkeypatch,
 ):
     """Hybrid preserves legacy recall unless reranking owns the shared candidate pool."""
-    if not isinstance(search_repository, SQLiteSearchRepository):
-        pytest.skip("sqlite-vec repository behavior is local SQLite-only.")
-
-    _enable_semantic(search_repository)
-    await _index_two_auth_notes(search_repository)
-    search_repository._semantic_vector_k = 100
-    search_repository._reranker_candidates = 100
-    search_repository._rerank_provider = None
+    await _index_two_auth_notes(rerank_search_repository)
+    rerank_search_repository._semantic_vector_k = 100
+    rerank_search_repository._reranker_candidates = 100
+    rerank_search_repository._rerank_provider = None
 
     candidate_limits: list[int] = []
-    run_vector_query = search_repository._run_vector_query
+    run_vector_query = rerank_search_repository._run_vector_query
 
     async def record_vector_query(
         session: Any,
@@ -676,9 +696,9 @@ async def test_hybrid_search_preserves_candidate_windows(
         candidate_limits.append(candidate_limit)
         return await run_vector_query(session, query_embedding, candidate_limit)
 
-    monkeypatch.setattr(search_repository, "_run_vector_query", record_vector_query)
+    monkeypatch.setattr(rerank_search_repository, "_run_vector_query", record_vector_query)
 
-    baseline_results = await search_repository.search(
+    baseline_results = await rerank_search_repository.search(
         search_text="auth session token",
         retrieval_mode=SearchRetrievalMode.HYBRID,
         limit=10,
@@ -688,11 +708,11 @@ async def test_hybrid_search_preserves_candidate_windows(
     assert candidate_limits == [1000]
 
     candidate_limits.clear()
-    search_repository._semantic_vector_k = 5
-    search_repository._reranker_candidates = 20
+    rerank_search_repository._semantic_vector_k = 5
+    rerank_search_repository._reranker_candidates = 20
     reranker = _FakeReranker({"Alpha": 0.1, "Bravo": 0.9})
-    search_repository._rerank_provider = reranker
-    reranked_results = await search_repository.search(
+    rerank_search_repository._rerank_provider = reranker
+    reranked_results = await rerank_search_repository.search(
         search_text="auth session token",
         retrieval_mode=SearchRetrievalMode.HYBRID,
         limit=11,
@@ -702,7 +722,7 @@ async def test_hybrid_search_preserves_candidate_windows(
     assert candidate_limits == [80]
 
     candidate_limits.clear()
-    growing_prefix_results = await search_repository.search(
+    growing_prefix_results = await rerank_search_repository.search(
         search_text="auth session token",
         retrieval_mode=SearchRetrievalMode.HYBRID,
         limit=21,
@@ -786,17 +806,13 @@ async def test_hybrid_search_keeps_deep_tail_stable_as_candidate_window_grows(mo
 
 
 @pytest.mark.asyncio
-async def test_hybrid_search_surfaces_transient_reranker_error(search_repository):
+async def test_hybrid_search_surfaces_transient_reranker_error(rerank_search_repository):
     """Hybrid search must not replace reranked order with raw order during an outage."""
-    if not isinstance(search_repository, SQLiteSearchRepository):
-        pytest.skip("sqlite-vec repository behavior is local SQLite-only.")
-
-    _enable_semantic(search_repository)
-    await _index_two_auth_notes(search_repository)
-    search_repository._rerank_provider = _ExplodingReranker()
+    await _index_two_auth_notes(rerank_search_repository)
+    rerank_search_repository._rerank_provider = _ExplodingReranker()
 
     with pytest.raises(RerankTransientError, match="backend unreachable"):
-        await search_repository.search(
+        await rerank_search_repository.search(
             search_text="auth session token",
             retrieval_mode=SearchRetrievalMode.HYBRID,
             limit=5,
@@ -804,19 +820,15 @@ async def test_hybrid_search_surfaces_transient_reranker_error(search_repository
 
 
 @pytest.mark.asyncio
-async def test_hybrid_search_propagates_contract_error(search_repository):
+async def test_hybrid_search_propagates_contract_error(rerank_search_repository):
     """A provider-contract break (e.g. incomplete rerank response) must surface, not hide."""
-    if not isinstance(search_repository, SQLiteSearchRepository):
-        pytest.skip("sqlite-vec repository behavior is local SQLite-only.")
-
-    _enable_semantic(search_repository)
-    await _index_two_auth_notes(search_repository)
-    search_repository._rerank_provider = _PermanentFaultReranker(
+    await _index_two_auth_notes(rerank_search_repository)
+    rerank_search_repository._rerank_provider = _PermanentFaultReranker(
         RerankProviderContractError("incomplete rerank response")
     )
 
     with pytest.raises(RerankProviderContractError):
-        await search_repository.search(
+        await rerank_search_repository.search(
             search_text="auth session token",
             retrieval_mode=SearchRetrievalMode.HYBRID,
             limit=5,
@@ -824,18 +836,183 @@ async def test_hybrid_search_propagates_contract_error(search_repository):
 
 
 @pytest.mark.asyncio
-async def test_search_without_reranker_keeps_baseline(search_repository):
-    if not isinstance(search_repository, SQLiteSearchRepository):
-        pytest.skip("sqlite-vec repository behavior is local SQLite-only.")
+async def test_search_without_reranker_keeps_baseline(rerank_search_repository):
+    await _index_two_auth_notes(rerank_search_repository)
+    rerank_search_repository._rerank_provider = None
 
-    _enable_semantic(search_repository)
-    await _index_two_auth_notes(search_repository)
-    search_repository._rerank_provider = None
-
-    results = await search_repository.search(
+    results = await rerank_search_repository.search(
         search_text="auth session token",
         retrieval_mode=SearchRetrievalMode.VECTOR,
         limit=5,
     )
     # Vector similarity ranks the plain-auth note above the "deep"-tilted one.
     assert [r.permalink for r in results] == ["specs/alpha", "specs/bravo"]
+
+
+@pytest.mark.asyncio
+async def test_fts_title_and_permalink_searches_never_call_reranker(
+    rerank_search_repository,
+):
+    await _index_two_auth_notes(rerank_search_repository)
+    rerank_search_repository._rerank_provider = None
+    searches = {
+        "text": {"search_text": "auth", "retrieval_mode": SearchRetrievalMode.FTS},
+        "title": {"title": "Alpha Auth Guide"},
+        "permalink": {"permalink": "specs/alpha"},
+    }
+
+    baseline = {
+        name: await rerank_search_repository.search(**parameters)
+        for name, parameters in searches.items()
+    }
+    exploding_reranker = _ExplodingReranker()
+    rerank_search_repository._rerank_provider = exploding_reranker
+    guarded = {
+        name: await rerank_search_repository.search(**parameters)
+        for name, parameters in searches.items()
+    }
+
+    assert all(baseline[name] for name in searches)
+    assert guarded == baseline
+    assert exploding_reranker.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_reranker_max_document_chars_config_reaches_provider(
+    session_maker,
+    test_project,
+    app_config,
+):
+    max_chars = 12
+    repository = _semantic_search_repository(
+        session_maker,
+        test_project.id,
+        app_config,
+        reranker_max_document_chars=max_chars,
+    )
+    await _index_two_auth_notes(repository)
+    reranker = _FakeReranker({"Alpha": 0.1, "Bravo": 0.9})
+    repository._rerank_provider = reranker
+
+    await repository.search(
+        search_text="auth session token",
+        retrieval_mode=SearchRetrievalMode.VECTOR,
+        limit=5,
+    )
+
+    assert reranker.document_batches == [
+        [
+            build_rerank_document(
+                "Alpha Auth Guide",
+                "auth login session token overview",
+                max_chars,
+            ),
+            build_rerank_document(
+                "Bravo Auth Guide",
+                "auth login session token deep dive",
+                max_chars,
+            ),
+        ]
+    ]
+
+
+@pytest.mark.parametrize(
+    ("backend", "expected_type"),
+    [
+        (DatabaseBackend.SQLITE, SQLiteSearchRepository),
+        (DatabaseBackend.POSTGRES, PostgresSearchRepository),
+    ],
+)
+def test_create_search_repository_injects_reranker_for_both_backends(
+    monkeypatch,
+    backend,
+    expected_type,
+):
+    reranker = _FakeReranker({})
+    embedding_provider = _StubEmbeddingProvider()
+    vector_index = MagicMock()
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/test"},
+        default_project="test-project",
+        database_backend=backend,
+        semantic_search_enabled=True,
+    )
+    monkeypatch.setattr(
+        search_repository_module,
+        "create_embedding_provider",
+        lambda _config: embedding_provider,
+    )
+    monkeypatch.setattr(
+        search_repository_module,
+        "create_semantic_vector_index",
+        lambda **_kwargs: (
+            "pgvector" if backend == DatabaseBackend.POSTGRES else "sqlite-vec",
+            vector_index,
+        ),
+    )
+    monkeypatch.setattr(
+        search_repository_module,
+        "create_rerank_provider",
+        lambda _config: reranker,
+    )
+
+    repository = create_search_repository(
+        MagicMock(),
+        project_id=1,
+        app_config=config,
+        database_backend=backend,
+    )
+
+    assert isinstance(repository, expected_type)
+    assert repository._rerank_provider is reranker
+
+
+@pytest.mark.parametrize(
+    ("repository_type", "repository_module", "backend"),
+    [
+        (
+            SQLiteSearchRepository,
+            sqlite_search_repository_module,
+            DatabaseBackend.SQLITE,
+        ),
+        (
+            PostgresSearchRepository,
+            postgres_search_repository_module,
+            DatabaseBackend.POSTGRES,
+        ),
+    ],
+)
+@pytest.mark.parametrize("semantic_search_enabled", [False, True])
+def test_repository_self_resolves_reranker_only_when_semantic_search_is_enabled(
+    monkeypatch,
+    repository_type,
+    repository_module,
+    backend,
+    semantic_search_enabled,
+):
+    reranker = _FakeReranker({})
+    resolver = MagicMock(return_value=reranker)
+    monkeypatch.setattr(repository_module, "create_rerank_provider", resolver)
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/test"},
+        default_project="test-project",
+        database_backend=backend,
+        semantic_search_enabled=semantic_search_enabled,
+    )
+
+    repository = repository_type(
+        MagicMock(),
+        project_id=1,
+        app_config=config,
+        embedding_provider=_StubEmbeddingProvider(),
+        vector_index=MagicMock(),
+    )
+
+    if semantic_search_enabled:
+        resolver.assert_called_once_with(config)
+        assert repository._rerank_provider is reranker
+    else:
+        resolver.assert_not_called()
+        assert repository._rerank_provider is None
