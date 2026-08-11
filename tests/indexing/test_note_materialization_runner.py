@@ -24,6 +24,7 @@ from basic_memory.indexing.note_materialization_runner import (
 )
 from basic_memory.indexing.note_content_reconciliation import NoteContentState
 from basic_memory.models import Entity, NoteContent
+from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.note_file_vacate_repository import NoteFileVacateRepository
 from basic_memory.runtime.cleanup import RuntimeNoteFileDeleteJobRequest
 from basic_memory.runtime.note_content import (
@@ -533,6 +534,7 @@ async def test_repository_note_materialization_publisher_updates_current_written
     session = FakeRepositorySession(entity=entity, note_content=note_content)
     session_lock = FakeSessionLock()
     repository = RecordingNoteContentRepository()
+    entity_updates: list[tuple[AsyncSession, int, dict[str, object]]] = []
     cleared_vacate_paths: list[tuple[AsyncSession, str]] = []
     scoped_session = RecordingScopedSession(
         scoped_session=FakeScopedSession(session),
@@ -540,6 +542,16 @@ async def test_repository_note_materialization_publisher_updates_current_written
     )
 
     with pytest.MonkeyPatch.context() as monkeypatch:
+
+        async def record_entity_update_fields(
+            entity_repository: EntityRepository,
+            current_session: AsyncSession,
+            entity_id: int,
+            entity_data: dict[str, object],
+        ) -> bool:
+            assert entity_repository.project_id == 7
+            entity_updates.append((current_session, entity_id, entity_data))
+            return True
 
         async def record_clear_vacate_path(
             vacate_repository: NoteFileVacateRepository,
@@ -553,6 +565,10 @@ async def test_repository_note_materialization_publisher_updates_current_written
         monkeypatch.setattr(
             "basic_memory.indexing.note_materialization_runner.db.scoped_session",
             scoped_session,
+        )
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_materialization_runner.EntityRepository.update_fields",
+            record_entity_update_fields,
         )
         monkeypatch.setattr(
             "basic_memory.indexing.note_materialization_runner."
@@ -576,7 +592,7 @@ async def test_repository_note_materialization_publisher_updates_current_written
     assert len(session.scalar_statements) == 2
     assert "FROM note_content" in str(session.scalar_statements[0])
     assert "FROM entity" in str(session.scalar_statements[1])
-    assert all("FOR UPDATE" in str(statement) for statement in session.scalar_statements)
+    assert all("FOR UPDATE" not in str(statement) for statement in session.scalar_statements)
     assert repository.calls == [
         (
             cast(AsyncSession, session),
@@ -593,9 +609,17 @@ async def test_repository_note_materialization_publisher_updates_current_written
         )
     ]
     assert entity.updated_at == semantic_updated_at
-    assert entity.mtime == written.file_updated_at.timestamp()
-    assert entity.size == len(b"# A note\n")
-    assert session.flush_count == 1
+    assert entity_updates == [
+        (
+            cast(AsyncSession, session),
+            42,
+            {
+                "mtime": written.file_updated_at.timestamp(),
+                "size": len(b"# A note\n"),
+            },
+        )
+    ]
+    assert session.flush_count == 0
     assert cleared_vacate_paths == [(cast(AsyncSession, session), "notes/a.md")]
 
 
@@ -620,9 +644,17 @@ async def test_repository_note_materialization_publisher_records_stale_written_f
     )
 
     with pytest.MonkeyPatch.context() as monkeypatch:
+
+        async def fail_entity_update_fields(*args: object, **kwargs: object) -> bool:
+            raise AssertionError("stale publish must not update Entity")
+
         monkeypatch.setattr(
             "basic_memory.indexing.note_materialization_runner.db.scoped_session",
             scoped_session,
+        )
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_materialization_runner.EntityRepository.update_fields",
+            fail_entity_update_fields,
         )
         result = await RepositoryNoteMaterializationPublisher(
             session_maker=cast(async_sessionmaker[AsyncSession], object()),
@@ -653,6 +685,270 @@ async def test_repository_note_materialization_publisher_records_stale_written_f
         )
     ]
     # The entity metadata update belongs to the newer version's publish.
+    assert session.flush_count == 0
+
+
+@pytest.mark.asyncio
+async def test_repository_note_materialization_publisher_handles_entity_missing_before_cas() -> (
+    None
+):
+    request = materialization_request()
+    prepared = prepared_write(request)
+    written = written_file()
+    note_content = materialization_note_content()
+    session = FakeRepositorySession(entity=None, note_content=note_content)
+    repository = RecordingNoteContentRepository()
+    cleared_vacate_paths: list[str] = []
+    scoped_session = RecordingScopedSession(
+        scoped_session=FakeScopedSession(session),
+        opened_session_makers=[],
+    )
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+
+        async def fail_entity_update_fields(*args: object, **kwargs: object) -> bool:
+            raise AssertionError("missing Entity must stop before metadata update")
+
+        async def record_clear_vacate_path(
+            vacate_repository: NoteFileVacateRepository,
+            current_session: AsyncSession,
+            *,
+            file_path: str,
+        ) -> None:
+            cleared_vacate_paths.append(file_path)
+
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_materialization_runner.db.scoped_session",
+            scoped_session,
+        )
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_materialization_runner.EntityRepository.update_fields",
+            fail_entity_update_fields,
+        )
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_materialization_runner."
+            "NoteFileVacateRepository.clear_vacate_path",
+            record_clear_vacate_path,
+        )
+        result = await RepositoryNoteMaterializationPublisher(
+            session_maker=cast(async_sessionmaker[AsyncSession], object()),
+            note_content_store=lambda project_id: repository,
+        ).publish_written_file_state(request, prepared, written)
+
+    assert result == RuntimeNoteMaterializationResult(
+        entity_id=42,
+        status=RuntimeNoteMaterializationStatus.missing,
+        reason="entity disappeared after file write: 42",
+        file_path="notes/a.md",
+        file_checksum="new-file-sum",
+    )
+    assert repository.calls == []
+    assert cleared_vacate_paths == []
+    assert session.flush_count == 0
+
+
+@pytest.mark.asyncio
+async def test_repository_note_materialization_publisher_handles_entity_missing_after_cas() -> None:
+    request = materialization_request()
+    prepared = prepared_write(request)
+    written = written_file()
+    session = FakeRepositorySession(
+        entity=materialization_entity(),
+        note_content=materialization_note_content(),
+    )
+    repository = RecordingNoteContentRepository()
+    entity_updates: list[tuple[AsyncSession, int, dict[str, object]]] = []
+    cleared_vacate_paths: list[str] = []
+    scoped_session = RecordingScopedSession(
+        scoped_session=FakeScopedSession(session),
+        opened_session_makers=[],
+    )
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+
+        async def miss_entity_update_fields(
+            entity_repository: EntityRepository,
+            current_session: AsyncSession,
+            entity_id: int,
+            entity_data: dict[str, object],
+        ) -> bool:
+            assert entity_repository.project_id == 7
+            entity_updates.append((current_session, entity_id, entity_data))
+            return False
+
+        async def record_clear_vacate_path(
+            vacate_repository: NoteFileVacateRepository,
+            current_session: AsyncSession,
+            *,
+            file_path: str,
+        ) -> None:
+            cleared_vacate_paths.append(file_path)
+
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_materialization_runner.db.scoped_session",
+            scoped_session,
+        )
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_materialization_runner.EntityRepository.update_fields",
+            miss_entity_update_fields,
+        )
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_materialization_runner."
+            "NoteFileVacateRepository.clear_vacate_path",
+            record_clear_vacate_path,
+        )
+        result = await RepositoryNoteMaterializationPublisher(
+            session_maker=cast(async_sessionmaker[AsyncSession], object()),
+            note_content_store=lambda project_id: repository,
+        ).publish_written_file_state(request, prepared, written)
+
+    assert result == RuntimeNoteMaterializationResult(
+        entity_id=42,
+        status=RuntimeNoteMaterializationStatus.missing,
+        reason="entity disappeared after file write: 42",
+        file_path="notes/a.md",
+        file_checksum="new-file-sum",
+    )
+    assert len(repository.calls) == 1
+    assert entity_updates == [
+        (
+            cast(AsyncSession, session),
+            42,
+            {
+                "mtime": written.file_updated_at.timestamp(),
+                "size": len(b"# A note\n"),
+            },
+        )
+    ]
+    assert cleared_vacate_paths == []
+    assert session.flush_count == 0
+
+
+@pytest.mark.asyncio
+async def test_repository_note_materialization_publisher_cas_loss_same_path_is_not_orphaned() -> (
+    None
+):
+    request = materialization_request()
+    prepared = prepared_write(request)
+    written = written_file()
+    session = FakeRepositorySession(
+        entity=materialization_entity(),
+        note_content=materialization_note_content(),
+    )
+    repository = RecordingNoteContentRepository()
+    lost_cas_calls: list[tuple[AsyncSession, int, dict[str, object]]] = []
+    scoped_session = RecordingScopedSession(
+        scoped_session=FakeScopedSession(session),
+        opened_session_makers=[],
+    )
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+
+        async def lose_note_content_cas(
+            current_session: AsyncSession,
+            entity_id: int,
+            **updates: object,
+        ) -> None:
+            lost_cas_calls.append((current_session, entity_id, updates))
+            return None
+
+        async def fail_entity_update_fields(*args: object, **kwargs: object) -> bool:
+            raise AssertionError("lost CAS must not update Entity")
+
+        async def fail_clear_vacate_path(*args: object, **kwargs: object) -> None:
+            raise AssertionError("lost CAS must not clear a vacate path")
+
+        monkeypatch.setattr(repository, "update_state_fields", lose_note_content_cas)
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_materialization_runner.db.scoped_session",
+            scoped_session,
+        )
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_materialization_runner.EntityRepository.update_fields",
+            fail_entity_update_fields,
+        )
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_materialization_runner."
+            "NoteFileVacateRepository.clear_vacate_path",
+            fail_clear_vacate_path,
+        )
+        result = await RepositoryNoteMaterializationPublisher(
+            session_maker=cast(async_sessionmaker[AsyncSession], object()),
+            note_content_store=lambda project_id: repository,
+        ).publish_written_file_state(request, prepared, written)
+
+    assert result.status is RuntimeNoteMaterializationStatus.stale
+    assert (
+        result.reason == "file written but a newer accepted note superseded it before publish: 42"
+    )
+    assert result.written_file_orphaned is False
+    assert len(lost_cas_calls) == 1
+    assert len(session.scalar_statements) == 3
+    assert "FROM entity" in str(session.scalar_statements[2])
+    assert session.flush_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entity_after_cas", ["moved", "missing"])
+async def test_repository_note_materialization_publisher_cas_loss_orphans_vacated_path(
+    entity_after_cas: str,
+) -> None:
+    request = materialization_request()
+    prepared = prepared_write(request)
+    written = written_file()
+    session = FakeRepositorySession(
+        entity=materialization_entity(),
+        note_content=materialization_note_content(),
+    )
+    repository = RecordingNoteContentRepository()
+    scoped_session = RecordingScopedSession(
+        scoped_session=FakeScopedSession(session),
+        opened_session_makers=[],
+    )
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+
+        async def lose_note_content_cas(
+            current_session: AsyncSession,
+            entity_id: int,
+            **updates: object,
+        ) -> None:
+            if entity_after_cas == "moved":
+                assert session.entity is not None
+                session.entity.file_path = "notes/moved.md"
+            else:
+                session.entity = None
+            return None
+
+        async def fail_entity_update_fields(*args: object, **kwargs: object) -> bool:
+            raise AssertionError("lost CAS must not update Entity")
+
+        async def fail_clear_vacate_path(*args: object, **kwargs: object) -> None:
+            raise AssertionError("lost CAS must not clear a vacate path")
+
+        monkeypatch.setattr(repository, "update_state_fields", lose_note_content_cas)
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_materialization_runner.db.scoped_session",
+            scoped_session,
+        )
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_materialization_runner.EntityRepository.update_fields",
+            fail_entity_update_fields,
+        )
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_materialization_runner."
+            "NoteFileVacateRepository.clear_vacate_path",
+            fail_clear_vacate_path,
+        )
+        result = await RepositoryNoteMaterializationPublisher(
+            session_maker=cast(async_sessionmaker[AsyncSession], object()),
+            note_content_store=lambda project_id: repository,
+        ).publish_written_file_state(request, prepared, written)
+
+    assert result.status is RuntimeNoteMaterializationStatus.stale
+    assert result.written_file_orphaned is True
+    assert len(session.scalar_statements) == 3
+    assert "FROM entity" in str(session.scalar_statements[2])
     assert session.flush_count == 0
 
 

@@ -80,13 +80,9 @@ class NoteContentRepository(Repository[NoteContent]):
         self,
         session: AsyncSession,
         entity_id: int,
-        *,
-        lock_for_update: bool = False,
     ) -> Entity:
         """Load the owning entity so duplicated identity fields stay aligned."""
         query = select(Entity).where(Entity.id == entity_id)
-        if lock_for_update:
-            query = query.with_for_update()
         result = await session.execute(query)
         entity = result.scalar_one_or_none()
         if entity is None:
@@ -304,14 +300,12 @@ class NoteContentRepository(Repository[NoteContent]):
             # from the entity (rather than mutating the ORM row) so the whole
             # write is the single conditional UPDATE whose rowcount decides the
             # race, portably across SQLite and Postgres.
-            # Materialization publishes NoteContent state and then updates Entity
-            # file metadata in the same transaction. Lock Entity first so that
-            # path cannot invert an Entity -> NoteContent indexing transaction.
-            entity = await self._load_entity_identity(
-                session,
-                entity_id,
-                lock_for_update=True,
-            )
+            # This identity read is deliberately unlocked. Reconciler and
+            # materialization callers hold no prior NoteContent claim, so an
+            # Entity lock here would invert the NoteContent-first order documented
+            # by current_relation_generation_statement and recreate the #1224
+            # deadlock. The conditional UPDATE rowcount is the only guard needed.
+            entity = await self._load_entity_identity(session, entity_id)
             result = cast(
                 CursorResult[Any],
                 await session.execute(
