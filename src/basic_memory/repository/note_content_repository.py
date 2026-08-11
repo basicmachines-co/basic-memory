@@ -305,6 +305,12 @@ class NoteContentRepository(Repository[NoteContent]):
             # Entity lock here would invert the NoteContent-first order documented
             # by current_relation_generation_statement and recreate the #1224
             # deadlock. The conditional UPDATE rowcount is the only guard needed.
+            # A project-index move can repoint entity and note_content paths
+            # without advancing db_version, so this copy can lose that race and
+            # go briefly stale. That is accepted: the identity columns are a
+            # denormalized convenience, planning always prefers Entity.file_path,
+            # and every subsequent write refreshes the copy. Serializing here
+            # would trade a self-healing drift for a deadlock class.
             entity = await self._load_entity_identity(session, entity_id)
             result = cast(
                 CursorResult[Any],

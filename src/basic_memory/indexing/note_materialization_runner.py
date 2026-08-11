@@ -432,6 +432,16 @@ class RepositoryNoteMaterializationPublisher:
             # lock is the NoteContent CAS UPDATE, preserving the canonical order in
             # current_relation_generation_statement. With no read locks held, the
             # publisher cannot anchor the lock cycle reported in #1224.
+            #
+            # Everything this publisher writes — the file on disk, Entity
+            # mtime/size, NoteContent file lineage — is derived, eventually
+            # consistent state. A concurrent accepted write or move may
+            # invalidate these snapshots at any point; when it does, the CAS
+            # below no-ops and the newer generation's own publish converges the
+            # projections. Do not "fix" an observed race here by reintroducing
+            # SELECT-time locks: every such lock rebuilds a #1224-class
+            # deadlock, while the drift it would prevent is transient and
+            # repaired by the next write's index pass.
             note_content = await session.scalar(
                 select(NoteContent).where(
                     NoteContent.entity_id == request.entity_id,
