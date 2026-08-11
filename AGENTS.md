@@ -148,6 +148,37 @@ agents must apply this skill before changing or evaluating Python code.
   handling, casts, or unapproved fallback logic
 - **No guessing**: Do not say "The issue is..." before you actually know what the issue is. Investigate first.
 
+### Consistency Model — Review Expectations
+
+Basic Memory separates canonical state from derived state, and reviews (human or automated)
+must hold them to different standards:
+
+- **Canonical state** — the markdown files on disk and the accepted `note_content` row.
+  Writes are guarded: CAS on `db_version`, generation fences, checksum-guarded file
+  operations. Correctness findings here are welcome.
+- **Derived state** — entity file metadata, observation/relation graph rows, search index
+  rows, materialized files. This is **eventually consistent by design**. It converges
+  through the next write, the next index pass, `reindex`, `doctor`, or the scheduled orphan
+  sweeper (cloud). Stale writers no-op on generation fences instead of blocking; concurrent
+  races resolve last-writer-wins.
+
+Deadlocks are always worse than temporary staleness. Do NOT raise review findings that
+propose, for derived-state paths:
+
+- adding `SELECT ... FOR UPDATE`, lock ordering, or wider/shared transactions — this class
+  of "fix" caused the production deadlock clusters (#1213, #1224) and the silent observation
+  duplication (#1214);
+- adding compensating re-checks, retry markers, or two-phase machinery for races whose
+  drift self-heals on a later write or index pass;
+- treating a window where a projection lags its canonical source as a bug, including rare
+  transient-failure windows that a later edit, `reindex`, or the orphan sweeper repairs.
+
+A derived-state race is a real finding only when it converges to a *wrong* state that no
+existing mechanism repairs, with a realistically hittable window. Name that non-converging
+end state explicitly and the mechanism gap; otherwise do not raise it. When in doubt,
+prefer the smaller, lock-free design and note the alternative in the PR discussion instead
+of a review finding.
+
 ### Literate Programming Style
 
 Code should tell a story. Comments must explain the "why" and narrative flow, not just the "what".
