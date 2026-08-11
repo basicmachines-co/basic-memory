@@ -26,7 +26,10 @@ from basic_memory.repository.search_repository import (
 from basic_memory.repository.search_query import relaxed_query_words
 from basic_memory.schemas.base import normalize_note_type
 from basic_memory.schemas.search import SearchQuery, SearchItemType, SearchRetrievalMode
-from basic_memory.runtime.vector_sync import VectorSyncBatchResult
+from basic_memory.runtime.vector_sync import (
+    VECTOR_SYNC_SAMPLE_ERROR_LIMIT,
+    VectorSyncBatchResult,
+)
 from basic_memory.services import FileService
 
 # Maximum size for content_stems field to stay under Postgres's 8KB index row limit.
@@ -516,11 +519,7 @@ class SearchService:
     ) -> VectorSyncBatchResult:
         """Refresh vector chunks for a batch of entities."""
         if not entity_ids:
-            return VectorSyncBatchResult(
-                entities_total=0,
-                entities_synced=0,
-                entities_failed=0,
-            )
+            return await self.repository.sync_entity_vectors_batch([])
 
         async with db.scoped_session(self.session_maker) as session:
             entities_by_id = {
@@ -550,30 +549,18 @@ class SearchService:
         cleanup_task = (
             self.repository.sync_entity_vectors_batch(unknown_ids) if unknown_ids else None
         )
-        eligible_task = (
-            self.repository.sync_entity_vectors_batch(
-                eligible_entity_ids,
-                progress_callback=progress_callback,
-            )
-            if eligible_entity_ids
-            else None
+        eligible_task = self.repository.sync_entity_vectors_batch(
+            eligible_entity_ids,
+            progress_callback=progress_callback,
         )
         repository_results = [
             result
             for result in await asyncio.gather(
                 cleanup_task if cleanup_task is not None else asyncio.sleep(0, result=None),
-                eligible_task if eligible_task is not None else asyncio.sleep(0, result=None),
+                eligible_task,
             )
             if result is not None
         ]
-
-        if not repository_results:
-            return VectorSyncBatchResult(
-                entities_total=len(entity_ids),
-                entities_synced=0,
-                entities_failed=0,
-                entities_skipped=len(opted_out_ids),
-            )
 
         batch_result = VectorSyncBatchResult(
             entities_total=len(entity_ids),
@@ -589,6 +576,25 @@ class SearchService:
                 failed_entity_id
                 for result in repository_results
                 for failed_entity_id in result.failed_entity_ids
+            ),
+            sample_errors=tuple(
+                dict.fromkeys(
+                    error
+                    for result in repository_results
+                    for error in result.sample_errors
+                )
+            )[:VECTOR_SYNC_SAMPLE_ERROR_LIMIT],
+            vector_index=next(
+                (result.vector_index for result in repository_results if result.vector_index),
+                "",
+            ),
+            embedding_model=next(
+                (
+                    result.embedding_model
+                    for result in repository_results
+                    if result.embedding_model
+                ),
+                "",
             ),
             chunks_total=sum(result.chunks_total for result in repository_results),
             chunks_skipped=sum(result.chunks_skipped for result in repository_results),
@@ -616,7 +622,7 @@ class SearchService:
                 eligible entity re-embeds from scratch.
 
         Returns:
-            dict with stats: total_entities, embedded, skipped, errors
+            dict with counts, sampled errors, and the active vector index/model identity
         """
         async with db.scoped_session(self.session_maker) as session:
             entities = await self.entity_repository.find_all(session)
@@ -638,6 +644,9 @@ class SearchService:
             "embedded": batch_result.entities_synced,
             "skipped": batch_result.entities_skipped,
             "errors": batch_result.entities_failed,
+            "sample_errors": batch_result.sample_errors,
+            "vector_index": batch_result.vector_index,
+            "embedding_model": batch_result.embedding_model,
         }
 
         for failed_entity_id in batch_result.failed_entity_ids:

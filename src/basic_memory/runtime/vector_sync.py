@@ -5,6 +5,8 @@ from typing import Protocol
 
 type EntityId = int
 
+VECTOR_SYNC_SAMPLE_ERROR_LIMIT = 3
+
 
 @dataclass(frozen=True, slots=True)
 class VectorSyncBatchResult:
@@ -16,6 +18,9 @@ class VectorSyncBatchResult:
     entities_deferred: int = 0
     entities_skipped: int = 0
     failed_entity_ids: tuple[EntityId, ...] = ()
+    sample_errors: tuple[str, ...] = ()
+    vector_index: str = ""
+    embedding_model: str = ""
     chunks_total: int = 0
     chunks_skipped: int = 0
     embedding_jobs_total: int = 0

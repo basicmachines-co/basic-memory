@@ -1,6 +1,7 @@
 """Tests for `bm reindex` CLI wiring."""
 
 import asyncio
+from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -14,6 +15,25 @@ import basic_memory.cli.commands.db as db_cmd  # noqa: F401
 
 
 runner = CliRunner()
+
+
+def _vector_stats(
+    *,
+    total_entities: int,
+    embedded: int,
+    skipped: int,
+    errors: int,
+    sample_errors: tuple[str, ...] = (),
+) -> dict[str, object]:
+    return {
+        "total_entities": total_entities,
+        "embedded": embedded,
+        "skipped": skipped,
+        "errors": errors,
+        "sample_errors": sample_errors,
+        "vector_index": "milvus",
+        "embedding_model": "FastEmbedEmbeddingProvider:BAAI/bge-small-en-v1.5",
+    }
 
 
 def _stub_app_config(*, semantic_search_enabled: bool = True) -> SimpleNamespace:
@@ -42,6 +62,98 @@ def _configure_reindex_cli(monkeypatch, app_config: SimpleNamespace) -> None:
         "ConfigManager",
         lambda: SimpleNamespace(config=app_config),
     )
+
+
+def _configure_embedding_runtime(
+    monkeypatch,
+    session_maker,
+    stats: Mapping[str, object],
+) -> tuple[SimpleNamespace, AsyncMock, list[str]]:
+    """Install the runtime boundaries needed to exercise the real reindex command."""
+    app_config = _stub_app_config()
+    project = SimpleNamespace(id=1, name="foo", path="/tmp/foo")
+    printed_lines: list[str] = []
+    project_index = AsyncMock(
+        return_value=SimpleNamespace(
+            total_files=1,
+            enqueued_files=1,
+            enqueued_batches=1,
+            deleted_files=0,
+        )
+    )
+
+    class StubProjectRepository:
+        async def get_active_projects(self, session):
+            return [project]
+
+    class StubSearchService:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def reindex_vectors(self, *, progress_callback=None, force_full: bool = False):
+            return dict(stats)
+
+    class SilentProgress:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args) -> bool:
+            return False
+
+        def add_task(self, *args, **kwargs) -> int:
+            return 1
+
+        def update(self, *args, **kwargs) -> None:
+            pass
+
+    _configure_reindex_cli(monkeypatch, app_config)
+    monkeypatch.setattr(db_cmd, "run_with_cleanup", lambda coro: asyncio.run(coro))
+    monkeypatch.setattr(
+        "basic_memory.services.initialization.reconcile_projects_with_config",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "basic_memory.services.initialization.recover_project_materializations",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        "basic_memory.db.get_or_create_db",
+        AsyncMock(return_value=(None, session_maker)),
+    )
+    monkeypatch.setattr("basic_memory.db.shutdown_db", AsyncMock())
+    monkeypatch.setattr("basic_memory.repository.ProjectRepository", StubProjectRepository)
+    monkeypatch.setattr(
+        "basic_memory.index.local_project.run_local_project_index_for_project",
+        project_index,
+    )
+    monkeypatch.setattr(
+        "basic_memory.repository.search_repository.create_search_repository",
+        lambda *args, **kwargs: object(),
+    )
+    monkeypatch.setattr("basic_memory.repository.EntityRepository", lambda *a, **k: object())
+    monkeypatch.setattr(
+        "basic_memory.markdown.entity_parser.EntityParser",
+        lambda *a, **k: object(),
+    )
+    monkeypatch.setattr(
+        "basic_memory.markdown.markdown_processor.MarkdownProcessor",
+        lambda *a, **k: object(),
+    )
+    monkeypatch.setattr(
+        "basic_memory.services.file_service.FileService",
+        lambda *a, **k: object(),
+    )
+    monkeypatch.setattr("basic_memory.services.search_service.SearchService", StubSearchService)
+    monkeypatch.setattr(db_cmd, "Progress", SilentProgress)
+    monkeypatch.setattr(
+        db_cmd.console,
+        "print",
+        lambda message="", *args, **kwargs: printed_lines.append(str(message)),
+    )
+    return app_config, project_index, printed_lines
 
 
 def test_reindex_defaults_to_incremental_search_and_embeddings(monkeypatch):
@@ -251,7 +363,7 @@ async def test_reindex_embeddings_only_full_passes_force_full_to_vector_reindex(
                     "force_full": force_full,
                 }
             )
-            return {"total_entities": 2, "embedded": 2, "skipped": 0, "errors": 0}
+            return _vector_stats(total_entities=2, embedded=2, skipped=0, errors=0)
 
     class SilentProgress:
         def __init__(self, *args, **kwargs):
@@ -341,7 +453,7 @@ async def test_reindex_embeddings_only_warns_when_project_has_no_indexed_entitie
             pass
 
         async def reindex_vectors(self, *, progress_callback=None, force_full: bool = False):
-            return {"total_entities": 0, "embedded": 0, "skipped": 0, "errors": 0}
+            return _vector_stats(total_entities=0, embedded=0, skipped=0, errors=0)
 
     class SilentProgress:
         def __init__(self, *args, **kwargs):
@@ -483,7 +595,7 @@ async def test_reindex_full_does_not_double_embed(monkeypatch, session_maker):
 
         async def reindex_vectors(self, *, progress_callback=None, force_full: bool = False):
             vector_reindex_calls.append({"force_full": force_full})
-            return {"total_entities": 1, "embedded": 1, "skipped": 0, "errors": 0}
+            return _vector_stats(total_entities=1, embedded=1, skipped=0, errors=0)
 
     class SilentProgress:
         def __init__(self, *args, **kwargs) -> None:
@@ -537,3 +649,90 @@ async def test_reindex_full_does_not_double_embed(monkeypatch, session_maker):
     assert index_call.kwargs["embeddings"] is False
     assert len(vector_reindex_calls) == 1
     assert vector_reindex_calls[0]["force_full"] is True
+
+
+def test_reindex_total_embedding_failure_surfaces_error_and_exits_one(
+    monkeypatch,
+    session_maker,
+):
+    representative_error = "first line\nsecond line " + ("x" * 300)
+    stats = _vector_stats(
+        total_entities=3,
+        embedded=0,
+        skipped=0,
+        errors=3,
+        sample_errors=(representative_error,),
+    )
+    _app_config, project_index, printed_lines = _configure_embedding_runtime(
+        monkeypatch,
+        session_maker,
+        stats,
+    )
+
+    result = runner.invoke(app, ["reindex"])
+
+    assert result.exit_code == 1
+    project_index.assert_awaited_once()
+    output = "\n".join(printed_lines)
+    assert (
+        "Embeddings complete ([cyan]index=milvus[/cyan], "
+        "[cyan]model=FastEmbedEmbeddingProvider:BAAI/bge-small-en-v1.5[/cyan]): "
+        "0 entities embedded, 0 skipped, 3 errors"
+    ) in output
+    representative_line = next(
+        line for line in printed_lines if "Representative error:" in line
+    )
+    assert "first line second line" in representative_line
+    assert representative_line.endswith("...")
+    assert "Reindex failed: all vector embedding attempts failed." in output
+    assert "Reindex complete!" not in output
+
+
+def test_reindex_partial_embedding_failure_surfaces_error_and_exits_zero(
+    monkeypatch,
+    session_maker,
+):
+    stats = _vector_stats(
+        total_entities=3,
+        embedded=2,
+        skipped=0,
+        errors=1,
+        sample_errors=("Milvus is unavailable",),
+    )
+    _app_config, _project_index, printed_lines = _configure_embedding_runtime(
+        monkeypatch,
+        session_maker,
+        stats,
+    )
+
+    result = runner.invoke(app, ["reindex", "--embeddings"])
+
+    assert result.exit_code == 0
+    output = "\n".join(printed_lines)
+    assert "2 entities embedded, 0 skipped, 1 errors" in output
+    assert "Representative error:[/yellow] Milvus is unavailable" in output
+    assert "Reindex complete!" in output
+
+
+def test_reindex_embedding_success_reports_index_and_model_and_exits_zero(
+    monkeypatch,
+    session_maker,
+):
+    stats = _vector_stats(total_entities=2, embedded=2, skipped=0, errors=0)
+    _app_config, _project_index, printed_lines = _configure_embedding_runtime(
+        monkeypatch,
+        session_maker,
+        stats,
+    )
+
+    result = runner.invoke(app, ["reindex", "--embeddings"])
+
+    assert result.exit_code == 0
+    output = "\n".join(printed_lines)
+    assert (
+        "Embeddings complete ([cyan]index=milvus[/cyan], "
+        "[cyan]model=FastEmbedEmbeddingProvider:BAAI/bge-small-en-v1.5[/cyan]): "
+        "2 entities embedded, 0 skipped, 0 errors"
+    ) in output
+    assert "Representative error:" not in output
+    assert "Reindex complete!" in output

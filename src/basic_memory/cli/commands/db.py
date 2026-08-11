@@ -13,6 +13,7 @@ import psutil
 import typer
 from loguru import logger
 from rich.console import Console
+from rich.markup import escape
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
 from basic_memory.cli.app import app
@@ -20,6 +21,15 @@ from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.config import ConfigManager, ProjectMode
 
 console = Console()
+REINDEX_ERROR_SUMMARY_MAX_LENGTH = 240
+
+
+def _reindex_error_summary(message: str) -> str:
+    """Collapse one error to a bounded single-line CLI summary."""
+    single_line = " ".join(message.split())
+    if len(single_line) <= REINDEX_ERROR_SUMMARY_MAX_LENGTH:
+        return single_line
+    return f"{single_line[: REINDEX_ERROR_SUMMARY_MAX_LENGTH - 3].rstrip()}..."
 
 
 def _is_basic_memory_mcp(cmdline: list[str]) -> bool:
@@ -364,6 +374,8 @@ async def _reindex(
                     console.print(f"[red]Project '{project}' not found.[/red]")
                 raise typer.Exit(1)
 
+        embedding_entities_total = 0
+        embedding_errors_total = 0
         for proj in projects:
             console.print(f"\n[bold]Project: [cyan]{proj.name}[/cyan][/bold]")
 
@@ -455,11 +467,20 @@ async def _reindex(
                     progress.update(task, completed=stats["total_entities"])
 
                 console.print(
-                    f"  [green]done[/green] Embeddings complete: "
+                    "  [green]done[/green] Embeddings complete "
+                    f"([cyan]index={escape(stats['vector_index'])}[/cyan], "
+                    f"[cyan]model={escape(stats['embedding_model'])}[/cyan]): "
                     f"{stats['embedded']} entities embedded, "
                     f"{stats['skipped']} skipped, "
                     f"{stats['errors']} errors"
                 )
+                if stats["sample_errors"]:
+                    console.print(
+                        "  [yellow]Representative error:[/yellow] "
+                        f"{escape(_reindex_error_summary(stats['sample_errors'][0]))}"
+                    )
+                embedding_entities_total += stats["total_entities"]
+                embedding_errors_total += stats["errors"]
                 if stats["total_entities"] == 0 and not search:
                     # Trigger: embeddings-only mode found no database entities.
                     # Why: this mode rebuilds derived vectors; it does not discover files.
@@ -470,6 +491,13 @@ async def _reindex(
                         "database. Run [green]bm reindex[/green] to index project files first, "
                         "or start the MCP server and retry after its initial index completes."
                     )
+
+        # Trigger: every entity attempted across the selected projects failed to embed.
+        # Why: requested search work and other project summaries must still finish first.
+        # Outcome: the command preserves useful output but no longer reports false success.
+        if embedding_entities_total > 0 and embedding_errors_total == embedding_entities_total:
+            console.print("\n[red]Reindex failed: all vector embedding attempts failed.[/red]")
+            raise typer.Exit(code=1)
 
         console.print("\n[green]Reindex complete![/green]")
     finally:

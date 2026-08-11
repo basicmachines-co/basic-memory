@@ -14,7 +14,10 @@ from sqlalchemy import text
 
 from basic_memory import db
 from basic_memory.repository.semantic_chunking import VectorChunkRecord
-from basic_memory.runtime.vector_sync import VectorSyncBatchResult
+from basic_memory.runtime.vector_sync import (
+    VECTOR_SYNC_SAMPLE_ERROR_LIMIT,
+    VectorSyncBatchResult,
+)
 from basic_memory.schemas.search import SearchItemType
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle exists only for static analysis
@@ -38,6 +41,19 @@ class _VectorSyncBatchAccumulator:
     queue_wait_seconds_total: float = 0.0
     embed_seconds_total: float = 0.0
     write_seconds_total: float = 0.0
+    sample_errors: list[str] = field(default_factory=list)
+
+    def record_error(self, error: BaseException) -> None:
+        """Retain a small, distinct sample without flooding callers."""
+        message = " ".join(str(error).split())
+        if not message:
+            message = type(error).__name__
+        if (
+            message in self.sample_errors
+            or len(self.sample_errors) >= VECTOR_SYNC_SAMPLE_ERROR_LIMIT
+        ):
+            return
+        self.sample_errors.append(message)
 
     def freeze(
         self,
@@ -46,6 +62,8 @@ class _VectorSyncBatchAccumulator:
         synced_entity_ids: set[int],
         deferred_entity_ids: set[int],
         failed_entity_ids: set[int],
+        vector_index: str,
+        embedding_model: str,
     ) -> VectorSyncBatchResult:
         """Return the immutable result after entity terminal states settle."""
         return VectorSyncBatchResult(
@@ -55,6 +73,9 @@ class _VectorSyncBatchAccumulator:
             entities_deferred=len(deferred_entity_ids),
             entities_skipped=self.entities_skipped,
             failed_entity_ids=tuple(sorted(failed_entity_ids)),
+            sample_errors=tuple(self.sample_errors),
+            vector_index=vector_index,
+            embedding_model=embedding_model,
             chunks_total=self.chunks_total,
             chunks_skipped=self.chunks_skipped,
             embedding_jobs_total=self.embedding_jobs_total,
@@ -274,11 +295,15 @@ async def sync_entity_vectors_internal(
     assert repository._embedding_provider is not None
 
     total_entities = len(entity_ids)
+    vector_index = repository._semantic_vector_index_name
+    embedding_model = repository._embedding_model_key()
     if total_entities == 0:
         return VectorSyncBatchResult(
             entities_total=0,
             entities_synced=0,
             entities_failed=0,
+            vector_index=vector_index,
+            embedding_model=embedding_model,
         )
     batch_start = time.perf_counter()
     backend_name = type(repository).__name__.removesuffix("SearchRepository").lower()
@@ -336,6 +361,7 @@ async def sync_entity_vectors_internal(
                     if not continue_on_error:
                         raise prepared
                     failed_entity_ids.add(entity_id)
+                    batch_counters.record_error(prepared)
                     logger.warning(
                         "Vector batch sync entity prepare failed: project_id={project_id} "
                         "entity_id={entity_id} error={error}",
@@ -431,6 +457,7 @@ async def sync_entity_vectors_internal(
                     except Exception as exc:
                         if not continue_on_error:
                             raise
+                        batch_counters.record_error(exc)
                         affected_entity_ids = sorted({job.entity_id for job in flush_jobs})
                         failed_entity_ids.update(affected_entity_ids)
                         synced_entity_ids.difference_update(affected_entity_ids)
@@ -471,6 +498,7 @@ async def sync_entity_vectors_internal(
             except Exception as exc:
                 if not continue_on_error:
                     raise
+                batch_counters.record_error(exc)
                 affected_entity_ids = sorted({job.entity_id for job in flush_jobs})
                 failed_entity_ids.update(affected_entity_ids)
                 synced_entity_ids.difference_update(affected_entity_ids)
@@ -494,6 +522,9 @@ async def sync_entity_vectors_internal(
         # Outcome: fail-safe marks these entities as failed to avoid false positives.
         if entity_runtime:
             orphan_runtime_entities = sorted(entity_runtime.keys())
+            batch_counters.record_error(
+                RuntimeError("Vector sync left unfinished entities after flushes.")
+            )
             failed_entity_ids.update(orphan_runtime_entities)
             synced_entity_ids.difference_update(orphan_runtime_entities)
             deferred_entity_ids.difference_update(orphan_runtime_entities)
@@ -514,6 +545,8 @@ async def sync_entity_vectors_internal(
             synced_entity_ids=synced_entity_ids,
             deferred_entity_ids=deferred_entity_ids,
             failed_entity_ids=failed_entity_ids,
+            vector_index=vector_index,
+            embedding_model=embedding_model,
         )
 
         logger.info(

@@ -187,6 +187,28 @@ async def test_semantic_vector_sync_batch_skips_embed_opt_out_and_reports_skips(
 
 
 @pytest.mark.asyncio
+async def test_semantic_vector_sync_empty_batch_preserves_index_identity(
+    search_service,
+    monkeypatch,
+):
+    repository = _sqlite_repo(search_service)
+    expected = VectorSyncBatchResult(
+        entities_total=0,
+        entities_synced=0,
+        entities_failed=0,
+        vector_index="sqlite-vec",
+        embedding_model="FastEmbedEmbeddingProvider:test-model",
+    )
+    sync_batch = AsyncMock(return_value=expected)
+    monkeypatch.setattr(repository, "sync_entity_vectors_batch", sync_batch)
+
+    result = await search_service.sync_entity_vectors_batch([])
+
+    assert result is expected
+    sync_batch.assert_awaited_once_with([])
+
+
+@pytest.mark.asyncio
 async def test_embed_opt_out_note_still_participates_in_fts(
     search_service, session_maker, test_project
 ):
@@ -240,9 +262,12 @@ async def test_reindex_vectors_respects_embed_opt_out(search_service, monkeypatc
     sync_batch = AsyncMock(
         return_value=VectorSyncBatchResult(
             entities_total=2,
-            entities_synced=1,
-            entities_failed=0,
+            entities_synced=0,
+            entities_failed=1,
             entities_skipped=1,
+            sample_errors=("embedding service unavailable",),
+            vector_index="sqlite-vec",
+            embedding_model="FastEmbedEmbeddingProvider:test-model",
         )
     )
     monkeypatch.setattr(search_service, "_purge_stale_search_rows", purge_stale_rows)
@@ -257,9 +282,12 @@ async def test_reindex_vectors_respects_embed_opt_out(search_service, monkeypatc
     reconcile.assert_awaited_once()
     assert stats == {
         "total_entities": 2,
-        "embedded": 1,
+        "embedded": 0,
         "skipped": 1,
-        "errors": 0,
+        "errors": 1,
+        "sample_errors": ("embedding service unavailable",),
+        "vector_index": "sqlite-vec",
+        "embedding_model": "FastEmbedEmbeddingProvider:test-model",
     }
 
 
@@ -283,7 +311,13 @@ async def test_reindex_vectors_purges_sqlite_vectors_before_sync(search_service,
         assert entity_ids == [42]
         assert progress_callback is None
         calls.append("sync")
-        return VectorSyncBatchResult(entities_total=1, entities_synced=1, entities_failed=0)
+        return VectorSyncBatchResult(
+            entities_total=1,
+            entities_synced=1,
+            entities_failed=0,
+            vector_index="sqlite-vec",
+            embedding_model="FastEmbedEmbeddingProvider:test-model",
+        )
 
     monkeypatch.setattr(repository, "delete_stale_vector_rows", delete_stale_vector_rows)
     monkeypatch.setattr(search_service, "sync_entity_vectors_batch", sync_entity_vectors_batch)
@@ -299,6 +333,9 @@ async def test_reindex_vectors_purges_sqlite_vectors_before_sync(search_service,
         "embedded": 1,
         "skipped": 0,
         "errors": 0,
+        "sample_errors": (),
+        "vector_index": "sqlite-vec",
+        "embedding_model": "FastEmbedEmbeddingProvider:test-model",
     }
 
 
@@ -383,6 +420,8 @@ async def test_reindex_vectors_force_full_clears_project_vectors_before_resync(
             entities_total=2,
             entities_synced=2,
             entities_failed=0,
+            vector_index="sqlite-vec",
+            embedding_model="FastEmbedEmbeddingProvider:test-model",
         )
     )
     monkeypatch.setattr(search_service, "_purge_stale_search_rows", purge_stale_rows)
@@ -402,6 +441,9 @@ async def test_reindex_vectors_force_full_clears_project_vectors_before_resync(
         "embedded": 2,
         "skipped": 0,
         "errors": 0,
+        "sample_errors": (),
+        "vector_index": "sqlite-vec",
+        "embedding_model": "FastEmbedEmbeddingProvider:test-model",
     }
 
 
@@ -423,11 +465,17 @@ async def test_semantic_vector_sync_batch_cleans_up_unknown_ids(search_service, 
                 entities_synced=1,
                 entities_failed=0,
                 entities_skipped=1,
+                sample_errors=("shared failure", "cleanup failure"),
+                vector_index="sqlite-vec",
+                embedding_model="FastEmbedEmbeddingProvider:test-model",
             ),
             VectorSyncBatchResult(
                 entities_total=1,
                 entities_synced=1,
                 entities_failed=0,
+                sample_errors=("shared failure", "embedding failure", "extra failure"),
+                vector_index="sqlite-vec",
+                embedding_model="FastEmbedEmbeddingProvider:test-model",
             ),
         ]
     )
@@ -451,3 +499,10 @@ async def test_semantic_vector_sync_batch_cleans_up_unknown_ids(search_service, 
     assert result.entities_synced == 2
     assert result.entities_failed == 0
     assert result.entities_skipped == 0
+    assert result.sample_errors == (
+        "shared failure",
+        "cleanup failure",
+        "embedding failure",
+    )
+    assert result.vector_index == "sqlite-vec"
+    assert result.embedding_model == "FastEmbedEmbeddingProvider:test-model"

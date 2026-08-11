@@ -129,6 +129,8 @@ def _batch_repository(
     repository = _TestRepository()
     repository._semantic_embedding_sync_batch_size = batch_size
     monkeypatch.setattr(repository, "_embedding_provider", object())
+    monkeypatch.setattr(repository, "_embedding_model_key", Mock(return_value="test-model"))
+    repository._semantic_vector_index_name = "sqlite-vec"
     monkeypatch.setattr(repository, "_assert_semantic_available", Mock())
     monkeypatch.setattr(repository, "_ensure_vector_tables", AsyncMock())
     monkeypatch.setattr(repository, "_vector_prepare_window_size", Mock(return_value=8))
@@ -166,6 +168,8 @@ async def test_vector_sync_handles_empty_batches_and_deferred_empty_entities(
     )
 
     assert empty_result.entities_total == 0
+    assert empty_result.vector_index == "sqlite-vec"
+    assert empty_result.embedding_model == "test-model"
 
     deferred_repository = _batch_repository(
         monkeypatch,
@@ -180,6 +184,38 @@ async def test_vector_sync_handles_empty_batches_and_deferred_empty_entities(
 
     assert deferred_result.entities_deferred == 1
     assert deferred_result.entities_synced == 0
+
+
+@pytest.mark.asyncio
+async def test_vector_sync_samples_distinct_errors_with_a_small_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _batch_repository(
+        monkeypatch,
+        [
+            RuntimeError("first failure\nwith context"),
+            RuntimeError("first failure with context"),
+            ValueError("second failure"),
+            RuntimeError(),
+            RuntimeError("fourth distinct failure"),
+        ],
+    )
+
+    result = await semantic_vector_sync.sync_entity_vectors_internal(
+        repository,
+        [1, 2, 3, 4, 5],
+        progress_callback=None,
+        continue_on_error=True,
+    )
+
+    assert result.entities_failed == 5
+    assert result.sample_errors == (
+        "first failure with context",
+        "second failure",
+        "RuntimeError",
+    )
+    assert result.vector_index == "sqlite-vec"
+    assert result.embedding_model == "test-model"
 
 
 @pytest.mark.asyncio
@@ -236,6 +272,7 @@ async def test_vector_sync_handles_final_flush_errors_and_orphan_runtime(
     )
 
     assert failed_result.failed_entity_ids == (1,)
+    assert failed_result.sample_errors == ("final flush failed",)
 
     strict_repository = _batch_repository(
         monkeypatch,
@@ -267,6 +304,9 @@ async def test_vector_sync_handles_final_flush_errors_and_orphan_runtime(
     )
 
     assert orphan_result.failed_entity_ids == (1,)
+    assert orphan_result.sample_errors == (
+        "Vector sync left unfinished entities after flushes.",
+    )
 
 
 def test_vector_shard_planning_and_logging_edges(monkeypatch) -> None:
