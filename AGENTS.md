@@ -153,25 +153,33 @@ agents must apply this skill before changing or evaluating Python code.
 Basic Memory separates canonical state from derived state, and reviews (human or automated)
 must hold them to different standards:
 
-- **Canonical state** — the markdown files on disk and the accepted `note_content` row.
-  Writes are guarded: CAS on `db_version`, generation fences, checksum-guarded file
-  operations. Correctness findings here are welcome.
+- **Canonical state** — the markdown bytes of a note (on disk and as accepted
+  `note_content`). Writes are guarded: CAS on `db_version`, generation fences,
+  checksum-guarded file operations. Corrupting, wrongly rewriting, or wrongly deleting note
+  content is always a real finding, in every code path — materialization writes canonical
+  bytes into their portable file form, so the file's *content* is never "just a projection".
 - **Derived state** — entity file metadata, observation/relation graph rows, search index
-  rows, materialized files. This is **eventually consistent by design**. It converges
-  through the next write, the next index pass, `reindex`, `doctor`, or the scheduled orphan
+  rows, and materialization status/lineage (file versions, checksums, write status, *when*
+  a file catches up to its accepted row). This is **eventually consistent by design**. It
+  converges through the next write, the next index pass, `reindex`, or the scheduled orphan
   sweeper (cloud). Stale writers no-op on generation fences instead of blocking; concurrent
   races resolve last-writer-wins.
 
 Deadlocks are always worse than temporary staleness. Do NOT raise review findings that
 propose, for derived-state paths:
 
-- adding `SELECT ... FOR UPDATE`, lock ordering, or wider/shared transactions — this class
-  of "fix" caused the production deadlock clusters (#1213, #1224) and the silent observation
-  duplication (#1214);
+- adding `SELECT ... FOR UPDATE` or wider/shared transactions — this class of "fix" caused
+  the production deadlock clusters (#1213, #1224) and the silent observation duplication
+  (#1214). (Code that legitimately takes locks must still follow the canonical
+  NoteContent-first order documented by `current_relation_generation_statement`; flagging a
+  violation of that ordering IS a real finding — the ban is on adding serialization, not on
+  policing the existing protocol.);
 - adding compensating re-checks, retry markers, or two-phase machinery for races whose
   drift self-heals on a later write or index pass;
 - treating a window where a projection lags its canonical source as a bug, including rare
   transient-failure windows that a later edit, `reindex`, or the orphan sweeper repairs.
+  (`doctor` diagnoses in a temporary project; it is not a repair mechanism and does not
+  count as one.)
 
 A derived-state race is a real finding only when it converges to a *wrong* state that no
 existing mechanism repairs, with a realistically hittable window. Name that non-converging
