@@ -8,6 +8,7 @@ import threading
 import pytest
 from requests import Response, exceptions as requests_exceptions
 
+from basic_memory.config_models import DEFAULT_FASTEMBED_RERANK_MODEL
 from basic_memory.repository.fastembed_rerank_provider import FastEmbedRerankProvider
 from basic_memory.repository.semantic_errors import (
     RerankProviderContractError,
@@ -47,6 +48,12 @@ def _http_error(status_code: int) -> requests_exceptions.HTTPError:
     response = Response()
     response.status_code = status_code
     return requests_exceptions.HTTPError(f"HTTP {status_code}", response=response)
+
+
+def test_constructor_uses_configured_default_model():
+    provider = FastEmbedRerankProvider()
+
+    assert provider.model_name == DEFAULT_FASTEMBED_RERANK_MODEL
 
 
 @pytest.mark.asyncio

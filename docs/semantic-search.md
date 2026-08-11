@@ -394,6 +394,7 @@ All settings use the `BASIC_MEMORY_` environment prefix:
 | `reranker_model` | `BASIC_MEMORY_RERANKER_MODEL` | `jinaai/jina-reranker-v1-tiny-en` | Model identifier. LiteLLM requires explicit `provider/model` routing. |
 | `reranker_candidates` | `BASIC_MEMORY_RERANKER_CANDIDATES` | `20` | Number of leading retrieval results rescored on every page. Larger values can improve recall but increase latency and provider usage. |
 | `reranker_max_document_chars` | `BASIC_MEMORY_RERANKER_MAX_DOCUMENT_CHARS` | `0` | Maximum characters sent per candidate. `0` sends the full matched text; a positive cap bounds latency and request size. |
+| `reranker_timeout` | `BASIC_MEMORY_RERANKER_TIMEOUT` | `30.0` | Maximum seconds for each LiteLLM rerank request. FastEmbed runs locally and ignores this setting. |
 | `reranker_api_base` | `BASIC_MEMORY_RERANKER_API_BASE` | Unset | Optional custom endpoint for the LiteLLM provider. |
 | `reranker_api_key` | `BASIC_MEMORY_RERANKER_API_KEY` | Unset | Optional credential passed directly to LiteLLM. When unset, LiteLLM resolves provider credentials from its normal environment variables. |
 

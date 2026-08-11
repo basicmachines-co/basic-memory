@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 from requests import exceptions as requests_exceptions
 
+from basic_memory.config_models import DEFAULT_FASTEMBED_RERANK_MODEL
 from basic_memory.repository.rerank_provider import validate_rerank_scores
 from basic_memory.repository.semantic_errors import (
     RerankProviderContractError,
@@ -68,7 +69,7 @@ class FastEmbedRerankProvider:
 
     def __init__(
         self,
-        model_name: str = "Xenova/ms-marco-MiniLM-L-6-v2",
+        model_name: str = DEFAULT_FASTEMBED_RERANK_MODEL,
         *,
         cache_dir: str | None = None,
         threads: int | None = None,

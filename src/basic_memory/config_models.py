@@ -450,6 +450,12 @@ class BasicMemoryConfig(BaseSettings):
         "most-relevant matched chunk leads the text, so a modest cap keeps most of the signal.",
         ge=0,
     )
+    reranker_timeout: float = Field(
+        default=30.0,
+        description="Maximum seconds allowed for each LiteLLM rerank request. "
+        "FastEmbed runs locally and ignores this setting.",
+        gt=0,
+    )
     reranker_api_base: str | None = Field(
         default=None,
         description="Optional custom API base URL for the litellm reranker provider "

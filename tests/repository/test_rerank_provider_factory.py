@@ -88,12 +88,14 @@ def test_litellm_provider_selected_with_routing():
         reranker_model="cohere/rerank-v3.5",
         reranker_api_key="secret",
         reranker_api_base="https://rerank.example",
+        reranker_timeout=12.5,
     )
     provider = create_rerank_provider(config)
     assert isinstance(provider, LiteLLMRerankProvider)
     assert provider.model_name == "cohere/rerank-v3.5"
     assert provider._api_key == "secret"
     assert provider._api_base == "https://rerank.example"
+    assert provider._timeout == 12.5
 
 
 def test_unsupported_provider_raises():
@@ -140,10 +142,30 @@ def test_distinct_cache_dir_does_not_collide():
     assert b.cache_dir == "/tmp/rr-b"
 
 
+def test_distinct_litellm_timeout_does_not_collide():
+    """Two hosted configs differing only in timeout need distinct provider instances."""
+    common = {
+        "reranker_enabled": True,
+        "reranker_provider": "litellm",
+        "reranker_model": "cohere/rerank-v3.5",
+    }
+
+    fast_timeout = create_rerank_provider(_config(**common, reranker_timeout=5.0))
+    slow_timeout = create_rerank_provider(_config(**common, reranker_timeout=45.0))
+
+    assert fast_timeout is not slow_timeout
+
+
 def test_reranker_enabled_requires_semantic_search():
     """Config rejects reranking without semantic search rather than silently no-op'ing."""
     with pytest.raises(ValidationError, match="requires semantic_search_enabled"):
         _config(reranker_enabled=True, semantic_search_enabled=False)
+
+
+@pytest.mark.parametrize("timeout", [0, -1.0])
+def test_reranker_timeout_must_be_positive(timeout):
+    with pytest.raises(ValidationError, match="reranker_timeout"):
+        _config(reranker_timeout=timeout)
 
 
 def test_litellm_provider_rejects_default_fastembed_model():
