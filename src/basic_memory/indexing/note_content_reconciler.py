@@ -27,7 +27,8 @@ from basic_memory.indexing.note_content_reconciliation import (
     NoteContentSource,
     NoteContentWriteStatus,
     ObservedNoteContent,
-    plan_note_content_reconciliation,
+    bootstrap_note_content_plan,
+    plan_existing_note_content_reconciliation,
 )
 from basic_memory.models import NoteContent
 from basic_memory.repository import NoteContentRepository
@@ -350,16 +351,14 @@ class NoteContentReconciler:
                     return NoteContentReconciliationResult.stale()
 
             if note_content is None:
-                plan = plan_note_content_reconciliation(None, observed)
-                if not isinstance(plan, NoteContentBootstrap):
-                    raise RuntimeError("Missing note_content must bootstrap reconciliation")
+                bootstrap = bootstrap_note_content_plan(observed=observed)
 
                 try:
                     await self._note_content_repository.create(
                         session,
-                        note_content_from_bootstrap(entity.id, plan),
+                        note_content_from_bootstrap(entity.id, bootstrap),
                     )
-                    return NoteContentReconciliationResult.current(plan.db_version)
+                    return NoteContentReconciliationResult.current(bootstrap.db_version)
                 except IntegrityError:
                     # Concurrent repair/index workers can both observe a missing row before
                     # one wins the insert. Reload the winner and let normal reconciliation
@@ -386,12 +385,10 @@ class NoteContentReconciler:
             # the row between our read and write is not silently reverted.
             expected_db_version = int(note_content.db_version)
             current_state = note_content_state_from_model(note_content)
-            plan = plan_note_content_reconciliation(
-                current_state,
-                observed,
+            plan = plan_existing_note_content_reconciliation(
+                current=current_state,
+                observed=observed,
             )
-            if isinstance(plan, NoteContentBootstrap):
-                raise RuntimeError("Existing note_content cannot bootstrap reconciliation")
             if isinstance(plan, NoteContentReconciliationDeferred):
                 logger.debug(
                     "Deferred note_content file promotion for entity {}: "

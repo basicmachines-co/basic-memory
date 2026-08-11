@@ -18,9 +18,10 @@ from basic_memory.indexing.note_content_reconciliation import (
     NoteContentReconciliationResult,
     NoteContentState,
     ObservedNoteContent,
+    bootstrap_note_content_plan,
+    plan_existing_note_content_reconciliation,
     plan_note_content_materialization_publish,
     plan_note_content_materialization_status,
-    plan_note_content_reconciliation,
 )
 
 
@@ -45,7 +46,7 @@ def _observed(checksum: str = "observed-checksum") -> ObservedNoteContent:
 
 
 def test_plan_bootstraps_missing_note_content() -> None:
-    plan = plan_note_content_reconciliation(None, _observed())
+    plan = bootstrap_note_content_plan(observed=_observed())
 
     assert plan == NoteContentBootstrap(
         markdown_content="# Observed\n",
@@ -63,14 +64,14 @@ def test_plan_bootstraps_missing_note_content() -> None:
 
 
 def test_plan_marks_file_synced_when_observed_checksum_matches_db() -> None:
-    plan = plan_note_content_reconciliation(
-        NoteContentState(
+    plan = plan_existing_note_content_reconciliation(
+        current=NoteContentState(
             db_version=7,
             db_checksum="db-checksum",
             file_version=6,
             file_checksum="old-file-checksum",
         ),
-        _observed("db-checksum"),
+        observed=_observed("db-checksum"),
     )
 
     assert plan == NoteContentFileSynced(
@@ -85,14 +86,14 @@ def test_plan_marks_file_synced_when_observed_checksum_matches_db() -> None:
 
 
 def test_plan_refreshes_file_observation_when_db_is_ahead() -> None:
-    plan = plan_note_content_reconciliation(
-        NoteContentState(
+    plan = plan_existing_note_content_reconciliation(
+        current=NoteContentState(
             db_version=9,
             db_checksum="new-db-checksum",
             file_version=8,
             file_checksum="old-file-checksum",
         ),
-        _observed("old-file-checksum"),
+        observed=_observed("old-file-checksum"),
     )
 
     assert plan == NoteContentFileObserved(
@@ -103,30 +104,30 @@ def test_plan_refreshes_file_observation_when_db_is_ahead() -> None:
 
 
 def test_plan_defers_external_file_change_while_file_state_is_not_synced() -> None:
-    plan = plan_note_content_reconciliation(
-        NoteContentState(
+    plan = plan_existing_note_content_reconciliation(
+        current=NoteContentState(
             db_version=3,
             db_checksum="db-checksum",
             file_version=5,
             file_checksum="materialized-file-checksum",
             file_write_status="pending",
         ),
-        _observed("external-change-checksum"),
+        observed=_observed("external-change-checksum"),
     )
 
     assert plan == NoteContentReconciliationDeferred()
 
 
 def test_plan_promotes_external_file_change_from_synced_state() -> None:
-    plan = plan_note_content_reconciliation(
-        NoteContentState(
+    plan = plan_existing_note_content_reconciliation(
+        current=NoteContentState(
             db_version=5,
             db_checksum="db-checksum",
             file_version=5,
             file_checksum="db-checksum",
             file_write_status="synced",
         ),
-        _observed("external-change-checksum"),
+        observed=_observed("external-change-checksum"),
     )
 
     assert plan == NoteContentPromoted(

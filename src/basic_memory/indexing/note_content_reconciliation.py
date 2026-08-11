@@ -191,9 +191,8 @@ class NoteContentPromoted:
     last_materialization_attempt_at: datetime | None
 
 
-type NoteContentReconciliationPlan = (
-    NoteContentBootstrap
-    | NoteContentFileSynced
+type ExistingNoteContentReconciliationPlan = (
+    NoteContentFileSynced
     | NoteContentFileObserved
     | NoteContentReconciliationDeferred
     | NoteContentPromoted
@@ -212,10 +211,28 @@ def note_content_matches_accepted_version(
     return current.db_version == accepted.db_version and current.db_checksum == accepted.db_checksum
 
 
-def plan_note_content_reconciliation(
-    current: NoteContentState | None,
+def bootstrap_note_content_plan(*, observed: ObservedNoteContent) -> NoteContentBootstrap:
+    """Seed db_version=1/file_version=1 synced state for a note with no stored content row."""
+    return NoteContentBootstrap(
+        markdown_content=observed.markdown_content,
+        db_version=1,
+        db_checksum=observed.checksum,
+        file_version=1,
+        file_checksum=observed.checksum,
+        file_write_status="synced",
+        last_source=observed.source,
+        updated_at=observed.observed_at,
+        file_updated_at=observed.observed_at,
+        last_materialization_error=None,
+        last_materialization_attempt_at=None,
+    )
+
+
+def plan_existing_note_content_reconciliation(
+    *,
+    current: NoteContentState,
     observed: ObservedNoteContent,
-) -> NoteContentReconciliationPlan:
+) -> ExistingNoteContentReconciliationPlan:
     """Choose the note_content write needed to converge one observed file.
 
     The same rule must apply everywhere:
@@ -224,21 +241,6 @@ def plan_note_content_reconciliation(
     - an unrelated observation can advance DB only from fully synchronized state
     - otherwise: defer until the accepted DB/file lineage is stable
     """
-    if current is None:
-        return NoteContentBootstrap(
-            markdown_content=observed.markdown_content,
-            db_version=1,
-            db_checksum=observed.checksum,
-            file_version=1,
-            file_checksum=observed.checksum,
-            file_write_status="synced",
-            last_source=observed.source,
-            updated_at=observed.observed_at,
-            file_updated_at=observed.observed_at,
-            last_materialization_error=None,
-            last_materialization_attempt_at=None,
-        )
-
     if observed.checksum == current.db_checksum:
         return NoteContentFileSynced(
             markdown_content=observed.markdown_content,
