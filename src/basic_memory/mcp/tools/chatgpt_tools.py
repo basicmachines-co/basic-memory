@@ -14,7 +14,7 @@ from loguru import logger
 from basic_memory.mcp.client_info import is_openai_mcp_client
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.read_note import read_note
-from basic_memory.mcp.tools.search import search_notes
+from basic_memory.mcp.tools.search import _SERVICE_UNAVAILABLE_HEADING, search_notes
 from basic_memory.schemas.search import SearchResponse, SearchResult
 
 
@@ -182,6 +182,18 @@ async def search(
         )
 
         if isinstance(results, str):
+            # Trigger: search_notes translated an API 503 into its retryable outage response.
+            # Why: OpenAI clients need to distinguish a temporary provider failure from an
+            # internal adapter error before deciding whether to retry.
+            # Outcome: preserve the retry signal in the Actions-compatible error payload.
+            if results.startswith(_SERVICE_UNAVAILABLE_HEADING):
+                return _text_content(
+                    {
+                        "results": [],
+                        "error": "Search temporarily unavailable",
+                        "error_message": "Search temporarily unavailable, retry shortly",
+                    }
+                )
             logger.warning(f"Search failed with error: {results[:100]}...")
             search_results = {
                 "results": [],

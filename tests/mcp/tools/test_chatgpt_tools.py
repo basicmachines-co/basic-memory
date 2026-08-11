@@ -80,6 +80,29 @@ async def test_search_with_error_response(monkeypatch, client, test_project, con
 
 
 @pytest.mark.asyncio
+async def test_search_retryable_outage_returns_explicit_retry_message(
+    monkeypatch, client, test_project, context_state
+):
+    """The search_notes 503 shape remains retryable through the ChatGPT adapter."""
+    import basic_memory.mcp.tools.chatgpt_tools as chatgpt_tools
+
+    async def fake_search_notes_fn(*args, **kwargs):
+        return f"{chatgpt_tools._SERVICE_UNAVAILABLE_HEADING}\n\nReranker temporarily unavailable"
+
+    monkeypatch.setattr(chatgpt_tools, "search_notes", fake_search_notes_fn)
+
+    context = await _openai_mcp_context(context_state)
+    result = await chatgpt_tools.search("retryable query", context=context)
+
+    content = json.loads(result[0]["text"])
+    assert content == {
+        "results": [],
+        "error": "Search temporarily unavailable",
+        "error_message": "Search temporarily unavailable, retry shortly",
+    }
+
+
+@pytest.mark.asyncio
 async def test_search_uses_dynamic_default_search_type(
     monkeypatch, client, test_project, context_state
 ):
@@ -315,7 +338,7 @@ async def test_search_internal_exception_returns_error_payload(
     assert isinstance(result, list)
     content = json.loads(result[0]["text"])
     assert content["error"] == "Internal search error"
-    assert "error_message" in content
+    assert content["error_message"] == "boom"
 
 
 @pytest.mark.asyncio
