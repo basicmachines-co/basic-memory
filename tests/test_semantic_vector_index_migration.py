@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 
 from basic_memory import db
 from basic_memory.alembic.versions import (
@@ -192,7 +193,9 @@ def test_upgrade_repairs_sqlite_state_from_duplicate_vector_revision(
         "created_at",
     }
     assert "ix_note_file_vacate_project_id" in indexes
-    assert version == ("r1m2n3o4p5q6",)
+    # The repair must land on whatever the current head is, not a pinned
+    # revision — hardcoding the head breaks this test on every new migration.
+    assert version == (ScriptDirectory.from_config(config).get_current_head(),)
 
 
 def test_downgrade_removes_manifest_state(monkeypatch) -> None:
