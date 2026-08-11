@@ -2,6 +2,14 @@
 
 The publication carries the complete observation and relation projections through one
 note_content fence lifecycle and one durable retry marker.
+
+The graph tables are eventually consistent projections, not part of the accepted write's
+transaction. Publication runs after the content commit; a stale fence makes every statement
+a no-op (the newer generation owns convergence); a crashed or failed publication is repaired
+by a later index pass republishing the same generation. Readers must tolerate a note whose
+projections briefly lag its accepted content. This is deliberate: pulling these writes back
+into one shared transaction — or adding cross-table locks to close the lag — is what caused
+the #1213/#1214 deadlock and duplication incidents.
 """
 
 from __future__ import annotations
