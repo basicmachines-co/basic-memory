@@ -272,6 +272,244 @@ class RankingDocument:
     content: str
 
 
+@dataclass(frozen=True)
+class RankingQuery:
+    """A natural-language query paired with its one expected top note."""
+
+    text: str
+    expected_permalink: str
+
+
+# --- Reranker quality corpus ---
+# Each topic has nearby alternatives that share vocabulary. The expected note is
+# distinguished by the request's full intent, giving the cross-encoder useful
+# query-document interaction instead of a trivial unique-keyword lookup.
+
+GOLDEN_RANKING_DOCUMENTS = (
+    RankingDocument(
+        title="Charge After Annual Plan Cancellation",
+        permalink="ranking/billing-cancelled-renewal",
+        content=(
+            "If an annual plan renews after a cancellation was recorded before the renewal "
+            "deadline, support verifies the cancellation timestamp and refunds the renewal "
+            "charge to the original payment method."
+        ),
+    ),
+    RankingDocument(
+        title="Cancel a Free Trial",
+        permalink="ranking/billing-free-trial",
+        content=(
+            "Cancel a free trial before day fourteen to prevent the first subscription charge. "
+            "Trials that already converted follow the standard subscription refund policy."
+        ),
+    ),
+    RankingDocument(
+        title="Correct Company Invoice Details",
+        permalink="ranking/billing-invoice-details",
+        content=(
+            "Billing administrators can update a legal company name, address, and VAT number on "
+            "future invoices. Invoice detail corrections do not cancel a plan or reverse a charge."
+        ),
+    ),
+    RankingDocument(
+        title="Recover Access Without an Authenticator",
+        permalink="ranking/auth-lost-authenticator",
+        content=(
+            "When a member loses the phone that holds their authenticator, they should use a "
+            "single-use recovery code. Without a recovery code, support performs identity "
+            "verification before resetting two-factor authentication."
+        ),
+    ),
+    RankingDocument(
+        title="Reset a Forgotten Password",
+        permalink="ranking/auth-forgotten-password",
+        content=(
+            "Request a password-reset email from the sign-in page. Completing the link sets a new "
+            "password and invalidates existing sessions without changing two-factor settings."
+        ),
+    ),
+    RankingDocument(
+        title="Respond to a Suspicious Sign-In",
+        permalink="ranking/auth-suspicious-login",
+        content=(
+            "After an unfamiliar sign-in alert, revoke all active sessions, change the password, "
+            "and review connected applications. Keep two-factor authentication enabled."
+        ),
+    ),
+    RankingDocument(
+        title="Choose Columns for a Composite Index",
+        permalink="ranking/database-composite-index",
+        content=(
+            "For queries that filter by tenant and then sort by creation time, create a composite "
+            "index with tenant_id first and created_at second. Confirm the query plan uses it."
+        ),
+    ),
+    RankingDocument(
+        title="Roll Back a Failed Schema Deployment",
+        permalink="ranking/database-migration-rollback",
+        content=(
+            "If a schema migration fails during deployment, stop application writes and run the "
+            "tested downgrade revision. A rollback restores the previous schema, not deleted data."
+        ),
+    ),
+    RankingDocument(
+        title="Restore Data to a Point in Time",
+        permalink="ranking/database-point-in-time-restore",
+        content=(
+            "To recover rows deleted by mistake, restore the latest base backup and replay the "
+            "write-ahead log until just before the deletion timestamp in an isolated database."
+        ),
+    ),
+    RankingDocument(
+        title="Resolve Two Copies of the Same Edited Note",
+        permalink="ranking/sync-edit-conflict",
+        content=(
+            "When local and remote writers edit the same note from one shared base, preserve both "
+            "versions, compare the conflict copy, and merge the intended paragraphs manually."
+        ),
+    ),
+    RankingDocument(
+        title="Recover Changes Missed by the File Watcher",
+        permalink="ranking/sync-watcher-reconcile",
+        content=(
+            "If filesystem events were missed while the watcher was offline, run a reconciliation "
+            "scan. It compares checksums and reindexes files whose current bytes changed."
+        ),
+    ),
+    RankingDocument(
+        title="Pull Shared Notes Without Removing Local Files",
+        permalink="ranking/sync-additive-pull",
+        content=(
+            "Use an additive cloud pull to download new team notes while preserving local-only "
+            "files. A mirror sync is different because it may delete files absent at the source."
+        ),
+    ),
+    RankingDocument(
+        title="Revive a Weak Sourdough Starter",
+        permalink="ranking/kitchen-sourdough-starter",
+        content=(
+            "A starter that barely rises needs regular feedings at a warm temperature. Keep a small "
+            "portion, add equal weights of flour and water, and wait for it to double before baking."
+        ),
+    ),
+    RankingDocument(
+        title="Fix Soup That Tastes Too Salty",
+        permalink="ranking/kitchen-salty-soup",
+        content=(
+            "Dilute an over-salted soup with unsalted stock or water, then add more vegetables or "
+            "grains to spread the seasoning. Do not expect a raw potato to absorb only salt."
+        ),
+    ),
+    RankingDocument(
+        title="Remove Rust From Cast Iron",
+        permalink="ranking/kitchen-cast-iron-rust",
+        content=(
+            "Scrub rust from a cast-iron pan, dry it completely over heat, apply a very thin coat of "
+            "oil, and bake it to rebuild the protective seasoning."
+        ),
+    ),
+    RankingDocument(
+        title="Replace a Lost Passport Abroad",
+        permalink="ranking/travel-lost-passport",
+        content=(
+            "A traveler who loses a passport in another country should contact their embassy or "
+            "consulate, file a police report, and request an emergency travel document."
+        ),
+    ),
+    RankingDocument(
+        title="Rebook After a Missed Connection",
+        permalink="ranking/travel-missed-connection",
+        content=(
+            "When a delay on the first flight causes a missed protected connection, ask the airline "
+            "operating the itinerary to rebook the next available route at no extra fare."
+        ),
+    ),
+    RankingDocument(
+        title="Claim Essentials for Delayed Baggage",
+        permalink="ranking/travel-delayed-baggage",
+        content=(
+            "Report delayed checked baggage before leaving the airport, keep the claim number, and "
+            "save receipts for reasonable replacement toiletries and clothing."
+        ),
+    ),
+)
+
+GOLDEN_RANKING_QUERIES = (
+    RankingQuery(
+        text="I cancelled before the annual renewal deadline but was billed anyway. Can it be refunded?",
+        expected_permalink="ranking/billing-cancelled-renewal",
+    ),
+    RankingQuery(
+        text="How do I stop a fourteen-day trial from turning into my first paid subscription?",
+        expected_permalink="ranking/billing-free-trial",
+    ),
+    RankingQuery(
+        text="Where can our billing admin fix the VAT number and legal address shown on invoices?",
+        expected_permalink="ranking/billing-invoice-details",
+    ),
+    RankingQuery(
+        text="My old phone with the authenticator is gone and I cannot pass two-step verification.",
+        expected_permalink="ranking/auth-lost-authenticator",
+    ),
+    RankingQuery(
+        text="I forgot my password and need an emailed link that also signs out old sessions.",
+        expected_permalink="ranking/auth-forgotten-password",
+    ),
+    RankingQuery(
+        text="An unknown device logged in to my account. What should I revoke and change?",
+        expected_permalink="ranking/auth-suspicious-login",
+    ),
+    RankingQuery(
+        text="Which column order speeds up tenant-filtered rows sorted by creation time?",
+        expected_permalink="ranking/database-composite-index",
+    ),
+    RankingQuery(
+        text="A deployment's schema change failed; how do we return to the previous revision?",
+        expected_permalink="ranking/database-migration-rollback",
+    ),
+    RankingQuery(
+        text="How can we recover accidentally deleted rows to the moment before deletion?",
+        expected_permalink="ranking/database-point-in-time-restore",
+    ),
+    RankingQuery(
+        text="Local and remote edits diverged from the same note. How should I preserve and merge both?",
+        expected_permalink="ranking/sync-edit-conflict",
+    ),
+    RankingQuery(
+        text="The watcher was offline and missed file events. How do I detect changed bytes and reindex?",
+        expected_permalink="ranking/sync-watcher-reconcile",
+    ),
+    RankingQuery(
+        text="How can I download new team notes without deleting files that exist only on my laptop?",
+        expected_permalink="ranking/sync-additive-pull",
+    ),
+    RankingQuery(
+        text="My sourdough culture barely rises. What feeding ratio and readiness sign should I use?",
+        expected_permalink="ranking/kitchen-sourdough-starter",
+    ),
+    RankingQuery(
+        text="I added too much salt to a pot of soup. What should I dilute and bulk it out with?",
+        expected_permalink="ranking/kitchen-salty-soup",
+    ),
+    RankingQuery(
+        text="How do I scrub and reseason a rusty cast-iron skillet?",
+        expected_permalink="ranking/kitchen-cast-iron-rust",
+    ),
+    RankingQuery(
+        text="I am overseas and my passport was stolen. Which authority can issue an emergency document?",
+        expected_permalink="ranking/travel-lost-passport",
+    ),
+    RankingQuery(
+        text="The first leg was delayed and I missed the connecting flight on one itinerary. Who rebooks me?",
+        expected_permalink="ranking/travel-missed-connection",
+    ),
+    RankingQuery(
+        text="My checked suitcase has not arrived. What report and purchase receipts should I keep?",
+        expected_permalink="ranking/travel-delayed-baggage",
+    ),
+)
+
+
 # --- Query suites ---
 # Lexical queries use keywords that appear in the content but require
 # disambiguation when topics share vocabulary.

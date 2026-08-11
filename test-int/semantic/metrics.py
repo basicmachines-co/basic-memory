@@ -29,6 +29,16 @@ def first_relevant_rank(results: list[SearchIndexRow], expected_topic: str, k: i
     return None
 
 
+def first_permalink_rank(
+    results: list[SearchIndexRow], expected_permalink: str, k: int
+) -> int | None:
+    """Return the 1-based rank of one exact note, or ``None`` when it misses the window."""
+    for rank, row in enumerate(results[:k], start=1):
+        if row.permalink == expected_permalink:
+            return rank
+    return None
+
+
 # --- Metric dataclass ---
 
 
@@ -69,6 +79,11 @@ class QualityMetrics:
     @property
     def recall_at_5(self) -> float:
         return self.hits_at_5 / self.cases if self.cases else 0.0
+
+    @property
+    def hit_at_5(self) -> float:
+        """Return hit@5; one gold note per query makes this equivalent to recall@5."""
+        return self.recall_at_5
 
     @property
     def mrr_at_10(self) -> float:
@@ -115,6 +130,29 @@ def format_comparison_table(all_metrics: list[QualityMetrics]) -> str:
             f"{m.avg_latency_ms:>8.1f} {m.total_time_ms:>9.1f}"
         )
 
+    lines.append(separator)
+    return "\n".join(lines)
+
+
+def format_reranker_quality_table(all_metrics: list[QualityMetrics]) -> str:
+    """Format reranker-off/on quality and deltas using exact-note ranking metrics."""
+    header = f"{'Configuration':<16} {'hit@1':>7} {'hit@5':>7} {'MRR':>7}"
+    separator = "-" * len(header)
+    lines = [separator, header, separator]
+    for metrics in all_metrics:
+        lines.append(
+            f"{metrics.combo:<16} {metrics.hit_at_1:>7.3f} "
+            f"{metrics.hit_at_5:>7.3f} {metrics.mrr_at_10:>7.3f}"
+        )
+
+    if len(all_metrics) == 2:
+        baseline, reranked = all_metrics
+        lines.append(separator)
+        lines.append(
+            f"{'delta':<16} {reranked.hit_at_1 - baseline.hit_at_1:>+7.3f} "
+            f"{reranked.hit_at_5 - baseline.hit_at_5:>+7.3f} "
+            f"{reranked.mrr_at_10 - baseline.mrr_at_10:>+7.3f}"
+        )
     lines.append(separator)
     return "\n".join(lines)
 
