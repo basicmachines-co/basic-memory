@@ -326,6 +326,36 @@ class PostgresSearchRepository(SearchRepositoryBase):
     # ------------------------------------------------------------------
 
     @override
+    async def get_entity_physical_chunk_keys(self, entity_id: int) -> set[str] | None:
+        """Return chunk keys whose pgvector physical row is live for this entity."""
+        # Trigger: semantic search is off, or the configured index is external.
+        # Why: a disabled config expects no physical rows, and external adapters expose
+        # no portable storage-inspection contract (same rule as get_embedding_status()).
+        # Outcome: None — chunk status stays manifest-only.
+        if not self._semantic_enabled or self._semantic_vector_index_name != "pgvector":
+            return None
+        async with db.scoped_session(self.session_maker) as session:
+            tables_result = await session.execute(
+                text(
+                    "SELECT table_name FROM information_schema.tables "
+                    "WHERE table_name IN ('search_vector_chunks', 'search_vector_embeddings')"
+                )
+            )
+            table_names = {str(name) for name in tables_result.scalars().all()}
+            if not {"search_vector_chunks", "search_vector_embeddings"} <= table_names:
+                return set()
+            result = await session.execute(
+                text(
+                    "SELECT c.chunk_key FROM search_vector_chunks c "
+                    "JOIN search_vector_embeddings e "
+                    "ON e.chunk_id = c.id AND e.source_hash = c.source_hash "
+                    "WHERE c.project_id = :project_id AND c.entity_id = :entity_id"
+                ),
+                {"project_id": self.project_id, "entity_id": entity_id},
+            )
+            return {str(chunk_key) for chunk_key in result.scalars().all()}
+
+    @override
     async def _ensure_vector_tables(self) -> None:
         self._assert_semantic_available()
         if not hasattr(self, "_semantic_vector_index"):

@@ -3,11 +3,11 @@
 import hashlib
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional, cast
+from typing import Any, Callable, Dict, List, Literal, Optional, cast
 
 import logfire as logfire
 from loguru import logger
@@ -16,10 +16,14 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
+from basic_memory.config import BasicMemoryConfig
 from basic_memory.repository import semantic_vector_sync
 from basic_memory.repository.embedding_provider import (
     EmbeddingProvider,
     embedding_provider_identity,
+)
+from basic_memory.repository.embedding_provider_factory import (
+    configured_embedding_provider_identity,
 )
 from basic_memory.repository.rerank_provider import (
     RerankProvider,
@@ -59,6 +63,7 @@ from basic_memory.repository.semantic_vector_sync import (
 )
 from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
+from basic_memory.utils import ensure_timezone_aware
 
 # --- Semantic search constants ---
 
@@ -80,6 +85,53 @@ _BUILT_IN_VECTOR_INDEX_NAMES = frozenset({"pgvector", "sqlite-vec"})
 # auto-increment sequences, so a bare id is ambiguous across row types. Every map in
 # the vector/hybrid retrieval path must key rows by (type, id) to avoid collisions.
 type SearchIndexKey = tuple[str, int]
+type StoredEmbeddingStatus = Literal["pending", "ready"]
+
+
+@dataclass(frozen=True, slots=True)
+class ChunkManifestRow:
+    """One persisted vector-chunk manifest row."""
+
+    entity_id: int
+    chunk_key: str
+    chunk_text: str
+    source_hash: str
+    entity_fingerprint: str
+    embedding_model: str
+    vector_index: str
+    embedding_status: StoredEmbeddingStatus
+    updated_at: datetime
+
+    @classmethod
+    def from_mapping(cls, row: Mapping[str, Any]) -> "ChunkManifestRow":
+        """Hydrate one portable manifest row from SQLite or PostgreSQL."""
+        raw_status = str(row["embedding_status"])
+        match raw_status:
+            case "pending":
+                embedding_status: StoredEmbeddingStatus = "pending"
+            case "ready":
+                embedding_status = "ready"
+            case _:
+                raise ValueError(f"Unknown vector chunk embedding status: {raw_status!r}")
+
+        return cls(
+            entity_id=int(row["entity_id"]),
+            chunk_key=str(row["chunk_key"]),
+            chunk_text=str(row["chunk_text"]),
+            source_hash=str(row["source_hash"]),
+            entity_fingerprint=str(row["entity_fingerprint"]),
+            embedding_model=str(row["embedding_model"]),
+            vector_index=str(row["vector_index"]),
+            embedding_status=embedding_status,
+            updated_at=row["updated_at"],
+        )
+
+    def __post_init__(self) -> None:
+        """Restore a timezone-aware datetime from either backend's raw value."""
+        updated_at = self.updated_at
+        if isinstance(updated_at, str):
+            updated_at = datetime.fromisoformat(updated_at)
+        object.__setattr__(self, "updated_at", ensure_timezone_aware(updated_at))
 
 
 async def purge_stale_search_index_rows(
@@ -131,6 +183,7 @@ class SearchRepositoryBase(ABC):
 
     # --- Subclass-populated attributes ---
     _semantic_enabled: bool
+    _app_config: BasicMemoryConfig
     _semantic_vector_k: int
     _semantic_min_similarity: float
     _embedding_provider: Optional[EmbeddingProvider]
@@ -160,6 +213,26 @@ class SearchRepositoryBase(ABC):
 
         self.session_maker = session_maker
         self.project_id = project_id
+
+    async def semantic_effectively_enabled(self) -> bool:
+        """Return whether semantic retrieval can actually run for this repository.
+
+        Configuration is the default signal. Backends with a startup runtime
+        fallback (SQLite degrades to keyword-only search when sqlite-vec cannot
+        load, #711) override this with a runtime probe so per-request instances
+        honor the degraded state instead of trusting still-enabled config.
+        """
+        return self._semantic_enabled
+
+    @property
+    def configured_embedding_model(self) -> str:
+        """Return the configured persisted embedding identity without loading a model."""
+        return configured_embedding_provider_identity(self._app_config)
+
+    @property
+    def configured_vector_index(self) -> str:
+        """Return the configured vector-index identity."""
+        return self._semantic_vector_index_name
 
     # ------------------------------------------------------------------
     # Abstract methods — FTS and schema (backend-specific)
@@ -858,6 +931,58 @@ class SearchRepositoryBase(ABC):
             )
             logger.debug(f"Bulk indexed {len(search_index_rows)} rows")
             await session.commit()
+
+    async def get_entity_search_rows(self, entity_id: int) -> list[SearchIndexRow]:
+        """Return every search projection owned by one entity."""
+        async with db.scoped_session(self.session_maker) as session:
+            result = await session.execute(
+                text(
+                    "SELECT project_id, id, title, content_stems, content_snippet, "
+                    "permalink, file_path, type, metadata, from_id, to_id, relation_type, "
+                    "entity_id, category, created_at, updated_at "
+                    "FROM search_index "
+                    "WHERE project_id = :project_id AND ("
+                    "(type = 'entity' AND id = :entity_id) "
+                    "OR entity_id = :entity_id "
+                    "OR (type = 'relation' AND from_id = :entity_id)"
+                    ") ORDER BY type, id"
+                ),
+                {"project_id": self.project_id, "entity_id": entity_id},
+            )
+            return [SearchIndexRow.from_mapping(dict(row)) for row in result.mappings().all()]
+
+    async def get_entity_chunk_manifest(self, entity_id: int) -> list[ChunkManifestRow]:
+        """Return the stored vector-chunk manifest for one project-scoped entity."""
+        async with db.scoped_session(self.session_maker) as session:
+            connection = await session.connection()
+            manifest_exists = await connection.run_sync(
+                lambda sync_connection: inspect(sync_connection).has_table("search_vector_chunks")
+            )
+            if not manifest_exists:
+                return []
+
+            result = await session.execute(
+                text(
+                    "SELECT entity_id, chunk_key, chunk_text, source_hash, "
+                    "entity_fingerprint, embedding_model, vector_index, "
+                    "embedding_status, updated_at "
+                    "FROM search_vector_chunks "
+                    "WHERE project_id = :project_id AND entity_id = :entity_id "
+                    "ORDER BY chunk_key"
+                ),
+                {"project_id": self.project_id, "entity_id": entity_id},
+            )
+            return [ChunkManifestRow.from_mapping(dict(row)) for row in result.mappings().all()]
+
+    @abstractmethod
+    async def get_entity_physical_chunk_keys(self, entity_id: int) -> set[str] | None:
+        """Return manifest chunk keys whose built-in physical vector row is live.
+
+        ``None`` means physical storage is not inspectable here: semantic search is
+        disabled, or the configured index is external and exposes no portable
+        storage-inspection contract (mirroring get_embedding_status()).
+        """
+        ...
 
     async def delete_by_entity_id(self, entity_id: int) -> None:
         """Delete all search index entries for an entity.

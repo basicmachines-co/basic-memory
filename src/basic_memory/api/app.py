@@ -19,6 +19,7 @@ from basic_memory.api.v2.routers import (
     prompt_router as v2_prompt,
     importer_router as v2_importer,
     schema_router as v2_schema,
+    inspect_router as v2_inspect,
 )
 import logfire
 from basic_memory.index.note_content_materialization import drain_pending_materializations
@@ -131,6 +132,7 @@ app.include_router(v2_directory, prefix="/v2/projects/{project_id}")
 app.include_router(v2_prompt, prefix="/v2/projects/{project_id}")
 app.include_router(v2_importer, prefix="/v2/projects/{project_id}")
 app.include_router(v2_schema, prefix="/v2/projects/{project_id}")
+app.include_router(v2_inspect, prefix="/v2/projects/{project_id}")
 app.include_router(v2_project, prefix="/v2")
 
 # Legacy web app proxy paths (compat with /proxy/projects/projects)

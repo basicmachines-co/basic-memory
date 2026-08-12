@@ -46,6 +46,10 @@ class ConcreteSearchRepo(SearchRepositoryBase):
         pass  # pragma: no cover
 
     @override
+    async def get_entity_physical_chunk_keys(self, entity_id: int) -> set[str] | None:
+        return None  # physical storage is not inspectable in this double
+
+    @override
     def _prepare_search_term(self, term, is_prefix=True):
         return term  # pragma: no cover
 

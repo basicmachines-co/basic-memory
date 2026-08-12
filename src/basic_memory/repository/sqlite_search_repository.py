@@ -400,6 +400,59 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             return None
         return " OR ".join(f"{word}*" for word in words)
 
+    @override
+    async def semantic_effectively_enabled(self) -> bool:
+        """Probe the sqlite-vec runtime instead of trusting still-enabled config.
+
+        init_search_index() disables semantics only on the startup repository
+        instance; per-request instances are rebuilt from config, so they must
+        re-check the runtime to honor the keyword-only fallback (#711).
+        """
+        if not self._semantic_enabled:
+            return False
+        async with db.scoped_session(self.session_maker) as session:
+            try:
+                await self._ensure_sqlite_vec_loaded(session)
+            except SemanticDependenciesMissingError:
+                return False
+        return True
+
+    @override
+    async def get_entity_physical_chunk_keys(self, entity_id: int) -> set[str] | None:
+        """Return chunk keys whose sqlite-vec physical row is live for this entity."""
+        # Trigger: semantic search is off, or the configured index is external.
+        # Why: a disabled config expects no physical rows, and external adapters expose
+        # no portable storage-inspection contract (same rule as get_embedding_status()).
+        # Outcome: None — chunk status stays manifest-only.
+        if not self._semantic_enabled or self._semantic_vector_index_name != "sqlite-vec":
+            return None
+        async with db.scoped_session(self.session_maker) as session:
+            tables_result = await session.execute(
+                text(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' "
+                    "AND name IN ('search_vector_chunks', 'search_vector_embeddings')"
+                )
+            )
+            table_names = {str(name) for name in tables_result.scalars().all()}
+            if not {"search_vector_chunks", "search_vector_embeddings"} <= table_names:
+                return set()
+            try:
+                await self._ensure_sqlite_vec_loaded(session)
+            except SemanticDependenciesMissingError:
+                # Runtime fallback: tables remain from a working install but this host
+                # cannot load sqlite-vec, so physical storage is not inspectable here.
+                return None
+            result = await session.execute(
+                text(
+                    "SELECT c.chunk_key FROM search_vector_chunks c "
+                    "JOIN search_vector_embeddings e "
+                    "ON e.rowid = c.id AND e.source_hash = c.source_hash "
+                    "WHERE c.project_id = :project_id AND c.entity_id = :entity_id"
+                ),
+                {"project_id": self.project_id, "entity_id": entity_id},
+            )
+            return {str(chunk_key) for chunk_key in result.scalars().all()}
+
     # ------------------------------------------------------------------
     # sqlite-vec extension loading (SQLite-specific)
     # ------------------------------------------------------------------

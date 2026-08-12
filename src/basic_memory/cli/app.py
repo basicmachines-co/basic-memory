@@ -127,6 +127,7 @@ def app_callback(
     # ('hook' returns above, before this point.)
     skip_init_commands = {
         "doctor",
+        "inspect",
         "man",
         "mcp",
         "status",

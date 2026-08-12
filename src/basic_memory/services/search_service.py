@@ -54,6 +54,34 @@ class _PreparedSearchQuery:
     min_similarity: float | None
 
 
+def entity_embeddings_enabled(entity: Entity) -> bool:
+    """Return whether semantic embeddings should be generated for this entity.
+
+    Shared policy: sync uses it to clear and skip opted-out notes, and the retrieval
+    inspector uses it so an opt-out is never reported as missing vector coverage.
+    """
+    if not entity.entity_metadata:
+        return True
+
+    embed_value = entity.entity_metadata.get("embed")
+    if embed_value is None:
+        return True
+    if isinstance(embed_value, bool):
+        return embed_value
+    if isinstance(embed_value, str):
+        normalized = embed_value.strip().lower()
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+    if isinstance(embed_value, (int, float)):
+        return bool(embed_value)
+
+    # Default unknown values to enabled so malformed metadata does not silently
+    # remove notes from semantic search.
+    return True
+
+
 def _strip_nul(value: str) -> str:
     """Strip NUL bytes that PostgreSQL text columns cannot store.
 
@@ -506,7 +534,7 @@ class SearchService:
             await self._clear_entity_vectors(entity_id)
             return
 
-        if not self._entity_embeddings_enabled(entity):
+        if not entity_embeddings_enabled(entity):
             await self._clear_entity_vectors(entity_id)
             return
 
@@ -532,7 +560,7 @@ class SearchService:
             for entity_id in entity_ids
             if (
                 (entity := entities_by_id.get(entity_id)) is not None
-                and not self._entity_embeddings_enabled(entity)
+                and not entity_embeddings_enabled(entity)
             )
         ]
         if opted_out_ids:
@@ -579,9 +607,7 @@ class SearchService:
             ),
             sample_errors=tuple(
                 dict.fromkeys(
-                    error
-                    for result in repository_results
-                    for error in result.sample_errors
+                    error for result in repository_results for error in result.sample_errors
                 )
             )[:VECTOR_SYNC_SAMPLE_ERROR_LIMIT],
             vector_index=next(
@@ -589,11 +615,7 @@ class SearchService:
                 "",
             ),
             embedding_model=next(
-                (
-                    result.embedding_model
-                    for result in repository_results
-                    if result.embedding_model
-                ),
+                (result.embedding_model for result in repository_results if result.embedding_model),
                 "",
             ),
             chunks_total=sum(result.chunks_total for result in repository_results),
@@ -673,30 +695,6 @@ class SearchService:
         logger.info(
             "Purged stale search rows", project_id=self.repository.project_id, purged=purged
         )
-
-    @staticmethod
-    def _entity_embeddings_enabled(entity: Entity) -> bool:
-        """Return whether semantic embeddings should be generated for this entity."""
-        if not entity.entity_metadata:
-            return True
-
-        embed_value = entity.entity_metadata.get("embed")
-        if embed_value is None:
-            return True
-        if isinstance(embed_value, bool):
-            return embed_value
-        if isinstance(embed_value, str):
-            normalized = embed_value.strip().lower()
-            if normalized in {"false", "0", "no", "off"}:
-                return False
-            if normalized in {"true", "1", "yes", "on"}:
-                return True
-        if isinstance(embed_value, (int, float)):
-            return bool(embed_value)
-
-        # Default unknown values to enabled so malformed metadata does not silently
-        # remove notes from semantic search.
-        return True
 
     async def _clear_entity_vectors(self, entity_id: int) -> None:
         """Delete derived vector rows for one entity."""
