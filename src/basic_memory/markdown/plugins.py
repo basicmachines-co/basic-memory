@@ -14,10 +14,26 @@ from markdown_it.token import Token
 _TIMESTAMP_CATEGORY = re.compile(r"^\d{1,3}:\d{2}(:\d{2})?([.,]\d{1,3})?$")
 
 
+def _is_task_marker_category(category: str) -> bool:
+    """Recognize checkbox-marker shapes the GFM/Obsidian task family uses.
+
+    `[ ]`, `[x]`, and `[-]` are excluded upstream, but the extended vocabulary
+    (`[/]` in progress, `[>]` deferred, `[?]` question, uppercase `[X]`) shares the
+    bracket shape and would otherwise mint junk one-character categories (#1241).
+    Single-character alphanumeric categories other than x/X keep parsing as today.
+    """
+    if len(category) != 1:
+        return False
+    return category in {"x", "X"} or not category.isalnum()
+
+
 def _observation_category_match(content: str) -> re.Match[str] | None:
-    """Match ``[category] content``, rejecting timestamp-shaped categories."""
+    """Match ``[category] content``, rejecting timestamp and task-marker shapes."""
     match = re.match(r"^\[([^\[\]()]+)\]\s+(.+)", content)
-    if match and _TIMESTAMP_CATEGORY.match(match.group(1).strip()):
+    if not match:
+        return None
+    category = match.group(1).strip()
+    if _TIMESTAMP_CATEGORY.match(category) or _is_task_marker_category(category):
         return None
     return match
 

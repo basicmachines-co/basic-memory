@@ -186,3 +186,34 @@ def test_numeric_but_non_timestamp_categories_still_parse():
         obs = token.meta.get("observation") if token.meta else None
         assert obs is not None, line
         assert obs["category"] == category
+
+
+def test_extended_checkbox_markers_are_not_observation_categories():
+    """Obsidian's extended task markers must not mint observations (issue #1241)."""
+    md = MarkdownIt().use(observation_plugin)
+
+    for line in (
+        "- [/] in progress task",
+        "- [>] deferred task",
+        "- [?] maybe task",
+        "- [!] important task",
+        "- [X] uppercase done task",
+    ):
+        tokens = md.parse(line)
+        assert not any(t.meta and "observation" in t.meta for t in tokens), line
+
+
+def test_single_character_alphanumeric_categories_still_parse():
+    """Only marker shapes are rejected; short real categories keep working."""
+    md = MarkdownIt().use(observation_plugin)
+
+    for line, category in (
+        ("- [a] annotation shorthand", "a"),
+        ("- [1] first point", "1"),
+        ("- [q] question shorthand", "q"),
+    ):
+        tokens = md.parse(line)
+        token = next(t for t in tokens if t.type == "inline")
+        obs = token.meta.get("observation") if token.meta else None
+        assert obs is not None, line
+        assert obs["category"] == category
