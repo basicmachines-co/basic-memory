@@ -443,11 +443,14 @@ class BasicMemoryConfig(BaseSettings):
         "e.g. 'cohere/rerank-v3.5'.",
     )
     reranker_max_document_chars: int = Field(
-        default=0,
+        default=2000,
         description="Max characters of each candidate's text passed to the cross-encoder. "
-        "0 (default) sends the full matched text — the model still truncates to its own token "
-        "limit. Set a positive cap (e.g. ~1000) to bound rerank latency on long notes; the "
-        "most-relevant matched chunk leads the text, so a modest cap keeps most of the signal.",
+        "The default of 2000 bounds worst-case rerank latency on very long documents with no "
+        "measured quality loss (issue #1234 LoCoMo sweep: caps >= 2000 score identically to "
+        "unbounded); the most-relevant matched chunk leads the text, so the retained prefix "
+        "carries the signal. 0 sends the full matched text — the model still truncates to its "
+        "own token limit. To reduce rerank latency generally, lower reranker_candidates; the "
+        "cap only matters for long documents.",
         ge=0,
     )
     reranker_timeout: float = Field(

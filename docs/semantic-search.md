@@ -393,7 +393,7 @@ All settings use the `BASIC_MEMORY_` environment prefix:
 | `reranker_provider` | `BASIC_MEMORY_RERANKER_PROVIDER` | `fastembed` | `fastembed` for a local ONNX cross-encoder or `litellm` for an API provider. |
 | `reranker_model` | `BASIC_MEMORY_RERANKER_MODEL` | `jinaai/jina-reranker-v1-tiny-en` | Model identifier. LiteLLM requires explicit `provider/model` routing. |
 | `reranker_candidates` | `BASIC_MEMORY_RERANKER_CANDIDATES` | `20` | Number of leading retrieval results rescored on every page. Larger values can improve recall but increase latency and provider usage. |
-| `reranker_max_document_chars` | `BASIC_MEMORY_RERANKER_MAX_DOCUMENT_CHARS` | `0` | Maximum characters sent per candidate. `0` sends the full matched text; a positive cap bounds latency and request size. |
+| `reranker_max_document_chars` | `BASIC_MEMORY_RERANKER_MAX_DOCUMENT_CHARS` | `2000` | Maximum characters sent per candidate. The default bounds worst-case latency on very long documents with no measured quality loss; `0` sends the full matched text. |
 | `reranker_timeout` | `BASIC_MEMORY_RERANKER_TIMEOUT` | `30.0` | Maximum seconds for each LiteLLM rerank request. FastEmbed runs locally and ignores this setting. |
 | `reranker_api_base` | `BASIC_MEMORY_RERANKER_API_BASE` | Unset | Optional custom endpoint for the LiteLLM provider. |
 | `reranker_api_key` | `BASIC_MEMORY_RERANKER_API_KEY` | Unset | Optional credential passed directly to LiteLLM. When unset, LiteLLM resolves provider credentials from its normal environment variables. |
@@ -441,9 +441,12 @@ Start with the defaults, then tune only if measurements justify it:
 - Increase `reranker_candidates` when relevant results enter the retrieval set
   but remain outside the desired cutoff. This increases local inference time or
   hosted provider usage.
-- Set `reranker_max_document_chars` to a positive value such as `1000` to
-  bound latency and hosted request size for long notes. The matched chunk comes
-  first, so a modest cap retains the strongest retrieval signal.
+- To reduce rerank latency, lower `reranker_candidates` — per-query cost is
+  candidate-count-driven. `reranker_max_document_chars` (default `2000`) only
+  matters for very long documents: caps of 2000+ measured identical quality to
+  unbounded on a full LoCoMo sweep, while `1000` cost about 1.4 points of
+  recall@5. The matched chunk comes first, so the retained prefix carries the
+  strongest retrieval signal. Set `0` to disable the cap entirely.
 - Keep reranking disabled when retrieval latency matters more than the
   additional ranking pass.
 
