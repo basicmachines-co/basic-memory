@@ -1,5 +1,7 @@
 """Read-only retrieval inspection commands."""
 
+from enum import Enum
+from itertools import groupby
 from typing import Annotated, Optional, assert_never
 
 import typer
@@ -20,14 +22,23 @@ from basic_memory.schemas.inspect import (
     InspectChunksResponse,
     InspectDetachedSearchRow,
     InspectIndexBehindRowsDetail,
+    InspectQueryCandidate,
+    InspectQueryResponse,
     InspectRowsBehindFileDetail,
     InspectSearchRow,
 )
+from basic_memory.schemas.search import SearchQuery, SearchRetrievalMode
 
 inspect_app = typer.Typer()
 app.add_typer(inspect_app, name="inspect", help="Inspect retrieval projections")
 
 console = Console()
+
+
+class InspectQueryMode(str, Enum):
+    TEXT = "text"
+    VECTOR = "vector"
+    HYBRID = "hybrid"
 
 
 async def run_inspect_chunks(
@@ -43,6 +54,26 @@ async def run_inspect_chunks(
     ):
         return await InspectClient(http_client, active_project.external_id).inspect_chunks(
             identifier
+        )
+
+
+async def run_inspect_query(
+    query: SearchQuery,
+    *,
+    limit: int,
+    offset: int,
+    project: str | None,
+    project_id: str | None,
+) -> InspectQueryResponse:
+    """Resolve the project route and execute one traced query."""
+    async with get_project_client(project=project, project_id=project_id) as (
+        http_client,
+        active_project,
+    ):
+        return await InspectClient(http_client, active_project.external_id).inspect_query(
+            query,
+            limit=limit,
+            offset=offset,
         )
 
 
@@ -263,6 +294,319 @@ def _plain_chunks(response: InspectChunksResponse) -> None:
                 f"  {chunk.ordinal}  {chunk.status}  {len(chunk.text)} chars  "
                 f"{_text_preview(chunk.text)}"
             )
+
+
+def _score_text(candidate: InspectQueryCandidate) -> str:
+    score = candidate.scores.final_score
+    return f"{score:.4f}" if score is not None else "-"
+
+
+def _movement_text(candidate: InspectQueryCandidate) -> str:
+    before = candidate.scores.pre_rerank_rank
+    after = candidate.scores.post_rerank_rank
+    if before is None or after is None:
+        return "-"
+    movement = before - after
+    return f"{movement:+d}"
+
+
+def _query_candidate_label(candidate: InspectQueryCandidate) -> str:
+    if candidate.title or candidate.permalink:
+        return candidate.title or candidate.permalink or ""
+    if candidate.type is not None and candidate.id is not None:
+        return f"{candidate.type}:{candidate.id}"
+    if candidate.rejection_detail is not None and candidate.rejection_detail.chunk_key:
+        return candidate.rejection_detail.chunk_key
+    return "unknown candidate"
+
+
+def _query_candidate_id(candidate: InspectQueryCandidate) -> str | None:
+    if candidate.external_id is not None:
+        return candidate.external_id
+    if candidate.type is not None and candidate.id is not None:
+        return f"{candidate.type}:{candidate.id}"
+    return None
+
+
+def _display_query(
+    response: InspectQueryResponse,
+    *,
+    show_misses: bool,
+    show_ids: bool,
+) -> None:
+    """Render the traced query as a compact human-readable query plan."""
+    header = Text()
+    header.append(f"{response.query}\n", style="bold cyan")
+    header.append(f"Mode: {response.retrieval_mode.value}")
+    header.append(f"  ·  Project: {response.project_id}")
+    header.append(
+        f"  ·  Window: {response.window.offset + 1}-"
+        f"{response.window.offset + response.window.limit}"
+    )
+    console.print(Panel(header, title="Retrieval query", expand=False))
+
+    engine = response.engine
+    reranker = engine.reranker
+    engine_text = Text()
+    engine_text.append(f"Vector index: {engine.vector_index}\n")
+    engine_text.append(f"Embedding model: {engine.embedding_model}\n")
+    if engine.ready_rows is None:
+        engine_text.append("Readiness: n/a (FTS execution reads no vector manifest)\n")
+    else:
+        engine_text.append(
+            "Readiness: "
+            f"{engine.ready_rows} ready, {engine.pending_rows} pending, "
+            f"{engine.other_identity_rows} other identity\n"
+        )
+    engine_text.append(f"Fusion: {engine.fusion_formula}\n")
+    engine_text.append(
+        f"Minimum similarity: {engine.min_similarity:.4f} ({engine.min_similarity_source})\n"
+    )
+    if reranker.enabled:
+        status = "applied" if reranker.applied else f"skipped: {reranker.skipped_reason}"
+        engine_text.append(
+            f"Reranker: {reranker.model} · {reranker.candidates} candidates · {status}"
+        )
+    else:
+        engine_text.append("Reranker: disabled")
+    console.print(Panel(engine_text, title="Engine", expand=False))
+
+    stage_table = Table(title="Stages", show_header=True, header_style="bold")
+    stage_table.add_column("Stage")
+    stage_table.add_column("In", justify="right")
+    stage_table.add_column("Out", justify="right")
+    stage_table.add_column("Dropped", justify="right")
+    stage_table.add_column("ms", justify="right")
+    for stage in response.stages:
+        stage_name = stage.name
+        if stage.relaxed_fallback_used:
+            stage_name = f"{stage.name} (relaxed fallback)"
+        stage_table.add_row(
+            stage_name,
+            str(stage.count_in),
+            str(stage.count_out),
+            str(stage.dropped) if stage.dropped is not None else "-",
+            f"{stage.ms:.2f}" if stage.ms is not None else "-",
+        )
+    console.print(stage_table)
+
+    returned = [
+        candidate for candidate in response.candidates if candidate.disposition == "returned"
+    ]
+    result_table = Table(title="Ranked results", show_header=True, header_style="bold")
+    result_table.add_column("Rank", justify="right")
+    result_table.add_column("Result")
+    result_table.add_column("Score", justify="right")
+    result_table.add_column("Δ", justify="right")
+    for candidate in returned:
+        label = _query_candidate_label(candidate)
+        result = Text(label)
+        if candidate.type == "entity" and candidate.permalink:
+            result.append(f"\n{candidate.permalink}", style="green")
+        if show_ids and (candidate_id := _query_candidate_id(candidate)) is not None:
+            result.append(f"\n{candidate_id}", style="dim")
+        result_table.add_row(
+            str(candidate.scores.final_rank or "-"),
+            result,
+            _score_text(candidate),
+            _movement_text(candidate),
+        )
+    console.print(result_table)
+
+    if not show_misses:
+        return
+    if response.retrieval_mode == SearchRetrievalMode.FTS:
+        console.print("[yellow]show-misses not applicable: FTS window is the SQL LIMIT[/yellow]")
+        return
+
+    console.print("[dim]Misses: bounded window — not exhaustive[/dim]")
+    misses = sorted(
+        (candidate for candidate in response.candidates if candidate.disposition != "returned"),
+        key=lambda candidate: (
+            candidate.disposition,
+            candidate.type or "",
+            candidate.id if candidate.id is not None else -1,
+            _query_candidate_label(candidate),
+        ),
+    )
+    for disposition, grouped in groupby(misses, key=lambda candidate: candidate.disposition):
+        miss_table = Table(title=disposition, show_header=True, header_style="bold")
+        miss_table.add_column("Candidate")
+        miss_table.add_column("Score", justify="right")
+        miss_table.add_column("Detail")
+        for candidate in grouped:
+            detail = candidate.rejection_detail
+            detail_text = detail.model_dump_json(exclude_none=True) if detail is not None else "-"
+            miss_table.add_row(
+                _query_candidate_label(candidate),
+                (
+                    f"{candidate.scores.vector_similarity:.4f}"
+                    if candidate.scores.vector_similarity is not None
+                    else "-"
+                ),
+                detail_text,
+            )
+        console.print(miss_table)
+
+
+def _plain_query(
+    response: InspectQueryResponse,
+    *,
+    show_misses: bool,
+    show_ids: bool,
+) -> None:
+    """Render the same query plan as undecorated, greppable text."""
+    typer.echo(f"Retrieval query: {response.query}")
+    typer.echo(f"Mode: {response.retrieval_mode.value}")
+    typer.echo(f"Project: {response.project_id}")
+    typer.echo("Engine:")
+    typer.echo(f"  Vector index: {response.engine.vector_index}")
+    typer.echo(f"  Embedding model: {response.engine.embedding_model}")
+    if response.engine.ready_rows is None:
+        typer.echo("  Readiness: n/a (FTS execution reads no vector manifest)")
+    else:
+        typer.echo(
+            "  Readiness: "
+            f"ready={response.engine.ready_rows} pending={response.engine.pending_rows} "
+            f"other_identity={response.engine.other_identity_rows}"
+        )
+    typer.echo(f"  Fusion: {response.engine.fusion_formula}")
+    reranker = response.engine.reranker
+    if reranker.enabled:
+        status = "applied" if reranker.applied else f"skipped={reranker.skipped_reason}"
+        typer.echo(f"  Reranker: {reranker.model} candidates={reranker.candidates} {status}")
+    else:
+        typer.echo("  Reranker: disabled")
+
+    typer.echo("Stages:")
+    for stage in response.stages:
+        ms = f"{stage.ms:.2f}" if stage.ms is not None else "-"
+        relaxed = " relaxed_fallback=yes" if stage.relaxed_fallback_used else ""
+        typer.echo(
+            f"  {stage.name} in={stage.count_in} out={stage.count_out} "
+            f"dropped={stage.dropped if stage.dropped is not None else '-'} ms={ms}{relaxed}"
+        )
+
+    typer.echo("Ranked results:")
+    returned = [
+        candidate for candidate in response.candidates if candidate.disposition == "returned"
+    ]
+    for candidate in returned:
+        label = _query_candidate_label(candidate)
+        identity = []
+        if candidate.type == "entity" and candidate.permalink:
+            identity.append(f"permalink={candidate.permalink}")
+        if show_ids and (candidate_id := _query_candidate_id(candidate)) is not None:
+            identity.append(f"id={candidate_id}")
+        identity_text = f"  {' '.join(identity)}" if identity else ""
+        typer.echo(
+            f"  {candidate.scores.final_rank or '-'}  {_score_text(candidate)}  "
+            f"delta={_movement_text(candidate)}  {label}{identity_text}"
+        )
+
+    if not show_misses:
+        return
+    if response.retrieval_mode == SearchRetrievalMode.FTS:
+        typer.echo("show-misses not applicable: FTS window is the SQL LIMIT")
+        return
+    typer.echo("Misses (bounded window — not exhaustive):")
+    misses = sorted(
+        (candidate for candidate in response.candidates if candidate.disposition != "returned"),
+        key=lambda candidate: (
+            candidate.disposition,
+            candidate.type or "",
+            candidate.id if candidate.id is not None else -1,
+            _query_candidate_label(candidate),
+        ),
+    )
+    for disposition, grouped in groupby(misses, key=lambda candidate: candidate.disposition):
+        typer.echo(f"  {disposition}:")
+        for candidate in grouped:
+            typer.echo(f"    {_query_candidate_label(candidate)}")
+
+
+@inspect_app.command("query")
+def inspect_query(
+    query_text: Annotated[str, typer.Argument(help="Text query to inspect")],
+    mode: InspectQueryMode = typer.Option(
+        InspectQueryMode.TEXT,
+        "--mode",
+        help="Retrieval mode: text, vector, or hybrid",
+    ),
+    show_misses: bool = typer.Option(
+        False,
+        "--show-misses",
+        help="Render bounded rejected candidates in human output",
+    ),
+    show_ids: bool = typer.Option(
+        False,
+        "--show-ids",
+        help="Include stable entity IDs in human output, with search-row fallbacks",
+    ),
+    page: int = typer.Option(1, "--page", min=1, help="Result page to inspect"),
+    page_size: int = typer.Option(
+        10,
+        "--page-size",
+        min=1,
+        help="Results per page",
+    ),
+    json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+    plain: bool = typer.Option(False, "--plain", help="Output undecorated plain text"),
+    project: Annotated[
+        Optional[str],
+        typer.Option(help="The project to use; defaults to the configured project."),
+    ] = None,
+    project_id: Annotated[
+        Optional[str],
+        typer.Option(
+            "--project-id",
+            help="Project external_id (UUID); takes precedence over --project.",
+        ),
+    ] = None,
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
+) -> None:
+    """Show the retrieval stages that produced one query result page."""
+    from basic_memory.cli.commands.command_utils import run_with_cleanup
+    from fastmcp.exceptions import ToolError
+
+    retrieval_mode = {
+        InspectQueryMode.TEXT: SearchRetrievalMode.FTS,
+        InspectQueryMode.VECTOR: SearchRetrievalMode.VECTOR,
+        InspectQueryMode.HYBRID: SearchRetrievalMode.HYBRID,
+    }[mode]
+    try:
+        validate_routing_flags(local, cloud)
+        _validate_output_flags(json_output, plain)
+        with force_routing(local=local, cloud=cloud):
+            response = run_with_cleanup(
+                run_inspect_query(
+                    SearchQuery(text=query_text, retrieval_mode=retrieval_mode),
+                    limit=page_size,
+                    offset=(page - 1) * page_size,
+                    project=project,
+                    project_id=project_id,
+                )
+            )
+
+        output_mode = _resolve_output_mode(json_output, plain)
+        if output_mode == "json":
+            print(response.model_dump_json(indent=2))
+        elif output_mode == "plain":
+            _plain_query(response, show_misses=show_misses, show_ids=show_ids)
+        else:
+            _display_query(response, show_misses=show_misses, show_ids=show_ids)
+    except typer.Exit:
+        raise
+    except (ToolError, ValueError) as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(1)
+    except Exception as exc:  # pragma: no cover
+        logger.error(f"Error inspecting retrieval query: {exc}")
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(1)
 
 
 @inspect_app.command("chunks")

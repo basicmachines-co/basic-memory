@@ -3,6 +3,7 @@
 import asyncio
 import json
 import re
+import time
 from collections.abc import Sequence
 from datetime import datetime
 from typing import Any, override, List, Optional
@@ -24,6 +25,10 @@ from basic_memory.repository.semantic_chunking import VectorChunkRecord
 from basic_memory.repository.search_repository_base import (
     SearchRepositoryBase,
     VectorChunkState,
+)
+from basic_memory.repository.search_trace import (
+    SearchTraceCollector,
+    build_fts_page_stage,
 )
 from basic_memory.repository.metadata_filters import parse_metadata_filters
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
@@ -428,8 +433,15 @@ class PostgresSearchRepository(SearchRepositoryBase):
         session: AsyncSession,
         query_embedding: list[float],
         candidate_limit: int,
+        *,
+        trace: SearchTraceCollector | None = None,
     ) -> list[dict[str, Any]]:
-        return await super()._run_vector_query(session, query_embedding, candidate_limit)
+        return await super()._run_vector_query(
+            session,
+            query_embedding,
+            candidate_limit,
+            trace=trace,
+        )
 
     @override
     def _vector_prepare_window_size(self) -> int:
@@ -865,6 +877,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
         offset: int = 0,
         allow_relaxed: bool = False,
         session: AsyncSession | None = None,
+        *,
+        trace: SearchTraceCollector | None = None,
     ) -> List[SearchIndexRow]:
         """Search across all indexed content using PostgreSQL tsvector."""
         # --- Dispatch vector / hybrid modes (shared logic) ---
@@ -882,6 +896,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             min_similarity=min_similarity,
             limit=limit,
             offset=offset,
+            trace=trace,
         )
         if dispatched is not None:
             return dispatched
@@ -935,6 +950,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         """
 
         logger.trace(f"Search {sql} params: {params}")
+        fts_started_at = time.perf_counter() if trace is not None else None
 
         use_savepoint = session is not None or allow_relaxed
 
@@ -952,6 +968,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         async def run_search(active_session: AsyncSession):
             relaxed = self._relaxed_tsquery_text(search_text) if allow_relaxed else None
             strict_syntax_error = False
+            relaxed_fallback_used = False
             try:
                 rows = await execute_rows(active_session, params)
             except Exception as exc:
@@ -969,6 +986,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             # Outcome: one retry with OR-joined prefix lexemes; ts_rank
             # still ranks multi-term matches first.
             if relaxed and not rows and params.get("text"):
+                relaxed_fallback_used = True
                 retry_reason = "invalid syntax" if strict_syntax_error else "0 results"
                 logger.debug(
                     f"Strict Postgres FTS returned {retry_reason}; retrying relaxed FTS query "
@@ -986,17 +1004,27 @@ class PostgresSearchRepository(SearchRepositoryBase):
                         active_session,
                         {**params, "text": relaxed},
                     )
-            return rows
+            return rows, relaxed_fallback_used
 
         try:
             if session is not None:
-                rows = await run_search(session)
+                rows, relaxed_fallback_used = await run_search(session)
             else:
                 async with db.scoped_session(self.session_maker) as owned_session:
-                    rows = await run_search(owned_session)
+                    rows, relaxed_fallback_used = await run_search(owned_session)
         except Exception as e:
             if self._is_tsquery_syntax_error(e):
                 logger.warning(f"tsquery syntax error for search term: {search_text}, error: {e}")
+                if trace is not None:
+                    trace.fts = build_fts_page_stage(
+                        [],
+                        relaxed_fallback_used=False,
+                        fts_ms=(
+                            (time.perf_counter() - fts_started_at) * 1000
+                            if fts_started_at is not None
+                            else None
+                        ),
+                    )
                 return []
 
             # Re-raise other database errors
@@ -1004,6 +1032,16 @@ class PostgresSearchRepository(SearchRepositoryBase):
             raise
 
         results = [SearchIndexRow.from_mapping(row._asdict()) for row in rows]
+        if trace is not None:
+            trace.fts = build_fts_page_stage(
+                [((row.type, row.id), row.score or 0.0) for row in results],
+                relaxed_fallback_used=relaxed_fallback_used,
+                fts_ms=(
+                    (time.perf_counter() - fts_started_at) * 1000
+                    if fts_started_at is not None
+                    else None
+                ),
+            )
 
         logger.trace(f"Found {len(results)} search results")
         for r in results:

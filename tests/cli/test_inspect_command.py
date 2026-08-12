@@ -20,9 +20,20 @@ from basic_memory.schemas.inspect import (
     InspectDetachedSearchRow,
     InspectFreshness,
     InspectIndexBehindRowsDetail,
+    InspectMatchedChunk,
+    InspectQueryCandidate,
+    InspectQueryEngine,
+    InspectQueryRejectionDetail,
+    InspectQueryResponse,
+    InspectQueryReranker,
+    InspectQueryScores,
+    InspectQueryStage,
+    InspectQueryTimings,
+    InspectQueryWindow,
     InspectRowsBehindFileDetail,
     InspectSearchRow,
 )
+from basic_memory.schemas.search import SearchQuery, SearchRetrievalMode
 
 runner = CliRunner()
 
@@ -157,6 +168,104 @@ def _response_with_freshness(freshness: InspectFreshness) -> InspectChunksRespon
             "freshness": freshness,
             "freshness_detail": detail,
         }
+    )
+
+
+def _query_response(
+    retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.HYBRID,
+) -> InspectQueryResponse:
+    return InspectQueryResponse(
+        query="auth retrieval",
+        retrieval_mode=retrieval_mode,
+        project_id=7,
+        window=InspectQueryWindow(
+            limit=10,
+            offset=0,
+            candidate_limit=100,
+            rerank_pool=2,
+        ),
+        engine=InspectQueryEngine(
+            embedding_model="TraceEmbedding:model:4",
+            vector_index="sqlite-vec",
+            ready_rows=12,
+            pending_rows=2,
+            other_identity_rows=3,
+            fusion_formula="max+0.3*min/v1",
+            min_similarity=0.2,
+            min_similarity_source="config",
+            reranker=InspectQueryReranker(
+                enabled=True,
+                model="trace-reranker",
+                candidates=20,
+                applied=True,
+                skipped_reason=None,
+            ),
+        ),
+        stages=[
+            InspectQueryStage(
+                name="fts",
+                count_in=3,
+                count_out=3,
+                dropped=0,
+                ms=0.8,
+                relaxed_fallback_used=True,
+            ),
+            InspectQueryStage(name="embedding", count_in=1, count_out=1, dropped=0, ms=1.2),
+            InspectQueryStage(name="vector", count_in=5, count_out=2, dropped=3, ms=2.3),
+            InspectQueryStage(name="fusion", count_in=3, count_out=3, dropped=0, ms=0.4),
+            InspectQueryStage(name="rerank", count_in=2, count_out=2, dropped=0, ms=4.5),
+        ],
+        candidates=[
+            InspectQueryCandidate(
+                type="entity",
+                id=1,
+                external_id="11111111-1111-1111-1111-111111111111",
+                title="Authentication Guide",
+                permalink="notes/authentication-guide",
+                file_path="Authentication Guide.md",
+                disposition="returned",
+                rejection_detail=None,
+                matched_chunks=[InspectMatchedChunk(chunk_key="entity:1:0", similarity=0.9)],
+                dropped_chunks=[],
+                scores=InspectQueryScores(
+                    vector_similarity=0.9,
+                    vector_rank=2,
+                    fused_score=1.1,
+                    fused_rank=2,
+                    pre_rerank_rank=2,
+                    pre_rerank_score=1.1,
+                    rerank_score=0.95,
+                    post_rerank_rank=1,
+                    final_rank=1,
+                    final_score=0.95,
+                ),
+            ),
+            InspectQueryCandidate(
+                type="entity",
+                id=2,
+                external_id=None,
+                title=None,
+                permalink=None,
+                file_path=None,
+                disposition="below_threshold",
+                rejection_detail=InspectQueryRejectionDetail(
+                    reason="below_threshold",
+                    similarity=0.1,
+                    threshold=0.2,
+                ),
+                matched_chunks=[InspectMatchedChunk(chunk_key="entity:2:0", similarity=0.1)],
+                dropped_chunks=[],
+                scores=InspectQueryScores(vector_similarity=0.1, vector_rank=5),
+            ),
+        ],
+        timings_ms=InspectQueryTimings(
+            total=8.4,
+            embedding=1.2,
+            vector_query=2.3,
+            fts=0.5,
+            fusion=0.4,
+            rerank=4.5,
+        ),
     )
 
 
@@ -366,3 +475,233 @@ async def test_run_inspect_chunks_uses_typed_client_and_project_route(monkeypatc
     assert await_args.args[1] == (
         "/v2/projects/33333333-3333-3333-3333-333333333333/inspect/chunks"
     )
+
+
+@patch("basic_memory.cli.commands.tool._use_rich", return_value=True)
+@patch("basic_memory.cli.commands.inspect.run_inspect_query", new_callable=AsyncMock)
+def test_inspect_query_rich_renders_query_plan_and_grouped_misses(mock_run, _mock_use_rich):
+    mock_run.return_value = _query_response()
+
+    result = runner.invoke(
+        cli_app,
+        [
+            "inspect",
+            "query",
+            "auth retrieval",
+            "--mode",
+            "hybrid",
+            "--show-misses",
+            "--show-ids",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Retrieval query" in result.output
+    assert "Project: 7" in result.output
+    assert "12 ready, 2 pending, 3 other identity" in result.output
+    assert "max+0.3*min/v1" in result.output
+    assert "Ranked results" in result.output
+    assert "fts (relaxed fallback)" in result.output
+    assert "Authentication Guide" in result.output
+    assert "notes/authentication-guide" in result.output
+    assert "11111111-1111-1111-1111-111111111111" in result.output
+    assert "+1" in result.output
+    assert "bounded window — not exhaustive" in result.output
+    assert "below_threshold" in result.output
+
+
+@patch("basic_memory.cli.commands.tool._use_rich", return_value=True)
+@patch("basic_memory.cli.commands.inspect.run_inspect_query", new_callable=AsyncMock)
+def test_inspect_query_renders_fts_readiness_as_not_applicable(mock_run, _mock_use_rich):
+    """An FTS-only trace has no manifest snapshot; zeros would misreport the index."""
+    response = _query_response()
+    mock_run.return_value = response.model_copy(
+        update={
+            "engine": response.engine.model_copy(
+                update={
+                    "ready_rows": None,
+                    "pending_rows": None,
+                    "other_identity_rows": None,
+                }
+            )
+        }
+    )
+
+    rich_result = runner.invoke(cli_app, ["inspect", "query", "auth retrieval"])
+    assert rich_result.exit_code == 0, rich_result.output
+    assert "Readiness: n/a" in rich_result.output
+    assert "0 ready" not in rich_result.output
+
+    plain_result = runner.invoke(cli_app, ["inspect", "query", "auth retrieval", "--plain"])
+    assert plain_result.exit_code == 0, plain_result.output
+    assert "Readiness: n/a" in plain_result.output
+    assert "ready=0" not in plain_result.output
+
+
+@patch("basic_memory.cli.commands.inspect.run_inspect_query", new_callable=AsyncMock)
+def test_inspect_query_plain_hides_misses_without_show_misses(mock_run):
+    mock_run.return_value = _query_response()
+
+    result = runner.invoke(
+        cli_app,
+        ["inspect", "query", "auth retrieval", "--mode", "vector", "--plain"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "Engine:" in result.output
+    assert "relaxed_fallback=yes" in result.output
+    assert "dropped=3" in result.output
+    assert "delta=+1" in result.output
+    assert "permalink=notes/authentication-guide" in result.output
+    assert "11111111-1111-1111-1111-111111111111" not in result.output
+    assert "id=entity:1" not in result.output
+    assert "bounded window" not in result.output
+    query = mock_run.await_args.args[0]
+    assert query.retrieval_mode == SearchRetrievalMode.VECTOR
+
+
+@patch("basic_memory.cli.commands.inspect.run_inspect_query", new_callable=AsyncMock)
+def test_inspect_query_json_is_schema_locked_and_always_includes_misses(mock_run):
+    expected = _query_response()
+    mock_run.return_value = expected
+
+    result = runner.invoke(
+        cli_app,
+        [
+            "inspect",
+            "query",
+            "auth retrieval",
+            "--json",
+            "--page",
+            "2",
+            "--page-size",
+            "5",
+            "--show-ids",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    validated = InspectQueryResponse.model_validate_json(result.output)
+    assert validated == expected
+    assert {candidate.disposition for candidate in validated.candidates} == {
+        "returned",
+        "below_threshold",
+    }
+    assert mock_run.await_args.kwargs["limit"] == 5
+    assert mock_run.await_args.kwargs["offset"] == 5
+
+
+@patch("basic_memory.cli.commands.inspect.run_inspect_query", new_callable=AsyncMock)
+def test_inspect_query_plain_show_ids_adds_external_id(mock_run):
+    mock_run.return_value = _query_response()
+
+    result = runner.invoke(
+        cli_app,
+        ["inspect", "query", "auth retrieval", "--plain", "--show-ids"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "permalink=notes/authentication-guide" in result.output
+    assert "id=11111111-1111-1111-1111-111111111111" in result.output
+    assert "id=entity:1" not in result.output
+
+
+@patch("basic_memory.cli.commands.inspect.run_inspect_query", new_callable=AsyncMock)
+def test_inspect_query_plain_show_ids_falls_back_to_type_qualified_trace_key(mock_run):
+    response = _query_response()
+    returned = response.candidates[0].model_copy(update={"external_id": None})
+    mock_run.return_value = response.model_copy(
+        update={"candidates": [returned, *response.candidates[1:]]}
+    )
+
+    result = runner.invoke(
+        cli_app,
+        ["inspect", "query", "auth retrieval", "--plain", "--show-ids"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "id=entity:1" in result.output
+
+
+@patch("basic_memory.cli.commands.inspect.run_inspect_query", new_callable=AsyncMock)
+def test_inspect_query_plain_preserves_malformed_drop_chunk_key(mock_run):
+    response = _query_response()
+    malformed = InspectQueryCandidate(
+        type=None,
+        id=None,
+        external_id=None,
+        title=None,
+        permalink=None,
+        file_path=None,
+        disposition="not_in_manifest",
+        rejection_detail=InspectQueryRejectionDetail(
+            reason="not_in_manifest",
+            chunk_key="malformed-key",
+            similarity=0.4,
+        ),
+        matched_chunks=[InspectMatchedChunk(chunk_key="malformed-key", similarity=0.4)],
+        dropped_chunks=[],
+        scores=InspectQueryScores(vector_similarity=0.4),
+    )
+    mock_run.return_value = response.model_copy(
+        update={"candidates": [*response.candidates, malformed]}
+    )
+
+    result = runner.invoke(
+        cli_app,
+        ["inspect", "query", "auth retrieval", "--plain", "--show-misses"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "malformed-key" in result.output
+    assert "None:None" not in result.output
+
+
+@patch("basic_memory.cli.commands.inspect.run_inspect_query", new_callable=AsyncMock)
+def test_inspect_query_fts_show_misses_explains_sql_limit(mock_run):
+    response = _query_response(SearchRetrievalMode.FTS)
+    response.engine.reranker.applied = False
+    response.engine.reranker.skipped_reason = "fts_mode"
+    mock_run.return_value = response
+
+    result = runner.invoke(
+        cli_app,
+        ["inspect", "query", "auth retrieval", "--show-misses", "--plain"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "show-misses not applicable: FTS window is the SQL LIMIT" in result.output
+
+
+@pytest.mark.asyncio
+async def test_run_inspect_query_uses_typed_client_and_project_route(monkeypatch):
+    expected = _query_response()
+    http_client = MagicMock()
+    active_project = SimpleNamespace(external_id="33333333-3333-3333-3333-333333333333")
+
+    @asynccontextmanager
+    async def fake_get_project_client(*, project=None, project_id=None):
+        assert project == "research"
+        assert project_id == "33333333-3333-3333-3333-333333333333"
+        yield http_client, active_project
+
+    response = MagicMock()
+    response.json.return_value = expected.model_dump(mode="json")
+    call_post = AsyncMock(return_value=response)
+    monkeypatch.setattr(inspect_command, "get_project_client", fake_get_project_client)
+    monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", call_post)
+
+    query = SearchQuery(text="auth retrieval", retrieval_mode=SearchRetrievalMode.HYBRID)
+    result = await inspect_command.run_inspect_query(
+        query,
+        limit=10,
+        offset=0,
+        project="research",
+        project_id="33333333-3333-3333-3333-333333333333",
+    )
+
+    assert result == expected
+    call_post.assert_awaited_once()
+    await_args = call_post.await_args
+    assert await_args is not None
+    assert await_args.args[1] == ("/v2/projects/33333333-3333-3333-3333-333333333333/inspect/query")

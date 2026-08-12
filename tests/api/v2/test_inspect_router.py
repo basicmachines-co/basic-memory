@@ -1,18 +1,43 @@
 """API contract tests for note-level retrieval inspection."""
 
+from importlib import import_module
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import text
 
 from basic_memory import db
+from basic_memory.deps.services import get_search_service_v2_external
 from basic_memory.models import Project
+from basic_memory.repository.semantic_errors import (
+    RerankProviderContractError,
+    RerankTransientError,
+)
 from basic_memory.repository.semantic_chunking import (
     build_entity_fingerprint,
     build_vector_chunk_records,
 )
-from basic_memory.schemas.inspect import InspectChunksResponse, InspectRowsBehindFileDetail
+from basic_memory.repository.search_trace import (
+    FinalResultEntry,
+    HydrationDropped,
+    ManifestReadiness,
+    QueryMeta,
+    RerankerConfigSummary,
+    VectorQueryTrace,
+    build_vector_stage,
+)
+from basic_memory.schemas.inspect import (
+    InspectChunksResponse,
+    InspectQueryRequest,
+    InspectQueryResponse,
+    InspectRowsBehindFileDetail,
+)
+from basic_memory.schemas.search import SearchQuery, SearchRetrievalMode
+
+inspect_router_module = import_module("basic_memory.api.v2.routers.inspect_router")
 
 
 async def _create_indexed_entity(
@@ -250,3 +275,166 @@ async def test_inspect_chunks_semantic_disabled_returns_rows_only(
     assert inspection.detached == []
     assert inspection.entity_fingerprint_indexed is None
     assert inspection.stale is False
+
+
+@pytest.mark.asyncio
+async def test_inspect_query_returns_schema_for_seeded_fts_corpus(
+    client: AsyncClient,
+    v2_project_url: str,
+    test_project: Project,
+    entity_repository,
+    search_service,
+    file_service,
+):
+    entity = await _create_indexed_entity(
+        test_project=test_project,
+        title="API Query Inspection",
+        file_name="api-query-inspection.md",
+        entity_repository=entity_repository,
+        search_service=search_service,
+        file_service=file_service,
+    )
+
+    response = await client.post(
+        f"{v2_project_url}/inspect/query",
+        json={
+            "query": {"text": "inspection", "retrieval_mode": "fts"},
+            "limit": 5,
+            "offset": 0,
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    inspection = InspectQueryResponse.model_validate(response.json())
+    assert inspection.query == 'text="inspection"'
+    assert inspection.retrieval_mode.value == "fts"
+    assert inspection.window.limit == 5
+    assert inspection.candidates[0].permalink == entity.permalink
+    assert inspection.candidates[0].external_id == str(entity.external_id)
+    assert inspection.candidates[0].disposition == "returned"
+    assert [stage.name for stage in inspection.stages] == ["fts"]
+
+
+@pytest.mark.asyncio
+async def test_inspect_query_batch_enriches_final_and_hydration_drop_external_ids(monkeypatch):
+    trace = VectorQueryTrace(
+        meta=QueryMeta(
+            query_text="inspection",
+            retrieval_mode="vector",
+            limit=5,
+            offset=0,
+            project_id=1,
+            candidate_limit=10,
+            rerank_pool_size=0,
+            embedding_model="embedding",
+            vector_index="index",
+            fusion_formula_version="max+0.3*min/v1",
+            min_similarity=0.2,
+            min_similarity_source="config",
+            reranker=RerankerConfigSummary(enabled=False, model=None, candidates=20),
+            rerank_applied=False,
+            rerank_skipped_reason="disabled",
+            total_ms=1.0,
+        ),
+        readiness=ManifestReadiness("index", "embedding", 0, 0, 0),
+        vector=build_vector_stage(
+            candidate_limit=10,
+            adapter_match_count=1,
+            hydrated_count=0,
+            drops=(
+                HydrationDropped(
+                    entity_id=2,
+                    chunk_key="entity:2:0",
+                    similarity=0.8,
+                    reason="not_in_manifest",
+                    stored_model=None,
+                    stored_index=None,
+                ),
+            ),
+        ),
+        rerank=None,
+        final=(
+            FinalResultEntry(
+                key=("entity", 1),
+                entity_id=1,
+                title="One",
+                permalink="one",
+                file_path="one.md",
+                final_rank=1,
+                final_score=0.9,
+            ),
+        ),
+    )
+
+    async def fake_explain_query(*_args, **_kwargs):
+        return trace
+
+    entity_service = MagicMock()
+    entity_service.get_entities_by_id = AsyncMock(
+        return_value=[
+            SimpleNamespace(id=1, external_id="external-1"),
+            SimpleNamespace(id=2, external_id="external-2"),
+        ]
+    )
+    monkeypatch.setattr(inspect_router_module, "explain_query", fake_explain_query)
+
+    inspection = await inspect_router_module.inspect_query(
+        data=InspectQueryRequest(
+            query=SearchQuery(text="inspection", retrieval_mode=SearchRetrievalMode.VECTOR)
+        ),
+        project_id=1,
+        entity_service=entity_service,
+        search_service=MagicMock(),
+    )
+
+    assert {candidate.external_id for candidate in inspection.candidates} == {
+        "external-1",
+        "external-2",
+    }
+    entity_service.get_entities_by_id.assert_awaited_once_with([1, 2])
+
+
+@pytest.mark.asyncio
+async def test_inspect_query_maps_semantic_disabled_to_400(
+    client: AsyncClient,
+    v2_project_url: str,
+):
+    response = await client.post(
+        f"{v2_project_url}/inspect/query",
+        json={"query": {"text": "inspection", "retrieval_mode": "vector"}},
+    )
+
+    assert response.status_code == 400
+    assert "Semantic search is disabled" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "status_code"),
+    [
+        (RerankTransientError("reranker unavailable"), 503),
+        (RerankProviderContractError("malformed reranker response"), 502),
+    ],
+)
+async def test_inspect_query_maps_reranker_errors(
+    client: AsyncClient,
+    v2_project_url: str,
+    app,
+    error: Exception,
+    status_code: int,
+):
+    class RaisingSearchService:
+        async def search(self, *args, **kwargs):
+            raise error
+
+    app.dependency_overrides[get_search_service_v2_external] = lambda: RaisingSearchService()
+    try:
+        response = await client.post(
+            f"{v2_project_url}/inspect/query",
+            json={"query": {"text": "inspection", "retrieval_mode": "hybrid"}},
+        )
+    finally:
+        app.dependency_overrides.pop(get_search_service_v2_external, None)
+
+    assert response.status_code == status_code
+    assert response.json()["detail"] == str(error)

@@ -32,6 +32,17 @@ class EntityServiceBatchLookup(Protocol):
     async def get_entities_by_id(self, ids: List[int]) -> Sequence[Any]: ...
 
 
+async def get_entities_by_id_lookup(
+    entity_service: EntityServiceBatchLookup,
+    entity_ids: Sequence[int],
+) -> dict[int, Any]:
+    """Fetch an entity batch once and index it by internal identity."""
+    if not entity_ids:
+        return {}
+    entities = await entity_service.get_entities_by_id(list(entity_ids))
+    return {entity.id: entity for entity in entities}
+
+
 def _required_str(value: str | None, field_name: str) -> str:
     """Return a required search field or fail before producing invalid response data."""
     if value is None:
@@ -233,9 +244,10 @@ async def to_search_results(
             phase="fetch_entities",
             result_count=len(all_entity_ids),
         ):
-            if all_entity_ids:
-                entities = await entity_service.get_entities_by_id(list(all_entity_ids))
-                entities_by_id = {e.id: e for e in entities}
+            entities_by_id = await get_entities_by_id_lookup(
+                entity_service,
+                list(all_entity_ids),
+            )
 
         search_results = []
         with logfire.span(

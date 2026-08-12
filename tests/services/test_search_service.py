@@ -295,7 +295,7 @@ async def test_search_entity_type(search_service, test_graph):
 
 @pytest.mark.asyncio
 async def test_search_categories_filter(search_service, test_graph):
-    """categories propagates through _prepare_query/has_criteria to scope results.
+    """categories propagates through prepare_query/has_criteria to scope results.
 
     The test_graph fixture indexes observations with categories "note" and "tech".
     A categories filter must return only matching observation categories.

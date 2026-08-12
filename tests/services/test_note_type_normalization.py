@@ -13,6 +13,7 @@ from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_repository import SearchRepository
 from basic_memory.schemas.search import SearchQuery
+from basic_memory.services.retrieval_inspect import explain_query
 from basic_memory.services.search_service import SearchService
 
 
@@ -25,13 +26,13 @@ def _search_service(repository: SearchRepository) -> SearchService:
     )
 
 
-def test_prepare_query_canonicalizes_directly_assigned_note_types():
+def testprepare_query_canonicalizes_directly_assigned_note_types():
     """Service callers cannot bypass canonicalization by mutating SearchQuery."""
     repository = cast(SearchRepository, MagicMock())
     service = _search_service(repository)
     query = SearchQuery.model_construct(note_types=["TaskItem"])
 
-    prepared = service._prepare_query(query)
+    prepared = service.prepare_query(query)
 
     assert prepared is not None
     assert prepared.note_types == ["task_item"]
@@ -112,3 +113,10 @@ async def test_search_matches_legacy_note_type_projection_without_reindex(
 
     assert [result.entity_id for result in results] == [entity.id]
     assert await search_service.count(query) == 1
+
+    # The execution trace must describe the expanded filter that admitted the legacy
+    # row, not the raw request — a trace showing only ['task_item'] could not explain
+    # why a 'TaskItem' row was returned.
+    trace = await explain_query(search_service, query, limit=10, offset=0)
+    assert "note_types=['TaskItem', 'task_item']" in trace.meta.query_text
+    assert [entry.entity_id for entry in trace.final] == [entity.id]

@@ -823,9 +823,7 @@ def test_reindex_total_embedding_failure_surfaces_error_and_exits_one(
         "[cyan]model=FastEmbedEmbeddingProvider:BAAI/bge-small-en-v1.5[/cyan]): "
         "0 entities embedded, 0 skipped, 3 errors"
     ) in output
-    representative_line = next(
-        line for line in printed_lines if "Representative error:" in line
-    )
+    representative_line = next(line for line in printed_lines if "Representative error:" in line)
     assert "first line second line" in representative_line
     assert representative_line.endswith("...")
     assert "Reindex failed: all vector embedding attempts failed." in output

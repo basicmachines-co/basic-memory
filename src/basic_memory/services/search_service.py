@@ -24,6 +24,7 @@ from basic_memory.repository.search_repository import (
     SearchRepository,
 )
 from basic_memory.repository.search_query import relaxed_query_words
+from basic_memory.repository.search_trace import SearchTraceCollector
 from basic_memory.schemas.base import normalize_note_type
 from basic_memory.schemas.search import SearchQuery, SearchItemType, SearchRetrievalMode
 from basic_memory.runtime.vector_sync import (
@@ -38,7 +39,7 @@ MAX_CONTENT_STEMS_SIZE = 6000
 
 
 @dataclass(frozen=True)
-class _PreparedSearchQuery:
+class PreparedSearchQuery:
     """Normalized query inputs shared by search and count."""
 
     search_text: str | None
@@ -80,6 +81,36 @@ def entity_embeddings_enabled(entity: Entity) -> bool:
     # Default unknown values to enabled so malformed metadata does not silently
     # remove notes from semantic search.
     return True
+
+
+def describe_search_criteria(prepared: PreparedSearchQuery) -> str:
+    """Render the criteria the repository actually executed.
+
+    The prepared query is the execution-native source: shorthand like ``text="tag:x"``
+    normalizes into metadata filters, convenience fields fold into their canonical
+    forms, and note-type filters expand to legacy spellings, so describing the raw
+    request would misreport what ran.
+    """
+
+    def quoted(value: str | None) -> str | None:
+        return f'"{value}"' if value else None
+
+    criteria: dict[str, object | None] = {
+        "text": quoted(prepared.search_text),
+        "title": quoted(prepared.title),
+        "permalink": quoted(prepared.permalink),
+        "permalink_match": quoted(prepared.permalink_match),
+        "note_types": list(prepared.note_types) if prepared.note_types else None,
+        # SearchItemType is a str-backed Enum whose str() is "SearchItemType.ENTITY";
+        # the executed repository filter uses the plain value.
+        "entity_types": [item.value for item in prepared.search_item_types]
+        if prepared.search_item_types
+        else None,
+        "after_date": prepared.after_date,
+        "categories": list(prepared.categories) if prepared.categories else None,
+        "metadata_filters": dict(prepared.metadata_filters) if prepared.metadata_filters else None,
+    }
+    return " ".join(f"{name}={value}" for name, value in criteria.items() if value is not None)
 
 
 def _strip_nul(value: str) -> str:
@@ -136,7 +167,7 @@ class SearchService:
 
         logger.info("Reindex complete")
 
-    def _prepare_query(self, query: SearchQuery) -> _PreparedSearchQuery | None:
+    def prepare_query(self, query: SearchQuery) -> PreparedSearchQuery | None:
         """Normalize a SearchQuery into repository arguments."""
         search_text = query.text
         tags = query.tags
@@ -170,7 +201,7 @@ class SearchService:
             if query.status:
                 metadata_filters.setdefault("status", query.status)
 
-        prepared = _PreparedSearchQuery(
+        prepared = PreparedSearchQuery(
             search_text=search_text,
             permalink=query.permalink,
             permalink_match=query.permalink_match,
@@ -205,7 +236,7 @@ class SearchService:
         return prepared
 
     @staticmethod
-    def _prepared_has_filters(prepared: _PreparedSearchQuery) -> bool:
+    def _prepared_has_filters(prepared: PreparedSearchQuery) -> bool:
         return bool(
             prepared.metadata_filters
             or prepared.note_types
@@ -216,10 +247,10 @@ class SearchService:
 
     async def _include_legacy_note_type_spellings(
         self,
-        prepared: _PreparedSearchQuery,
+        prepared: PreparedSearchQuery,
         *,
         session: AsyncSession | None = None,
-    ) -> _PreparedSearchQuery:
+    ) -> PreparedSearchQuery:
         """Expand canonical note-type filters to exact legacy entity spellings."""
         if not prepared.note_types:
             return prepared
@@ -245,14 +276,33 @@ class SearchService:
 
     async def _search_repository(
         self,
-        prepared: _PreparedSearchQuery,
+        prepared: PreparedSearchQuery,
         *,
         search_text: str | None,
         limit: int,
         offset: int,
         allow_relaxed: bool = False,
         session: AsyncSession | None = None,
+        trace: SearchTraceCollector | None = None,
     ) -> List[SearchIndexRow]:
+        if trace is None:
+            return await self.repository.search(
+                search_text=search_text,
+                permalink=prepared.permalink,
+                permalink_match=prepared.permalink_match,
+                title=prepared.title,
+                note_types=prepared.note_types,
+                search_item_types=prepared.search_item_types,
+                categories=prepared.categories,
+                after_date=prepared.after_date,
+                metadata_filters=prepared.metadata_filters,
+                retrieval_mode=prepared.retrieval_mode,
+                min_similarity=prepared.min_similarity,
+                limit=limit,
+                offset=offset,
+                allow_relaxed=allow_relaxed,
+                session=session,
+            )
         return await self.repository.search(
             search_text=search_text,
             permalink=prepared.permalink,
@@ -269,11 +319,12 @@ class SearchService:
             offset=offset,
             allow_relaxed=allow_relaxed,
             session=session,
+            trace=trace,
         )
 
     async def _count_repository(
         self,
-        prepared: _PreparedSearchQuery,
+        prepared: PreparedSearchQuery,
         *,
         search_text: str | None,
         allow_relaxed: bool = False,
@@ -299,6 +350,8 @@ class SearchService:
         limit=10,
         offset=0,
         session: AsyncSession | None = None,
+        *,
+        trace: SearchTraceCollector | None = None,
     ) -> List[SearchIndexRow]:
         """Search across all indexed content.
 
@@ -307,13 +360,17 @@ class SearchService:
         2. Pattern match: handles * wildcards in paths
         3. Text search: full-text search across title/content
         """
-        prepared = self._prepare_query(query)
+        prepared = self.prepare_query(query)
         if prepared is None:
             return []
         prepared = await self._include_legacy_note_type_spellings(
             prepared,
             session=session,
         )
+        if trace is not None:
+            # The trace must describe this execution's criteria, not a re-preparation:
+            # the legacy note-type expansion above depends on stored entity spellings.
+            trace.executed_query_description = describe_search_criteria(prepared)
 
         strict_search_text = prepared.search_text
         has_query = bool(
@@ -344,13 +401,14 @@ class SearchService:
                 offset=offset,
                 allow_relaxed=allow_relaxed,
                 session=session,
+                trace=trace,
             )
 
         return results
 
     async def count(self, query: SearchQuery) -> int:
         """Count all indexed rows matching a query."""
-        prepared = self._prepare_query(query)
+        prepared = self.prepare_query(query)
         if prepared is None:
             return 0
         prepared = await self._include_legacy_note_type_spellings(prepared)

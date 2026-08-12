@@ -4,12 +4,22 @@ from typing import assert_never
 
 from fastapi import APIRouter, HTTPException
 
+from basic_memory.api.v2.utils import get_entities_by_id_lookup
 from basic_memory.deps import (
+    EntityServiceV2ExternalDep,
     FileServiceV2ExternalDep,
     LinkResolverV2ExternalDep,
     ProjectExternalIdPathDep,
     SearchRepositoryV2ExternalDep,
+    SearchServiceV2ExternalDep,
 )
+from basic_memory.repository.semantic_errors import (
+    RerankProviderContractError,
+    RerankTransientError,
+    SemanticDependenciesMissingError,
+    SemanticSearchDisabledError,
+)
+from basic_memory.repository.search_trace import HybridQueryTrace, VectorQueryTrace
 from basic_memory.schemas.inspect import (
     InspectChunk,
     InspectChunkReadiness,
@@ -17,8 +27,11 @@ from basic_memory.schemas.inspect import (
     InspectChunksResponse,
     InspectDetachedSearchRow,
     InspectIndexBehindRowsDetail,
+    InspectQueryRequest,
+    InspectQueryResponse,
     InspectRowsBehindFileDetail,
     InspectSearchRow,
+    query_trace_response,
 )
 from basic_memory.services.retrieval_inspect import (
     ChunkFresh,
@@ -26,10 +39,48 @@ from basic_memory.services.retrieval_inspect import (
     ChunkNotIndexed,
     ChunkIndexBehindRows,
     ChunkRowsBehindFile,
+    explain_query,
     inspect_entity_chunks,
 )
 
 router = APIRouter(prefix="/inspect", tags=["inspect"])
+
+
+@router.post("/query", response_model=InspectQueryResponse)
+async def inspect_query(
+    data: InspectQueryRequest,
+    project_id: ProjectExternalIdPathDep,
+    entity_service: EntityServiceV2ExternalDep,
+    search_service: SearchServiceV2ExternalDep,
+) -> InspectQueryResponse:
+    """Run one search and return the trace captured by that exact execution."""
+    del project_id  # Route resolution scopes the injected search service.
+    try:
+        trace = await explain_query(
+            search_service,
+            data.query,
+            limit=data.limit,
+            offset=data.offset,
+        )
+    except (SemanticSearchDisabledError, SemanticDependenciesMissingError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RerankTransientError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except RerankProviderContractError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    # Nullable-owner rows stay inspectable; only known owners get external-id enrichment.
+    entity_ids = {result.entity_id for result in trace.final if result.entity_id is not None}
+    if isinstance(trace, (VectorQueryTrace, HybridQueryTrace)):
+        entity_ids.update(rejection.entity_id for rejection in trace.vector.drops)
+        entity_ids.update(
+            match.entity_id for match in trace.vector.chunk_matches if match.entity_id is not None
+        )
+    entities_by_id = await get_entities_by_id_lookup(entity_service, sorted(entity_ids))
+    external_ids_by_entity_id = {
+        entity_id: str(entity.external_id) for entity_id, entity in entities_by_id.items()
+    }
+    return query_trace_response(trace, external_ids_by_entity_id)
 
 
 @router.post("/chunks", response_model=InspectChunksResponse)

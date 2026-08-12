@@ -18,6 +18,7 @@ from basic_memory.repository.search_repository_base import (
     SearchRepositoryBase,
     _PreparedEntityVectorSync,
 )
+from basic_memory.repository.search_trace import SearchTraceCollector
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.repository.semantic_errors import (
     SemanticSearchDisabledError,
@@ -91,6 +92,8 @@ class _ConcreteRepo(SearchRepositoryBase):
         limit: int = 10,
         offset: int = 0,
         allow_relaxed: bool = False,
+        *,
+        trace: SearchTraceCollector | None = None,
     ) -> list[SearchIndexRow]:
         return []
 
@@ -99,7 +102,14 @@ class _ConcreteRepo(SearchRepositoryBase):
         pass
 
     @override
-    async def _run_vector_query(self, session, query_embedding, candidate_limit):
+    async def _run_vector_query(
+        self,
+        session,
+        query_embedding,
+        candidate_limit,
+        *,
+        trace: SearchTraceCollector | None = None,
+    ):
         return []
 
     @override

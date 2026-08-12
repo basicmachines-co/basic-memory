@@ -1,5 +1,6 @@
 """Read-only inspection of one entity's retrieval projections."""
 
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Literal, assert_never
@@ -17,15 +18,25 @@ from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_repository import SearchRepository
 from basic_memory.repository.search_repository_base import (
     ChunkManifestRow,
+    FUSION_FORMULA_VERSION,
     SearchRepositoryBase,
+)
+from basic_memory.repository.search_trace import (
+    FinalResultEntry,
+    QueryMeta,
+    QueryTrace,
+    RerankerConfigSummary,
+    SearchTraceCollector,
+    finalize_query_trace,
 )
 from basic_memory.repository.semantic_chunking import (
     build_entity_fingerprint,
     build_vector_chunk_records,
 )
 from basic_memory.schemas.inspect import ChunkStatus
+from basic_memory.schemas.search import SearchQuery
 from basic_memory.services.file_service import FileService
-from basic_memory.services.search_service import entity_embeddings_enabled
+from basic_memory.services.search_service import SearchService, entity_embeddings_enabled
 
 
 @dataclass(frozen=True, slots=True)
@@ -491,3 +502,106 @@ async def inspect_entity_chunks(
             if (row_type, row_id) not in search_rows_by_key
         ),
     )
+
+
+async def explain_query(
+    search_service: SearchService,
+    query: SearchQuery,
+    *,
+    limit: int,
+    offset: int,
+) -> QueryTrace:
+    """Run one real search and freeze its execution-native retrieval trace."""
+    collector = SearchTraceCollector()
+    started_at = time.perf_counter()
+    results = await search_service.search(
+        query,
+        limit=limit,
+        offset=offset,
+        trace=collector,
+    )
+    total_ms = (time.perf_counter() - started_at) * 1000
+
+    repository = search_service.repository
+    mode = query.retrieval_mode.value
+    reranker_model = repository.configured_reranker_model
+    rerank_applied = collector.rerank is not None
+    if rerank_applied:
+        rerank_skipped_reason = None
+    elif mode == "fts":
+        rerank_skipped_reason = "fts_mode"
+    elif reranker_model is None:
+        rerank_skipped_reason = "disabled"
+    elif not results:
+        # Trigger: the final page is empty while earlier stages captured candidates.
+        # Why: hydrated chunks can still lose their whole row to the similarity
+        # threshold, filters, or a missing search row — only candidates that survive
+        # ranking can make an offset page "out of range"; anything less is a
+        # genuinely empty retrieval, even with hydrated chunks in the trace.
+        # Outcome: distinguish the empty page from an empty ranked candidate set.
+        if collector.fusion is not None:
+            ranked_candidates = len(collector.fusion.entries)
+        elif collector.vector is not None:
+            served_rows = {match.key for match in collector.vector.chunk_matches}
+            ranked_candidates = (
+                len(served_rows)
+                - len(collector.vector.threshold_rejections)
+                - len(collector.vector.filter_rejections)
+                - len(collector.vector.missing_search_rows)
+            )
+        else:
+            ranked_candidates = 0
+        rerank_skipped_reason = "page_out_of_range" if ranked_candidates > 0 else "no_candidates"
+    else:
+        rerank_skipped_reason = "not_applied"
+
+    candidate_limit = collector.vector.candidate_limit if collector.vector is not None else limit
+    effective_min_similarity = (
+        query.min_similarity
+        if query.min_similarity is not None
+        else repository.configured_min_similarity
+    )
+    meta = QueryMeta(
+        # Captured by search() from the exact prepared query it executed; absent only
+        # when preparation found no criteria and the search short-circuited.
+        query_text=(
+            collector.executed_query_description
+            if collector.executed_query_description is not None
+            else "(unsatisfiable query: no criteria)"
+        ),
+        retrieval_mode=mode,
+        limit=limit,
+        offset=offset,
+        project_id=repository.project_id,
+        candidate_limit=candidate_limit,
+        rerank_pool_size=(collector.rerank.pool_size if collector.rerank is not None else 0),
+        embedding_model=repository.configured_embedding_model,
+        vector_index=repository.configured_vector_index,
+        fusion_formula_version=FUSION_FORMULA_VERSION,
+        min_similarity=effective_min_similarity,
+        min_similarity_source=("query" if query.min_similarity is not None else "config"),
+        reranker=RerankerConfigSummary(
+            enabled=reranker_model is not None,
+            model=reranker_model,
+            candidates=repository.configured_reranker_candidates,
+        ),
+        rerank_applied=rerank_applied,
+        rerank_skipped_reason=rerank_skipped_reason,
+        total_ms=total_ms,
+    )
+    final: list[FinalResultEntry] = []
+    for rank, row in enumerate(results, start=1):
+        # entity_id is nullable storage on both backends (legacy/diagnostic rows);
+        # a missing owner degrades external-id enrichment, never the whole trace.
+        final.append(
+            FinalResultEntry(
+                key=(row.type, row.id),
+                entity_id=row.entity_id,
+                title=row.title,
+                permalink=row.permalink,
+                file_path=row.file_path,
+                final_rank=offset + rank,
+                final_score=row.score or 0.0,
+            )
+        )
+    return finalize_query_trace(collector, meta, final, mode)

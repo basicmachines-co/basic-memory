@@ -2,6 +2,7 @@
 
 import asyncio
 import re
+import time
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -28,6 +29,10 @@ from basic_memory.repository.rerank_provider_factory import create_rerank_provid
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_query import relaxed_query_words
 from basic_memory.repository.search_repository_base import SearchRepositoryBase
+from basic_memory.repository.search_trace import (
+    SearchTraceCollector,
+    build_fts_page_stage,
+)
 from basic_memory.repository.metadata_filters import parse_metadata_filters, build_sqlite_json_path
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.semantic_vector_index import SemanticVectorIndex
@@ -615,8 +620,15 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         session: AsyncSession,
         query_embedding: list[float],
         candidate_limit: int,
+        *,
+        trace: SearchTraceCollector | None = None,
     ) -> list[dict[str, Any]]:
-        return await super()._run_vector_query(session, query_embedding, candidate_limit)
+        return await super()._run_vector_query(
+            session,
+            query_embedding,
+            candidate_limit,
+            trace=trace,
+        )
 
     @override
     async def _delete_entity_chunks(
@@ -977,6 +989,8 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         offset: int = 0,
         allow_relaxed: bool = False,
         session: AsyncSession | None = None,
+        *,
+        trace: SearchTraceCollector | None = None,
     ) -> List[SearchIndexRow]:
         """Search across all indexed content using SQLite FTS5.
 
@@ -1000,6 +1014,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             min_similarity=min_similarity,
             limit=limit,
             offset=offset,
+            trace=trace,
         )
         if dispatched is not None:
             return dispatched
@@ -1047,10 +1062,12 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         """
 
         logger.trace(f"Search {sql} params: {params}")
+        fts_started_at = time.perf_counter() if trace is not None else None
 
         async def run_search(active_session: AsyncSession):
             result = await active_session.execute(text(sql), params)
             rows = result.fetchall()
+            relaxed_fallback_used = False
             # Trigger: multi-word natural-language query matched nothing
             # under the default all-terms-AND semantics.
             # Why: questions ("when did X do Y") rarely have every word in
@@ -1061,6 +1078,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             # ranks multi-term matches first.
             relaxed = self._relaxed_fts_text(search_text) if allow_relaxed and not rows else None
             if relaxed and params.get("text"):
+                relaxed_fallback_used = True
                 params["text"] = relaxed
                 logger.debug(
                     "Strict SQLite FTS returned 0 results; retrying relaxed FTS query "
@@ -1075,19 +1093,29 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 ):
                     result = await active_session.execute(text(sql), params)
                     rows = result.fetchall()
-            return rows
+            return rows, relaxed_fallback_used
 
         try:
             if session is not None:
-                rows = await run_search(session)
+                rows, relaxed_fallback_used = await run_search(session)
             else:
                 async with db.scoped_session(self.session_maker) as owned_session:
-                    rows = await run_search(owned_session)
+                    rows, relaxed_fallback_used = await run_search(owned_session)
         except Exception as e:
             # Handle FTS5 syntax errors and provide user-friendly feedback
             if self._is_fts5_syntax_error(e):  # pragma: no cover
                 logger.warning(f"FTS5 syntax error for search term: {search_text}, error: {e}")
                 # Return empty results rather than crashing
+                if trace is not None:
+                    trace.fts = build_fts_page_stage(
+                        [],
+                        relaxed_fallback_used=False,
+                        fts_ms=(
+                            (time.perf_counter() - fts_started_at) * 1000
+                            if fts_started_at is not None
+                            else None
+                        ),
+                    )
                 return []
             else:
                 # Re-raise other database errors
@@ -1095,6 +1123,16 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 raise
 
         results = [SearchIndexRow.from_mapping(row._asdict()) for row in rows]
+        if trace is not None:
+            trace.fts = build_fts_page_stage(
+                [((row.type, row.id), row.score or 0.0) for row in results],
+                relaxed_fallback_used=relaxed_fallback_used,
+                fts_ms=(
+                    (time.perf_counter() - fts_started_at) * 1000
+                    if fts_started_at is not None
+                    else None
+                ),
+            )
 
         logger.trace(f"Found {len(results)} search results")
         for r in results:

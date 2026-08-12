@@ -13,6 +13,7 @@ from basic_memory.repository import semantic_vector_sync
 from basic_memory.repository import search_repository_base as search_repository_base_module
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_repository_base import SearchRepositoryBase
+from basic_memory.repository.search_trace import SearchTraceCollector
 from basic_memory.repository.semantic_chunking import VectorChunkRecord
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
@@ -60,6 +61,8 @@ class _TestRepository(SearchRepositoryBase):
         limit: int = 10,
         offset: int = 0,
         allow_relaxed: bool = False,
+        *,
+        trace: SearchTraceCollector | None = None,
     ) -> list[SearchIndexRow]:
         return []
 
@@ -68,7 +71,14 @@ class _TestRepository(SearchRepositoryBase):
         pass
 
     @override
-    async def _run_vector_query(self, session, query_embedding, candidate_limit):
+    async def _run_vector_query(
+        self,
+        session,
+        query_embedding,
+        candidate_limit,
+        *,
+        trace: SearchTraceCollector | None = None,
+    ):
         return []
 
     @override
