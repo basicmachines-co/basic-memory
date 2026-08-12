@@ -339,6 +339,7 @@ async def _reindex(
     )
     from basic_memory.repository import EntityRepository, ProjectRepository
     from basic_memory.repository.search_repository import create_search_repository
+    from basic_memory.repository.search_repository_base import purge_stale_search_index_rows
     from basic_memory.services.initialization import (
         reconcile_projects_with_config,
         recover_project_materializations,
@@ -412,6 +413,9 @@ async def _reindex(
                     f"{result.deleted_files} deleted, "
                     f"{result.enqueued_batches} batches[/dim]"
                 )
+
+                purged = await purge_stale_search_index_rows(session_maker, proj.id)
+                console.print(f"  [dim]{purged} stale search rows purged[/dim]")
 
                 console.print("  [green]done[/green] Full-text search index rebuilt")
 

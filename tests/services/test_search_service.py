@@ -1465,6 +1465,112 @@ async def test_index_entity_markdown_strips_nul_bytes(search_service, session_ma
 
 
 @pytest.mark.asyncio
+async def test_purge_stale_search_rows_removes_db_orphaned_rows(
+    search_service,
+    session_maker,
+    test_graph,
+    test_project,
+    project_repository,
+    tmp_path,
+):
+    """The reconciliation sweep removes DB-only graph divergence without crossing projects."""
+    from basic_memory.repository.search_repository_base import purge_stale_search_index_rows
+
+    async with db.scoped_session(session_maker) as session:
+        indexed_rows = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT id, type, permalink, entity_id FROM search_index "
+                        "WHERE project_id = :project_id ORDER BY type, id"
+                    ),
+                    {"project_id": test_project.id},
+                )
+            )
+            .mappings()
+            .all()
+        )
+
+        orphaned_observation = next(
+            row for row in indexed_rows if row["type"] == SearchItemType.OBSERVATION.value
+        )
+        orphaned_relation = next(
+            row for row in indexed_rows if row["type"] == SearchItemType.RELATION.value
+        )
+        surviving_rows = [
+            next(row for row in indexed_rows if row["type"] == SearchItemType.ENTITY.value),
+            next(
+                row
+                for row in indexed_rows
+                if row["type"] == SearchItemType.OBSERVATION.value
+                and row["id"] != orphaned_observation["id"]
+            ),
+            next(
+                row
+                for row in indexed_rows
+                if row["type"] == SearchItemType.RELATION.value
+                and row["id"] != orphaned_relation["id"]
+            ),
+        ]
+
+        other_project = await project_repository.create(
+            session,
+            {
+                "name": "search-purge-isolation",
+                "description": "Project isolation for stale search reconciliation",
+                "path": str(tmp_path / "search-purge-isolation"),
+                "is_active": True,
+                "is_default": False,
+            },
+        )
+        other_project_id = other_project.id
+        isolated_search_row_id = 9_000_001
+        await session.execute(
+            text(
+                "INSERT INTO search_index "
+                "(id, title, content_stems, content_snippet, permalink, file_path, "
+                "type, entity_id, project_id) "
+                "VALUES (:id, 'isolation canary', 'isolation canary', 'isolation canary', "
+                "'isolation-canary', 'isolation-canary.md', 'observation', "
+                ":entity_id, :project_id)"
+            ),
+            {
+                "id": isolated_search_row_id,
+                "entity_id": surviving_rows[0]["entity_id"],
+                "project_id": other_project_id,
+            },
+        )
+        await session.execute(
+            text("DELETE FROM observation WHERE project_id = :project_id AND id = :row_id"),
+            {"project_id": test_project.id, "row_id": orphaned_observation["id"]},
+        )
+        await session.execute(
+            text("DELETE FROM relation WHERE project_id = :project_id AND id = :row_id"),
+            {"project_id": test_project.id, "row_id": orphaned_relation["id"]},
+        )
+
+    purged = await purge_stale_search_index_rows(session_maker, test_project.id)
+
+    assert purged == 2
+    assert not await search_service.search(SearchQuery(permalink=orphaned_observation["permalink"]))
+    assert not await search_service.search(SearchQuery(permalink=orphaned_relation["permalink"]))
+    for surviving_row in surviving_rows:
+        results = await search_service.search(SearchQuery(permalink=surviving_row["permalink"]))
+        assert {(result.type, result.id) for result in results} == {
+            (surviving_row["type"], surviving_row["id"])
+        }
+
+    async with db.scoped_session(session_maker) as session:
+        isolated_row_count = await session.scalar(
+            text(
+                "SELECT COUNT(*) FROM search_index WHERE project_id = :project_id AND id = :row_id"
+            ),
+            {"project_id": other_project_id, "row_id": isolated_search_row_id},
+        )
+    assert isolated_row_count == 1
+
+
+@pytest.mark.asyncio
 async def test_reindex_vectors(search_service, session_maker, test_project, monkeypatch):
     """Test that reindex_vectors processes all entities and reports stats."""
     from basic_memory.repository import EntityRepository

@@ -95,6 +95,10 @@ class SearchRepository(Protocol):
         """Delete items by entity ID."""
         ...
 
+    async def purge_stale_search_rows(self) -> int:
+        """Delete full-text rows whose backing database row no longer exists."""
+        ...
+
     async def sync_entity_vectors(self, entity_id: int) -> None:
         """Sync semantic vector chunks for an entity."""
         ...

@@ -7,8 +7,10 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from sqlalchemy import text
 from typer.testing import CliRunner
 
+from basic_memory import db
 from basic_memory.cli.app import app
 from basic_memory.config import DatabaseBackend
 import basic_memory.cli.commands.db as db_cmd  # noqa: F401
@@ -570,6 +572,148 @@ async def test_reindex_recovers_stuck_materializations_before_scan(monkeypatch, 
 
     # Recovery runs before the delete-reconciling scan, per project.
     assert call_order == ["recover:foo", "index:foo", "recover:bar", "index:bar"]
+
+
+@pytest.mark.asyncio
+async def test_reindex_search_converges_seeded_db_fts_divergence(
+    monkeypatch,
+    session_maker,
+    app_config,
+    test_project,
+    test_graph,
+):
+    """An unchanged file's orphaned FTS row converges through reindex --search alone."""
+    printed_lines: list[str] = []
+
+    async with db.scoped_session(session_maker) as session:
+        orphaned_observation_id = await session.scalar(
+            text(
+                "SELECT id FROM search_index "
+                "WHERE project_id = :project_id AND type = 'observation' "
+                "ORDER BY id LIMIT 1"
+            ),
+            {"project_id": test_project.id},
+        )
+        assert orphaned_observation_id is not None
+        await session.execute(
+            text("DELETE FROM observation WHERE project_id = :project_id AND id = :row_id"),
+            {"project_id": test_project.id, "row_id": orphaned_observation_id},
+        )
+
+    class StubProjectRepository:
+        async def get_active_projects(self, session):
+            return [test_project]
+
+    project_index = AsyncMock(
+        return_value=SimpleNamespace(
+            total_files=0,
+            enqueued_files=0,
+            enqueued_batches=0,
+            deleted_files=0,
+        )
+    )
+    monkeypatch.setattr(
+        "basic_memory.services.initialization.reconcile_projects_with_config", AsyncMock()
+    )
+    monkeypatch.setattr(
+        "basic_memory.services.initialization.recover_project_materializations", AsyncMock()
+    )
+    monkeypatch.setattr(
+        "basic_memory.db.get_or_create_db",
+        AsyncMock(return_value=(None, session_maker)),
+    )
+    monkeypatch.setattr("basic_memory.db.shutdown_db", AsyncMock())
+    monkeypatch.setattr("basic_memory.repository.ProjectRepository", StubProjectRepository)
+    monkeypatch.setattr(
+        "basic_memory.index.local_project.run_local_project_index_for_project",
+        project_index,
+    )
+    monkeypatch.setattr(
+        db_cmd.console,
+        "print",
+        lambda message="", *args, **kwargs: printed_lines.append(str(message)),
+    )
+
+    await db_cmd._reindex(
+        app_config,
+        search=True,
+        embeddings=False,
+        full=False,
+        project=test_project.name,
+    )
+
+    project_index.assert_awaited_once()
+    async with db.scoped_session(session_maker) as session:
+        orphaned_search_row_count = await session.scalar(
+            text(
+                "SELECT COUNT(*) FROM search_index "
+                "WHERE project_id = :project_id AND type = 'observation' AND id = :row_id"
+            ),
+            {"project_id": test_project.id, "row_id": orphaned_observation_id},
+        )
+    assert orphaned_search_row_count == 0
+    assert any("1 stale search rows purged" in line for line in printed_lines)
+
+
+@pytest.mark.asyncio
+async def test_reindex_search_wires_stale_row_purge(
+    monkeypatch,
+    session_maker,
+    app_config,
+    test_project,
+):
+    """The search-only CLI path calls the lightweight repository reconciliation seam."""
+    printed_lines: list[str] = []
+
+    class StubProjectRepository:
+        async def get_active_projects(self, session):
+            return [test_project]
+
+    project_index = AsyncMock(
+        return_value=SimpleNamespace(
+            total_files=0,
+            enqueued_files=0,
+            enqueued_batches=0,
+            deleted_files=0,
+        )
+    )
+    purge_stale_rows = AsyncMock(return_value=3)
+    monkeypatch.setattr(
+        "basic_memory.services.initialization.reconcile_projects_with_config", AsyncMock()
+    )
+    monkeypatch.setattr(
+        "basic_memory.services.initialization.recover_project_materializations", AsyncMock()
+    )
+    monkeypatch.setattr(
+        "basic_memory.db.get_or_create_db",
+        AsyncMock(return_value=(None, session_maker)),
+    )
+    monkeypatch.setattr("basic_memory.db.shutdown_db", AsyncMock())
+    monkeypatch.setattr("basic_memory.repository.ProjectRepository", StubProjectRepository)
+    monkeypatch.setattr(
+        "basic_memory.index.local_project.run_local_project_index_for_project",
+        project_index,
+    )
+    monkeypatch.setattr(
+        "basic_memory.repository.search_repository_base.purge_stale_search_index_rows",
+        purge_stale_rows,
+    )
+    monkeypatch.setattr(
+        db_cmd.console,
+        "print",
+        lambda message="", *args, **kwargs: printed_lines.append(str(message)),
+    )
+
+    await db_cmd._reindex(
+        app_config,
+        search=True,
+        embeddings=False,
+        full=False,
+        project=test_project.name,
+    )
+
+    purge_stale_rows.assert_awaited_once_with(session_maker, test_project.id)
+    assert any("3 stale search rows purged" in line for line in printed_lines)
 
 
 @pytest.mark.asyncio

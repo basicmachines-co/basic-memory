@@ -7,11 +7,12 @@ from collections.abc import Iterable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, cast
 
 import logfire as logfire
 from loguru import logger
 from sqlalchemy import Executable, Result, inspect, text
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -79,6 +80,39 @@ _BUILT_IN_VECTOR_INDEX_NAMES = frozenset({"pgvector", "sqlite-vec"})
 # auto-increment sequences, so a bare id is ambiguous across row types. Every map in
 # the vector/hybrid retrieval path must key rows by (type, id) to avoid collisions.
 type SearchIndexKey = tuple[str, int]
+
+
+async def purge_stale_search_index_rows(
+    session_maker: async_sessionmaker[AsyncSession],
+    project_id: int,
+) -> int:
+    """Reconciliation sweep: delete search_index rows whose backing row is gone.
+
+    search_index is derived, eventually consistent state; this sweep converges
+    DB-only divergence (#1214/#1226) that file-checksum change detection cannot
+    see. Plain project-scoped DELETEs - no locks, no file re-parse. The SQL text
+    is identical on SQLite FTS5 and Postgres (precedent: migration 2d26b287813b).
+    """
+    statements = (
+        "DELETE FROM search_index WHERE project_id = :project_id "
+        "AND entity_id NOT IN (SELECT id FROM entity WHERE project_id = :project_id)",
+        "DELETE FROM search_index WHERE project_id = :project_id "
+        "AND type = 'observation' "
+        "AND id NOT IN (SELECT id FROM observation WHERE project_id = :project_id)",
+        "DELETE FROM search_index WHERE project_id = :project_id "
+        "AND type = 'relation' "
+        "AND id NOT IN (SELECT id FROM relation WHERE project_id = :project_id)",
+    )
+    purged = 0
+    async with db.scoped_session(session_maker) as session:
+        for statement in statements:
+            result = cast(
+                CursorResult[Any],
+                await session.execute(text(statement), {"project_id": project_id}),
+            )
+            purged += max(result.rowcount or 0, 0)
+    logger.info("Purged stale search index rows", project_id=project_id, purged=purged)
+    return purged
 
 
 class SearchRepositoryBase(ABC):
@@ -731,6 +765,9 @@ class SearchRepositoryBase(ABC):
     # ------------------------------------------------------------------
     # Shared index / delete operations
     # ------------------------------------------------------------------
+
+    async def purge_stale_search_rows(self) -> int:
+        return await purge_stale_search_index_rows(self.session_maker, self.project_id)
 
     async def index_item(self, search_index_row: SearchIndexRow) -> None:
         """Index or update a single item.

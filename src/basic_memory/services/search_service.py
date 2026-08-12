@@ -668,29 +668,11 @@ class SearchService:
         logger.info("Cleared project vectors for full reindex", project_id=project_id)
 
     async def _purge_stale_search_rows(self) -> None:
-        """Remove rows from search_index and search_vector_chunks for deleted entities.
-
-        Trigger: entities are deleted but their derived search rows remain
-        Why: stale rows inflate embedding coverage stats in project info
-        Outcome: search tables only contain rows for entities that still exist
-        """
-        project_id = self.repository.project_id
-        stale_entity_filter = (
-            "entity_id NOT IN (SELECT id FROM entity WHERE project_id = :project_id)"
-        )
-        params = {"project_id": project_id}
-
-        # Delete stale search_index rows
-        await self.repository.execute_query(
-            text(
-                f"DELETE FROM search_index WHERE project_id = :project_id AND {stale_entity_filter}"
-            ),
-            params,
-        )
-
+        purged = await self.repository.purge_stale_search_rows()
         await self.repository.delete_stale_vector_rows()
-
-        logger.info("Purged stale search rows for deleted entities", project_id=project_id)
+        logger.info(
+            "Purged stale search rows", project_id=self.repository.project_id, purged=purged
+        )
 
     @staticmethod
     def _entity_embeddings_enabled(entity: Entity) -> bool:
