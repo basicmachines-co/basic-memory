@@ -961,7 +961,7 @@ async def test_sync_entity_vectors_batch_flushes_at_configured_threshold(monkeyp
     """Batch sync should flush queued jobs at semantic_embedding_sync_batch_size boundaries."""
     repo = _ConcreteRepo()
     repo._semantic_enabled = True
-    repo._embedding_provider = object()
+    repo._embedding_provider = SimpleNamespace(model_name="stub", dimensions=4)
     repo._semantic_embedding_sync_batch_size = 2
 
     prepared_by_entity = {
@@ -1006,7 +1006,7 @@ async def test_sync_entity_vectors_batch_skip_only_has_zero_queue_wait(monkeypat
     """Skip-only batches should not accumulate synthetic queue wait."""
     repo = _ConcreteRepo()
     repo._semantic_enabled = True
-    repo._embedding_provider = object()
+    repo._embedding_provider = SimpleNamespace(model_name="stub", dimensions=4)
 
     async def _stub_prepare_window(entity_ids: list[int]):
         return [
@@ -1039,7 +1039,7 @@ async def test_sync_entity_vectors_batch_progress_tracks_terminal_entities(monke
     """Progress callback should advance on terminal entity completion, not prepare entry."""
     repo = _ConcreteRepo()
     repo._semantic_enabled = True
-    repo._embedding_provider = object()
+    repo._embedding_provider = SimpleNamespace(model_name="stub", dimensions=4)
     repo._semantic_embedding_sync_batch_size = 2
 
     prepared_by_entity = {
@@ -1083,7 +1083,7 @@ async def test_sync_entity_vectors_batch_continue_on_error(monkeypatch):
     """Batch sync should continue after per-entity and per-flush failures."""
     repo = _ConcreteRepo()
     repo._semantic_enabled = True
-    repo._embedding_provider = object()
+    repo._embedding_provider = SimpleNamespace(model_name="stub", dimensions=4)
     repo._semantic_embedding_sync_batch_size = 1
 
     async def _stub_prepare_window(entity_ids: list[int]):
@@ -1130,7 +1130,7 @@ async def test_sync_entity_vectors_batch_only_attributes_queue_wait_to_flushed_e
     """Mixed batches should only charge queue wait to entities that entered flush work."""
     repo = _ConcreteRepo()
     repo._semantic_enabled = True
-    repo._embedding_provider = object()
+    repo._embedding_provider = SimpleNamespace(model_name="stub", dimensions=4)
     repo._semantic_embedding_sync_batch_size = 2
 
     async def _stub_prepare_window(entity_ids: list[int]):
@@ -1193,7 +1193,7 @@ async def test_sync_entity_vectors_batch_tracks_prepare_and_queue_wait_seconds(m
     """Queue wait should be reported separately from prepare/embed/write timings."""
     repo = _ConcreteRepo()
     repo._semantic_enabled = True
-    repo._embedding_provider = object()
+    repo._embedding_provider = SimpleNamespace(model_name="stub", dimensions=4)
     repo._semantic_embedding_sync_batch_size = 2
 
     async def _stub_prepare_window(entity_ids: list[int]):
@@ -1309,7 +1309,7 @@ async def test_sync_entity_vectors_batch_records_entity_granularity_histograms(m
     """Entity timing histograms should emit one sample per finalized entity."""
     repo = _ConcreteRepo()
     repo._semantic_enabled = True
-    repo._embedding_provider = object()
+    repo._embedding_provider = SimpleNamespace(model_name="stub", dimensions=4)
     repo._semantic_embedding_sync_batch_size = 2
 
     async def _stub_prepare_window(entity_ids: list[int]):
