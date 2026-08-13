@@ -115,7 +115,7 @@ All settings are fields on `BasicMemoryConfig` and can be set via environment va
 | `milvus_timeout_seconds` | `BASIC_MEMORY_MILVUS_TIMEOUT_SECONDS` | `30.0` | Finite per-operation timeout for Milvus and Zilliz client calls. Increase it for unusually slow deployments. |
 | `milvus_collection_prefix` | `BASIC_MEMORY_MILVUS_COLLECTION_PREFIX` | `"basic_memory"` | Prefix for deterministic project-isolated Milvus collections. |
 | `milvus_database` | `BASIC_MEMORY_MILVUS_DATABASE` | `"default"` | Milvus database name. |
-| `semantic_embedding_provider` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER` | `"fastembed"` | Embedding provider: `"fastembed"` (local), `"openai"` (API), or `"litellm"` (multi-provider API, **experimental** — advanced users only). |
+| `semantic_embedding_provider` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER` | `"fastembed"` | Embedding provider: `"fastembed"` (local), `"openai"` (API), `"orcarouter"` (API), or `"litellm"` (multi-provider API, **experimental** — advanced users only). |
 | `semantic_embedding_model` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL` | `"bge-small-en-v1.5"` | Model identifier. Auto-adjusted per provider if left at default. |
 | `semantic_embedding_api_base` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_API_BASE` | Unset | Optional custom endpoint for the LiteLLM provider, including local or self-hosted OpenAI-compatible servers. |
 | `semantic_embedding_api_key` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_API_KEY` | Unset | Optional API key passed directly to the LiteLLM provider. When unset, LiteLLM continues to read provider credential env vars such as `OPENAI_API_KEY`. |
@@ -156,6 +156,20 @@ Uses OpenAI's embeddings API for higher-dimensional vectors. Requires an API key
 export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER=openai
 export OPENAI_API_KEY=sk-...
+```
+
+### OrcaRouter
+
+Uses [OrcaRouter](https://www.orcarouter.ai) as the embedding backend through its OpenAI-compatible `/v1/embeddings` endpoint. OrcaRouter is a model routing gateway that exposes 150+ models from OpenAI, Anthropic, Google, DeepSeek, Qwen, MiniMax and xAI behind a single API key, and it also provides gateway-level security controls for AI agents. Model ids use the gateway's `provider/model` form, e.g. `openai/text-embedding-3-small`.
+
+- **Model**: `openai/text-embedding-3-small`
+- **Dimensions**: 1536
+- **Tradeoff**: Same OpenAI-compatible wire as the OpenAI provider, but the request goes through OrcaRouter, so the endpoint, key, and routing stay gateway-managed.
+
+```bash
+export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER=orcarouter
+export ORCAROUTER_API_KEY=sk-orca-...
 ```
 
 ### LiteLLM

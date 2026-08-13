@@ -162,6 +162,17 @@ def configured_embedding_provider_identity(app_config: BasicMemoryConfig) -> str
             model_name = "text-embedding-3-small"
         dimensions = configured_dimensions or 1536
         provider_identity = f"{model_name}:{dimensions}"
+    elif provider_name == "orcarouter":
+        from basic_memory.repository.orcarouter_provider import (
+            ORCAROUTER_DEFAULT_MODEL,
+        )
+
+        provider_type_name = "OrcaRouterEmbeddingProvider"
+        model_name = app_config.semantic_embedding_model or ORCAROUTER_DEFAULT_MODEL
+        if model_name == "bge-small-en-v1.5":
+            model_name = ORCAROUTER_DEFAULT_MODEL
+        dimensions = configured_dimensions or 1536
+        provider_identity = f"{model_name}:{dimensions}"
     elif provider_name == "litellm":
         from basic_memory.repository.litellm_provider import (
             _default_input_types,
@@ -265,6 +276,22 @@ def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvide
         if model_name == "bge-small-en-v1.5":
             model_name = "text-embedding-3-small"
         provider = OpenAIEmbeddingProvider(
+            model_name=model_name,
+            batch_size=app_config.semantic_embedding_batch_size,
+            request_concurrency=app_config.semantic_embedding_request_concurrency,
+            **extra_kwargs,
+        )
+    elif provider_name == "orcarouter":
+        # Deferred import: openai may not be installed
+        from basic_memory.repository.orcarouter_provider import (
+            ORCAROUTER_DEFAULT_MODEL,
+            OrcaRouterEmbeddingProvider,
+        )
+
+        model_name = app_config.semantic_embedding_model or ORCAROUTER_DEFAULT_MODEL
+        if model_name == "bge-small-en-v1.5":
+            model_name = ORCAROUTER_DEFAULT_MODEL
+        provider = OrcaRouterEmbeddingProvider(
             model_name=model_name,
             batch_size=app_config.semantic_embedding_batch_size,
             request_concurrency=app_config.semantic_embedding_request_concurrency,

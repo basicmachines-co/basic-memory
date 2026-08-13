@@ -291,7 +291,9 @@ class BasicMemoryConfig(BaseSettings):
     )
     semantic_embedding_provider: str = Field(
         default="fastembed",
-        description="Embedding provider for local semantic indexing/search.",
+        description="Embedding provider for local semantic indexing/search: "
+        "'fastembed' (local), 'openai' (API), 'orcarouter' (API), or 'litellm' "
+        "(multi-provider API).",
     )
     semantic_embedding_model: str = Field(
         default="bge-small-en-v1.5",
