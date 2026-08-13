@@ -31,6 +31,7 @@ from basic_memory.read_cache.keys import (
 )
 from basic_memory.read_cache.redis import (
     RedisReadCache,
+    _remaining_ttl_seconds,
     _required_bytes,
     _store_status,
     create_redis_read_cache_client,
@@ -106,11 +107,14 @@ async def test_round_trip_and_ttl_expiry(redis_cache: RedisCacheHarness) -> None
     assert hit.is_hit
     assert hit.payload == b"cached entity"
     assert hit.generation == miss.generation
+    assert hit.remaining_ttl_seconds is not None
+    assert 0 < hit.remaining_ttl_seconds <= 1
 
     await asyncio.sleep(1.1)
     expired = await redis_cache.cache.lookup(key)
     assert not expired.is_hit
     assert expired.generation == miss.generation
+    assert expired.remaining_ttl_seconds is None
 
 
 @pytest.mark.asyncio
@@ -414,12 +418,19 @@ async def test_invalidation_leaves_unrelated_redis_data_untouched(
 @pytest.mark.asyncio
 async def test_corrupt_redis_values_fail_fast(redis_cache: RedisCacheHarness) -> None:
     key = _key()
-    await redis_cache.cache.lookup(key)
+    lookup = await redis_cache.cache.lookup(key)
     redis_keys = redis_read_cache_keys(
         prefix=redis_cache.prefix,
         namespace=redis_cache.namespace,
         key=key,
     )
+
+    await redis_cache.client.set(
+        redis_keys.data_key,
+        lookup.generation.encode("ascii") + b"\npersistent payload",
+    )
+    with pytest.raises(ReadCacheDataError, match="has no expiration"):
+        await redis_cache.cache.lookup(key)
 
     await redis_cache.client.set(redis_keys.data_key, b"missing envelope")
     with pytest.raises(ReadCacheDataError, match="invalid generation envelope"):
@@ -824,6 +835,8 @@ def test_key_validation_and_canonicalization() -> None:
     )
     with pytest.raises(ValueError, match="generation"):
         ReadCacheLookup(generation="", payload=b"orphaned")
+    with pytest.raises(ValueError, match="remaining_ttl_seconds"):
+        ReadCacheLookup(generation="0" * 32, remaining_ttl_seconds=-0.1)
     with pytest.raises(ValueError, match="prefix"):
         redis_read_cache_generation_key(
             prefix="",
@@ -881,6 +894,12 @@ async def test_invalid_store_inputs_fail_before_redis(
 
 
 def test_required_bytes_rejects_non_string_values() -> None:
+    with pytest.raises(ReadCacheDataError, match="has no expiration"):
+        _remaining_ttl_seconds(-1)
+    with pytest.raises(ReadCacheDataError, match="invalid cached payload TTL"):
+        _remaining_ttl_seconds(-2)
+    with pytest.raises(ReadCacheDataError, match="invalid cached payload TTL"):
+        _remaining_ttl_seconds("1000")
     with pytest.raises(ReadCacheDataError, match="invalid test value"):
         _required_bytes(1, field="test")
     with pytest.raises(ReadCacheDataError, match="invalid cache store result"):

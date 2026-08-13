@@ -2,9 +2,9 @@
 
 from textwrap import dedent
 from typing import Any, Annotated, Optional, Literal, cast
+from uuid import UUID
 
 import logfire
-import yaml
 
 from loguru import logger
 from fastmcp import Context
@@ -15,6 +15,10 @@ from basic_memory.mcp.project_context import (
     detect_project_from_identifier_prefix,
     get_project_client,
     resolve_project_and_path,
+)
+from basic_memory.mcp.note_reads import (
+    parse_opening_frontmatter,
+    read_note_json_by_external_id,
 )
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search_notes
@@ -39,38 +43,16 @@ def _is_exact_title_match(identifier: str, title: str) -> bool:
 
 
 def _parse_opening_frontmatter(content: str) -> tuple[str, dict[str, Any] | None]:
-    """Parse opening YAML frontmatter and return (body, frontmatter).
+    """Retain the existing test/import surface for the shared parser."""
+    return parse_opening_frontmatter(content)
 
-    Mirrors CLI behavior: only parses a frontmatter block at the very top.
-    If parsing fails or frontmatter is not a mapping, returns body unchanged and None.
-    """
-    original_content = content
-    lines = content.splitlines(keepends=True)
-    if not lines or lines[0].strip() != "---":
-        return original_content, None
 
-    closing_index = None
-    for i in range(1, len(lines)):
-        if lines[i].strip() == "---":
-            closing_index = i
-            break
-
-    if closing_index is None:
-        return original_content, None
-
-    fm_text = "".join(lines[1:closing_index])
+def _exact_external_id(identifier: str) -> str | None:
+    """Return the canonical UUID when the whole identifier is an external ID."""
     try:
-        parsed = yaml.safe_load(fm_text)
-    except yaml.YAMLError:
-        return original_content, None
-
-    if parsed is None:
-        parsed = {}
-    if not isinstance(parsed, dict):
-        return original_content, None
-
-    body_content = "".join(lines[closing_index + 1 :])
-    return body_content, parsed
+        return str(UUID(identifier.strip()))
+    except ValueError:
+        return None
 
 
 @mcp.tool(
@@ -259,25 +241,6 @@ async def read_note(
             knowledge_client = KnowledgeClient(client, active_project.external_id)
             resource_client = ResourceClient(client, active_project.external_id)
 
-            async def _read_json_payload(entity_id: str) -> dict[str, Any]:
-                with logfire.span(
-                    "mcp.read_note.shape_response",
-                    domain="mcp",
-                    action="read_note",
-                    phase="shape_response",
-                ):
-                    entity = await knowledge_client.get_entity(entity_id)
-                    response = await resource_client.read(entity_id)
-                    content_text = response.text
-                    body_content, parsed_frontmatter = _parse_opening_frontmatter(content_text)
-                    return {
-                        "title": entity.title,
-                        "permalink": entity.permalink,
-                        "file_path": entity.file_path,
-                        "content": content_text if include_frontmatter else body_content,
-                        "frontmatter": parsed_frontmatter,
-                    }
-
             def _empty_json_payload() -> dict[str, Any]:
                 return {
                     "title": None,
@@ -346,25 +309,52 @@ async def read_note(
                 value = item.get("file_path")
                 return str(value) if value else None
 
-            try:
-                # Try to resolve identifier to entity ID
-                entity_id = await knowledge_client.resolve_entity(entity_path, strict=True)
+            def _result_external_id(item: dict[str, object]) -> str | None:
+                value = item.get("external_id")
+                return value if isinstance(value, str) and value else None
 
-                # Fetch content using entity ID
-                response = await resource_client.read(entity_id)
+            if output_format == "json":
+                exact_external_id = _exact_external_id(entity_path)
+                if exact_external_id is not None:
+                    return dict(
+                        await read_note_json_by_external_id(
+                            knowledge_client=knowledge_client,
+                            resource_client=resource_client,
+                            entity_external_id=exact_external_id,
+                            include_frontmatter=include_frontmatter,
+                        )
+                    )
 
-                # If successful, return the content
-                if response.status_code == 200:
+                try:
+                    entity_id = await knowledge_client.resolve_entity(entity_path, strict=True)
+                except Exception as error:  # pragma: no cover
+                    logger.info(f"Direct lookup failed for '{entity_path}': {error}")
+                else:
                     logger.info(
-                        "Returning read_note result from resource: {path}",
+                        "Returning JSON read_note result from entity: {path}",
                         path=entity_path,
                     )
-                    if output_format == "json":
-                        return await _read_json_payload(entity_id)
-                    return response.text
-            except Exception as e:  # pragma: no cover
-                logger.info(f"Direct lookup failed for '{entity_path}': {e}")
-                # Continue to fallback methods
+                    return dict(
+                        await read_note_json_by_external_id(
+                            knowledge_client=knowledge_client,
+                            resource_client=resource_client,
+                            entity_external_id=entity_id,
+                            include_frontmatter=include_frontmatter,
+                        )
+                    )
+            else:
+                # Text mode intentionally retains the resolve -> resource behavior.
+                try:
+                    entity_id = await knowledge_client.resolve_entity(entity_path, strict=True)
+                    response = await resource_client.read(entity_id)
+                    if response.status_code == 200:
+                        logger.info(
+                            "Returning read_note result from resource: {path}",
+                            path=entity_path,
+                        )
+                        return response.text
+                except Exception as error:  # pragma: no cover
+                    logger.info(f"Direct lookup failed for '{entity_path}': {error}")
 
             # Fallback 1: Try title search via API, walking fixed-size pages of
             # title results until an exact match is found or results run out.
@@ -405,26 +395,45 @@ async def read_note(
                     logger.info(f"No exact title match found for: {identifier}")
                     break
 
-            if result is not None and _result_permalink(result):
+            if result is not None and output_format == "json":
                 try:
-                    # Resolve the permalink to entity ID
+                    entity_id = _result_external_id(result)
+                    if entity_id is None and _result_permalink(result) is not None:
+                        entity_id = await knowledge_client.resolve_entity(
+                            _result_permalink(result) or "", strict=True
+                        )
+                    if entity_id is not None:
+                        logger.info(
+                            f"Found note by exact title search: {_result_permalink(result)}"
+                        )
+                        return dict(
+                            await read_note_json_by_external_id(
+                                knowledge_client=knowledge_client,
+                                resource_client=resource_client,
+                                entity_external_id=entity_id,
+                                include_frontmatter=include_frontmatter,
+                            )
+                        )
+                except Exception as error:  # pragma: no cover
+                    logger.info(
+                        "Failed to fetch content for found title match "
+                        f"{_result_permalink(result)}: {error}"
+                    )
+            elif result is not None and _result_permalink(result):
+                try:
                     entity_id = await knowledge_client.resolve_entity(
                         _result_permalink(result) or "", strict=True
                     )
-
-                    # Fetch content using the entity ID
                     response = await resource_client.read(entity_id)
-
                     if response.status_code == 200:
                         logger.info(
                             f"Found note by exact title search: {_result_permalink(result)}"
                         )
-                        if output_format == "json":
-                            return await _read_json_payload(entity_id)
                         return response.text
-                except Exception as e:  # pragma: no cover
+                except Exception as error:  # pragma: no cover
                     logger.info(
-                        f"Failed to fetch content for found title match {_result_permalink(result)}: {e}"
+                        "Failed to fetch content for found title match "
+                        f"{_result_permalink(result)}: {error}"
                     )
 
             # Fallback 2: Text search as a last resort

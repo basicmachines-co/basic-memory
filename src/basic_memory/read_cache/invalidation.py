@@ -35,7 +35,7 @@ async def invalidate_project_read_cache(
         except ReadCacheUnavailable as error:
             # Trigger: an authoritative mutation committed while Redis was unavailable.
             # Why: failing the request cannot roll the mutation back and would invite
-            # duplicate retries; the 60-second TTL already bounds stale exposure.
+            # duplicate retries; the configured response TTL bounds stale exposure.
             # Outcome: surface prominent telemetry and let the committed write succeed.
             status = ReadCacheInvalidationStatus.unavailable
             logger.error(

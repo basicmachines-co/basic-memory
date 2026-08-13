@@ -46,7 +46,8 @@ if generation then
 else
     redis.call("SET", KEYS[1], ARGV[1], "EX", ARGV[2])
 end
-return redis.call("MGET", KEYS[1], KEYS[2])
+local values = redis.call("MGET", KEYS[1], KEYS[2])
+return {values[1], values[2], redis.call("PTTL", KEYS[2])}
 """
 _STORE_IF_CURRENT_SCRIPT = """
 if redis.call("GET", KEYS[1]) ~= ARGV[1] then
@@ -105,6 +106,16 @@ def _store_status(value: object) -> ReadCacheStoreStatus:
     raise ReadCacheDataError("Redis returned an invalid cache store result")
 
 
+def _remaining_ttl_seconds(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ReadCacheDataError("Redis returned an invalid cached payload TTL")
+    if value == -1:
+        raise ReadCacheDataError("Redis cached payload has no expiration")
+    if value < 0:
+        raise ReadCacheDataError("Redis returned an invalid cached payload TTL")
+    return value / 1_000
+
+
 class RedisReadCache:
     """Namespace-bound Redis cache with race-safe generation invalidation.
 
@@ -141,7 +152,7 @@ class RedisReadCache:
     async def lookup(self, key: ReadCacheKey) -> ReadCacheLookup:
         keys = self._keys(key)
         try:
-            generation_value, cached_value = await self._client.eval(
+            generation_value, cached_value, remaining_ttl_ms = await self._client.eval(
                 _LOOKUP_SCRIPT,
                 2,
                 keys.generation_key,
@@ -162,7 +173,11 @@ class RedisReadCache:
             raise ReadCacheDataError("Redis cached payload has an invalid generation envelope")
         if cached_generation != generation:
             return ReadCacheLookup(generation=generation_text)
-        return ReadCacheLookup(generation=generation_text, payload=payload)
+        return ReadCacheLookup(
+            generation=generation_text,
+            payload=payload,
+            remaining_ttl_seconds=_remaining_ttl_seconds(remaining_ttl_ms),
+        )
 
     async def store(
         self,
