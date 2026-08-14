@@ -131,7 +131,11 @@ class ChunkRowsBehindFile:
 
 @dataclass(frozen=True, slots=True)
 class ChunkFreshnessUnknown:
-    """The file could not be read and lineage cannot prove its relation to the rows."""
+    """The file could not be read and lineage cannot prove its relation to the rows.
+
+    Row-to-index divergence is independent evidence. It remains visible through
+    ``EntityChunkInspection.stale`` and the indexed/current fingerprint fields.
+    """
 
     evidence: FileFreshnessEvidence
     value: Literal["unknown"] = "unknown"
@@ -148,7 +152,12 @@ type EntityChunkFreshness = (
 
 @dataclass(frozen=True, slots=True)
 class EntityChunkInspection:
-    """Complete note-level retrieval inspection result."""
+    """Complete note-level retrieval inspection result.
+
+    ``stale`` reports whether stored chunks trail current search rows. It can be true while
+    ``freshness`` is unknown because unreadable file bytes leave the upstream file-to-row
+    relationship unresolved.
+    """
 
     entity: Entity
     configured_identity: ConfiguredVectorIdentity

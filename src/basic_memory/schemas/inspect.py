@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Literal, Self, assert_never
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 type ChunkStatus = Literal["ready", "pending", "stale", "orphaned"]
 type InspectFreshness = Literal[
@@ -116,9 +116,24 @@ class InspectChunksResponse(BaseModel):
     readiness: InspectChunkReadiness
     entity_fingerprint_indexed: str | list[str] | None
     entity_fingerprint_current: str
-    stale: bool
-    freshness: InspectFreshness
-    freshness_detail: InspectFreshnessDetail | None
+    stale: bool = Field(
+        description=(
+            "Whether stored vector chunks trail current search rows. This signal remains "
+            "independent when upstream file freshness is unknown."
+        )
+    )
+    freshness: InspectFreshness = Field(
+        description=(
+            "Upstream-first file-to-row-to-index classification. Unknown can coexist with "
+            "stale=true when file bytes are unreadable but chunk fingerprints prove index lag."
+        )
+    )
+    freshness_detail: InspectFreshnessDetail | None = Field(
+        description=(
+            "Evidence for the selected freshness state. When freshness is unknown, consult "
+            "stale and the fingerprint fields for independent row-to-index evidence."
+        )
+    )
     rows: list[InspectSearchRow]
     detached: list[InspectDetachedSearchRow]
 

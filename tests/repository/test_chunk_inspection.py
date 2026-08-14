@@ -819,6 +819,60 @@ async def test_freshness_is_unknown_when_file_read_fails_with_clean_lineage(
     assert isinstance(inspection.freshness, ChunkFreshnessUnknown)
 
 
+@pytest.mark.asyncio
+async def test_unknown_file_freshness_preserves_stale_manifest_evidence(
+    search_repository,
+    session_maker,
+    sample_entity,
+    file_service,
+    monkeypatch,
+):
+    """Unreadable file bytes do not erase independently proven row-to-index lag."""
+    rows = _search_rows(sample_entity.project_id, sample_entity.id)
+    await search_repository.bulk_index_items(rows)
+    await _insert_manifest(
+        session_maker,
+        project_id=sample_entity.project_id,
+        entity_id=sample_entity.id,
+        rows=rows,
+        embedding_model=search_repository.configured_embedding_model,
+        vector_index=search_repository.configured_vector_index,
+    )
+    sample_entity.checksum = "synced-checksum"
+    await _insert_note_content(
+        session_maker,
+        sample_entity,
+        db_checksum="synced-checksum",
+        file_checksum="synced-checksum",
+        file_write_status="synced",
+    )
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(
+            text(
+                "UPDATE search_index SET content_snippet = :content "
+                "WHERE project_id = :project_id AND type = 'entity' AND id = :entity_id"
+            ),
+            {
+                "content": "Newer rows than the stored chunks.",
+                "project_id": sample_entity.project_id,
+                "entity_id": sample_entity.id,
+            },
+        )
+        await session.commit()
+
+    async def fail_read(_path):
+        raise FileOperationError("storage unavailable")
+
+    monkeypatch.setattr(file_service, "read_file", fail_read)
+
+    inspection = await inspect_entity_chunks(search_repository, sample_entity, file_service)
+
+    assert isinstance(inspection.freshness, ChunkFreshnessUnknown)
+    assert inspection.stale is True
+    assert inspection.readiness.stale == 3
+    assert inspection.entity_fingerprint_indexed != inspection.entity_fingerprint_current
+
+
 @pytest.mark.parametrize(
     ("state", "expected"),
     [
