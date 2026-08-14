@@ -606,6 +606,47 @@ async def test_inspection_marks_manifest_stale_after_search_row_changes(
 
 
 @pytest.mark.asyncio
+async def test_source_hash_mismatch_marks_note_index_behind(
+    search_repository,
+    session_maker,
+    sample_entity,
+    file_service,
+):
+    """Per-chunk stale evidence must agree with note-level freshness."""
+    rows = _search_rows(sample_entity.project_id, sample_entity.id)
+    await search_repository.bulk_index_items(rows)
+    await _insert_manifest(
+        session_maker,
+        project_id=sample_entity.project_id,
+        entity_id=sample_entity.id,
+        rows=rows,
+        embedding_model=search_repository.configured_embedding_model,
+        vector_index=search_repository.configured_vector_index,
+    )
+    await _write_current_entity_file(file_service, sample_entity)
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(
+            text(
+                "UPDATE search_vector_chunks SET source_hash = :source_hash "
+                "WHERE project_id = :project_id AND chunk_key = :chunk_key"
+            ),
+            {
+                "source_hash": "stale-source-hash",
+                "project_id": sample_entity.project_id,
+                "chunk_key": f"observation:{sample_entity.id}:0",
+            },
+        )
+        await session.commit()
+
+    inspection = await inspect_entity_chunks(search_repository, sample_entity, file_service)
+
+    assert inspection.entity_fingerprint_indexed == inspection.entity_fingerprint_current
+    assert inspection.readiness.stale == 1
+    assert inspection.stale is True
+    assert isinstance(inspection.freshness, ChunkIndexBehindRows)
+
+
+@pytest.mark.asyncio
 async def test_inspection_uses_all_stored_fingerprints_for_note_staleness(
     search_repository,
     session_maker,

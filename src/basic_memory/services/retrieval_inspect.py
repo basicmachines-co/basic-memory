@@ -329,10 +329,12 @@ def derive_chunk_freshness(
     else:
         return ChunkFreshnessUnknown(evidence=file_evidence)
 
-    # Trigger: stored fingerprints disagree with current rows, or current chunks have no
-    # manifest row at all (e.g. only the first shard of an over-limit entity was scheduled).
-    # Why: matching fingerprints cannot prove coverage — a missing key never enters the
-    # stored-row comparison, so per-chunk checks are blind to it.
+    # Trigger: stored fingerprints or per-chunk source hashes disagree with current rows,
+    # or current chunks have no manifest row at all (e.g. only the first shard of an
+    # over-limit entity was scheduled).
+    # Why: matching fingerprints cannot prove per-chunk agreement or coverage — a stale
+    # source hash can retain the current fingerprint, and a missing key enters neither
+    # stored-row comparison.
     # Outcome: report the index as behind the rows, with the uncovered count as evidence.
     if index_behind_rows or missing_chunk_count:
         return ChunkIndexBehindRows(
@@ -423,6 +425,9 @@ async def inspect_entity_chunks(
         fingerprint != current_source_hashes.entity_fingerprint
         for fingerprint in indexed_fingerprints
     )
+    index_behind_rows = fingerprint_mismatch or any(
+        chunk.status == "stale" for chunk in inspected_chunks
+    )
     # A current chunk with no manifest row never enters the stored-row loop above, so
     # count the uncovered remainder explicitly (e.g. shards beyond the scheduling limit).
     # With semantic indexing off — by config, by the runtime keyword-only fallback, or
@@ -447,7 +452,7 @@ async def inspect_entity_chunks(
         ),
         entity_fingerprint_indexed=indexed_fingerprint,
         entity_fingerprint_current=current_source_hashes.entity_fingerprint,
-        stale=fingerprint_mismatch or missing_chunk_count > 0,
+        stale=index_behind_rows or missing_chunk_count > 0,
         freshness=derive_chunk_freshness(
             entity_search_row_present=("entity", entity.id) in search_rows_by_key,
             entity_checksum=entity.checksum,
@@ -455,7 +460,7 @@ async def inspect_entity_chunks(
             note_content=note_content,
             entity_fingerprint_indexed=indexed_fingerprint,
             entity_fingerprint_current=current_source_hashes.entity_fingerprint,
-            index_behind_rows=fingerprint_mismatch,
+            index_behind_rows=index_behind_rows,
             missing_chunk_count=missing_chunk_count,
         ),
         rows=tuple(
