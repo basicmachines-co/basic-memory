@@ -25,6 +25,7 @@ import subprocess
 import tempfile
 import time
 import uuid
+from typing import Any
 
 import pytest
 
@@ -108,7 +109,7 @@ def provider(bm, temp_bm_project, tmp_path):
     p.shutdown()
 
 
-def _parse_tool_result(raw):
+def _parse_tool_result(raw) -> dict[str, Any] | None:
     try:
         d = json.loads(raw)
     except Exception:
