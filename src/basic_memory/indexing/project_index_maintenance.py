@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from typing import override, Protocol
 
 from loguru import logger
@@ -100,17 +101,147 @@ class ProjectIndexDeletePathVerifier(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class TrustPlannedProjectIndexDeleteVerifier(ProjectIndexDeletePathVerifier):
-    """Confirm every planned delete without re-probing storage.
+    """Confirm deletes already proven by a path-specific storage event.
 
-    Cloud/S3 runtimes treat the scan's storage listing as authoritative and
-    have no cheap per-path existence probe at apply time, so they keep the
-    plan's verdict unchanged. Runtimes with a live filesystem (local) inject
-    a probing verifier instead.
+    This verifier is not safe for project scans: their listing is a stale
+    snapshot by the time a delete batch applies. Scan runtimes must inject a
+    verifier that probes each candidate's current storage state.
     """
 
     @override
     async def confirm_deleted_paths(self, paths: Sequence[str]) -> frozenset[str]:
         return frozenset(paths)
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexDeleteEntity:
+    """Stable entity identity carried through one delete eligibility check."""
+
+    entity_id: int
+    file_path: str
+
+
+@dataclass(frozen=True, slots=True)
+class StorageOwnedProjectIndexDeleteCandidate:
+    """An indexed file with no DB-accepted Markdown content."""
+
+    entity: ProjectIndexDeleteEntity
+
+
+@dataclass(frozen=True, slots=True)
+class MaterializedNoteProjectIndexDeleteCandidate:
+    """A note whose accepted content is fully represented by its file."""
+
+    entity: ProjectIndexDeleteEntity
+    db_version: int
+    db_checksum: str
+    file_version: int
+    file_checksum: str
+    last_materialization_attempt_at: datetime | None
+
+
+type ProjectIndexDeleteCandidate = (
+    StorageOwnedProjectIndexDeleteCandidate | MaterializedNoteProjectIndexDeleteCandidate
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectIndexDeleteCandidateScreen:
+    """Candidate rows plus paths that exist but are not currently deletable."""
+
+    candidates: tuple[ProjectIndexDeleteCandidate, ...]
+    indexed_paths: frozenset[str]
+
+
+class ProjectIndexDeleteCandidateRow(Protocol):
+    """Persistence projection consumed by delete-candidate classification."""
+
+    def __getitem__(self, key: str, /) -> object: ...
+
+
+def _project_index_delete_candidate_from_row(
+    row: ProjectIndexDeleteCandidateRow,
+) -> ProjectIndexDeleteCandidate | None:
+    """Classify one persistence row into the positive delete-eligible domain."""
+    entity_id = row["entity_id"]
+    file_path = row["file_path"]
+    if not isinstance(entity_id, int) or not isinstance(file_path, str):
+        raise TypeError("delete candidate identity must contain an integer id and string path")
+    entity = ProjectIndexDeleteEntity(
+        entity_id=entity_id,
+        file_path=file_path,
+    )
+    if row["note_content_entity_id"] is None:
+        return StorageOwnedProjectIndexDeleteCandidate(entity=entity)
+
+    db_version = row["db_version"]
+    db_checksum = row["db_checksum"]
+    file_version = row["file_version"]
+    file_checksum = row["file_checksum"]
+    if row["file_write_status"] != "synced":
+        return None
+    if (
+        not isinstance(db_version, int)
+        or not isinstance(db_checksum, str)
+        or not isinstance(file_version, int)
+        or not isinstance(file_checksum, str)
+    ):
+        return None
+    if file_version != db_version or file_checksum != db_checksum:
+        return None
+
+    attempted_at = row["last_materialization_attempt_at"]
+    if attempted_at is not None and not isinstance(attempted_at, datetime):
+        raise TypeError("last_materialization_attempt_at must be a datetime")
+    return MaterializedNoteProjectIndexDeleteCandidate(
+        entity=entity,
+        db_version=db_version,
+        db_checksum=db_checksum,
+        file_version=file_version,
+        file_checksum=file_checksum,
+        last_materialization_attempt_at=attempted_at,
+    )
+
+
+async def _load_project_index_delete_candidates(
+    session: AsyncSession,
+    *,
+    project_id: ProjectId,
+    paths: Sequence[str],
+) -> ProjectIndexDeleteCandidateScreen:
+    """Load the exact lineage that permits deletion for the requested paths."""
+    if not paths:
+        return ProjectIndexDeleteCandidateScreen(candidates=(), indexed_paths=frozenset())
+
+    result = await session.execute(
+        select(
+            Entity.id.label("entity_id"),
+            Entity.file_path.label("file_path"),
+            NoteContent.entity_id.label("note_content_entity_id"),
+            NoteContent.db_version.label("db_version"),
+            NoteContent.db_checksum.label("db_checksum"),
+            NoteContent.file_version.label("file_version"),
+            NoteContent.file_checksum.label("file_checksum"),
+            NoteContent.file_write_status.label("file_write_status"),
+            NoteContent.last_materialization_attempt_at.label("last_materialization_attempt_at"),
+        )
+        .outerjoin(NoteContent, NoteContent.entity_id == Entity.id)
+        .where(
+            Entity.project_id == project_id,
+            Entity.file_path.in_(tuple(paths)),
+        )
+        .order_by(Entity.id)
+    )
+    rows = result.mappings().all()
+    candidates = tuple(
+        candidate
+        for row in rows
+        if (candidate := _project_index_delete_candidate_from_row(row)) is not None
+    )
+    return ProjectIndexDeleteCandidateScreen(
+        candidates=candidates,
+        indexed_paths=frozenset(str(row["file_path"]) for row in rows),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -586,7 +717,7 @@ class RepositoryProjectIndexMaintenanceStore:
     project_id: ProjectId
     external_vector_cleaner: ProjectIndexExternalVectorCleaner | None = None
     move_content_updater: ProjectIndexMoveContentUpdater | None = None
-    delete_path_verifier: ProjectIndexDeletePathVerifier = TrustPlannedProjectIndexDeleteVerifier()
+    delete_path_verifier: ProjectIndexDeletePathVerifier | None = None
     # Trigger: an entity occupies a move destination at apply time.
     # Why: scan change planning only pairs moves with paths that had no DB row
     #      at snapshot time, so a row found there was created concurrently and
@@ -853,53 +984,131 @@ class RepositoryProjectIndexMaintenanceStore:
         if not delete_batch.paths:
             return ProjectIndexDeleteBatchResult(deleted_entities=0)
 
-        # Trigger: a planned delete path exists in storage again at apply time.
-        # Why: the plan compares a storage snapshot against a later DB read, so
-        #      a note accepted and materialized in between is planned as deleted;
-        #      applying it would destroy the accepted entity, search, and vector
-        #      rows with no recovery.
-        # Outcome: only positively re-confirmed absences are deleted; skipped
-        #          paths are reported and the next scan picks the file up as
-        #          modified.
-        confirmed_paths = await self.delete_path_verifier.confirm_deleted_paths(delete_batch.paths)
-        skipped_paths = tuple(
-            deleted_path
-            for deleted_path in delete_batch.paths
-            if deleted_path not in confirmed_paths
+        # --- Snapshot DB eligibility before probing storage ---
+        # Only storage-owned rows and fully synchronized notes can become delete
+        # candidates. Pending, writing, failed, externally changed, and partially
+        # synchronized NoteContent states remain canonical DB work and are skipped.
+        async with db.scoped_session(self.session_maker) as session:
+            initial_screen = await _load_project_index_delete_candidates(
+                session,
+                project_id=self.project_id,
+                paths=delete_batch.paths,
+            )
+
+        initial_candidates_by_path = {
+            candidate.entity.file_path: candidate for candidate in initial_screen.candidates
+        }
+        protected_paths = initial_screen.indexed_paths - initial_candidates_by_path.keys()
+        missing_paths = set(delete_batch.paths) - initial_screen.indexed_paths
+        skipped_paths = set(protected_paths)
+        if protected_paths:
+            logger.warning(
+                "Skipping planned index deletes for unsynchronized note state",
+                paths=tuple(path for path in delete_batch.paths if path in protected_paths),
+            )
+        if not initial_candidates_by_path:
+            return ProjectIndexDeleteBatchResult(
+                deleted_entities=0,
+                missing_paths=tuple(path for path in delete_batch.paths if path in missing_paths),
+                skipped_paths=tuple(path for path in delete_batch.paths if path in skipped_paths),
+            )
+
+        # --- Re-probe external storage outside the DB transaction ---
+        # A project scan's listing is only a snapshot. Refuse to delete when the
+        # runtime cannot positively confirm each candidate is still absent.
+        if self.delete_path_verifier is None:
+            raise RuntimeError("project-index delete requires a live storage path verifier")
+        candidate_paths = tuple(
+            path for path in delete_batch.paths if path in initial_candidates_by_path
         )
-        if skipped_paths:
+        confirmed_paths = await self.delete_path_verifier.confirm_deleted_paths(candidate_paths)
+        storage_present_paths = set(candidate_paths) - confirmed_paths
+        skipped_paths.update(storage_present_paths)
+        if storage_present_paths:
             logger.warning(
                 "Skipping planned index deletes for paths present in storage again",
-                paths=skipped_paths,
+                paths=tuple(path for path in delete_batch.paths if path in storage_present_paths),
             )
         if not confirmed_paths:
             return ProjectIndexDeleteBatchResult(
                 deleted_entities=0,
-                skipped_paths=skipped_paths,
+                missing_paths=tuple(path for path in delete_batch.paths if path in missing_paths),
+                skipped_paths=tuple(path for path in delete_batch.paths if path in skipped_paths),
             )
 
+        # --- Lock and revalidate the exact DB lineage before deletion ---
         async with db.scoped_session(self.session_maker) as session:
-            target_result = await session.execute(
-                select(Entity.id, Entity.file_path).where(
-                    Entity.project_id == self.project_id,
-                    Entity.file_path.in_(tuple(confirmed_paths)),
-                )
+            confirmed_candidates = tuple(
+                initial_candidates_by_path[path]
+                for path in candidate_paths
+                if path in confirmed_paths
             )
-            target_rows = target_result.mappings().all()
-
-            if not target_rows:
+            candidate_entity_ids = tuple(
+                candidate.entity.entity_id for candidate in confirmed_candidates
+            )
+            await lock_note_content_before_entity_mutation(
+                session,
+                project_id=self.project_id,
+                entity_ids=candidate_entity_ids,
+            )
+            # PostgreSQL foreign-key insertion takes a lock on Entity. Taking
+            # these row locks after NoteContent means a concurrent legacy-note
+            # bootstrap either commits before the next statement or waits until
+            # this externally deleted entity is gone.
+            await session.execute(
+                select(Entity.id)
+                .where(
+                    Entity.project_id == self.project_id,
+                    Entity.id.in_(candidate_entity_ids),
+                )
+                .order_by(Entity.id)
+                .with_for_update()
+            )
+            current_screen = await _load_project_index_delete_candidates(
+                session,
+                project_id=self.project_id,
+                paths=tuple(confirmed_paths),
+            )
+            current_candidates_by_path = {
+                candidate.entity.file_path: candidate for candidate in current_screen.candidates
+            }
+            deletable_candidates = tuple(
+                candidate
+                for candidate in confirmed_candidates
+                if current_candidates_by_path.get(candidate.entity.file_path) == candidate
+            )
+            changed_paths = {
+                candidate.entity.file_path
+                for candidate in confirmed_candidates
+                if candidate.entity.file_path in current_screen.indexed_paths
+                and current_candidates_by_path.get(candidate.entity.file_path) != candidate
+            }
+            disappeared_paths = {
+                candidate.entity.file_path
+                for candidate in confirmed_candidates
+                if candidate.entity.file_path not in current_screen.indexed_paths
+            }
+            skipped_paths.update(changed_paths)
+            missing_paths.update(disappeared_paths)
+            if changed_paths:
+                logger.warning(
+                    "Skipping planned index deletes whose canonical lineage changed",
+                    paths=tuple(path for path in delete_batch.paths if path in changed_paths),
+                )
+            if not deletable_candidates:
                 return ProjectIndexDeleteBatchResult(
                     deleted_entities=0,
                     missing_paths=tuple(
-                        deleted_path
-                        for deleted_path in delete_batch.paths
-                        if deleted_path in confirmed_paths
+                        path for path in delete_batch.paths if path in missing_paths
                     ),
-                    skipped_paths=skipped_paths,
+                    skipped_paths=tuple(
+                        path for path in delete_batch.paths if path in skipped_paths
+                    ),
                 )
 
-            deleted_entity_ids = tuple(int(row["id"]) for row in target_rows)
-            deleted_found_paths = frozenset(str(row["file_path"]) for row in target_rows)
+            deleted_entity_ids = tuple(
+                candidate.entity.entity_id for candidate in deletable_candidates
+            )
 
             relation_cleanup_entity_ids = await delete_project_index_entities(
                 session,
@@ -911,12 +1120,8 @@ class RepositoryProjectIndexMaintenanceStore:
         return ProjectIndexDeleteBatchResult(
             deleted_entities=len(deleted_entity_ids),
             relation_cleanup_entity_ids=relation_cleanup_entity_ids,
-            missing_paths=tuple(
-                deleted_path
-                for deleted_path in delete_batch.paths
-                if deleted_path in confirmed_paths and deleted_path not in deleted_found_paths
-            ),
-            skipped_paths=skipped_paths,
+            missing_paths=tuple(path for path in delete_batch.paths if path in missing_paths),
+            skipped_paths=tuple(path for path in delete_batch.paths if path in skipped_paths),
         )
 
 

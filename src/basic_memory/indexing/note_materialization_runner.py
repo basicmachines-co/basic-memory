@@ -9,7 +9,7 @@ from typing import Protocol, Self
 
 from loguru import logger
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -113,6 +113,14 @@ class NoteMaterializationPreflightResult:
         if self.prepared_write is None:
             raise RuntimeError("terminal note materialization preflight has no prepared write")
         return self.prepared_write
+
+
+@dataclass(frozen=True, slots=True)
+class ClaimedNoteMaterializationContent:
+    """Content returned by an atomic claim of one accepted note version."""
+
+    markdown_content: str
+    previous_file_checksum: RuntimeFileChecksum | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,6 +292,66 @@ def plan_note_materialization_preflight(
     )
 
 
+async def claim_note_materialization_content(
+    session: AsyncSession,
+    *,
+    request: RuntimeNoteMaterializationJobRequest,
+    attempted_at: datetime,
+) -> ClaimedNoteMaterializationContent | None:
+    """Atomically claim the queued accepted version and return its file input."""
+    claim_result = await session.execute(
+        update(NoteContent)
+        .where(
+            NoteContent.project_id == request.project_id,
+            NoteContent.entity_id == request.entity_id,
+            NoteContent.db_version == request.db_version,
+            NoteContent.db_checksum == request.db_checksum,
+        )
+        .values(
+            file_write_status="writing",
+            last_materialization_attempt_at=attempted_at,
+        )
+        .returning(
+            NoteContent.markdown_content,
+            NoteContent.file_checksum,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    claimed_row = claim_result.one_or_none()
+    if claimed_row is None:
+        return None
+    return ClaimedNoteMaterializationContent(
+        markdown_content=claimed_row[0],
+        previous_file_checksum=claimed_row[1],
+    )
+
+
+def plan_missed_note_materialization_claim(
+    request: RuntimeNoteMaterializationJobRequest,
+    *,
+    entity: NoteMaterializationEntitySource | None,
+    note_content: NoteMaterializationContentSource | None,
+    attempted_at: datetime,
+) -> NoteMaterializationPreflightResult:
+    """Classify the current state after a guarded materialization claim misses."""
+    current_plan = plan_note_materialization_preflight(
+        request,
+        entity=entity,
+        note_content=note_content,
+        attempted_at=attempted_at,
+    )
+    if current_plan.terminal_result is not None:
+        return current_plan
+    return NoteMaterializationPreflightResult.terminal(
+        RuntimeNoteMaterializationResult(
+            entity_id=request.entity_id,
+            status=RuntimeNoteMaterializationStatus.stale,
+            reason=f"note state changed before file-write claim: {request.entity_id}",
+            file_path=entity.file_path if entity is not None else None,
+        )
+    )
+
+
 def plan_written_note_materialization_publish(
     *,
     request: RuntimeNoteMaterializationJobRequest,
@@ -384,25 +452,45 @@ class RepositoryNoteMaterializationPreflight:
                 entity_id=request.entity_id,
             )
 
-            entity = await session.get(Entity, request.entity_id)
-            note_content = await session.get(NoteContent, request.entity_id)
             attempted_at = note_materialization_utc_now()
-            preflight_result = plan_note_materialization_preflight(
-                request,
-                entity=entity,
-                note_content=note_content,
+            claimed_content = await claim_note_materialization_content(
+                session,
+                request=request,
                 attempted_at=attempted_at,
             )
-            if preflight_result.terminal_result is not None:
-                return preflight_result
+            if claimed_content is None:
+                entity = await session.get(Entity, request.entity_id)
+                note_content = await session.get(NoteContent, request.entity_id)
+                if entity is not None and entity.project_id != request.project_id:
+                    entity = None
+                if note_content is not None and note_content.project_id != request.project_id:
+                    note_content = None
+                return plan_missed_note_materialization_claim(
+                    request,
+                    entity=entity,
+                    note_content=note_content,
+                    attempted_at=attempted_at,
+                )
 
-            if note_content is None:
-                raise RuntimeError("prepared note materialization requires note_content")
-
-            note_content.file_write_status = "writing"
-            note_content.last_materialization_attempt_at = attempted_at
-            await session.flush()
-            return preflight_result
+            entity = await session.get(Entity, request.entity_id)
+            if entity is None or entity.project_id != request.project_id:
+                return NoteMaterializationPreflightResult.terminal(
+                    RuntimeNoteMaterializationResult(
+                        entity_id=request.entity_id,
+                        status=RuntimeNoteMaterializationStatus.missing,
+                        reason=f"note state no longer exists: {request.entity_id}",
+                    ),
+                    cleanup_file=plan_note_materialization_cleanup_file_delete(request),
+                )
+            return NoteMaterializationPreflightResult.prepared(
+                plan_prepared_note_write(
+                    request=request,
+                    file_path=entity.file_path,
+                    markdown_content=claimed_content.markdown_content,
+                    previous_file_checksum=claimed_content.previous_file_checksum,
+                    attempted_at=attempted_at,
+                )
+            )
 
 
 @dataclass(frozen=True, slots=True)
