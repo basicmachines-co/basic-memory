@@ -120,8 +120,8 @@ async def test_read_note_emits_root_operation_and_project_context(
     )
     span_names = [name for name, _ in spans]
     assert "api.request.knowledge.resolve_entity" in span_names
-    assert "api.request.resource.get_content" in span_names
     assert "api.request.knowledge.get_entity" in span_names
+    assert "api.request.resource.get_content" not in span_names
     assert _contains_span_attrs(
         spans,
         "routing.client_session",

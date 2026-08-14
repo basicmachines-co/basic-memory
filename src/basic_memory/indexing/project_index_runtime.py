@@ -40,6 +40,7 @@ from basic_memory.indexing.relation_resolution import (
 )
 from basic_memory.indexing.progress import VectorSyncProgress
 from basic_memory.indexing.project_index_maintenance import (
+    ProjectIndexDeletePathVerifier,
     ProjectIndexDeleteRun,
     ProjectIndexMaintenanceRunner,
     ProjectIndexMoveRun,
@@ -172,6 +173,7 @@ def build_default_project_index_runtime(
     vector_sync: VectorSyncExecutor,
     entity_repository: RelationResolutionEntityRepository,
     entity_indexer: RelationResolutionEntityIndexer,
+    delete_path_verifier: ProjectIndexDeletePathVerifier,
     external_vector_cleaner: ProjectIndexExternalVectorCleaner | None = None,
 ) -> ProjectIndexRuntime:
     """Compose the default repository-backed project-index runtime."""
@@ -183,6 +185,7 @@ def build_default_project_index_runtime(
         session_maker=session_maker,
         project_id=project_id,
         external_vector_cleaner=external_vector_cleaner,
+        delete_path_verifier=delete_path_verifier,
     )
     return ProjectIndexRuntime(
         project_id=project_id,

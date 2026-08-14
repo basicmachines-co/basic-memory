@@ -100,6 +100,10 @@ For example, prefer separate `Completed(result)` and `Failed(reason)` values joi
 
 ## Database Writes And Concurrency
 
+See [TRANSACTION_ISOLATION.md](TRANSACTION_ISOLATION.md) for the PostgreSQL Read Committed
+semantics, guarded-write patterns, and NoteContent-before-Entity lock protocol that repository
+code may rely on.
+
 - Let the database arbitrate ordinary write contention. Express idempotency and uniqueness with
   constraints plus `INSERT ... ON CONFLICT DO NOTHING` or `DO UPDATE`, and return an explicit
   inserted, existing, or updated outcome when callers need to distinguish them.

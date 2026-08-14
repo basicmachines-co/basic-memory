@@ -24,6 +24,7 @@ from basic_memory.indexing.project_index_maintenance import (
     ProjectIndexMoveBatchResult,
     RepositoryProjectIndexMaintenanceStore,
     StoreProjectIndexMaintenanceRunner,
+    TrustPlannedProjectIndexDeleteVerifier,
 )
 from basic_memory.indexing.embedding_index_planning import RepositoryVectorSyncEntitySource
 from basic_memory.indexing.forward_reference_resolution import (
@@ -207,6 +208,7 @@ def test_build_default_project_index_runtime_composes_repository_backed_runtime(
     vector_sync = NoopVectorSync()
     entity_repository = NoopEntityRepository()
     entity_indexer = NoopEntityIndexer()
+    delete_path_verifier = TrustPlannedProjectIndexDeleteVerifier()
 
     runtime = build_default_project_index_runtime(
         project_id=7,
@@ -214,6 +216,7 @@ def test_build_default_project_index_runtime_composes_repository_backed_runtime(
         vector_sync=vector_sync,
         entity_repository=entity_repository,
         entity_indexer=entity_indexer,
+        delete_path_verifier=delete_path_verifier,
     )
 
     assert isinstance(runtime, ProjectIndexRuntime)
@@ -225,6 +228,7 @@ def test_build_default_project_index_runtime_composes_repository_backed_runtime(
     assert isinstance(runtime.maintenance, StoreProjectIndexMaintenanceRunner)
     assert isinstance(runtime.maintenance.move_store, RepositoryProjectIndexMaintenanceStore)
     assert runtime.maintenance.move_store is runtime.maintenance.delete_store
+    assert runtime.maintenance.move_store.delete_path_verifier is delete_path_verifier
     assert isinstance(
         runtime.forward_reference_relation_source,
         RepositoryForwardReferenceRelationSource,

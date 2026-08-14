@@ -3,6 +3,7 @@
 from collections.abc import AsyncIterator, Iterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import override, cast
 
@@ -130,6 +131,106 @@ class FakeProjectIndexResult:
 
     def mappings(self) -> FakeProjectIndexMappingResult:
         return FakeProjectIndexMappingResult(self.mapping_rows)
+
+
+def storage_owned_delete_candidate_row(entity_id: int, file_path: str) -> dict[str, object]:
+    """Return the persistence projection for one storage-owned delete candidate."""
+    return {
+        "entity_id": entity_id,
+        "file_path": file_path,
+        "note_content_entity_id": None,
+        "db_version": None,
+        "db_checksum": None,
+        "file_version": None,
+        "file_checksum": None,
+        "file_write_status": None,
+        "last_materialization_attempt_at": None,
+    }
+
+
+def materialized_delete_candidate_row(
+    entity_id: int,
+    file_path: str,
+    *,
+    file_write_status: str = "synced",
+    db_version: int = 3,
+    db_checksum: str = "current-checksum",
+    file_version: int | None = 3,
+    file_checksum: str | None = "current-checksum",
+    last_materialization_attempt_at: object = None,
+) -> dict[str, object]:
+    """Return the persistence projection for one accepted note delete candidate."""
+    return {
+        "entity_id": entity_id,
+        "file_path": file_path,
+        "note_content_entity_id": entity_id,
+        "db_version": db_version,
+        "db_checksum": db_checksum,
+        "file_version": file_version,
+        "file_checksum": file_checksum,
+        "file_write_status": file_write_status,
+        "last_materialization_attempt_at": last_materialization_attempt_at,
+    }
+
+
+def test_project_index_delete_candidate_constructs_fully_materialized_note() -> None:
+    attempted_at = datetime(2026, 8, 14, 12, 0, tzinfo=UTC)
+
+    candidate = project_index_maintenance_module._project_index_delete_candidate_from_row(
+        materialized_delete_candidate_row(
+            10,
+            "notes/a.md",
+            last_materialization_attempt_at=attempted_at,
+        )
+    )
+
+    assert (
+        candidate
+        == project_index_maintenance_module.MaterializedNoteProjectIndexDeleteCandidate(
+            entity=project_index_maintenance_module.ProjectIndexDeleteEntity(
+                entity_id=10,
+                file_path="notes/a.md",
+            ),
+            db_version=3,
+            db_checksum="current-checksum",
+            file_version=3,
+            file_checksum="current-checksum",
+            last_materialization_attempt_at=attempted_at,
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    ("overrides"),
+    [
+        {"file_write_status": "pending"},
+        {"file_write_status": "writing"},
+        {"file_write_status": "failed"},
+        {"file_write_status": "external_change_detected"},
+        {"file_version": 2},
+        {"file_checksum": "older-checksum"},
+    ],
+)
+def test_project_index_delete_candidate_rejects_unsynchronized_note_state(
+    overrides: dict[str, object],
+) -> None:
+    row = materialized_delete_candidate_row(10, "notes/a.md")
+    row.update(overrides)
+
+    candidate = project_index_maintenance_module._project_index_delete_candidate_from_row(row)
+
+    assert candidate is None
+
+
+def test_project_index_delete_candidate_rejects_invalid_attempt_timestamp() -> None:
+    row = materialized_delete_candidate_row(
+        10,
+        "notes/a.md",
+        last_materialization_attempt_at="not-a-datetime",
+    )
+
+    with pytest.raises(TypeError, match="last_materialization_attempt_at must be a datetime"):
+        project_index_maintenance_module._project_index_delete_candidate_from_row(row)
 
 
 @dataclass(slots=True)
@@ -894,6 +995,92 @@ class StaticDeletePathVerifier:
 
 
 @pytest.mark.asyncio
+async def test_repository_project_index_maintenance_store_requires_live_delete_verifier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    session = FakeProjectIndexSession(
+        results=[
+            FakeProjectIndexResult(
+                mapping_rows=[storage_owned_delete_candidate_row(10, "notes/a.md")]
+            )
+        ]
+    )
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[FakeProjectIndexSession]:
+        assert scoped_session_maker is session_maker
+        yield session
+
+    monkeypatch.setattr(
+        project_index_maintenance_module.db,
+        "scoped_session",
+        fake_scoped_session,
+    )
+
+    store = RepositoryProjectIndexMaintenanceStore(
+        session_maker=session_maker,
+        project_id=42,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="project-index delete requires a live storage path verifier",
+    ):
+        await store.apply_project_index_delete_batch(
+            ProjectIndexDeleteBatch(completed_batches=1, paths=("notes/a.md",))
+        )
+
+
+@pytest.mark.asyncio
+async def test_repository_project_index_maintenance_store_protects_pending_note_without_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session_maker = cast(async_sessionmaker[AsyncSession], object())
+    session = FakeProjectIndexSession(
+        results=[
+            FakeProjectIndexResult(
+                mapping_rows=[
+                    materialized_delete_candidate_row(
+                        10,
+                        "notes/pending.md",
+                        file_write_status="pending",
+                        file_version=None,
+                        file_checksum=None,
+                    )
+                ]
+            )
+        ]
+    )
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        scoped_session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[FakeProjectIndexSession]:
+        yield session
+
+    monkeypatch.setattr(
+        project_index_maintenance_module.db,
+        "scoped_session",
+        fake_scoped_session,
+    )
+
+    result = await RepositoryProjectIndexMaintenanceStore(
+        session_maker=session_maker,
+        project_id=42,
+    ).apply_project_index_delete_batch(
+        ProjectIndexDeleteBatch(completed_batches=1, paths=("notes/pending.md",))
+    )
+
+    assert result == ProjectIndexDeleteBatchResult(
+        deleted_entities=0,
+        skipped_paths=("notes/pending.md",),
+    )
+
+
+@pytest.mark.asyncio
 async def test_repository_project_index_maintenance_store_skips_deletes_for_reappeared_paths(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -903,9 +1090,16 @@ async def test_repository_project_index_maintenance_store_skips_deletes_for_reap
         results=[
             FakeProjectIndexResult(
                 mapping_rows=[
-                    {"id": 10, "file_path": "notes/a.md"},
+                    storage_owned_delete_candidate_row(10, "notes/a.md"),
+                    storage_owned_delete_candidate_row(20, "notes/reappeared.md"),
                 ]
             ),
+            FakeProjectIndexResult(),  # sorted NoteContent lock fence
+            FakeProjectIndexResult(),  # sorted Entity lock fence
+            FakeProjectIndexResult(
+                mapping_rows=[storage_owned_delete_candidate_row(10, "notes/a.md")]
+            ),
+            FakeProjectIndexResult(),  # delete helper NoteContent fence
             FakeProjectIndexResult(scalar_values=[]),
         ]
     )
@@ -950,7 +1144,16 @@ async def test_repository_project_index_maintenance_store_skips_whole_batch_when
 ) -> None:
     """When no planned delete is re-confirmed absent, the database is not touched."""
     session_maker = cast(async_sessionmaker[AsyncSession], object())
-    session = FakeProjectIndexSession(results=[])
+    session = FakeProjectIndexSession(
+        results=[
+            FakeProjectIndexResult(
+                mapping_rows=[
+                    storage_owned_delete_candidate_row(10, "notes/a.md"),
+                    storage_owned_delete_candidate_row(20, "notes/b.md"),
+                ]
+            )
+        ]
+    )
 
     @asynccontextmanager
     async def fake_scoped_session(
@@ -981,7 +1184,7 @@ async def test_repository_project_index_maintenance_store_skips_whole_batch_when
         deleted_entities=0,
         skipped_paths=("notes/a.md", "notes/b.md"),
     )
-    assert session.statements == []
+    assert len(session.statements) == 1
 
 
 @pytest.mark.asyncio
@@ -1178,11 +1381,19 @@ async def test_repository_project_index_maintenance_store_applies_delete_batch(
         results=[
             FakeProjectIndexResult(
                 mapping_rows=[
-                    {"id": 10, "file_path": "notes/a.md"},
-                    {"id": 20, "file_path": "notes/b.md"},
+                    storage_owned_delete_candidate_row(10, "notes/a.md"),
+                    storage_owned_delete_candidate_row(20, "notes/b.md"),
                 ]
             ),
             FakeProjectIndexResult(),  # sorted NoteContent lock fence
+            FakeProjectIndexResult(),  # sorted Entity lock fence
+            FakeProjectIndexResult(
+                mapping_rows=[
+                    storage_owned_delete_candidate_row(10, "notes/a.md"),
+                    storage_owned_delete_candidate_row(20, "notes/b.md"),
+                ]
+            ),
+            FakeProjectIndexResult(),  # delete helper NoteContent fence
             FakeProjectIndexResult(scalar_values=[99]),
         ]
     )
@@ -1203,6 +1414,7 @@ async def test_repository_project_index_maintenance_store_applies_delete_batch(
     store = RepositoryProjectIndexMaintenanceStore(
         session_maker=session_maker,
         project_id=42,
+        delete_path_verifier=project_index_maintenance_module.TrustPlannedProjectIndexDeleteVerifier(),
     )
 
     result = await store.apply_project_index_delete_batch(
@@ -1217,13 +1429,16 @@ async def test_repository_project_index_maintenance_store_applies_delete_batch(
         relation_cleanup_entity_ids=frozenset({99}),
         missing_paths=("notes/missing.md",),
     )
-    assert len(session.statements) == 6
-    assert "SELECT entity.id, entity.file_path" in str(session.statements[0])
+    assert len(session.statements) == 9
+    assert "LEFT OUTER JOIN note_content" in str(session.statements[0])
     assert "ORDER BY note_content.entity_id" in str(session.statements[1])
-    assert "SELECT DISTINCT relation.from_id" in str(session.statements[2])
-    assert "DELETE FROM search_index" in str(session.statements[3])
-    assert "sqlite_master" in str(session.statements[4])
-    assert "DELETE FROM entity" in str(session.statements[5])
+    assert "FOR UPDATE" in str(session.statements[2])
+    assert "LEFT OUTER JOIN note_content" in str(session.statements[3])
+    assert "ORDER BY note_content.entity_id" in str(session.statements[4])
+    assert "SELECT DISTINCT relation.from_id" in str(session.statements[5])
+    assert "DELETE FROM search_index" in str(session.statements[6])
+    assert "sqlite_master" in str(session.statements[7])
+    assert "DELETE FROM entity" in str(session.statements[8])
 
 
 @pytest.mark.asyncio
@@ -1234,9 +1449,12 @@ async def test_repository_project_index_maintenance_store_deletes_vector_embeddi
     session = FakeProjectIndexSession(
         results=[
             FakeProjectIndexResult(
-                mapping_rows=[
-                    {"id": 10, "file_path": "notes/a.md"},
-                ]
+                mapping_rows=[storage_owned_delete_candidate_row(10, "notes/a.md")]
+            ),
+            FakeProjectIndexResult(),
+            FakeProjectIndexResult(),
+            FakeProjectIndexResult(
+                mapping_rows=[storage_owned_delete_candidate_row(10, "notes/a.md")]
             ),
             FakeProjectIndexResult(),
             FakeProjectIndexResult(scalar_values=[]),
@@ -1276,6 +1494,7 @@ async def test_repository_project_index_maintenance_store_deletes_vector_embeddi
     store = RepositoryProjectIndexMaintenanceStore(
         session_maker=session_maker,
         project_id=42,
+        delete_path_verifier=project_index_maintenance_module.TrustPlannedProjectIndexDeleteVerifier(),
     )
 
     result = await store.apply_project_index_delete_batch(
@@ -1309,9 +1528,12 @@ async def test_repository_project_index_maintenance_store_skips_vector_cleanup_w
     session = FakeProjectIndexSession(
         results=[
             FakeProjectIndexResult(
-                mapping_rows=[
-                    {"id": 10, "file_path": "notes/a.md"},
-                ]
+                mapping_rows=[storage_owned_delete_candidate_row(10, "notes/a.md")]
+            ),
+            FakeProjectIndexResult(),
+            FakeProjectIndexResult(),
+            FakeProjectIndexResult(
+                mapping_rows=[storage_owned_delete_candidate_row(10, "notes/a.md")]
             ),
             FakeProjectIndexResult(),
             FakeProjectIndexResult(scalar_values=[]),
@@ -1336,6 +1558,7 @@ async def test_repository_project_index_maintenance_store_skips_vector_cleanup_w
     store = RepositoryProjectIndexMaintenanceStore(
         session_maker=session_maker,
         project_id=42,
+        delete_path_verifier=project_index_maintenance_module.TrustPlannedProjectIndexDeleteVerifier(),
     )
 
     result = await store.apply_project_index_delete_batch(

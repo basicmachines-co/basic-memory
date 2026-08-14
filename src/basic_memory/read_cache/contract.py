@@ -73,10 +73,13 @@ class ReadCacheLookup:
 
     generation: str
     payload: bytes | None = None
+    remaining_ttl_seconds: float | None = None
 
     def __post_init__(self) -> None:
         if not self.generation:
             raise ValueError("read-cache lookup generation must not be empty")
+        if self.remaining_ttl_seconds is not None and self.remaining_ttl_seconds < 0:
+            raise ValueError("read-cache remaining_ttl_seconds must not be negative")
 
     @property
     def is_hit(self) -> bool:

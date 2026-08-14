@@ -18,6 +18,7 @@ from basic_memory.indexing.note_materialization_runner import (
     RepositoryNoteMaterializationPreflight,
     RepositoryNoteMaterializationPublisher,
     RepositoryNoteMaterializationStatusPublisher,
+    plan_missed_note_materialization_claim,
     plan_note_materialization_preflight,
     plan_written_note_materialization_publish,
     run_note_materialization,
@@ -137,12 +138,29 @@ class FakeSessionLock:
         self.calls.append((session, project_id, entity_id))
 
 
+@dataclass(frozen=True, slots=True)
+class FakeReturningResult:
+    row: tuple[str, str | None] | None
+
+    def one_or_none(self) -> tuple[str, str | None] | None:
+        return self.row
+
+
 class FakeRepositorySession:
     def __init__(self, *, entity: Entity | None, note_content: NoteContent | None) -> None:
         self.entity = entity
         self.note_content = note_content
         self.flush_count = 0
         self.scalar_statements: list[object] = []
+        self.execute_statements: list[object] = []
+
+    async def execute(self, statement: object) -> FakeReturningResult:
+        self.execute_statements.append(statement)
+        if self.note_content is None:
+            return FakeReturningResult(row=None)
+        return FakeReturningResult(
+            row=(self.note_content.markdown_content, self.note_content.file_checksum)
+        )
 
     async def scalar(self, statement: object) -> object | None:
         self.scalar_statements.append(statement)
@@ -450,6 +468,26 @@ def test_plan_note_materialization_preflight_returns_prepared_write() -> None:
     )
 
 
+def test_plan_missed_note_materialization_claim_returns_typed_stale_result() -> None:
+    request = materialization_request()
+
+    result = plan_missed_note_materialization_claim(
+        request,
+        entity=SimpleNamespace(file_path="notes/a.md"),
+        note_content=materialization_note_content(),
+        attempted_at=datetime(2026, 6, 18, 15, 0, tzinfo=UTC),
+    )
+
+    assert result == NoteMaterializationPreflightResult.terminal(
+        RuntimeNoteMaterializationResult(
+            entity_id=42,
+            status=RuntimeNoteMaterializationStatus.stale,
+            reason="note state changed before file-write claim: 42",
+            file_path="notes/a.md",
+        )
+    )
+
+
 @pytest.mark.asyncio
 async def test_repository_note_materialization_preflight_marks_current_note_writing() -> None:
     request = materialization_request()
@@ -488,9 +526,43 @@ async def test_repository_note_materialization_preflight_marks_current_note_writ
         )
     )
     assert session_lock.calls == [(cast(AsyncSession, session), 7, 42)]
-    assert note_content.file_write_status == "writing"
-    assert note_content.last_materialization_attempt_at == attempted_at
-    assert session.flush_count == 1
+    assert len(session.execute_statements) == 1
+    assert "UPDATE note_content" in str(session.execute_statements[0])
+    assert "RETURNING note_content.markdown_content" in str(session.execute_statements[0])
+    assert session.flush_count == 0
+
+
+@pytest.mark.asyncio
+async def test_repository_note_materialization_preflight_returns_missing_after_claim_miss() -> None:
+    request = materialization_request()
+    session = FakeRepositorySession(entity=None, note_content=None)
+    scoped_session = RecordingScopedSession(
+        scoped_session=FakeScopedSession(session),
+        opened_session_makers=[],
+    )
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_materialization_runner.db.scoped_session",
+            scoped_session,
+        )
+        result = await RepositoryNoteMaterializationPreflight(
+            session_maker=cast(async_sessionmaker[AsyncSession], object()),
+        ).prepare_note_materialization(request)
+
+    assert result == NoteMaterializationPreflightResult.terminal(
+        RuntimeNoteMaterializationResult(
+            entity_id=42,
+            status=RuntimeNoteMaterializationStatus.missing,
+            reason="note state no longer exists: 42",
+        ),
+        cleanup_file=RuntimePendingNoteFileDelete(
+            project_id=7,
+            entity_id=42,
+            file_path="notes/old.md",
+            file_checksum="old-cleanup-sum",
+        ),
+    )
 
 
 @pytest.mark.asyncio

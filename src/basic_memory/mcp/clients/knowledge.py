@@ -19,7 +19,7 @@ from basic_memory.schemas.response import (
     DirectoryDeleteResult,
 )
 from basic_memory.schemas.v2.graph import GraphNode, OrphanEntitiesResponse
-from basic_memory.schemas.v2.entity import EntityResolveResponse
+from basic_memory.schemas.v2.entity import EntityResolveResponse, EntityResponseV2
 
 
 class KnowledgeClient:
@@ -112,14 +112,14 @@ class KnowledgeClient:
             )
         return EntityResponse.model_validate(response.json())
 
-    async def get_entity(self, entity_id: str) -> EntityResponse:
+    async def get_entity(self, entity_id: str) -> EntityResponseV2:
         """Get an entity by ID.
 
         Args:
             entity_id: Entity external_id (UUID)
 
         Returns:
-            EntityResponse with entity details
+            EntityResponseV2 with accepted note content and entity metadata
 
         Raises:
             ToolError: If the entity is not found or request fails
@@ -138,7 +138,7 @@ class KnowledgeClient:
                 operation="get_entity",
                 path_template="/v2/projects/{project_id}/knowledge/entities/{entity_id}",
             )
-        return EntityResponse.model_validate(response.json())
+        return EntityResponseV2.model_validate(response.json())
 
     async def patch_entity(
         self,

@@ -565,6 +565,8 @@ async def test_read_note_explicit_workspace_project_ignores_stale_cached_project
                 title="TODO",
                 permalink="personal/main/todo",
                 file_path="TODO.md",
+                content="---\ntitle: TODO\n---\n\n# TODO - Priorities & Tasks\n",
+                entity_metadata={"title": "TODO"},
             )
 
     class FakeResourceClient:
@@ -572,11 +574,7 @@ async def test_read_note_explicit_workspace_project_ignores_stale_cached_project
             assert project_id == expected_uuid
 
         async def read(self, entity_id: str):
-            assert entity_id == "entity-1"
-            return SimpleNamespace(
-                status_code=200,
-                text="---\ntitle: TODO\n---\n\n# TODO - Priorities & Tasks\n",
-            )
+            raise AssertionError(f"accepted content must avoid resource read for {entity_id}")
 
     monkeypatch.setattr(
         project_context,

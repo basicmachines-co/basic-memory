@@ -226,25 +226,25 @@ Random tokens prevent an evicted generation key from returning to an old integer
 reviving stale data. A read that fills after concurrent invalidation also remains safe because its
 old token no longer matches.
 
-## Initial Cache Surface
+## Cache Surface And Production TTL
 
 Phase one:
 
-| Operation                   | Initial TTL | Constraints                                         |
-| --------------------------- | ----------: | --------------------------------------------------- |
-| Entity by external ID       |  60 seconds | Cache validated `EntityResponseV2` JSON             |
-| Identifier resolution       |  60 seconds | Include body and workspace context                  |
-| Markdown note resource      |  60 seconds | Cache only below an explicit size limit             |
-| Directory structure         |  60 seconds | Folder-only tree; two MiB payload cap               |
-| Directory tree              |  60 seconds | Full hierarchy; two MiB measured payload cap        |
-| Paginated directory listing |  60 seconds | Include path, depth, glob, page, and page-size keys |
+| Operation                   | Production TTL | Constraints                                         |
+| --------------------------- | -------------: | --------------------------------------------------- |
+| Entity by external ID       |    300 seconds | Cache validated `EntityResponseV2` JSON             |
+| Identifier resolution       |    300 seconds | Include body and workspace context                  |
+| Markdown note resource      |    300 seconds | Cache only below an explicit size limit             |
+| Directory structure         |    300 seconds | Folder-only tree; two MiB payload cap               |
+| Directory tree              |    300 seconds | Full hierarchy; two MiB measured payload cap        |
+| Paginated directory listing |    300 seconds | Include path, depth, glob, page, and page-size keys |
 
 Additional measured surfaces:
 
-| Operation                   |   Initial TTL | Constraints                                    |
-| --------------------------- | ------------: | ---------------------------------------------- |
-| Search                      |    30 seconds | Implemented; complete query plus pagination key |
-| Context and recent activity | 15-30 seconds | Future; normalize or bound time-relative inputs |
+| Operation                   | Production TTL | Constraints                                     |
+| --------------------------- | -------------: | ----------------------------------------------- |
+| Search                      |     30 seconds | Implemented; complete query plus pagination key |
+| Context and recent activity |  15-30 seconds | Future; normalize or bound time-relative inputs |
 
 Do not initially cache failures, missing entities, graph/orphan responses, large or arbitrary
 binary resources, schema inference, writes, or Cloud control-plane data.
@@ -437,7 +437,8 @@ response-cache layers as the final design.
 - Reads bypass Redis and use the authoritative path when the cache is unavailable.
 - Cache-store failures do not fail an otherwise successful read.
 - Cache-invalidation failures do not fail committed writes, but they emit prominent telemetry.
-- Short initial TTLs bound stale-data exposure after an invalidation failure and Redis recovery.
+- Bounded operation TTLs limit stale-data exposure after an invalidation failure and Redis
+  recovery.
 - Redis client-input errors plus local serialization, decoding, and programming errors fail fast
   rather than masquerading as cache misses.
 
@@ -447,12 +448,14 @@ Rate-limit failure behavior remains entirely Cloud-owned.
 
 Record:
 
-- hit, miss, bypass, store, invalidation, unavailable, and oversize outcomes;
-- operation name without tenant or project metric labels;
+- distinct lookup and store outcomes, including hit, miss, bypass, store, invalidation,
+  unavailable, corrupt, and oversize;
+- operation name and configured TTL without tenant or project metric labels;
+- remaining TTL on cache hits;
 - Redis operation latency;
 - cached payload size;
 - authoritative read latency on misses;
-- hashed scope and request identifiers on diagnostic spans only.
+- hashed scope, request, and generation identifiers on diagnostic spans only.
 
 Do not add public cache headers in the first version.
 
