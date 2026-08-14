@@ -432,8 +432,12 @@ async def inspect_entity_chunks(
         fingerprint != current_source_hashes.entity_fingerprint
         for fingerprint in indexed_fingerprints
     )
+    # Trigger: any stored chunk is not currently retrievable under the active identity.
+    # Why: semantic hydration admits only ready manifest rows; pending, stale, and
+    # orphaned rows all leave the index behind the current retrieval projection.
+    # Outcome: note-level freshness cannot contradict the readiness breakdown.
     index_behind_rows = fingerprint_mismatch or any(
-        chunk.status in {"stale", "orphaned"} for chunk in inspected_chunks
+        chunk.status != "ready" for chunk in inspected_chunks
     )
     # A current chunk with no manifest row never enters the stored-row loop above, so
     # count the uncovered remainder explicitly (e.g. shards beyond the scheduling limit).

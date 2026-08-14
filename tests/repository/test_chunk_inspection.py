@@ -187,6 +187,7 @@ async def test_inspection_groups_rows_and_normalizes_manifest_timestamps(
         vector_index=search_repository.configured_vector_index,
         pending_key=f"observation:{sample_entity.id}:0",
     )
+    await _write_current_entity_file(file_service, sample_entity)
 
     # A second project uses the same entity/search ids and chunk key. Project-scoped
     # repository reads must not admit any of its rows into the inspection.
@@ -235,7 +236,8 @@ async def test_inspection_groups_rows_and_normalizes_manifest_timestamps(
     assert inspection.readiness.pending == 1
     assert inspection.readiness.stale == 0
     assert inspection.readiness.orphaned == 0
-    assert inspection.stale is False
+    assert inspection.stale is True
+    assert isinstance(inspection.freshness, ChunkIndexBehindRows)
     assert all(
         chunk.stored_row.updated_at.tzinfo is not None
         for row in inspection.rows
