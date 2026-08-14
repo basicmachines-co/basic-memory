@@ -30,10 +30,11 @@ from basic_memory.services.search_service import entity_embeddings_enabled
 
 @dataclass(frozen=True, slots=True)
 class ConfiguredVectorIdentity:
-    """The vector configuration whose rows are visible to retrieval."""
+    """The active vector identity, or an explicit disabled inspection state."""
 
     embedding_model: str
     vector_index: str
+    semantic_enabled: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,7 +183,7 @@ def classify_chunk_status(
     is live; ``None`` means physical storage is not inspectable (semantic disabled or an
     external index) and status stays manifest-only.
     """
-    if (
+    if configured_identity.semantic_enabled and (
         stored_row.embedding_model != configured_identity.embedding_model
         or stored_row.vector_index != configured_identity.vector_index
     ):
@@ -389,9 +390,16 @@ async def inspect_entity_chunks(
         by_chunk_key={record["chunk_key"]: record["source_hash"] for record in current_records},
         entity_fingerprint=build_entity_fingerprint(current_records),
     )
+    semantic_enabled = await repository.semantic_effectively_enabled()
     configured_identity = ConfiguredVectorIdentity(
-        embedding_model=repository.configured_embedding_model,
+        # Trigger: semantic retrieval is disabled by config or runtime fallback.
+        # Why: dormant provider settings are not required to form a valid embedding
+        # identity, and inspection must retain its rows-only diagnostic path.
+        # Outcome: expose the disabled state without validating or loading a provider;
+        # stored chunks remain manifest-only rather than becoming false orphans.
+        embedding_model=(repository.configured_embedding_model if semantic_enabled else "disabled"),
         vector_index=repository.configured_vector_index,
+        semantic_enabled=semantic_enabled,
     )
 
     inspected_chunks: list[InspectedChunk] = []
@@ -432,7 +440,7 @@ async def inspect_entity_chunks(
     # With semantic indexing off — by config, by the runtime keyword-only fallback, or
     # by this note's own embed opt-out — no chunks are expected at all, so an empty
     # manifest is not missing coverage.
-    if entity_embeddings_enabled(entity) and await repository.semantic_effectively_enabled():
+    if entity_embeddings_enabled(entity) and semantic_enabled:
         stored_chunk_keys = {stored_row.chunk_key for stored_row in stored_rows}
         missing_chunk_count = sum(
             1

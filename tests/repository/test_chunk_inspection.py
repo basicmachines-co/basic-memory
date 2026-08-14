@@ -564,6 +564,40 @@ async def test_effective_semantic_signal_defaults_to_config_without_runtime_prob
 
 
 @pytest.mark.asyncio
+async def test_semantic_disabled_inspection_does_not_validate_dormant_embedding_config(
+    session_maker,
+    sample_entity,
+    app_config,
+    file_service,
+):
+    """Rows-only inspection must not require a valid dormant embedding identity."""
+    config = app_config.model_copy(
+        update={
+            "semantic_search_enabled": False,
+            "semantic_embedding_provider": "litellm",
+            "semantic_embedding_model": "cohere/embed-english-v3.0",
+            "semantic_embedding_dimensions": None,
+        }
+    )
+    search_repository = create_search_repository(
+        session_maker,
+        project_id=sample_entity.project_id,
+        app_config=config,
+    )
+    await search_repository.bulk_index_items(
+        _search_rows(sample_entity.project_id, sample_entity.id)[:1]
+    )
+    await _write_current_entity_file(file_service, sample_entity)
+
+    inspection = await inspect_entity_chunks(search_repository, sample_entity, file_service)
+
+    assert inspection.configured_identity.embedding_model == "disabled"
+    assert inspection.configured_identity.semantic_enabled is False
+    assert inspection.rows
+    assert inspection.readiness.missing == 0
+
+
+@pytest.mark.asyncio
 async def test_inspection_marks_manifest_stale_after_search_row_changes(
     search_repository,
     session_maker,
@@ -690,12 +724,15 @@ async def test_inspection_uses_all_stored_fingerprints_for_note_staleness(
 
 @pytest.mark.asyncio
 async def test_inspection_marks_wrong_configured_identity_orphaned(
-    search_repository,
     session_maker,
     sample_entity,
+    app_config,
     file_service,
 ):
     """A manifest row owned by another model is invisible to current retrieval."""
+    _skip_unless_healthy_semantic_runtime(app_config)
+    search_repository = _semantic_repository(session_maker, sample_entity.project_id, app_config)
+    await search_repository._ensure_vector_tables()
     rows = _search_rows(sample_entity.project_id, sample_entity.id)
     await search_repository.bulk_index_items(rows)
     await _insert_manifest(
@@ -706,6 +743,7 @@ async def test_inspection_marks_wrong_configured_identity_orphaned(
         embedding_model=search_repository.configured_embedding_model,
         vector_index=search_repository.configured_vector_index,
     )
+    await _insert_physical_vectors(session_maker, search_repository)
     async with db.scoped_session(session_maker) as session:
         await session.execute(
             text(
@@ -1041,6 +1079,20 @@ def test_classify_chunk_status_covers_closed_status_space():
     # None = physical storage not inspectable (semantic disabled or external index):
     # status stays manifest-only.
     assert classify_chunk_status(stored, current, identity, None) == "ready"
+    disabled_identity = ConfiguredVectorIdentity(
+        embedding_model="disabled",
+        vector_index=identity.vector_index,
+        semantic_enabled=False,
+    )
+    assert (
+        classify_chunk_status(
+            replace(stored, embedding_model="dormant-model"),
+            current,
+            disabled_identity,
+            None,
+        )
+        == "ready"
+    )
     # A ready manifest row whose physical vector row is gone can never be served.
     assert classify_chunk_status(stored, current, identity, set()) == "orphaned"
     assert classify_chunk_status(
