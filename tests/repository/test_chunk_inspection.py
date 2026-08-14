@@ -1,5 +1,6 @@
 """Repository and domain tests for note-level chunk inspection."""
 
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import datetime, timezone
 
@@ -452,6 +453,40 @@ async def test_ready_chunk_without_physical_vector_reports_orphaned(
     assert inspection.readiness.orphaned == 1
     assert inspection.readiness.ready == 2
     assert inspection.readiness.missing == 0
+
+
+@pytest.mark.asyncio
+async def test_postgres_physical_probe_uses_active_search_path(
+    session_maker,
+    sample_entity,
+    app_config,
+    monkeypatch,
+):
+    """Tables outside the active search path must not trigger an unqualified join."""
+    if app_config.database_backend != DatabaseBackend.POSTGRES:
+        pytest.skip("search_path is PostgreSQL-specific")
+
+    search_repository = _semantic_repository(
+        session_maker,
+        sample_entity.project_id,
+        app_config,
+    )
+    await search_repository._ensure_vector_tables()
+
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(text("CREATE SCHEMA inspect_chunks_empty"))
+        await session.execute(text("SET LOCAL search_path TO inspect_chunks_empty"))
+
+        @asynccontextmanager
+        async def use_active_session(_session_maker):
+            yield session
+
+        monkeypatch.setattr(
+            "basic_memory.repository.postgres_search_repository.db.scoped_session",
+            use_active_session,
+        )
+
+        assert await search_repository.get_entity_physical_chunk_keys(sample_entity.id) == set()
 
 
 @pytest.mark.asyncio

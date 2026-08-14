@@ -338,7 +338,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
             tables_result = await session.execute(
                 text(
                     "SELECT table_name FROM information_schema.tables "
-                    "WHERE table_name IN ('search_vector_chunks', 'search_vector_embeddings')"
+                    "WHERE table_schema = ANY (current_schemas(false)) "
+                    "AND table_name IN ('search_vector_chunks', 'search_vector_embeddings')"
                 )
             )
             table_names = {str(name) for name in tables_result.scalars().all()}
