@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import OperationalError as SAOperationalError
 
 from basic_memory import db
 from basic_memory.file_utils import FileError
@@ -257,6 +258,58 @@ class _UnusedEmbeddingProvider:
 
     def runtime_log_attrs(self) -> dict[str, object]:  # pragma: no cover - unused
         return {}
+
+
+class _ExtensionLoadingUnavailableDriver:
+    """Model aiosqlite exposing a method absent from its wrapped sqlite3 connection."""
+
+    async def enable_load_extension(self, enabled: bool) -> None:
+        raise AttributeError("sqlite3.Connection has no attribute 'enable_load_extension'")
+
+
+class _RawConnectionWithUnavailableDriver:
+    driver_connection = _ExtensionLoadingUnavailableDriver()
+
+
+class _AsyncConnectionWithUnavailableDriver:
+    async def get_raw_connection(self) -> _RawConnectionWithUnavailableDriver:
+        return _RawConnectionWithUnavailableDriver()
+
+
+class _VecProbeSessionWithUnavailableDriver:
+    async def execute(self, _statement) -> None:
+        raise SAOperationalError(
+            "SELECT vec_version()",
+            {},
+            RuntimeError("no such function: vec_version"),
+        )
+
+    async def connection(self) -> _AsyncConnectionWithUnavailableDriver:
+        return _AsyncConnectionWithUnavailableDriver()
+
+
+@pytest.mark.asyncio
+async def test_sqlite_vec_probe_normalizes_wrapped_extension_loading_failure(
+    session_maker,
+    sample_entity,
+    app_config,
+):
+    """An aiosqlite wrapper must not leak its inner connection's AttributeError."""
+    if app_config.database_backend == DatabaseBackend.POSTGRES:
+        pytest.skip("SQLite extension loading is SQLite-specific")
+    search_repository = SQLiteSearchRepository(
+        session_maker,
+        project_id=sample_entity.project_id,
+        app_config=app_config,
+    )
+
+    with pytest.raises(
+        SemanticDependenciesMissingError,
+        match="does not support SQLite extension loading",
+    ) as exc_info:
+        await search_repository._ensure_sqlite_vec_loaded(_VecProbeSessionWithUnavailableDriver())
+
+    assert isinstance(exc_info.value.__cause__, AttributeError)
 
 
 def _sqlite_vec_loadable() -> bool:

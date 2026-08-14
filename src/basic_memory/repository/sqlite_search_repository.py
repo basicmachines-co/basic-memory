@@ -508,7 +508,24 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                     "to silence this and use keyword-only search."
                 )
 
-            await driver_connection.enable_load_extension(True)
+            try:
+                await driver_connection.enable_load_extension(True)
+            except AttributeError as exc:
+                # Trigger: aiosqlite exposes its wrapper method, but the wrapped
+                # sqlite3.Connection was built without extension-loading support.
+                # Why: hasattr() above can only inspect the wrapper, so invoking the
+                # method is the authoritative capability probe on these interpreters.
+                # Outcome: preserve the same keyword-only fallback as a directly
+                # unsupported driver connection instead of leaking AttributeError.
+                raise SemanticDependenciesMissingError(
+                    "This Python build does not support SQLite extension loading "
+                    "(no enable_load_extension on sqlite3.Connection). "
+                    "Common cause: python.org Python on macOS. "
+                    "Reinstall basic-memory under a Python that ships extension "
+                    "support (uv-managed CPython, Homebrew Python, or the official "
+                    "Docker image), or set semantic_search_enabled=false in config "
+                    "to silence this and use keyword-only search."
+                ) from exc
             await driver_connection.load_extension(sqlite_vec.loadable_path())
             await driver_connection.enable_load_extension(False)
             await session.execute(text("SELECT vec_version()"))
