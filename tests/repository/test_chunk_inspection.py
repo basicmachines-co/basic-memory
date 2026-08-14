@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import text
 
 from basic_memory import db
+from basic_memory.file_utils import FileError
 from basic_memory.indexing.note_content_reconciliation import NoteContentState
 from basic_memory.models import NoteContent, Project
 from basic_memory.repository.note_content_repository import NoteContentRepository
@@ -34,7 +35,6 @@ from basic_memory.services.retrieval_inspect import (
     lineage_shows_rows_behind_file,
 )
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
-from basic_memory.services.exceptions import FileOperationError
 
 
 def _search_rows(project_id: int, entity_id: int) -> list[SearchIndexRow]:
@@ -770,6 +770,33 @@ async def test_freshness_is_fresh_for_untouched_file_rows_and_manifest(
 
 
 @pytest.mark.asyncio
+async def test_freshness_hashes_binary_entities_without_decoding(
+    search_repository,
+    sample_entity,
+    file_service,
+):
+    """Binary resource checksums are readable even when their bytes are not UTF-8."""
+    sample_entity.file_path = "assets/inspection.png"
+    path = file_service.get_entity_path(sample_entity)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe\x00binary")
+    sample_entity.checksum = await file_service.compute_checksum(sample_entity.file_path)
+    await search_repository.bulk_index_items(
+        [
+            replace(
+                _search_rows(sample_entity.project_id, sample_entity.id)[0],
+                file_path=sample_entity.file_path,
+            )
+        ]
+    )
+
+    inspection = await inspect_entity_chunks(search_repository, sample_entity, file_service)
+
+    assert isinstance(inspection.freshness, ChunkFresh)
+    assert inspection.freshness.value == "fresh"
+
+
+@pytest.mark.asyncio
 async def test_freshness_marks_file_edit_after_index_as_rows_behind_file(
     search_repository,
     sample_entity,
@@ -810,10 +837,10 @@ async def test_freshness_uses_conclusive_lineage_when_file_cannot_be_read(
         file_write_status="external_change_detected",
     )
 
-    async def fail_read(_path):
-        raise FileOperationError("storage unavailable")
+    async def fail_checksum(_path):
+        raise FileError("storage unavailable")
 
-    monkeypatch.setattr(file_service, "read_file", fail_read)
+    monkeypatch.setattr(file_service, "compute_checksum", fail_checksum)
 
     inspection = await inspect_entity_chunks(search_repository, sample_entity, file_service)
 
@@ -885,10 +912,10 @@ async def test_freshness_is_unknown_when_file_read_fails_with_clean_lineage(
         file_write_status="synced",
     )
 
-    async def fail_read(_path):
-        raise FileOperationError("permission denied")
+    async def fail_checksum(_path):
+        raise FileError("permission denied")
 
-    monkeypatch.setattr(file_service, "read_file", fail_read)
+    monkeypatch.setattr(file_service, "compute_checksum", fail_checksum)
 
     inspection = await inspect_entity_chunks(search_repository, sample_entity, file_service)
 
@@ -936,10 +963,10 @@ async def test_unknown_file_freshness_preserves_stale_manifest_evidence(
         )
         await session.commit()
 
-    async def fail_read(_path):
-        raise FileOperationError("storage unavailable")
+    async def fail_checksum(_path):
+        raise FileError("storage unavailable")
 
-    monkeypatch.setattr(file_service, "read_file", fail_read)
+    monkeypatch.setattr(file_service, "compute_checksum", fail_checksum)
 
     inspection = await inspect_entity_chunks(search_repository, sample_entity, file_service)
 

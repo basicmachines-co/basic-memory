@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Literal, assert_never
 
 from basic_memory import db
+from basic_memory.file_utils import FileError
 from basic_memory.indexing.note_content_reconciler import note_content_state_from_model
 from basic_memory.indexing.note_content_reconciliation import (
     NoteContentState,
@@ -23,7 +24,6 @@ from basic_memory.repository.semantic_chunking import (
     build_vector_chunk_records,
 )
 from basic_memory.schemas.inspect import ChunkStatus
-from basic_memory.services.exceptions import FileOperationError
 from basic_memory.services.file_service import FileService
 from basic_memory.services.search_service import entity_embeddings_enabled
 
@@ -362,10 +362,9 @@ async def _read_current_file_checksum(
 ) -> str | None:
     """Read one project-scoped file checksum, returning absence when storage is unavailable."""
     try:
-        _, checksum = await file_service.read_file(entity.file_path)
-    except FileOperationError:
+        return await file_service.compute_checksum(entity.file_path)
+    except FileError:
         return None
-    return checksum
 
 
 async def inspect_entity_chunks(
