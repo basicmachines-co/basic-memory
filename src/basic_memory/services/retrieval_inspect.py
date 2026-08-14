@@ -96,7 +96,7 @@ class ChunkFresh:
 
 @dataclass(frozen=True, slots=True)
 class ChunkIndexBehindRows:
-    """Stored chunks were built from older search rows, or do not cover them all."""
+    """Stored chunks trail current rows, cannot serve them, or do not cover them all."""
 
     entity_fingerprint_indexed: str | tuple[str, ...] | None
     entity_fingerprint_current: str
@@ -155,9 +155,9 @@ type EntityChunkFreshness = (
 class EntityChunkInspection:
     """Complete note-level retrieval inspection result.
 
-    ``stale`` reports whether stored chunks trail current search rows. It can be true while
-    ``freshness`` is unknown because unreadable file bytes leave the upstream file-to-row
-    relationship unresolved.
+    ``stale`` reports whether stored chunks trail or cannot serve current search rows. It can
+    be true while ``freshness`` is unknown because unreadable file bytes leave the upstream
+    file-to-row relationship unresolved.
     """
 
     entity: Entity
@@ -433,7 +433,7 @@ async def inspect_entity_chunks(
         for fingerprint in indexed_fingerprints
     )
     index_behind_rows = fingerprint_mismatch or any(
-        chunk.status == "stale" for chunk in inspected_chunks
+        chunk.status in {"stale", "orphaned"} for chunk in inspected_chunks
     )
     # A current chunk with no manifest row never enters the stored-row loop above, so
     # count the uncovered remainder explicitly (e.g. shards beyond the scheduling limit).

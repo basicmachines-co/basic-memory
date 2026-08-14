@@ -78,7 +78,7 @@ class InspectDetachedSearchRow(BaseModel):
 
 
 class InspectIndexBehindRowsDetail(BaseModel):
-    """Fingerprint mismatch or uncovered chunks proving the index trails current rows."""
+    """Evidence that chunks trail, cannot serve, or do not cover current search rows."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -118,8 +118,8 @@ class InspectChunksResponse(BaseModel):
     entity_fingerprint_current: str
     stale: bool = Field(
         description=(
-            "Whether stored vector chunks trail current search rows. This signal remains "
-            "independent when upstream file freshness is unknown."
+            "Whether stored vector chunks trail or cannot serve current search rows. This "
+            "signal remains independent when upstream file freshness is unknown."
         )
     )
     freshness: InspectFreshness = Field(
@@ -131,7 +131,7 @@ class InspectChunksResponse(BaseModel):
     freshness_detail: InspectFreshnessDetail | None = Field(
         description=(
             "Evidence for the selected freshness state. When freshness is unknown, consult "
-            "stale and the fingerprint fields for independent row-to-index evidence."
+            "stale, readiness, and the fingerprint fields for independent row-to-index evidence."
         )
     )
     rows: list[InspectSearchRow]

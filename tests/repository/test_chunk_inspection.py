@@ -506,6 +506,8 @@ async def test_ready_chunk_without_physical_vector_reports_orphaned(
     assert inspection.readiness.orphaned == 1
     assert inspection.readiness.ready == 2
     assert inspection.readiness.missing == 0
+    assert inspection.stale is True
+    assert isinstance(inspection.freshness, ChunkIndexBehindRows)
 
 
 @pytest.mark.asyncio
@@ -809,12 +811,15 @@ async def test_inspection_marks_wrong_configured_identity_orphaned(
             },
         )
         await session.commit()
+    await _write_current_entity_file(file_service, sample_entity)
 
     inspection = await inspect_entity_chunks(search_repository, sample_entity, file_service)
 
     assert inspection.readiness.orphaned == 1
     assert inspection.readiness.ready == 2
     assert inspection.rows[0].chunks[0].status == "orphaned"
+    assert inspection.stale is True
+    assert isinstance(inspection.freshness, ChunkIndexBehindRows)
 
 
 @pytest.mark.asyncio
