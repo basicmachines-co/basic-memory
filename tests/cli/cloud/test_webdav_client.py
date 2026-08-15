@@ -383,3 +383,44 @@ async def test_transport_errors_are_reported_without_a_response():
     async with _client(handler) as client:
         with pytest.raises(WebdavError, match="connection refused"):
             await download_file(client, "research", "a.md")
+
+
+@pytest.mark.parametrize(
+    ("project", "rel_path", "expected"),
+    [
+        # `#` and `?` are URL delimiters, so leaving them raw would truncate the
+        # request path at a perfectly legal filename character.
+        ("research", "a#draft.md", "/webdav/research/a%23draft.md"),
+        ("research", "b?v2.md", "/webdav/research/b%3Fv2.md"),
+        ("research", "notes/c d.md", "/webdav/research/notes/c%20d.md"),
+        ("my project", "a.md", "/webdav/my%20project/a.md"),
+        # Separators stay separators.
+        ("research", "one/two/three.md", "/webdav/research/one/two/three.md"),
+    ],
+)
+def test_webdav_path_percent_encodes_without_losing_separators(project, rel_path, expected):
+    assert webdav_path(project, rel_path) == expected
+
+
+@pytest.mark.asyncio
+async def test_delimiter_filenames_round_trip_through_list_and_download():
+    """A note named `a#draft.md` must be listed, then fetched, as that same file."""
+    listing = _multistatus(
+        "/webdav/research/",
+        _file_entry("/webdav/research/a%23draft.md", "a#draft.md", 4),
+    )
+    fetched: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PROPFIND":
+            return httpx.Response(207, text=listing)
+        fetched.append(request.url.path)
+        return httpx.Response(200, content=b"body")
+
+    async with _client(handler) as client:
+        files = await list_project_files(client, "research")
+        await download_file(client, "research", files[0].path)
+
+    assert [f.path for f in files] == ["a#draft.md"]
+    # httpx reports the decoded path; the delimiter survived the round trip.
+    assert fetched == ["/webdav/research/a#draft.md"]

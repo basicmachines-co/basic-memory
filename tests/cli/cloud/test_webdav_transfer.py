@@ -61,6 +61,24 @@ def _plain(text: str) -> str:
     return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 
+def _propfind_body(paths: list[str]) -> str:
+    """A minimal project listing naming exactly `paths` as files."""
+    entries = "".join(
+        f"""<D:response><D:href>/webdav/research/{path}</D:href><D:propstat><D:prop>
+    <D:resourcetype/><D:displayname>{path.split("/")[-1]}</D:displayname>
+    <D:getcontentlength>1</D:getcontentlength>
+</D:prop></D:propstat></D:response>"""
+        for path in paths
+    )
+    return f"""<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+<D:response><D:href>/webdav/research/</D:href><D:propstat><D:prop>
+    <D:resourcetype><D:collection/></D:resourcetype><D:displayname>research</D:displayname>
+</D:prop></D:propstat></D:response>
+{entries}
+</D:multistatus>"""
+
+
 def _client_factory(handler):
     @asynccontextmanager
     async def factory():
@@ -329,6 +347,8 @@ async def test_push_uploads_new_files_with_their_local_mtime(config_home, tmp_pa
     seen: list[tuple[str, bytes, str]] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PROPFIND":
+            return httpx.Response(207, text=_propfind_body([]))
         seen.append((request.url.path, request.content, request.headers["X-OC-Mtime"]))
         return httpx.Response(201)
 
@@ -353,6 +373,8 @@ async def test_push_keep_local_overwrites_the_conflicting_cloud_file(config_home
     seen: list[str] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PROPFIND":
+            return httpx.Response(207, text=_propfind_body([]))
         seen.append(request.url.path)
         return httpx.Response(204)
 
@@ -379,6 +401,8 @@ async def test_push_keep_cloud_leaves_the_conflicting_cloud_file_alone(config_ho
     seen: list[str] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PROPFIND":
+            return httpx.Response(207, text=_propfind_body([]))
         seen.append(request.url.path)
         return httpx.Response(201)
 
@@ -406,6 +430,8 @@ async def test_push_keep_both_uploads_the_incoming_copy_under_a_conflict_name(
     seen: list[str] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PROPFIND":
+            return httpx.Response(207, text=_propfind_body([]))
         seen.append(request.url.path)
         return httpx.Response(201)
 
@@ -557,3 +583,295 @@ async def test_webdav_project_diff_lists_the_cloud_and_compares(config_home, tmp
     assert plan.new == ["theirs.md"]
     assert plan.conflicts == []
     assert plan.dest_only == []
+
+
+# --- Symlinks never let a transfer leave the project boundary ---
+
+
+def test_scan_skips_symlinked_files(config_home, tmp_path):
+    """Push must not read bytes from outside the project through a link."""
+    outside = tmp_path / "outside.md"
+    outside.write_text("secret", encoding="utf-8")
+    root = tmp_path / "research"
+    _write(root, "real.md", "real")
+    (root / "link.md").symlink_to(outside)
+
+    patterns = load_gitignore_patterns(root, use_gitignore=False)
+    assert sorted(scan_local_files(root, patterns)) == ["real.md"]
+
+
+def test_scan_does_not_descend_into_symlinked_directories(config_home, tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.md").write_text("secret", encoding="utf-8")
+    root = tmp_path / "research"
+    _write(root, "real.md", "real")
+    (root / "linked").symlink_to(outside, target_is_directory=True)
+
+    patterns = load_gitignore_patterns(root, use_gitignore=False)
+    assert sorted(scan_local_files(root, patterns)) == ["real.md"]
+
+
+@pytest.mark.asyncio
+async def test_pull_refuses_to_write_through_a_symlinked_directory(config_home, tmp_path):
+    """A lexically clean path can still point outside once a link is resolved."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    root = tmp_path / "research"
+    root.mkdir()
+    (root / "notes").symlink_to(outside, target_is_directory=True)
+
+    async def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
+        raise AssertionError("must refuse before touching the network")
+
+    with pytest.raises(WebdavError, match="link out of the project"):
+        await webdav_project_transfer(
+            "research",
+            root,
+            "pull",
+            TransferPlan(new=["notes/planted.md"]),
+            workspace_id="team-tenant",
+            client_cm_factory=_client_factory(handler),
+        )
+
+    assert not (outside / "planted.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_push_refuses_to_read_through_a_symlinked_directory(config_home, tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.md").write_text("secret", encoding="utf-8")
+    root = tmp_path / "research"
+    root.mkdir()
+    (root / "notes").symlink_to(outside, target_is_directory=True)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PROPFIND":
+            return httpx.Response(207, text=_propfind_body([]))
+        raise AssertionError("must refuse before uploading anything")
+
+    with pytest.raises(WebdavError, match="link out of the project"):
+        await webdav_project_transfer(
+            "research",
+            root,
+            "push",
+            TransferPlan(new=["notes/secret.md"]),
+            workspace_id="team-tenant",
+            client_cm_factory=_client_factory(handler),
+        )
+
+
+@pytest.mark.asyncio
+async def test_pull_keep_cloud_refuses_to_overwrite_a_symlinked_note(config_home, tmp_path):
+    outside = tmp_path / "outside.md"
+    outside.write_text("original", encoding="utf-8")
+    root = tmp_path / "research"
+    root.mkdir()
+    (root / "dup.md").symlink_to(outside)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"cloud version")
+
+    with pytest.raises(WebdavError, match="symlinked path"):
+        await webdav_project_transfer(
+            "research",
+            root,
+            "pull",
+            TransferPlan(conflicts=["dup.md"]),
+            workspace_id="team-tenant",
+            strategy="keep-cloud",
+            client_cm_factory=_client_factory(handler),
+        )
+
+    assert outside.read_text() == "original"
+
+
+# --- A path planned as new is created, never used to replace ---
+
+
+@pytest.mark.asyncio
+async def test_pull_leaves_a_local_note_that_appeared_after_planning(config_home, tmp_path, capsys):
+    """The plan is a snapshot; the exclusive create is what makes acting on it safe."""
+    root = tmp_path / "research"
+    root.mkdir()
+    # Written after the plan classified this path as new — a note nobody compared.
+    _write(root, "raced.md", "written since the plan")
+
+    async def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
+        raise AssertionError("must not download over a note that appeared")
+
+    await webdav_project_transfer(
+        "research",
+        root,
+        "pull",
+        TransferPlan(new=["raced.md"]),
+        workspace_id="team-tenant",
+        client_cm_factory=_client_factory(handler),
+    )
+
+    assert (root / "raced.md").read_text() == "written since the plan"
+    output = _plain(capsys.readouterr().out)
+    assert "Transferred 0 file(s)" in output
+    assert "appeared on the destination" in output
+    assert "raced.md" in output
+
+
+@pytest.mark.asyncio
+async def test_push_leaves_a_cloud_note_that_appeared_after_planning(config_home, tmp_path, capsys):
+    """Mirrors rclone's --ignore-existing, which re-reads the destination at copy time."""
+    root = tmp_path / "research"
+    _write(root, "raced.md", "local content")
+    _write(root, "fresh.md", "also local")
+
+    listing = _propfind_body(["raced.md"])
+    puts: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PROPFIND":
+            return httpx.Response(207, text=listing)
+        puts.append(request.url.path)
+        return httpx.Response(201)
+
+    await webdav_project_transfer(
+        "research",
+        root,
+        "push",
+        TransferPlan(new=["fresh.md", "raced.md"]),
+        workspace_id="team-tenant",
+        client_cm_factory=_client_factory(handler),
+    )
+
+    assert puts == ["/webdav/research/fresh.md"]
+    output = _plain(capsys.readouterr().out)
+    assert "Transferred 1 file(s)" in output
+    assert "appeared on the destination" in output
+    assert "raced.md" in output
+
+
+@pytest.mark.asyncio
+async def test_push_keep_local_still_overwrites_a_resolved_conflict(config_home, tmp_path):
+    """An explicit resolution is an instruction to overwrite, not a stale guess."""
+    root = tmp_path / "research"
+    _write(root, "dup.md", "local wins")
+
+    puts: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PROPFIND":
+            return httpx.Response(207, text=_propfind_body(["dup.md"]))
+        puts.append(request.url.path)
+        return httpx.Response(204)
+
+    await webdav_project_transfer(
+        "research",
+        root,
+        "push",
+        TransferPlan(conflicts=["dup.md"]),
+        workspace_id="team-tenant",
+        strategy="keep-local",
+        client_cm_factory=_client_factory(handler),
+    )
+
+    assert puts == ["/webdav/research/dup.md"]
+
+
+@pytest.mark.asyncio
+async def test_pull_keep_cloud_still_overwrites_a_resolved_conflict(config_home, tmp_path):
+    root = tmp_path / "research"
+    _write(root, "dup.md", "local version")
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"cloud version")
+
+    await webdav_project_transfer(
+        "research",
+        root,
+        "pull",
+        TransferPlan(conflicts=["dup.md"]),
+        workspace_id="team-tenant",
+        strategy="keep-cloud",
+        client_cm_factory=_client_factory(handler),
+    )
+
+    assert (root / "dup.md").read_text() == "cloud version"
+
+
+@pytest.mark.asyncio
+async def test_pull_leaves_no_placeholder_when_the_download_fails(config_home, tmp_path):
+    """The exclusive create must not survive as an empty phantom note."""
+    root = tmp_path / "research"
+    root.mkdir()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="boom")
+
+    with pytest.raises(WebdavError, match="HTTP 500"):
+        await webdav_project_transfer(
+            "research",
+            root,
+            "pull",
+            TransferPlan(new=["a.md"]),
+            workspace_id="team-tenant",
+            client_cm_factory=_client_factory(handler),
+        )
+
+    assert not (root / "a.md").exists()
+
+
+# --- Filenames that are legal on disk but structural in a URL ---
+
+
+@pytest.mark.asyncio
+async def test_pull_round_trips_filenames_containing_url_delimiters(config_home, tmp_path):
+    """`#` and `?` are path data here, not a fragment and a query."""
+    root = tmp_path / "research"
+    root.mkdir()
+    requested: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        # httpx decodes the path it received; the delimiters must survive intact.
+        requested.append(request.url.path)
+        return httpx.Response(200, content=b"body")
+
+    plan = TransferPlan(new=["notes/a#draft.md", "notes/b?v2.md", "notes/c d.md"])
+    await webdav_project_transfer(
+        "research",
+        root,
+        "pull",
+        plan,
+        workspace_id="team-tenant",
+        client_cm_factory=_client_factory(handler),
+    )
+
+    assert requested == [
+        "/webdav/research/notes/a#draft.md",
+        "/webdav/research/notes/b?v2.md",
+        "/webdav/research/notes/c d.md",
+    ]
+    assert (root / "notes" / "a#draft.md").read_bytes() == b"body"
+    assert (root / "notes" / "b?v2.md").read_bytes() == b"body"
+
+
+@pytest.mark.asyncio
+async def test_push_sends_filenames_containing_url_delimiters_intact(config_home, tmp_path):
+    root = tmp_path / "research"
+    _write(root, "a#draft.md", "content")
+    requested: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PROPFIND":
+            return httpx.Response(207, text=_propfind_body([]))
+        requested.append(request.url.path)
+        return httpx.Response(201)
+
+    await webdav_project_transfer(
+        "research",
+        root,
+        "push",
+        TransferPlan(new=["a#draft.md"]),
+        workspace_id="team-tenant",
+        client_cm_factory=_client_factory(handler),
+    )
+
+    assert requested == ["/webdav/research/a#draft.md"]

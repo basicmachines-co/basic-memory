@@ -14,11 +14,15 @@ transfer engine over that transport, and it keeps the same contract:
 - additive — nothing is ever deleted on the destination
 - files that differ on both sides are conflicts, resolved only by an explicit
   ``--on-conflict`` choice
+- a path the plan cleared as new is only ever created, never used to replace
+  something that arrived in the meantime
 - deletions are not propagated (see #862)
 
 Comparison is by entity tag plus size, falling back to last-modified plus size
 when the service reports no entity tag we can treat as a content hash. See
-``_compare`` for why that fallback errs toward reporting a conflict.
+``_compare`` for why that fallback errs toward reporting a conflict, and
+``_drop_appeared_on_cloud`` for how a stale plan is kept from overwriting a note
+nobody compared.
 """
 
 import hashlib
@@ -79,6 +83,25 @@ class LocalFile:
     mtime: float
 
 
+@dataclass(frozen=True)
+class _Transfer:
+    """One file to move, and whether it may replace something already there.
+
+    ``create_only`` carries the plan's classification forward: a path the diff
+    called `new` was cleared to be created, never to overwrite. That distinction
+    is what makes the destination re-check below safe to act on.
+    """
+
+    source_rel: str
+    dest_rel: str
+    create_only: bool
+
+    def describe(self) -> str:
+        if self.source_rel == self.dest_rel:
+            return self.source_rel
+        return f"{self.source_rel} -> {self.dest_rel}"
+
+
 # --- Entry points used by the CLI ---
 
 
@@ -135,15 +158,22 @@ async def webdav_project_transfer(
     # keep-both: preserve the destination's version and drop the incoming one
     # beside it as a conflict copy, then do an additive (new-only) pass.
     renames = (
-        [(rel_path, conflict_copy_name(rel_path, conflict_suffix)) for rel_path in plan.conflicts]
+        [
+            _Transfer(rel_path, conflict_copy_name(rel_path, conflict_suffix), create_only=True)
+            for rel_path in plan.conflicts
+        ]
         if strategy == "keep-both"
         else []
     )
 
+    # A path the plan called `new` must only ever be created. A path the user
+    # resolved with keep-local/keep-cloud is an instruction to overwrite.
     overwrite = strategy_overwrites_dest(direction, strategy)
-    copies = [(rel_path, rel_path) for rel_path in plan.new]
+    copies = [_Transfer(rel_path, rel_path, create_only=True) for rel_path in plan.new]
     if overwrite:
-        copies.extend((rel_path, rel_path) for rel_path in plan.conflicts)
+        copies.extend(
+            _Transfer(rel_path, rel_path, create_only=False) for rel_path in plan.conflicts
+        )
 
     transfers = renames + copies
     if not transfers:
@@ -152,23 +182,32 @@ async def webdav_project_transfer(
 
     if dry_run:
         console.print(f"[dim]Dry run: {len(transfers)} file(s) would be transferred.[/dim]")
-        for source_rel, dest_rel in transfers:
-            suffix = "" if source_rel == dest_rel else f" -> {dest_rel}"
-            console.print(f"  [dim]{source_rel}{suffix}[/dim]")
+        for transfer in transfers:
+            console.print(f"  [dim]{transfer.describe()}[/dim]")
         return
 
     cm_factory = client_cm_factory or partial(get_cloud_proxy_client, workspace=workspace_id)
     async with cm_factory() as client:
-        for source_rel, dest_rel in transfers:
-            if verbose:
-                suffix = "" if source_rel == dest_rel else f" -> {dest_rel}"
-                console.print(f"  {source_rel}{suffix}")
-            if direction == "pull":
-                await _pull_file(client, project, local_root, source_rel, dest_rel)
-            else:
-                await _push_file(client, project, local_root, source_rel, dest_rel)
+        if direction == "push":
+            transfers, appeared = await _drop_appeared_on_cloud(client, project, transfers)
+        else:
+            appeared = []
 
-    console.print(f"[dim]Transferred {len(transfers)} file(s).[/dim]")
+        transferred = 0
+        for transfer in transfers:
+            if verbose:
+                console.print(f"  {transfer.describe()}")
+            if direction == "pull":
+                written = await _pull_file(client, project, local_root, transfer)
+                if not written:
+                    appeared.append(transfer.dest_rel)
+                    continue
+            else:
+                await _push_file(client, project, local_root, transfer)
+            transferred += 1
+
+    console.print(f"[dim]Transferred {transferred} file(s).[/dim]")
+    _report_appeared(appeared)
 
 
 # --- Planning ---
@@ -227,19 +266,26 @@ def scan_local_files(local_root: Path, ignore_patterns: set[str]) -> dict[str, L
     for push/pull. A project's ``.gitignore`` deliberately does not participate:
     it is scoped to `bm cloud upload`, and honoring it here would make a transfer
     depend on which machine ran it.
+
+    Links are not followed and symlinked files are skipped, so push can never
+    read bytes from outside the project boundary — the same rule the local
+    project scanner applies for the same reason.
     """
     files: dict[str, LocalFile] = {}
 
-    for root, dirs, filenames in os.walk(local_root):
+    for root, dirs, filenames in os.walk(local_root, followlinks=False):
         root_path = Path(root)
         dirs[:] = [
             name
             for name in dirs
-            if not should_ignore_path(root_path / name, local_root, ignore_patterns)
+            if not (root_path / name).is_symlink()
+            and not should_ignore_path(root_path / name, local_root, ignore_patterns)
         ]
 
         for filename in filenames:
             file_path = root_path / filename
+            if file_path.is_symlink():
+                continue
             if should_ignore_path(file_path, local_root, ignore_patterns):
                 continue
             stat = file_path.stat()
@@ -296,6 +342,63 @@ def _file_content_hash(path: Path) -> str:
     return digest.hexdigest()
 
 
+# --- Guarding against a destination that moved under the plan ---
+#
+# The plan is a snapshot. Between classifying a path as `new` and writing it, the
+# destination can gain that path — a teammate's push, another machine's pull, the
+# user's own editor. Acting on the stale classification would destroy a note that
+# nobody asked to replace, even under the default `--on-conflict fail`.
+#
+# The Personal path does not have this problem, and not because of its plan:
+# `project_copy` passes `--ignore-existing`, and rclone evaluates that against
+# the destination listing it makes at copy time, not against the earlier
+# `rclone check`. So a file that appeared in between is skipped there. These two
+# guards give the WebDAV path the same property, per direction.
+
+
+async def _drop_appeared_on_cloud(
+    client: httpx.AsyncClient, project: str, transfers: list[_Transfer]
+) -> tuple[list[_Transfer], list[str]]:
+    """Re-read the cloud and drop create-only pushes whose path now exists.
+
+    This is the analogue of rclone re-listing the destination at copy time. It
+    narrows the window rather than closing it: nothing here is atomic with the
+    PUT that follows, so a file created in the remaining moments is still
+    overwritten. Closing it needs a conditional create on the service side; the
+    write endpoint does not act on conditional request headers today, so sending
+    one would be a guard that silently does nothing.
+    """
+    create_only = {transfer.dest_rel for transfer in transfers if transfer.create_only}
+    if not create_only:
+        return transfers, []
+
+    existing = {remote.path for remote in await list_project_files(client, project)}
+    appeared = sorted(create_only & existing)
+    if not appeared:
+        return transfers, []
+
+    kept = [
+        transfer
+        for transfer in transfers
+        if not (transfer.create_only and transfer.dest_rel in existing)
+    ]
+    return kept, appeared
+
+
+def _report_appeared(appeared: list[str]) -> None:
+    """Name the files that were left alone because the destination gained them."""
+    if not appeared:
+        return
+
+    console.print(
+        f"[yellow]{len(appeared)} file(s) appeared on the destination after this transfer "
+        "was planned and were left untouched:[/yellow]"
+    )
+    for path in appeared:
+        console.print(f"  [yellow]*[/yellow] {path}")
+    console.print("[dim]Re-run to compare them and resolve with --on-conflict.[/dim]")
+
+
 # --- Single-file transfers ---
 
 
@@ -303,14 +406,38 @@ async def _pull_file(
     client: httpx.AsyncClient,
     project: str,
     local_root: Path,
-    source_rel: str,
-    dest_rel: str,
-) -> None:
-    """Download one cloud file and land it under the destination path."""
-    target = _safe_local_path(local_root, dest_rel)
-    downloaded = await download_file(client, project, source_rel)
+    transfer: _Transfer,
+) -> bool:
+    """Download one cloud file and land it under the destination path.
 
+    Returns False when a create-only transfer found the path already taken, so
+    the caller can report it instead of replacing a note it never compared.
+    """
+    target = _safe_local_path(local_root, transfer.dest_rel)
     target.parent.mkdir(parents=True, exist_ok=True)
+
+    # Trigger: the plan cleared this path for creation only.
+    # Why: an exclusive create is the one check the filesystem can make
+    # atomically — a stat-then-write would leave the same race open. It also
+    # refuses a symlink outright, so a link that appeared here is treated as the
+    # path being taken rather than followed.
+    # Outcome: claim the name up front, or leave the existing note alone.
+    if transfer.create_only:
+        try:
+            os.close(os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+        except FileExistsError:
+            return False
+    else:
+        _refuse_symlink(target, transfer.dest_rel)
+
+    try:
+        downloaded = await download_file(client, project, transfer.source_rel)
+    except WebdavError:
+        # Do not leave the empty placeholder behind as a phantom note.
+        if transfer.create_only:
+            target.unlink(missing_ok=True)
+        raise
+
     # Write to a sibling temp file and rename into place: an interrupted pull
     # must never leave a half-written note in the user's knowledge base.
     handle, temp_name = tempfile.mkstemp(
@@ -331,21 +458,23 @@ async def _pull_file(
         # A no-op once the rename succeeded; the cleanup path when it did not.
         temp_path.unlink(missing_ok=True)
 
+    return True
+
 
 async def _push_file(
     client: httpx.AsyncClient,
     project: str,
     local_root: Path,
-    source_rel: str,
-    dest_rel: str,
+    transfer: _Transfer,
 ) -> None:
     """Upload one local file to the destination path in the cloud project."""
-    source = _safe_local_path(local_root, source_rel)
+    source = _safe_local_path(local_root, transfer.source_rel)
+    _refuse_symlink(source, transfer.source_rel)
     stat = source.stat()
     await upload_file(
         client,
         project,
-        dest_rel,
+        transfer.dest_rel,
         content=source.read_bytes(),
         mtime=int(stat.st_mtime),
     )
@@ -358,10 +487,39 @@ def _safe_local_path(local_root: Path, rel_path: str) -> Path:
     where this machine writes. An absolute path, a ``..`` segment, or a Windows
     separator must never be honored.
 
+    Those are lexical checks, and a lexical check cannot see a link. The parent
+    chain — the part that actually decides which directory is read from or
+    written into — is resolved and required to stay inside the project.
+    Otherwise a symlinked directory would let push read bytes from outside the
+    project into a shared workspace, and let pull write through to somewhere the
+    user never pointed at.
+
+    The final component is left to the caller: whether a link there should be
+    refused or simply treated as "already taken" depends on what the transfer is
+    about to do to it.
+
     Raises:
         WebdavError: If the path would resolve outside the project directory.
     """
     candidate = PurePosixPath(rel_path)
     if "\\" in rel_path or candidate.is_absolute() or ".." in candidate.parts:
         raise WebdavError(f"Refusing to transfer a path outside the project: {rel_path!r}")
-    return local_root.joinpath(*candidate.parts)
+
+    target = local_root.joinpath(*candidate.parts)
+    root = Path(os.path.realpath(local_root))
+    parent = Path(os.path.realpath(target.parent))
+    if parent != root and root not in parent.parents:
+        raise WebdavError(f"Refusing to transfer through a link out of the project: {rel_path!r}")
+
+    return target
+
+
+def _refuse_symlink(path: Path, rel_path: str) -> None:
+    """Refuse to read from, or write over, a path that is itself a link.
+
+    Used where the transfer would otherwise follow it: reading a push source, or
+    replacing a file the user resolved with keep-cloud. Create-only pulls need no
+    such check — their exclusive create already refuses a link outright.
+    """
+    if path.is_symlink():
+        raise WebdavError(f"Refusing to transfer a symlinked path: {rel_path!r}")

@@ -24,7 +24,7 @@ import xml.etree.ElementTree as ElementTree
 from dataclasses import dataclass
 from datetime import datetime
 from email.utils import parsedate_to_datetime
-from urllib.parse import unquote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 import httpx
 
@@ -86,11 +86,16 @@ class _Entry:
 def webdav_path(project: str, rel_path: str = "") -> str:
     """Build the request path for a project, or for a file inside it.
 
-    Callers pass the path unescaped; httpx percent-encodes it on the way out.
+    Callers pass the name and path unescaped; this percent-encodes them, keeping
+    ``/`` as the separator. Leaving that to the HTTP client is not enough: ``?``
+    and ``#`` are structural URL delimiters, not path data, so a note named
+    ``a#draft.md`` would be requested as ``a`` — a 404, or worse, another
+    object's bytes. Both are legal POSIX filenames.
     """
+    encoded_project = quote(project, safe="")
     if not rel_path:
-        return f"{WEBDAV_ROOT}/{project}"
-    return f"{WEBDAV_ROOT}/{project}/{rel_path}"
+        return f"{WEBDAV_ROOT}/{encoded_project}"
+    return f"{WEBDAV_ROOT}/{encoded_project}/{quote(rel_path, safe='/')}"
 
 
 def normalize_etag(raw: str | None) -> str | None:
@@ -350,8 +355,13 @@ def _href_path(href: str) -> str:
 
 
 def _same_path(href: str, request_path: str) -> bool:
-    """Compare an href against a request path, ignoring a trailing slash."""
-    return _href_path(href).rstrip("/") == request_path.rstrip("/")
+    """Compare an href against a request path, ignoring a trailing slash.
+
+    Both sides are percent-decoded first: the request path is encoded by
+    ``webdav_path`` while the href may or may not be, and the comparison is
+    about which resource is named, not how it was spelled on the wire.
+    """
+    return _href_path(href).rstrip("/") == unquote(request_path).rstrip("/")
 
 
 def _describe(exc: httpx.HTTPError) -> str:
