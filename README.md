@@ -689,11 +689,11 @@ Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Star History
 
-<a href="https://www.star-history.com/#basicmachines-co/basic-memory&Date">
+<a href="https://star-history.dera.page/#basicmachines-co/basic-memory&Date">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=basicmachines-co/basic-memory&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=basicmachines-co/basic-memory&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=basicmachines-co/basic-memory&type=Date" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=basicmachines-co/basic-memory&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=basicmachines-co/basic-memory&type=Date" />
+   <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=basicmachines-co/basic-memory&type=Date" />
  </picture>
 </a>
 
