@@ -157,12 +157,15 @@ def test_stage_builders_freeze_plain_values_and_exact_fusion_math():
     fts = build_fts_page_stage(
         [(("entity", 1), -5.0), (("entity", 2), -2.5)],
         normalized_scores={("entity", 1): 1.0, ("entity", 2): 0.5},
+        entity_ids={("entity", 1): 11, ("entity", 2): 22},
         fts_max_abs=5.0,
         relaxed_fallback_used=True,
         fts_ms=3.0,
     )
     assert fts.relaxed_fallback_used is True
     assert [entry.rank for entry in fts.raw_scores] == [1, 2]
+    assert [entry.entity_id for entry in fts.raw_scores] == [11, 22]
+    assert [entry.entity_id for entry in fts.normalized_scores or ()] == [11, 22]
 
     fusion = build_fusion_stage(
         formula_version="max+0.3*min/v1",
@@ -444,6 +447,44 @@ def test_query_response_clears_vector_rejection_for_fts_fusion_survivor():
     assert candidates[1].disposition == "beyond_page_window"
     assert candidates[1].rejection_detail is not None
     assert candidates[1].rejection_detail.reason == "beyond_page_window"
+
+
+def test_query_response_enriches_fts_only_hybrid_miss():
+    fts = build_fts_page_stage(
+        [(("entity", 1), -1.0), (("entity", 2), -0.8)],
+        normalized_scores={("entity", 1): 1.0, ("entity", 2): 0.8},
+        entity_ids={("entity", 1): 1, ("entity", 2): 2},
+        fts_max_abs=1.0,
+        relaxed_fallback_used=False,
+    )
+    vector = build_vector_stage(candidate_limit=10, adapter_match_count=0, hydrated_count=0)
+    fusion = build_fusion_stage(
+        formula_version="max+0.3*min/v1",
+        bonus=FUSION_BONUS,
+        fts_scores={("entity", 1): 1.0, ("entity", 2): 0.8},
+        fts_ranks={("entity", 1): 0, ("entity", 2): 1},
+        vector_scores={},
+        vector_ranks={},
+        ranked_scores=[(("entity", 1), 1.0), (("entity", 2), 0.8)],
+        fusion_ms=0.1,
+    )
+    trace = finalize_query_trace(
+        SearchTraceCollector(
+            fts=fts,
+            vector=vector,
+            fusion=fusion,
+            readiness=ManifestReadiness("i", "m", 0, 0, 0),
+        ),
+        replace(_meta("hybrid"), limit=1),
+        (FinalResultEntry(("entity", 1), 1, "One", "one", "one.md", 1, 1.0),),
+        "hybrid",
+    )
+
+    response = query_trace_response(trace, {1: "external-1", 2: "external-2"})
+    candidates = {candidate.id: candidate for candidate in response.candidates}
+
+    assert candidates[2].disposition == "beyond_page_window"
+    assert candidates[2].external_id == "external-2"
 
 
 def test_fts_query_response_uses_global_ranks_after_sql_offset():
@@ -787,6 +828,8 @@ async def test_fts_vector_hybrid_and_rerank_trace_variants(
         offset=0,
     )
     assert isinstance(hybrid_trace, HybridQueryTrace)
+    alpha_fts = next(score for score in hybrid_trace.fts.raw_scores if score.key == ("entity", 1))
+    assert alpha_fts.entity_id == 1
     alpha = next(entry for entry in hybrid_trace.fusion.entries if entry.key == ("entity", 1))
     assert alpha.fts_score == pytest.approx(1.0)
     assert alpha.vector_score == pytest.approx(0.95)

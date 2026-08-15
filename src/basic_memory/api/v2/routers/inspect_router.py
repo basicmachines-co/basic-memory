@@ -19,7 +19,7 @@ from basic_memory.repository.semantic_errors import (
     SemanticDependenciesMissingError,
     SemanticSearchDisabledError,
 )
-from basic_memory.repository.search_trace import HybridQueryTrace, VectorQueryTrace
+from basic_memory.repository.search_trace import FtsQueryTrace, HybridQueryTrace, VectorQueryTrace
 from basic_memory.schemas.inspect import (
     InspectChunk,
     InspectChunkReadiness,
@@ -71,6 +71,10 @@ async def inspect_query(
 
     # Nullable-owner rows stay inspectable; only known owners get external-id enrichment.
     entity_ids = {result.entity_id for result in trace.final if result.entity_id is not None}
+    if isinstance(trace, (FtsQueryTrace, HybridQueryTrace)):
+        entity_ids.update(
+            score.entity_id for score in trace.fts.raw_scores if score.entity_id is not None
+        )
     if isinstance(trace, (VectorQueryTrace, HybridQueryTrace)):
         entity_ids.update(rejection.entity_id for rejection in trace.vector.drops)
         entity_ids.update(

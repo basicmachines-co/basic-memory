@@ -476,6 +476,8 @@ def query_trace_response(
         fts_rank_offset = trace.meta.offset if isinstance(trace, FtsQueryTrace) else 0
         for score in fts.raw_scores:
             entry = candidate(score.key)
+            if entry.entity_id is None:
+                entry.entity_id = score.entity_id
             # Duplicate SQL-page occurrences share one logical candidate; the page is
             # rank-ordered, so the first occurrence carries the row's best source rank.
             if entry.scores.fts_rank is None:

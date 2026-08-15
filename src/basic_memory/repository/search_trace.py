@@ -95,6 +95,7 @@ class FtsScore:
     key: TraceKey
     score: float
     rank: int
+    entity_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -332,6 +333,7 @@ def build_fts_page_stage(
     raw_scores: Sequence[tuple[TraceKey, float]],
     *,
     normalized_scores: Mapping[TraceKey, float] | None = None,
+    entity_ids: Mapping[TraceKey, int | None] | None = None,
     fts_max_abs: float | None = None,
     relaxed_fallback_used: bool,
     fts_ms: float | None = None,
@@ -342,13 +344,14 @@ def build_fts_page_stage(
     copies of one logical row, and each occurrence keeps its own rank here so the
     stage never disagrees with the final results built from the same page.
     """
+    owners = entity_ids or {}
     raw = tuple(
-        FtsScore(key=key, score=score, rank=rank)
+        FtsScore(key=key, score=score, rank=rank, entity_id=owners.get(key))
         for rank, (key, score) in enumerate(raw_scores, start=1)
     )
     normalized = (
         tuple(
-            FtsScore(key=key, score=score, rank=rank)
+            FtsScore(key=key, score=score, rank=rank, entity_id=owners.get(key))
             for rank, (key, score) in enumerate(normalized_scores.items(), start=1)
         )
         if normalized_scores is not None

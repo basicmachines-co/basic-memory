@@ -2580,6 +2580,7 @@ class SearchRepositoryBase(ABC):
             trace.fts = build_fts_page_stage(
                 [((row.type, row.id), row.score or 0.0) for row in fts_results],
                 normalized_scores=fts_scores,
+                entity_ids={(row.type, row.id): row.entity_id for row in fts_results},
                 fts_max_abs=fts_max,
                 relaxed_fallback_used=relaxed_fallback_used,
                 fts_ms=fts_ms,

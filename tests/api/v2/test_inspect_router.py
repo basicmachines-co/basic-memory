@@ -22,11 +22,13 @@ from basic_memory.repository.semantic_chunking import (
 )
 from basic_memory.repository.search_trace import (
     FinalResultEntry,
+    HybridQueryTrace,
     HydrationDropped,
     ManifestReadiness,
     QueryMeta,
     RerankerConfigSummary,
-    VectorQueryTrace,
+    build_fts_page_stage,
+    build_fusion_stage,
     build_vector_stage,
 )
 from basic_memory.schemas.inspect import (
@@ -316,11 +318,11 @@ async def test_inspect_query_returns_schema_for_seeded_fts_corpus(
 
 
 @pytest.mark.asyncio
-async def test_inspect_query_batch_enriches_final_and_hydration_drop_external_ids(monkeypatch):
-    trace = VectorQueryTrace(
+async def test_inspect_query_batch_enriches_all_known_external_ids(monkeypatch):
+    trace = HybridQueryTrace(
         meta=QueryMeta(
             query_text="inspection",
-            retrieval_mode="vector",
+            retrieval_mode="hybrid",
             limit=5,
             offset=0,
             project_id=1,
@@ -337,6 +339,13 @@ async def test_inspect_query_batch_enriches_final_and_hydration_drop_external_id
             total_ms=1.0,
         ),
         readiness=ManifestReadiness("index", "embedding", 0, 0, 0),
+        fts=build_fts_page_stage(
+            [(("entity", 1), -1.0), (("entity", 3), -0.7)],
+            normalized_scores={("entity", 1): 1.0, ("entity", 3): 0.7},
+            entity_ids={("entity", 1): 1, ("entity", 3): 3},
+            fts_max_abs=1.0,
+            relaxed_fallback_used=False,
+        ),
         vector=build_vector_stage(
             candidate_limit=10,
             adapter_match_count=1,
@@ -351,6 +360,16 @@ async def test_inspect_query_batch_enriches_final_and_hydration_drop_external_id
                     stored_index=None,
                 ),
             ),
+        ),
+        fusion=build_fusion_stage(
+            formula_version="max+0.3*min/v1",
+            bonus=0.3,
+            fts_scores={("entity", 1): 1.0, ("entity", 3): 0.7},
+            fts_ranks={("entity", 1): 0, ("entity", 3): 1},
+            vector_scores={},
+            vector_ranks={},
+            ranked_scores=[(("entity", 1), 1.0), (("entity", 3), 0.7)],
+            fusion_ms=0.1,
         ),
         rerank=None,
         final=(
@@ -374,13 +393,14 @@ async def test_inspect_query_batch_enriches_final_and_hydration_drop_external_id
         return_value=[
             SimpleNamespace(id=1, external_id="external-1"),
             SimpleNamespace(id=2, external_id="external-2"),
+            SimpleNamespace(id=3, external_id="external-3"),
         ]
     )
     monkeypatch.setattr(inspect_router_module, "explain_query", fake_explain_query)
 
     inspection = await inspect_router_module.inspect_query(
         data=InspectQueryRequest(
-            query=SearchQuery(text="inspection", retrieval_mode=SearchRetrievalMode.VECTOR)
+            query=SearchQuery(text="inspection", retrieval_mode=SearchRetrievalMode.HYBRID)
         ),
         project_id=1,
         entity_service=entity_service,
@@ -390,8 +410,11 @@ async def test_inspect_query_batch_enriches_final_and_hydration_drop_external_id
     assert {candidate.external_id for candidate in inspection.candidates} == {
         "external-1",
         "external-2",
+        "external-3",
     }
-    entity_service.get_entities_by_id.assert_awaited_once_with([1, 2])
+    fts_only_miss = next(candidate for candidate in inspection.candidates if candidate.id == 3)
+    assert fts_only_miss.disposition == "beyond_page_window"
+    entity_service.get_entities_by_id.assert_awaited_once_with([1, 2, 3])
 
 
 @pytest.mark.asyncio
