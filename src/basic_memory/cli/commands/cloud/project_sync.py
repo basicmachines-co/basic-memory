@@ -8,6 +8,7 @@ they are cloud-specific operations.
 import os
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 
 import typer
 from rich.console import Console
@@ -17,8 +18,6 @@ from basic_memory.cli.commands.cloud.bisync_commands import get_mount_info
 from basic_memory.cli.commands.cloud.rclone_commands import (
     RcloneError,
     SyncProject,
-    TransferDirection,
-    TransferPlan,
     get_bmignore_prune_filter_path,
     get_project_bisync_state,
     project_bisync,
@@ -33,6 +32,12 @@ from basic_memory.cli.commands.cloud.rclone_config import (
     DEFAULT_RCLONE_REMOTE,
     rclone_remote_exists,
     remote_name_for_workspace,
+)
+from basic_memory.cli.commands.cloud.transfer import TransferDirection, TransferPlan
+from basic_memory.cli.commands.cloud.webdav import WebdavError
+from basic_memory.cli.commands.cloud.webdav_transfer import (
+    webdav_project_diff,
+    webdav_project_transfer,
 )
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.routing import force_routing
@@ -79,8 +84,8 @@ class ConflictStrategy(str, Enum):
     leaving the user to re-run with an explicit resolution — like git refusing
     to clobber local changes.
 
-    This is the Typer-facing enum; the engine in ``rclone_commands`` accepts the
-    same values as a ``ConflictStrategy`` Literal. ``_run_directional_transfer``
+    This is the Typer-facing enum; both transfer engines accept the same values
+    as the ``ConflictStrategy`` Literal in ``transfer``. The orchestration
     bridges the two by passing ``on_conflict.value``. Keep the values in sync.
     """
 
@@ -213,6 +218,24 @@ async def _get_cloud_project(name: str, *, workspace_id: str | None = None) -> P
         return None
 
 
+def _require_local_sync_path(name: str, config: BasicMemoryConfig) -> str:
+    """Resolve the local directory a project syncs against, or exit with guidance.
+
+    Both transports need this: the rclone path passes it to rclone, the WebDAV
+    path walks it directly.
+    """
+    sync_entry = config.projects.get(name)
+    # Support both new (path) and legacy (local_sync_path) configs
+    local_sync_path = (sync_entry.local_sync_path or sync_entry.path) if sync_entry else None
+
+    if not local_sync_path or not os.path.isabs(local_sync_path):
+        console.print(f"[red]Error: Project '{name}' has no local sync path configured[/red]")
+        console.print(f"\nConfigure sync with: bm cloud sync-setup {name} ~/path/to/local")
+        raise typer.Exit(1)
+
+    return local_sync_path
+
+
 def _get_sync_project(
     name: str,
     config: BasicMemoryConfig,
@@ -227,14 +250,7 @@ def _get_sync_project(
 
     Returns (sync_project, local_sync_path). Exits if no local_sync_path configured.
     """
-    sync_entry = config.projects.get(name)
-    # Support both new (path) and legacy (local_sync_path) configs
-    local_sync_path = (sync_entry.local_sync_path or sync_entry.path) if sync_entry else None
-
-    if not local_sync_path or not os.path.isabs(local_sync_path):
-        console.print(f"[red]Error: Project '{name}' has no local sync path configured[/red]")
-        console.print(f"\nConfigure sync with: bm cloud sync-setup {name} ~/path/to/local")
-        raise typer.Exit(1)
+    local_sync_path = _require_local_sync_path(name, config)
 
     sync_project = SyncProject(
         name=project_data.name,
@@ -451,6 +467,116 @@ def _print_conflict_abort(name: str, direction: TransferDirection, plan: Transfe
     )
 
 
+# Why the two transports word this differently: rclone reports files it could not
+# read or hash, while the WebDAV transport reports files the service described
+# without any validator it could compare. Same abort, different cause.
+RCLONE_COMPARE_FAILURE = "rclone could not compare {count} file(s)"
+WEBDAV_COMPARE_FAILURE = (
+    "the cloud reported no comparable checksum or timestamp for {count} file(s)"
+)
+
+
+def _check_plan(
+    name: str,
+    direction: TransferDirection,
+    plan: TransferPlan,
+    on_conflict: ConflictStrategy,
+    *,
+    compare_failure: str,
+) -> None:
+    """Apply the pre-transfer gates shared by both transports.
+
+    Trigger: files that could not be compared, or conflicts with no chosen
+    resolution.
+    Why: comparing is the whole basis for a safe transfer — never guess, and
+    never silently pick a winner.
+    Outcome: abort before moving any bytes, listing what needs attention.
+    """
+    if plan.errors:
+        console.print(
+            f"[red]{direction.capitalize()} aborted: "
+            f"{compare_failure.format(count=len(plan.errors))}[/red]"
+        )
+        for path in plan.errors:
+            console.print(f"  [red]![/red] {path}")
+        raise typer.Exit(1)
+
+    if plan.conflicts and on_conflict is ConflictStrategy.fail:
+        _print_conflict_abort(name, direction, plan)
+        raise typer.Exit(1)
+
+
+def _report_transfer_complete(name: str, direction: TransferDirection, plan: TransferPlan) -> None:
+    """Announce success and account for what was deliberately left alone."""
+    console.print(f"[green]{name} {direction} completed successfully[/green]")
+
+    # Without a sync baseline (see #862) we cannot tell an intentional delete
+    # from a file the other side simply never had, so deletions never sync.
+    if plan.dest_only:
+        kept_on = "local" if direction == "pull" else "cloud"
+        console.print(
+            f"[dim]{len(plan.dest_only)} file(s) exist only on {kept_on} and were left "
+            "untouched (deletions are not propagated).[/dim]"
+        )
+
+
+def _run_webdav_directional_transfer(
+    name: str,
+    direction: TransferDirection,
+    *,
+    config: BasicMemoryConfig,
+    workspace: WorkspaceInfo,
+    on_conflict: ConflictStrategy,
+    dry_run: bool,
+    verbose: bool,
+) -> None:
+    """Run a Team-workspace push/pull over the cloud WebDAV surface.
+
+    No `bm cloud setup`, no rclone remote, no storage credentials: the service
+    authorizes every request against the caller's access to this project, which
+    is the model a shared workspace needs (#1262). Conflict handling, additive
+    semantics, and the CLI's output are the same as the Personal path.
+    """
+    with force_routing(cloud=True):
+        project_data = run_with_cleanup(_get_cloud_project(name, workspace_id=workspace.tenant_id))
+    if not project_data:
+        console.print(f"[red]Error: Project '{name}' not found[/red]")
+        raise typer.Exit(1)
+
+    local_root = Path(_require_local_sync_path(name, config))
+
+    # --- Detect before transferring ---
+    plan = run_with_cleanup(
+        webdav_project_diff(
+            project_data.name,
+            local_root,
+            direction,
+            workspace_id=workspace.tenant_id,
+        )
+    )
+    _check_plan(name, direction, plan, on_conflict, compare_failure=WEBDAV_COMPARE_FAILURE)
+
+    # --- Transfer ---
+    arrow = "cloud -> local" if direction == "pull" else "local -> cloud"
+    console.print(f"[blue]{direction.capitalize()} {name} ({arrow})...[/blue]")
+
+    run_with_cleanup(
+        webdav_project_transfer(
+            project_data.name,
+            local_root,
+            direction,
+            plan,
+            workspace_id=workspace.tenant_id,
+            strategy=on_conflict.value,
+            conflict_suffix=datetime.now().strftime("%Y%m%d-%H%M%S"),
+            dry_run=dry_run,
+            verbose=verbose,
+        )
+    )
+
+    _report_transfer_complete(name, direction, plan)
+
+
 def _run_directional_transfer(
     name: str,
     direction: TransferDirection,
@@ -463,20 +589,25 @@ def _run_directional_transfer(
     """Shared orchestration for `bm cloud push` / `bm cloud pull`.
 
     Detects conflicts first, then aborts (the default) or applies the chosen
-    resolution. Uses additive `rclone copy`, so it never deletes on the
-    destination — safe for Team workspaces and therefore not gated.
+    resolution. Both transports are additive — neither ever deletes on the
+    destination — which is what makes these commands safe on Team workspaces.
 
-    Routes through the resolved workspace's own tenant-scoped rclone remote, so a
-    Team project reads/writes the right bucket (see #919).
+    The transport depends on the workspace. Personal workspaces run `rclone copy`
+    against their own tenant-scoped remote, so the project reads/writes the right
+    bucket (see #919). Team workspaces go over WebDAV instead: storage
+    credentials are scoped to a whole tenant bucket and so cannot honor
+    per-project access, and minting them is owner-only, which left members unable
+    to run these commands at all (#1262).
     """
     config = ConfigManager().config
     _require_cloud_credentials(config)
 
     try:
-        # --- Resolve the target workspace and its tenant-scoped remote ---
-        # Tigris credentials are bucket/tenant-scoped, so each workspace has its
-        # own rclone remote. Resolve which workspace this project belongs to
-        # (config or --workspace override) before touching any bucket.
+        # --- Resolve the target workspace and its transport ---
+        # The workspace decides both the transport and, on the Personal path,
+        # which tenant-scoped rclone remote to use. Resolve which workspace this
+        # project belongs to (config or --workspace override) before going near
+        # a bucket or the cloud's file surface.
         try:
             target_workspace = run_with_cleanup(
                 _get_workspace_for_project(name, config, workspace_override=workspace)
@@ -484,6 +615,25 @@ def _run_directional_transfer(
         except Exception as exc:
             console.print(f"[red]Error resolving workspace for project '{name}': {exc}[/red]")
             raise typer.Exit(1)
+
+        # Trigger: the resolved workspace is shared (an organization workspace).
+        # Why: the rclone path below needs tenant-wide storage credentials, which
+        # bypass the service's per-project access control and can only be minted
+        # by a workspace owner — every other member got a 403 pointing at a
+        # command that could never succeed (#1262).
+        # Outcome: Team transfers run over WebDAV, where the service applies
+        # per-project access to each request. Personal is untouched.
+        if target_workspace.workspace_type != "personal":
+            _run_webdav_directional_transfer(
+                name,
+                direction,
+                config=config,
+                workspace=target_workspace,
+                on_conflict=on_conflict,
+                dry_run=dry_run,
+                verbose=verbose,
+            )
+            return
 
         remote_name = remote_name_for_workspace(
             target_workspace.slug, is_default=target_workspace.is_default
@@ -519,25 +669,7 @@ def _run_directional_transfer(
 
         # --- Detect before transferring ---
         plan = project_diff(sync_project, bucket_name, direction)
-
-        # Trigger: rclone could not read/hash some files.
-        # Why: comparing is the whole basis for a safe transfer — never guess.
-        # Outcome: abort before moving any bytes.
-        if plan.errors:
-            console.print(
-                f"[red]{direction.capitalize()} aborted: rclone could not compare "
-                f"{len(plan.errors)} file(s)[/red]"
-            )
-            for path in plan.errors:
-                console.print(f"  [red]![/red] {path}")
-            raise typer.Exit(1)
-
-        # Trigger: files differ on both sides and the user chose no resolution.
-        # Why: "no surprises" — never silently pick a winner.
-        # Outcome: list the conflicts and exit, like git refusing to clobber.
-        if plan.conflicts and on_conflict is ConflictStrategy.fail:
-            _print_conflict_abort(name, direction, plan)
-            raise typer.Exit(1)
+        _check_plan(name, direction, plan, on_conflict, compare_failure=RCLONE_COMPARE_FAILURE)
 
         # --- Transfer ---
         arrow = "cloud -> local" if direction == "pull" else "local -> cloud"
@@ -559,18 +691,9 @@ def _run_directional_transfer(
             console.print(f"[red]{name} {direction} failed[/red]")
             raise typer.Exit(1)
 
-        console.print(f"[green]{name} {direction} completed successfully[/green]")
+        _report_transfer_complete(name, direction, plan)
 
-        # Without a sync baseline (see #862) we cannot tell an intentional delete
-        # from a file the other side simply never had, so deletions never sync.
-        if plan.dest_only:
-            kept_on = "local" if direction == "pull" else "cloud"
-            console.print(
-                f"[dim]{len(plan.dest_only)} file(s) exist only on {kept_on} and were left "
-                "untouched (deletions are not propagated).[/dim]"
-            )
-
-    except RcloneError as e:
+    except (RcloneError, WebdavError) as e:
         console.print(f"[red]{direction.capitalize()} error: {e}[/red]")
         raise typer.Exit(1)
     except typer.Exit:

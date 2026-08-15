@@ -1,6 +1,7 @@
 """Tests for cloud sync and bisync command behavior."""
 
 import importlib
+import re
 from types import SimpleNamespace
 
 import pytest
@@ -8,12 +9,23 @@ import typer
 from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
-from basic_memory.cli.commands.cloud.rclone_commands import RcloneError, TransferPlan
+from basic_memory.cli.commands.cloud.rclone_commands import RcloneError
+from basic_memory.cli.commands.cloud.transfer import TransferPlan
+from basic_memory.cli.commands.cloud.webdav import WebdavError
 from basic_memory.config import ProjectEntry, ProjectMode
 from basic_memory.schemas.cloud import WorkspaceInfo
 from typing import Any
 
 runner = CliRunner()
+
+
+def _plain(text: str) -> str:
+    """Strip console styling so assertions read against the words alone.
+
+    Rich emits escape sequences for styled output (``[dim]`` survives even
+    NO_COLOR), which would otherwise split the phrases these tests look for.
+    """
+    return " ".join(re.sub(r"\x1b\[[0-9;]*m", "", text).split())
 
 
 @pytest.mark.parametrize(
@@ -566,54 +578,39 @@ def test_cloud_push_keep_local_resolves_conflict(monkeypatch, config_manager):
     assert recorder["args"][2] == "push"
 
 
-def test_cloud_push_allows_organization_workspace(monkeypatch, config_manager):
-    """push is additive and Team-safe — an organization workspace is allowed (no Personal gate)."""
-    module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
-
-    org_ws = _workspace("team-tenant", "organization", "acme", is_default=False)
-    plan = TransferPlan(new=["new.md"], conflicts=[], dest_only=[], errors=[])
-    recorder: dict[str, Any] = {}
-    _stub_transfer_env(monkeypatch, module, plan=plan, recorder=recorder, workspace=org_ws)
-
-    result = runner.invoke(app, ["cloud", "push", "--name", "research"])
-
-    assert result.exit_code == 0, result.output
-    assert "research push completed successfully" in result.output
-    # Routed through the team workspace's own remote, against its tenant's bucket.
-    assert recorder["args"][0].remote_name == "basic-memory-cloud-acme"
-
-
 def test_cloud_pull_workspace_override_routes_through_workspace_remote(monkeypatch, config_manager):
     """pull --workspace routes through the named workspace's own remote and bucket."""
     module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
 
-    org_ws = _workspace("team-tenant", "organization", "acme", is_default=False)
+    alt_ws = _workspace("personal-alt-tenant", "personal", "personal-alt", is_default=False)
     plan = TransferPlan(new=["new.md"], conflicts=[], dest_only=[], errors=[])
     recorder: dict[str, Any] = {}
 
-    # _get_workspace_for_project must receive the override and return the org workspace.
+    # _get_workspace_for_project must receive the override and return that workspace.
     def _resolve(_name, _config, *, workspace_override=None):
-        assert workspace_override == "acme"
-        return _async_value(org_ws)
+        assert workspace_override == "personal-alt"
+        return _async_value(alt_ws)
 
-    _stub_transfer_env(monkeypatch, module, plan=plan, recorder=recorder, workspace=org_ws)
+    _stub_transfer_env(monkeypatch, module, plan=plan, recorder=recorder, workspace=alt_ws)
     monkeypatch.setattr(module, "_get_workspace_for_project", _resolve)
 
-    result = runner.invoke(app, ["cloud", "pull", "--name", "research", "--workspace", "acme"])
+    result = runner.invoke(
+        app, ["cloud", "pull", "--name", "research", "--workspace", "personal-alt"]
+    )
 
     assert result.exit_code == 0, result.output
-    assert recorder["args"][0].remote_name == "basic-memory-cloud-acme"
+    assert recorder["args"][0].remote_name == "basic-memory-cloud-personal-alt"
     assert recorder["args"][2] == "pull"
 
 
 def test_cloud_push_errors_when_workspace_remote_not_set_up(monkeypatch, config_manager):
-    """If the workspace's remote isn't configured, push stops with the setup command."""
+    """If a Personal workspace's remote isn't configured, push stops with the setup command."""
     module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
 
-    org_ws = _workspace("team-tenant", "organization", "acme", is_default=False)
+    alt_ws = _workspace("personal-alt-tenant", "personal", "personal-alt", is_default=False)
     plan = TransferPlan(new=["new.md"], conflicts=[], dest_only=[], errors=[])
     recorder: dict[str, Any] = {}
-    _stub_transfer_env(monkeypatch, module, plan=plan, recorder=recorder, workspace=org_ws)
+    _stub_transfer_env(monkeypatch, module, plan=plan, recorder=recorder, workspace=alt_ws)
     # Override: this workspace has not been set up yet.
     monkeypatch.setattr(module, "rclone_remote_exists", lambda _remote: False)
 
@@ -622,8 +619,167 @@ def test_cloud_push_errors_when_workspace_remote_not_set_up(monkeypatch, config_
     assert result.exit_code == 1, result.output
     output = " ".join(result.output.split())
     assert "not set up for sync" in output
-    assert "bm cloud setup --workspace acme" in output
+    assert "bm cloud setup --workspace personal-alt" in output
     assert "args" not in recorder  # never transferred
+
+
+# --- Team workspaces transfer over WebDAV (#1262) ---
+
+
+def _stub_webdav_transfer_env(monkeypatch, module, *, plan, recorder, workspace=None):
+    """Stub the Team push/pull chain so only the WebDAV routing is exercised."""
+    monkeypatch.setattr(module, "_require_cloud_credentials", lambda _config: None)
+    ws = workspace or _workspace("team-tenant", "organization", "acme", is_default=False)
+    monkeypatch.setattr(
+        module,
+        "_get_workspace_for_project",
+        lambda _name, _config, **_kwargs: _async_value(ws),
+    )
+    monkeypatch.setattr(
+        module,
+        "_get_cloud_project",
+        lambda _name, **_kwargs: _async_value(SimpleNamespace(name="research", path="research")),
+    )
+    monkeypatch.setattr(module, "_require_local_sync_path", lambda _name, _config: "/tmp/research")
+
+    # Nothing on the Team path may reach for storage credentials or an rclone
+    # remote — that requirement is exactly what made these commands unusable.
+    def _forbidden(*_args, **_kwargs):
+        raise AssertionError("the Team path must not touch rclone or storage credentials")
+
+    monkeypatch.setattr(module, "get_mount_info", _forbidden)
+    monkeypatch.setattr(module, "rclone_remote_exists", _forbidden)
+    monkeypatch.setattr(module, "project_diff", _forbidden)
+    monkeypatch.setattr(module, "project_transfer", _forbidden)
+
+    async def _fake_diff(*args, **kwargs):
+        recorder["diff_args"] = args
+        recorder["diff_kwargs"] = kwargs
+        return plan
+
+    async def _fake_transfer(*args, **kwargs):
+        recorder["args"] = args
+        recorder["kwargs"] = kwargs
+
+    monkeypatch.setattr(module, "webdav_project_diff", _fake_diff)
+    monkeypatch.setattr(module, "webdav_project_transfer", _fake_transfer)
+
+
+@pytest.mark.parametrize("direction", ["pull", "push"])
+def test_cloud_transfer_on_team_workspace_uses_webdav(monkeypatch, config_manager, direction):
+    """Team push/pull run over WebDAV — no rclone remote, no `bm cloud setup`."""
+    module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+    plan = TransferPlan(new=["new.md"], conflicts=[], dest_only=["local-only.md"], errors=[])
+    recorder: dict[str, Any] = {}
+    _stub_webdav_transfer_env(monkeypatch, module, plan=plan, recorder=recorder)
+
+    result = runner.invoke(app, ["cloud", direction, "--name", "research"])
+
+    assert result.exit_code == 0, result.output
+    output = _plain(result.output)
+    assert f"research {direction} completed successfully" in output
+    assert "bm cloud setup" not in output
+    assert "deletions are not propagated" in output
+    # Routed at the resolved workspace, addressed by the cloud project's name.
+    assert recorder["diff_args"][0] == "research"
+    assert recorder["diff_args"][2] == direction
+    assert recorder["diff_kwargs"]["workspace_id"] == "team-tenant"
+    assert recorder["kwargs"]["strategy"] == "fail"
+
+
+def test_cloud_pull_on_team_workspace_aborts_on_conflict_by_default(monkeypatch, config_manager):
+    """The default conflict gate is the same on both transports."""
+    module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+    plan = TransferPlan(new=[], conflicts=["notes/dup.md"], dest_only=[], errors=[])
+    recorder: dict[str, Any] = {}
+    _stub_webdav_transfer_env(monkeypatch, module, plan=plan, recorder=recorder)
+
+    result = runner.invoke(app, ["cloud", "pull", "--name", "research"])
+
+    assert result.exit_code == 1, result.output
+    output = _plain(result.output)
+    assert "notes/dup.md" in output
+    assert "--on-conflict keep-cloud" in output
+    assert "args" not in recorder  # transfer never ran
+
+
+@pytest.mark.parametrize("strategy", ["keep-local", "keep-cloud", "keep-both"])
+def test_cloud_push_on_team_workspace_passes_the_conflict_strategy(
+    monkeypatch, config_manager, strategy
+):
+    module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+    plan = TransferPlan(new=[], conflicts=["notes/dup.md"], dest_only=[], errors=[])
+    recorder: dict[str, Any] = {}
+    _stub_webdav_transfer_env(monkeypatch, module, plan=plan, recorder=recorder)
+
+    result = runner.invoke(app, ["cloud", "push", "--name", "research", "--on-conflict", strategy])
+
+    assert result.exit_code == 0, result.output
+    assert recorder["kwargs"]["strategy"] == strategy
+    assert recorder["kwargs"]["conflict_suffix"]
+
+
+def test_cloud_pull_on_team_workspace_aborts_when_files_cannot_be_compared(
+    monkeypatch, config_manager
+):
+    """Without a validator to compare, pull stops rather than guessing."""
+    module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+    plan = TransferPlan(new=[], conflicts=[], dest_only=[], errors=["opaque.md"])
+    recorder: dict[str, Any] = {}
+    _stub_webdav_transfer_env(monkeypatch, module, plan=plan, recorder=recorder)
+
+    result = runner.invoke(app, ["cloud", "pull", "--name", "research"])
+
+    assert result.exit_code == 1, result.output
+    output = _plain(result.output)
+    assert "no comparable checksum or timestamp" in output
+    assert "opaque.md" in output
+    assert "args" not in recorder
+
+
+def test_cloud_pull_on_team_workspace_forwards_dry_run_and_verbose(monkeypatch, config_manager):
+    module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+    plan = TransferPlan(new=["new.md"], conflicts=[], dest_only=[], errors=[])
+    recorder: dict[str, Any] = {}
+    _stub_webdav_transfer_env(monkeypatch, module, plan=plan, recorder=recorder)
+
+    result = runner.invoke(app, ["cloud", "pull", "--name", "research", "--dry-run", "--verbose"])
+
+    assert result.exit_code == 0, result.output
+    assert recorder["kwargs"]["dry_run"] is True
+    assert recorder["kwargs"]["verbose"] is True
+
+
+def test_cloud_pull_on_team_workspace_reports_a_webdav_failure(monkeypatch, config_manager):
+    module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+    recorder: dict[str, Any] = {}
+    _stub_webdav_transfer_env(monkeypatch, module, plan=TransferPlan(), recorder=recorder)
+
+    async def _raise(*_args, **_kwargs):
+        raise WebdavError("HTTP 403 - Forbidden")
+
+    monkeypatch.setattr(module, "webdav_project_diff", _raise)
+
+    result = runner.invoke(app, ["cloud", "pull", "--name", "research"])
+
+    assert result.exit_code == 1, result.output
+    output = _plain(result.output)
+    assert "Pull error: HTTP 403 - Forbidden" in output
+    # The old failure pointed at a command the member could never run.
+    assert "bm cloud setup" not in output
+
+
+def test_cloud_pull_on_team_workspace_reports_a_missing_project(monkeypatch, config_manager):
+    module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+    recorder: dict[str, Any] = {}
+    _stub_webdav_transfer_env(monkeypatch, module, plan=TransferPlan(), recorder=recorder)
+    monkeypatch.setattr(module, "_get_cloud_project", lambda _name, **_kwargs: _async_value(None))
+
+    result = runner.invoke(app, ["cloud", "pull", "--name", "research"])
+
+    assert result.exit_code == 1, result.output
+    assert "not found" in _plain(result.output)
+    assert "diff_args" not in recorder
 
 
 def test_get_workspace_for_project_override_resolves(monkeypatch, config_manager):

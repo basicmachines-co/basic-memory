@@ -6,12 +6,14 @@ from pathlib import Path
 
 import pytest
 
+from basic_memory.cli.commands.cloud.transfer import (
+    TransferPlan,
+    conflict_copy_name,
+)
 from basic_memory.cli.commands.cloud.rclone_commands import (
     MIN_RCLONE_VERSION_EMPTY_DIRS,
     RcloneError,
     SyncProject,
-    TransferPlan,
-    _conflict_copy_name,
     _parse_check_combined,
     bisync_initialized,
     check_rclone_installed,
@@ -607,8 +609,8 @@ def test_parse_check_combined_handles_paths_with_spaces():
 
 
 def test_conflict_copy_name_inserts_marker_before_extension():
-    assert _conflict_copy_name("notes/x.md", "20260608-1030") == "notes/x.conflict-20260608-1030.md"
-    assert _conflict_copy_name("top.md", "S") == "top.conflict-S.md"
+    assert conflict_copy_name("notes/x.md", "20260608-1030") == "notes/x.conflict-20260608-1030.md"
+    assert conflict_copy_name("top.md", "S") == "top.conflict-S.md"
 
 
 def test_project_diff_pull_uses_remote_as_source(tmp_path):

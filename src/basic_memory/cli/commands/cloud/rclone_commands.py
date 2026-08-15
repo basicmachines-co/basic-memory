@@ -13,15 +13,22 @@ Replaces tenant-wide sync with project-scoped workflows.
 import re
 import subprocess
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import lru_cache
-from pathlib import Path, PurePosixPath
-from typing import Callable, Literal, Optional, Protocol
+from pathlib import Path
+from typing import Callable, Optional, Protocol
 
 from loguru import logger
 from rich.console import Console
 
 from basic_memory.cli.commands.cloud.rclone_installer import is_rclone_installed
+from basic_memory.cli.commands.cloud.transfer import (
+    ConflictStrategy,
+    TransferDirection,
+    TransferPlan,
+    conflict_copy_name,
+    strategy_overwrites_dest,
+)
 from basic_memory.config import resolve_data_dir
 from basic_memory.utils import normalize_project_path
 
@@ -225,33 +232,13 @@ def get_project_remote(project: SyncProject, bucket_name: str) -> str:
 
 # --- Directional transfer primitives (push / pull) ---
 #
-# These power the Team-safe `bm cloud push` / `bm cloud pull` commands. Unlike
-# the mirror operations (`sync`/`bisync`), they use `rclone copy` so they never
-# delete on the destination, and conflicts are surfaced to the caller rather
-# than silently resolved. See issue #858 for the full design rationale.
-
-# push = local -> cloud, pull = cloud -> local.
-TransferDirection = Literal["push", "pull"]
-
-# How a directional transfer treats files that differ on both sides. "fail" is
-# the safe default: the caller is expected to abort before any transfer runs.
-ConflictStrategy = Literal["fail", "keep-local", "keep-cloud", "keep-both"]
-
-
-@dataclass
-class TransferPlan:
-    """Classification of how local and cloud differ for a directional transfer.
-
-    Built from ``rclone check --combined``. Paths are relative to the project
-    root. ``conflicts`` are files present on both sides with differing content —
-    without a sync baseline (see #862) every divergence is a conflict, because
-    we cannot tell a teammate's edit from a stale local copy.
-    """
-
-    new: list[str] = field(default_factory=list)  # only on source → safe to bring over
-    conflicts: list[str] = field(default_factory=list)  # differ on both sides
-    dest_only: list[str] = field(default_factory=list)  # only on destination → left untouched
-    errors: list[str] = field(default_factory=list)  # rclone could not read/hash
+# These power the `bm cloud push` / `bm cloud pull` commands on Personal
+# workspaces. Unlike the mirror operations (`sync`/`bisync`), they use
+# `rclone copy` so they never delete on the destination, and conflicts are
+# surfaced to the caller rather than silently resolved. See issue #858 for the
+# full design rationale. Team workspaces run the same commands over the WebDAV
+# transport instead (`webdav_transfer.py`, #1262); the plan vocabulary both
+# transports share lives in `transfer.py`.
 
 
 def _transfer_endpoints(project: SyncProject, bucket_name: str) -> tuple[str, str]:
@@ -507,12 +494,6 @@ def project_copy(
     return result.returncode == 0
 
 
-def _conflict_copy_name(rel_path: str, suffix: str) -> str:
-    """Insert a ``.conflict-<suffix>`` marker before the extension of a rel path."""
-    p = PurePosixPath(rel_path)
-    return str(p.with_name(f"{p.stem}.conflict-{suffix}{p.suffix}"))
-
-
 def project_copy_file(
     project: SyncProject,
     bucket_name: str,
@@ -560,19 +541,6 @@ def project_copy_file(
     return result.returncode == 0
 
 
-def _strategy_overwrites_dest(direction: TransferDirection, strategy: ConflictStrategy) -> bool:
-    """True when the strategy lets the source side overwrite the destination.
-
-    The source side is cloud on pull, local on push. "keep-cloud" wins on pull,
-    "keep-local" wins on push; otherwise the destination is preserved.
-    """
-    if strategy == "keep-cloud":
-        return direction == "pull"
-    if strategy == "keep-local":
-        return direction == "push"
-    return False  # "fail" (no conflicts) and "keep-both" never overwrite existing dest files
-
-
 def project_transfer(
     project: SyncProject,
     bucket_name: str,
@@ -597,7 +565,7 @@ def project_transfer(
     # beside it as a conflict copy, then do an additive (new-only) pass.
     if strategy == "keep-both":
         for rel_path in plan.conflicts:
-            dest_rel = _conflict_copy_name(rel_path, conflict_suffix)
+            dest_rel = conflict_copy_name(rel_path, conflict_suffix)
             copied = project_copy_file(
                 project,
                 bucket_name,
@@ -612,7 +580,7 @@ def project_transfer(
             if not copied:
                 return False
 
-    overwrite = _strategy_overwrites_dest(direction, strategy)
+    overwrite = strategy_overwrites_dest(direction, strategy)
     return project_copy(
         project,
         bucket_name,

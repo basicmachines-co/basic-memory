@@ -8,6 +8,7 @@ from typing import Callable, Protocol
 import aiofiles
 import httpx
 
+from basic_memory.cli.commands.cloud.webdav import webdav_path
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.mcp.async_client import get_client
 
@@ -116,8 +117,9 @@ async def upload_path(
                         skipped_count += 1
                         continue
 
-                    # Build remote path: /webdav/{project_name}/{relative_path}
-                    remote_path = f"/webdav/{project_name}/{relative_path}"
+                    # Shared with the push/pull transport so both write paths
+                    # address a project's files the same way.
+                    remote_path = webdav_path(project_name, relative_path)
                     print(f"Uploading {relative_path} ({i}/{len(files_to_upload)})")
 
                     # Get file modification time
