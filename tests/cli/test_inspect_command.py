@@ -561,6 +561,44 @@ def test_inspect_query_plain_hides_misses_without_show_misses(mock_run):
 
 
 @patch("basic_memory.cli.commands.inspect.run_inspect_query", new_callable=AsyncMock)
+def test_inspect_query_plain_show_misses_renders_rejection_evidence(mock_run):
+    response = _query_response()
+    model_mismatch = InspectQueryCandidate(
+        type="entity",
+        id=3,
+        external_id=None,
+        title="Stale model candidate",
+        permalink=None,
+        file_path=None,
+        disposition="model_mismatch",
+        rejection_detail=InspectQueryRejectionDetail(
+            reason="model_mismatch",
+            chunk_key="entity:3:0",
+            similarity=0.3,
+            stored_model="old-model",
+            stored_index="sqlite-vec",
+        ),
+        matched_chunks=[],
+        dropped_chunks=[],
+        scores=InspectQueryScores(vector_similarity=0.3),
+    )
+    mock_run.return_value = response.model_copy(
+        update={"candidates": [*response.candidates, model_mismatch]}
+    )
+
+    result = runner.invoke(
+        cli_app,
+        ["inspect", "query", "auth retrieval", "--plain", "--show-misses"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert 'score=0.1000 detail={"reason":"below_threshold"' in result.output
+    assert '"similarity":0.1,"threshold":0.2' in result.output
+    assert 'score=0.3000 detail={"reason":"model_mismatch"' in result.output
+    assert '"stored_model":"old-model","stored_index":"sqlite-vec"' in result.output
+
+
+@patch("basic_memory.cli.commands.inspect.run_inspect_query", new_callable=AsyncMock)
 def test_inspect_query_json_is_schema_locked_and_always_includes_misses(mock_run):
     expected = _query_response()
     mock_run.return_value = expected

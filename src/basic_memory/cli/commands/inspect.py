@@ -522,7 +522,13 @@ def _plain_query(
     for disposition, grouped in groupby(misses, key=lambda candidate: candidate.disposition):
         typer.echo(f"  {disposition}:")
         for candidate in grouped:
-            typer.echo(f"    {_query_candidate_label(candidate)}")
+            score = candidate.scores.vector_similarity
+            score_text = f"{score:.4f}" if score is not None else "-"
+            detail = candidate.rejection_detail
+            detail_text = detail.model_dump_json(exclude_none=True) if detail is not None else "-"
+            typer.echo(
+                f"    {_query_candidate_label(candidate)} score={score_text} detail={detail_text}"
+            )
 
 
 @inspect_app.command("query")
