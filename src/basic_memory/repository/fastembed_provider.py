@@ -276,6 +276,20 @@ class FastEmbedEmbeddingProvider:
             )
             return self._model
 
+    def _normalize_vectors(self, vectors) -> list[list[float]]:
+        # sqlite_search_repository.py uses a distance-to-similarity formula that assumes
+        # unit-normalized vectors (see the comment on line 65-67 of that file).
+        # Some models (e.g. multilingual ones) return vectors with norm > 1, so we
+        # L2-normalize here to satisfy that contract regardless of the chosen model.
+        normalized: list[list[float]] = []
+        for vector in vectors:
+            values = vector.tolist() if hasattr(vector, "tolist") else list(vector)
+            norm = math.sqrt(sum(x * x for x in values))
+            if norm > 0:
+                values = [x / norm for x in values]
+            normalized.append([float(v) for v in values])
+        return normalized
+
     async def embed_documents(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
@@ -297,19 +311,7 @@ class FastEmbedEmbeddingProvider:
             embed_kwargs: dict[str, int] = {"batch_size": self.batch_size}
             if effective_parallel is not None:
                 embed_kwargs["parallel"] = effective_parallel
-            vectors = list(model.embed(texts, **embed_kwargs))
-            # sqlite_search_repository.py uses a distance-to-similarity formula that assumes
-            # unit-normalized vectors (see the comment on line 65-67 of that file).
-            # Some models (e.g. multilingual ones) return vectors with norm > 1, so we
-            # L2-normalize here to satisfy that contract regardless of the chosen model.
-            normalized: list[list[float]] = []
-            for vector in vectors:
-                values = vector.tolist() if hasattr(vector, "tolist") else list(vector)
-                norm = math.sqrt(sum(x * x for x in values))
-                if norm > 0:
-                    values = [x / norm for x in values]
-                normalized.append([float(v) for v in values])
-            return normalized
+            return self._normalize_vectors(model.embed(texts, **embed_kwargs))
 
         vectors = await asyncio.to_thread(_embed_batch)
         if vectors and len(vectors[0]) != self.dimensions:
@@ -320,5 +322,19 @@ class FastEmbedEmbeddingProvider:
         return vectors
 
     async def embed_query(self, text: str) -> list[float]:
-        vectors = await self.embed_documents([text])
+        model = await self._load_model()
+
+        # Asymmetric models (e.g. bge-small-en-v1.5) apply a query-specific
+        # instruction inside query_embed; embed() is the passage/document path and
+        # silently loses that asymmetry for queries (#1264). query_embed takes no
+        # batch/parallel kwargs — it embeds a single query string.
+        def _embed_query() -> list[list[float]]:
+            return self._normalize_vectors(model.query_embed(text))
+
+        vectors = await asyncio.to_thread(_embed_query)
+        if vectors and len(vectors[0]) != self.dimensions:
+            raise RuntimeError(
+                f"Embedding model returned {len(vectors[0])}-dimensional vectors "
+                f"but provider was configured for {self.dimensions} dimensions."
+            )
         return vectors[0] if vectors else [0.0] * self.dimensions

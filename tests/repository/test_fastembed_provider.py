@@ -24,6 +24,7 @@ class _StubTextEmbedding:
     init_count = 0
     last_init_kwargs: dict[str, Any] = {}
     last_embed_kwargs: dict[str, Any] = {}
+    last_query_embed_inputs: list[str] = []
 
     def __init__(
         self,
@@ -34,6 +35,7 @@ class _StubTextEmbedding:
     ):
         self.model_name = model_name
         self.embed_calls = 0
+        self.query_embed_calls = 0
         _StubTextEmbedding.last_init_kwargs = {
             "model_name": model_name,
             "cache_dir": cache_dir,
@@ -50,6 +52,15 @@ class _StubTextEmbedding:
                 yield _StubVector([1.0, 0.0, 0.0, 0.0, 0.5])
             else:
                 yield _StubVector([1.0, 0.0, 0.0, 0.0])
+
+    def query_embed(self, query):
+        self.query_embed_calls += 1
+        inputs = [query] if isinstance(query, str) else list(query)
+        _StubTextEmbedding.last_query_embed_inputs = inputs
+        for _ in inputs:
+            # Distinct from the embed() passage vector so tests can tell the
+            # query path apart from the document path.
+            yield _StubVector([0.0, 1.0, 0.0, 0.0])
 
 
 @pytest.mark.asyncio
@@ -205,6 +216,10 @@ class _UnnormalizedTextEmbedding:
         for _ in texts:
             yield _UnormalizedVector([1.5, 2.0, 1.0, 0.5])
 
+    def query_embed(self, query):
+        for _ in [query] if isinstance(query, str) else list(query):
+            yield _UnormalizedVector([1.5, 2.0, 1.0, 0.5])
+
 
 @pytest.mark.asyncio
 async def test_fastembed_provider_l2_normalizes_output_vectors(monkeypatch):
@@ -224,6 +239,58 @@ async def test_fastembed_provider_l2_normalizes_output_vectors(monkeypatch):
     assert len(result) == 1
     norm = math.sqrt(sum(x * x for x in result[0]))
     assert abs(norm - 1.0) < 1e-6, f"Expected unit norm, got {norm}"
+
+
+@pytest.mark.asyncio
+async def test_fastembed_provider_embed_query_uses_query_embed(monkeypatch):
+    """embed_query must take FastEmbed's query_embed path, not the passage embed path (#1264).
+
+    Asymmetric models (e.g. bge-small-en-v1.5) apply a query-specific instruction
+    inside query_embed; embedding a query through the document path silently loses
+    that asymmetry and degrades retrieval quality.
+    """
+    module = type(sys)("fastembed")
+    setattr(module, "TextEmbedding", _StubTextEmbedding)
+    monkeypatch.setitem(sys.modules, "fastembed", module)
+    _StubTextEmbedding.last_embed_kwargs = {}
+    _StubTextEmbedding.last_query_embed_inputs = []
+
+    provider = FastEmbedEmbeddingProvider(model_name="stub-model", dimensions=4)
+    vector = await provider.embed_query("auth query")
+
+    assert provider._model is not None
+    assert _StubTextEmbedding.last_query_embed_inputs == ["auth query"]
+    assert _StubTextEmbedding.last_embed_kwargs == {}
+    # The stub's query vector is [0, 1, 0, 0], distinct from its passage vector,
+    # so this assertion fails if the query is embedded via embed().
+    assert vector == [0.0, 1.0, 0.0, 0.0]
+
+
+@pytest.mark.asyncio
+async def test_fastembed_provider_embed_query_normalizes_and_checks_dimensions(monkeypatch):
+    """Query vectors must get the same L2 normalization and dimension checks as documents."""
+    module = type(sys)("fastembed")
+    setattr(module, "TextEmbedding", _UnnormalizedTextEmbedding)
+    monkeypatch.setitem(sys.modules, "fastembed", module)
+
+    provider = FastEmbedEmbeddingProvider(model_name="stub-multilingual", dimensions=4)
+    result = await provider.embed_query("some query")
+
+    norm = math.sqrt(sum(x * x for x in result))
+    assert abs(norm - 1.0) < 1e-6, f"Expected unit norm, got {norm}"
+
+    class _WideQueryEmbedding:
+        def __init__(self, model_name: str, **_kwargs):
+            pass
+
+        def query_embed(self, query):
+            for _ in [query] if isinstance(query, str) else list(query):
+                yield _UnormalizedVector([1.0, 0.0, 0.0, 0.0, 0.5])
+
+    setattr(module, "TextEmbedding", _WideQueryEmbedding)
+    provider = FastEmbedEmbeddingProvider(model_name="stub-wide", dimensions=4)
+    with pytest.raises(RuntimeError, match="5-dimensional vectors"):
+        await provider.embed_query("wide query")
 
 
 @pytest.mark.asyncio
