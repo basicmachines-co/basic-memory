@@ -25,7 +25,16 @@ RELAXATION_CJK_PATTERN = re.compile(
     r"\uff65-\uff9f"  # Halfwidth Katakana
     r"]"
 )
-RELAXATION_ASCII_TOKEN_PATTERN = re.compile(r"[A-Za-z0-9]+")
+# Unicode-aware: `\w` minus underscore keeps the alphanumeric intent of the
+# original ASCII pattern while also counting Cyrillic, Greek, Hebrew, Arabic,
+# Armenian, and Georgian words. An ASCII-only gate made every such query look
+# like it had zero tokens, so the three-token guard below rejected all of them
+# and the hybrid FTS branch silently contributed nothing.
+#
+# Abugidas (Devanagari, Thai) are only partially handled: their vowel signs are
+# non-spacing marks outside `\w`, so a word splits into syllable fragments.
+# Relaxation still engages, but proper support needs grapheme segmentation.
+RELAXATION_WORD_TOKEN_PATTERN = re.compile(r"[^\W_]+", re.UNICODE)
 RELAXATION_EDGE_PUNCTUATION = "?!.,;:，。！？；：、"
 
 
@@ -59,9 +68,11 @@ def relaxed_query_words(search_text: str | None) -> list[str] | None:
       second-guessed);
     - fewer than three alphanumeric tokens (short queries like "New Feature"
       over-broaden under OR — and in hybrid the relaxed FTS-only rows normalize
-      to 1.0 and can outrank the vector result the user wanted);
+      to 1.0 and can outrank the vector result the user wanted). Tokens are
+      counted with a Unicode-aware pattern, so scripts other than Latin reach
+      the same guard instead of being read as zero tokens;
     - CJK terms separated by whitespace can relax with two or more terms because
-      the ASCII token gate would otherwise suppress the fallback entirely;
+      they are not whitespace-delimited the way the token guard assumes;
     - any pure-digit token ("root note 1", "SPEC 16") — identifier-like queries
       over-broaden and create false positives under OR.
     """
@@ -91,7 +102,7 @@ def relaxed_query_words(search_text: str | None) -> list[str] | None:
         # Outcome: preserve the short-query guard after pruning to avoid a broad retry.
         return relaxed_words if len(relaxed_words) >= 2 else None
 
-    tokens = RELAXATION_ASCII_TOKEN_PATTERN.findall(stripped.lower())
+    tokens = RELAXATION_WORD_TOKEN_PATTERN.findall(stripped.lower())
     if len(tokens) < 3 or any(token.isdigit() for token in tokens):
         return None
     pruned_words = [token for token in tokens if token not in RELAXATION_STOPWORDS]
