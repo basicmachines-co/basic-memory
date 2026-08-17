@@ -11,6 +11,7 @@ from basic_memory.mcp.server import mcp
 from basic_memory.schemas.directory import (
     DEFAULT_DIRECTORY_PAGE_SIZE,
     MAX_DIRECTORY_PAGE_SIZE,
+    DirectorySortOrder,
 )
 
 
@@ -42,6 +43,7 @@ async def list_directory(
             validation_alias=AliasChoices("file_name_glob", "glob", "pattern", "filter"),
         ),
     ] = None,
+    sort: DirectorySortOrder | None = None,
     page: int = 1,
     page_size: Annotated[
         int,
@@ -68,6 +70,8 @@ async def list_directory(
                Higher values show subdirectory contents recursively
         file_name_glob: Optional glob pattern for filtering file names
                        Examples: "*.md", "*meeting*", "project_*"
+        sort: Optional file ordering: "title_asc", "title_desc", "updated_asc",
+              or "updated_desc". Directories remain first.
         page: One-indexed result page (default: 1)
         page_size: Number of nodes per page (default: 10, maximum: 200)
         output_format: "text" for a readable listing or "json" for structured pagination data
@@ -100,6 +104,9 @@ async def list_directory(
         # Continue a large listing
         list_directory(dir_name="/projects", page=2, page_size=10)
 
+        # List folders first, then notes from newest to oldest
+        list_directory(dir_name="/projects", sort="updated_desc")
+
         # Explicit project specification
         list_directory(project="work-docs", dir_name="/projects")
 
@@ -118,7 +125,8 @@ async def list_directory(
         active_project,
     ):
         logger.debug(
-            f"Listing directory '{dir_name}' in project {project} with depth={depth}, glob='{file_name_glob}'"
+            f"Listing directory '{dir_name}' in project {project} with "
+            f"depth={depth}, glob='{file_name_glob}', sort={sort}"
         )
 
         # Import here to avoid circular import
@@ -130,6 +138,7 @@ async def list_directory(
             dir_name,
             depth=depth,
             file_name_glob=file_name_glob,
+            sort=sort,
             page=page,
             page_size=page_size,
         )
@@ -158,16 +167,13 @@ async def list_directory(
         )
         output_lines.append("")
 
-        # Group by type and sort
+        # The API has already applied the requested stable order. Partitioning
+        # preserves that order while retaining the existing text presentation.
         directories = [n for n in nodes if n["type"] == "directory"]
         files = [n for n in nodes if n["type"] == "file"]
 
         if not nodes:
             output_lines.append("No items on this page.")
-
-        # Sort by name
-        directories.sort(key=lambda x: x["name"])
-        files.sort(key=lambda x: x["name"])
 
         # Display directories first
         for node in directories:
@@ -247,6 +253,8 @@ async def list_directory(
             ]
             if file_name_glob:
                 continuation_args.append(f"file_name_glob={file_name_glob!r}")
+            if sort is not None:
+                continuation_args.append(f"sort={sort!r}")
             if project_id:
                 continuation_args.append(f"project_id={project_id!r}")
             elif project:

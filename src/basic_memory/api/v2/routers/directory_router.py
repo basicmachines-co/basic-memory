@@ -32,6 +32,7 @@ from basic_memory.schemas.directory import (
     MAX_DIRECTORY_PAGE_SIZE,
     DirectoryListResponse,
     DirectoryNode,
+    DirectorySortOrder,
 )
 
 router = APIRouter(prefix="/directory", tags=["directory-v2"])
@@ -150,6 +151,13 @@ async def list_directory(
     dir_name: str = Query("/", description="Directory path to list"),
     depth: int = Query(1, ge=1, le=10, description="Recursion depth (1-10)"),
     file_name_glob: str | None = Query(None, description="Glob pattern for filtering file names"),
+    sort: DirectorySortOrder | None = Query(
+        None,
+        description=(
+            "Optional file ordering. Directories are always returned first; omitting sort "
+            "preserves legacy filename ordering."
+        ),
+    ),
     page: int = Query(1, ge=1, description="One-indexed result page"),
     page_size: int = Query(
         DEFAULT_DIRECTORY_PAGE_SIZE,
@@ -166,6 +174,7 @@ async def list_directory(
         dir_name: Directory path to list (default: root "/")
         depth: Recursion depth (1-10, default: 1 for immediate children only)
         file_name_glob: Optional glob pattern for filtering file names (e.g., "*.md", "*meeting*")
+        sort: Optional title or updated-time ordering for files
         page: One-indexed result page
         page_size: Number of nodes per page (1-200)
 
@@ -179,6 +188,7 @@ async def list_directory(
             dir_name,
             str(depth),
             file_name_glob or "",
+            sort or "",
             str(page),
             str(page_size),
         ),
@@ -196,6 +206,7 @@ async def list_directory(
             dir_name=dir_name,
             depth=depth,
             file_name_glob=file_name_glob,
+            sort=sort,
             page=page,
             page_size=page_size,
         )

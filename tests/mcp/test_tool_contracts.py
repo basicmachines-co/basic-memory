@@ -53,6 +53,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "dir_name",
         "depth",
         "file_name_glob",
+        "sort",
         "page",
         "page_size",
         "output_format",
@@ -274,6 +275,21 @@ async def test_edit_note_operation_schema_exposes_supported_operations():
 
     assert operation_schema["type"] == "string"
     assert operation_schema["enum"] == EXPECTED_EDIT_NOTE_OPERATIONS
+
+
+@pytest.mark.asyncio
+async def test_list_directory_sort_schema_exposes_supported_orders():
+    """Directory sorting is a closed MCP choice set, not a free-form string."""
+    tool_list = await mcp.list_tools()
+    list_directory_tool = next(tool for tool in tool_list if tool.name == "list_directory")
+
+    input_schema = list_directory_tool.to_mcp_tool().input_schema
+    sort_schema = input_schema["properties"]["sort"]
+
+    assert sort_schema["anyOf"][0] == {
+        "enum": ["title_asc", "title_desc", "updated_asc", "updated_desc"],
+        "type": "string",
+    }
 
 
 @pytest.mark.asyncio

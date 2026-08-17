@@ -3,8 +3,8 @@
 import fnmatch
 import logging
 import os
-from typing import Dict, List, Optional, Sequence
-
+from datetime import datetime
+from typing import Dict, List, Optional, Sequence, assert_never
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -16,9 +16,26 @@ from basic_memory.schemas.directory import (
     MAX_DIRECTORY_PAGE_SIZE,
     DirectoryListResponse,
     DirectoryNode,
+    DirectorySortOrder,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _required_file_updated_at(node: DirectoryNode) -> datetime:
+    """Return the timestamp required by an explicit updated-time sort."""
+    if node.updated_at is None:
+        raise ValueError(f"File directory node '{node.directory_path}' is missing updated_at")
+    return node.updated_at
+
+
+def _file_identity_key(node: DirectoryNode) -> tuple[str, str, str]:
+    """Order files deterministically by display title, path, then stable identity."""
+    return (
+        (node.title or node.name).casefold(),
+        node.directory_path.casefold(),
+        node.external_id or "",
+    )
 
 
 class DirectoryService:
@@ -155,6 +172,7 @@ class DirectoryService:
         dir_name: str = "/",
         depth: int = 1,
         file_name_glob: Optional[str] = None,
+        sort: DirectorySortOrder | None = None,
         page: int = 1,
         page_size: int = DEFAULT_DIRECTORY_PAGE_SIZE,
     ) -> DirectoryListResponse:
@@ -164,6 +182,7 @@ class DirectoryService:
             dir_name: Directory path to list (default: root "/")
             depth: Recursion depth (1 = immediate children only)
             file_name_glob: Glob pattern for filtering file names
+            sort: Optional title or updated-time ordering for files
             page: One-indexed result page
             page_size: Number of nodes per page
 
@@ -211,19 +230,51 @@ class DirectoryService:
             )
 
         # Collect nodes with depth and glob filtering
-        result = []
+        result: list[DirectoryNode] = []
         self._collect_nodes_recursive(target_node, result, depth, file_name_glob, 0)
 
-        # Stable ordering is required before slicing so repeated page requests
-        # neither skip nor duplicate nodes when repository row order changes.
-        result.sort(
-            key=lambda node: (
-                0 if node.type == "directory" else 1,
-                node.name.casefold(),
-                node.directory_path.casefold(),
-                node.directory_path,
+        if sort is None:
+            # Omitting sort is a compatibility contract: existing callers retain the
+            # historical folders-first filename order.
+            result.sort(
+                key=lambda node: (
+                    0 if node.type == "directory" else 1,
+                    node.name.casefold(),
+                    node.directory_path.casefold(),
+                    node.directory_path,
+                )
             )
-        )
+        else:
+            directories = [node for node in result if node.type == "directory"]
+            files = [node for node in result if node.type == "file"]
+
+            # Directories are implicit projections of file paths, so they have no
+            # canonical updated_at. Title sorting applies the selected direction to
+            # folder names; updated sorting keeps the folder group name-ascending.
+            directories.sort(
+                key=lambda node: (
+                    node.name.casefold(),
+                    node.directory_path.casefold(),
+                    node.directory_path,
+                ),
+                reverse=sort == "title_desc",
+            )
+
+            match sort:
+                case "title_asc" | "title_desc":
+                    files.sort(key=_file_identity_key, reverse=sort == "title_desc")
+                case "updated_asc" | "updated_desc":
+                    # Stable secondary ordering prevents equal timestamps from moving
+                    # between pages when repository row order changes.
+                    files.sort(key=_file_identity_key)
+                    files.sort(
+                        key=_required_file_updated_at,
+                        reverse=sort == "updated_desc",
+                    )
+                case _ as unreachable:  # pragma: no cover - closed type is exhaustive
+                    assert_never(unreachable)
+
+            result = [*directories, *files]
 
         total = len(result)
         start = (page - 1) * page_size

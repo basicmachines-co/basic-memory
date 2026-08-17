@@ -1,12 +1,19 @@
 """Schemas for directory tree operations."""
 
 from datetime import datetime
-from typing import List, Optional, Literal
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel
 
 DEFAULT_DIRECTORY_PAGE_SIZE = 10
 MAX_DIRECTORY_PAGE_SIZE = 200
+
+type DirectorySortOrder = Literal[
+    "title_asc",
+    "title_desc",
+    "updated_asc",
+    "updated_desc",
+]
 
 
 class DirectoryNode(BaseModel):

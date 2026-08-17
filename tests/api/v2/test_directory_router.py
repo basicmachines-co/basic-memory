@@ -115,6 +115,39 @@ async def test_list_directory_with_pagination(
 
 
 @pytest.mark.asyncio
+async def test_list_directory_with_sort(
+    client: AsyncClient,
+    test_graph,
+    v2_project_url: str,
+):
+    """The API validates and applies the closed directory sort contract."""
+    response = await client.get(
+        f"{v2_project_url}/directory/list",
+        params={"dir_name": "/test", "sort": "title_desc", "page_size": 200},
+    )
+
+    assert response.status_code == 200
+    listing = DirectoryListResponse.model_validate(response.json())
+    assert [node.name for node in listing.nodes] == [
+        "Root.md",
+        "Deeper Entity.md",
+        "Deep Entity.md",
+        "Connected Entity 2.md",
+        "Connected Entity 1.md",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_list_directory_rejects_invalid_sort(
+    client: AsyncClient,
+    v2_project_url: str,
+):
+    response = await client.get(f"{v2_project_url}/directory/list?sort=not-supported")
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("query", ["page=0", "page_size=0", "page_size=201"])
 async def test_list_directory_rejects_invalid_pagination(
     client: AsyncClient,

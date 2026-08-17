@@ -99,7 +99,12 @@ async def test_list_directory_with_depth_control(client, test_graph, test_projec
     assert "Total: 1 items (1 directory)" in result_depth_1
 
     # Depth 2: should return directory + its files
-    result_depth_2 = await list_directory(project=test_project.name, dir_name="/", depth=2)
+    result_depth_2 = await list_directory(
+        project=test_project.name,
+        dir_name="/",
+        depth=2,
+        sort="title_desc",
+    )
 
     assert isinstance(result_depth_2, str)
     assert "Contents of '/' (depth 2):" in result_depth_2
@@ -110,6 +115,16 @@ async def test_list_directory_with_depth_control(client, test_graph, test_projec
     assert "📄 Deeper Entity.md" in result_depth_2
     assert "📄 Root.md" in result_depth_2
     assert "Total: 6 items (1 directory, 5 files)" in result_depth_2
+    expected_rows = [
+        "📁 test",
+        "📄 Root.md",
+        "📄 Deeper Entity.md",
+        "📄 Deep Entity.md",
+        "📄 Connected Entity 2.md",
+        "📄 Connected Entity 1.md",
+    ]
+    row_positions = [result_depth_2.index(row) for row in expected_rows]
+    assert row_positions == sorted(row_positions)
 
 
 @pytest.mark.asyncio
@@ -275,12 +290,14 @@ async def test_list_directory_continuation_preserves_project_id(
         project_id=test_project.external_id,
         dir_name="/test",
         file_name_glob="*Entity*",
+        sort="updated_desc",
         page=1,
         page_size=2,
     )
 
     assert isinstance(result, str)
     assert "file_name_glob='*Entity*'" in result
+    assert "sort='updated_desc'" in result
     assert f"project_id={test_project.external_id!r}" in result
     assert "project=" not in result
 
@@ -307,7 +324,7 @@ async def test_list_directory_out_of_range_page_reports_pagination(
 
 
 @pytest.mark.asyncio
-async def test_list_directory_json_pagination_preserves_glob_and_depth(
+async def test_list_directory_json_pagination_preserves_glob_depth_and_sort(
     client,
     test_graph,
     test_project,
@@ -317,6 +334,7 @@ async def test_list_directory_json_pagination_preserves_glob_and_depth(
         dir_name="/test",
         depth=2,
         file_name_glob="*Entity*",
+        sort="title_desc",
         page=2,
         page_size=2,
         output_format="json",
@@ -328,8 +346,8 @@ async def test_list_directory_json_pagination_preserves_glob_and_depth(
     assert result["total"] == 4
     assert result["has_more"] is False
     assert [node["name"] for node in result["nodes"]] == [
-        "Deep Entity.md",
-        "Deeper Entity.md",
+        "Connected Entity 2.md",
+        "Connected Entity 1.md",
     ]
 
 

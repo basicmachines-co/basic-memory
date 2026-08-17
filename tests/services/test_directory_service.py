@@ -1,8 +1,84 @@
 """Tests for directory service."""
 
-import pytest
+from datetime import UTC, datetime
 
-from basic_memory.services.directory_service import DirectoryService
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from basic_memory import db
+from basic_memory.models import Entity
+from basic_memory.repository import EntityRepository
+from basic_memory.schemas.directory import DirectoryNode, DirectorySortOrder
+from basic_memory.services.directory_service import DirectoryService, _required_file_updated_at
+
+
+async def _create_sortable_directory_entries(
+    entity_repository: EntityRepository,
+    session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    older = datetime(2026, 1, 1, tzinfo=UTC)
+    newer = datetime(2026, 1, 2, tzinfo=UTC)
+    entries = (
+        Entity(
+            title="Nested alpha",
+            note_type="note",
+            content_type="text/markdown",
+            file_path="alpha-folder/nested.md",
+            checksum="nested-alpha",
+            created_at=older,
+            updated_at=older,
+        ),
+        Entity(
+            title="Nested zulu",
+            note_type="note",
+            content_type="text/markdown",
+            file_path="zulu-folder/nested.md",
+            checksum="nested-zulu",
+            created_at=older,
+            updated_at=older,
+        ),
+        Entity(
+            title="Zulu",
+            note_type="note",
+            content_type="text/markdown",
+            file_path="a-file.md",
+            checksum="root-zulu",
+            created_at=older,
+            updated_at=older,
+        ),
+        Entity(
+            title="Bravo",
+            note_type="note",
+            content_type="text/markdown",
+            file_path="middle-file.md",
+            checksum="root-bravo",
+            created_at=newer,
+            updated_at=newer,
+        ),
+        Entity(
+            title="Alpha",
+            note_type="note",
+            content_type="text/markdown",
+            file_path="z-file.md",
+            checksum="root-alpha",
+            created_at=older,
+            updated_at=older,
+        ),
+    )
+    async with db.scoped_session(session_maker) as session:
+        for entry in entries:
+            await entity_repository.add(session, entry)
+
+
+def test_updated_sort_requires_file_timestamp() -> None:
+    node = DirectoryNode(
+        name="missing-timestamp.md",
+        directory_path="/missing-timestamp.md",
+        type="file",
+    )
+
+    with pytest.raises(ValueError, match="missing updated_at"):
+        _required_file_updated_at(node)
 
 
 @pytest.mark.asyncio
@@ -270,6 +346,56 @@ async def test_list_directory_orders_directories_before_files_across_depth(
         "file",
     ]
     assert result.nodes[0].name == "test"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("sort", "expected_names"),
+    [
+        (
+            None,
+            ["alpha-folder", "zulu-folder", "a-file.md", "middle-file.md", "z-file.md"],
+        ),
+        (
+            "title_asc",
+            ["alpha-folder", "zulu-folder", "z-file.md", "middle-file.md", "a-file.md"],
+        ),
+        (
+            "title_desc",
+            ["zulu-folder", "alpha-folder", "a-file.md", "middle-file.md", "z-file.md"],
+        ),
+        (
+            "updated_asc",
+            ["alpha-folder", "zulu-folder", "z-file.md", "a-file.md", "middle-file.md"],
+        ),
+        (
+            "updated_desc",
+            ["alpha-folder", "zulu-folder", "middle-file.md", "z-file.md", "a-file.md"],
+        ),
+    ],
+)
+async def test_list_directory_sort_variants_are_stable_across_pages(
+    directory_service: DirectoryService,
+    entity_repository: EntityRepository,
+    session_maker: async_sessionmaker[AsyncSession],
+    sort: DirectorySortOrder | None,
+    expected_names: list[str],
+) -> None:
+    await _create_sortable_directory_entries(entity_repository, session_maker)
+
+    pages = [
+        await directory_service.list_directory(
+            dir_name="/",
+            sort=sort,
+            page=page,
+            page_size=2,
+        )
+        for page in range(1, 4)
+    ]
+
+    assert [node.name for page in pages for node in page.nodes] == expected_names
+    assert [page.total for page in pages] == [5, 5, 5]
+    assert [page.has_more for page in pages] == [True, True, False]
 
 
 @pytest.mark.asyncio

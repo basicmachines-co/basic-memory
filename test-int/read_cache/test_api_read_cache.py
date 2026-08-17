@@ -471,6 +471,18 @@ async def test_directory_reads_cache_then_project_invalidation_refreshes(
                 updated_at=datetime.now(timezone.utc),
             ),
         )
+        await repository.add(
+            session,
+            Entity(
+                title="Zebra cached directory note",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="cache-surface/second.md",
+                checksum="second-cached-directory-checksum",
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
+            ),
+        )
 
     app.dependency_overrides[get_read_cache] = lambda: redis_cache.cache
     tree_url = f"{project_url}/directory/tree"
@@ -486,16 +498,30 @@ async def test_directory_reads_cache_then_project_invalidation_refreshes(
     first_tree_response = await client.get(tree_url)
     first_structure_response = await client.get(structure_url)
     first_list_response = await client.get(list_url, params=list_params)
+    title_desc_response = await client.get(
+        list_url,
+        params={**list_params, "sort": "title_desc"},
+    )
     assert first_tree_response.status_code == 200
     assert first_structure_response.status_code == 200
     assert first_list_response.status_code == 200
+    assert title_desc_response.status_code == 200
 
     first_tree = DirectoryNode.model_validate(first_tree_response.json())
     first_structure = DirectoryNode.model_validate(first_structure_response.json())
     first_list = DirectoryListResponse.model_validate(first_list_response.json())
+    title_desc_list = DirectoryListResponse.model_validate(title_desc_response.json())
     assert "/cache-surface/after-cache" not in descendant_paths(first_tree)
     assert "/cache-surface/after-cache" not in descendant_paths(first_structure)
     assert "/cache-surface/after-cache" not in {node.directory_path for node in first_list.nodes}
+    assert [node.title for node in first_list.nodes] == [
+        "Existing cached directory note",
+        "Zebra cached directory note",
+    ]
+    assert [node.title for node in title_desc_list.nodes] == [
+        "Zebra cached directory note",
+        "Existing cached directory note",
+    ]
 
     cache_keys = (
         _cache_key(
@@ -512,7 +538,13 @@ async def test_directory_reads_cache_then_project_invalidation_refreshes(
             project_id=project_external_id,
             operation=ReadCacheOperation.directory_list,
             request="/cache-surface",
-            request_context=("2", "", "1", "200"),
+            request_context=("2", "", "", "1", "200"),
+        ),
+        _cache_key(
+            project_id=project_external_id,
+            operation=ReadCacheOperation.directory_list,
+            request="/cache-surface",
+            request_context=("2", "", "title_desc", "1", "200"),
         ),
     )
     for key in cache_keys:
@@ -540,9 +572,14 @@ async def test_directory_reads_cache_then_project_invalidation_refreshes(
     cached_tree_response = await client.get(tree_url)
     cached_structure_response = await client.get(structure_url)
     cached_list_response = await client.get(list_url, params=list_params)
+    cached_title_desc_response = await client.get(
+        list_url,
+        params={**list_params, "sort": "title_desc"},
+    )
     assert cached_tree_response.json() == first_tree_response.json()
     assert cached_structure_response.json() == first_structure_response.json()
     assert cached_list_response.json() == first_list_response.json()
+    assert cached_title_desc_response.json() == title_desc_response.json()
 
     await redis_cache.cache.invalidate_project(project_external_id)
 
