@@ -28,24 +28,32 @@ async def test_create_or_update_entity_uses_lightweight_exact_resolution(
         content="# Create Or Update",
     )
     sentinel_entity = SimpleNamespace(file_path="notes/existing.md")
-    resolve_calls: list[tuple[str, dict[str, Any]]] = []
+    repository_calls: list[tuple[str, str, dict[str, Any]]] = []
 
-    async def fake_resolve_link(link_text: str, **kwargs):
-        resolve_calls.append((link_text, kwargs))
-        if link_text == schema.file_path:
-            return None
+    async def fake_get_by_file_path(session, file_path: str, **kwargs):
+        repository_calls.append(("file_path", file_path, kwargs))
+        return None
+
+    async def fake_get_by_permalink(session, permalink: str, **kwargs):
+        repository_calls.append(("permalink", permalink, kwargs))
         return sentinel_entity
 
-    monkeypatch.setattr(entity_service.link_resolver, "resolve_link", fake_resolve_link)
+    monkeypatch.setattr(entity_service.repository, "get_by_file_path", fake_get_by_file_path)
+    monkeypatch.setattr(entity_service.repository, "get_by_permalink", fake_get_by_permalink)
+    monkeypatch.setattr(
+        entity_service.link_resolver,
+        "resolve_link",
+        AsyncMock(side_effect=AssertionError("canonical writes must not use link aliases")),
+    )
     monkeypatch.setattr(entity_service, "update_entity", AsyncMock(return_value=sentinel_entity))
 
     entity, is_new = await entity_service.create_or_update_entity(schema)
 
     assert entity is sentinel_entity
     assert is_new is False
-    assert resolve_calls == [
-        (schema.file_path, {"strict": True, "load_relations": False}),
-        (schema.permalink, {"strict": True, "load_relations": False}),
+    assert repository_calls == [
+        ("file_path", schema.file_path, {"load_relations": False}),
+        ("permalink", schema.permalink, {"load_relations": False}),
     ]
 
 

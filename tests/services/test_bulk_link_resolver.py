@@ -167,14 +167,43 @@ async def test_bulk_resolution_normalizes_file_paths(
         updated_at=now,
         project_id=project_id,
     )
+    root_filename_note = Entity(
+        title="Alpha — a descriptive human title",
+        note_type="note",
+        content_type="text/markdown",
+        file_path="alpha_note.md",
+        permalink="descriptive-alpha",
+        created_at=now,
+        updated_at=now,
+        project_id=project_id,
+    )
+    unicode_filename_note = Entity(
+        title="A descriptive French school title",
+        note_type="note",
+        content_type="text/markdown",
+        file_path="École_note.md",
+        permalink="descriptive-school",
+        created_at=now,
+        updated_at=now,
+        project_id=project_id,
+    )
     async with db.scoped_session(session_maker) as session:
         await entity_repository.add(session, custom_permalink_note)
+        await entity_repository.add(session, root_filename_note)
+        await entity_repository.add(session, unicode_filename_note)
 
     resolver = BulkLinkResolver(entity_repository, app_config)
 
     async with db.scoped_session(session_maker) as session:
         results = await resolver.resolve_relation_targets(
-            ["./assets//image.png", "docs/Guide"],
+            [
+                "./assets//image.png",
+                "docs/Guide",
+                "alpha_note",
+                "alpha-note",
+                "ALPHA-NOTE.MD",
+                "école-note",
+            ],
             session=session,
         )
 
@@ -184,6 +213,53 @@ async def test_bulk_resolution_normalizes_file_paths(
     resolved_guide = results["docs/Guide"]
     assert resolved_guide is not None
     assert resolved_guide.id == custom_permalink_note.id
+    for identifier in ("alpha_note", "alpha-note", "ALPHA-NOTE.MD"):
+        resolved_root_note = results[identifier]
+        assert resolved_root_note is not None
+        assert resolved_root_note.id == root_filename_note.id
+    resolved_unicode_note = results["école-note"]
+    assert resolved_unicode_note is not None
+    assert resolved_unicode_note.id == unicode_filename_note.id
+
+
+def test_project_entity_index_declines_ambiguous_file_path_aliases(
+    test_project: Project,
+    bulk_entities: list[Entity],
+) -> None:
+    """Bulk resolution never chooses between colliding underscore/hyphen aliases."""
+    now = datetime.now(timezone.utc)
+    project_id = test_project.id
+    aliases = [
+        Entity(
+            title="Hyphenated target",
+            note_type="note",
+            content_type="text/markdown",
+            file_path="alpha-note.md",
+            permalink="hyphenated-target",
+            created_at=now,
+            updated_at=now,
+            project_id=project_id,
+        ),
+        Entity(
+            title="Underscored target",
+            note_type="note",
+            content_type="text/markdown",
+            file_path="alpha_note.md",
+            permalink="underscored-target",
+            created_at=now,
+            updated_at=now,
+            project_id=project_id,
+        ),
+    ]
+    index = ProjectEntityIdentityIndex.from_entities(test_project, [*bulk_entities, *aliases])
+
+    match = index.resolve_strict(
+        "ALPHA-NOTE",
+        include_project_permalinks=False,
+        workspace_permalink=None,
+    )
+
+    assert match.entity is None
 
 
 def test_project_entity_index_reports_title_derived_permalink_ambiguity(

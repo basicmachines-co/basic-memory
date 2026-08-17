@@ -1,10 +1,10 @@
 """Repository for managing entities in the knowledge graph."""
 
+import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import override, List, Optional, Sequence, Union, Any
-
 
 from loguru import logger
 from sqlalchemy import case, exists, func, or_, select
@@ -19,6 +19,12 @@ from basic_memory.models.relation_search_refresh import RelationSearchRefresh
 from basic_memory.repository.repository import Repository
 
 type EntityMetadata = dict[str, Any] | None
+
+
+def file_path_alias(file_path: Union[Path, str]) -> str:
+    """Return the forgiving filename alias used only after exact path lookup misses."""
+    normalized_path = unicodedata.normalize("NFC", Path(file_path).as_posix())
+    return normalized_path.casefold().replace("_", "-")
 
 
 @dataclass(frozen=True, slots=True)
@@ -193,6 +199,40 @@ class EntityRepository(Repository[Entity]):
             query,
             load_relations=load_relations,
             lock_for_update=lock_for_update,
+        )
+
+    async def get_unique_by_file_path_alias(
+        self,
+        session: AsyncSession,
+        file_path: Union[Path, str],
+        *,
+        load_relations: bool = True,
+    ) -> Optional[Entity]:
+        """Resolve one case-insensitive underscore/hyphen file-path alias.
+
+        Exact paths remain the canonical identity and are queried separately by callers. This
+        fallback only returns an entity when the forgiving alias is unique within the project;
+        colliding files such as ``alpha-note.md`` and ``alpha_note.md`` remain unresolved.
+        """
+        normalized_alias = file_path_alias(file_path)
+
+        # SQLite's lower() only folds ASCII while Postgres follows its configured collation.
+        # Compare the lightweight identity rows in Python so both backends apply the same
+        # Unicode casefolding rules. This path runs only after exact semantic/path matches miss;
+        # bulk relation resolution builds the equivalent project-wide index once instead.
+        query = self.select(Entity.id, Entity.file_path)
+        result = await self.execute_query(session, query, use_query_options=False)
+        matching_ids = [
+            entity_id
+            for entity_id, stored_file_path in result.all()
+            if file_path_alias(stored_file_path) == normalized_alias
+        ]
+        if len(matching_ids) != 1:
+            return None
+        return await self.get_by_id(
+            session,
+            matching_ids[0],
+            load_relations=load_relations,
         )
 
     # -------------------------------------------------------------------------

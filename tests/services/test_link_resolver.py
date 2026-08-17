@@ -411,7 +411,7 @@ async def test_folder_title_pattern_with_md_extension(link_resolver, test_entiti
     assert entity is not None
     assert entity.permalink == f"{project_prefix}/components/core-service"
 
-    # Test that it doesn't try to add .md to single words (no slash)
+    # A nonexistent root filename still stays unresolved.
     entity = await link_resolver.resolve_link("NonExistent")
     assert entity is None
 
@@ -419,6 +419,102 @@ async def test_folder_title_pattern_with_md_extension(link_resolver, test_entiti
     entity = await link_resolver.resolve_link("components/core-service")
     assert entity is not None
     assert entity.permalink == f"{project_prefix}/components/core-service"
+
+
+@pytest.mark.asyncio
+async def test_root_filename_alias_resolves_descriptive_title(
+    entity_repository, session_maker, link_resolver
+):
+    """Root filename stems resolve independently of title and permalink (#1253)."""
+    now = datetime.now(timezone.utc)
+    async with db.scoped_session(session_maker) as session:
+        target = await entity_repository.add(
+            session,
+            EntityModel(
+                title="Alpha — a descriptive human title",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="alpha_note.md",
+                permalink="descriptive-alpha",
+                created_at=now,
+                updated_at=now,
+                project_id=entity_repository.project_id,
+            ),
+        )
+
+    for identifier in ("alpha_note", "alpha-note", "ALPHA-NOTE", "ALPHA-NOTE.MD"):
+        result = await link_resolver.resolve_link(identifier, strict=True, use_search=False)
+        assert result is not None, identifier
+        assert result.id == target.id
+
+
+@pytest.mark.asyncio
+async def test_file_path_alias_uses_backend_independent_unicode_casefolding(
+    entity_repository, session_maker, link_resolver
+):
+    """SQLite and Postgres resolve non-ASCII filename case with identical rules."""
+    now = datetime.now(timezone.utc)
+    async with db.scoped_session(session_maker) as session:
+        target = await entity_repository.add(
+            session,
+            EntityModel(
+                title="A descriptive French school title",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="École_note.md",
+                permalink="descriptive-school",
+                created_at=now,
+                updated_at=now,
+                project_id=entity_repository.project_id,
+            ),
+        )
+
+    result = await link_resolver.resolve_link("école-note", strict=True, use_search=False)
+
+    assert result is not None
+    assert result.id == target.id
+
+
+@pytest.mark.asyncio
+async def test_file_path_alias_collision_does_not_guess(
+    entity_repository, session_maker, link_resolver
+):
+    """A forgiving alias must stay unresolved when two exact paths normalize to it."""
+    now = datetime.now(timezone.utc)
+    async with db.scoped_session(session_maker) as session:
+        hyphenated = await entity_repository.add(
+            session,
+            EntityModel(
+                title="Hyphenated target",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="alpha-note.md",
+                permalink="hyphenated-target",
+                created_at=now,
+                updated_at=now,
+                project_id=entity_repository.project_id,
+            ),
+        )
+        await entity_repository.add(
+            session,
+            EntityModel(
+                title="Underscored target",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="alpha_note.md",
+                permalink="underscored-target",
+                created_at=now,
+                updated_at=now,
+                project_id=entity_repository.project_id,
+            ),
+        )
+
+    ambiguous = await link_resolver.resolve_link("ALPHA-NOTE", use_search=False)
+    assert ambiguous is None
+
+    exact = await link_resolver.resolve_link("alpha-note.md", use_search=False)
+    assert exact is not None
+    assert exact.id == hyphenated.id
 
 
 # Tests for strict mode parameter combinations
@@ -1099,7 +1195,8 @@ async def relative_path_entities(entity_repository, session_maker):
     ├── testing/
     │   ├── link-test.md               (source file for testing)
     │   └── nested/
-    │       └── deep-note.md           (target for relative path)
+    │       ├── deep-note.md           (target for relative path)
+    │       └── under_score.md         (target for filename alias)
     ├── nested/
     │   └── deep-note.md               (different deep-note at root level)
     └── other/
@@ -1174,6 +1271,22 @@ async def relative_path_entities(entity_repository, session_maker):
         )
         entities.append(e4)
 
+        # testing/nested/under_score.md (relative filename-alias target)
+        e5 = await entity_repository.add(
+            session,
+            EntityModel(
+                title="Relative target with descriptive title",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="testing/nested/under_score.md",
+                permalink="relative-descriptive-target",
+                created_at=now,
+                updated_at=now,
+                project_id=project_id,
+            ),
+        )
+        entities.append(e5)
+
     return entities
 
 
@@ -1194,6 +1307,17 @@ async def test_relative_path_resolution_from_subfolder(relative_path_resolver):
     )
     assert result is not None
     assert result.file_path == "testing/nested/deep-note.md"
+
+
+@pytest.mark.asyncio
+async def test_relative_path_resolution_uses_unique_filename_alias(relative_path_resolver):
+    """Relative filename links apply the same underscore/hyphen alias as root links."""
+    result = await relative_path_resolver.resolve_link(
+        "nested/under-score", source_path="testing/link-test.md", use_search=False
+    )
+
+    assert result is not None
+    assert result.file_path == "testing/nested/under_score.md"
 
 
 @pytest.mark.asyncio

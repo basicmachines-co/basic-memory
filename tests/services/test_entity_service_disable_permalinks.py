@@ -59,6 +59,54 @@ async def test_create_entity_with_permalinks_disabled(
 
 
 @pytest.mark.asyncio
+async def test_create_or_update_keeps_aliasing_file_paths_distinct_without_permalinks(
+    entity_repository,
+    observation_repository,
+    relation_repository,
+    entity_parser,
+    file_service: FileService,
+    link_resolver,
+    session_maker,
+):
+    """A forgiving read alias must never turn a distinct create into a canonical move."""
+    entity_service = EntityService(
+        entity_parser=entity_parser,
+        entity_repository=entity_repository,
+        observation_repository=observation_repository,
+        relation_repository=relation_repository,
+        file_service=file_service,
+        link_resolver=link_resolver,
+        app_config=BasicMemoryConfig(disable_permalinks=True),
+        session_maker=session_maker,
+    )
+
+    underscored, underscored_created = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="alpha_note",
+            directory="",
+            note_type="note",
+            content="Underscored content",
+        )
+    )
+    hyphenated, hyphenated_created = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="alpha-note",
+            directory="",
+            note_type="note",
+            content="Hyphenated content",
+        )
+    )
+
+    assert underscored_created is True
+    assert hyphenated_created is True
+    assert underscored.id != hyphenated.id
+    assert underscored.file_path == "alpha_note.md"
+    assert hyphenated.file_path == "alpha-note.md"
+    assert await file_service.exists(underscored.file_path)
+    assert await file_service.exists(hyphenated.file_path)
+
+
+@pytest.mark.asyncio
 async def test_update_entity_with_permalinks_disabled(
     entity_repository,
     observation_repository,

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory.config import BasicMemoryConfig
 from basic_memory.models import Entity, Project
-from basic_memory.repository.entity_repository import EntityRepository
+from basic_memory.repository.entity_repository import EntityRepository, file_path_alias
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.services.link_resolver import normalize_link_text
 from basic_memory.utils import (
@@ -100,6 +100,7 @@ class ProjectEntityIdentityIndex:
     by_permalink: Mapping[str, Entity]
     by_title: Mapping[str, tuple[Entity, ...]]
     by_file_path: Mapping[str, Entity]
+    by_file_path_alias: Mapping[str, Entity]
 
     @classmethod
     def from_entities(
@@ -112,6 +113,7 @@ class ProjectEntityIdentityIndex:
         by_external_id: dict[str, Entity] = {}
         by_permalink: dict[str, Entity] = {}
         by_file_path: dict[str, Entity] = {}
+        file_path_alias_matches: dict[str, list[Entity]] = {}
 
         for entity in entities:
             by_external_id[entity.external_id] = entity
@@ -119,6 +121,7 @@ class ProjectEntityIdentityIndex:
                 by_permalink[entity.permalink] = entity
             title_matches.setdefault(entity.title, []).append(entity)
             by_file_path[entity.file_path] = entity
+            file_path_alias_matches.setdefault(file_path_alias(entity.file_path), []).append(entity)
 
         return cls(
             project=project,
@@ -131,6 +134,11 @@ class ProjectEntityIdentityIndex:
                 for title, matches in title_matches.items()
             },
             by_file_path=by_file_path,
+            by_file_path_alias={
+                alias: matches[0]
+                for alias, matches in file_path_alias_matches.items()
+                if len(matches) == 1
+            },
         )
 
     def resolve_strict(
@@ -167,10 +175,19 @@ class ProjectEntityIdentityIndex:
         if path_match is not None:
             return StrictProjectLinkMatch(path_match)
 
-        if not normalized_path.endswith(".md") and "/" in normalized_path:
-            path_match = self.by_file_path.get(f"{normalized_path}.md")
+        path_with_md = normalized_path
+        can_use_stem_path = "/" in normalized_path or not ambiguous_title
+        has_markdown_extension = normalized_path.casefold().endswith(".md")
+        if not has_markdown_extension and can_use_stem_path:
+            path_with_md = f"{normalized_path}.md"
+            path_match = self.by_file_path.get(path_with_md)
             if path_match is not None:
                 return StrictProjectLinkMatch(path_match)
+
+        if has_markdown_extension or can_use_stem_path:
+            alias_match = self.by_file_path_alias.get(file_path_alias(path_with_md))
+            if alias_match is not None:
+                return StrictProjectLinkMatch(alias_match)
 
         return StrictProjectLinkMatch(entity=None, ambiguous=ambiguous_title)
 

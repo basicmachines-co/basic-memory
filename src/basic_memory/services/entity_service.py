@@ -446,17 +446,22 @@ class EntityService(BaseService[EntityModel]):
             f"Creating or updating entity: {schema.file_path}, permalink: {schema.permalink}"
         )
 
-        existing = await self.link_resolver.resolve_link(
-            schema.file_path,
-            strict=True,
-            load_relations=False,
-        )
-        if not existing and schema.permalink:
-            existing = await self.link_resolver.resolve_link(
-                schema.permalink,
-                strict=True,
+        # Canonical writes may update only the exact file path or permalink requested by the
+        # caller. Forgiving link aliases are intentionally excluded: treating ``alpha-note.md``
+        # as the existing ``alpha_note.md`` here would move/overwrite the canonical note instead
+        # of creating the distinct file the caller requested.
+        async with db.scoped_session(self.session_maker) as session:
+            existing = await self.repository.get_by_file_path(
+                session,
+                schema.file_path,
                 load_relations=False,
             )
+            if not existing and schema.permalink:
+                existing = await self.repository.get_by_permalink(
+                    session,
+                    schema.permalink,
+                    load_relations=False,
+                )
 
         if existing:
             logger.debug(f"Found existing entity: {existing.file_path}")
