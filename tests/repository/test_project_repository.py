@@ -273,6 +273,27 @@ async def test_set_as_default(
 
 
 @pytest.mark.asyncio
+async def test_set_as_default_keeps_existing_default(
+    project_repository: ProjectRepository, test_project: Project, session_maker
+):
+    """Setting the existing default again must leave it persisted as the default."""
+    async with db.scoped_session(session_maker) as session:
+        existing_default = await project_repository.find_by_id(session, test_project.id)
+        assert existing_default is not None
+        assert existing_default.is_default is True
+
+        updated_default = await project_repository.set_as_default(session, existing_default.id)
+        assert updated_default is not None
+        assert updated_default.is_default is True
+
+    # Verify from a new identity map so the assertion reflects persisted database state.
+    async with db.scoped_session(session_maker) as session:
+        persisted_default = await project_repository.get_default_project(session)
+        assert persisted_default is not None
+        assert persisted_default.id == test_project.id
+
+
+@pytest.mark.asyncio
 async def test_update_project(
     project_repository: ProjectRepository, sample_project: Project, session_maker
 ):

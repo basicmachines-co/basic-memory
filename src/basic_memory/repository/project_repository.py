@@ -168,19 +168,24 @@ class ProjectRepository(Repository[Project]):
         Returns:
             The updated project if found, None otherwise
         """
-        # First, clear the default flag for all projects using direct SQL
-        await session.execute(
-            text("UPDATE project SET is_default = NULL WHERE is_default IS NOT NULL")
-        )
-        await session.flush()
-
-        # Set the new default project
         target_project = await self.select_by_id(session, project_id)
-        if target_project:
-            target_project.is_default = True
-            await session.flush()
-            return target_project
-        return None  # pragma: no cover
+        if not target_project:
+            return None  # pragma: no cover
+
+        # Preserve the target row while clearing previous defaults. Clearing an already-default
+        # target through bulk SQL leaves its ORM identity-map value at True, so assigning True
+        # again emits no UPDATE and otherwise persists a database with no default project.
+        await session.execute(
+            text(
+                "UPDATE project SET is_default = NULL "
+                "WHERE id != :project_id AND is_default IS NOT NULL"
+            ),
+            {"project_id": project_id},
+        )
+
+        target_project.is_default = True
+        await session.flush()
+        return target_project
 
     @override
     async def delete(self, session: AsyncSession, entity_id: int) -> bool:
