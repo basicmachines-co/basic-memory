@@ -11,7 +11,8 @@ from markdown_it.token import Token
 # observation categories, so indexed transcripts would mint one junk observation per
 # spoken line. A category that is purely a clock value is never a semantic category;
 # those bracket prefixes stay ordinary content (issue #1219).
-_TIMESTAMP_CATEGORY = re.compile(r"^\d{1,3}:\d{2}(:\d{2})?([.,]\d{1,3})?$")
+_TIMESTAMP_VALUE = r"\d{1,3}:\d{2}(?::\d{2})?(?:[.,]\d{1,3})?"
+_TIMESTAMP_CATEGORY = re.compile(rf"^{_TIMESTAMP_VALUE}(?:\s+-\s+{_TIMESTAMP_VALUE})?$")
 
 
 def _is_task_marker_category(category: str) -> bool:

@@ -160,6 +160,20 @@ def test_timestamp_shapes_rejected_across_formats():
         assert not any(t.meta and "observation" in t.meta for t in tokens), line
 
 
+def test_timestamp_ranges_are_not_observation_categories():
+    """Spaced transcript time ranges stay ordinary content (issue #1270)."""
+    md = MarkdownIt().use(observation_plugin)
+
+    for line in (
+        "- [24:33.098 - 24:41.260] fractional range",
+        "- [1:02 - 2:03] minute range",
+        "- [00:01:02 - 100:02:11] long recording range",
+        "- [12:03,250 - 13:04,500] comma-millisecond range",
+    ):
+        tokens = md.parse(line)
+        assert not any(t.meta and "observation" in t.meta for t in tokens), line
+
+
 def test_hashtag_promoted_timestamp_line_keeps_timecode_in_content():
     """A tagged transcript line is an observation via its hashtag, never via the timecode."""
     md = MarkdownIt().use(observation_plugin)
@@ -180,6 +194,7 @@ def test_numeric_but_non_timestamp_categories_still_parse():
         ("- [2024] year in review", "2024"),
         ("- [v1:2] odd but not a clock", "v1:2"),
         ("- [10:30am] time-of-day words", "10:30am"),
+        ("- [10:30am - 11:30am] named time range", "10:30am - 11:30am"),
     ):
         tokens = md.parse(line)
         token = next(t for t in tokens if t.type == "inline")
