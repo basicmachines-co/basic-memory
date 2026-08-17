@@ -61,24 +61,37 @@ def test_relaxed_query_words_supports_non_latin_alphabetic_scripts(
 
 
 @pytest.mark.parametrize(
-    "query",
+    ("query", "expected"),
     [
-        "पहुंच कैसे रद्द करें",  # Devanagari
-        "วิธี เพิกถอน การเข้าถึง",  # Thai
+        ("पहुंच कैसे रद्द करें", ["पहुंच", "कैसे", "रद्द", "करें"]),  # Devanagari
+        ("วิธี เพิกถอน การเข้าถึง", ["วิธี", "เพิกถอน", "การเข้าถึง"]),  # Thai
+        ("como revogar acesso concedido", ["como", "revogar", "acesso", "concedido"]),
     ],
 )
-def test_relaxed_query_words_still_splits_scripts_with_combining_marks(query: str) -> None:
-    """Known limitation: abugidas split on combining marks, which `\\w` excludes.
+def test_relaxed_query_words_keeps_combining_marks_with_their_base_character(
+    query: str,
+    expected: list[str],
+) -> None:
+    """Vowel signs and diacritics stay inside the word they attach to.
 
-    Vowel signs and viramas are non-spacing marks, so a `\\w`-based pattern cuts
-    each syllable cluster into fragments. Relaxation still engages — the token
-    count only grows — but the resulting OR terms are word fragments rather than
-    words. Proper support needs grapheme-cluster segmentation; this test pins the
-    current behaviour so a future change is a deliberate one.
+    Combining marks are not alphanumeric, so treating them as separators splits
+    one abugida word into syllable fragments. The token count then inflates past
+    the three-token guard and relaxation ORs those fragments together.
     """
-    words = relaxed_query_words(query)
-    assert words is not None
-    assert len(words) > len(query.split())
+    assert relaxed_query_words(query) == expected
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "अंतर्राष्ट्रीयकरण",  # one Devanagari word: 7 fragments if marks split it
+        "การเข้าถึง",  # one Thai word
+        "pre\u0301sentation",  # one word, NFD-decomposed acute accent
+    ],
+)
+def test_relaxed_query_words_guards_single_words_with_combining_marks(query: str) -> None:
+    """A single word stays one token, so the short-query guard still rejects it."""
+    assert relaxed_query_words(query) is None
 
 
 @pytest.mark.parametrize(

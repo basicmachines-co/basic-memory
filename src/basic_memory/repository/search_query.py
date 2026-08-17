@@ -1,6 +1,7 @@
 """Shared full-text query preparation rules."""
 
 import re
+import unicodedata
 
 # Interrogative/function words contribute lexical noise when a strict
 # full-text query is relaxed: "when OR did OR a" matches loud wrong documents
@@ -25,17 +26,37 @@ RELAXATION_CJK_PATTERN = re.compile(
     r"\uff65-\uff9f"  # Halfwidth Katakana
     r"]"
 )
-# Unicode-aware: `\w` minus underscore keeps the alphanumeric intent of the
-# original ASCII pattern while also counting Cyrillic, Greek, Hebrew, Arabic,
-# Armenian, and Georgian words. An ASCII-only gate made every such query look
-# like it had zero tokens, so the three-token guard below rejected all of them
-# and the hybrid FTS branch silently contributed nothing.
-#
-# Abugidas (Devanagari, Thai) are only partially handled: their vowel signs are
-# non-spacing marks outside `\w`, so a word splits into syllable fragments.
-# Relaxation still engages, but proper support needs grapheme segmentation.
-RELAXATION_WORD_TOKEN_PATTERN = re.compile(r"[^\W_]+", re.UNICODE)
 RELAXATION_EDGE_PUNCTUATION = "?!.,;:，。！？；：、"
+
+
+def relaxation_word_tokens(text: str) -> list[str]:
+    """Split text into word tokens for the relaxation eligibility guards.
+
+    A token is a run of alphanumeric characters together with any combining
+    marks attached to them. Counting this way matters twice over:
+
+    - an ASCII-only rule saw zero tokens in Cyrillic, Greek, Hebrew, Arabic,
+      Armenian, and Georgian queries, so the three-token guard below rejected
+      every one of them and the hybrid FTS branch silently contributed nothing;
+    - combining marks are not alphanumeric, so counting them as separators cuts
+      abugidas (Devanagari, Thai) and decomposed text into syllable fragments.
+      One word then looks like several tokens, passes the three-token guard, and
+      relaxes into a broad OR of fragments — the opposite of what the guard is
+      for. Keeping marks with their base character preserves it.
+    """
+    tokens: list[str] = []
+    current: list[str] = []
+    for char in text:
+        # A leading mark has no base character to attach to, so it cannot open
+        # a token; that keeps stray marks from forming fragment-only terms.
+        if char.isalnum() or (current and unicodedata.category(char).startswith("M")):
+            current.append(char)
+        elif current:
+            tokens.append("".join(current))
+            current = []
+    if current:
+        tokens.append("".join(current))
+    return tokens
 
 
 def _dedupe_relaxation_words(words: list[str]) -> list[str]:
@@ -66,11 +87,11 @@ def relaxed_query_words(search_text: str | None) -> list[str] | None:
 
     - empty / quoted / explicit-boolean queries (user intent is not
       second-guessed);
-    - fewer than three alphanumeric tokens (short queries like "New Feature"
+    - fewer than three word tokens (short queries like "New Feature"
       over-broaden under OR — and in hybrid the relaxed FTS-only rows normalize
       to 1.0 and can outrank the vector result the user wanted). Tokens are
-      counted with a Unicode-aware pattern, so scripts other than Latin reach
-      the same guard instead of being read as zero tokens;
+      counted with relaxation_word_tokens, so scripts other than Latin reach the
+      same guard instead of being read as zero tokens;
     - CJK terms separated by whitespace can relax with two or more terms because
       they are not whitespace-delimited the way the token guard assumes;
     - any pure-digit token ("root note 1", "SPEC 16") — identifier-like queries
@@ -102,7 +123,7 @@ def relaxed_query_words(search_text: str | None) -> list[str] | None:
         # Outcome: preserve the short-query guard after pruning to avoid a broad retry.
         return relaxed_words if len(relaxed_words) >= 2 else None
 
-    tokens = RELAXATION_WORD_TOKEN_PATTERN.findall(stripped.lower())
+    tokens = relaxation_word_tokens(stripped.lower())
     if len(tokens) < 3 or any(token.isdigit() for token in tokens):
         return None
     pruned_words = [token for token in tokens if token not in RELAXATION_STOPWORDS]
