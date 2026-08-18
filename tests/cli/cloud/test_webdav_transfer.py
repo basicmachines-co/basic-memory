@@ -5,7 +5,9 @@ surface, so every `--on-conflict` strategy is proven to behave the way it does o
 the Personal (rclone) path.
 """
 
+import errno
 import hashlib
+import importlib
 import os
 import re
 from contextlib import asynccontextmanager
@@ -698,8 +700,10 @@ async def test_pull_leaves_a_local_note_that_appeared_after_planning(config_home
     # Written after the plan classified this path as new — a note nobody compared.
     _write(root, "raced.md", "written since the plan")
 
-    async def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
-        raise AssertionError("must not download over a note that appeared")
+    async def handler(request: httpx.Request) -> httpx.Response:
+        # The download does run — nothing may be staged at the destination until
+        # the bytes exist — but publication is what refuses.
+        return httpx.Response(200, content=b"from cloud")
 
     await webdav_project_transfer(
         "research",
@@ -711,6 +715,8 @@ async def test_pull_leaves_a_local_note_that_appeared_after_planning(config_home
     )
 
     assert (root / "raced.md").read_text() == "written since the plan"
+    # The staged temp file is cleaned up either way.
+    assert sorted(p.name for p in root.iterdir()) == ["raced.md"]
     output = _plain(capsys.readouterr().out)
     assert "Transferred 0 file(s)" in output
     assert "appeared on the destination" in output
@@ -834,7 +840,9 @@ async def test_pull_round_trips_filenames_containing_url_delimiters(config_home,
         requested.append(request.url.path)
         return httpx.Response(200, content=b"body")
 
-    plan = TransferPlan(new=["notes/a#draft.md", "notes/b?v2.md", "notes/c d.md"])
+    # `?` is exercised in the client tests instead: Windows will not allow a file
+    # by that name on disk, and this test has to actually write one.
+    plan = TransferPlan(new=["notes/a#draft.md", "notes/c d.md"])
     await webdav_project_transfer(
         "research",
         root,
@@ -846,11 +854,10 @@ async def test_pull_round_trips_filenames_containing_url_delimiters(config_home,
 
     assert requested == [
         "/webdav/research/notes/a#draft.md",
-        "/webdav/research/notes/b?v2.md",
         "/webdav/research/notes/c d.md",
     ]
     assert (root / "notes" / "a#draft.md").read_bytes() == b"body"
-    assert (root / "notes" / "b?v2.md").read_bytes() == b"body"
+    assert (root / "notes" / "c d.md").read_bytes() == b"body"
 
 
 @pytest.mark.asyncio
@@ -875,3 +882,226 @@ async def test_push_sends_filenames_containing_url_delimiters_intact(config_home
     )
 
     assert requested == ["/webdav/research/a#draft.md"]
+
+
+# --- Nothing is created at the destination before the bytes exist ---
+
+
+@pytest.mark.asyncio
+async def test_pull_leaves_a_note_created_during_the_download(config_home, tmp_path, capsys):
+    """The destination is claimed after the download, so a note that lands mid-flight survives."""
+    root = tmp_path / "research"
+    root.mkdir()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        # Racing writer: the note appears while the download is in flight.
+        _write(root, "raced.md", "written during the download")
+        return httpx.Response(200, content=b"from cloud")
+
+    await webdav_project_transfer(
+        "research",
+        root,
+        "pull",
+        TransferPlan(new=["raced.md"]),
+        workspace_id="team-tenant",
+        client_cm_factory=_client_factory(handler),
+    )
+
+    assert (root / "raced.md").read_text() == "written during the download"
+    output = _plain(capsys.readouterr().out)
+    assert "Transferred 0 file(s)" in output
+    assert "appeared on the destination" in output
+
+
+@pytest.mark.asyncio
+async def test_pull_leaves_content_written_into_the_destination_during_the_download(
+    config_home, tmp_path
+):
+    """No empty placeholder exists for an editor to fill and have discarded."""
+    root = tmp_path / "research"
+    root.mkdir()
+    observed: list[list[str]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        # An editor opening the destination mid-download must find nothing there
+        # to open, and its content must survive whatever the transfer does next.
+        observed.append(sorted(p.name for p in root.iterdir()))
+        _write(root, "raced.md", "editor content")
+        return httpx.Response(200, content=b"from cloud")
+
+    await webdav_project_transfer(
+        "research",
+        root,
+        "pull",
+        TransferPlan(new=["raced.md"]),
+        workspace_id="team-tenant",
+        client_cm_factory=_client_factory(handler),
+    )
+
+    assert observed == [[]]  # nothing staged at the destination before the bytes existed
+    assert (root / "raced.md").read_text() == "editor content"
+
+
+@pytest.mark.asyncio
+async def test_pull_leaves_nothing_behind_when_publication_fails(
+    config_home, tmp_path, monkeypatch
+):
+    """A failure after a successful download must not leave a phantom note."""
+    root = tmp_path / "research"
+    root.mkdir()
+
+    module = importlib.import_module("basic_memory.cli.commands.cloud.webdav_transfer")
+
+    def _explode(*_args, **_kwargs):
+        raise OSError("publication failed")
+
+    monkeypatch.setattr(module.os, "link", _explode)
+    monkeypatch.setattr(module.os, "open", _explode)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, content=b"from cloud")
+
+    with pytest.raises(OSError, match="publication failed"):
+        await webdav_project_transfer(
+            "research",
+            root,
+            "pull",
+            TransferPlan(new=["a.md"]),
+            workspace_id="team-tenant",
+            client_cm_factory=_client_factory(handler),
+        )
+
+    assert sorted(p.name for p in root.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_pull_publishes_without_hardlinks_when_the_filesystem_cannot(
+    config_home, tmp_path, monkeypatch
+):
+    """exFAT and some virtual mounts have no hardlinks; the no-clobber rule still holds."""
+    root = tmp_path / "research"
+    root.mkdir()
+    _write(root, "taken.md", "already here")
+
+    module = importlib.import_module("basic_memory.cli.commands.cloud.webdav_transfer")
+
+    def _unsupported(*_args, **_kwargs):
+        raise OSError(errno.EPERM, "hardlinks are not supported here")
+
+    monkeypatch.setattr(module.os, "link", _unsupported)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            content=b"from cloud",
+            headers={"Last-Modified": "Mon, 08 Jun 2026 10:30:00 GMT"},
+        )
+
+    await webdav_project_transfer(
+        "research",
+        root,
+        "pull",
+        TransferPlan(new=["fresh.md", "taken.md"]),
+        workspace_id="team-tenant",
+        client_cm_factory=_client_factory(handler),
+    )
+
+    # The new name is written, timestamp and all; the taken one is untouched.
+    assert (root / "fresh.md").read_bytes() == b"from cloud"
+    assert (root / "fresh.md").stat().st_mtime == pytest.approx(MODIFIED.timestamp())
+    assert (root / "taken.md").read_text() == "already here"
+
+
+# --- The conditional create, not the re-list, is what holds the line on push ---
+
+
+@pytest.mark.asyncio
+async def test_push_sends_a_conditional_create_and_honors_a_refusal(config_home, tmp_path, capsys):
+    """A path created after the re-list is refused at the write itself."""
+    root = tmp_path / "research"
+    _write(root, "raced.md", "local content")
+    _write(root, "fresh.md", "also local")
+
+    seen: list[tuple[str, str | None]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PROPFIND":
+            # The listing is clean: this race opens *after* it.
+            return httpx.Response(207, text=_propfind_body([]))
+        seen.append((request.url.path, request.headers.get("If-None-Match")))
+        if request.url.path.endswith("raced.md"):
+            return httpx.Response(412, text="Precondition Failed")
+        return httpx.Response(201)
+
+    await webdav_project_transfer(
+        "research",
+        root,
+        "push",
+        TransferPlan(new=["fresh.md", "raced.md"]),
+        workspace_id="team-tenant",
+        client_cm_factory=_client_factory(handler),
+    )
+
+    assert seen == [
+        ("/webdav/research/fresh.md", "*"),
+        ("/webdav/research/raced.md", "*"),
+    ]
+    output = _plain(capsys.readouterr().out)
+    assert "Transferred 1 file(s)" in output
+    assert "appeared on the destination" in output
+    assert "raced.md" in output
+
+
+@pytest.mark.asyncio
+async def test_push_keep_local_does_not_send_a_conditional_create(config_home, tmp_path):
+    """An explicit resolution is an instruction to replace, so it must not be refused."""
+    root = tmp_path / "research"
+    _write(root, "dup.md", "local wins")
+
+    seen: list[tuple[str, str | None]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PROPFIND":
+            return httpx.Response(207, text=_propfind_body(["dup.md"]))
+        seen.append((request.url.path, request.headers.get("If-None-Match")))
+        return httpx.Response(204)
+
+    await webdav_project_transfer(
+        "research",
+        root,
+        "push",
+        TransferPlan(conflicts=["dup.md"]),
+        workspace_id="team-tenant",
+        strategy="keep-local",
+        client_cm_factory=_client_factory(handler),
+    )
+
+    assert seen == [("/webdav/research/dup.md", None)]
+
+
+@pytest.mark.asyncio
+async def test_push_keep_both_conflict_copies_are_conditional(config_home, tmp_path):
+    """A conflict copy is a create too — it must never land on an existing name."""
+    root = tmp_path / "research"
+    _write(root, "dup.md", "local version")
+
+    seen: list[tuple[str, str | None]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "PROPFIND":
+            return httpx.Response(207, text=_propfind_body([]))
+        seen.append((request.url.path, request.headers.get("If-None-Match")))
+        return httpx.Response(201)
+
+    await webdav_project_transfer(
+        "research",
+        root,
+        "push",
+        TransferPlan(conflicts=["dup.md"]),
+        workspace_id="team-tenant",
+        strategy="keep-both",
+        conflict_suffix="S",
+        client_cm_factory=_client_factory(handler),
+    )
+
+    assert seen == [("/webdav/research/dup.conflict-S.md", "*")]

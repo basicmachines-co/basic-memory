@@ -15,7 +15,8 @@ transfer engine over that transport, and it keeps the same contract:
 - files that differ on both sides are conflicts, resolved only by an explicit
   ``--on-conflict`` choice
 - a path the plan cleared as new is only ever created, never used to replace
-  something that arrived in the meantime
+  something that arrived in the meantime — enforced at the write itself, by an
+  exclusive create on pull and a conditional create on push
 - deletions are not propagated (see #862)
 
 Comparison is by entity tag plus size, falling back to last-modified plus size
@@ -46,6 +47,7 @@ from basic_memory.cli.commands.cloud.transfer import (
     strategy_overwrites_dest,
 )
 from basic_memory.cli.commands.cloud.webdav import (
+    DownloadedFile,
     RemoteFile,
     WebdavError,
     download_file,
@@ -199,11 +201,11 @@ async def webdav_project_transfer(
                 console.print(f"  {transfer.describe()}")
             if direction == "pull":
                 written = await _pull_file(client, project, local_root, transfer)
-                if not written:
-                    appeared.append(transfer.dest_rel)
-                    continue
             else:
-                await _push_file(client, project, local_root, transfer)
+                written = await _push_file(client, project, local_root, transfer)
+            if not written:
+                appeared.append(transfer.dest_rel)
+                continue
             transferred += 1
 
     console.print(f"[dim]Transferred {transferred} file(s).[/dim]")
@@ -352,8 +354,15 @@ def _file_content_hash(path: Path) -> str:
 # The Personal path does not have this problem, and not because of its plan:
 # `project_copy` passes `--ignore-existing`, and rclone evaluates that against
 # the destination listing it makes at copy time, not against the earlier
-# `rclone check`. So a file that appeared in between is skipped there. These two
-# guards give the WebDAV path the same property, per direction.
+# `rclone check`. So a file that appeared in between is skipped there.
+#
+# What actually holds the line here is a precondition evaluated at the write
+# itself, per direction: an exclusive create on pull, and `If-None-Match: *` on
+# push. Both are atomic with the write, so no listing this client made — however
+# recent — is standing between a teammate and their note. The re-list below is
+# an optimization and a reporting aid, not the correctness boundary: it spares
+# pointless round trips and names what was skipped, and it is allowed to be
+# stale, because the write refuses on its own.
 
 
 async def _drop_appeared_on_cloud(
@@ -361,12 +370,12 @@ async def _drop_appeared_on_cloud(
 ) -> tuple[list[_Transfer], list[str]]:
     """Re-read the cloud and drop create-only pushes whose path now exists.
 
-    This is the analogue of rclone re-listing the destination at copy time. It
-    narrows the window rather than closing it: nothing here is atomic with the
-    PUT that follows, so a file created in the remaining moments is still
-    overwritten. Closing it needs a conditional create on the service side; the
-    write endpoint does not act on conditional request headers today, so sending
-    one would be a guard that silently does nothing.
+    The analogue of rclone re-listing the destination at copy time: it avoids
+    uploading bytes that are certain to be refused, and it names the collisions
+    up front instead of one at a time. It is deliberately not the safety
+    mechanism — the window between this listing and the Nth PUT grows with every
+    file ahead of it in the queue. ``If-None-Match: *`` on each create-only
+    upload is what closes that window.
     """
     create_only = {transfer.dest_rel for transfer in transfers if transfer.create_only}
     if not create_only:
@@ -410,36 +419,33 @@ async def _pull_file(
 ) -> bool:
     """Download one cloud file and land it under the destination path.
 
-    Returns False when a create-only transfer found the path already taken, so
-    the caller can report it instead of replacing a note it never compared.
+    Nothing is created at the destination until the bytes exist: the download
+    lands in a sibling temp file, and only then is the name claimed. Returns
+    False when a create-only transfer found the name already taken, so the
+    caller can report it instead of replacing a note it never compared.
     """
     target = _safe_local_path(local_root, transfer.dest_rel)
-    target.parent.mkdir(parents=True, exist_ok=True)
-
-    # Trigger: the plan cleared this path for creation only.
-    # Why: an exclusive create is the one check the filesystem can make
-    # atomically — a stat-then-write would leave the same race open. It also
-    # refuses a symlink outright, so a link that appeared here is treated as the
-    # path being taken rather than followed.
-    # Outcome: claim the name up front, or leave the existing note alone.
-    if transfer.create_only:
-        try:
-            os.close(os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
-        except FileExistsError:
-            return False
-    else:
+    if not transfer.create_only:
         _refuse_symlink(target, transfer.dest_rel)
 
-    try:
-        downloaded = await download_file(client, project, transfer.source_rel)
-    except WebdavError:
-        # Do not leave the empty placeholder behind as a phantom note.
-        if transfer.create_only:
-            target.unlink(missing_ok=True)
-        raise
+    downloaded = await download_file(client, project, transfer.source_rel)
 
-    # Write to a sibling temp file and rename into place: an interrupted pull
-    # must never leave a half-written note in the user's knowledge base.
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = _write_temp_file(target, downloaded)
+    try:
+        if transfer.create_only:
+            return _publish_new(temp_path, target, downloaded)
+        # An explicit keep-cloud is an instruction to replace what is there.
+        os.replace(temp_path, target)
+        return True
+    finally:
+        # After a rename the temp name is already gone; after a link or a
+        # direct write it is the copy to drop.
+        temp_path.unlink(missing_ok=True)
+
+
+def _write_temp_file(target: Path, downloaded: DownloadedFile) -> Path:
+    """Stage the downloaded bytes beside the destination, fully written."""
     handle, temp_name = tempfile.mkstemp(
         dir=target.parent, prefix=f".{target.name}.", suffix=".part"
     )
@@ -447,18 +453,72 @@ async def _pull_file(
     try:
         with os.fdopen(handle, "wb") as stream:
             stream.write(downloaded.content)
-        # Carry the cloud's timestamp onto the local copy, the way rclone does.
-        # Without it every pulled file would look freshly modified, and the
-        # last-modified fallback in _compare could never report a match.
-        if downloaded.modified is not None:
-            stamp = downloaded.modified.timestamp()
-            os.utime(temp_path, (stamp, stamp))
-        os.replace(temp_path, target)
-    finally:
-        # A no-op once the rename succeeded; the cleanup path when it did not.
+        # The timestamp is set here, before publication, because it lives on the
+        # inode — a hardlinked publish shares it, and there is no window in which
+        # the published note carries the wrong mtime.
+        _apply_modified(temp_path, downloaded)
+    except BaseException:
         temp_path.unlink(missing_ok=True)
+        raise
 
+    return temp_path
+
+
+def _publish_new(temp_path: Path, target: Path, downloaded: DownloadedFile) -> bool:
+    """Claim a name that nothing else holds, atomically.
+
+    ``os.link`` is the atomic no-replace publish: it fails outright when the
+    name is taken, so a note that appeared during the download is never
+    destroyed, and no reader ever observes a half-written file.
+    """
+    try:
+        os.link(temp_path, target)
+        return True
+    except FileExistsError:
+        return False
+    except OSError:
+        # Trigger: the filesystem cannot hardlink at all — exFAT, and the
+        # virtual/network mounts this project already accommodates elsewhere.
+        # Why: refusing outright would break pull for those users, and the
+        # property that has to hold — never destroying a note that appeared —
+        # does not actually need links. An exclusive create claims the name just
+        # as atomically.
+        # Outcome: the same no-clobber guarantee, weaker only in that a reader
+        # can catch the new file mid-write. No unlinked filesystem can do
+        # better, and a real failure (no space, no permission) still surfaces
+        # from the create below rather than being swallowed here.
+        return _publish_new_without_link(target, downloaded)
+
+
+def _publish_new_without_link(target: Path, downloaded: DownloadedFile) -> bool:
+    """Claim the name with an exclusive create, then write through it."""
+    try:
+        handle = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return False
+
+    try:
+        with os.fdopen(handle, "wb") as stream:
+            stream.write(downloaded.content)
+    except BaseException:
+        # Never leave a note behind that holds none of the content.
+        target.unlink(missing_ok=True)
+        raise
+
+    _apply_modified(target, downloaded)
     return True
+
+
+def _apply_modified(path: Path, downloaded: DownloadedFile) -> None:
+    """Carry the cloud's timestamp onto the local copy, the way rclone does.
+
+    Without it every pulled file would look freshly modified, and the
+    last-modified fallback in ``_compare`` could never report a match.
+    """
+    if downloaded.modified is None:
+        return
+    stamp = downloaded.modified.timestamp()
+    os.utime(path, (stamp, stamp))
 
 
 async def _push_file(
@@ -466,17 +526,22 @@ async def _push_file(
     project: str,
     local_root: Path,
     transfer: _Transfer,
-) -> None:
-    """Upload one local file to the destination path in the cloud project."""
+) -> bool:
+    """Upload one local file to the destination path in the cloud project.
+
+    Returns False when a create-only upload was refused because the path now
+    exists in the cloud, mirroring the pull side.
+    """
     source = _safe_local_path(local_root, transfer.source_rel)
     _refuse_symlink(source, transfer.source_rel)
     stat = source.stat()
-    await upload_file(
+    return await upload_file(
         client,
         project,
         transfer.dest_rel,
         content=source.read_bytes(),
         mtime=int(stat.st_mtime),
+        create_only=transfer.create_only,
     )
 
 

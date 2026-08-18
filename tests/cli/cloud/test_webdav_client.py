@@ -424,3 +424,47 @@ async def test_delimiter_filenames_round_trip_through_list_and_download():
     assert [f.path for f in files] == ["a#draft.md"]
     # httpx reports the decoded path; the delimiter survived the round trip.
     assert fetched == ["/webdav/research/a#draft.md"]
+
+
+@pytest.mark.asyncio
+async def test_upload_file_create_only_sends_the_conditional_header():
+    seen: dict[str, object] = {}
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen["if_none_match"] = request.headers.get("If-None-Match")
+        return httpx.Response(201)
+
+    async with _client(handler) as client:
+        written = await upload_file(
+            client, "research", "a.md", content=b"hi", mtime=1, create_only=True
+        )
+
+    assert written is True
+    assert seen == {"if_none_match": "*"}
+
+
+@pytest.mark.asyncio
+async def test_upload_file_create_only_reports_a_refused_precondition():
+    """412 is the answer the request asked for, not a failure to raise on."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(412, text="Precondition Failed")
+
+    async with _client(handler) as client:
+        written = await upload_file(
+            client, "research", "a.md", content=b"hi", mtime=1, create_only=True
+        )
+
+    assert written is False
+
+
+@pytest.mark.asyncio
+async def test_upload_file_without_create_only_still_raises_on_412():
+    """Only a conditional write can interpret 412; anywhere else it is an error."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(412, text="Precondition Failed")
+
+    async with _client(handler) as client:
+        with pytest.raises(WebdavError, match="HTTP 412"):
+            await upload_file(client, "research", "a.md", content=b"hi", mtime=1)

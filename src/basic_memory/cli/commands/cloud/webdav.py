@@ -194,25 +194,42 @@ async def upload_file(
     *,
     content: bytes,
     mtime: int,
-) -> None:
+    create_only: bool = False,
+) -> bool:
     """Write one file, advertising the local modification time.
 
     ``X-OC-Mtime`` (the ownCloud/Nextcloud convention) is what `bm cloud upload`
     already sends, so the two write paths look identical to the service.
 
+    ``create_only`` sends ``If-None-Match: *``, which asks the service to refuse
+    the write if the resource already exists. That precondition is evaluated at
+    the moment of the write, which is the only place a client-side check cannot
+    reach: any listing this client did beforehand is already stale by the time
+    the request lands.
+
+    Returns:
+        True when the file was written; False when a create-only write was
+        refused because the resource already exists.
+
     Raises:
-        WebdavError: If the service refuses the upload.
+        WebdavError: If the service refuses the upload for any other reason.
     """
     request_path = webdav_path(project, rel_path)
+    headers = {"X-OC-Mtime": str(mtime)}
+    if create_only:
+        headers["If-None-Match"] = "*"
+
     try:
-        response = await client.put(
-            request_path,
-            content=content,
-            headers={"X-OC-Mtime": str(mtime)},
-        )
+        response = await client.put(request_path, content=content, headers=headers)
+        # Checked before raise_for_status: a refused precondition is the answer
+        # this call asked for, not a failure.
+        if create_only and response.status_code == httpx.codes.PRECONDITION_FAILED:
+            return False
         response.raise_for_status()
     except httpx.HTTPError as exc:
         raise WebdavError(f"Failed to upload {rel_path}: {_describe(exc)}") from exc
+
+    return True
 
 
 # --- PROPFIND parsing ---
