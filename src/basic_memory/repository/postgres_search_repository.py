@@ -231,12 +231,24 @@ class PostgresSearchRepository(SearchRepositoryBase):
         return self._prepare_single_term(term, is_prefix)
 
     @staticmethod
+    def _relaxed_tsquery_term(word: str) -> str:
+        """Render one relaxed word as a tsquery-safe prefix expression.
+
+        Mirrors the SQLite renderer: a word token can contain an apostrophe, and
+        tsquery reads that as lexeme-quoting syntax rather than text. Quoting the
+        lexeme and doubling any interior quote keeps it literal.
+        """
+        if "'" in word:
+            return "'{}':*".format(word.replace("'", "''"))
+        return f"{word}:*"
+
+    @staticmethod
     def _relaxed_tsquery_text(search_text: Optional[str]) -> Optional[str]:
         """OR-relaxed tsquery expression for a failed strict query, or None."""
         words = relaxed_query_words(search_text)
         if not words:
             return None
-        return " | ".join(f"{word}:*" for word in words)
+        return " | ".join(PostgresSearchRepository._relaxed_tsquery_term(word) for word in words)
 
     def _prepare_boolean_query(self, query: str) -> str:
         """Convert Boolean query to tsquery format.

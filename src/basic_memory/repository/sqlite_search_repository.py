@@ -398,12 +398,25 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         return self._prepare_single_term(term, is_prefix)
 
     @staticmethod
+    def _relaxed_fts_term(word: str) -> str:
+        """Render one relaxed word as an FTS5-safe prefix expression.
+
+        A word token can contain an apostrophe ("об'єкт", "don't"). Interpolated
+        bare it is FTS5 syntax, not text: the whole expression fails to parse, the
+        caller swallows the syntax error, and the relaxed retry returns nothing —
+        the exact silent-empty-FTS failure this fallback exists to prevent.
+        """
+        if "'" in word or '"' in word:
+            return '"{}"*'.format(word.replace('"', '""'))
+        return f"{word}*"
+
+    @staticmethod
     def _relaxed_fts_text(search_text: Optional[str]) -> Optional[str]:
         """OR-relaxed FTS5 expression for a failed strict query, or None."""
         words = relaxed_query_words(search_text)
         if not words:
             return None
-        return " OR ".join(f"{word}*" for word in words)
+        return " OR ".join(SQLiteSearchRepository._relaxed_fts_term(word) for word in words)
 
     @override
     async def semantic_effectively_enabled(self) -> bool:
