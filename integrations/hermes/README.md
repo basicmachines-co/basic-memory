@@ -106,7 +106,7 @@ Plugin v0.2.0 and later register the commands above, but some Hermes Agent gatew
 - `hermes memory status` shows `Provider: basic-memory` and `Status: available`; but
 - Discord/native slash command pickers do not show `/bm-search`, `/bm-read`, `/bm-context`, and the other `/bm-*` commands after `hermes gateway restart`.
 
-This is a Hermes Agent plugin-discovery issue, not a Basic Memory runtime issue. It is tracked upstream in [NousResearch/hermes-agent#23603](https://github.com/NousResearch/hermes-agent/issues/23603). Updating the Basic Memory plugin alone cannot fix affected gateway startup discovery; Hermes Agent itself must include or receive the compatibility patch. Until the upstream Hermes fix is available in your installed Hermes version, use one of these workarounds:
+This is a Hermes Agent plugin-discovery issue, not a Basic Memory runtime issue. Hermes `v0.20.1` and newer correctly own provider command and skill registration, including unload cleanup, but command discovery can still omit an exclusive memory provider before it is loaded. It is tracked upstream in [NousResearch/hermes-agent#23603](https://github.com/NousResearch/hermes-agent/issues/23603). Until the active-provider startup-load fix is available in your installed Hermes version, use one of these workarounds:
 
 1. apply the Hermes Agent-side patch described in [MONKEYPATCH.md](MONKEYPATCH.md), which includes compatibility notes for Hermes Agent v0.13.x and v0.14.0; or
 2. use the agent tools directly (`bm_search`, `bm_read`, `bm_recent`, etc.) instead of native slash commands.

@@ -49,6 +49,56 @@ class _FakePluginManager:
         self._plugin_skills: dict = {}
 
 
+class _LifecycleAwareContext:
+    """Modern PluginContext-shaped collector with lifecycle-owned entries."""
+
+    def __init__(self):
+        self.provider = None
+        self.commands: dict = {}
+        self.skills: dict = {}
+
+    def register_memory_provider(self, provider):
+        self.provider = provider
+
+    def register_command(self, name, handler, description="", args_hint=""):
+        self.commands[name] = {
+            "handler": handler,
+            "description": description,
+            "args_hint": args_hint,
+            "plugin_key": "basic-memory",
+        }
+
+    def register_skill(self, name, path, description=""):
+        self.skills[name] = {
+            "path": path,
+            "description": description,
+            "plugin_key": "basic-memory",
+        }
+
+    def dispose(self):
+        self.commands.clear()
+        self.skills.clear()
+
+
+class _CommandsOnlyContext:
+    """Transitional collector that delegates commands but not skills."""
+
+    def __init__(self):
+        self.provider = None
+        self.commands: dict = {}
+
+    def register_memory_provider(self, provider):
+        self.provider = provider
+
+    def register_command(self, name, handler, description="", args_hint=""):
+        self.commands[name] = {
+            "handler": handler,
+            "description": description,
+            "args_hint": args_hint,
+            "plugin_key": "basic-memory",
+        }
+
+
 def _install_fake_hermes_cli(monkeypatch, *, resolve_returns=None):
     """
     Insert a fake `hermes_cli.plugins` (with `_ensure_plugins_discovered`) and
@@ -119,12 +169,45 @@ def test_register_command_calls_include_description_and_args_hint(bm):
     bm._active_providers.clear()
     bm.register(ctx)
     for call in ctx.register_command.call_args_list:
-        name, handler = call.args[0], call.args[1]
+        _, handler = call.args[0], call.args[1]
         kwargs = call.kwargs
         assert callable(handler)
         assert "description" in kwargs and kwargs["description"]
         assert "args_hint" in kwargs  # may be empty string for no-arg commands
     bm._active_providers.clear()
+
+
+def test_modern_context_keeps_lifecycle_owned_registrations(bm, monkeypatch):
+    """A context that supports registration APIs must not be overwritten through
+    PluginManager's private registries, or Hermes cannot later dispose it."""
+    fake_mgr = _install_fake_hermes_cli(monkeypatch)
+    ctx = _LifecycleAwareContext()
+    bm._active_providers.clear()
+    bm.register(ctx)
+    try:
+        assert set(ctx.commands) == _EXPECTED_COMMANDS
+        assert all(entry["plugin_key"] == "basic-memory" for entry in ctx.commands.values())
+        assert set(ctx.skills) == {"basic-memory"}
+        assert fake_mgr._plugin_commands == {}
+        assert fake_mgr._plugin_skills == {}
+        ctx.dispose()
+        assert ctx.commands == {}
+        assert ctx.skills == {}
+    finally:
+        bm._active_providers.clear()
+
+
+def test_legacy_fallback_is_gated_per_registration_capability(bm, monkeypatch):
+    fake_mgr = _install_fake_hermes_cli(monkeypatch)
+    ctx = _CommandsOnlyContext()
+    bm._active_providers.clear()
+    bm.register(ctx)
+    try:
+        assert set(ctx.commands) == _EXPECTED_COMMANDS
+        assert fake_mgr._plugin_commands == {}
+        assert set(fake_mgr._plugin_skills) == {"basic-memory:basic-memory"}
+    finally:
+        bm._active_providers.clear()
 
 
 def test_register_tolerates_old_hermes_without_register_command(bm):
