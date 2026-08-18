@@ -29,23 +29,37 @@ RELAXATION_CJK_PATTERN = re.compile(
 RELAXATION_EDGE_PUNCTUATION = "?!.,;:，。！？；：、"
 # Written inside a word (Persian "\u200c", Indic conjuncts) rather than between words.
 RELAXATION_JOIN_CONTROLS = "\u200c\u200d"
+# Word-internal only between letters: "\u043f\u2019\u044f\u0442\u044c", "don't" \u2014 but not "SPEC 16's",
+# where the digit must stay its own token so the numeric guard still sees it.
+RELAXATION_WORD_INTERNAL_PUNCTUATION = "'\u2019"
 
 
-def _is_token_continuation(char: str) -> bool:
+def _is_token_continuation(text: str, index: int, current: list[str]) -> bool:
     """Whether a non-alphanumeric character belongs to the word being read.
 
-    Combining marks and the zero-width join controls are written inside a word
-    but are not alphanumeric, so a naive scan would treat them as separators and
-    split one orthographic word into several tokens.
+    Combining marks, zero-width join controls, and apostrophes are written inside
+    a word but are not alphanumeric, so a naive scan treats them as separators
+    and splits one orthographic word into several tokens.
+
+    An apostrophe counts only between two letters. That keeps "\u043f\u2019\u044f\u0442\u044c" whole while
+    leaving "SPEC 16's" split, so the digit stays a token of its own and the
+    numeric-identifier guard still rejects the query.
     """
-    return char in RELAXATION_JOIN_CONTROLS or unicodedata.category(char).startswith("M")
+    char = text[index]
+    if char in RELAXATION_JOIN_CONTROLS or unicodedata.category(char).startswith("M"):
+        return True
+    if char in RELAXATION_WORD_INTERNAL_PUNCTUATION:
+        follows_letter = bool(current) and current[-1].isalpha()
+        precedes_letter = index + 1 < len(text) and text[index + 1].isalpha()
+        return follows_letter and precedes_letter
+    return False
 
 
 def relaxation_word_tokens(text: str) -> list[str]:
     """Split text into word tokens for the relaxation eligibility guards.
 
     A token is a run of alphanumeric characters together with the combining
-    marks and join controls written inside it. Counting this way matters because
+    marks, join controls, and apostrophes written inside it. Counting this way matters because
     an ASCII-only rule saw zero tokens in Cyrillic, Greek, Hebrew, Arabic,
     Armenian, and Georgian queries, so the three-token guard below rejected every
     one of them and the hybrid FTS branch silently contributed nothing.
@@ -67,11 +81,11 @@ def relaxation_word_tokens(text: str) -> list[str]:
             tokens.append(token)
         current.clear()
 
-    for char in text:
-        # A leading mark or join control has no base character to attach to, so
-        # it cannot open a token; that keeps stray marks from forming
-        # fragment-only terms.
-        if char.isalnum() or (current and _is_token_continuation(char)):
+    for index, char in enumerate(text):
+        # A leading mark, join control, or apostrophe has no base character to
+        # attach to, so it cannot open a token; that keeps stray punctuation from
+        # forming fragment-only terms.
+        if char.isalnum() or (current and _is_token_continuation(text, index, current)):
             current.append(char)
         elif current:
             flush()

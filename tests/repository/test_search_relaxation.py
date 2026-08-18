@@ -143,3 +143,45 @@ def test_relaxed_query_words_rejects_unicode_numeric_tokens(query: str) -> None:
     character would let identifier-like queries slip past the numeric guard.
     """
     assert relaxed_query_words(query) is None
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("п’ять проектів", None),  # two Ukrainian words, U+2019
+        ("об'єкт доступу", None),  # two Ukrainian words, ASCII apostrophe
+        (
+            "скасувати п’ять виданих об'єктів",
+            ["скасувати", "п’ять", "виданих", "об'єктів"],
+        ),
+    ],
+)
+def test_relaxed_query_words_keeps_apostrophes_inside_words(
+    query: str,
+    expected: list[str] | None,
+) -> None:
+    """A word-internal apostrophe must not split one word into several tokens.
+
+    Splitting on it turned a two-word Ukrainian query into three tokens, which
+    cleared the three-token guard and relaxed into one-letter fragments.
+    """
+    assert relaxed_query_words(query) == expected
+
+
+def test_relaxed_query_words_apostrophe_does_not_shield_numeric_tokens() -> None:
+    """An apostrophe joins letters only, so a digit stays a token of its own.
+
+    Were `16's` read as one token it would not be numeric, and the query would
+    escape the identifier guard that rejects `SPEC 16 design`.
+    """
+    assert relaxed_query_words("SPEC 16's design") is None
+
+
+def test_relaxed_query_words_keeps_ascii_contractions_whole() -> None:
+    """ASCII contractions become one token instead of a word plus a stray letter.
+
+    This is the one place where relaxed terms differ from the previous ASCII
+    behaviour. It only ever lowers the token count, so no query that the guards
+    used to reject can start relaxing because of it.
+    """
+    assert relaxed_query_words("don't touch this") == ["don't", "touch"]
