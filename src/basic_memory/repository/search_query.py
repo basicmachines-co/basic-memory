@@ -27,35 +27,55 @@ RELAXATION_CJK_PATTERN = re.compile(
     r"]"
 )
 RELAXATION_EDGE_PUNCTUATION = "?!.,;:，。！？；：、"
+# Written inside a word (Persian "\u200c", Indic conjuncts) rather than between words.
+RELAXATION_JOIN_CONTROLS = "\u200c\u200d"
+
+
+def _is_token_continuation(char: str) -> bool:
+    """Whether a non-alphanumeric character belongs to the word being read.
+
+    Combining marks and the zero-width join controls are written inside a word
+    but are not alphanumeric, so a naive scan would treat them as separators and
+    split one orthographic word into several tokens.
+    """
+    return char in RELAXATION_JOIN_CONTROLS or unicodedata.category(char).startswith("M")
 
 
 def relaxation_word_tokens(text: str) -> list[str]:
     """Split text into word tokens for the relaxation eligibility guards.
 
-    A token is a run of alphanumeric characters together with any combining
-    marks attached to them. Counting this way matters twice over:
+    A token is a run of alphanumeric characters together with the combining
+    marks and join controls written inside it. Counting this way matters because
+    an ASCII-only rule saw zero tokens in Cyrillic, Greek, Hebrew, Arabic,
+    Armenian, and Georgian queries, so the three-token guard below rejected every
+    one of them and the hybrid FTS branch silently contributed nothing.
 
-    - an ASCII-only rule saw zero tokens in Cyrillic, Greek, Hebrew, Arabic,
-      Armenian, and Georgian queries, so the three-token guard below rejected
-      every one of them and the hybrid FTS branch silently contributed nothing;
-    - combining marks are not alphanumeric, so counting them as separators cuts
-      abugidas (Devanagari, Thai) and decomposed text into syllable fragments.
-      One word then looks like several tokens, passes the three-token guard, and
-      relaxes into a broad OR of fragments — the opposite of what the guard is
-      for. Keeping marks with their base character preserves it.
+    Counting characters that live inside a word as separators is just as wrong in
+    the other direction: it cuts abugidas (Devanagari, Thai), decomposed text,
+    and Persian or Indic words joined by U+200C/U+200D into fragments. One word
+    then looks like several tokens, clears the three-token guard, and relaxes
+    into a broad OR of fragments — the opposite of what the guard is for.
     """
     tokens: list[str] = []
     current: list[str] = []
+
+    def flush() -> None:
+        # Trailing join controls are word-internal by definition, so a token that
+        # ends in one is really a word followed by a separator.
+        token = "".join(current).rstrip(RELAXATION_JOIN_CONTROLS)
+        if token:
+            tokens.append(token)
+        current.clear()
+
     for char in text:
-        # A leading mark has no base character to attach to, so it cannot open
-        # a token; that keeps stray marks from forming fragment-only terms.
-        if char.isalnum() or (current and unicodedata.category(char).startswith("M")):
+        # A leading mark or join control has no base character to attach to, so
+        # it cannot open a token; that keeps stray marks from forming
+        # fragment-only terms.
+        if char.isalnum() or (current and _is_token_continuation(char)):
             current.append(char)
         elif current:
-            tokens.append("".join(current))
-            current = []
-    if current:
-        tokens.append("".join(current))
+            flush()
+    flush()
     return tokens
 
 
@@ -94,8 +114,9 @@ def relaxed_query_words(search_text: str | None) -> list[str] | None:
       same guard instead of being read as zero tokens;
     - CJK terms separated by whitespace can relax with two or more terms because
       they are not whitespace-delimited the way the token guard assumes;
-    - any pure-digit token ("root note 1", "SPEC 16") — identifier-like queries
-      over-broaden and create false positives under OR.
+    - any numeric token ("root note 1", "SPEC 16", "SPEC \u216b") — identifier-like
+      queries over-broaden and create false positives under OR. Numeric-ness is
+      Unicode-wide, so Nl/No characters such as \u216b and \u00bd are caught too.
     """
     if not search_text:
         return None
@@ -109,7 +130,7 @@ def relaxed_query_words(search_text: str | None) -> list[str] | None:
     has_cjk_term = any(RELAXATION_CJK_PATTERN.search(word) for word in cjk_words)
 
     if has_cjk_term:
-        if len(cjk_words) < 2 or any(word.isdigit() for word in cjk_words):
+        if len(cjk_words) < 2 or any(word.isnumeric() for word in cjk_words):
             return None
         pruned_words = [
             word
@@ -124,7 +145,7 @@ def relaxed_query_words(search_text: str | None) -> list[str] | None:
         return relaxed_words if len(relaxed_words) >= 2 else None
 
     tokens = relaxation_word_tokens(stripped.lower())
-    if len(tokens) < 3 or any(token.isdigit() for token in tokens):
+    if len(tokens) < 3 or any(token.isnumeric() for token in tokens):
         return None
     pruned_words = [token for token in tokens if token not in RELAXATION_STOPWORDS]
     return _dedupe_relaxation_words(pruned_words or tokens) or None

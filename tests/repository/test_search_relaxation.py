@@ -106,3 +106,40 @@ def test_relaxed_query_words_guards_single_words_with_combining_marks(query: str
 def test_relaxed_query_words_applies_existing_guards_to_non_latin(query: str) -> None:
     """Non-Latin queries gain no exemption from the short-query and identifier guards."""
     assert relaxed_query_words(query) is None
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("می‌روم خانه", None),  # two Persian words, one joined by ZWNJ
+        ("نمی‌خواهم دسترسی را لغو", ["نمی‌خواهم", "دسترسی", "را", "لغو"]),
+        ("क‍ष विशेष पहुंच", ["क‍ष", "विशेष", "पहुंच"]),  # explicit ZWJ conjunct
+    ],
+)
+def test_relaxed_query_words_keeps_join_controls_inside_words(
+    query: str,
+    expected: list[str] | None,
+) -> None:
+    """U+200C/U+200D are written inside a word, so they must not split its token.
+
+    Splitting on them inflates the token count: a two-word Persian query looks
+    like three tokens, clears the three-token guard, and relaxes into fragments.
+    """
+    assert relaxed_query_words(query) == expected
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "SPEC Ⅻ design",  # Nl: Roman numeral twelve
+        "spec ½ design",  # No: vulgar fraction one half
+        "٣ ٤ ٥",  # Arabic-Indic digits
+    ],
+)
+def test_relaxed_query_words_rejects_unicode_numeric_tokens(query: str) -> None:
+    """The identifier guard classifies numbers Unicode-wide, not just as ASCII digits.
+
+    `isdigit()` is false for Nl/No characters, so admitting every alphanumeric
+    character would let identifier-like queries slip past the numeric guard.
+    """
+    assert relaxed_query_words(query) is None
