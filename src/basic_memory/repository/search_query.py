@@ -94,7 +94,10 @@ def _base_before(current: list[str]) -> bool:
 
 def _base_after(text: str, index: int) -> bool:
     """Whether a letter follows the punctuation, looking past what hangs off it."""
-    for char in text[index + 1 :]:
+    # Indexed rather than sliced: a slice copies the rest of the query at every
+    # joiner, which makes tokenizing a long query quadratic in its length.
+    for position in range(index + 1, len(text)):
+        char = text[position]
         if _is_attached(char):
             continue
         return char.isalpha()

@@ -13,6 +13,7 @@ marks word boundaries in Thai and Khmer, and Han numerals stay content words
 rather than identifiers.
 """
 
+import time
 import unicodedata
 
 import pytest
@@ -241,3 +242,30 @@ def test_taken_characters_outside_the_standard_are_justified() -> None:
 def test_structural_punctuation_keeps_splitting(structural: str) -> None:
     """Joining across these would merge a qualifier with its value, or a name with its extension."""
     assert len(relaxation_word_tokens(f"сло{structural}во доступа")) == 3
+
+
+def test_tokenizing_scales_linearly_with_query_length() -> None:
+    """Doubling the query must roughly double the work, not more.
+
+    The joining rule has to look at what follows the punctuation. Reading that
+    with a slice copies the rest of the query at every joiner, which is
+    quadratic: an unbounded query full of apostrophes then ties up the worker
+    that tokenizes it. The ratio is asserted rather than a duration, so the test
+    does not depend on how fast the machine is.
+    """
+    query = "a'b " * (128 * 1024 // 4)
+
+    def elapsed(text: str) -> float:
+        start = time.perf_counter()
+        relaxation_word_tokens(text)
+        return time.perf_counter() - start
+
+    # Fastest of three runs each: the ratio, not the duration, is what is being
+    # asserted, so a slow or busy machine does not turn this red. Measured here,
+    # the indexed reader scales at ×2.0 and the sliced one at ×3.2.
+    single = min(elapsed(query) for _ in range(3))
+    double = min(elapsed(query * 2) for _ in range(3))
+
+    assert double < single * 2.5, (
+        f"tokenizing scaled worse than linearly: {single * 1000:.1f} ms then {double * 1000:.1f} ms"
+    )
