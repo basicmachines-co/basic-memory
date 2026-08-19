@@ -69,6 +69,11 @@ def relaxation_word_tokens(text: str) -> list[str]:
     and Persian or Indic words joined by U+200C/U+200D into fragments. One word
     then looks like several tokens, clears the three-token guard, and relaxes
     into a broad OR of fragments — the opposite of what the guard is for.
+
+    Scripts normally written without spaces between words — Thai, Lao, Khmer —
+    are counted, but a whole phrase arrives as a single token and so never
+    reaches the three-token guard. They are not in RELAXATION_CJK_PATTERN either,
+    so nothing relaxes for them. Fixing that needs real word segmentation.
     """
     tokens: list[str] = []
     current: list[str] = []
@@ -144,7 +149,11 @@ def relaxed_query_words(search_text: str | None) -> list[str] | None:
     has_cjk_term = any(RELAXATION_CJK_PATTERN.search(word) for word in cjk_words)
 
     if has_cjk_term:
-        if len(cjk_words) < 2 or any(word.isnumeric() for word in cjk_words):
+        # isdigit(), not isnumeric(): Han numerals are ordinary content words in
+        # CJK prose, not identifiers. Widening this guard the way the general
+        # branch needs would reject a query like "数据 三 分析" and silently switch
+        # off relaxation for the very queries #1022 turned it on for.
+        if len(cjk_words) < 2 or any(word.isdigit() for word in cjk_words):
             return None
         pruned_words = [
             word

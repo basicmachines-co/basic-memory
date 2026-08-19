@@ -185,3 +185,29 @@ def test_relaxed_query_words_keeps_ascii_contractions_whole() -> None:
     used to reject can start relaxing because of it.
     """
     assert relaxed_query_words("don't touch this") == ["don't", "touch"]
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("数据 三 分析", ["数据", "三", "分析"]),
+        ("日本 十 経済 統計", ["日本", "十", "経済", "統計"]),
+        ("データ 二 分析 結果", ["データ", "二", "分析", "結果"]),
+    ],
+)
+def test_relaxed_query_words_treats_han_numerals_as_content_words(
+    query: str,
+    expected: list[str],
+) -> None:
+    """The CJK guard stays on `isdigit()`, so a numeral word does not veto relaxation.
+
+    143 characters in U+3000–U+9FFF are `isnumeric()` without being `isdigit()`.
+    Classifying them as identifiers would reject ordinary CJK prose and switch
+    relaxation back off for the queries it was turned on for.
+    """
+    assert relaxed_query_words(query) == expected
+
+
+def test_relaxed_query_words_still_rejects_ascii_digits_in_cjk_queries() -> None:
+    """The CJK identifier guard itself is unchanged: ASCII digits still veto."""
+    assert relaxed_query_words("SPEC 16 设计") is None
