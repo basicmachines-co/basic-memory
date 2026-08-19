@@ -27,7 +27,7 @@ RELAXATION_CJK_PATTERN = re.compile(
     r"]"
 )
 RELAXATION_EDGE_PUNCTUATION = "?!.,;:，。！？；：、"
-# Written inside a word (Persian "\u200c", Indic conjuncts) rather than between words.
+# Written inside a word (Persian U+200C, Indic conjuncts) rather than between words.
 # Format characters (Unicode Cf) are invisible and, with one exception, sit
 # inside a word: soft hyphen from copied text, the Persian and Indic joiners,
 # bidi marks, the Mongolian vowel separator, word joiners. Counting any of them
@@ -47,7 +47,7 @@ RELAXATION_WORD_SEPARATOR_FORMATS = "\u200b"
 # document, a bidi hint, a stray BOM — absent from the stored note, so carrying
 # it into the term is what stops the term matching.
 RELAXATION_ORTHOGRAPHIC_JOINERS = "\u200c\u200d"
-# Word-internal only between letters: "\u043f\u2019\u044f\u0442\u044c", "don't" \u2014 but not "SPEC 16's",
+# Word-internal only between letters: "п’ять", "don't" — but not "SPEC 16's",
 # where the digit must stay its own token so the numeric guard still sees it.
 RELAXATION_WORD_INTERNAL_PUNCTUATION = "'\u2019"
 
@@ -71,7 +71,7 @@ def _is_token_continuation(text: str, index: int, current: list[str]) -> bool:
     a word but are not alphanumeric, so a naive scan treats them as separators
     and splits one orthographic word into several tokens.
 
-    An apostrophe counts only between two letters. That keeps "\u043f\u2019\u044f\u0442\u044c" whole while
+    An apostrophe counts only between two letters. That keeps "п’ять" whole while
     leaving "SPEC 16's" split, so the digit stays a token of its own and the
     numeric-identifier guard still rejects the query.
     """
@@ -207,9 +207,9 @@ def relaxed_query_words(search_text: str | None) -> list[str] | None:
       same guard instead of being read as zero tokens;
     - CJK terms separated by whitespace can relax with two or more terms because
       they are not whitespace-delimited the way the token guard assumes;
-    - any numeric token ("root note 1", "SPEC 16", "SPEC \u216b") — identifier-like
+    - any numeric token ("root note 1", "SPEC 16", "SPEC Ⅻ") — identifier-like
       queries over-broaden and create false positives under OR. Numeric-ness is
-      Unicode-wide, so Nl/No characters such as \u216b and \u00bd are caught too.
+      Unicode-wide, so Nl/No characters such as Ⅻ and ½ are caught too.
     """
     if not search_text:
         return None
