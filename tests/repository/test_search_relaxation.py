@@ -208,9 +208,21 @@ def test_relaxed_query_words_treats_han_numerals_as_content_words(
     assert relaxed_query_words(query) == expected
 
 
-def test_relaxed_query_words_still_rejects_ascii_digits_in_cjk_queries() -> None:
-    """The CJK identifier guard itself is unchanged: ASCII digits still veto."""
-    assert relaxed_query_words("SPEC 16 设计") is None
+@pytest.mark.parametrize(
+    "query",
+    [
+        "SPEC 16 设计",  # ASCII digits
+        "SPEC Ⅻ 设计",  # Roman numeral: a number character, not a Han word
+        "SPEC ½ 设计",  # vulgar fraction
+    ],
+)
+def test_relaxed_query_words_rejects_number_characters_in_cjk_queries(query: str) -> None:
+    """Adding a CJK term must not smuggle an identifier past the numeric guard.
+
+    Han numerals are category Lo — letters — so they stay content words, while
+    every category-N character is caught in both branches alike.
+    """
+    assert relaxed_query_words(query) is None
 
 
 @pytest.mark.parametrize(

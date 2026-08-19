@@ -137,19 +137,19 @@ def _token_core(token: str) -> str:
 
 
 def _is_numeric_token(token: str) -> bool:
-    """Whether a token is a number once its attached characters are set aside."""
-    core = _token_core(token)
-    return bool(core) and core.isnumeric()
+    """Whether a token is a bare number, and so identifier-like rather than a word.
 
+    Classified by Unicode category, not by `isdigit()`/`isnumeric()`. Both of
+    those answer True for Han numerals, which are category Lo — letters, and
+    ordinary content words in CJK prose. Rejecting them would switch relaxation
+    off for the queries #1022 turned it on for.
 
-def _is_digit_token(token: str) -> bool:
-    """Same, for the CJK branch, which classifies ASCII-style digits only.
-
-    Han numerals stay content words here: they carry no combining marks, so the
-    core is the word itself and `isdigit()` is false for it, as on main.
+    Everything in category N is a number character: ASCII and Arabic-Indic
+    digits (Nd), Roman numerals (Nl), vulgar fractions (No). A token made only
+    of those is the "SPEC 16" shape the guard exists to catch, in any script.
     """
     core = _token_core(token)
-    return bool(core) and core.isdigit()
+    return bool(core) and all(unicodedata.category(char).startswith("N") for char in core)
 
 
 def _dedupe_relaxation_words(words: list[str]) -> list[str]:
@@ -203,11 +203,7 @@ def relaxed_query_words(search_text: str | None) -> list[str] | None:
     has_cjk_term = any(RELAXATION_CJK_PATTERN.search(word) for word in cjk_words)
 
     if has_cjk_term:
-        # isdigit(), not isnumeric(): Han numerals are ordinary content words in
-        # CJK prose, not identifiers. Widening this guard the way the general
-        # branch needs would reject a query like "数据 三 分析" and silently switch
-        # off relaxation for the very queries #1022 turned it on for.
-        if len(cjk_words) < 2 or any(_is_digit_token(word) for word in cjk_words):
+        if len(cjk_words) < 2 or any(_is_numeric_token(word) for word in cjk_words):
             return None
         pruned_words = [
             word
