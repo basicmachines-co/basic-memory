@@ -228,3 +228,37 @@ def test_relaxed_query_words_sees_numbers_through_combining_marks(query: str) ->
     identifier-like query straight past the guard.
     """
     assert relaxed_query_words(query) is None
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("пере­вод доступа", None),  # soft hyphen from copied formatted text
+        ("сло⁠во доступа", None),  # word joiner
+        ("сло﻿во доступа", None),  # zero-width no-break space
+    ],
+)
+def test_relaxed_query_words_ignores_word_internal_format_characters(
+    query: str,
+    expected: list[str] | None,
+) -> None:
+    """Invisible format characters inside a word must not split its token.
+
+    Text pasted from formatted documents carries them, and splitting there
+    inflates the token count exactly as the join-control case did.
+    """
+    assert relaxed_query_words(query) == expected
+
+
+def test_relaxed_query_words_treats_zero_width_space_as_a_word_boundary() -> None:
+    """U+200B separates words in Thai and Khmer, so it must keep splitting.
+
+    Grouping it into the word would collapse a whole phrase into one token and
+    switch relaxation off for the one form of those scripts that reaches the
+    guard at all.
+    """
+    assert relaxed_query_words("ฉัน​จะลอง​ชำระเงิน") == [
+        "ฉัน",
+        "จะลอง",
+        "ชำระเงิน",
+    ]

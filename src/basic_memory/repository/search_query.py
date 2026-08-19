@@ -28,7 +28,12 @@ RELAXATION_CJK_PATTERN = re.compile(
 )
 RELAXATION_EDGE_PUNCTUATION = "?!.,;:，。！？；：、"
 # Written inside a word (Persian "\u200c", Indic conjuncts) rather than between words.
-RELAXATION_JOIN_CONTROLS = "\u200c\u200d"
+# Invisible format characters that sit *inside* a word: soft hyphen from copied
+# formatted text, the Persian/Indic joiners, and the word joiners. U+200B is
+# deliberately absent — zero-width space marks word *boundaries* in Thai and
+# Khmer, so treating it as word-internal would glue a whole phrase into one
+# token and switch relaxation off for the one form of those scripts that works.
+RELAXATION_WORD_INTERNAL_FORMATS = "\u00ad\u200c\u200d\u2060\ufeff"
 # Word-internal only between letters: "\u043f\u2019\u044f\u0442\u044c", "don't" \u2014 but not "SPEC 16's",
 # where the digit must stay its own token so the numeric guard still sees it.
 RELAXATION_WORD_INTERNAL_PUNCTUATION = "'\u2019"
@@ -37,7 +42,7 @@ RELAXATION_WORD_INTERNAL_PUNCTUATION = "'\u2019"
 def _is_token_continuation(text: str, index: int, current: list[str]) -> bool:
     """Whether a non-alphanumeric character belongs to the word being read.
 
-    Combining marks, zero-width join controls, and apostrophes are written inside
+    Combining marks, invisible word-internal format characters, and apostrophes are written inside
     a word but are not alphanumeric, so a naive scan treats them as separators
     and splits one orthographic word into several tokens.
 
@@ -46,7 +51,7 @@ def _is_token_continuation(text: str, index: int, current: list[str]) -> bool:
     numeric-identifier guard still rejects the query.
     """
     char = text[index]
-    if char in RELAXATION_JOIN_CONTROLS or unicodedata.category(char).startswith("M"):
+    if char in RELAXATION_WORD_INTERNAL_FORMATS or unicodedata.category(char).startswith("M"):
         return True
     if char in RELAXATION_WORD_INTERNAL_PUNCTUATION:
         follows_letter = bool(current) and current[-1].isalpha()
@@ -79,9 +84,9 @@ def relaxation_word_tokens(text: str) -> list[str]:
     current: list[str] = []
 
     def flush() -> None:
-        # Trailing join controls are word-internal by definition, so a token that
-        # ends in one is really a word followed by a separator.
-        token = "".join(current).rstrip(RELAXATION_JOIN_CONTROLS)
+        # A trailing format character is word-internal by definition, so a token
+        # that ends in one is really a word followed by a separator.
+        token = "".join(current).rstrip(RELAXATION_WORD_INTERNAL_FORMATS)
         if token:
             tokens.append(token)
         current.clear()
@@ -109,7 +114,8 @@ def _token_core(token: str) -> str:
     return "".join(
         char
         for char in token
-        if char not in RELAXATION_JOIN_CONTROLS and not unicodedata.category(char).startswith("M")
+        if char not in RELAXATION_WORD_INTERNAL_FORMATS
+        and not unicodedata.category(char).startswith("M")
     )
 
 
