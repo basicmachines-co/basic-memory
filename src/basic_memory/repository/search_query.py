@@ -98,6 +98,37 @@ def relaxation_word_tokens(text: str) -> list[str]:
     return tokens
 
 
+def _token_core(token: str) -> str:
+    """The token without the characters that only ever attach to another one.
+
+    Combining marks and join controls are kept inside a token so a word is
+    counted once, but they must not disguise what the token *is*: a keycap
+    digit is not `isnumeric()` as a whole string, which would walk
+    an identifier-like query straight past the numeric guard.
+    """
+    return "".join(
+        char
+        for char in token
+        if char not in RELAXATION_JOIN_CONTROLS and not unicodedata.category(char).startswith("M")
+    )
+
+
+def _is_numeric_token(token: str) -> bool:
+    """Whether a token is a number once its attached characters are set aside."""
+    core = _token_core(token)
+    return bool(core) and core.isnumeric()
+
+
+def _is_digit_token(token: str) -> bool:
+    """Same, for the CJK branch, which classifies ASCII-style digits only.
+
+    Han numerals stay content words here: they carry no combining marks, so the
+    core is the word itself and `isdigit()` is false for it, as on main.
+    """
+    core = _token_core(token)
+    return bool(core) and core.isdigit()
+
+
 def _dedupe_relaxation_words(words: list[str]) -> list[str]:
     """Preserve first-seen relaxed terms while removing duplicates case-insensitively."""
     deduped_terms: list[str] = []
@@ -153,7 +184,7 @@ def relaxed_query_words(search_text: str | None) -> list[str] | None:
         # CJK prose, not identifiers. Widening this guard the way the general
         # branch needs would reject a query like "数据 三 分析" and silently switch
         # off relaxation for the very queries #1022 turned it on for.
-        if len(cjk_words) < 2 or any(word.isdigit() for word in cjk_words):
+        if len(cjk_words) < 2 or any(_is_digit_token(word) for word in cjk_words):
             return None
         pruned_words = [
             word
@@ -168,7 +199,7 @@ def relaxed_query_words(search_text: str | None) -> list[str] | None:
         return relaxed_words if len(relaxed_words) >= 2 else None
 
     tokens = relaxation_word_tokens(stripped.lower())
-    if len(tokens) < 3 or any(token.isnumeric() for token in tokens):
+    if len(tokens) < 3 or any(_is_numeric_token(token) for token in tokens):
         return None
     pruned_words = [token for token in tokens if token not in RELAXATION_STOPWORDS]
     return _dedupe_relaxation_words(pruned_words or tokens) or None

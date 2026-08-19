@@ -211,3 +211,20 @@ def test_relaxed_query_words_treats_han_numerals_as_content_words(
 def test_relaxed_query_words_still_rejects_ascii_digits_in_cjk_queries() -> None:
     """The CJK identifier guard itself is unchanged: ASCII digits still veto."""
     assert relaxed_query_words("SPEC 16 设计") is None
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "SPEC 1️⃣ design",  # keycap digit: digit plus VS16 plus enclosing keycap
+        "spec 1́ design",  # digit carrying a combining acute
+    ],
+)
+def test_relaxed_query_words_sees_numbers_through_combining_marks(query: str) -> None:
+    """A mark attached to a digit must not disguise it from the numeric guard.
+
+    Marks stay inside the token so the word is counted once, but classification
+    looks at the token without them — otherwise a decorated digit walks an
+    identifier-like query straight past the guard.
+    """
+    assert relaxed_query_words(query) is None
