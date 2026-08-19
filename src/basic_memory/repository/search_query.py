@@ -68,6 +68,34 @@ def _strip_trailing_formats(token: str) -> str:
     return token
 
 
+def _is_attached(char: str) -> bool:
+    """Whether a character hangs off the one before it rather than standing alone."""
+    return _is_word_internal_format(char) or unicodedata.category(char).startswith("M")
+
+
+def _base_before(current: list[str]) -> bool:
+    """Whether the token so far ends in a letter, looking past what hangs off it.
+
+    Pointed Hebrew and decomposed Latin put a mark between the letter and the
+    punctuation, so reading only the last character sees the mark and splits a
+    word the joining rule is meant to keep whole.
+    """
+    for char in reversed(current):
+        if _is_attached(char):
+            continue
+        return char.isalpha()
+    return False
+
+
+def _base_after(text: str, index: int) -> bool:
+    """Whether a letter follows the punctuation, looking past what hangs off it."""
+    for char in text[index + 1 :]:
+        if _is_attached(char):
+            continue
+        return char.isalpha()
+    return False
+
+
 def _is_token_continuation(text: str, index: int, current: list[str]) -> bool:
     """Whether a non-alphanumeric character belongs to the word being read.
 
@@ -83,9 +111,7 @@ def _is_token_continuation(text: str, index: int, current: list[str]) -> bool:
     if _is_word_internal_format(char) or unicodedata.category(char).startswith("M"):
         return True
     if char in RELAXATION_WORD_INTERNAL_PUNCTUATION:
-        follows_letter = bool(current) and current[-1].isalpha()
-        precedes_letter = index + 1 < len(text) and text[index + 1].isalpha()
-        return follows_letter and precedes_letter
+        return _base_before(current) and _base_after(text, index)
     return False
 
 

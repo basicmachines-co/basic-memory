@@ -314,3 +314,23 @@ def test_relaxed_query_words_splits_on_structural_punctuation(query: str) -> Non
     permalinks, paths and version strings.
     """
     assert relaxed_query_words(query) is None
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("גּ׳ון סמית כתב", ["גּ׳ון", "סמית", "כתב"]),  # dagesh between letter and geresh
+        ("pré d'accord test", ["pré", "d'accord", "test"]),  # NFD before apostrophe
+    ],
+)
+def test_relaxed_query_words_finds_the_base_letter_through_marks(
+    query: str,
+    expected: list[str],
+) -> None:
+    """The joining rule looks for a letter, not for the last character.
+
+    Pointed Hebrew and decomposed Latin put a mark between the letter and the
+    punctuation, so reading only the character before it sees the mark and
+    splits a word the rule is meant to keep whole.
+    """
+    assert relaxed_query_words(query) == expected
