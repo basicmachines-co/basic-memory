@@ -236,6 +236,8 @@ def test_relaxed_query_words_sees_numbers_through_combining_marks(query: str) ->
         ("пере­вод доступа", None),  # soft hyphen from copied formatted text
         ("сло⁠во доступа", None),  # word joiner
         ("сло﻿во доступа", None),  # zero-width no-break space
+        ("сло᠎во доступа", None),  # Mongolian vowel separator
+        ("сло‏во доступа", None),  # right-to-left mark
     ],
 )
 def test_relaxed_query_words_ignores_word_internal_format_characters(

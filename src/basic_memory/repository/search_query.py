@@ -28,15 +28,33 @@ RELAXATION_CJK_PATTERN = re.compile(
 )
 RELAXATION_EDGE_PUNCTUATION = "?!.,;:，。！？；：、"
 # Written inside a word (Persian "\u200c", Indic conjuncts) rather than between words.
-# Invisible format characters that sit *inside* a word: soft hyphen from copied
-# formatted text, the Persian/Indic joiners, and the word joiners. U+200B is
-# deliberately absent — zero-width space marks word *boundaries* in Thai and
-# Khmer, so treating it as word-internal would glue a whole phrase into one
-# token and switch relaxation off for the one form of those scripts that works.
-RELAXATION_WORD_INTERNAL_FORMATS = "\u00ad\u200c\u200d\u2060\ufeff"
+# Format characters (Unicode Cf) are invisible and, with one exception, sit
+# inside a word: soft hyphen from copied text, the Persian and Indic joiners,
+# bidi marks, the Mongolian vowel separator, word joiners. Counting any of them
+# as a separator splits one word into several tokens, which is the direction
+# that defeats the guards below — grouping can only lower a token count, never
+# inflate it past them.
+#
+# U+200B is the exception: zero-width space marks word *boundaries* in Thai and
+# Khmer, so it must keep splitting, or a whole phrase collapses into one token
+# and relaxation switches off for the one form of those scripts that reaches
+# the guard at all.
+RELAXATION_WORD_SEPARATOR_FORMATS = "\u200b"
 # Word-internal only between letters: "\u043f\u2019\u044f\u0442\u044c", "don't" \u2014 but not "SPEC 16's",
 # where the digit must stay its own token so the numeric guard still sees it.
 RELAXATION_WORD_INTERNAL_PUNCTUATION = "'\u2019"
+
+
+def _is_word_internal_format(char: str) -> bool:
+    """Whether an invisible format character belongs to the word around it."""
+    return unicodedata.category(char) == "Cf" and char not in RELAXATION_WORD_SEPARATOR_FORMATS
+
+
+def _strip_trailing_formats(token: str) -> str:
+    """Drop format characters left at a token's end, where they separate rather than join."""
+    while token and _is_word_internal_format(token[-1]):
+        token = token[:-1]
+    return token
 
 
 def _is_token_continuation(text: str, index: int, current: list[str]) -> bool:
@@ -51,7 +69,7 @@ def _is_token_continuation(text: str, index: int, current: list[str]) -> bool:
     numeric-identifier guard still rejects the query.
     """
     char = text[index]
-    if char in RELAXATION_WORD_INTERNAL_FORMATS or unicodedata.category(char).startswith("M"):
+    if _is_word_internal_format(char) or unicodedata.category(char).startswith("M"):
         return True
     if char in RELAXATION_WORD_INTERNAL_PUNCTUATION:
         follows_letter = bool(current) and current[-1].isalpha()
@@ -86,7 +104,7 @@ def relaxation_word_tokens(text: str) -> list[str]:
     def flush() -> None:
         # A trailing format character is word-internal by definition, so a token
         # that ends in one is really a word followed by a separator.
-        token = "".join(current).rstrip(RELAXATION_WORD_INTERNAL_FORMATS)
+        token = _strip_trailing_formats("".join(current))
         if token:
             tokens.append(token)
         current.clear()
@@ -106,16 +124,15 @@ def relaxation_word_tokens(text: str) -> list[str]:
 def _token_core(token: str) -> str:
     """The token without the characters that only ever attach to another one.
 
-    Combining marks and join controls are kept inside a token so a word is
-    counted once, but they must not disguise what the token *is*: a keycap
-    digit is not `isnumeric()` as a whole string, which would walk
-    an identifier-like query straight past the numeric guard.
+    Combining marks and format characters are kept inside a token so a word is
+    counted once, but they must not disguise what the token *is*: a keycap digit
+    is not `isnumeric()` as a whole string, which would walk an identifier-like
+    query straight past the numeric guard.
     """
     return "".join(
         char
         for char in token
-        if char not in RELAXATION_WORD_INTERNAL_FORMATS
-        and not unicodedata.category(char).startswith("M")
+        if not _is_word_internal_format(char) and not unicodedata.category(char).startswith("M")
     )
 
 
