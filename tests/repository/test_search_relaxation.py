@@ -276,3 +276,41 @@ def test_relaxed_query_words_treats_zero_width_space_as_a_word_boundary() -> Non
         "จะลอง",
         "ชำระเงิน",
     ]
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("ג׳ון סמית כתב", ["ג׳ון", "סמית", "כתב"]),  # geresh: foreign sounds
+        ("ר״ת של המשפט", ["ר״ת", "של", "המשפט"]),  # gershayim: acronym
+        ("col·lecció de dades", ["col·lecció", "de", "dades"]),  # Catalan middle dot
+    ],
+)
+def test_relaxed_query_words_keeps_letter_joining_punctuation(
+    query: str,
+    expected: list[str],
+) -> None:
+    """The apostrophe rule covers every UAX #29 MidLetter character taken here.
+
+    Hebrew writes geresh and gershayim inside words constantly, so splitting on
+    them turns a three-word query into fragments — the same failure the
+    apostrophe case had, in a script this change exists to support.
+    """
+    assert relaxed_query_words(query) == expected
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "spec 1.2 design",  # full stop: UAX #29 would join "1.2" into one token
+        "spec 1:2 design",  # colon
+    ],
+)
+def test_relaxed_query_words_splits_on_structural_punctuation(query: str) -> None:
+    """Colon and full stop are deliberately outside the MidLetter set taken here.
+
+    UAX #29 joins digits across a full stop, and "1.2" is not a category-N token,
+    so it would slip past the numeric guard. Both also carry structure in
+    permalinks, paths and version strings.
+    """
+    assert relaxed_query_words(query) is None

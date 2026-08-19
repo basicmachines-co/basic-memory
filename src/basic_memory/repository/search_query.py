@@ -47,9 +47,13 @@ RELAXATION_WORD_SEPARATOR_FORMATS = "\u200b"
 # document, a bidi hint, a stray BOM — absent from the stored note, so carrying
 # it into the term is what stops the term matching.
 RELAXATION_ORTHOGRAPHIC_JOINERS = "\u200c\u200d"
-# Word-internal only between letters: "п’ять", "don't" — but not "SPEC 16's",
-# where the digit must stay its own token so the numeric guard still sees it.
-RELAXATION_WORD_INTERNAL_PUNCTUATION = "'\u2019"
+# Punctuation written inside a word, applied only between two letters: "п’ять",
+# "don't", Hebrew ג׳ון and ר״ת, Catalan col·lecció. This is the UAX #29 MidLetter
+# set minus colon and full stop, which the standard also joins on — "1.2" comes
+# back as one token there, and a token like that is not category N, so it would
+# walk an identifier-like query straight past the numeric guard. Both carry
+# structure in permalinks, paths and versions here, so they keep splitting.
+RELAXATION_WORD_INTERNAL_PUNCTUATION = "'\u2018\u2019\u00b7\u0387\u05f3\u05f4\u2027"
 
 
 def _is_word_internal_format(char: str) -> bool:
