@@ -18,6 +18,7 @@ import unicodedata
 import pytest
 
 from basic_memory.repository.search_query import (
+    RELAXATION_WORD_INTERNAL_PUNCTUATION,
     RELAXATION_WORD_SEPARATOR_FORMATS,
     relaxation_word_tokens,
     relaxed_query_words,
@@ -37,6 +38,7 @@ def _characters_in_categories(*categories: str) -> list[str]:
 FORMAT_CHARACTERS = _characters_in_categories("Cf")
 COMBINING_MARKS = _characters_in_categories("Mn", "Mc", "Me")
 NUMBER_CHARACTERS = _characters_in_categories("Nd", "Nl", "No")
+PUNCTUATION_CHARACTERS = _characters_in_categories("Pc", "Pd", "Ps", "Pe", "Pi", "Pf", "Po")
 
 # Numerals written as letters (category Lo). Unicode gives them a numeric value,
 # so isdigit()/isnumeric() answer True, but they are ordinary words in CJK prose.
@@ -120,3 +122,66 @@ def test_han_numerals_stay_content_words(numeral: str) -> None:
     """
     assert unicodedata.category(numeral) == "Lo"
     assert relaxed_query_words(f"数据 {numeral} 分析") == ["数据", numeral, "分析"]
+
+
+def test_only_the_declared_punctuation_joins_a_word() -> None:
+    """Nothing else in the punctuation classes may join two letters.
+
+    The joining set is a chosen subset of UAX #29 MidLetter, so it has to stay a
+    subset: any other punctuation that started joining would merge two words into
+    one term and quietly change what the backend searches for.
+    """
+    joining = [
+        char
+        for char in PUNCTUATION_CHARACTERS
+        if char not in RELAXATION_WORD_INTERNAL_PUNCTUATION
+        and len(relaxation_word_tokens(f"сло{char}во доступа")) != 3
+    ]
+    assert not joining, f"punctuation that joined a word — {_describe(joining)}"
+
+
+def test_declared_punctuation_is_exactly_the_chosen_midletter_subset() -> None:
+    """Pin the set itself: the sweep above skips whatever it holds.
+
+    Removing a character silently drops it from every sweep here, and adding one
+    silently exempts it, so both have to be a deliberate edit rather than a side
+    effect. The named cases in test_search_relaxation.py pin what each is for.
+    """
+    assert RELAXATION_WORD_INTERNAL_PUNCTUATION == "'\u2018\u2019\u00b7\u0387\u05f3\u05f4\u2027"
+
+
+def test_declared_punctuation_joins_letters_only() -> None:
+    """Each joiner must join letters, and none may join digits.
+
+    Joining digits is what makes the exclusions below necessary: a term like
+    "1.2" is not a category-N token, so it would walk an identifier-like query
+    past the numeric guard.
+    """
+    not_joining = [
+        char
+        for char in RELAXATION_WORD_INTERNAL_PUNCTUATION
+        if len(relaxation_word_tokens(f"сло{char}во доступа")) != 2
+    ]
+    assert not not_joining, f"declared joiners that split letters — {_describe(not_joining)}"
+
+    joining_digits = [
+        char
+        for char in RELAXATION_WORD_INTERNAL_PUNCTUATION
+        if relaxed_query_words(f"spec 1{char}2 design") is not None
+    ]
+    assert not joining_digits, (
+        f"declared joiners that shielded a digit — {_describe(joining_digits)}"
+    )
+
+
+@pytest.mark.parametrize("structural", [":", "."])
+def test_colon_and_full_stop_split_although_uax29_joins_them(structural: str) -> None:
+    """The two deliberate departures from MidLetter, written as literals.
+
+    UAX #29 returns "1.2" as a single token. Such a token is not category N, so
+    it would slip past the numeric guard that rejects "SPEC 16". Both characters
+    also carry structure here — permalinks, paths, version strings — so both keep
+    splitting, and a query built on them stays ineligible for relaxation.
+    """
+    assert len(relaxation_word_tokens(f"сло{structural}во доступа")) == 3
+    assert relaxed_query_words(f"spec 1{structural}2 design") is None
