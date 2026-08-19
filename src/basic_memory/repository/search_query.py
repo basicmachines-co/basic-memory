@@ -40,6 +40,13 @@ RELAXATION_EDGE_PUNCTUATION = "?!.,;:，。！？；：、"
 # and relaxation switches off for the one form of those scripts that reaches
 # the guard at all.
 RELAXATION_WORD_SEPARATOR_FORMATS = "\u200b"
+# Of the characters kept inside a token, only these two are orthography: the
+# Persian and Indic joiners are written in the text and therefore sit in the
+# index too, so a relaxed term must keep them or it stops matching. Every other
+# format character is a rendering artifact — a soft hyphen from a paginated
+# document, a bidi hint, a stray BOM — absent from the stored note, so carrying
+# it into the term is what stops the term matching.
+RELAXATION_ORTHOGRAPHIC_JOINERS = "\u200c\u200d"
 # Word-internal only between letters: "\u043f\u2019\u044f\u0442\u044c", "don't" \u2014 but not "SPEC 16's",
 # where the digit must stay its own token so the numeric guard still sees it.
 RELAXATION_WORD_INTERNAL_PUNCTUATION = "'\u2019"
@@ -171,6 +178,19 @@ def _split_relaxation_words(search_text: str) -> list[str]:
     return [word for word in words if word]
 
 
+def _emit_relaxation_terms(words: list[str]) -> list[str]:
+    """Clean the words for the backend, then drop duplicates the cleaning creates."""
+    cleaned = [
+        "".join(
+            char
+            for char in word
+            if char in RELAXATION_ORTHOGRAPHIC_JOINERS or not _is_word_internal_format(char)
+        )
+        for word in words
+    ]
+    return _dedupe_relaxation_words([word for word in cleaned if word])
+
+
 def relaxed_query_words(search_text: str | None) -> list[str] | None:
     """Return content-bearing words for OR-relaxing a strict full-text query.
 
@@ -210,7 +230,7 @@ def relaxed_query_words(search_text: str | None) -> list[str] | None:
             for word in cjk_words
             if word.isalnum() and word.lower() not in RELAXATION_STOPWORDS
         ]
-        relaxed_words = _dedupe_relaxation_words(pruned_words)
+        relaxed_words = _emit_relaxation_terms(pruned_words)
         # Trigger: punctuation/stopword pruning or deduplication leaves only one term.
         # Why: the raw whitespace count can make an identifier-like mixed query
         # appear multi-term even though only one backend-safe CJK prefix remains.
@@ -221,4 +241,4 @@ def relaxed_query_words(search_text: str | None) -> list[str] | None:
     if len(tokens) < 3 or any(_is_numeric_token(token) for token in tokens):
         return None
     pruned_words = [token for token in tokens if token not in RELAXATION_STOPWORDS]
-    return _dedupe_relaxation_words(pruned_words or tokens) or None
+    return _emit_relaxation_terms(pruned_words or tokens) or None

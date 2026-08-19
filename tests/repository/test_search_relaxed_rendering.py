@@ -83,3 +83,31 @@ def test_sqlite_relaxed_text_bare_apostrophe_would_be_rejected() -> None:
 def test_postgres_relaxed_tsquery_quotes_apostrophe_lexemes(query: str, expected: str) -> None:
     """Postgres carries the same token shapes, so it needs the same escaping."""
     assert PostgresSearchRepository._relaxed_tsquery_text(query) == expected
+
+
+@pytest.mark.parametrize(
+    ("document", "query"),
+    [
+        ("перевод права доступа", "пере­vод права доступа"),  # soft hyphen
+        ("слово права доступа", "сло⁠во права доступа"),  # word joiner
+        ("نمی‌خواهم دسترسی را لغو", "نمی‌خواهم دسترسی را لغو"),  # ZWNJ kept
+    ],
+)
+def test_relaxed_terms_match_the_stored_note(document: str, query: str) -> None:
+    """A term must match the note as stored, not as the query happened to be pasted.
+
+    Rendering artifacts — a soft hyphen from a paginated document, a stray word
+    joiner — are absent from the note, so carrying them into the term stops it
+    matching. The Persian joiner is the opposite case: it is written in the text
+    and indexed with it, so removing it would break the match instead.
+    """
+    connection = sqlite3.connect(":memory:")
+    try:
+        connection.execute(CREATE_FTS)
+        connection.execute("INSERT INTO t VALUES (?)", (document,))
+        relaxed = SQLiteSearchRepository._relaxed_fts_text(query)
+        assert relaxed is not None
+        rows = connection.execute("SELECT rowid FROM t WHERE t MATCH ?", (relaxed,)).fetchall()
+    finally:
+        connection.close()
+    assert rows, f"relaxed expression did not match the stored note: {relaxed!r}"
