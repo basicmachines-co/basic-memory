@@ -391,12 +391,9 @@ class DirectoryService:
             return
 
         for child in node.children:
-            # Apply glob filtering
-            if file_name_glob and not fnmatch.fnmatch(child.name, file_name_glob):
-                continue
-
-            # Add the child to results
-            result.append(child)
+            # Add child to results if it matches the glob filter
+            if not file_name_glob or fnmatch.fnmatch(child.name, file_name_glob):
+                result.append(child)
 
             # Recurse into subdirectories if we haven't reached max depth
             if child.type == "directory" and current_depth < max_depth:
