@@ -147,7 +147,10 @@ def test_declared_punctuation_is_exactly_the_chosen_midletter_subset() -> None:
     silently exempts it, so both have to be a deliberate edit rather than a side
     effect. The named cases in test_search_relaxation.py pin what each is for.
     """
-    assert RELAXATION_WORD_INTERNAL_PUNCTUATION == "'\u2018\u2019\u00b7\u0387\u05f3\u05f4\u2027"
+    assert (
+        RELAXATION_WORD_INTERNAL_PUNCTUATION
+        == "'\u2018\u2019\uff07\u00b7\u0387\u055f\u05f3\u05f4\u2027"
+    )
 
 
 def test_declared_punctuation_joins_letters_only() -> None:
@@ -185,3 +188,56 @@ def test_colon_and_full_stop_split_although_uax29_joins_them(structural: str) ->
     """
     assert len(relaxation_word_tokens(f"сло{structural}во доступа")) == 3
     assert relaxed_query_words(f"spec 1{structural}2 design") is None
+
+
+# UAX #29 Word_Break values for the punctuation that joins words, transcribed
+# from the standard. Python's unicodedata does not expose the property, so the
+# class is pinned here as data: the partition below then has to account for every
+# member, and a character cannot be forgotten, only deliberately excluded.
+UAX29_WORD_JOINING_PUNCTUATION = {
+    "MidLetter": ":··՟״‧︓﹕：",
+    "MidNumLet": ".‘’․﹒＇．",
+    "Single_Quote": "'",
+}
+# Excluded on purpose: these carry structure in this project rather than sitting
+# inside words — "tag:example" is documented query syntax, and permalinks and
+# file names are built on the full stop.
+STRUCTURAL_PUNCTUATION = ":︓﹕：.․﹒．"
+
+
+def test_the_joining_set_accounts_for_every_word_joining_character() -> None:
+    """Every UAX #29 word-joining character is either taken or named structural.
+
+    Review surfaced these one at a time — the Armenian abbreviation mark and the
+    fullwidth apostrophe were the last two. Partitioning the class means a
+    missing character fails here rather than in another round.
+    """
+    standard = set("".join(UAX29_WORD_JOINING_PUNCTUATION.values()))
+    taken = set(RELAXATION_WORD_INTERNAL_PUNCTUATION)
+    excluded = set(STRUCTURAL_PUNCTUATION)
+
+    unaccounted = standard - taken - excluded
+    assert not unaccounted, (
+        f"word-joining characters neither taken nor excluded — {_describe(sorted(unaccounted))}"
+    )
+
+    contradictory = taken & excluded
+    assert not contradictory, (
+        f"characters both taken and excluded — {_describe(sorted(contradictory))}"
+    )
+
+
+def test_taken_characters_outside_the_standard_are_justified() -> None:
+    """U+05F3 is the one addition: UAX #29 classes geresh as a letter, not punctuation.
+
+    Python sees it as Po, so the joining rule has to name it explicitly to reach
+    the same result the standard does for Hebrew.
+    """
+    standard = set("".join(UAX29_WORD_JOINING_PUNCTUATION.values()))
+    assert set(RELAXATION_WORD_INTERNAL_PUNCTUATION) - standard == {"׳"}
+
+
+@pytest.mark.parametrize("structural", sorted(STRUCTURAL_PUNCTUATION))
+def test_structural_punctuation_keeps_splitting(structural: str) -> None:
+    """Joining across these would merge a qualifier with its value, or a name with its extension."""
+    assert len(relaxation_word_tokens(f"сло{structural}во доступа")) == 3

@@ -47,13 +47,18 @@ RELAXATION_WORD_SEPARATOR_FORMATS = "\u200b"
 # document, a bidi hint, a stray BOM — absent from the stored note, so carrying
 # it into the term is what stops the term matching.
 RELAXATION_ORTHOGRAPHIC_JOINERS = "\u200c\u200d"
-# Punctuation written inside a word, applied only between two letters: "п’ять",
-# "don't", Hebrew ג׳ון and ר״ת, Catalan col·lecció. This is the UAX #29 MidLetter
-# set minus colon and full stop, which the standard also joins on — "1.2" comes
-# back as one token there, and a token like that is not category N, so it would
-# walk an identifier-like query straight past the numeric guard. Both carry
-# structure in permalinks, paths and versions here, so they keep splitting.
-RELAXATION_WORD_INTERNAL_PUNCTUATION = "'\u2018\u2019\u00b7\u0387\u05f3\u05f4\u2027"
+# Punctuation written inside a word, joined only between two letters. This is
+# the whole of UAX #29 MidLetter, MidNumLet and Single_Quote — plus U+05F3, which
+# the standard classes as a letter — minus two families that carry structure in
+# this project rather than inside words:
+#
+#   colons      U+003A U+FE13 U+FE55 U+FF1A   "tag:example" is query syntax
+#   full stops  U+002E U+2024 U+FE52 U+FF0E   permalinks and file names
+#
+# Joining across those would merge a qualifier with its value, or a name with its
+# extension, into one term. Everything else in the class is here, so a new
+# member is a change to the standard rather than an oversight.
+RELAXATION_WORD_INTERNAL_PUNCTUATION = "'\u2018\u2019\uff07\u00b7\u0387\u055f\u05f3\u05f4\u2027"
 
 
 def _is_word_internal_format(char: str) -> bool:
