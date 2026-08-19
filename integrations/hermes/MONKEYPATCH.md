@@ -4,7 +4,7 @@ This document describes the Hermes Agent-side patch needed when `/bm-*` slash co
 
 This issue is tracked upstream in https://github.com/NousResearch/hermes-agent/issues/23603
 
-Agents may use this file as a guide to add support for `/bm-*` slash commands in Hermes Agent builds that do not yet include the upstream fix.
+Agents may use this file as a guide to add support for `/bm-*` slash commands in Hermes Agent builds that do not yet include the upstream fix. Choose the version-specific path below: modern Hermes releases need only the active-provider startup-load change, while legacy releases also need collector delegation.
 
 ## Current status and compatibility
 
@@ -14,11 +14,11 @@ This is a **Hermes Agent-side** compatibility patch, not a Basic Memory plugin r
 |---|---:|---|
 | `v0.13.x` | `v0.3.0` | Plugin `v0.3.0` remains the right runtime release. If `/bm-*` commands are missing, use the Hermes Agent-side monkeypatch below or wait for the upstream Hermes fix. |
 | `v0.14.0` / `v2026.5.16` | `v0.3.1` docs, runtime still equivalent to `v0.3.0` | The plugin runtime still works, but Hermes Agent `v0.14.0` still does **not** include the upstream slash-command discovery fix. Use the v0.14.0-compatible Hermes Agent-side patch below. |
-| Future Hermes release with upstream fix | Latest plugin | Do **not** apply this monkeypatch unless `/bm-*` commands are still absent; the fix should be redundant once Hermes loads active exclusive memory-provider commands during command discovery. |
+| `v0.20.1` / `v2026.8.13` and newer | Latest plugin | The collector delegates command and skill registration. Do not apply its collector portion; only the active-provider startup-load portion remains necessary when `/bm-*` commands are absent. |
 
-Checked against Hermes Agent `v2026.5.16` / `v0.14.0` on 2026-05-16: the upstream Hermes release still does **not** include this fix. After applying the Hermes Agent-side patch below locally, `get_plugin_commands()` returns the expected `/bm-*` commands.
+Checked against Hermes Agent `v2026.5.16` / `v0.14.0` on 2026-05-16: that release includes neither half of the fix. Hermes Agent `v2026.8.13` / `v0.20.1` and newer include collector delegation but still require the active-provider startup-load change when `/bm-*` commands are absent. After applying the appropriate Hermes Agent-side patch below locally, `get_plugin_commands()` returns the expected `/bm-*` commands.
 
-Important nuance: recent `hermes-basic-memory` versions include a best-effort PluginManager reach-in that registers commands when the provider is loaded. That workaround alone is not enough for gateway startup discovery in affected Hermes builds, because `get_plugin_commands()` does not load the active exclusive memory provider. The Hermes Agent-side patch is still needed until upstream command discovery loads the active memory provider and the memory-provider collector delegates command/skill registration.
+Important nuance: on Hermes `v0.20.1` and newer, registration flows through the lifecycle-aware collector and Basic Memory deliberately does not write the same entries through private PluginManager registries. That fixes provider unload cleanup, but gateway startup still needs to load the active exclusive memory provider before command discovery can see `/bm-*` commands.
 
 Release/tagging note for agents: `v0.3.1` is a documentation release that clarifies Hermes Agent `v0.14.0` compatibility instructions. It does not require users on Hermes Agent `v0.13.x` to change plugin runtime behavior, and it should not be interpreted as a Basic Memory data/schema migration.
 
@@ -26,7 +26,9 @@ Release/tagging note for agents: `v0.3.1` is a documentation release that clarif
 
 `hermes-basic-memory` is an **exclusive memory-provider plugin**. Hermes loads exclusive memory providers through `plugins.memory`, not through the normal `PluginManager` discovery path.
 
-Gateway adapters register native slash commands during startup by calling Hermes's plugin command discovery APIs. In affected Hermes builds, that startup path only sees commands registered by normal plugins. The active memory provider has not been loaded yet, and the memory-provider loader uses a collector that captures only `register_memory_provider(...)`. As a result, commands registered by this plugin with `ctx.register_command(...)` never reach the central plugin command registry before Discord/native slash-command sync.
+Gateway adapters register native slash commands during startup by calling Hermes's plugin command discovery APIs. In affected Hermes builds, that startup path only sees commands registered by normal plugins because the active memory provider has not been loaded yet.
+
+Hermes releases before `v0.20.1` have a second problem: their memory-provider collector captures only `register_memory_provider(...)`, so commands registered by this plugin with `ctx.register_command(...)` never reach the central plugin command registry. Hermes `v0.20.1` and newer already delegate these registrations through a lifecycle-aware `PluginContext`; replacing that collector would regress unload cleanup and must not be done.
 
 Symptoms:
 
@@ -53,7 +55,15 @@ bm-workspace
 
 ## Files to patch in Hermes Agent
 
-Patch these files in the Hermes Agent repository, not in this plugin repository:
+Apply the patch in the Hermes Agent repository, not in this plugin repository.
+
+For Hermes `v0.20.1` / `v2026.8.13` and newer, patch only:
+
+```text
+hermes_cli/plugins.py
+```
+
+For Hermes releases older than `v0.20.1`, patch both:
 
 ```text
 hermes_cli/plugins.py
@@ -69,7 +79,7 @@ tests/hermes_cli/test_plugins.py
 
 ## Implementation outline
 
-### 1. Load active memory-provider commands from `get_plugin_commands()`
+### 1. Load active memory-provider commands from `get_plugin_commands()` (all affected versions)
 
 In `hermes_cli/plugins.py`, add module-level idempotency/recursion guards near the global plugin manager:
 
@@ -129,7 +139,9 @@ Notes:
 - The recursion guard prevents `load_memory_provider(...)` → provider `register(...)` → `ctx.register_command(...)` → plugin manager access from re-entering endlessly.
 - The load set prevents duplicate provider command registration work.
 
-### 2. Make the memory-provider collector delegate commands and skills
+### 2. Make the memory-provider collector delegate commands and skills (legacy Hermes only)
+
+Skip this section on Hermes `v0.20.1` / `v2026.8.13` and newer. Those releases already delegate registration through a real, lifecycle-aware `PluginContext`; replacing that implementation with the legacy shim below would discard ownership metadata and can leave stale commands or skills behind after provider unload.
 
 In `plugins/memory/__init__.py`, import `Callable`:
 
@@ -232,7 +244,18 @@ Keep existing no-op methods such as `register_tool(...)` and `register_cli_comma
 
 ## Verification
 
-From the Hermes Agent repository, run focused compile/tests:
+From the Hermes Agent repository, run focused compile/tests.
+
+For Hermes `v0.20.1` / `v2026.8.13` and newer:
+
+```bash
+python -m py_compile hermes_cli/plugins.py
+python -m pytest \
+  tests/hermes_cli/test_plugins.py::TestPluginCommands::test_get_plugin_commands_loads_active_memory_provider_commands \
+  -q -o 'addopts='
+```
+
+For legacy Hermes releases where both files were patched:
 
 ```bash
 python -m py_compile hermes_cli/plugins.py plugins/memory/__init__.py
