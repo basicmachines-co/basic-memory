@@ -111,3 +111,32 @@ def test_relaxed_terms_match_the_stored_note(document: str, query: str) -> None:
     finally:
         connection.close()
     assert rows, f"relaxed expression did not match the stored note: {relaxed!r}"
+
+
+@pytest.mark.parametrize("document", ["foo­bar", "foobar"])
+def test_relaxed_terms_match_either_stored_form(document: str) -> None:
+    """A format character is invisible, so the note may hold it or not.
+
+    The two forms index differently — "foo­bar" as two tokens, "foobar" as
+    one — and neither term matches the other note. Both forms are emitted, and
+    the OR relaxation already builds covers whichever the note actually has.
+    """
+    connection = sqlite3.connect(":memory:")
+    try:
+        connection.execute(CREATE_FTS)
+        connection.execute("INSERT INTO t VALUES (?)", (document,))
+        relaxed = SQLiteSearchRepository._relaxed_fts_text("foo­bar права доступа")
+        assert relaxed is not None
+        rows = connection.execute("SELECT rowid FROM t WHERE t MATCH ?", (relaxed,)).fetchall()
+    finally:
+        connection.close()
+    assert rows, f"relaxed expression missed the note {document!r}: {relaxed!r}"
+
+
+def test_orthographic_joiners_are_not_duplicated_into_a_second_variant() -> None:
+    """Joiners are written in the text, so the stored form has them.
+
+    A stripped variant would only widen the OR with a term no note can hold.
+    """
+    relaxed = SQLiteSearchRepository._relaxed_fts_text("نمی‌خواهم دسترسی را لغو")
+    assert relaxed == "نمی‌خواهم* OR دسترسی* OR را* OR لغو*"

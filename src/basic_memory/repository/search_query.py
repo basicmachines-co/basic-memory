@@ -182,17 +182,33 @@ def _split_relaxation_words(search_text: str) -> list[str]:
     return [word for word in words if word]
 
 
+def _relaxation_term_variants(word: str) -> list[str]:
+    """Every form of a word that could match how the note happens to be stored.
+
+    A format character is invisible, so the same word may be stored with it or
+    without it, and the two index differently: a note holding "foo\u00adbar" is
+    indexed as "foo" and "bar", one holding "foobar" as a single token. Neither
+    term matches the other note, so both forms are emitted and the OR that
+    relaxation already builds covers whichever the note actually has.
+
+    Orthographic joiners are not stripped: they are written in the text, so the
+    stored form has them and the cleaned variant would only add noise.
+    """
+    cleaned = "".join(
+        char
+        for char in word
+        if char in RELAXATION_ORTHOGRAPHIC_JOINERS or not _is_word_internal_format(char)
+    )
+    if not cleaned:
+        return []
+    return [cleaned] if cleaned == word else [cleaned, word]
+
+
 def _emit_relaxation_terms(words: list[str]) -> list[str]:
-    """Clean the words for the backend, then drop duplicates the cleaning creates."""
-    cleaned = [
-        "".join(
-            char
-            for char in word
-            if char in RELAXATION_ORTHOGRAPHIC_JOINERS or not _is_word_internal_format(char)
-        )
-        for word in words
-    ]
-    return _dedupe_relaxation_words([word for word in cleaned if word])
+    """Expand the words into backend-ready terms, then drop duplicates."""
+    return _dedupe_relaxation_words(
+        [variant for word in words for variant in _relaxation_term_variants(word)]
+    )
 
 
 def relaxed_query_words(search_text: str | None) -> list[str] | None:
