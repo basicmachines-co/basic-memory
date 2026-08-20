@@ -391,7 +391,9 @@ class DirectoryService:
             return
 
         for child in node.children:
-            # Add child to results if it matches the glob filter
+            # The glob gates inclusion in the results only. Recursion below must not
+            # be gated by it: directory names rarely match file globs (e.g. "test"
+            # vs "*.md"), and pruning here would hide every file beneath them.
             if not file_name_glob or fnmatch.fnmatch(child.name, file_name_glob):
                 result.append(child)
 

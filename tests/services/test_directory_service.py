@@ -236,14 +236,20 @@ async def test_list_directory_with_specific_file_filter(
 async def test_list_directory_with_glob_filter_recursive_depth(
     directory_service: DirectoryService, test_graph
 ):
-    """Test listing directory from root with depth > 1 and glob filter traverses subdirectories."""
+    """Test that a glob filter excludes non-matching directories without pruning traversal."""
     result = await directory_service.list_directory(dir_name="/", depth=2, file_name_glob="*.md")
 
-    # Should traverse "/test" directory and match the 5 markdown files inside
-    assert len(result.nodes) == 5
+    # The "test" directory does not match "*.md", so it is excluded from the
+    # results themselves but still traversed for the matching files inside it.
     file_names = {node.name for node in result.nodes}
-    assert "Root.md" in file_names
-
+    assert file_names == {
+        "Connected Entity 1.md",
+        "Connected Entity 2.md",
+        "Deep Entity.md",
+        "Deeper Entity.md",
+        "Root.md",
+    }
+    assert all(node.type == "file" for node in result.nodes)
 
 
 @pytest.mark.asyncio
