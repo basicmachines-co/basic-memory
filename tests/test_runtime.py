@@ -1102,6 +1102,10 @@ class TestRuntimeContracts:
         assert file_checksum_from_object_metadata(metadata) == "checksum-1"
         assert db_version_from_object_metadata(metadata) == 7
         assert source_from_object_metadata(metadata) == "mcp"
+        assert (
+            source_from_object_metadata({NOTE_OBJECT_SOURCE_METADATA: "document_ingestion"})
+            == "document_ingestion"
+        )
 
         unsafe_metadata = {
             NOTE_OBJECT_ACTOR_KIND_METADATA: "spoofed",
