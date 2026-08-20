@@ -331,6 +331,7 @@ class LinkResolver:
         # Trigger: source_path is provided AND link contains "/"
         # Why: Resolve paths like [[nested/deep-note]] relative to source folder first
         # Outcome: [[nested/deep-note]] from testing/link-test.md → testing/nested/deep-note.md
+        deferred_relative_alias_path: Optional[str] = None
         if source_path and "/" in clean_text:
             if not (
                 include_project
@@ -362,18 +363,15 @@ class LinkResolver:
                     if entity:
                         return entity
 
-                    relative_alias_path = (
+                    # Only exact relative paths may resolve this early. The forgiving
+                    # alias spelling is deferred until every exact identity — permalink,
+                    # title, file path — has missed, or a nearby alias would shadow
+                    # another note's exact permalink.
+                    deferred_relative_alias_path = (
                         relative_path
                         if relative_path.casefold().endswith(".md")
                         else f"{relative_path}.md"
                     )
-                    alias_entity = await entity_repository.get_unique_by_file_path_alias(
-                        session,
-                        relative_alias_path,
-                        load_relations=load_relations,
-                    )
-                    if alias_entity:
-                        return alias_entity
 
         # When source_path is provided, use context-aware resolution:
         # Check both permalink and title matches, prefer closest to source.
@@ -498,6 +496,20 @@ class LinkResolver:
         # 5. Direct-on-disk vaults commonly mix filename separators and case in
         # wikilinks. Treat those spellings as aliases only after every exact semantic
         # and path lookup, and only when the alias identifies one file uniquely.
+        # A source-relative alias is the closest forgiving spelling, so it is tried
+        # ahead of the project-wide one.
+        if deferred_relative_alias_path:
+            relative_alias_entity = await entity_repository.get_unique_by_file_path_alias(
+                session,
+                deferred_relative_alias_path,
+                load_relations=load_relations,
+            )
+            if relative_alias_entity:
+                logger.debug(
+                    f"Found entity by relative file path alias: {relative_alias_entity.file_path}"
+                )
+                return relative_alias_entity
+
         if has_markdown_extension or can_use_stem_path:
             alias_path = await entity_repository.get_unique_by_file_path_alias(
                 session,

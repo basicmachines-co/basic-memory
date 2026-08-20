@@ -1287,6 +1287,40 @@ async def relative_path_entities(entity_repository, session_maker):
         )
         entities.append(e5)
 
+        # elsewhere/permalink-owner.md owns the exact permalink "nested/shadow-target",
+        # while testing/nested/shadow_target.md is only an alias spelling away from the
+        # same link text. Exact identities must win over forgiving alias spellings.
+        e6 = await entity_repository.add(
+            session,
+            EntityModel(
+                title="Exact permalink owner",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="elsewhere/permalink-owner.md",
+                permalink="nested/shadow-target",
+                created_at=now,
+                updated_at=now,
+                project_id=project_id,
+            ),
+        )
+        entities.append(e6)
+
+        # testing/nested/shadow_target.md (relative filename-alias decoy for e6)
+        e7 = await entity_repository.add(
+            session,
+            EntityModel(
+                title="Relative alias decoy",
+                note_type="note",
+                content_type="text/markdown",
+                file_path="testing/nested/shadow_target.md",
+                permalink="relative-alias-decoy",
+                created_at=now,
+                updated_at=now,
+                project_id=project_id,
+            ),
+        )
+        entities.append(e7)
+
     return entities
 
 
@@ -1318,6 +1352,17 @@ async def test_relative_path_resolution_uses_unique_filename_alias(relative_path
 
     assert result is not None
     assert result.file_path == "testing/nested/under_score.md"
+
+
+@pytest.mark.asyncio
+async def test_exact_permalink_wins_over_relative_filename_alias(relative_path_resolver):
+    """A note owning the exact permalink beats a source-relative alias spelling."""
+    result = await relative_path_resolver.resolve_link(
+        "nested/shadow-target", source_path="testing/link-test.md", use_search=False
+    )
+
+    assert result is not None
+    assert result.file_path == "elsewhere/permalink-owner.md"
 
 
 @pytest.mark.asyncio
