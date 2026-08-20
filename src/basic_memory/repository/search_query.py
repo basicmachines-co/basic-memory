@@ -68,9 +68,13 @@ def _is_word_internal_format(char: str) -> bool:
 
 def _strip_trailing_formats(token: str) -> str:
     """Drop format characters left at a token's end, where they separate rather than join."""
-    while token and _is_word_internal_format(token[-1]):
-        token = token[:-1]
-    return token
+    # Indexed rather than sliced: trimming one character at a time copies the
+    # shrinking token at every step, which is quadratic in a run of trailing
+    # format characters.
+    end = len(token)
+    while end and _is_word_internal_format(token[end - 1]):
+        end -= 1
+    return token[:end]
 
 
 def _is_attached(char: str) -> bool:

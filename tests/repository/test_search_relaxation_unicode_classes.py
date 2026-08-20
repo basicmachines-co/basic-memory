@@ -269,3 +269,30 @@ def test_tokenizing_scales_linearly_with_query_length() -> None:
     assert double < single * 2.5, (
         f"tokenizing scaled worse than linearly: {single * 1000:.1f} ms then {double * 1000:.1f} ms"
     )
+
+
+def test_trailing_format_trim_scales_linearly() -> None:
+    """A word ending in a long run of format characters must trim in one pass.
+
+    Format characters are word-internal, so a token collects them all before the
+    trailing trim runs. Trimming one character at a time copies the shrinking
+    token at every step, which is quadratic: an unbounded query ending in enough
+    soft hyphens then ties up the worker that tokenizes it. As above, the ratio
+    is asserted rather than a duration.
+    """
+
+    def elapsed(count: int) -> float:
+        text = "a" + "\u00ad" * count
+        start = time.perf_counter()
+        relaxation_word_tokens(text)
+        return time.perf_counter() - start
+
+    # Sized so the trim dominates the measurement: at shorter lengths the
+    # tokenizer's linear per-character work dilutes the quadratic term below
+    # the ratio threshold and a regression would pass unnoticed.
+    single = min(elapsed(256 * 1024) for _ in range(3))
+    double = min(elapsed(512 * 1024) for _ in range(3))
+
+    assert double < single * 2.5, (
+        f"trailing trim scaled worse than linearly: {single * 1000:.1f} ms then {double * 1000:.1f} ms"
+    )
