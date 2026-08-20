@@ -75,7 +75,7 @@ async def test_write_same_title_same_directory_collision(mcp_server, app, test_p
     (The lower-level ``EntityRepository._handle_permalink_conflict`` numeric-suffix
     recovery is NOT reachable on this sequential path — the API pre-check pre-empts
     it. It is exercised via the concurrent TOCTOU race in
-    ``test_concurrent_permalink_conflict_recovery`` below.)
+    ``test_concurrent_same_title_collision`` below.)
     """
 
     async with Client(mcp_server) as client:
@@ -272,6 +272,13 @@ async def test_concurrent_same_title_collision(mcp_server, app, test_project) ->
         assert read_payload["title"] == "Race Note", read_payload
         assert read_payload["permalink"].endswith(base), read_payload
 
+        # The surviving note must hold exactly one complete writer body — a
+        # torn or interleaved write would leave content matching no writer.
+        assert any(
+            f"Writer {i} attempted this note." in read_payload["content"]
+            for i in range(write_count)
+        ), read_payload
+
 
 @pytest.mark.asyncio
 async def test_concurrent_write_different_notes(mcp_server, app, test_project) -> None:
@@ -372,11 +379,15 @@ async def test_concurrent_write_same_directory(mcp_server, app, test_project) ->
 
 @pytest.mark.asyncio
 async def test_concurrent_write_then_search(mcp_server, app, test_project) -> None:
-    """After concurrent writes, each note is findable via search.
+    """After concurrent writes, EVERY note becomes findable via search.
 
     Concurrent index updates are a classic race; this writes N notes in parallel
     then searches for each unique token to confirm the FTS index absorbed every
-    write without dropping entries.
+    write without dropping entries. Local write_note indexes synchronously
+    before returning, so the first search pass should normally find everything;
+    a bounded convergence poll tolerates eventually-consistent indexing without
+    weakening the oracle — if any note is still unfindable when the bound is
+    exhausted, the test fails listing the missing titles.
     """
 
     note_count = 8
@@ -417,25 +428,34 @@ async def test_concurrent_write_then_search(mcp_server, app, test_project) -> No
                 )
             )
 
-        search_results = await asyncio.gather(*(search_one(i) for i in range(note_count)))
-        # Search indexing may be eventually consistent, so we do NOT require every
-        # note to be immediately findable. Instead we verify the index is not
-        # corrupted under concurrent writes: each search returns a valid, well-shaped
-        # response, and at least some of the notes are findable (proving it works).
-        found = 0
-        for index, payload in enumerate(search_results):
-            assert isinstance(payload.get("results"), list), (
-                f"search {index} returned invalid response shape: {payload}"
-            )
-            for result in payload["results"]:
-                # Any returned result must have the expected structure.
-                assert "title" in result, f"search {index} result missing title: {payload}"
-            if any(result["title"] == f"Searchable Note {index}" for result in payload["results"]):
-                found += 1
+        # Convergence oracle: every note must become findable within the bound.
+        # Search indexing is allowed to be eventually consistent, so poll rather
+        # than assert instant visibility — but a note still missing after the
+        # bound is a lost index update, not a timing artifact.
+        expected_titles = {f"Searchable Note {i}" for i in range(note_count)}
+        missing_titles = set(expected_titles)
+        for _attempt in range(20):
+            search_results = await asyncio.gather(*(search_one(i) for i in range(note_count)))
+            found_titles: set[str] = set()
+            for index, payload in enumerate(search_results):
+                assert isinstance(payload.get("results"), list), (
+                    f"search {index} returned invalid response shape: {payload}"
+                )
+                for result in payload["results"]:
+                    # Any returned result must have the expected structure.
+                    assert "title" in result, f"search {index} result missing title: {payload}"
+                if any(
+                    result["title"] == f"Searchable Note {index}" for result in payload["results"]
+                ):
+                    found_titles.add(f"Searchable Note {index}")
+            missing_titles = expected_titles - found_titles
+            if not missing_titles:
+                break
+            await asyncio.sleep(0.25)
 
-        assert found > 0, (
-            f"no concurrently written notes were findable via search; "
-            f"index appears non-functional: {search_results}"
+        assert not missing_titles, (
+            f"search index never converged after concurrent writes; "
+            f"notes still missing after bounded poll: {sorted(missing_titles)}"
         )
 
 
@@ -557,6 +577,8 @@ async def test_concurrent_write_high_volume(mcp_server, app, test_project) -> No
 
         read_results = await asyncio.gather(*(read_one(i) for i in range(note_count)))
         for index, payload in enumerate(read_results):
-            assert f"Volume body {index}" in payload["content"], (
+            # Match the terminated body ("Volume body 1.") so index 1 cannot
+            # false-positive against "Volume body 10." and friends.
+            assert f"Volume body {index}." in payload["content"], (
                 f"note {index} content missing under load: {payload}"
             )
