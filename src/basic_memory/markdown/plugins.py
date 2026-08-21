@@ -145,39 +145,49 @@ def is_explicit_relation(token: Token) -> bool:
 
     # Use token.tag which contains the actual content for test tokens, fallback to content
     content = (token.tag or token.content).strip()
-    return "[[" in content and "]]" in content and parse_relation_type(content) is not None
+    if "[[" not in content or "]]" not in content:
+        return False
+    return _parse_explicit_relation(content) is not None
 
 
-def parse_relation(token: Token) -> Dict[str, Any] | None:
-    """Extract relation parts from token."""
-    # Remove bullet point if present
-    # Use token.tag which contains the actual content for test tokens, fallback to content
-    content = (token.tag or token.content).strip()
-
+def _parse_explicit_relation(content: str) -> Dict[str, Any] | None:
+    """Parse ``type [[target]] (context)``, rejecting lines with a prose tail."""
     rel_type = parse_relation_type(content)
     if rel_type is None:
         return None
 
-    # Extract [[target]]
-    target = None
-    context = None
-
     start = content.find("[[")
     end = content.find("]]", start + 2)
+    if start == -1 or end == -1:
+        return None
 
-    if start != -1 and end != -1:
-        # Get target
-        target = normalize_project_reference(content[start + 2 : end].strip())
+    target = normalize_project_reference(content[start + 2 : end].strip())
+    if not target:
+        return None
 
-        # Look for context after
-        after = content[end + 2 :].strip()
-        if after.startswith("(") and after.endswith(")"):
-            context = after[1:-1].strip() or None
-
-    if not target:  # pragma: no cover
+    # Trigger: text follows the target that is not a parenthesized context.
+    # Why: an explicit relation line ends at its target or its (context). A prose
+    #   tail means the line is a sentence that happens to contain a wikilink; the
+    #   old behavior minted a junk type from the word before the link and silently
+    #   dropped the tail — including any further [[links]] in it — from the edge
+    #   (#1260).
+    # Outcome: such lines fall through to inline links_to handling, which keeps
+    #   every wikilink on the line as an edge and the sentence intact as content.
+    after = content[end + 2 :].strip()
+    context = None
+    if after.startswith("(") and after.endswith(")"):
+        context = after[1:-1].strip() or None
+    elif after:
         return None
 
     return {"type": rel_type, "target": target, "context": context}
+
+
+def parse_relation(token: Token) -> Dict[str, Any] | None:
+    """Extract relation parts from token."""
+    # Use token.tag which contains the actual content for test tokens, fallback to content
+    content = (token.tag or token.content).strip()
+    return _parse_explicit_relation(content)
 
 
 def parse_inline_relations(content: str) -> List[Dict[str, Any]]:

@@ -42,24 +42,24 @@ def test_malformed_links():
     tokens = md.parse("- type ]]Target[[")
     assert not any(t.meta and "relations" in t.meta for t in tokens)
 
-    # Nested brackets
+    # Nested brackets: the tail after the first ]] is not a (context), so the
+    # line is not an explicit relation; inline handling depth-matches the link.
     tokens = md.parse("- type [[Outer [[Inner]] ]]")
     token = next(t for t in tokens if t.type == "inline")
-    rel = parse_relation(token)
-    assert rel is not None
-    assert "Outer" in rel["target"]
+    assert parse_relation(token) is None
+    assert all(r["type"] == "links_to" for r in token.meta["relations"])
 
 
 def test_context_handling():
     """Test handling of contexts."""
     md = MarkdownIt().use(relation_plugin)
 
-    # Unclosed context
+    # Unclosed context is a prose tail, not a context: the line falls back to
+    # an inline link instead of minting a typed edge with the tail dropped.
     tokens = md.parse("- type [[Target]] (unclosed")
     token = next(t for t in tokens if t.type == "inline")
-    rel = parse_relation(token)
-    assert rel is not None
-    assert rel["context"] is None
+    assert parse_relation(token) is None
+    assert token.meta["relations"] == [{"type": "links_to", "target": "Target", "context": None}]
 
     # Multiple parens
     tokens = md.parse("- type [[Target]] (with (nested) parens)")
@@ -96,6 +96,68 @@ def test_inline_relations():
     tokens = md.parse("[[One]] [[Two]] [[Three]]")
     token = next(t for t in tokens if t.type == "inline")
     assert len(token.meta["relations"]) == 3
+
+
+def test_prose_tail_falls_back_to_inline_link():
+    """A sentence containing a wikilink must not mint a typed relation (#1260).
+
+    An explicit relation line ends at its target or its (context); trailing
+    prose means the line is ordinary writing, and the old behavior both minted
+    a junk type from the word before the link and silently dropped the tail.
+    """
+    md = MarkdownIt().use(relation_plugin)
+
+    for src in [
+        "- Added [[Target Note]] to the roster",
+        "- Calls [[Target Note]] every Sunday",
+        '- "multi word type" [[Target Note]] trailing prose',
+        "- type [[Target Note]] (context) and more",
+    ]:
+        tokens = md.parse(src)
+        token = next(t for t in tokens if t.type == "inline")
+        assert parse_relation(token) is None, src
+        assert token.meta["relations"] == [
+            {"type": "links_to", "target": "Target Note", "context": None}
+        ], src
+
+
+def test_prose_tail_keeps_every_wikilink_in_the_tail():
+    """Falling back to inline handling preserves links the old path dropped."""
+    md = MarkdownIt().use(relation_plugin)
+
+    # The old explicit path minted `relates_to -> A` and lost B's edge entirely.
+    tokens = md.parse("- relates_to [[Alpha]] and [[Beta]]")
+    token = next(t for t in tokens if t.type == "inline")
+    assert parse_relation(token) is None
+    assert {r["target"] for r in token.meta["relations"]} == {"Alpha", "Beta"}
+    assert all(r["type"] == "links_to" for r in token.meta["relations"])
+
+    tokens = md.parse("- Links: [[Alpha]], [[Beta]]")
+    token = next(t for t in tokens if t.type == "inline")
+    assert {r["target"] for r in token.meta["relations"]} == {"Alpha", "Beta"}
+
+
+def test_explicit_relation_forms_still_parse():
+    """Hand-authored relation shapes keep their types after the #1260 fix."""
+    md = MarkdownIt().use(relation_plugin)
+
+    expected = {
+        "- spouse_of [[Target Note]]": ("spouse_of", None),
+        "- requires [[Target Note]] (because reasons)": ("requires", "because reasons"),
+        '- "multi word type" [[Target Note]] (context)': ("multi word type", "context"),
+    }
+    for src, (rel_type, context) in expected.items():
+        tokens = md.parse(src)
+        token = next(t for t in tokens if t.type == "inline")
+        rel = parse_relation(token)
+        assert rel == {"type": rel_type, "target": "Target Note", "context": context}, src
+
+    # Known limitation, pinned deliberately: a single capitalized word with no
+    # tail is indistinguishable by shape from a hand-authored type ("Requires"),
+    # so it still mints. The grammar policy for this case is tracked in #1260.
+    tokens = md.parse("- Mother [[Target Note]]")
+    token = next(t for t in tokens if t.type == "inline")
+    assert parse_relation(token) == {"type": "Mother", "target": "Target Note", "context": None}
 
 
 def test_unicode_targets():
