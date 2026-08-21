@@ -203,6 +203,30 @@ async def test_import_chatgpt_invalid_file(client: AsyncClient, tmp_path, v2_pro
 
 
 @pytest.mark.asyncio
+async def test_import_chatgpt_invalid_utf8_file(client: AsyncClient, v2_project_url: str):
+    """Invalid UTF-8 bytes are a client-input problem too, not a 500 (#1276)."""
+    files = {"file": ("invalid.json", b"\xff\xfe not utf-8", "application/json")}
+    data = {"directory": "test_chatgpt"}
+
+    response = await client.post(f"{v2_project_url}/import/chatgpt", files=files, data=data)
+
+    assert response.status_code == 400
+    assert "not valid JSON" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_import_memory_json_invalid_utf8_file(client: AsyncClient, v2_project_url: str):
+    """The line-oriented memory-json decode rejects invalid UTF-8 with a 400 as well."""
+    files = {"file": ("memory.json", b"\xff\xfe not utf-8", "application/json")}
+    data = {"directory": "test_memory"}
+
+    response = await client.post(f"{v2_project_url}/import/memory-json", files=files, data=data)
+
+    assert response.status_code == 400
+    assert "not valid JSON" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_import_claude_conversations(
     client: AsyncClient,
     tmp_path,
