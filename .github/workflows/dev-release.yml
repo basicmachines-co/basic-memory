@@ -32,6 +32,22 @@ jobs:
       - name: Compute version from git
         id: check_version
         run: |
+          # Trigger: the push of a release PR's bump commit reaches this
+          #   workflow before the release recipe pushes the vX.Y.Z tag.
+          # Why: dunamai would see an untagged commit and emit a dev version,
+          #   publishing the stable release content as a spurious dev artifact
+          #   under the previous release line.
+          # Outcome: release-bump commits are recognized by the recipe's fixed
+          #   commit subject (the same key the recipe itself uses to locate the
+          #   commit after rebase-merge) and skipped; the Release workflow
+          #   publishes them from the tag.
+          SUBJECT=$(git log -1 --pretty=%s)
+          if [[ "$SUBJECT" =~ ^chore:\ update\ version\ to\ .*\ release$ ]]; then
+            echo "is_dev=false" >> $GITHUB_OUTPUT
+            echo "version=" >> $GITHUB_OUTPUT
+            echo "Release bump commit detected ('$SUBJECT'), skipping dev release"
+            exit 0
+          fi
           # The release automation hardcodes the last stable release into
           # basic_memory.__version__, so importing the source tree always
           # reports that release and the old gate skipped every dev publish.
