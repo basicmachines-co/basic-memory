@@ -202,12 +202,37 @@ def test_import_chatgpt_with_custom_folder(tmp_path, sample_chatgpt_json, monkey
 
 
 def test_import_chatgpt_missing_create_time(tmp_path, sample_conversation):
-    """Conversations without create_time fall back to update_time (#1276)."""
+    """Without create_time, the earliest message time wins over update_time (#1276).
+
+    update_time advances whenever a conversation continues, so using it while
+    messages carry timestamps would rename the output file on the next export
+    and fork a duplicate note. The messages' 2025-01-11 prefix proves the
+    immutable rung was chosen over the later update_time day.
+    """
     config = get_project_config()
     config.home = tmp_path
     del sample_conversation["create_time"]
-    # A later day than the messages, so the date prefix proves update_time was used
+    sample_conversation["update_time"] = 1736703003.0  # 2025-01-12, later than messages
+    json_file = tmp_path / "conversations.json"
+    json_file.write_text(json.dumps([sample_conversation]), encoding="utf-8")
+
+    result = runner.invoke(app, ["import", "chatgpt", str(json_file), "--folder", "chats"])
+    assert result.exit_code == 0
+    assert "Imported 1 conversations" in result.output
+
+    conv_path = tmp_path / "chats" / "20250111-Test_Conversation.md"
+    assert conv_path.exists()
+
+
+def test_import_chatgpt_update_time_rung_when_no_message_times(tmp_path, sample_conversation):
+    """update_time is the fallback only when no message carries a timestamp (#1276)."""
+    config = get_project_config()
+    config.home = tmp_path
+    del sample_conversation["create_time"]
     sample_conversation["update_time"] = 1736703003.0  # 2025-01-12
+    for node in sample_conversation["mapping"].values():
+        if node.get("message"):
+            node["message"]["create_time"] = None
     json_file = tmp_path / "conversations.json"
     json_file.write_text(json.dumps([sample_conversation]), encoding="utf-8")
 

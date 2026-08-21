@@ -102,13 +102,16 @@ class ChatGPTImporter(Importer[ChatImportResult]):
         """Resolve conversation timestamps, tolerating absent fields.
 
         OpenAI's export format does not guarantee `create_time` or `update_time`
-        on every conversation object (#1276). Fall back in order: the other
-        conversation-level timestamp, the earliest message timestamp, an epoch
-        sentinel. The last resort must be deterministic — the resolved date
-        names the output file (`YYYYMMDD-title.md`), so an import-time fallback
-        would make a reimport of the same archive write a duplicate note under
-        a new name instead of updating the original. The obviously-wrong 1970
-        prefix also reads as "date unknown" rather than faking a plausible one.
+        on every conversation object (#1276). Fall back in order: the earliest
+        message timestamp, the conversation's `update_time`, an epoch sentinel.
+        Every rung must stay stable across re-exports — the resolved date names
+        the output file (`YYYYMMDD-title.md`), so a value that changes between
+        exports would make the next import write a duplicate note under a new
+        name instead of updating the original. That is why the earliest message
+        time outranks `update_time` (existing messages keep their timestamps
+        while `update_time` advances whenever the conversation continues) and
+        why the last resort is a fixed sentinel whose obviously-wrong 1970
+        prefix reads as "date unknown" rather than faking a plausible one.
 
         Args:
             conversation: ChatGPT conversation data.
@@ -119,14 +122,16 @@ class ChatGPTImporter(Importer[ChatImportResult]):
         created_at = conversation.get("create_time")
         modified_at = conversation.get("update_time")
         if created_at is None:
-            created_at = modified_at
-        if created_at is None:
             message_times = [
                 node["message"]["create_time"]
                 for node in conversation.get("mapping", {}).values()
                 if node.get("message") and node["message"].get("create_time") is not None
             ]
-            created_at = min(message_times) if message_times else UNKNOWN_DATE_SENTINEL
+            created_at = min(message_times) if message_times else None
+        if created_at is None:
+            created_at = modified_at
+        if created_at is None:
+            created_at = UNKNOWN_DATE_SENTINEL
         if modified_at is None:
             modified_at = created_at
         return created_at, modified_at
