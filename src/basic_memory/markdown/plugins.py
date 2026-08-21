@@ -165,7 +165,7 @@ def _parse_explicit_relation(content: str) -> Dict[str, Any] | None:
     if not target:
         return None
 
-    # Trigger: text follows the target that is not a parenthesized context.
+    # Trigger: text follows the target that is not a single parenthesized context.
     # Why: an explicit relation line ends at its target or its (context). A prose
     #   tail means the line is a sentence that happens to contain a wikilink; the
     #   old behavior minted a junk type from the word before the link and silently
@@ -175,12 +175,33 @@ def _parse_explicit_relation(content: str) -> Dict[str, Any] | None:
     #   every wikilink on the line as an edge and the sentence intact as content.
     after = content[end + 2 :].strip()
     context = None
-    if after.startswith("(") and after.endswith(")"):
+    if after:
+        if not _is_single_parenthesized(after):
+            return None
         context = after[1:-1].strip() or None
-    elif after:
-        return None
 
     return {"type": rel_type, "target": target, "context": context}
+
+
+def _is_single_parenthesized(text: str) -> bool:
+    """Whether the text is one balanced ``(...)`` group and nothing more.
+
+    Checking only the first and last characters would accept
+    ``(primary) and [[Beta]] (secondary)`` as a single context and silently
+    drop the Beta link — the corruption class the prose-tail rule exists to
+    prevent — so the opening paren must close exactly at the final character.
+    """
+    if not text.startswith("("):
+        return False
+    depth = 0
+    for position, char in enumerate(text):
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth == 0:
+                return position == len(text) - 1
+    return False
 
 
 def parse_relation(token: Token) -> Dict[str, Any] | None:

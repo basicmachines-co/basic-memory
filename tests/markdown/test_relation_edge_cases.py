@@ -136,6 +136,15 @@ def test_prose_tail_keeps_every_wikilink_in_the_tail():
     token = next(t for t in tokens if t.type == "inline")
     assert {r["target"] for r in token.meta["relations"]} == {"Alpha", "Beta"}
 
+    # A context-looking tail whose opening paren closes before the end is prose:
+    # accepting `(primary) and [[Beta]] (secondary)` as one context would drop
+    # the Beta link — the corruption class this rule exists to prevent.
+    tokens = md.parse("- relates_to [[Alpha]] (primary) and [[Beta]] (secondary)")
+    token = next(t for t in tokens if t.type == "inline")
+    assert parse_relation(token) is None
+    assert {r["target"] for r in token.meta["relations"]} == {"Alpha", "Beta"}
+    assert all(r["type"] == "links_to" for r in token.meta["relations"])
+
 
 def test_explicit_relation_forms_still_parse():
     """Hand-authored relation shapes keep their types after the #1260 fix."""
