@@ -240,6 +240,11 @@ search entries.
 - **#1271**: Transcript timestamp ranges like `[24:33.098 - 24:41.260]` no
   longer mint junk observation categories either — the remaining
   range-shaped case from **#1239** (**#1270**).
+- **#1291**: Prose bullets no longer mint typed relations: a sentence like
+  `- Added [[Target]] to the roster` filed a relation *type* called `Added`
+  and silently dropped the rest of the line, including any further links in
+  it. An explicit relation now ends at its target or its `(context)`;
+  anything else keeps every wikilink as a plain `links_to` edge (**#1260**).
 - **#1060**: `schema_validate` with no arguments validates all
   schema-covered types instead of type "unknown" (**#1013**), and invalid
   schema-validation modes are rejected instead of silently degrading to
@@ -252,6 +257,10 @@ search entries.
 - **#1273**: Re-selecting the project that is already the default no longer
   clears the default flag — a state that broke project discovery and every
   project-scoped MCP tool until a default was set again.
+- **#1290**: ChatGPT import no longer crashes on conversations missing
+  `create_time` — timestamps fall back to `update_time`, then the earliest
+  message time, so the whole archive imports (**#1276**); undecodable
+  import uploads return a 400 with the parse error instead of a 500.
 - **#1058 / #1094**: `bm doctor` never prints a blank failure message, and
   migrations adapt to existing event loops (**#1027**).
 - **#1080**: Loading config no longer recreates an empty `~/basic-memory`
