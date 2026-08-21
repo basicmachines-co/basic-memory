@@ -71,9 +71,12 @@ jobs:
           # artifact carries the same metadata-free version the gate saw.
           UV_DYNAMIC_VERSIONING_BYPASS="${{ steps.check_version.outputs.version }}" uv build
 
+      # Publishes via PyPI trusted publishing (OIDC) — the PYPI_TOKEN secret no
+      # longer exists (stable releases attest via the release.yml trusted
+      # publisher). Requires a PyPI trusted-publisher registration for
+      # dev-release.yml on the basic-memory project.
       - name: Publish dev version to PyPI
         if: steps.check_version.outputs.is_dev == 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          password: ${{ secrets.PYPI_TOKEN }}
           skip-existing: true  # Don't fail if version already exists
