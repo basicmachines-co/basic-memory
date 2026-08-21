@@ -10,12 +10,15 @@ Milvus adapter, and a batch of embedding-correctness fixes; the indexing and
 persistence path is rebuilt around generation-versioned, compare-and-swap
 writes so concurrent multi-agent workloads can no longer deadlock or lose
 observations and relations. Day-to-day operation gets a real front door with
-`bm config`, Rich `bm tool` output, a diagnostics tool, and an honest
-reindex; `bm hook` brings harness lifecycle capture into the package; and
-cloud adds `bm cloud share`, `bm cloud prune`, and an optional Redis read
-cache. Five database migrations run automatically on first start, including
-a one-time repair that dedupes duplicate observation rows and purges their
-stale full-text search entries.
+`bm config`, Rich `bm tool` output, a diagnostics tool, an honest reindex,
+and a retrieval inspector — `bm inspect chunks` shows a note exactly as the
+index sees it and `bm inspect query` traces how a search ranked its results;
+`bm hook` brings harness lifecycle capture into the package; and cloud adds
+`bm cloud share`, `bm cloud prune`, an optional Redis read cache, and Team
+workspace `bm cloud push`/`pull` over permissioned WebDAV. Five database
+migrations run automatically on first start, including a one-time repair
+that dedupes duplicate observation rows and purges their stale full-text
+search entries.
 
 ### Breaking Changes
 
@@ -73,6 +76,16 @@ stale full-text search entries.
   `api_key` for OpenAI-compatible and self-hosted servers (**#1005**), and
   literal document/query prefixes support prefix-sensitive asymmetric
   models (**#1044**, **#1008**).
+- **#1249 / #1250**: New retrieval inspector (**#1155**). `bm inspect
+  chunks <note>` shows a note exactly as the index sees it — its search
+  rows, the vector chunks each row produced, and per-chunk
+  ready/pending/stale/orphaned status — separating chunking problems from
+  freshness problems in one command. `bm inspect query "<query>"` captures
+  an opt-in execution trace from the same search call that returns the
+  results: FTS and vector candidates, fusion, filtering, reranking, and the
+  final page window, with stable JSON output and `--show-misses` for
+  rejected candidates. Ordinary search behavior and responses are
+  unchanged.
 - **#1088**: New `bm config` command group: `list` (effective values with
   env overrides marked), `get`, `set` (validated through the config model),
   and `unset` (**#991**).
@@ -129,9 +142,20 @@ stale full-text search entries.
 - **#1061**: New `bm cloud prune` removes `.bmignore`d files from the cloud
   on demand (**#1032**; see Breaking Changes for the one-way sync behavior
   change).
+- **#1263**: Team-workspace `bm cloud push`/`pull` run over the service's
+  permissioned WebDAV surface instead of tenant-wide storage credentials,
+  so any member can sync the projects they have access to — previously only
+  workspace owners could provision the required credentials and every other
+  member got a 403 (**#1262**). Same flags and semantics: `--on-conflict`
+  still defaults to `fail`, and transfers stay additive — nothing is ever
+  deleted. Requires the updated cloud server, already deployed in
+  production; the Personal rclone path is untouched.
 - **#1168 / #1172**: Optional Redis read caching accelerates standalone MCP
   reads via the `basic-memory[redis]` extra (`redis_url`,
   `redis_max_connections`) (**#980**).
+- **#1255**: Semantic note reads make the minimum number of API requests —
+  exact-ID reads skip resolve and resource calls entirely — and ordinary
+  read-cache entries live 300 seconds instead of 60.
 - **#1062 / #1074**: Cloud project deletion errors are surfaced, with an
   optional notes purge and a visible deletion job (**#1033**, **#1034**).
 - **#1145**: First-connect MCP onboarding: server instructions, empty-state
@@ -141,6 +165,10 @@ stale full-text search entries.
 - **#1075**: `move_note` returns the previous accepted path (**#1072**).
 - **#1040 / #1101 / #1103**: `external_id` is exposed in `list_directory`,
   `recent_activity`, search results, and `search_notes` markdown output.
+- **#1268**: `list_directory` accepts a `sort` parameter (`title_asc`,
+  `title_desc`, `updated_asc`, `updated_desc`) with deterministic
+  folders-first ordering applied before pagination (**#1267**); omitting it
+  keeps the existing filename order.
 - **#1031 / #1036 / #1037**: MCP tool annotations are directory-compliant,
   destructive hints are explicit, and `edit_note` exposes its operation
   enum.
@@ -153,9 +181,17 @@ stale full-text search entries.
   (**#1187**, **#1199**, **#1209**).
 - A one-time migration dedupes historical duplicate observation rows and
   purges their orphaned full-text search entries (companion to **#1228**).
+- **#1247**: Incremental `bm reindex --search` purges stale search-index
+  rows whose backing entity, observation, or relation is gone, so DB-only
+  search divergence on unchanged files converges without a `--full` rebuild
+  (**#1226**; the last loose end of the **#1214** repair).
 - **#1152 / #1160**: Moves record a durable vacate marker, so a
   byte-identical copy at the old path indexes as a new note instead of
   being skipped as a lingering move source.
+- **#1258**: A note accepted while a project scan is in flight can no
+  longer be deleted as "externally removed" — destructive project-index
+  deletes re-verify the database lineage and the path's current absence
+  from storage at apply time (**#1256**).
 - **#1016**: Direct on-disk edits picked up by the file watcher are now
   vector-embedded, so externally edited notes no longer go missing from
   semantic search until a reindex (closed by the vector-sync overhaul,
@@ -165,6 +201,12 @@ stale full-text search entries.
 - **#1071**: SQLite full-text search covers complete note content —
   previously content beyond ~6000 characters was invisible (**#1065**) —
   and CJK terms work in the relaxed FTS fallback (**#1022**).
+- **#1269**: Full-text query relaxation counts non-Latin tokens, so
+  Cyrillic, Greek, Hebrew, Arabic, and other non-Latin queries relax to an
+  OR retry instead of silently degrading hybrid search to vector-only
+  ranking, and combining marks stay inside their word so Devanagari and
+  Thai terms are not shredded into fragments (extends the CJK-only fix from
+  **#1022**).
 - **#1069**: Unknown semantic/hybrid result totals are explicit in
   structured search responses (**#1068**).
 - **#1190**: `bm reindex --embeddings` warns when the project has no synced
@@ -175,6 +217,11 @@ stale full-text search entries.
   returning the wrong note (**#1148**), and project-scoped entity
   resolution is separated from cross-project wikilink resolution
   (**#1192**, **#1170**).
+- **#1272**: Root-level wikilinks written as filename stems resolve via the
+  `.md` file-path fallback, and a forgiving underscore/hyphen/case alias
+  resolves links in directly edited vaults — tried only after every exact
+  identity, and failing closed when two files collide on the same alias
+  (**#1253**).
 - **#1189**: Note-type filters are case-canonicalized, so `Person` and
   `person` match the same population (**#1180**).
 - **#1081**: `write_note` rejects filename-convention twins (kebab-case vs
@@ -182,11 +229,17 @@ stale full-text search entries.
 - **#1073**: `edit_note` with a `memory://` URL routes to the target
   project instead of creating phantom notes (**#1066**), and scoped
   `memory://` URL paths are preserved (**#1092**).
+- **#1285**: Glob-filtered directory listings traverse subdirectories
+  again: `file_name_glob` filters results instead of accidentally pruning
+  recursion, so `*.md` with depth 2 finds files inside subdirectories.
 - **#1188**: Sync preserves malformed frontmatter instead of prepending a
   second frontmatter block that shadows `name`/`description` (**#1171**).
 - **#1239**: Timestamp-prefixed transcript lines and checkbox markers
   (`[x]`, `[/]`, `[>]`, `[?]`) no longer mint junk observation categories
   (**#1219**, **#1241**).
+- **#1271**: Transcript timestamp ranges like `[24:33.098 - 24:41.260]` no
+  longer mint junk observation categories either — the remaining
+  range-shaped case from **#1239** (**#1270**).
 - **#1060**: `schema_validate` with no arguments validates all
   schema-covered types instead of type "unknown" (**#1013**), and invalid
   schema-validation modes are rejected instead of silently degrading to
@@ -196,6 +249,9 @@ stale full-text search entries.
 - **#1010**: `bm project list` shows configured cloud-mode projects even
   when uncredentialed (**#1003**), and deleting the default project
   auto-reassigns the default instead of refusing (**#1139**).
+- **#1273**: Re-selecting the project that is already the default no longer
+  clears the default flag — a state that broke project discovery and every
+  project-scoped MCP tool until a default was set again.
 - **#1058 / #1094**: `bm doctor` never prints a blank failure message, and
   migrations adapt to existing event loops (**#1027**).
 - **#1080**: Loading config no longer recreates an empty `~/basic-memory`
@@ -210,6 +266,11 @@ stale full-text search entries.
 - **#1059 / #1179**: Hermes: `bm mcp` child processes no longer leak
   (**#1017**), and bm subprocesses no longer inherit Hermes's Python
   environment (**#1093**).
+- **#1274**: Hermes: commands and skills register through Hermes's own
+  registration APIs instead of private PluginManager writes, preserving the
+  lifecycle ownership that cleans them up on provider unload (**#1257**);
+  the slash-command monkeypatch docs are split by Hermes version so modern
+  installs skip the legacy collector workaround (**#1278**).
 
 ### Maintenance
 
