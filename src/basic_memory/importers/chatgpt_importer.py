@@ -11,6 +11,11 @@ from basic_memory.importers.utils import clean_filename, format_timestamp
 
 logger = logging.getLogger(__name__)
 
+# One day past the Unix epoch: deterministic, still obviously a sentinel, and
+# never a pre-epoch value in any local timezone — Windows' CRT raises OSError
+# converting epoch-adjacent times through fromtimestamp/astimezone.
+UNKNOWN_DATE_SENTINEL = 86400.0
+
 
 class ChatGPTImporter(Importer[ChatImportResult]):
     """Service for importing ChatGPT conversations."""
@@ -100,11 +105,11 @@ class ChatGPTImporter(Importer[ChatImportResult]):
 
         OpenAI's export format does not guarantee `create_time` or `update_time`
         on every conversation object (#1276). Fall back in order: the other
-        conversation-level timestamp, the earliest message timestamp, the Unix
-        epoch. The last resort must be deterministic — the resolved date names
-        the output file (`YYYYMMDD-title.md`), so an import-time fallback would
-        make a reimport of the same archive write a duplicate note under a new
-        name instead of updating the original. The epoch's obviously-wrong 1970
+        conversation-level timestamp, the earliest message timestamp, an epoch
+        sentinel. The last resort must be deterministic — the resolved date
+        names the output file (`YYYYMMDD-title.md`), so an import-time fallback
+        would make a reimport of the same archive write a duplicate note under
+        a new name instead of updating the original. The obviously-wrong 1970
         prefix also reads as "date unknown" rather than faking a plausible one.
 
         Args:
@@ -123,7 +128,7 @@ class ChatGPTImporter(Importer[ChatImportResult]):
                 for node in conversation.get("mapping", {}).values()
                 if node.get("message") and node["message"].get("create_time") is not None
             ]
-            created_at = min(message_times) if message_times else 0.0
+            created_at = min(message_times) if message_times else UNKNOWN_DATE_SENTINEL
         if modified_at is None:
             modified_at = created_at
         return created_at, modified_at

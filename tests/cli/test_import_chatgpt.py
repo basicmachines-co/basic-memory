@@ -9,6 +9,7 @@ from typer.testing import CliRunner
 from basic_memory.cli.app import app, import_app
 from basic_memory.cli.commands import import_chatgpt  # noqa
 from basic_memory.config import get_project_config
+from basic_memory.importers.chatgpt_importer import UNKNOWN_DATE_SENTINEL
 
 # Set up CLI runner
 runner = CliRunner()
@@ -258,6 +259,6 @@ def test_import_chatgpt_no_timestamps_anywhere_is_deterministic(tmp_path, sample
     assert result.exit_code == 0
     assert "Imported 1 conversations" in result.output
 
-    epoch_prefix = datetime.fromtimestamp(0).astimezone().strftime("%Y%m%d")
+    epoch_prefix = datetime.fromtimestamp(UNKNOWN_DATE_SENTINEL).astimezone().strftime("%Y%m%d")
     conv_path = tmp_path / "chats" / f"{epoch_prefix}-Test_Conversation.md"
     assert conv_path.exists()
