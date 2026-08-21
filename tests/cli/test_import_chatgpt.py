@@ -1,6 +1,7 @@
 """Tests for import_chatgpt command."""
 
 import json
+from datetime import datetime
 
 import pytest
 from typer.testing import CliRunner
@@ -234,4 +235,29 @@ def test_import_chatgpt_null_create_time(tmp_path, sample_conversation):
     assert "Containing 2 messages" in result.output
 
     conv_path = tmp_path / "chats" / "20250111-Test_Conversation.md"
+    assert conv_path.exists()
+
+
+def test_import_chatgpt_no_timestamps_anywhere_is_deterministic(tmp_path, sample_conversation):
+    """With no usable timestamp at all, the epoch sentinel keeps reimports stable (#1276).
+
+    The resolved date names the output file, so an import-time fallback would
+    write a duplicate note under a new name on a later reimport.
+    """
+    config = get_project_config()
+    config.home = tmp_path
+    sample_conversation["create_time"] = None
+    sample_conversation["update_time"] = None
+    for node in sample_conversation["mapping"].values():
+        if node.get("message"):
+            node["message"]["create_time"] = None
+    json_file = tmp_path / "conversations.json"
+    json_file.write_text(json.dumps([sample_conversation]), encoding="utf-8")
+
+    result = runner.invoke(app, ["import", "chatgpt", str(json_file), "--folder", "chats"])
+    assert result.exit_code == 0
+    assert "Imported 1 conversations" in result.output
+
+    epoch_prefix = datetime.fromtimestamp(0).astimezone().strftime("%Y%m%d")
+    conv_path = tmp_path / "chats" / f"{epoch_prefix}-Test_Conversation.md"
     assert conv_path.exists()

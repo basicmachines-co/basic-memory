@@ -100,7 +100,12 @@ class ChatGPTImporter(Importer[ChatImportResult]):
 
         OpenAI's export format does not guarantee `create_time` or `update_time`
         on every conversation object (#1276). Fall back in order: the other
-        conversation-level timestamp, the earliest message timestamp, current time.
+        conversation-level timestamp, the earliest message timestamp, the Unix
+        epoch. The last resort must be deterministic — the resolved date names
+        the output file (`YYYYMMDD-title.md`), so an import-time fallback would
+        make a reimport of the same archive write a duplicate note under a new
+        name instead of updating the original. The epoch's obviously-wrong 1970
+        prefix also reads as "date unknown" rather than faking a plausible one.
 
         Args:
             conversation: ChatGPT conversation data.
@@ -118,7 +123,7 @@ class ChatGPTImporter(Importer[ChatImportResult]):
                 for node in conversation.get("mapping", {}).values()
                 if node.get("message") and node["message"].get("create_time") is not None
             ]
-            created_at = min(message_times) if message_times else datetime.now().timestamp()
+            created_at = min(message_times) if message_times else 0.0
         if modified_at is None:
             modified_at = created_at
         return created_at, modified_at
