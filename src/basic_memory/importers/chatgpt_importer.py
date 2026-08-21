@@ -98,9 +98,7 @@ class ChatGPTImporter(Importer[ChatImportResult]):
             logger.exception("Failed to import ChatGPT conversations")
             return self.handle_error("Failed to import ChatGPT conversations", e)
 
-    def _resolve_timestamps(
-        self, conversation: Dict[str, Any]
-    ) -> tuple[float, float]:  # pragma: no cover
+    def _resolve_timestamps(self, conversation: Dict[str, Any]) -> tuple[float, float]:
         """Resolve conversation timestamps, tolerating absent fields.
 
         OpenAI's export format does not guarantee `create_time` or `update_time`
