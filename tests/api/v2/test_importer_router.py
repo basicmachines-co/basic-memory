@@ -197,9 +197,9 @@ async def test_import_chatgpt_invalid_file(client: AsyncClient, tmp_path, v2_pro
         # Send request - this should return an error
         response = await client.post(f"{v2_project_url}/import/chatgpt", files=files, data=data)
 
-    # Check response
-    assert response.status_code == 500
-    assert "Import failed" in response.json()["detail"]
+    # Check response: undecodable JSON is a client-input problem, not a server fault (#1276)
+    assert response.status_code == 400
+    assert "not valid JSON" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -261,9 +261,9 @@ async def test_import_claude_conversations_invalid_file(
             f"{v2_project_url}/import/claude/conversations", files=files, data=data
         )
 
-    # Check response
-    assert response.status_code == 500
-    assert "Import failed" in response.json()["detail"]
+    # Check response: undecodable JSON is a client-input problem, not a server fault (#1276)
+    assert response.status_code == 400
+    assert "not valid JSON" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -326,9 +326,9 @@ async def test_import_claude_projects_invalid_file(
             f"{v2_project_url}/import/claude/projects", files=files, data=data
         )
 
-    # Check response
-    assert response.status_code == 500
-    assert "Import failed" in response.json()["detail"]
+    # Check response: undecodable JSON is a client-input problem, not a server fault (#1276)
+    assert response.status_code == 400
+    assert "not valid JSON" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -414,9 +414,9 @@ async def test_import_memory_json_invalid_file(client: AsyncClient, tmp_path, v2
         # Send request - this should return an error
         response = await client.post(f"{v2_project_url}/import/memory-json", files=files, data=data)
 
-    # Check response
-    assert response.status_code == 500
-    assert "Import failed" in response.json()["detail"]
+    # Check response: undecodable JSON is a client-input problem, not a server fault (#1276)
+    assert response.status_code == 400
+    assert "not valid JSON" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -515,9 +515,9 @@ async def test_import_empty_file(client: AsyncClient, tmp_path, v2_project_url: 
         # Send request
         response = await client.post(f"{v2_project_url}/import/chatgpt", files=files, data=data)
 
-    # Check response
-    assert response.status_code == 500
-    assert "Import failed" in response.json()["detail"]
+    # Check response: undecodable JSON is a client-input problem, not a server fault (#1276)
+    assert response.status_code == 400
+    assert "not valid JSON" in response.json()["detail"]
 
 
 @pytest.mark.asyncio
@@ -544,6 +544,6 @@ async def test_import_malformed_json(client: AsyncClient, tmp_path, v2_project_u
             # Send request
             response = await client.post(endpoint, files=files, data=data)
 
-        # Check response
-        assert response.status_code == 500
-        assert "Import failed" in response.json()["detail"]
+        # Check response: undecodable JSON is a client-input problem, not a server fault (#1276)
+        assert response.status_code == 400
+        assert "not valid JSON" in response.json()["detail"]

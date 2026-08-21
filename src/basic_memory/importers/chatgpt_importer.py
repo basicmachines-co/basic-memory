@@ -53,7 +53,7 @@ class ChatGPTImporter(Importer[ChatImportResult]):
             chats_imported = 0
 
             for chat in conversations:
-                created_at = chat["create_time"]
+                created_at, modified_at = self._resolve_timestamps(chat)
                 date_prefix = datetime.fromtimestamp(created_at).astimezone().strftime("%Y%m%d")
                 clean_title = clean_filename(chat["title"])
                 relative_path = (
@@ -64,7 +64,7 @@ class ChatGPTImporter(Importer[ChatImportResult]):
                 permalink, file_path = self.build_import_paths(relative_path)
 
                 # Convert to entity
-                entity = self._format_chat_content(chat, permalink)
+                entity = self._format_chat_content(chat, permalink, created_at, modified_at)
 
                 # Write file using relative path - FileService handles base_path
                 await self.write_entity(entity, file_path)
@@ -93,22 +93,50 @@ class ChatGPTImporter(Importer[ChatImportResult]):
             logger.exception("Failed to import ChatGPT conversations")
             return self.handle_error("Failed to import ChatGPT conversations", e)
 
+    def _resolve_timestamps(
+        self, conversation: Dict[str, Any]
+    ) -> tuple[float, float]:  # pragma: no cover
+        """Resolve conversation timestamps, tolerating absent fields.
+
+        OpenAI's export format does not guarantee `create_time` or `update_time`
+        on every conversation object (#1276). Fall back in order: the other
+        conversation-level timestamp, the earliest message timestamp, current time.
+
+        Args:
+            conversation: ChatGPT conversation data.
+
+        Returns:
+            Tuple of (created_at, modified_at) unix timestamps.
+        """
+        created_at = conversation.get("create_time")
+        modified_at = conversation.get("update_time")
+        if created_at is None:
+            created_at = modified_at
+        if created_at is None:
+            message_times = [
+                node["message"]["create_time"]
+                for node in conversation.get("mapping", {}).values()
+                if node.get("message") and node["message"].get("create_time") is not None
+            ]
+            created_at = min(message_times) if message_times else datetime.now().timestamp()
+        if modified_at is None:
+            modified_at = created_at
+        return created_at, modified_at
+
     def _format_chat_content(
-        self, conversation: Dict[str, Any], permalink: str
+        self, conversation: Dict[str, Any], permalink: str, created_at: float, modified_at: float
     ) -> EntityMarkdown:  # pragma: no cover
         """Convert chat conversation to Basic Memory entity.
 
         Args:
-            folder: Destination folder name.
             conversation: ChatGPT conversation data.
+            permalink: Permalink for the entity.
+            created_at: Resolved creation timestamp.
+            modified_at: Resolved modification timestamp.
 
         Returns:
             EntityMarkdown instance representing the conversation.
         """
-        # Extract timestamps
-        created_at = conversation["create_time"]
-        modified_at = conversation["update_time"]
-
         root_id = None
         # Find root message
         for node_id, node in conversation["mapping"].items():

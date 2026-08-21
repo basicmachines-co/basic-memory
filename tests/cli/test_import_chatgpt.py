@@ -197,3 +197,41 @@ def test_import_chatgpt_with_custom_folder(tmp_path, sample_chatgpt_json, monkey
     # Check files in custom folder
     conv_path = tmp_path / conversations_folder / "20250111-Test_Conversation.md"
     assert conv_path.exists()
+
+
+def test_import_chatgpt_missing_create_time(tmp_path, sample_conversation):
+    """Conversations without create_time fall back to update_time (#1276)."""
+    config = get_project_config()
+    config.home = tmp_path
+    del sample_conversation["create_time"]
+    # A later day than the messages, so the date prefix proves update_time was used
+    sample_conversation["update_time"] = 1736703003.0  # 2025-01-12
+    json_file = tmp_path / "conversations.json"
+    json_file.write_text(json.dumps([sample_conversation]), encoding="utf-8")
+
+    result = runner.invoke(app, ["import", "chatgpt", str(json_file), "--folder", "chats"])
+    assert result.exit_code == 0
+    assert "Imported 1 conversations" in result.output
+
+    conv_path = tmp_path / "chats" / "20250112-Test_Conversation.md"
+    assert conv_path.exists()
+
+
+def test_import_chatgpt_null_create_time(tmp_path, sample_conversation):
+    """Null conversation timestamps fall back to the earliest message time (#1276)."""
+    config = get_project_config()
+    config.home = tmp_path
+    sample_conversation["create_time"] = None
+    sample_conversation["update_time"] = None
+    # msg1 has no usable time either; msg2 keeps its timestamp and becomes the fallback
+    sample_conversation["mapping"]["msg1"]["message"]["create_time"] = None
+    json_file = tmp_path / "conversations.json"
+    json_file.write_text(json.dumps([sample_conversation]), encoding="utf-8")
+
+    result = runner.invoke(app, ["import", "chatgpt", str(json_file), "--folder", "chats"])
+    assert result.exit_code == 0
+    assert "Imported 1 conversations" in result.output
+    assert "Containing 2 messages" in result.output
+
+    conv_path = tmp_path / "chats" / "20250111-Test_Conversation.md"
+    assert conv_path.exists()
