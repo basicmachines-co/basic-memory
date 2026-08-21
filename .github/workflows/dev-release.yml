@@ -29,16 +29,16 @@ jobs:
         run: |
           pip install uv
 
-      - name: Install dependencies and build
-        run: |
-          uv venv
-          uv sync
-          uv build
-
-      - name: Check if this is a dev version
+      - name: Compute version from git
         id: check_version
         run: |
-          VERSION=$(uv run python -c "import basic_memory; print(basic_memory.__version__)")
+          # The release automation hardcodes the last stable release into
+          # basic_memory.__version__, so importing the source tree always
+          # reports that release and the old gate skipped every dev publish.
+          # Derive the version from the VCS state instead, exactly as
+          # uv-dynamic-versioning would. --no-metadata drops the +commit
+          # local segment, which PyPI rejects on upload.
+          VERSION=$(uvx dunamai from git --style pep440 --bump --no-metadata)
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           if [[ "$VERSION" == *"dev"* ]]; then
             echo "is_dev=true" >> $GITHUB_OUTPUT
@@ -47,6 +47,13 @@ jobs:
             echo "is_dev=false" >> $GITHUB_OUTPUT
             echo "Release version detected: $VERSION, skipping dev release"
           fi
+
+      - name: Build
+        if: steps.check_version.outputs.is_dev == 'true'
+        run: |
+          # Bypass VCS version computation in the build backend so the
+          # artifact carries the same metadata-free version the gate saw.
+          UV_DYNAMIC_VERSIONING_BYPASS="${{ steps.check_version.outputs.version }}" uv build
 
       - name: Publish dev version to PyPI
         if: steps.check_version.outputs.is_dev == 'true'
