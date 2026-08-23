@@ -1,7 +1,7 @@
 # Benchmark Runbook
 
 This document is the canonical operator runbook for benchmark execution in
-`basic-memory-benchmarks`.
+the Core repository's `/benchmarks` package.
 
 It covers:
 1. current benchmark workflows and commands,
@@ -13,6 +13,7 @@ It covers:
 | Area | Status |
 | --- | --- |
 | Single run execution (`run retrieval`, `run full`, `run judge`) | Implemented |
+| Concurrent write convergence (`run concurrent-write`) | Implemented |
 | `just` one-command pipelines (`bench-full`, `bench-full-judge`) | Implemented |
 | Artifact generation and publish/compare commands | Implemented |
 | Manual BM revision comparison via worktrees + `--bm-local-path` | Implemented workflow, manual orchestration |
@@ -42,8 +43,8 @@ It covers:
 
 ### Repositories and paths
 
-- benchmark repo: clone of `basicmachines-co/basic-memory-benchmarks`
-- BM local repo: set `BM_LOCAL_PATH` env var (or in `.env`) to your local `basic-memory` checkout
+- benchmark package: `/benchmarks` in a clone of `basicmachines-co/basic-memory`
+- BM local repo: set `BM_LOCAL_PATH` env var (or in `.env`) to the Core checkout under test
 
 ### Environment
 
@@ -53,7 +54,7 @@ It covers:
 ### One-time setup
 
 ```bash
-cd /path/to/basic-memory-benchmarks
+cd /path/to/basic-memory/benchmarks
 just sync
 ```
 
@@ -78,6 +79,8 @@ just bench-prepare-long
 
 - `bench-full`
 - `bench-full-judge`
+- `bench-concurrent-write-smoke`
+- `bench-concurrent-write-load`
 - `bench-prepare-short`
 - `bench-prepare-long`
 - `bench-run-short`
@@ -96,6 +99,7 @@ Top-level commands:
 - `datasets fetch`
 - `convert locomo`
 - `run retrieval`
+- `run concurrent-write`
 - `run full`
 - `run judge`
 - `compare`
@@ -107,7 +111,7 @@ Top-level commands:
 ### One-command full retrieval run
 
 ```bash
-cd /path/to/basic-memory-benchmarks
+cd /path/to/basic-memory/benchmarks
 just bench-full
 ```
 
@@ -119,7 +123,7 @@ This runs:
 ### One-command full retrieval + judge
 
 ```bash
-cd /path/to/basic-memory-benchmarks
+cd /path/to/basic-memory/benchmarks
 just bench-full-judge
 ```
 
@@ -236,7 +240,7 @@ Use this workflow today to compare BM revisions while keeping benchmark tooling 
 
 ```bash
 BM_REPO=/path/to/basic-memory
-WT_ROOT=/path/to/basic-memory-benchmarks/benchmarks/worktrees/basic-memory
+WT_ROOT=/path/to/basic-memory/benchmarks/benchmarks/worktrees/basic-memory
 
 mkdir -p "$WT_ROOT"
 
@@ -250,7 +254,7 @@ git -C "$BM_REPO" worktree add "$WT_ROOT/current" HEAD
 ### Step 2: Prepare benchmark datasets once
 
 ```bash
-cd /path/to/basic-memory-benchmarks
+cd /path/to/basic-memory/benchmarks
 just sync
 just bench-prepare-short
 just bench-prepare-long

@@ -104,6 +104,11 @@ def test_status_json_is_not_ready_when_indexing() -> None:
     assert not BasicMemoryLocalProvider._status_json_is_ready(payload)
 
 
+def test_status_json_unknown_schema_is_unsupported() -> None:
+    payload = {"total_files": 1, "observed_files": [{"path": "note.md"}]}
+    assert BasicMemoryLocalProvider._status_json_is_ready(payload) is None
+
+
 def test_resolve_bm_command_prefix_default_uses_bm() -> None:
     run_config = RunConfig(
         run_id="r1",

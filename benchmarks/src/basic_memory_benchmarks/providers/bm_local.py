@@ -2,118 +2,25 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import re
 import subprocess
 import tempfile
-import threading
 import time
-from concurrent.futures import Future
-from dataclasses import dataclass
 from pathlib import Path
-from queue import Queue
 from typing import Any, cast
 
-import anyio
-from mcp.client.session import ClientSession
-from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.types import CallToolResult
 
+from basic_memory_benchmarks.bm_runtime import (
+    WarmMcpClient,
+    resolve_bm_command_prefix,
+    status_json_is_ready,
+)
 from basic_memory_benchmarks.models import RunConfig, SearchHit
 from basic_memory_benchmarks.providers.base import BenchmarkProvider
 from basic_memory_benchmarks.utils import run_command
-
-
-@dataclass
-class _McpToolRequest:
-    name: str
-    arguments: dict[str, Any]
-    response: Future[CallToolResult]
-
-
-class _WarmMcpClient:
-    def __init__(
-        self,
-        *,
-        command: str = "bm",
-        args: list[str] | None = None,
-        env: dict[str, str] | None = None,
-        startup_timeout_seconds: float = 30.0,
-        request_timeout_seconds: float = 60.0,
-    ) -> None:
-        self._command = command
-        self._args = args or ["mcp"]
-        self._env = env
-        self._startup_timeout_seconds = startup_timeout_seconds
-        self._request_timeout_seconds = request_timeout_seconds
-        self._requests: Queue[_McpToolRequest | None] = Queue()
-        self._ready = threading.Event()
-        self._startup_error: Exception | None = None
-        self._thread: threading.Thread | None = None
-
-    async def _serve(self) -> None:
-        params = StdioServerParameters(command=self._command, args=self._args, env=self._env)
-        async with stdio_client(params) as (read_stream, write_stream):
-            async with ClientSession(read_stream, write_stream) as session:
-                await session.initialize()
-                tools = await session.list_tools()
-                tool_names = {tool.name for tool in tools.tools}
-                if "search_notes" not in tool_names:
-                    raise RuntimeError("bm mcp server does not expose 'search_notes'")
-
-                self._ready.set()
-
-                while True:
-                    loop = asyncio.get_running_loop()
-                    request = await loop.run_in_executor(None, self._requests.get)
-                    if request is None:
-                        break
-                    try:
-                        result = await session.call_tool(request.name, request.arguments)
-                    except Exception as exc:
-                        request.response.set_exception(exc)
-                    else:
-                        request.response.set_result(result)
-
-    def _thread_main(self) -> None:
-        try:
-            anyio.run(self._serve)
-        except Exception as exc:
-            self._startup_error = exc
-            self._ready.set()
-
-    def start(self) -> None:
-        if self._thread is not None and self._thread.is_alive():
-            return
-        self._thread = threading.Thread(
-            target=self._thread_main,
-            name="bm-benchmark-mcp-client",
-            daemon=True,
-        )
-        self._thread.start()
-
-        if not self._ready.wait(timeout=self._startup_timeout_seconds):
-            raise TimeoutError("Timed out starting bm mcp session")
-        if self._startup_error is not None:
-            raise RuntimeError("Failed to start bm mcp session") from self._startup_error
-
-    def call_tool(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
-        if self._thread is None or not self._thread.is_alive():
-            raise RuntimeError("bm mcp session is not running")
-
-        response: Future[CallToolResult] = Future()
-        self._requests.put(_McpToolRequest(name=name, arguments=arguments, response=response))
-        return response.result(timeout=self._request_timeout_seconds)
-
-    def stop(self) -> None:
-        if self._thread is None:
-            return
-        if self._thread.is_alive():
-            self._requests.put(None)
-            self._thread.join(timeout=self._startup_timeout_seconds)
-        self._thread = None
 
 
 class BasicMemoryLocalProvider(BenchmarkProvider):
@@ -126,7 +33,7 @@ class BasicMemoryLocalProvider(BenchmarkProvider):
         # run_id -> resolved project name (grouped runs ingest many projects).
         self._resolved_project_names: dict[str, str] = {}
         self._status_json_supported: bool | None = None
-        self._mcp: _WarmMcpClient | None = None
+        self._mcp: WarmMcpClient | None = None
         self._bm_command_prefix: list[str] = ["bm"]
         self._bm_env: dict[str, str] | None = None
         self._config_dir: Path | None = None
@@ -159,12 +66,7 @@ class BasicMemoryLocalProvider(BenchmarkProvider):
 
     @staticmethod
     def _resolve_bm_command_prefix(run_config: RunConfig) -> list[str]:
-        if run_config.bm_local_path:
-            local_path = Path(run_config.bm_local_path)
-            if not local_path.exists():
-                raise ValueError(f"--bm-local-path not found: {local_path}")
-            return ["uv", "run", "--project", str(local_path), "basic-memory"]
-        return ["bm"]
+        return resolve_bm_command_prefix(run_config.bm_local_path)
 
     def _run_bm(
         self,
@@ -182,41 +84,8 @@ class BasicMemoryLocalProvider(BenchmarkProvider):
         return None
 
     @staticmethod
-    def _status_json_is_ready(payload: dict[str, Any]) -> bool:
-        total = payload.get("total")
-        if isinstance(total, int):
-            return total == 0
-
-        for list_key in ("new", "modified", "deleted", "skipped_files"):
-            value = payload.get(list_key)
-            if isinstance(value, list) and len(value) > 0:
-                return False
-
-        for dict_key in ("moves", "checksums"):
-            value = payload.get(dict_key)
-            if isinstance(value, dict) and len(value) > 0:
-                return False
-
-        status = payload.get("status")
-        if isinstance(status, str):
-            lowered = status.lower()
-            if "no changes" in lowered or "up to date" in lowered:
-                return True
-            if "sync" in lowered or "index" in lowered or "pending" in lowered:
-                return False
-
-        for key in ("is_syncing", "is_indexing", "sync_in_progress", "index_in_progress"):
-            value = payload.get(key)
-            if isinstance(value, bool):
-                return not value
-
-        for key in ("pending_files", "pending", "unindexed_files", "queued_files", "queue_size"):
-            value = payload.get(key)
-            if isinstance(value, int) and value != 0:
-                return False
-
-        # If the schema is unknown and no busy signal exists, treat status as ready.
-        return True
+    def _status_json_is_ready(payload: dict[str, Any]) -> bool | None:
+        return status_json_is_ready(payload)
 
     @staticmethod
     def _error_text_from_result(result: CallToolResult) -> str:
@@ -280,10 +149,12 @@ class BasicMemoryLocalProvider(BenchmarkProvider):
                 ]
             )
             payload = json.loads(completed.stdout.strip() or "{}")
-            if isinstance(payload, dict) and self._status_json_is_ready(
-                cast(dict[str, Any], payload)
-            ):
-                return
+            if isinstance(payload, dict):
+                readiness = self._status_json_is_ready(cast(dict[str, Any], payload))
+                if readiness is None:
+                    return
+                if readiness:
+                    return
 
             if time.monotonic() >= deadline:
                 raise TimeoutError(
@@ -334,7 +205,7 @@ class BasicMemoryLocalProvider(BenchmarkProvider):
         if self._mcp is None:
             mcp_command = self._bm_command_prefix[0]
             mcp_args = self._bm_command_prefix[1:] + ["mcp"]
-            self._mcp = _WarmMcpClient(command=mcp_command, args=mcp_args, env=self._bm_env)
+            self._mcp = WarmMcpClient(command=mcp_command, args=mcp_args, env=self._bm_env)
             self._mcp.start()
 
     @staticmethod

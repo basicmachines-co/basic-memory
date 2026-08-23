@@ -1,15 +1,17 @@
-# AGENTS.md - basic-memory-benchmarks Guide
+# AGENTS.md - Basic Memory benchmarks guide
 
 ## Project Overview
 
-`basic-memory-benchmarks` is a standalone benchmark harness for comparing Basic Memory against other memory systems.
+`basic-memory-benchmarks` is the benchmark harness within Core's `/benchmarks`
+directory for comparing Basic Memory against other memory systems.
 
 Primary goals:
 - Deterministic retrieval benchmarks
 - Optional LLM-as-a-judge benchmarks
 - Public, reproducible artifact publication (including provenance metadata)
 
-This repo is intentionally isolated from `basic-memory` so benchmark dependencies do not pollute the product repo.
+The benchmark package keeps its own `pyproject.toml` and lockfile so benchmark
+dependencies do not pollute the Core product environment.
 
 ## Build / Test Commands
 
@@ -44,6 +46,8 @@ Validate and publish:
 
 `just` shortcuts:
 - `just bench-smoke`
+- `BM_LOCAL_PATH=.. just bench-concurrent-write-smoke`
+- `BM_LOCAL_PATH=.. just bench-concurrent-write-load`
 - `just bench-fetch-locomo`
 - `just bench-convert-locomo`
 - `just bench-run-bm-local`
