@@ -9,6 +9,11 @@ from pathlib import Path
 
 from validate_skills import parse_frontmatter
 
+HERMES_INSTALL_COMMAND = "hermes plugins install basicmachines-co/basic-memory/integrations/hermes"
+UNSUPPORTED_HERMES_INSTALL_COMMAND = (
+    "hermes plugins install basicmachines-co/basic-memory --path integrations/hermes"
+)
+
 
 def parse_plugin_yaml(path: Path) -> dict[str, str]:
     data: dict[str, str] = {}
@@ -23,10 +28,12 @@ def validate_hermes_plugin(plugin_dir: Path) -> None:
     plugin_dir = plugin_dir.resolve()
     plugin_yaml = plugin_dir / "plugin.yaml"
     module = plugin_dir / "__init__.py"
+    readme = plugin_dir / "README.md"
+    root_readme = plugin_dir.parents[1] / "README.md"
     skill = plugin_dir / "skill/SKILL.md"
     tests = plugin_dir / "tests"
 
-    for path in [plugin_yaml, module, skill, tests]:
+    for path in [plugin_yaml, module, readme, root_readme, skill, tests]:
         if not path.exists():
             raise SystemExit(f"Missing Hermes plugin file: {path}")
 
@@ -45,6 +52,13 @@ def validate_hermes_plugin(plugin_dir: Path) -> None:
     frontmatter = parse_frontmatter(skill)
     if frontmatter.get("name") != "basic-memory":
         raise SystemExit(f"{skill}: expected name=basic-memory")
+
+    for documentation in [root_readme, readme]:
+        documentation_text = documentation.read_text()
+        if HERMES_INSTALL_COMMAND not in documentation_text:
+            raise SystemExit(f"{documentation}: missing supported Hermes install command")
+        if UNSUPPORTED_HERMES_INSTALL_COMMAND in documentation_text:
+            raise SystemExit(f"{documentation}: contains unsupported Hermes --path command")
 
     print(f"validated Hermes plugin in {plugin_dir}")
 
