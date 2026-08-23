@@ -6,6 +6,7 @@ from pathlib import Path
 
 from basic_memory import db
 from basic_memory.models import Project
+from basic_memory.schemas.memory import MAX_CONTEXT_PAGE_SIZE, MAX_CONTEXT_RELATED_RESULTS
 
 
 async def create_test_entity(
@@ -180,6 +181,36 @@ async def test_get_memory_context_by_permalink(
     assert response.status_code == 200
     data = response.json()
     assert "results" in data
+
+    # Values at the public limits remain valid so callers can request a bounded,
+    # larger traversal without guessing below the advertised ceiling.
+    response_at_limits = await client.get(
+        f"{v2_project_url}/memory/context-test",
+        params={"page_size": MAX_CONTEXT_PAGE_SIZE, "max_related": MAX_CONTEXT_RELATED_RESULTS},
+    )
+    assert response_at_limits.status_code == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"page_size": MAX_CONTEXT_PAGE_SIZE + 1},
+        {"max_related": MAX_CONTEXT_RELATED_RESULTS + 1},
+        {"page": 0},
+        {"page_size": 0},
+        {"max_related": -1},
+    ],
+)
+async def test_get_memory_context_rejects_unbounded_requests(
+    client: AsyncClient,
+    v2_project_url: str,
+    params: dict[str, int],
+):
+    """The API boundary must enforce the same bounds as the MCP tool."""
+    response = await client.get(f"{v2_project_url}/memory/context-test", params=params)
+
+    assert response.status_code == 422
 
 
 @pytest.mark.asyncio

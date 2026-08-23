@@ -9,6 +9,12 @@ from pydantic import BaseModel, Field, BeforeValidator, TypeAdapter, field_seria
 from basic_memory.schemas.search import SearchItemType
 
 
+DEFAULT_CONTEXT_PAGE_SIZE = 10
+MAX_CONTEXT_PAGE_SIZE = 50
+DEFAULT_CONTEXT_RELATED_RESULTS = 10
+MAX_CONTEXT_RELATED_RESULTS = 100
+
+
 def validate_memory_url_path(path: str) -> bool:
     """Validate that a memory URL path is well-formed.
 

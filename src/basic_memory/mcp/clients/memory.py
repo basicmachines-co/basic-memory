@@ -12,7 +12,11 @@ import logfire
 # call_* helpers live in basic_memory.mcp.tools.utils; importing that at module
 # level executes the whole tools package (fastmcp + mcp SDK) during CLI startup,
 # so each method defers the import to call time instead (#886).
-from basic_memory.schemas.memory import GraphContext
+from basic_memory.schemas.memory import (
+    DEFAULT_CONTEXT_PAGE_SIZE,
+    DEFAULT_CONTEXT_RELATED_RESULTS,
+    GraphContext,
+)
 
 
 class MemoryClient:
@@ -47,8 +51,8 @@ class MemoryClient:
         depth: int = 1,
         timeframe: Optional[str] = None,
         page: int = 1,
-        page_size: int = 10,
-        max_related: int = 10,
+        page_size: int = DEFAULT_CONTEXT_PAGE_SIZE,
+        max_related: int = DEFAULT_CONTEXT_RELATED_RESULTS,
     ) -> GraphContext:
         """Build context from a memory path.
 
@@ -57,8 +61,8 @@ class MemoryClient:
             depth: How deep to traverse relations
             timeframe: Time filter (e.g., "7d", "1 week")
             page: Page number (1-indexed)
-            page_size: Results per page
-            max_related: Maximum related items per result
+            page_size: Primary results per page
+            max_related: Maximum total related items across the page
 
         Returns:
             GraphContext with hierarchical results

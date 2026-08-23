@@ -18,7 +18,11 @@ from basic_memory.deps import (
 )
 from basic_memory.schemas.base import TimeFrame, parse_timeframe
 from basic_memory.schemas.memory import (
+    DEFAULT_CONTEXT_PAGE_SIZE,
+    DEFAULT_CONTEXT_RELATED_RESULTS,
     GraphContext,
+    MAX_CONTEXT_PAGE_SIZE,
+    MAX_CONTEXT_RELATED_RESULTS,
     normalize_memory_url,
 )
 from basic_memory.schemas.search import SearchItemType
@@ -125,9 +129,13 @@ async def get_memory_context(
     project_id: str = Path(..., description="Project external UUID"),
     depth: int = 1,
     timeframe: Optional[TimeFrame] = None,
-    page: int = 1,
-    page_size: int = 10,
-    max_related: int = 10,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(DEFAULT_CONTEXT_PAGE_SIZE, ge=1, le=MAX_CONTEXT_PAGE_SIZE),
+    max_related: int = Query(
+        DEFAULT_CONTEXT_RELATED_RESULTS,
+        ge=0,
+        le=MAX_CONTEXT_RELATED_RESULTS,
+    ),
 ) -> GraphContext:
     """Get rich context from memory:// URI.
 
@@ -143,8 +151,8 @@ async def get_memory_context(
         depth: How many levels of related entities to include
         timeframe: Optional time window for filtering related content
         page: Page number for pagination
-        page_size: Number of items per page
-        max_related: Maximum related entities to include
+        page_size: Number of primary items per page
+        max_related: Maximum total related entities to include
 
     Returns:
         GraphContext with the entity and its related context
