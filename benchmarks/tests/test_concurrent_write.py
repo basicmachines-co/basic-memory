@@ -27,6 +27,7 @@ from basic_memory_benchmarks.concurrent_write import (
     build_writer_plan,
     classify_error,
     run_integrity_checks,
+    resolve_clean_checkout_sha,
     summarize_op_type,
     tool_result_error,
 )
@@ -239,6 +240,33 @@ def test_unknown_status_schema_uses_fixed_settle_delay(
 
     assert mode == "fixed-delay"
     assert delays == [concurrent_write.FALLBACK_SETTLE_SECONDS]
+
+
+def test_resolve_clean_checkout_sha_rejects_dirty_target(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(concurrent_write, "git_sha", lambda _path: "abc123")
+    monkeypatch.setattr(
+        concurrent_write,
+        "run_command",
+        lambda *_args, **_kwargs: SimpleNamespace(stdout=" M src/basic_memory/app.py\n?? local.py\n"),
+    )
+
+    with pytest.raises(ValueError, match="bm_resolved_sha.*dirty paths"):
+        resolve_clean_checkout_sha(tmp_path)
+
+
+def test_resolve_clean_checkout_sha_accepts_clean_target(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(concurrent_write, "git_sha", lambda _path: "abc123")
+    monkeypatch.setattr(
+        concurrent_write,
+        "run_command",
+        lambda *_args, **_kwargs: SimpleNamespace(stdout=""),
+    )
+
+    assert resolve_clean_checkout_sha(tmp_path) == "abc123"
 
 
 # --- Integrity verification ---
@@ -469,6 +497,30 @@ def test_summary_markdown_reports_convergence(tmp_path: Path) -> None:
     assert "bm-bench run concurrent-write" in markdown
     assert summary.converged
     assert summary.notes_created_ok == 1
+    assert summary.ops_per_second == 0.67
+
+    setup_result = OpResult(
+        writer=-1,
+        op_index=0,
+        op_type="create_hub",
+        identifier="hubs/hub-0",
+        started_at_utc="2026-01-01T00:00:00Z",
+        latency_ms=500.0,
+        ok=True,
+        markers=["bmk-setup-h00-l0"],
+    )
+    with_setup_summary = build_summary(
+        config=config,
+        results=[setup_result, *results],
+        outcomes=[WriterOutcome(results=results)],
+        concurrent_wall_seconds=1.5,
+        settle_seconds=0.5,
+        settle_mode="status-json",
+        reindex_seconds=None,
+        integrity=integrity,
+    )
+    assert with_setup_summary.ops_total == 2
+    assert with_setup_summary.ops_per_second == 0.67
 
     failed_result = OpResult(
         writer=0,

@@ -178,8 +178,9 @@ create and edit notes in one shared Basic Memory project, with overlapping
 relation targets and shared hub notes that every writer appends to (the
 multi-agent shape from basic-memory#1213/#1214).
 
-The driver requires a local git checkout so every result records the exact
-Basic Memory commit under test:
+The driver requires a clean local git checkout so every result records the exact
+Basic Memory commit under test. Commit or stash tracked and untracked changes in
+the target checkout before running it:
 
 ```bash
 # Run from the Core benchmarks directory.

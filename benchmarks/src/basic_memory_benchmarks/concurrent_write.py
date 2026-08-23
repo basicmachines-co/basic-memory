@@ -658,6 +658,29 @@ def summarize_op_type(results: list[OpResult]) -> OpTypeStats:
     )
 
 
+def resolve_clean_checkout_sha(checkout: Path) -> str:
+    """Return the exact target SHA, rejecting bytes that the SHA cannot identify."""
+    resolved_sha = git_sha(checkout)
+    if resolved_sha is None:
+        raise ValueError("--bm-local-path must point to a Basic Memory git checkout")
+
+    status = run_command(
+        ["git", "-C", str(checkout), "status", "--porcelain=v1", "--untracked-files=all"]
+    )
+    dirty_paths = [line for line in status.stdout.splitlines() if line.strip()]
+    # Trigger: tracked or untracked bytes differ from the recorded commit.
+    # Why: the run must be reproducible from bm_resolved_sha alone.
+    # Outcome: abort before creating the isolated benchmark home or artifacts.
+    if dirty_paths:
+        sample = ", ".join(dirty_paths[:5])
+        suffix = " ..." if len(dirty_paths) > 5 else ""
+        raise ValueError(
+            "--bm-local-path must be clean so bm_resolved_sha identifies the executed bytes; "
+            f"dirty paths: {sample}{suffix}"
+        )
+    return resolved_sha
+
+
 def build_summary(
     *,
     config: ConcurrentWriteConfig,
@@ -679,6 +702,7 @@ def build_summary(
         typed = [result for result in results if result.op_type == op_type]
         if typed:
             per_op_type[op_type] = summarize_op_type(typed)
+    concurrent_results = [result for result in results if result.op_type != "create_hub"]
     notes_created_ok = sum(1 for r in results if r.op_type == "create" and r.ok)
     return ConcurrentWriteSummary(
         run_id=config.run_id,
@@ -697,7 +721,7 @@ def build_summary(
         creates_per_minute=round(notes_created_ok / (concurrent_wall_seconds / 60), 1)
         if concurrent_wall_seconds > 0
         else 0.0,
-        ops_per_second=round(len(results) / concurrent_wall_seconds, 2)
+        ops_per_second=round(len(concurrent_results) / concurrent_wall_seconds, 2)
         if concurrent_wall_seconds > 0
         else 0.0,
         integrity=integrity,
@@ -741,7 +765,7 @@ def build_summary_markdown(
         f" {summary.ops_not_attempted} not attempted",
         f"- Terminal writer failures: {summary.terminal_writer_failures}",
         f"- Notes created: {summary.notes_created_ok}"
-        f" ({summary.creates_per_minute} notes/min, {summary.ops_per_second} ops/s overall)",
+        f" ({summary.creates_per_minute} notes/min, {summary.ops_per_second} concurrent ops/s)",
         "",
         "## Latency (ms)",
         "",
@@ -878,9 +902,7 @@ def run_concurrent_write(config: ConcurrentWriteConfig) -> Path:
     """Execute the full driver: setup, concurrent phase, settle, verify, report."""
     bm_checkout = Path(config.bm_local_path).expanduser().resolve()
     prefix = resolve_bm_command_prefix(str(bm_checkout))
-    bm_resolved_sha = git_sha(bm_checkout)
-    if bm_resolved_sha is None:
-        raise ValueError("--bm-local-path must point to a Basic Memory git checkout")
+    bm_resolved_sha = resolve_clean_checkout_sha(bm_checkout)
     config = config.model_copy(update={"bm_local_path": str(bm_checkout)})
 
     home = Path("benchmarks/.bm-homes") / f"bm-write-{config.run_id}"
