@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import urllib.error
 from datetime import datetime, timedelta, timezone
 from io import StringIO
 from typing import Any, cast
 
+import pytest
 from rich.console import Console
 
 from basic_memory.cli.auto_update import (
     AutoUpdateResult,
     AutoUpdateStatus,
+    HomebrewCheckError,
     InstallSource,
     _check_homebrew_update_available,
     _is_interactive_session,
@@ -22,6 +25,11 @@ from basic_memory.cli.auto_update import (
     run_auto_update,
 )
 from basic_memory.config import BasicMemoryConfig
+
+UNTRUSTED_TAP_STDERR = (
+    "Error: Refusing to load formula basicmachines-co/basic-memory/basic-memory "
+    "from untrusted tap basicmachines-co/basic-memory."
+)
 
 
 class StubConfigManager:
@@ -159,6 +167,87 @@ def test_check_homebrew_update_available_exit_code_0_means_up_to_date(monkeypatc
     monkeypatch.setattr("basic_memory.cli.auto_update._run_subprocess", _fake_run)
     is_outdated, _ = _check_homebrew_update_available(silent=False)
     assert is_outdated is False
+
+
+def test_check_homebrew_update_available_failed_check_is_not_up_to_date(monkeypatch):
+    """A failed `brew outdated` exits non-zero with empty stdout -- it is not an answer."""
+
+    def _fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr=UNTRUSTED_TAP_STDERR)
+
+    monkeypatch.setattr("basic_memory.cli.auto_update._run_subprocess", _fake_run)
+
+    with pytest.raises(HomebrewCheckError) as excinfo:
+        _check_homebrew_update_available(silent=False)
+
+    assert "untrusted tap" in str(excinfo.value)
+
+
+def test_check_homebrew_update_available_reports_missing_brew(monkeypatch):
+    """brew not on PATH must surface as an unanswered check, not as up to date."""
+
+    def _raise_not_found(command, **kwargs):
+        raise FileNotFoundError(command[0])
+
+    monkeypatch.setattr("basic_memory.cli.auto_update._run_subprocess", _raise_not_found)
+
+    with pytest.raises(HomebrewCheckError):
+        _check_homebrew_update_available(silent=False)
+
+
+def test_failed_homebrew_check_falls_back_to_pypi(monkeypatch, tmp_path):
+    """Regression: a failed brew check reported the install as up to date.
+
+    The untrusted tap is one trigger; a stale tap, a missing formula, or a network
+    failure produce the same empty-stdout shape.
+    """
+    config = _base_config(tmp_path)
+    manager = StubConfigManager(config)
+
+    def _fake_run(command, **kwargs):
+        assert command[:2] == ["brew", "outdated"]
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr=UNTRUSTED_TAP_STDERR)
+
+    monkeypatch.setattr("basic_memory.cli.auto_update._run_subprocess", _fake_run)
+    monkeypatch.setattr(
+        "basic_memory.cli.auto_update._check_pypi_update_available",
+        lambda: (True, "9.9.9"),
+    )
+
+    result = run_auto_update(
+        check_only=True,
+        config_manager=_config_manager(manager),
+        executable="/opt/homebrew/Cellar/basic-memory/0.18.0/bin/python",
+    )
+
+    assert result.status == AutoUpdateStatus.UPDATE_AVAILABLE
+    assert result.latest_version == "9.9.9"
+    assert "brew upgrade basic-memory" in (result.message or "")
+
+
+def test_failed_homebrew_check_reports_failure_when_pypi_is_unreachable(monkeypatch, tmp_path):
+    """With neither source able to answer, report the failure rather than success."""
+    config = _base_config(tmp_path)
+    manager = StubConfigManager(config)
+
+    def _fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr=UNTRUSTED_TAP_STDERR)
+
+    def _pypi_unreachable():
+        raise urllib.error.URLError("network unreachable")
+
+    monkeypatch.setattr("basic_memory.cli.auto_update._run_subprocess", _fake_run)
+    monkeypatch.setattr(
+        "basic_memory.cli.auto_update._check_pypi_update_available", _pypi_unreachable
+    )
+
+    result = run_auto_update(
+        config_manager=_config_manager(manager),
+        executable="/opt/homebrew/Cellar/basic-memory/0.18.0/bin/python",
+    )
+
+    assert result.status == AutoUpdateStatus.FAILED
+    assert result.update_available is False
 
 
 def test_preload_lazy_console_modules_imports_deferred_modules(monkeypatch):
