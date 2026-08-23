@@ -8,8 +8,13 @@ The plugin replaces Hermes's "no external memory provider" with a real graph: se
 
 ## Install
 
+Managed installation requires a Hermes Agent release containing the
+[manifest-v2 installer fix](https://github.com/NousResearch/hermes-agent/pull/85893).
+Hermes Agent v0.20.5 (`v2026.8.19`) and earlier are not supported. If the installer says it only
+supports `manifest_version: 1`, update Hermes to a release containing that fix.
+
 ```bash
-hermes plugins install basicmachines-co/basic-memory --path integrations/hermes
+hermes plugins install basicmachines-co/basic-memory/integrations/hermes
 ```
 
 Then activate it in `~/.hermes/config.yaml`:
@@ -21,13 +26,12 @@ memory:
 
 If you run the gateway, restart it (`hermes gateway restart`). Done.
 
-If your installed Hermes build does not support `--path`, use the final deprecated `basicmachines-co/hermes-basic-memory` pointer release until Hermes subpath installs are available. Ongoing development now lives in [`basic-memory/integrations/hermes`](https://github.com/basicmachines-co/basic-memory/tree/main/integrations/hermes).
-
 The plugin self-installs the `basic-memory` CLI on first init via `uv tool install basic-memory` (one-time ~10s pause if it isn't already present). The bm binary lands at `~/.local/bin/bm` — the same location a manual `uv tool install basic-memory` would produce, so a later manual install or upgrade is a no-op rather than a second install.
 
 ### Prerequisites
 
-- [Hermes Agent](https://github.com/NousResearch/hermes-agent)
+- A supported [Hermes Agent](https://github.com/NousResearch/hermes-agent) release as described
+  above
 - [`uv`](https://docs.astral.sh/uv/) on PATH (used for the bootstrap install)
 - The `mcp` Python package in the Hermes venv. If `hermes plugins install` doesn't auto-install it (it follows `pip_dependencies` in `plugin.yaml`), run:
   ```bash

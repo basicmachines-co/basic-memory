@@ -240,13 +240,14 @@ the `memory-*` directories from `skills/` into your agent's skills directory.
 
 Hermes keeps its native plugin shape under [`integrations/hermes`](integrations/hermes):
 
-```bash
-hermes plugins install basicmachines-co/basic-memory --path integrations/hermes
-```
+Managed installation requires a Hermes Agent release containing the
+[manifest-v2 installer fix](https://github.com/NousResearch/hermes-agent/pull/85893).
+Hermes Agent v0.20.5 (`v2026.8.19`) and earlier are not supported. If the installer says it only
+supports `manifest_version: 1`, update Hermes to a release containing that fix.
 
-If your Hermes build lacks subpath installs, use the final deprecated
-`basicmachines-co/hermes-basic-memory` pointer release until host support
-lands.
+```bash
+hermes plugins install basicmachines-co/basic-memory/integrations/hermes
+```
 
 ### OpenClaw
 
