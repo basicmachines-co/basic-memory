@@ -233,6 +233,68 @@ def test_failed_homebrew_check_falls_back_to_pypi(monkeypatch, tmp_path):
     assert "brew upgrade basic-memory" in (result.message or "")
 
 
+def test_failed_homebrew_check_does_not_auto_upgrade(monkeypatch, tmp_path):
+    """Availability inferred from PyPI must not trigger an automatic `brew upgrade`.
+
+    release.yml publishes to PyPI in the `release` job and the Homebrew formula job
+    `needs: release`, so PyPI can carry a version the tap cannot install yet. On top
+    of that, whatever hid the brew answer (untrusted tap, missing brew) also blocks
+    the upgrade -- so acting on the PyPI answer runs a doomed command.
+    """
+    config = _base_config(tmp_path)
+    manager = StubConfigManager(config)
+    calls: list[list[str]] = []
+
+    def _fake_run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr=UNTRUSTED_TAP_STDERR)
+
+    monkeypatch.setattr("basic_memory.cli.auto_update._run_subprocess", _fake_run)
+    monkeypatch.setattr(
+        "basic_memory.cli.auto_update._check_pypi_update_available",
+        lambda: (True, "9.9.9"),
+    )
+
+    result = run_auto_update(
+        config_manager=_config_manager(manager),
+        executable="/opt/homebrew/Cellar/basic-memory/0.18.0/bin/python",
+    )
+
+    assert result.status == AutoUpdateStatus.UPDATE_AVAILABLE
+    assert result.updated is False
+    assert result.latest_version == "9.9.9"
+    assert ["brew", "upgrade", "basic-memory"] not in calls
+    assert "untrusted tap" in (result.message or "")
+    assert "brew upgrade basic-memory" in (result.message or "")
+
+
+def test_failed_homebrew_check_still_trusts_a_pypi_negative(monkeypatch, tmp_path):
+    """The fallback stays authoritative for "nothing newer exists".
+
+    The tap can only lag PyPI, never lead it, so a PyPI "up to date" is sound even
+    when brew could not answer. Only the positive answer is unsafe to act on.
+    """
+    config = _base_config(tmp_path)
+    manager = StubConfigManager(config)
+
+    def _fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(command, 1, stdout="", stderr=UNTRUSTED_TAP_STDERR)
+
+    monkeypatch.setattr("basic_memory.cli.auto_update._run_subprocess", _fake_run)
+    monkeypatch.setattr(
+        "basic_memory.cli.auto_update._check_pypi_update_available",
+        lambda: (False, "0.0.0"),
+    )
+
+    result = run_auto_update(
+        config_manager=_config_manager(manager),
+        executable="/opt/homebrew/Cellar/basic-memory/0.18.0/bin/python",
+    )
+
+    assert result.status == AutoUpdateStatus.UP_TO_DATE
+    assert result.update_available is False
+
+
 def test_failed_homebrew_check_reports_failure_when_pypi_is_unreachable(monkeypatch, tmp_path):
     """With neither source able to answer, report the failure rather than success."""
     config = _base_config(tmp_path)

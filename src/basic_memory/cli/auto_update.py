@@ -267,15 +267,19 @@ def run_auto_update(
     try:
         # --- Availability check ---
         latest_version: str | None = None
+        homebrew_check_error: str | None = None
         if source == InstallSource.HOMEBREW:
             try:
                 update_available, latest_version = _check_homebrew_update_available(silent=silent)
             except HomebrewCheckError as exc:
                 # Trigger: brew cannot answer (missing/untrusted tap, no brew, network).
-                # Why: an unanswered check must never be reported as up to date.
-                # Outcome: ask PyPI instead. The tap can only lag PyPI, so a PyPI
-                # comparison is a sound answer, and it yields a real latest version.
-                # `source` is unchanged, so remediation still points at `brew upgrade`.
+                # Why: an unanswered check must never be reported as up to date. PyPI is
+                # sound for the negative answer -- the tap can only lag PyPI, so "nothing
+                # newer exists" holds. It is NOT sound for installing: release.yml
+                # publishes to PyPI in `release`, and the homebrew formula job `needs:
+                # release`, so a newer PyPI version may not be installable via brew yet.
+                # Outcome: ask PyPI, but remember the answer came from there.
+                homebrew_check_error = str(exc)
                 logger.warning(f"Homebrew update check failed, falling back to PyPI: {exc}")
                 update_available, latest_version = _check_pypi_update_available()
         else:
@@ -316,6 +320,26 @@ def run_auto_update(
                 latest_version=latest_version,
                 message=(
                     f"Update available (latest: {latest_version or 'unknown'}). "
+                    f"{_manual_update_hint(source)}"
+                ),
+            )
+
+        if homebrew_check_error is not None:
+            # Trigger: availability was inferred from PyPI because brew could not answer.
+            # Why: the tap may not carry this version yet, and whatever hid the brew
+            # answer (untrusted tap, brew missing) will also block `brew upgrade`.
+            # Outcome: report the update and the reason instead of running a doomed
+            # upgrade; the user resolves the brew problem and upgrades deliberately.
+            return AutoUpdateResult(
+                status=AutoUpdateStatus.UPDATE_AVAILABLE,
+                source=source,
+                checked=True,
+                update_available=True,
+                updated=False,
+                latest_version=latest_version,
+                message=(
+                    f"Update available (latest: {latest_version or 'unknown'}), but the "
+                    f"Homebrew check failed: {homebrew_check_error} "
                     f"{_manual_update_hint(source)}"
                 ),
             )
