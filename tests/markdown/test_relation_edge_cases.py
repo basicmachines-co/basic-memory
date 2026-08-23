@@ -2,7 +2,12 @@
 
 from markdown_it import MarkdownIt
 
-from basic_memory.markdown.plugins import relation_plugin, parse_relation, parse_inline_relations
+from basic_memory.markdown.plugins import (
+    observation_plugin,
+    relation_plugin,
+    parse_relation,
+    parse_inline_relations,
+)
 from basic_memory.markdown.schemas import Relation
 
 
@@ -247,3 +252,43 @@ def test_bare_list_wikilink_is_inline_link_not_default_explicit_relation():
 
     assert token.meta["relations"] == [{"type": "links_to", "target": "Target", "context": None}]
     assert parse_relation(token) is None
+
+
+def test_links_to_directive_forces_implicit_relations():
+    """The terminal directive disambiguates a single-token relation prefix."""
+    md = MarkdownIt().use(relation_plugin)
+
+    tokens = md.parse("- Mother [[Alice]] #bm:links_to")
+    token = next(t for t in tokens if t.type == "inline")
+    assert token.meta["relations"] == [
+        {"type": "links_to", "target": "Alice", "context": None}
+    ]
+
+    tokens = md.parse("- Mentions [[Alice]] and [[Bob]] #bm:links_to")
+    token = next(t for t in tokens if t.type == "inline")
+    assert token.meta["relations"] == [
+        {"type": "links_to", "target": "Alice", "context": None},
+        {"type": "links_to", "target": "Bob", "context": None},
+    ]
+
+
+def test_links_to_directive_is_terminal_and_explicit_relations_are_unchanged():
+    """Only the exact terminal directive changes relation interpretation."""
+    md = MarkdownIt().use(relation_plugin)
+
+    tokens = md.parse("- spouse_of [[Alice]]")
+    token = next(t for t in tokens if t.type == "inline")
+    assert token.meta["relations"][0]["type"] == "spouse_of"
+
+    tokens = md.parse("- Mother [[Alice]] #bm:links_to later")
+    token = next(t for t in tokens if t.type == "inline")
+    assert token.meta["relations"][0]["type"] == "links_to"
+
+
+def test_links_to_directive_is_not_an_observation_tag():
+    """The directive is syntax, not a note tag or indexed observation text."""
+    md = MarkdownIt().use(observation_plugin).use(relation_plugin)
+
+    tokens = md.parse("- Mother [[Alice]] #bm:links_to")
+    token = next(t for t in tokens if t.type == "inline")
+    assert "observation" not in token.meta
