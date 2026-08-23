@@ -116,10 +116,10 @@ All settings are fields on `BasicMemoryConfig` and can be set via environment va
 | `milvus_collection_prefix` | `BASIC_MEMORY_MILVUS_COLLECTION_PREFIX` | `"basic_memory"` | Prefix for deterministic project-isolated Milvus collections. |
 | `milvus_database` | `BASIC_MEMORY_MILVUS_DATABASE` | `"default"` | Milvus database name. |
 | `semantic_embedding_provider` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER` | `"fastembed"` | Embedding provider: `"fastembed"` (local), `"openai"` (API), or `"litellm"` (multi-provider API, **experimental** — advanced users only). |
-| `semantic_embedding_model` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL` | `"bge-small-en-v1.5"` | Model identifier. Auto-adjusted per provider if left at default. |
+| `semantic_embedding_model` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL` | `"bge-small-en-v1.5"` | Model identifier. FastEmbed models must exist in the installed FastEmbed catalog. Auto-adjusted per provider if left at default. |
 | `semantic_embedding_api_base` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_API_BASE` | Unset | Optional custom endpoint for the LiteLLM provider, including local or self-hosted OpenAI-compatible servers. |
 | `semantic_embedding_api_key` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_API_KEY` | Unset | Optional API key passed directly to the LiteLLM provider. When unset, LiteLLM continues to read provider credential env vars such as `OPENAI_API_KEY`. |
-| `semantic_embedding_dimensions` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DIMENSIONS` | Provider default | Vector dimensions. 384 for FastEmbed, 1536 for OpenAI/LiteLLM OpenAI. Required when using a non-default LiteLLM model. |
+| `semantic_embedding_dimensions` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DIMENSIONS` | Provider default | Vector dimensions. Defaults to 384 for FastEmbed and 1536 for OpenAI/LiteLLM OpenAI. Set this to the model's output size when choosing a non-default FastEmbed or LiteLLM model. |
 | `semantic_embedding_forward_dimensions` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_FORWARD_DIMENSIONS` | Auto | LiteLLM-only override for whether configured dimensions are sent as a provider-side output-size request. |
 | `semantic_embedding_batch_size` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_BATCH_SIZE` | `2` | Number of texts to embed per batch. |
 | `semantic_embedding_document_input_type` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DOCUMENT_INPUT_TYPE` | Auto for known LiteLLM models | Optional LiteLLM `input_type` for indexed document/passages. |
@@ -143,6 +143,34 @@ FastEmbed runs entirely locally using ONNX models — no API key, no network cal
 pip install basic-memory
 export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
 ```
+
+#### Choose another local model
+
+Basic Memory passes `semantic_embedding_model` to FastEmbed, so you can select any text
+embedding model registered by the installed FastEmbed version. Basic Memory does not maintain a
+second model allowlist or add arbitrary Hugging Face models to FastEmbed.
+
+List the models available in your installation:
+
+```bash
+python -c "from fastembed import TextEmbedding; print(*(m['model'] for m in TextEmbedding.list_supported_models()), sep='\n')"
+```
+
+Then configure the model and its output dimensions. For example, the FastEmbed version bundled
+with Basic Memory supports the larger mixed Chinese-English Jina model:
+
+```bash
+basic-memory config set semantic_embedding_provider fastembed
+basic-memory config set semantic_embedding_model jinaai/jina-embeddings-v2-base-zh
+basic-memory config set semantic_embedding_dimensions 768
+bm reindex --embeddings
+```
+
+The model downloads on first use. The configured dimensions must match the model's actual output
+size because Basic Memory creates fixed-dimension vector storage before indexing. After changing
+the model or dimensions, rebuild embeddings as shown above. A model name absent from
+`TextEmbedding.list_supported_models()` requires support in FastEmbed itself or a separately
+operated provider such as LiteLLM; setting an arbitrary Hugging Face identifier is not enough.
 
 ### OpenAI
 
