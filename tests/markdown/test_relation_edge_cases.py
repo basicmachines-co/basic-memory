@@ -8,6 +8,7 @@ from basic_memory.markdown.plugins import (
     parse_relation,
     parse_inline_relations,
 )
+from basic_memory.markdown.entity_parser import parse
 from basic_memory.markdown.schemas import Relation
 
 
@@ -292,3 +293,18 @@ def test_links_to_directive_is_not_an_observation_tag():
     tokens = md.parse("- Mother [[Alice]] #bm:links_to")
     token = next(t for t in tokens if t.type == "inline")
     assert "observation" not in token.meta
+
+
+def test_links_to_directive_preserves_source_and_observation_content():
+    """The directive stays in source while remaining outside indexed semantics."""
+    source = "- [note] Mother [[Alice]] #bm:links_to\n"
+    parsed = parse(source)
+
+    assert parsed.content == source
+    assert len(parsed.observations) == 1
+    assert parsed.observations[0].category == "note"
+    assert parsed.observations[0].content == "Mother [[Alice]]"
+    assert parsed.observations[0].tags is None
+    assert len(parsed.relations) == 1
+    assert parsed.relations[0].type == "links_to"
+    assert parsed.relations[0].target == "Alice"
