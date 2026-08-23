@@ -30,11 +30,11 @@ read_load_bench = load_read_load_bench()
 def test_result_helpers_use_current_mcp_python_fields() -> None:
     success = CallToolResult(
         content=[TextContent(type="text", text="plain response")],
-        structuredContent={"result": {"permalink": "notes/example"}},
+        structured_content={"result": {"permalink": "notes/example"}},
     )
     failure = CallToolResult(
         content=[TextContent(type="text", text="failed response")],
-        isError=True,
+        is_error=True,
     )
 
     assert read_load_bench.result_payload(success) == {"permalink": "notes/example"}
