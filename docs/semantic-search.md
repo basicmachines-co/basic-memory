@@ -150,11 +150,21 @@ Basic Memory passes `semantic_embedding_model` to FastEmbed, so you can select a
 embedding model registered by the installed FastEmbed version. Basic Memory does not maintain a
 second model allowlist or add arbitrary Hugging Face models to FastEmbed.
 
-List the models available in your installation:
+List the models available in the same Python environment as Basic Memory. For a `uv tool`
+installation on macOS or Linux:
 
 ```bash
-python -c "from fastembed import TextEmbedding; print(*(m['model'] for m in TextEmbedding.list_supported_models()), sep='\n')"
+"$(uv tool dir)/basic-memory/bin/python" -c "from fastembed import TextEmbedding; print(*(m['model'] for m in TextEmbedding.list_supported_models()), sep='\n')"
 ```
+
+On Windows PowerShell, use the tool environment's `Scripts` directory:
+
+```powershell
+& "$(uv tool dir)\basic-memory\Scripts\python.exe" -c "from fastembed import TextEmbedding; print(*(m['model'] for m in TextEmbedding.list_supported_models()), sep='\n')"
+```
+
+For a virtual-environment or system `pip` installation, run the original installation's
+`python` executable with the same `-c` argument.
 
 Then configure the model and its output dimensions. For example, the FastEmbed version bundled
 with Basic Memory supports the larger mixed Chinese-English Jina model:
