@@ -9,6 +9,10 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from basic_memory_benchmarks.concurrent_write import (
+    ConcurrentWriteConfig,
+    run_concurrent_write,
+)
 from basic_memory_benchmarks.converters.locomo_to_corpus import convert_locomo_to_corpus
 from basic_memory_benchmarks.converters.longmemeval_to_corpus import convert_longmemeval_to_corpus
 from basic_memory_benchmarks.datasets.locomo import LOCOMO_URL, fetch_locomo_dataset
@@ -260,6 +264,73 @@ def run_retrieval_command(
 
     run_dir = run_retrieval(run_config=config, dataset=provenance)
     console.print(f"Retrieval run complete: [green]{run_dir}[/green]")
+
+
+@run_app.command("concurrent-write")
+def run_concurrent_write_command(
+    writers: int = typer.Option(4, "--writers", help="Concurrent MCP client sessions"),
+    notes_per_writer: int = typer.Option(25, "--notes-per-writer"),
+    edit_ratio: float = typer.Option(
+        0.4, "--edit-ratio", help="Per-note probability of hub/own-note append edits"
+    ),
+    hub_notes: int = typer.Option(4, "--hub-notes", help="Shared contended notes all writers edit"),
+    relation_pool: int = typer.Option(
+        8, "--relation-pool", help="Shared relation-target pool size"
+    ),
+    seed: int = typer.Option(42, "--seed"),
+    run_id: str | None = typer.Option(None, "--run-id"),
+    output_root: Path = typer.Option(Path("benchmarks/runs"), "--output-root"),
+    bm_source: str = typer.Option("local-checkout", "--bm-source"),
+    bm_local_path: Path = typer.Option(
+        ...,
+        "--bm-local-path",
+        exists=True,
+        file_okay=False,
+        resolve_path=True,
+        help="Pinned Basic Memory git checkout to benchmark",
+    ),
+    max_seconds: float | None = typer.Option(
+        None, "--max-seconds", help="Optional wall-clock cap for the concurrent phase"
+    ),
+    op_timeout: float = typer.Option(120.0, "--op-timeout"),
+    settle_timeout: float = typer.Option(180.0, "--settle-timeout"),
+    measure_reindex: bool = typer.Option(True, "--measure-reindex/--no-measure-reindex"),
+    strict: bool = typer.Option(
+        False,
+        "--strict/--no-strict",
+        help="Exit nonzero when convergence checks fail; the default records divergence",
+    ),
+) -> None:
+    """Run independent MCP writers against one shared project (basic-memory#1248)."""
+    resolved_run_id = run_id or f"cw-{uuid.uuid4().hex[:12]}"
+    config = ConcurrentWriteConfig(
+        run_id=resolved_run_id,
+        writers=writers,
+        notes_per_writer=notes_per_writer,
+        edit_ratio=edit_ratio,
+        hub_notes=hub_notes,
+        relation_pool=relation_pool,
+        seed=seed,
+        output_root=str(output_root),
+        bm_source=bm_source,
+        bm_local_path=str(bm_local_path),
+        max_seconds=max_seconds,
+        op_timeout_seconds=op_timeout,
+        settle_timeout_seconds=settle_timeout,
+        measure_reindex=measure_reindex,
+    )
+    run_dir = run_concurrent_write(config)
+    console.print(f"Concurrent-write run complete: [green]{run_dir}[/green]")
+
+    if strict:
+        import json
+
+        summary = json.loads(
+            (run_dir / "concurrent-write-summary.json").read_text(encoding="utf-8")
+        )
+        if not summary["converged"]:
+            console.print("[red]Convergence checks failed (--strict)[/red]")
+            raise typer.Exit(code=1)
 
 
 @run_app.command("qa")

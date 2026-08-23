@@ -210,6 +210,33 @@ bench-run-full-judge model="gpt-4o-mini":
       --judge \
       --judge-model "{{model}}"
 
+# --- Concurrency benchmark (basic-memory#1248) ---
+
+# Small-scale smoke: 4 writers x 25 notes; strict so divergence fails the command
+bench-concurrent-write-smoke:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -z "{{bm_local_path}}" ]]; then
+        echo "BM_LOCAL_PATH must point to the Basic Memory git checkout under test" >&2
+        exit 2
+    fi
+    uv run bm-bench run concurrent-write \
+      --writers 4 --notes-per-writer 25 \
+      --bm-local-path "{{bm_local_path}}" \
+      --strict
+
+# Load shape for the v0.22.1-vs-v0.23 comparison; report-only (divergence is the result)
+bench-concurrent-write-load writers="8" notes="200":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -z "{{bm_local_path}}" ]]; then
+        echo "BM_LOCAL_PATH must point to the Basic Memory git checkout under test" >&2
+        exit 2
+    fi
+    uv run bm-bench run concurrent-write \
+      --writers {{writers}} --notes-per-writer {{notes}} \
+      --bm-local-path "{{bm_local_path}}"
+
 # --- Artifacts and comparison ---
 
 bench-latest-run:
