@@ -184,6 +184,23 @@ the model or dimensions, rebuild embeddings as shown above. A model name absent 
 `TextEmbedding.list_supported_models()` requires support in FastEmbed itself or a separately
 operated provider such as LiteLLM; setting an arbitrary Hugging Face identifier is not enough.
 
+Some FastEmbed models require different literal prefixes for indexed passages and search queries.
+Basic Memory does not infer model-specific prompts for custom models, so configure the prefixes
+required by the selected model. For example, multilingual E5 models require `passage: ` for
+indexed content and `query: ` for queries:
+
+```bash
+basic-memory config set semantic_embedding_provider fastembed
+basic-memory config set semantic_embedding_model intfloat/multilingual-e5-large
+basic-memory config set semantic_embedding_dimensions 1024
+basic-memory config set semantic_embedding_document_prefix "passage: "
+basic-memory config set semantic_embedding_query_prefix "query: "
+bm reindex --embeddings
+```
+
+Rebuild embeddings after changing either prefix so stored document vectors and new query vectors
+use the same model contract.
+
 ### OpenAI
 
 Uses OpenAI's embeddings API for higher-dimensional vectors. Requires an API key.
