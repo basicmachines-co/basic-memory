@@ -13,6 +13,15 @@ from markdown_it.token import Token
 # those bracket prefixes stay ordinary content (issue #1219).
 _TIMESTAMP_VALUE = r"\d{1,3}:\d{2}(?::\d{2})?(?:[.,]\d{1,3})?"
 _TIMESTAMP_CATEGORY = re.compile(rf"^{_TIMESTAMP_VALUE}(?:\s+-\s+{_TIMESTAMP_VALUE})?$")
+_LINKS_TO_DIRECTIVE = re.compile(r"\s+#bm:links_to\s*$")
+
+
+def remove_links_to_directive(content: str) -> tuple[str, bool]:
+    """Remove an exact terminal ``#bm:links_to`` directive from content."""
+    match = _LINKS_TO_DIRECTIVE.search(content)
+    if not match:
+        return content, False
+    return content[: match.start()].rstrip(), True
 
 
 def _is_task_marker_category(category: str) -> bool:
@@ -47,6 +56,7 @@ def is_observation(token: Token) -> bool:
         return False
     # Use token.tag which contains the actual content for test tokens, fallback to content
     content = (token.tag or token.content).strip()
+    content, _ = remove_links_to_directive(content)
     if not content:  # pragma: no cover
         return False
     # if it's a markdown_task, return false
@@ -74,6 +84,7 @@ def parse_observation(token: Token) -> Dict[str, Any]:
 
     # Use token.tag which contains the actual content for test tokens, fallback to content
     content = (token.tag or token.content).strip()
+    content, _ = remove_links_to_directive(content)
 
     # Parse [category] with regex; a timestamp-shaped prefix is not a category, so a
     # hashtag-promoted transcript line keeps its timecode inside the content instead.
@@ -325,17 +336,19 @@ def relation_plugin(md: MarkdownIt) -> None:
 
             # Only process inline tokens
             if token.type == "inline":
+                content = token.tag or token.content
+                content_without_directive, has_directive = remove_links_to_directive(content)
+
                 # Check for explicit relations in list items
-                if in_list_item and is_explicit_relation(token):
+                if in_list_item and not has_directive and is_explicit_relation(token):
                     rel = parse_relation(token)
                     if rel:
                         token.meta["relations"] = [rel]
 
                 # Always check for inline links in any text
                 else:
-                    content = token.tag or token.content
                     if "[[" in content:
-                        rels = parse_inline_relations(content)
+                        rels = parse_inline_relations(content_without_directive)
                         if rels:
                             token.meta["relations"] = token.meta.get("relations", []) + rels
 
