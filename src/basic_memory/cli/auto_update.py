@@ -27,6 +27,10 @@ UV_UPGRADE_TIMEOUT_SECONDS = 180
 BREW_UPGRADE_TIMEOUT_SECONDS = 600
 
 
+class HomebrewCheckError(RuntimeError):
+    """Raised when `brew outdated` could not determine whether an update exists."""
+
+
 class InstallSource(str, Enum):
     """How the running CLI appears to have been installed."""
 
@@ -127,19 +131,36 @@ def _version_from_pypi() -> str:
 
 
 def _check_homebrew_update_available(silent: bool) -> tuple[bool, str | None]:
-    """Check whether Homebrew reports an outdated basic-memory formula."""
-    result = _run_subprocess(
-        ["brew", "outdated", "--quiet", PACKAGE_NAME],
-        timeout_seconds=BREW_OUTDATED_TIMEOUT_SECONDS,
-        silent=silent,
-        capture_output=True,
-    )
-    # Trigger: brew outdated exits 1 when the formula IS outdated (with name on stdout).
-    # Why: non-zero exit here means "outdated", not "error".
-    # Outcome: check stdout for the package name to determine outdated status.
+    """Check whether Homebrew reports an outdated basic-memory formula.
+
+    Raises:
+        HomebrewCheckError: brew could not answer the question (brew missing,
+            untrusted or stale tap, network failure, timeout).
+    """
+    try:
+        result = _run_subprocess(
+            ["brew", "outdated", "--quiet", PACKAGE_NAME],
+            timeout_seconds=BREW_OUTDATED_TIMEOUT_SECONDS,
+            silent=silent,
+            capture_output=True,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise HomebrewCheckError(f"could not run `brew outdated`: {exc}") from exc
+
+    # Trigger: brew outdated exits 1 both when the formula IS outdated (name on
+    # stdout) and when the check failed outright (empty stdout, reason on stderr).
+    # Why: reading a failed check as "not outdated" reports a stale install as up
+    # to date, which silently pins the user to an old version.
+    # Outcome: trust an empty stdout only when brew exited cleanly; otherwise the
+    # check is unanswered and the caller must find the answer elsewhere.
     stdout = (result.stdout or "").strip()
-    is_outdated = PACKAGE_NAME in stdout
-    return is_outdated, None
+    if PACKAGE_NAME in stdout:
+        return True, None
+    if result.returncode == 0:
+        return False, None
+
+    stderr = (result.stderr or "").strip()
+    raise HomebrewCheckError(stderr or f"`brew outdated` exited {result.returncode}")
 
 
 def _check_pypi_update_available() -> tuple[bool, str]:
@@ -247,7 +268,16 @@ def run_auto_update(
         # --- Availability check ---
         latest_version: str | None = None
         if source == InstallSource.HOMEBREW:
-            update_available, latest_version = _check_homebrew_update_available(silent=silent)
+            try:
+                update_available, latest_version = _check_homebrew_update_available(silent=silent)
+            except HomebrewCheckError as exc:
+                # Trigger: brew cannot answer (missing/untrusted tap, no brew, network).
+                # Why: an unanswered check must never be reported as up to date.
+                # Outcome: ask PyPI instead. The tap can only lag PyPI, so a PyPI
+                # comparison is a sound answer, and it yields a real latest version.
+                # `source` is unchanged, so remediation still points at `brew upgrade`.
+                logger.warning(f"Homebrew update check failed, falling back to PyPI: {exc}")
+                update_available, latest_version = _check_pypi_update_available()
         else:
             update_available, latest_version = _check_pypi_update_available()
 
