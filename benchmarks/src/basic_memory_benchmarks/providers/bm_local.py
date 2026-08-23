@@ -84,7 +84,7 @@ class BasicMemoryLocalProvider(BenchmarkProvider):
         return None
 
     @staticmethod
-    def _status_json_is_ready(payload: dict[str, Any]) -> bool:
+    def _status_json_is_ready(payload: dict[str, Any]) -> bool | None:
         return status_json_is_ready(payload)
 
     @staticmethod
@@ -149,10 +149,12 @@ class BasicMemoryLocalProvider(BenchmarkProvider):
                 ]
             )
             payload = json.loads(completed.stdout.strip() or "{}")
-            if isinstance(payload, dict) and self._status_json_is_ready(
-                cast(dict[str, Any], payload)
-            ):
-                return
+            if isinstance(payload, dict):
+                readiness = self._status_json_is_ready(cast(dict[str, Any], payload))
+                if readiness is None:
+                    return
+                if readiness:
+                    return
 
             if time.monotonic() >= deadline:
                 raise TimeoutError(

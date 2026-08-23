@@ -184,25 +184,30 @@ def resolve_bm_command_prefix(bm_local_path: str | None) -> list[str]:
     return ["bm"]
 
 
-def status_json_is_ready(payload: dict[str, Any]) -> bool:
+def status_json_is_ready(payload: dict[str, Any]) -> bool | None:
     """Interpret `bm status --json` output across BM versions.
 
-    The schema varies by version; every known busy signal is checked, and an
-    unknown schema with no busy signal counts as ready.
+    Returns ``True`` when a known schema is idle, ``False`` when it is busy,
+    and ``None`` when the payload has no supported readiness signal.
     """
     total = payload.get("total")
     if isinstance(total, int):
         return total == 0
 
+    recognized_signal = False
     for list_key in ("new", "modified", "deleted", "skipped_files"):
         value = payload.get(list_key)
-        if isinstance(value, list) and len(value) > 0:
-            return False
+        if isinstance(value, list):
+            recognized_signal = True
+            if value:
+                return False
 
     for dict_key in ("moves", "checksums"):
         value = payload.get(dict_key)
-        if isinstance(value, dict) and len(value) > 0:
-            return False
+        if isinstance(value, dict):
+            recognized_signal = True
+            if value:
+                return False
 
     status = payload.get("status")
     if isinstance(status, str):
@@ -215,12 +220,15 @@ def status_json_is_ready(payload: dict[str, Any]) -> bool:
     for key in ("is_syncing", "is_indexing", "sync_in_progress", "index_in_progress"):
         value = payload.get(key)
         if isinstance(value, bool):
-            return not value
+            recognized_signal = True
+            if value:
+                return False
 
     for key in ("pending_files", "pending", "unindexed_files", "queued_files", "queue_size"):
         value = payload.get(key)
-        if isinstance(value, int) and value != 0:
-            return False
+        if isinstance(value, int):
+            recognized_signal = True
+            if value != 0:
+                return False
 
-    # If the schema is unknown and no busy signal exists, treat status as ready.
-    return True
+    return True if recognized_signal else None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
 import threading
 from concurrent.futures import TimeoutError as FutureTimeoutError
@@ -12,8 +13,10 @@ from types import SimpleNamespace
 from typing import Any, AsyncIterator
 
 import pytest
+from mcp.types import CallToolResult, TextContent
 
 import basic_memory_benchmarks.bm_runtime as bm_runtime
+import basic_memory_benchmarks.concurrent_write as concurrent_write
 from basic_memory_benchmarks.bm_runtime import WarmMcpClient
 from basic_memory_benchmarks.concurrent_write import (
     ConcurrentWriteConfig,
@@ -25,6 +28,7 @@ from basic_memory_benchmarks.concurrent_write import (
     classify_error,
     run_integrity_checks,
     summarize_op_type,
+    tool_result_error,
 )
 
 
@@ -188,6 +192,53 @@ def test_summarize_op_type_latency_stats() -> None:
     assert stats.mean_ms == 40.0
     assert stats.p50_ms == 30.0
     assert stats.max_ms == 100.0
+
+
+def test_tool_result_error_reads_structured_tool_failure() -> None:
+    result = CallToolResult(
+        content=[TextContent(type="text", text='{"error":"deadlock detected"}')],
+        structuredContent={"result": {"error": "deadlock detected"}},
+        isError=False,
+    )
+    assert tool_result_error(result) == "deadlock detected"
+
+
+def test_tool_result_error_accepts_structured_success() -> None:
+    result = CallToolResult(
+        content=[TextContent(type="text", text='{"title":"note"}')],
+        structuredContent={"result": {"title": "note"}},
+        isError=False,
+    )
+    assert tool_result_error(result) is None
+
+
+def test_concurrent_ops_request_json_tool_responses() -> None:
+    op = build_writer_plan(0, _config(notes_per_writer=1))[0]
+    _tool, arguments = concurrent_write._tool_call_for(op, "project")
+    assert arguments["output_format"] == "json"
+
+
+def test_unknown_status_schema_uses_fixed_settle_delay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    status = json.dumps({"total_files": 2, "observed_files": [{"path": "note.md"}]})
+    monkeypatch.setattr(
+        concurrent_write,
+        "run_command",
+        lambda *_args, **_kwargs: SimpleNamespace(stdout=status, stderr=""),
+    )
+    delays: list[float] = []
+    monkeypatch.setattr(concurrent_write.time, "sleep", delays.append)
+
+    _seconds, mode = concurrent_write._settle_index(
+        prefix=["bm"],
+        env={},
+        project_name="project",
+        timeout_seconds=1.0,
+    )
+
+    assert mode == "fixed-delay"
+    assert delays == [concurrent_write.FALLBACK_SETTLE_SECONDS]
 
 
 # --- Integrity verification ---
@@ -418,3 +469,26 @@ def test_summary_markdown_reports_convergence(tmp_path: Path) -> None:
     assert "bm-bench run concurrent-write" in markdown
     assert summary.converged
     assert summary.notes_created_ok == 1
+
+    failed_result = OpResult(
+        writer=0,
+        op_index=1,
+        op_type="edit_own",
+        identifier="notes/w00-n0000",
+        started_at_utc="2026-01-01T00:00:01Z",
+        latency_ms=15.0,
+        ok=False,
+        error="deadlock detected",
+        error_kind="deadlock",
+    )
+    failed_summary = build_summary(
+        config=config,
+        results=[*results, failed_result],
+        outcomes=[WriterOutcome(results=[*results, failed_result])],
+        concurrent_wall_seconds=1.5,
+        settle_seconds=0.5,
+        settle_mode="status-json",
+        reindex_seconds=None,
+        integrity=integrity,
+    )
+    assert not failed_summary.converged

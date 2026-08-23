@@ -39,6 +39,7 @@ from pathlib import Path
 from statistics import mean
 from typing import Any, Literal
 
+from mcp.types import CallToolResult
 from pydantic import BaseModel, Field
 from rich.console import Console
 
@@ -55,6 +56,7 @@ console = Console()
 OpType = Literal["create_hub", "create", "edit_hub", "edit_own"]
 
 MARKER_PATTERN = re.compile(r"bmk-[a-z0-9-]+")
+FALLBACK_SETTLE_SECONDS = 10.0
 
 # --- Configuration and artifact models ---
 
@@ -341,13 +343,52 @@ def _tool_call_for(op: PlannedOp, project_name: str) -> tuple[str, dict[str, Any
             "directory": op.directory,
             "content": op.content,
             "project": project_name,
+            "output_format": "json",
         }
     return "edit_note", {
         "identifier": op.identifier,
         "operation": "append",
         "content": op.content,
         "project": project_name,
+        "output_format": "json",
     }
+
+
+def _tool_result_payload(result: CallToolResult) -> dict[str, Any]:
+    structured = result.structuredContent
+    if isinstance(structured, dict):
+        wrapped = structured.get("result")
+        if isinstance(wrapped, dict):
+            return wrapped
+        return structured
+
+    for item in result.content:
+        text = getattr(item, "text", None)
+        if not isinstance(text, str):
+            continue
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, dict):
+            return parsed
+    return {}
+
+
+def tool_result_error(result: CallToolResult) -> str | None:
+    """Return the MCP or tool-level error, including JSON responses with HTTP failures."""
+    if result.isError:
+        for item in result.content:
+            text = getattr(item, "text", None)
+            if isinstance(text, str) and text.strip():
+                return text.strip()
+        return "Unknown MCP tool error"
+
+    payload = _tool_result_payload(result)
+    if not payload:
+        return "MCP tool returned no JSON payload"
+    error = payload.get("error")
+    return str(error) if error else None
 
 
 def _execute_op(client: WarmMcpClient, op: PlannedOp, project_name: str) -> tuple[OpResult, bool]:
@@ -377,13 +418,8 @@ def _execute_op(client: WarmMcpClient, op: PlannedOp, project_name: str) -> tupl
             session_dead,
         )
     latency_ms = (time.perf_counter() - start) * 1000
-    if result.isError:
-        error = "Unknown MCP tool error"
-        for item in result.content:
-            text = getattr(item, "text", None)
-            if isinstance(text, str) and text.strip():
-                error = text.strip()
-                break
+    error = tool_result_error(result)
+    if error is not None:
         return _op_result(op, started_at, latency_ms, ok=False, error=error), False
     return _op_result(op, started_at, latency_ms, ok=True, error=None), False
 
@@ -634,6 +670,9 @@ def build_summary(
     integrity: IntegrityReport,
 ) -> ConcurrentWriteSummary:
     ops_ok = sum(1 for result in results if result.ok)
+    ops_error = len(results) - ops_ok
+    ops_not_attempted = sum(outcome.not_attempted for outcome in outcomes)
+    terminal_writer_failures = sum(1 for outcome in outcomes if outcome.terminal_error is not None)
     error_kinds = Counter(result.error_kind for result in results if result.error_kind is not None)
     per_op_type: dict[str, OpTypeStats] = {}
     for op_type in ("create_hub", "create", "edit_hub", "edit_own"):
@@ -649,11 +688,9 @@ def build_summary(
         reindex_seconds=round(reindex_seconds, 2) if reindex_seconds is not None else None,
         ops_total=len(results),
         ops_ok=ops_ok,
-        ops_error=len(results) - ops_ok,
-        ops_not_attempted=sum(outcome.not_attempted for outcome in outcomes),
-        terminal_writer_failures=sum(
-            1 for outcome in outcomes if outcome.terminal_error is not None
-        ),
+        ops_error=ops_error,
+        ops_not_attempted=ops_not_attempted,
+        terminal_writer_failures=terminal_writer_failures,
         error_kinds=dict(error_kinds),
         per_op_type=per_op_type,
         notes_created_ok=notes_created_ok,
@@ -664,7 +701,12 @@ def build_summary(
         if concurrent_wall_seconds > 0
         else 0.0,
         integrity=integrity,
-        converged=integrity.converged,
+        converged=(
+            integrity.converged
+            and ops_error == 0
+            and ops_not_attempted == 0
+            and terminal_writer_failures == 0
+        ),
     )
 
 
@@ -807,7 +849,7 @@ def _settle_index(
     if "no such option: --json" in merged:
         # Old BM without --json: no readiness signal exists; give the watcher a
         # fixed grace period and record the mode so the artifact is explicit.
-        time.sleep(10.0)
+        time.sleep(FALLBACK_SETTLE_SECONDS)
         return time.monotonic() - start, "fixed-delay"
 
     deadline = start + timeout_seconds
@@ -817,8 +859,13 @@ def _settle_index(
             prefix + ["status", "--project", project_name, "--json", "--local"], env=env
         )
         payload = json.loads(completed.stdout.strip() or "{}")
-        if isinstance(payload, dict) and status_json_is_ready(payload):
-            return time.monotonic() - start, "status-json"
+        if isinstance(payload, dict):
+            readiness = status_json_is_ready(payload)
+            if readiness is None:
+                time.sleep(FALLBACK_SETTLE_SECONDS)
+                return time.monotonic() - start, "fixed-delay"
+            if readiness:
+                return time.monotonic() - start, "status-json"
         if time.monotonic() >= deadline:
             raise TimeoutError(
                 f"Index did not settle within {timeout_seconds}s for project '{project_name}'"
