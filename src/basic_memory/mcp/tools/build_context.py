@@ -17,8 +17,12 @@ from basic_memory.mcp.server import mcp
 from basic_memory.schemas.base import TimeFrame
 from basic_memory.schemas.memory import (
     ContextResult,
+    DEFAULT_CONTEXT_PAGE_SIZE,
+    DEFAULT_CONTEXT_RELATED_RESULTS,
     EntitySummary,
     GraphContext,
+    MAX_CONTEXT_PAGE_SIZE,
+    MAX_CONTEXT_RELATED_RESULTS,
     MemoryUrl,
     ObservationSummary,
     RelationSummary,
@@ -169,12 +173,18 @@ async def build_context(
     ] = 1,
     page_size: Annotated[
         int,
-        Field(default=10, validation_alias=AliasChoices("page_size", "limit", "per_page")),
-    ] = 10,
+        Field(
+            default=DEFAULT_CONTEXT_PAGE_SIZE,
+            validation_alias=AliasChoices("page_size", "limit", "per_page"),
+        ),
+    ] = DEFAULT_CONTEXT_PAGE_SIZE,
     max_related: Annotated[
         int,
-        Field(default=10, validation_alias=AliasChoices("max_related", "max_results")),
-    ] = 10,
+        Field(
+            default=DEFAULT_CONTEXT_RELATED_RESULTS,
+            validation_alias=AliasChoices("max_related", "max_results"),
+        ),
+    ] = DEFAULT_CONTEXT_RELATED_RESULTS,
     output_format: Literal["json", "text"] = "json",
     context: Context | None = None,
 ) -> dict[str, Any] | str:
@@ -199,8 +209,8 @@ async def build_context(
         depth: How many relation hops to traverse (1-3 recommended for performance)
         timeframe: How far back to look. Supports natural language like "2 days ago", "last week"
         page: Page number of results to return (default: 1)
-        page_size: Number of results to return per page (default: 10)
-        max_related: Maximum number of related results to return (default: 10)
+        page_size: Number of primary results to return per page (default: 10, maximum: 50)
+        max_related: Maximum total related results to return (default: 10, maximum: 100)
         output_format: Response format - "json" for structured JSON dict,
             "text" for compact markdown text
         context: Optional FastMCP context for performance caching.
@@ -233,6 +243,24 @@ async def build_context(
         raise ValueError(f"page must be >= 1, got {page}")
     if page_size < 1:
         raise ValueError(f"page_size must be >= 1, got {page_size}")
+    # Trigger: a caller tries to turn context traversal into a bulk vault read.
+    # Why: primary note bodies dominate response size, while broad graph reads also
+    #      increase database work and consume the model context needed for traversal.
+    # Outcome: keep the tool bounded and direct callers toward pagination and links.
+    if page_size > MAX_CONTEXT_PAGE_SIZE:
+        raise ValueError(
+            f"page_size must be <= {MAX_CONTEXT_PAGE_SIZE}, got {page_size}. "
+            "build_context is a bounded traversal starting point; request another "
+            "page or follow the returned memory:// links."
+        )
+    if max_related < 0:
+        raise ValueError(f"max_related must be >= 0, got {max_related}")
+    if max_related > MAX_CONTEXT_RELATED_RESULTS:
+        raise ValueError(
+            f"max_related must be <= {MAX_CONTEXT_RELATED_RESULTS}, got {max_related}. "
+            "build_context is a bounded traversal starting point; follow the returned "
+            "memory:// links for more context."
+        )
 
     # Detect project from memory URL prefix before routing.
     # project_id routes by external UUID, so it bypasses URL discovery entirely.

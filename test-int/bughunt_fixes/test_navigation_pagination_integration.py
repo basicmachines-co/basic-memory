@@ -20,6 +20,7 @@ from fastmcp.exceptions import ToolError
 from typer.testing import CliRunner
 
 from basic_memory.cli.main import app as cli_app
+from basic_memory.schemas.memory import MAX_CONTEXT_PAGE_SIZE, MAX_CONTEXT_RELATED_RESULTS
 
 runner = CliRunner()
 
@@ -204,6 +205,45 @@ async def test_build_context_nonpositive_page_size_drops_primary(mcp_server, app
                     "output_format": "json",
                 },
             )
+        with pytest.raises(ToolError, match="max_related"):
+            await client.call_tool(
+                "build_context",
+                {
+                    "project": test_project.name,
+                    "url": "ctx/primary-note",
+                    "max_related": -1,
+                    "output_format": "json",
+                },
+            )
+
+        # The tool is a bounded starting point for traversal, not a bulk vault export.
+        for parameter, value in (
+            ("page_size", MAX_CONTEXT_PAGE_SIZE + 1),
+            ("max_related", MAX_CONTEXT_RELATED_RESULTS + 1),
+        ):
+            with pytest.raises(ToolError, match="bounded traversal starting point"):
+                await client.call_tool(
+                    "build_context",
+                    {
+                        "project": test_project.name,
+                        "url": "ctx/primary-note",
+                        parameter: value,
+                        "output_format": "json",
+                    },
+                )
+
+        # Values at the ceiling remain valid and return the requested primary note.
+        at_limits = await client.call_tool(
+            "build_context",
+            {
+                "project": test_project.name,
+                "url": "ctx/primary-note",
+                "page_size": MAX_CONTEXT_PAGE_SIZE,
+                "max_related": MAX_CONTEXT_RELATED_RESULTS,
+                "output_format": "json",
+            },
+        )
+        assert _parse(at_limits)["metadata"]["primary_count"] == 1
 
 
 # --- Bug #13: recent_activity header shows project name, not raw UUID ---
