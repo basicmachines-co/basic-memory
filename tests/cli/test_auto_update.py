@@ -146,11 +146,19 @@ def test_force_bypasses_auto_update_disabled(monkeypatch, tmp_path):
 
 
 def test_check_homebrew_update_available_exit_code_1_means_outdated(monkeypatch):
-    """brew outdated exits 1 when the formula is outdated, not on error."""
+    """brew outdated exits 1 when the formula is outdated, not on error.
+
+    Exit 1 is shared with the failure case, so stdout is the discriminator: the
+    tap-qualified formula name means outdated. brew also writes progress chatter
+    to stderr on this path, so a non-empty stderr must not be read as an error.
+    """
 
     def _fake_run(command, **kwargs):
         return subprocess.CompletedProcess(
-            command, 1, stdout="basicmachines-co/basic-memory/basic-memory\n", stderr=""
+            command,
+            1,
+            stdout="basicmachines-co/basic-memory/basic-memory\n",
+            stderr="==> Downloading Homebrew API data",
         )
 
     monkeypatch.setattr("basic_memory.cli.auto_update._run_subprocess", _fake_run)
