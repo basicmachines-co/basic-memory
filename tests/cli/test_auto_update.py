@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import urllib.error
@@ -30,6 +31,21 @@ UNTRUSTED_TAP_STDERR = (
     "Error: Refusing to load formula basicmachines-co/basic-memory/basic-memory "
     "from untrusted tap basicmachines-co/basic-memory."
 )
+
+
+def _brew_outdated_payload(current_version: str | None = None) -> str:
+    formulae = []
+    if current_version is not None:
+        formulae.append(
+            {
+                "name": "basicmachines-co/basic-memory/basic-memory",
+                "installed_versions": ["0.22.1"],
+                "current_version": current_version,
+                "pinned": False,
+                "pinned_version": None,
+            }
+        )
+    return json.dumps({"formulae": formulae, "casks": []})
 
 
 class StubConfigManager:
@@ -148,33 +164,71 @@ def test_force_bypasses_auto_update_disabled(monkeypatch, tmp_path):
 def test_check_homebrew_update_available_exit_code_1_means_outdated(monkeypatch):
     """brew outdated exits 1 when the formula is outdated, not on error.
 
-    Exit 1 is shared with the failure case, so stdout is the discriminator: the
-    tap-qualified formula name means outdated. brew also writes progress chatter
-    to stderr on this path, so a non-empty stderr must not be read as an error.
+    Exit 1 is shared with the failure case, so the JSON formula entry is the
+    discriminator. brew may also write progress chatter to stderr on this path,
+    so a non-empty stderr must not be read as an error.
     """
 
     def _fake_run(command, **kwargs):
+        assert command == ["brew", "outdated", "--json=v2", "basic-memory"]
         return subprocess.CompletedProcess(
             command,
             1,
-            stdout="basicmachines-co/basic-memory/basic-memory\n",
+            stdout=_brew_outdated_payload("0.23.0"),
             stderr="==> Downloading Homebrew API data",
         )
 
     monkeypatch.setattr("basic_memory.cli.auto_update._run_subprocess", _fake_run)
-    is_outdated, _ = _check_homebrew_update_available(silent=False)
+    is_outdated, latest_version = _check_homebrew_update_available(silent=False)
     assert is_outdated is True
+    assert latest_version == "0.23.0"
 
 
 def test_check_homebrew_update_available_exit_code_0_means_up_to_date(monkeypatch):
     """brew outdated exits 0 when the formula is up to date."""
 
     def _fake_run(command, **kwargs):
-        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=_brew_outdated_payload(),
+            stderr="",
+        )
 
     monkeypatch.setattr("basic_memory.cli.auto_update._run_subprocess", _fake_run)
     is_outdated, _ = _check_homebrew_update_available(silent=False)
     assert is_outdated is False
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ({}, "omitted the formulae list"),
+        ({"formulae": [None]}, "malformed formula"),
+        (
+            {"formulae": [{"name": "basicmachines-co/basic-memory/basic-memory"}]},
+            "omitted the formula current_version",
+        ),
+        (
+            {"formulae": [{"name": "another-formula", "current_version": "1.0.0"}]},
+            "exited 1",
+        ),
+    ],
+)
+def test_check_homebrew_update_available_rejects_malformed_json(
+    monkeypatch,
+    payload,
+    message,
+):
+    """A syntactically valid but incomplete response is still not an answer."""
+
+    def _fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(command, 1, stdout=json.dumps(payload), stderr="")
+
+    monkeypatch.setattr("basic_memory.cli.auto_update._run_subprocess", _fake_run)
+
+    with pytest.raises(HomebrewCheckError, match=message):
+        _check_homebrew_update_available(silent=False)
 
 
 def test_check_homebrew_update_available_failed_check_is_not_up_to_date(monkeypatch):
@@ -339,7 +393,7 @@ def test_homebrew_outdated_triggers_upgrade(monkeypatch, tmp_path):
 
     monkeypatch.setattr(
         "basic_memory.cli.auto_update._check_homebrew_update_available",
-        lambda silent: (True, None),
+        lambda silent: (True, "0.23.0"),
     )
     calls: list[list[str]] = []
 
@@ -355,7 +409,29 @@ def test_homebrew_outdated_triggers_upgrade(monkeypatch, tmp_path):
     )
 
     assert result.status == AutoUpdateStatus.UPDATED
+    assert result.latest_version == "0.23.0"
     assert calls == [["brew", "upgrade", "basic-memory"]]
+
+
+def test_homebrew_outdated_check_only_reports_latest_version(monkeypatch, tmp_path):
+    config = _base_config(tmp_path)
+    manager = StubConfigManager(config)
+
+    monkeypatch.setattr(
+        "basic_memory.cli.auto_update._check_homebrew_update_available",
+        lambda silent: (True, "0.23.0"),
+    )
+
+    result = run_auto_update(
+        check_only=True,
+        config_manager=_config_manager(manager),
+        executable="/opt/homebrew/Cellar/basic-memory/0.22.1/bin/python",
+    )
+
+    assert result.status == AutoUpdateStatus.UPDATE_AVAILABLE
+    assert result.latest_version == "0.23.0"
+    assert "latest: 0.23.0" in (result.message or "")
+    assert "unknown" not in (result.message or "")
 
 
 def test_uv_tool_pypi_check_triggers_upgrade(monkeypatch, tmp_path):

@@ -139,7 +139,7 @@ def _check_homebrew_update_available(silent: bool) -> tuple[bool, str | None]:
     """
     try:
         result = _run_subprocess(
-            ["brew", "outdated", "--quiet", PACKAGE_NAME],
+            ["brew", "outdated", "--json=v2", PACKAGE_NAME],
             timeout_seconds=BREW_OUTDATED_TIMEOUT_SECONDS,
             silent=silent,
             capture_output=True,
@@ -147,19 +147,39 @@ def _check_homebrew_update_available(silent: bool) -> tuple[bool, str | None]:
     except (OSError, subprocess.SubprocessError) as exc:
         raise HomebrewCheckError(f"could not run `brew outdated`: {exc}") from exc
 
-    # Trigger: brew outdated exits 1 both when the formula IS outdated (name on
-    # stdout) and when the check failed outright (empty stdout, reason on stderr).
-    # Why: reading a failed check as "not outdated" reports a stale install as up
-    # to date, which silently pins the user to an old version.
-    # Outcome: trust an empty stdout only when brew exited cleanly; otherwise the
-    # check is unanswered and the caller must find the answer elsewhere.
     stdout = (result.stdout or "").strip()
-    if PACKAGE_NAME in stdout:
-        return True, None
-    if result.returncode == 0:
-        return False, None
-
     stderr = (result.stderr or "").strip()
+    try:
+        payload = json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        raise HomebrewCheckError(
+            stderr or f"`brew outdated --json=v2` returned invalid JSON: {exc}"
+        ) from exc
+
+    formulae = payload.get("formulae") if isinstance(payload, dict) else None
+    if not isinstance(formulae, list):
+        raise HomebrewCheckError("`brew outdated --json=v2` omitted the formulae list")
+
+    # Trigger: brew outdated exits 1 both when the formula IS outdated (a JSON
+    # entry is present) and when the check failed outright (non-JSON error text).
+    # Why: JSON supplies Homebrew's actual target version without consulting a
+    # potentially-ahead package registry, while the exit code alone is ambiguous.
+    # Outcome: a matching formula is outdated, an empty successful list is current,
+    # and every other response remains unanswered for the caller's fallback path.
+    for formula in formulae:
+        if not isinstance(formula, dict):
+            raise HomebrewCheckError("`brew outdated --json=v2` returned a malformed formula")
+        name = formula.get("name")
+        if isinstance(name, str) and name.rsplit("/", maxsplit=1)[-1] == PACKAGE_NAME:
+            latest = formula.get("current_version")
+            if not isinstance(latest, str) or not latest:
+                raise HomebrewCheckError(
+                    "`brew outdated --json=v2` omitted the formula current_version"
+                )
+            return True, latest
+
+    if result.returncode == 0 and not formulae:
+        return False, None
     raise HomebrewCheckError(stderr or f"`brew outdated` exited {result.returncode}")
 
 
