@@ -154,17 +154,19 @@ List the models available in the same Python environment as Basic Memory. For a 
 installation on macOS or Linux:
 
 ```bash
-"$(uv tool dir)/basic-memory/bin/python" -c "from fastembed import TextEmbedding; print(*(m['model'] for m in TextEmbedding.list_supported_models()), sep='\n')"
+"$(uv tool dir)/basic-memory/bin/python" -c \
+  'from fastembed import TextEmbedding; print(*(m["model"] + "\t" + str(m["dim"]) for m in TextEmbedding.list_supported_models()), sep="\n")'
 ```
 
 On Windows PowerShell, use the tool environment's `Scripts` directory:
 
 ```powershell
-& "$(uv tool dir)\basic-memory\Scripts\python.exe" -c "from fastembed import TextEmbedding; print(*(m['model'] for m in TextEmbedding.list_supported_models()), sep='\n')"
+& "$(uv tool dir)\basic-memory\Scripts\python.exe" -c 'from fastembed import TextEmbedding; print(*(m["model"] + "\t" + str(m["dim"]) for m in TextEmbedding.list_supported_models()), sep="\n")'
 ```
 
 For a virtual-environment or system `pip` installation, run the original installation's
-`python` executable with the same `-c` argument.
+`python` executable with the same `-c` command. Each line shows the model identifier followed by
+its output dimensions.
 
 Then configure the model and its output dimensions. For example, the FastEmbed version bundled
 with Basic Memory supports the larger mixed Chinese-English Jina model:
