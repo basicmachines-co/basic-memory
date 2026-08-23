@@ -1,6 +1,30 @@
 {
   "version": 1,
   "skills": {
+    "cmux": {
+      "source": "manaflow-ai/cmux",
+      "sourceType": "github",
+      "skillPath": "skills/cmux/SKILL.md",
+      "computedHash": "75b2d4a46f84a04b23fac4fdcaafeb2b11310d44b9bcc0e9aa44a7ef5413a45e"
+    },
+    "cmux-markdown": {
+      "source": "manaflow-ai/cmux",
+      "sourceType": "github",
+      "skillPath": "skills/cmux-markdown/SKILL.md",
+      "computedHash": "0870025e9cc20f3a7bde8eeebfafc7a2c5e273168b5252df961acac942c26e28"
+    },
+    "cmux-settings": {
+      "source": "manaflow-ai/cmux",
+      "sourceType": "github",
+      "skillPath": "skills/cmux-settings/SKILL.md",
+      "computedHash": "26b221f4b15e2ae085e9b4e78f3b83170b1c7cabbf88f86d875f1a64a76be2e3"
+    },
+    "cmux-workspace": {
+      "source": "manaflow-ai/cmux",
+      "sourceType": "github",
+      "skillPath": "skills/cmux-workspace/SKILL.md",
+      "computedHash": "dd9c0a13ad338511e1e74266146657e32fbeeed29956f1fbe8947cb6494c5296"
+    },
     "instrumentation": {
       "source": "pydantic/skills",
       "sourceType": "github",
