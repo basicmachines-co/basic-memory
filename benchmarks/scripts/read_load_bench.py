@@ -382,7 +382,7 @@ def write_manifest(
 
 
 def result_payload(result: CallToolResult) -> dict[str, object]:
-    structured = result.structuredContent
+    structured = result.structured_content
     if isinstance(structured, dict):
         wrapped = structured.get("result")
         payload = wrapped if isinstance(wrapped, dict) else structured
@@ -402,7 +402,7 @@ def result_payload(result: CallToolResult) -> dict[str, object]:
 
 def result_text(result: CallToolResult) -> str | None:
     """Return text from a successful text-mode tool response."""
-    if result.isError:
+    if result.is_error:
         return None
     text_parts = [
         text for item in result.content if isinstance((text := getattr(item, "text", None)), str)
@@ -517,7 +517,7 @@ async def write_target(
             "output_format": "json",
         },
     )
-    if result.isError:
+    if result.is_error:
         raise RuntimeError(f"write_note failed while seeding {title}")
     payload = result_payload(result)
     identifier = payload.get("permalink")
@@ -573,7 +573,7 @@ async def searchable_count(session: ClientSession, project: str) -> int:
             "output_format": "json",
         },
     )
-    if result.isError:
+    if result.is_error:
         return 0
     payload = result_payload(result)
     total = payload.get("total")
@@ -742,7 +742,7 @@ async def run(args: argparse.Namespace) -> int:
                 "create_memory_project",
                 {"project_name": project, "project_path": str(project_dir)},
             )
-            if created.isError:
+            if created.is_error:
                 raise RuntimeError("could not create benchmark project")
 
             targets = await seed_corpus(
