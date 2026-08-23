@@ -22,7 +22,6 @@ from basic_memory_benchmarks.models import (
 from basic_memory_benchmarks.providers import create_provider
 from basic_memory_benchmarks.providers.base import BenchmarkProvider
 from basic_memory_benchmarks.reporting.artifacts import write_artifacts
-from basic_memory_benchmarks.scoring.judge import run_optional_judge
 from basic_memory_benchmarks.scoring.retrieval import evaluate_query, summarize_provider
 from basic_memory_benchmarks.utils import (
     git_sha,
@@ -483,53 +482,6 @@ def run_rejudge_stage(
     (run_dir / "qa-rejudge-flips.json").write_text(
         json.dumps(
             {"judge": judge_spec, "flip_count": len(all_flips), "flips": all_flips}, indent=2
-        ),
-        encoding="utf-8",
-    )
-    return run_dir
-
-
-def run_judge(
-    *,
-    run_dir: Path,
-    model: str,
-) -> Path:
-    retrieval_path = run_dir / "per-query-retrieval.jsonl"
-    if not retrieval_path.exists():
-        raise FileNotFoundError(f"Missing retrieval artifact: {retrieval_path}")
-
-    rows: list[PerQueryRetrievalResult] = []
-    with retrieval_path.open("r", encoding="utf-8") as file:
-        for line in file:
-            line = line.strip()
-            if not line:
-                continue
-            rows.append(PerQueryRetrievalResult.model_validate(json.loads(line)))
-
-    grouped: dict[str, list[PerQueryRetrievalResult]] = {}
-    for row in rows:
-        grouped.setdefault(row.provider, []).append(row)
-
-    judge_rows = []
-    judge_summaries = []
-    for provider, provider_rows in grouped.items():
-        provider_case_results, provider_summary = run_optional_judge(
-            provider_rows,
-            provider=provider,
-            model=model,
-        )
-        judge_rows.extend(provider_case_results)
-        judge_summaries.append(provider_summary)
-
-    judge_jsonl = run_dir / "per-query-judge.jsonl"
-    with judge_jsonl.open("w", encoding="utf-8") as file:
-        for row in judge_rows:
-            file.write(json.dumps(row.model_dump(mode="json"), sort_keys=True) + "\n")
-
-    judge_summary_path = run_dir / "judge-summary.json"
-    judge_summary_path.write_text(
-        json.dumps(
-            {"providers": [item.model_dump(mode="json") for item in judge_summaries]}, indent=2
         ),
         encoding="utf-8",
     )

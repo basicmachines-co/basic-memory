@@ -30,7 +30,6 @@ from basic_memory_benchmarks.reporting.compare import (
 )
 from basic_memory_benchmarks.runner import (
     run_diagnose_stage,
-    run_judge,
     run_qa_stage,
     run_rejudge_stage,
     run_review_stage,
@@ -430,15 +429,6 @@ def run_rejudge_command(
     console.print(f"Flips: [cyan]{out / 'qa-rejudge-flips.json'}[/cyan]")
 
 
-@run_app.command("judge")
-def run_judge_command(
-    run_dir: Path = typer.Option(..., "--run-dir"),
-    model: str = typer.Option("gpt-4o-mini", "--model"),
-) -> None:
-    out = run_judge(run_dir=run_dir, model=model)
-    console.print(f"Judge run complete: [green]{out}[/green]")
-
-
 @run_app.command("full")
 def run_full_command(
     providers: str = typer.Option("bm-local,mem0-local", "--providers"),
@@ -456,8 +446,6 @@ def run_full_command(
     bm_source: str = typer.Option("github:basicmachines-co/basic-memory@main", "--bm-source"),
     bm_local_path: str | None = typer.Option(None, "--bm-local-path"),
     allow_provider_skip: bool = typer.Option(True, "--allow-provider-skip/--strict-providers"),
-    judge: bool = typer.Option(False, "--judge"),
-    judge_model: str = typer.Option("gpt-4o-mini", "--judge-model"),
 ) -> None:
     run_retrieval_command(
         providers=providers,
@@ -472,18 +460,6 @@ def run_full_command(
         bm_local_path=bm_local_path,
         allow_provider_skip=allow_provider_skip,
     )
-
-    if judge:
-        resolved_run_id = run_id
-        if resolved_run_id is None:
-            # run_retrieval_command generated uuid when run_id is None. infer by latest dir.
-            run_dirs = sorted(Path(output_root).glob("*"), key=lambda path: path.stat().st_mtime)
-            if not run_dirs:
-                raise RuntimeError("Unable to locate run directory for judge step")
-            run_dir = run_dirs[-1]
-        else:
-            run_dir = Path(output_root) / resolved_run_id
-        run_judge_command(run_dir=run_dir, model=judge_model)
 
 
 @app.command("compare")

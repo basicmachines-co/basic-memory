@@ -18,11 +18,6 @@ dependencies = [
     "typer>=0.16.1",
 ]
 
-[project.optional-dependencies]
-judge = [
-    "pydantic-evals>=0.4.0",
-]
-
 [project.scripts]
 bm-bench = "basic_memory_benchmarks.cli:main"
 basic-memory-benchmarks = "basic_memory_benchmarks.cli:main"
