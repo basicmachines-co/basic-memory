@@ -166,6 +166,17 @@ Explicit relations:
 - 'in response to' [[Incident Review]]
 ```
 
+When the text before `[[` is ordinary prose rather than a relation type, add
+`#bm:links_to` to force the reference to use the implicit `links_to` relation:
+
+```markdown
+- Mother [[Alice]] #bm:links_to
+```
+
+The directive is parser metadata and is not included in the observation or
+relation context. It is especially useful when a single-token prose prefix
+would otherwise be interpreted as an explicit relation type.
+
 Bare wiki links and prose list items create implicit `links_to` relations:
 
 ```markdown
