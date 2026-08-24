@@ -16,6 +16,7 @@ Runner specs are strings so they can flow through CLI flags and run manifests:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import time
 from abc import ABC, abstractmethod
@@ -187,7 +188,8 @@ def create_runner(spec: str, *, api_key: str | None = None) -> LLMRunner:
             raise ValueError(
                 f"openai-compat spec must be 'openai-compat:<model>@<base_url>', got: {spec}"
             )
-        return OpenAICompatRunner(model=model, base_url=base_url, api_key=api_key)
+        resolved_api_key = api_key if api_key is not None else os.getenv("OPENAI_API_KEY")
+        return OpenAICompatRunner(model=model, base_url=base_url, api_key=resolved_api_key)
     raise ValueError(
         f"Unknown runner spec '{spec}'. Expected 'claude:<model>' or "
         f"'openai-compat:<model>@<base_url>'."

@@ -6,8 +6,6 @@ import json
 from pathlib import Path
 
 from basic_memory_benchmarks.models import (
-    JudgeCaseResult,
-    JudgeSummary,
     PerQueryRetrievalResult,
     ProviderStatus,
     RetrievalSummary,
@@ -35,8 +33,6 @@ def write_artifacts(
     retrieval_rows: list[PerQueryRetrievalResult],
     retrieval_summaries: list[RetrievalSummary],
     fairness_warnings: list[str],
-    judge_rows: list[JudgeCaseResult] | None = None,
-    judge_summaries: list[JudgeSummary] | None = None,
 ) -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     _write_json(run_dir / "manifest.json", manifest.model_dump(mode="json"))
@@ -56,25 +52,11 @@ def write_artifacts(
         },
     )
 
-    if judge_rows is not None:
-        _write_jsonl(
-            run_dir / "per-query-judge.jsonl",
-            [row.model_dump(mode="json") for row in judge_rows],
-        )
-    if judge_summaries is not None:
-        _write_json(
-            run_dir / "judge-summary.json",
-            {
-                "providers": [row.model_dump(mode="json") for row in judge_summaries],
-            },
-        )
-
     summary_markdown = build_summary_markdown(
         manifest=manifest,
         provider_status=provider_status,
         retrieval_summaries=retrieval_summaries,
         fairness_warnings=fairness_warnings,
-        judge_summaries=judge_summaries or [],
     )
     (run_dir / "summary.md").write_text(summary_markdown, encoding="utf-8")
 
@@ -85,7 +67,6 @@ def build_summary_markdown(
     provider_status: list[ProviderStatus],
     retrieval_summaries: list[RetrievalSummary],
     fairness_warnings: list[str],
-    judge_summaries: list[JudgeSummary],
 ) -> str:
     lines: list[str] = []
     lines.append(f"# Benchmark Run `{manifest.run_id}`")
@@ -145,19 +126,6 @@ def build_summary_markdown(
             f"| {summary.provider} | {metric.recall_at_5:.3f} | {metric.recall_at_10:.3f} | {metric.mrr:.3f} |"
         )
     lines.append("")
-
-    if judge_summaries:
-        lines.append("## Judge Summary")
-        lines.append("")
-        lines.append("| Provider | Evaluator | Model | Cases | Accuracy | Note |")
-        lines.append("| --- | --- | --- | --- | --- | --- |")
-        for summary in judge_summaries:
-            lines.append(
-                "| "
-                f"{summary.provider} | {summary.evaluator} | {summary.model} | "
-                f"{summary.total_cases} | {summary.accuracy:.3f} | {summary.skipped_reason or ''} |"
-            )
-        lines.append("")
 
     if fairness_warnings:
         lines.append("## Fairness Warnings")
