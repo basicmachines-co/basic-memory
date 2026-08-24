@@ -229,6 +229,11 @@ search entries.
 - **#1073**: `edit_note` with a `memory://` URL routes to the target
   project instead of creating phantom notes (**#1066**), and scoped
   `memory://` URL paths are preserved (**#1092**).
+- **#1299**: `build_context` bounds its traversal requests — primary pages
+  cap at 50 results, related context at 100 per page, and negative
+  `max_related` is rejected instead of acting as an unbounded SQL limit —
+  so a traversal call can no longer become a multi-megabyte vault export
+  (**#1296**). Callers paginate or follow returned `memory://` links.
 - **#1285**: Glob-filtered directory listings traverse subdirectories
   again: `file_name_glob` filters results instead of accidentally pruning
   recursion, so `*.md` with depth 2 finds files inside subdirectories.
@@ -261,6 +266,15 @@ search entries.
   `create_time` — timestamps fall back to `update_time`, then the earliest
   message time, so the whole archive imports (**#1276**); undecodable
   import uploads return a 400 with the parse error instead of a 500.
+- **#1298**: The update check no longer reports "up to date" when the
+  Homebrew probe fails, no longer auto-runs `brew upgrade` for an update
+  inferred from PyPI metadata, and names the actual Homebrew target
+  version it will install.
+- **#1300 / #1302**: The multilingual-E5 prefix contract is documented —
+  asymmetric FastEmbed models need `semantic_embedding_query_prefix` /
+  `semantic_embedding_document_prefix`, which already drive reindex through
+  the embedding identity — along with custom-model selection, the installed
+  FastEmbed catalog, and dimensions (**#1264**).
 - **#1058 / #1094**: `bm doctor` never prints a blank failure message, and
   migrations adapt to existing event loops (**#1027**).
 - **#1080**: Loading config no longer recreates an empty `~/basic-memory`
@@ -279,7 +293,9 @@ search entries.
   registration APIs instead of private PluginManager writes, preserving the
   lifecycle ownership that cleans them up on provider unload (**#1257**);
   the slash-command monkeypatch docs are split by Hermes version so modern
-  installs skip the legacy collector workaround (**#1278**).
+  installs skip the legacy collector workaround (**#1278**), and the install
+  docs require a Hermes release with managed manifest-v2 installation
+  instead of the nonexistent `--path` option (**#1280**, **#1303**).
 
 ### Maintenance
 
@@ -292,6 +308,12 @@ search entries.
 - Kept Milvus as a first-party optional vector backend while removing the
   unused Python entry-point registry for separately packaged vector
   adapters.
+- **#1292 / #1293**: The dev-release pipeline publishes again via PyPI
+  trusted publishing — its version gate imported a hardcoded module version
+  and had silently skipped every dev publish since the 0.22.1 bump.
+- **#1304 / #1307**: The concurrent-write convergence benchmark is ported
+  into the canonical `/benchmarks` package, and the read-load benchmark
+  runs against the current MCP SDK's typed result fields.
 
 ## v0.22.1 (2026-06-12)
 
