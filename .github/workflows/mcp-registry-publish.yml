@@ -1,0 +1,36 @@
+name: MCP Registry Publish
+
+# Publishes server.json to the official MCP Registry. GitHub Actions OIDC
+# authenticates this workflow as the repository owner, which grants the
+# io.github.basicmachines-co/* namespace directly — no personal login or
+# public-org-membership derivation involved (the manual `mcp-publisher login
+# github` path proved flaky there; see the v0.23.0 release notes on #1288).
+#
+# Run manually after a release, once the version is live on PyPI.
+
+on:
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/').tar.gz" \
+            | tar xz mcp-publisher
+          sudo mv mcp-publisher /usr/local/bin/
+
+      - name: Publish server.json
+        run: |
+          mcp-publisher login github-oidc
+          mcp-publisher publish
