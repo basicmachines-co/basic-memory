@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## v0.23.0 (2026-08-XX)
+## v0.23.0 (2026-08-23)
 
 Semantic search grows up and concurrent writes stop deadlocking. Search gains
 opt-in cross-encoder reranking, pluggable vector indexes with a first-party
