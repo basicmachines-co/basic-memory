@@ -137,6 +137,20 @@ def validate_claude_plugin(plugin_dir: Path) -> None:
     for event in REQUIRED_HOOK_EVENTS:
         if event not in hooks:
             raise SystemExit(f"hooks/hooks.json: missing {event} hook")
+    # Trigger: the shims pin core's exact fastmcp beta so older uv can resolve
+    #   basic-memory (pre-release transitives are refused there) without
+    #   enabling pre-releases for basic-memory itself.
+    # Why: nothing else keeps the shim pin and core's pyproject in lockstep,
+    #   and drift makes shim resolution conflict — which the fail-open contract
+    #   turns into a silent hook no-op.
+    # Outcome: validation fails loudly when core moves its fastmcp pin without
+    #   the shims following.
+    core_pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    core_match = re.search(r'^\s*"fastmcp==([^"]+)",$', core_pyproject, re.MULTILINE)
+    if not core_match:
+        raise SystemExit("pyproject.toml: no exact fastmcp pin found")
+    core_fastmcp_pin = core_match.group(1)
+
     for rel in REQUIRED_HOOK_SCRIPTS:
         script = plugin_dir / rel
         if not script.exists():
@@ -148,6 +162,14 @@ def validate_claude_plugin(plugin_dir: Path) -> None:
             r'^#     "basic-memory>=[^"]+",$', text, re.MULTILINE
         ):
             raise SystemExit(f"Hook script missing PEP 723 basic-memory floor: {script}")
+        shim_pins = re.findall(r'^#     "fastmcp==([^"]+)",$', text, re.MULTILINE)
+        if len(shim_pins) != 1:
+            raise SystemExit(f"Hook script missing exact fastmcp pin: {script}")
+        if shim_pins[0] != core_fastmcp_pin:
+            raise SystemExit(
+                f"{script}: fastmcp pin {shim_pins[0]} does not match "
+                f"core pyproject pin {core_fastmcp_pin}"
+            )
 
     # --- Output style ---
     output_style = plugin_dir / "output-styles/basic-memory.md"
