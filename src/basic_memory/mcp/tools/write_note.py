@@ -109,12 +109,15 @@ async def write_note(
         - Explicit: `- relation_type [[Entity]] (optional context)`
         - Quoted: `- "multi word relation type" [[Entity]] (optional context)`
         - Quoted: `- 'multi word relation type' [[Entity]] (optional context)`
+        - Disambiguation: Add `#bm:links_to` when prose before `[[Entity]]`
+          must not be treated as a single-token relation type
         - Inline: Any other `[[Entity]]` reference creates a `links_to` relation
 
         Examples:
         `- depends_on [[Content Parser]] (Need for semantic extraction)`
         `- "based on" [[Design Notes]]`
         `- 'in response to' [[Incident Review]]`
+        `- Mother [[Alice]] #bm:links_to`
         `- implements [[Search Spec]] (Initial implementation)`
         `- This feature extends [[Base Design]] and uses [[Core Utils]]`
 

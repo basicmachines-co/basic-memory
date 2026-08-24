@@ -261,9 +261,7 @@ def test_links_to_directive_forces_implicit_relations():
 
     tokens = md.parse("- Mother [[Alice]] #bm:links_to")
     token = next(t for t in tokens if t.type == "inline")
-    assert token.meta["relations"] == [
-        {"type": "links_to", "target": "Alice", "context": None}
-    ]
+    assert token.meta["relations"] == [{"type": "links_to", "target": "Alice", "context": None}]
 
     tokens = md.parse("- Mentions [[Alice]] and [[Bob]] #bm:links_to")
     token = next(t for t in tokens if t.type == "inline")
