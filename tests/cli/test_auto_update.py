@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import urllib.error
@@ -21,6 +22,7 @@ from basic_memory.cli.auto_update import (
     _check_homebrew_update_available,
     _is_interactive_session,
     _preload_lazy_console_modules,
+    print_update_status,
     detect_install_source,
     maybe_run_periodic_auto_update,
     run_auto_update,
@@ -385,6 +387,72 @@ def test_preload_lazy_console_modules_imports_deferred_modules(monkeypatch):
 
     assert "rich._emoji_codes" in sys.modules
     assert "typer.rich_utils" in sys.modules
+
+
+class _UpgradedAwayFinder:
+    """Stand-in for the deleted install prefix: nothing new can be imported."""
+
+    def find_spec(self, fullname, path=None, target=None):  # noqa: D102
+        raise ModuleNotFoundError(f"No module named {fullname!r}")
+
+
+def _cool_deferred_width_table(monkeypatch) -> None:
+    """Return rich to the cold state a freshly started process is in.
+
+    rich caches the Unicode cell-width table aggressively, and earlier tests in
+    this session will already have warmed it -- without this the regression test
+    below passes whether or not the table was preloaded.
+    """
+    import rich.cells
+
+    for cached in ("cached_cell_len", "get_character_cell_size"):
+        clear = getattr(getattr(rich.cells, cached, None), "cache_clear", None)
+        if clear is not None:
+            clear()
+
+    # rich >= 14.2 splits the tables into rich._unicode_data.unicode<version>;
+    # older versions inline them and have nothing to unload.
+    unicode_data = sys.modules.get("rich._unicode_data")
+    clear_load = getattr(getattr(unicode_data, "load", None), "cache_clear", None)
+    if clear_load is not None:
+        clear_load()
+    for name in [n for n in sys.modules if n.startswith("rich._unicode_data.unicode")]:
+        monkeypatch.delitem(sys.modules, name, raising=False)
+
+
+def test_status_message_survives_upgraded_away_install(monkeypatch):
+    # Regression (#1316): `brew upgrade` removes the running install's files, so
+    # the status message printed afterwards must not need any new import. The
+    # message is long and non-ASCII on purpose -- that is what makes rich wrap
+    # the line and reach for the deferred cell-width table.
+    output = StringIO()
+    console = Console(width=40, file=output)
+    console.print("warm up the print path")
+    _cool_deferred_width_table(monkeypatch)
+
+    _preload_lazy_console_modules()
+    monkeypatch.setattr(sys, "meta_path", [_UpgradedAwayFinder(), *sys.meta_path])
+
+    # Deliberately not print_update_status: its fallback would mask the bug.
+    console.print(
+        "[red]Automatic update failed. Error: could not link \u2018basic-memory\u2019 "
+        "\u2014 the files were replaced while running. " + "detail " * 12 + "[/red]"
+    )
+
+    # rich wrapped and styled the line; normalize before checking the content.
+    rendered = re.sub(r"\x1b\[[0-9;]*m", "", output.getvalue())
+    assert "could not link" in " ".join(rendered.split())
+
+
+def test_print_update_status_falls_back_to_plain_output(capsys):
+    # A status line must never be what fails a command whose upgrade succeeded.
+    class ExplodingConsole:
+        def print(self, *args, **kwargs):
+            raise ModuleNotFoundError("No module named 'rich._unicode_data.unicode17-0-0'")
+
+    print_update_status(cast(Console, ExplodingConsole()), "Basic Memory was updated.", "green")
+
+    assert "Basic Memory was updated." in capsys.readouterr().out
 
 
 def test_homebrew_outdated_triggers_upgrade(monkeypatch, tmp_path):

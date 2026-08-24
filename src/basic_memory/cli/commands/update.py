@@ -4,7 +4,7 @@ import typer
 from rich.console import Console
 
 from basic_memory.cli.app import app
-from basic_memory.cli.auto_update import AutoUpdateStatus, run_auto_update
+from basic_memory.cli.auto_update import AutoUpdateStatus, print_update_status, run_auto_update
 
 console = Console()
 
@@ -22,19 +22,21 @@ def update(
 
     if result.status == AutoUpdateStatus.FAILED:
         detail = f" {result.error}" if result.error else ""
-        console.print(f"[red]{result.message or 'Update failed.'}{detail}[/red]")
+        print_update_status(console, f"{result.message or 'Update failed.'}{detail}", "red")
         raise typer.Exit(1)
 
     if result.status == AutoUpdateStatus.UPDATED:
-        console.print(f"[green]{result.message or 'Basic Memory updated successfully.'}[/green]")
+        print_update_status(
+            console, f"{result.message or 'Basic Memory updated successfully.'}", "green"
+        )
         return
 
     if result.status == AutoUpdateStatus.UP_TO_DATE:
-        console.print(f"[green]{result.message or 'Basic Memory is up to date.'}[/green]")
+        print_update_status(console, f"{result.message or 'Basic Memory is up to date.'}", "green")
         return
 
     if result.status == AutoUpdateStatus.UPDATE_AVAILABLE:
-        console.print(f"[cyan]{result.message or 'Update available.'}[/cyan]")
+        print_update_status(console, f"{result.message or 'Update available.'}", "cyan")
         return
 
-    console.print(f"[dim]{result.message or 'No update action was performed.'}[/dim]")
+    print_update_status(console, f"{result.message or 'No update action was performed.'}", "dim")
