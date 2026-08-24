@@ -56,7 +56,7 @@ from basic_memory.cli.commands.cloud.webdav import (
     upload_file,
 )
 from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
-from basic_memory.mcp.async_client import get_cloud_proxy_client
+from basic_memory.mcp.async_client import get_cloud_control_plane_client
 
 console = Console()
 
@@ -123,7 +123,13 @@ async def webdav_project_diff(
     Raises:
         WebdavError: If the project cannot be listed.
     """
-    cm_factory = client_cm_factory or partial(get_cloud_proxy_client, workspace=workspace_id)
+    # The tenant WebDAV surface is mounted at the cloud app root (/webdav),
+    # not behind /proxy: the proxy catch-alls forward to the per-tenant core
+    # instance, which serves no WebDAV routes, so the proxy client 404s on
+    # every listing (cloud#1816).
+    cm_factory = client_cm_factory or partial(
+        get_cloud_control_plane_client, workspace=workspace_id
+    )
     async with cm_factory() as client:
         remote_files = await list_project_files(client, project)
 
@@ -188,7 +194,11 @@ async def webdav_project_transfer(
             console.print(f"  [dim]{transfer.describe()}[/dim]")
         return
 
-    cm_factory = client_cm_factory or partial(get_cloud_proxy_client, workspace=workspace_id)
+    # Root-mounted /webdav needs the control-plane base — see the note in
+    # webdav_project_diff (cloud#1816).
+    cm_factory = client_cm_factory or partial(
+        get_cloud_control_plane_client, workspace=workspace_id
+    )
     async with cm_factory() as client:
         if direction == "push":
             transfers, appeared = await _drop_appeared_on_cloud(client, project, transfers)
