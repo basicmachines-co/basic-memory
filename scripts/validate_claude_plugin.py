@@ -145,7 +145,7 @@ def validate_claude_plugin(plugin_dir: Path) -> None:
             raise SystemExit(f"Hook script is not executable: {script}")
         text = script.read_text(encoding="utf-8")
         if "# /// script" not in text or not re.search(
-            r'^# dependencies = \["basic-memory>=[^"]+"\]$', text, re.MULTILINE
+            r'^#     "basic-memory>=[^"]+",$', text, re.MULTILINE
         ):
             raise SystemExit(f"Hook script missing PEP 723 basic-memory floor: {script}")
 

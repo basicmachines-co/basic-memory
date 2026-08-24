@@ -119,7 +119,7 @@ def test_dependency_floor_matches_package_version() -> None:
     # scripts/update_versions.py bumps this line at release; drift between the
     # script floor and the package version fails here, before a release lands.
     text = SCRIPT.read_text(encoding="utf-8")
-    floors = re.findall(r'^# dependencies = \["basic-memory>=([^"]+)"\]$', text, re.MULTILINE)
+    floors = re.findall(r'^#     "basic-memory>=([^"]+)",$', text, re.MULTILINE)
 
     assert floors == [__version__]
 
