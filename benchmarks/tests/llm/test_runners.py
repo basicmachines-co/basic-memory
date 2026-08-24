@@ -28,6 +28,14 @@ class TestCreateRunner:
         assert runner.model == "llama3.1"
         assert runner.base_url == "http://localhost:11434/v1"
 
+    def test_openai_compat_uses_openai_api_key(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+
+        runner = create_runner("openai-compat:gpt-4o-mini@https://api.openai.com/v1")
+
+        assert isinstance(runner, OpenAICompatRunner)
+        assert runner._api_key == "test-key"
+
     def test_openai_compat_spec_requires_base_url(self):
         with pytest.raises(ValueError):
             create_runner("openai-compat:llama3.1")

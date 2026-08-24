@@ -30,3 +30,5 @@ def test_manifest_schema_roundtrip() -> None:
     payload = manifest.model_dump(mode="json")
     assert payload["run_id"] == "run1"
     assert payload["config"]["providers"] == ["bm-local"]
+    assert "judge_enabled" not in payload["config"]
+    assert "judge_model" not in payload["config"]

@@ -7,7 +7,7 @@ directory for comparing Basic Memory against other memory systems.
 
 Primary goals:
 - Deterministic retrieval benchmarks
-- Optional LLM-as-a-judge benchmarks
+- End-to-end QA scoring with fixed answerer and judge models
 - Public, reproducible artifact publication (including provenance metadata)
 
 The benchmark package keeps its own `pyproject.toml` and lockfile so benchmark
@@ -16,7 +16,6 @@ dependencies do not pollute the Core product environment.
 ## Build / Test Commands
 
 - Install: `uv sync --group dev`
-- Install judge extras: `uv sync --group dev --extra judge`
 - Run tests: `uv run pytest -q`
 - Lint: `uv run ruff check .`
 - Type check: `uv run pyright`
@@ -37,8 +36,8 @@ Dataset and conversion:
 Run retrieval:
 - `uv run bm-bench run retrieval --providers bm-local,mem0-local --dataset-id locomo --dataset-path benchmarks/datasets/locomo/locomo10.json --corpus-dir benchmarks/generated/locomo/docs --queries-path benchmarks/generated/locomo/queries.json --output-root benchmarks/runs --allow-provider-skip`
 
-Run judge (optional):
-- `uv run bm-bench run judge --run-dir benchmarks/runs/<run-id>`
+Run end-to-end QA scoring:
+- `uv run bm-bench run qa --run-dir benchmarks/runs/<run-id> --answerer claude:claude-haiku-4-5 --judge claude:claude-sonnet-4-6`
 
 Validate and publish:
 - `uv run bm-bench validate-artifacts --run-dir benchmarks/runs/<run-id>`
@@ -53,15 +52,15 @@ Validate and publish:
 - `just bench-run-bm-local`
 - `just bench-run-mem0-local`
 - `just bench-run-full`
-- `just bench-judge RUN_DIR=benchmarks/runs/<run-id>`
-- `just bench-publish RUN_DIR=benchmarks/runs/<run-id>`
+- `just bench-qa benchmarks/runs/<run-id>`
+- `just bench-publish benchmarks/runs/<run-id>`
 
 ## Repository Layout
 
 - `src/basic_memory_benchmarks/cli.py` - CLI surface
 - `src/basic_memory_benchmarks/runner.py` - run orchestration
 - `src/basic_memory_benchmarks/providers/` - provider adapters (`bm-local`, `bm-cloud`, `mem0-local`, `zep-reference`)
-- `src/basic_memory_benchmarks/scoring/` - retrieval + judge scoring
+- `src/basic_memory_benchmarks/scoring/` - retrieval + end-to-end QA scoring
 - `src/basic_memory_benchmarks/reporting/` - artifact writers / comparison helpers
 - `src/basic_memory_benchmarks/converters/` - dataset conversion logic
 - `src/basic_memory_benchmarks/datasets/` - dataset fetch/load helpers

@@ -12,9 +12,9 @@ It covers:
 
 | Area | Status |
 | --- | --- |
-| Single run execution (`run retrieval`, `run full`, `run judge`) | Implemented |
+| Single run execution (`run retrieval`, `run full`, `run qa`) | Implemented |
 | Concurrent write convergence (`run concurrent-write`) | Implemented |
-| `just` one-command pipelines (`bench-full`, `bench-full-judge`) | Implemented |
+| `just` retrieval and QA workflows (`bench-full`, `bench-qa`) | Implemented |
 | Artifact generation and publish/compare commands | Implemented |
 | Manual BM revision comparison via worktrees + `--bm-local-path` | Implemented workflow, manual orchestration |
 | `bm-bench run revision-matrix` | Planned, not implemented yet |
@@ -58,12 +58,6 @@ cd /path/to/basic-memory/benchmarks
 just sync
 ```
 
-If you plan to run judge metrics:
-
-```bash
-just sync-judge
-```
-
 ### Dataset assumptions
 
 LoCoMo source and converted outputs are created by:
@@ -78,7 +72,7 @@ just bench-prepare-long
 ### `just` commands (current)
 
 - `bench-full`
-- `bench-full-judge`
+- `bench-qa`
 - `bench-concurrent-write-smoke`
 - `bench-concurrent-write-load`
 - `bench-prepare-short`
@@ -86,7 +80,6 @@ just bench-prepare-long
 - `bench-run-short`
 - `bench-run-long`
 - `bench-run-full`
-- `bench-judge`
 - `bench-validate`
 - `bench-publish`
 - `bench-compare`
@@ -101,7 +94,9 @@ Top-level commands:
 - `run retrieval`
 - `run concurrent-write`
 - `run full`
-- `run judge`
+- `run qa`
+- `run rejudge`
+- `run review`
 - `compare`
 - `validate-artifacts`
 - `publish`
@@ -120,17 +115,15 @@ This runs:
 2. `just bench-prepare-long`
 3. `just bench-run-full`
 
-### One-command full retrieval + judge
+### End-to-end QA scoring
 
 ```bash
 cd /path/to/basic-memory/benchmarks
-just bench-full-judge
+just bench-qa benchmarks/runs/<run_id>
 ```
 
-This runs:
-1. `just sync-judge`
-2. `just bench-prepare-long`
-3. `just bench-run-full-judge`
+This generates answers from each provider's retrieved context, applies the
+same judge to every provider, and writes QA artifacts into the retrieval run.
 
 ### Short vs long workflows
 
@@ -196,10 +189,15 @@ Required files:
 - `retrieval-summary.json`
 - `summary.md`
 
-Optional judge files:
+Optional QA files:
 
-- `per-query-judge.jsonl`
-- `judge-summary.json`
+- `per-query-qa.jsonl`
+- `qa-summary.json`
+- `per-query-qa-rejudge.jsonl`
+- `qa-rejudge-summary.json`
+- `qa-rejudge-flips.json`
+- `review.html`
+- `qa-diagnosis.json`
 
 ### Key provenance fields
 
@@ -483,7 +481,7 @@ Dry-run checks:
 just --dry-run bench-run-short
 just --dry-run bench-run-long
 just --dry-run bench-full
-just --dry-run bench-full-judge
+just --dry-run bench-qa benchmarks/runs/<run_id>
 ```
 
 Artifact field checks:

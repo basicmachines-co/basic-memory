@@ -79,26 +79,6 @@ class RetrievalSummary(BaseModel):
     adversarial_breakout: RetrievalMetrics
 
 
-class JudgeCaseResult(BaseModel):
-    provider: str
-    query_id: str
-    category: str
-    passed: bool
-    score: float
-    reason: str
-    evaluator: str
-
-
-class JudgeSummary(BaseModel):
-    provider: str
-    evaluator: str
-    model: str
-    total_cases: int
-    pass_count: int
-    accuracy: float
-    skipped_reason: str | None = None
-
-
 class QACategoryMetrics(BaseModel):
     total: int = 0
     correct: int = 0
@@ -213,8 +193,6 @@ class RunConfig(BaseModel):
     top_k: int = 10
     bm_source: str = "github:basicmachines-co/basic-memory@main"
     bm_local_path: str | None = None
-    judge_enabled: bool = False
-    judge_model: str = "gpt-4o-mini"
     allow_provider_skip: bool = True
 
 
@@ -237,8 +215,6 @@ class RunArtifacts(BaseModel):
     provider_status: list[ProviderStatus]
     retrieval_summaries: list[RetrievalSummary]
     retrieval_rows: list[PerQueryRetrievalResult]
-    judge_summaries: list[JudgeSummary] = Field(default_factory=list)
-    judge_rows: list[JudgeCaseResult] = Field(default_factory=list)
     fairness_warnings: list[str] = Field(default_factory=list)
 
 
