@@ -221,6 +221,38 @@ def _preload_lazy_console_modules() -> None:
     """
     import rich._emoji_codes  # noqa: F401
     import typer.rich_utils  # noqa: F401
+    from rich.cells import cell_len
+
+    # Trigger: rich defers its Unicode cell-width table (`rich._unicode_data.
+    # unicode<version>`) until the first character it cannot measure with the
+    # ASCII fast path in `_cell_len`.
+    # Why: status messages echo captured `brew`/`uv` output, which carries
+    # non-ASCII characters (curly quotes, em dashes, warning glyphs), so the
+    # deferred import lands after the upgrade removed our files. Importing the
+    # module by name would hard-code a table version; calling `cell_len` uses
+    # rich's own resolution and honors UNICODE_VERSION like the print path does.
+    # Outcome: the table rich will reach for is resolved and cached up front.
+    cell_len("\u2500\u2018\u2713")
+
+
+def print_update_status(console: Console, text: str, style: str) -> None:
+    """Print an update status line that cannot fail the command.
+
+    Trigger: the line is printed after an in-place upgrade may already have
+    replaced this installation on disk.
+    Why: `_preload_lazy_console_modules` can only preload the deferred imports
+    we know about today, and rich/typer are free to add more. By the time this
+    prints, the upgrade has already succeeded -- a status line must never be
+    what turns it into a traceback and a non-zero exit.
+    Outcome: fall back to a plain, unstyled write that needs no new imports.
+    """
+    try:
+        console.print(f"[{style}]{text}[/{style}]")
+    except Exception as exc:
+        logger.warning(
+            f"Rich console print failed after update, falling back to plain output: {exc}"
+        )
+        print(text)
 
 
 def _save_last_checked_timestamp(config_manager: ConfigManager, checked_at: datetime) -> None:
@@ -468,11 +500,11 @@ def maybe_run_periodic_auto_update(
     }:
         out = console or Console()
         if result.status == AutoUpdateStatus.UPDATED:
-            out.print(f"[green]{result.message}[/green]")
+            print_update_status(out, f"{result.message}", "green")
         elif result.status == AutoUpdateStatus.FAILED:
             error_detail = f" {result.error}" if result.error else ""
-            out.print(f"[yellow]{result.message}{error_detail}[/yellow]")
+            print_update_status(out, f"{result.message}{error_detail}", "yellow")
         elif result.message:
-            out.print(f"[cyan]{result.message}[/cyan]")
+            print_update_status(out, f"{result.message}", "cyan")
 
     return result
