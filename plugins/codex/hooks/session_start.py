@@ -4,6 +4,9 @@
 # dependencies = [
 #     "basic-memory @ git+https://github.com/basicmachines-co/basic-memory@v0.23.0",
 # ]
+#
+# [tool.uv]
+# prerelease = "allow"
 # ///
 """SessionStart hook launcher backed by a pinned Basic Memory revision.
 

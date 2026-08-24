@@ -2,6 +2,9 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = ["basic-memory>=0.23.0"]
+#
+# [tool.uv]
+# prerelease = "allow"
 # ///
 """SessionStart hook — the entire hook. All logic (settings resolution, the
 context brief, lifecycle-envelope capture) lives in the released basic-memory

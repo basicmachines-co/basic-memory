@@ -2,6 +2,9 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = ["basic-memory>=0.23.0"]
+#
+# [tool.uv]
+# prerelease = "allow"
 # ///
 """PreCompact hook — the entire hook. All logic (settings resolution, the
 extractive checkpoint note, lifecycle-envelope capture) lives in the released
