@@ -1,7 +1,7 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["basic-memory>=0.22.1"]
+# dependencies = ["basic-memory>=0.23.0"]
 # ///
 """PreCompact hook — the entire hook. All logic (settings resolution, the
 extractive checkpoint note, lifecycle-envelope capture) lives in the released
