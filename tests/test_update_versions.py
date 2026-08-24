@@ -35,7 +35,10 @@ _SCRIPT_SEED = (
     "#!/usr/bin/env -S uv run --quiet --script\n"
     "# /// script\n"
     '# requires-python = ">=3.12"\n'
-    '# dependencies = ["basic-memory>=0.0.0"]\n'
+    "# dependencies = [\n"
+    '#     "basic-memory>=0.0.0",\n'
+    '#     "fastmcp==4.0.0b1",\n'
+    "# ]\n"
     "# ///\n"
     # Mirrors the real scripts: the docstring mentions a launcher spelling
     # without a version spec, which the anchored updater pattern must skip.

@@ -1,7 +1,14 @@
 #!/usr/bin/env -S uv run --quiet --script
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["basic-memory>=0.22.1"]
+# dependencies = [
+#     "basic-memory>=0.23.0",
+#     # Direct pre-release pin so old uv resolves basic-memory (which
+#     # requires this exact beta transitively) without enabling
+#     # pre-releases for basic-memory itself. Keep in lockstep with
+#     # core pyproject's fastmcp pin.
+#     "fastmcp==4.0.0b1",
+# ]
 # ///
 """SessionStart hook — the entire hook. All logic (settings resolution, the
 context brief, lifecycle-envelope capture) lives in the released basic-memory

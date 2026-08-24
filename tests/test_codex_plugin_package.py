@@ -386,3 +386,21 @@ def test_pr_create_skill_delegates_to_current_pr_workflow() -> None:
     assert "never merges" in skill
     assert "Do not enable auto-merge" in skill
     assert "current-head gate" in skill
+
+
+def test_codex_hook_fastmcp_pins_match_core_pyproject() -> None:
+    """The shims pin core's exact fastmcp beta; drift breaks shim resolution.
+
+    Old uv refuses pre-release transitives, so each shim carries the pin as a
+    direct dependency. Nothing rewrites it automatically — this test is the
+    lockstep enforcement when core's pyproject moves its fastmcp pin.
+    """
+    repo_root = Path(__file__).resolve().parents[1]
+    core = re.search(
+        r'^\s*"fastmcp==([^"]+)",$', (repo_root / "pyproject.toml").read_text(), re.MULTILINE
+    )
+    assert core is not None
+    for name in ("session_start.py", "pre_compact.py"):
+        shim = (repo_root / "plugins/codex/hooks" / name).read_text()
+        pins = re.findall(r'^#     "fastmcp==([^"]+)",$', shim, re.MULTILINE)
+        assert pins == [core.group(1)], name

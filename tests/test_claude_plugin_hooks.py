@@ -80,7 +80,7 @@ def test_claude_script_floor_matches_released_version(event: str, script_name: s
     # Release drift between the PEP 723 floor and the package version fails
     # here (and in each script's co-located test) before a release lands.
     text = (REPO_ROOT / "plugins/claude-code/hooks" / script_name).read_text(encoding="utf-8")
-    floors = re.findall(r'^# dependencies = \["basic-memory>=([^"]+)"\]$', text, re.MULTILINE)
+    floors = re.findall(r'^#     "basic-memory>=([^"]+)",$', text, re.MULTILINE)
 
     assert floors == [CURRENT_VERSION]
 

@@ -153,8 +153,8 @@ def _update_packages(version: str, *, dry_run: bool) -> None:
     for script in HOOK_SCRIPTS:
         update_text(
             script,
-            r'^# dependencies = \["basic-memory>=[^"]+"\]$',
-            f'# dependencies = ["basic-memory>={version}"]',
+            r'^#     "basic-memory>=[^"]+",$',
+            f'#     "basic-memory>={version}",',
             dry_run=dry_run,
         )
     update_text(
