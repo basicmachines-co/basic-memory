@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#     "basic-memory>=0.23.1",
+#     "basic-memory>=0.23.2",
 #     # Direct pre-release pin so old uv resolves basic-memory (which
 #     # requires this exact beta transitively) without enabling
 #     # pre-releases for basic-memory itself. Keep in lockstep with
