@@ -33,7 +33,12 @@ CREATE TABLE IF NOT EXISTS search_index (
     created_at TIMESTAMP WITH TIME ZONE,
     updated_at TIMESTAMP WITH TIME ZONE,
     textsearchable_index_col tsvector GENERATED ALWAYS AS (
-        to_tsvector('english', coalesce(title, '') || ' ' || coalesce(content_stems, ''))
+        to_tsvector(
+            'english',
+            coalesce(title, '') || ' ' ||
+            coalesce(content_stems, '') || ' ' ||
+            coalesce(content_snippet, '')
+        )
     ) STORED,
     PRIMARY KEY (id, type, project_id),
     FOREIGN KEY (project_id) REFERENCES project(id) ON DELETE CASCADE
