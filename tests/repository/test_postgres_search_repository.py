@@ -1280,6 +1280,37 @@ async def test_postgres_relaxed_retry_probes_joined_formatting_characters(
 
 
 @pytest.mark.asyncio
+async def test_postgres_relaxed_retry_quotes_apostrophe_operands(
+    session_maker,
+    test_project,
+):
+    """An apostrophe syntax error does not poison relaxed candidate probes."""
+    repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
+    now = datetime.now(timezone.utc)
+    await repo.index_item(
+        SearchIndexRow(
+            project_id=test_project.id,
+            id=81,
+            title="Contraction reference",
+            content_stems="can't sunrise",
+            content_snippet="Can't miss the sunrise.",
+            permalink="docs/contraction-reference",
+            file_path="docs/contraction-reference.md",
+            type="entity",
+            metadata={"note_type": "note"},
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    query = "can't find sunrise"
+    results = await repo.search(search_text=query, allow_relaxed=True)
+
+    assert any(row.id == 81 for row in results)
+    assert await repo.count(search_text=query, allow_relaxed=True) == 1
+
+
+@pytest.mark.asyncio
 async def test_postgres_search_supports_more_than_one_hundred_operands(
     session_maker,
     test_project,

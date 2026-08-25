@@ -76,6 +76,15 @@ def _tsquery_operands(processed_text: str) -> list[tuple[str, str]]:
             operands.setdefault(operand, representative)
             continue
 
+        # An unquoted apostrophe is invalid tsquery syntax. Keep the literal
+        # word for the synthetic document, but quote and escape its probe so a
+        # strict syntax failure can proceed to the relaxed retry.
+        if "'" in representative:
+            escaped = "'{}'".format(representative.replace("'", "''"))
+            safe_operand = f"{escaped}:*" if operand.endswith(":*") else escaped
+            operands.setdefault(safe_operand, representative)
+            continue
+
         # PostgreSQL legitimately parses punctuation inside operands such as
         # ``v0.13.0b2:*`` and ``auth-service:*``. Preserve those bytes so the
         # synthetic document is tokenized the same way as the original note.
