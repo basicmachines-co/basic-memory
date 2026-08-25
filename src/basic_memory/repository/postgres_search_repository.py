@@ -46,13 +46,16 @@ from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 
 POSTGRES_FTS_CHUNK_SIZE = 8_000
-POSTGRES_FTS_CHUNK_OVERLAP = 200
+# PostgreSQL ignores lexemes at 2 KiB and above. A 2,048-character overlap is
+# therefore conservative for every indexable lexeme, including multi-byte text:
+# any token split at one 8,000-character edge is complete in the next chunk.
+POSTGRES_FTS_CHUNK_OVERLAP = 2_048
 _TSQUERY_OPERAND_PATTERN = re.compile(r"'(?:''|[^'])*'(?::\*)?|[^\s&|!()]+")
 _TSQUERY_WORD_PATTERN = re.compile(r"[^\W_]+(?:'[^\W_]+)?", re.UNICODE)
 
 
 def _iter_fts_chunks(content: str | None) -> list[tuple[int, str]]:
-    """Split full note text into bounded, slightly overlapping FTS documents."""
+    """Split full note text without losing an indexable lexeme at a chunk edge."""
     if not content:
         return []
 
