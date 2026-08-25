@@ -26,17 +26,19 @@ def test_upgrade_creates_and_backfills_bounded_postgres_vectors(monkeypatch) -> 
     # reindex is repaired first; healthy databases no-op on IF NOT EXISTS.
     assert "CREATE TABLE IF NOT EXISTS search_index (" in statements[0]
     assert "PRIMARY KEY (id, type, project_id)" in statements[0]
-    assert "CREATE INDEX IF NOT EXISTS idx_search_index_fts" in statements[1]
-    assert "CREATE INDEX IF NOT EXISTS idx_search_index_metadata_gin" in statements[2]
-    assert "CREATE UNIQUE INDEX IF NOT EXISTS uix_search_index_permalink_project" in statements[3]
+    assert "CREATE INDEX IF NOT EXISTS ix_search_index_project_id" in statements[1]
+    assert "ON search_index (project_id)" in statements[1]
+    assert "CREATE INDEX IF NOT EXISTS idx_search_index_fts" in statements[2]
+    assert "CREATE INDEX IF NOT EXISTS idx_search_index_metadata_gin" in statements[3]
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS uix_search_index_permalink_project" in statements[4]
 
-    assert "CREATE TABLE search_index_fts_chunks" in statements[4]
-    assert "to_tsvector('english', chunk_text)" in statements[4]
-    assert "generate_series" in statements[5]
-    assert "FOR 8000" in statements[5]
-    assert "5952" in statements[5]
-    assert "2,048-character overlap" in statements[5]
-    assert "CREATE INDEX idx_search_index_fts_chunks_fts" in statements[6]
+    assert "CREATE TABLE search_index_fts_chunks" in statements[5]
+    assert "to_tsvector('english', chunk_text)" in statements[5]
+    assert "generate_series" in statements[6]
+    assert "FOR 8000" in statements[6]
+    assert "5952" in statements[6]
+    assert "2,048-character overlap" in statements[6]
+    assert "CREATE INDEX idx_search_index_fts_chunks_fts" in statements[7]
 
 
 def test_downgrade_drops_postgres_chunk_table(monkeypatch) -> None:
