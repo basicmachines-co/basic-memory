@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
-#     "basic-memory @ git+https://github.com/basicmachines-co/basic-memory@v0.23.0",
+#     "basic-memory @ git+https://github.com/basicmachines-co/basic-memory@v0.23.1",
 #     # Direct pre-release pin so old uv resolves basic-memory (which
 #     # requires this exact beta transitively) without enabling
 #     # pre-releases broadly. Keep in lockstep with core pyproject.
