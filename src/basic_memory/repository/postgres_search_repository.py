@@ -837,20 +837,20 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     if relaxed_text:
                         probe_texts.append(relaxed_text)
 
-                # Trigger: the query has no negation, so every true result must
-                # contain at least one operand in the parent vector or a content chunk.
-                # Why: evaluating correlated chunk probes against every project row
-                # bypasses both GIN indexes and turns ordinary searches into full scans.
-                # Outcome: an indexed UNION selects a bounded candidate set before the
-                # synthetic vector applies document-wide Boolean semantics.
-                if "!" not in processed_text:
-                    candidate_operands: dict[str, None] = {}
-                    for probe_text in probe_texts:
-                        for operand, _representative in _tsquery_operands(probe_text):
-                            candidate_operands.setdefault(operand, None)
-                    if candidate_operands:
-                        params["text_candidate"] = " | ".join(candidate_operands)
-                        from_clause = """
+                candidate_operands: dict[str, None] = {}
+                for probe_text in probe_texts:
+                    for operand, _representative in _tsquery_operands(probe_text):
+                        candidate_operands.setdefault(operand, None)
+                if candidate_operands:
+                    params["text_candidate"] = " | ".join(candidate_operands)
+
+                    # Trigger: PostgreSQL can extract a required-positive query tree.
+                    # Why: OR-ing its operands is a safe indexed superset even when
+                    # terms live in different chunks. Pure/optional negation returns
+                    # ``T`` and must retain all project rows for correct semantics.
+                    # Outcome: ordinary and required-positive NOT queries use both
+                    # GIN indexes; only genuinely unindexable negation scans the project.
+                    from_clause = """
                             search_index JOIN (
                                 SELECT
                                     candidate_parent.project_id,
@@ -858,6 +858,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                                     candidate_parent.type
                                 FROM search_index AS candidate_parent
                                 WHERE candidate_parent.project_id = :project_id
+                                  AND querytree(to_tsquery('english', :text)) <> 'T'
                                   AND candidate_parent.textsearchable_index_col
                                       @@ to_tsquery('english', :text_candidate)
                                 UNION
@@ -867,13 +868,22 @@ class PostgresSearchRepository(SearchRepositoryBase):
                                     candidate_chunk.search_index_type AS type
                                 FROM search_index_fts_chunks AS candidate_chunk
                                 WHERE candidate_chunk.project_id = :project_id
+                                  AND querytree(to_tsquery('english', :text)) <> 'T'
                                   AND candidate_chunk.textsearchable_index_col
                                       @@ to_tsquery('english', :text_candidate)
+                                UNION
+                                SELECT
+                                    candidate_all.project_id,
+                                    candidate_all.id,
+                                    candidate_all.type
+                                FROM search_index AS candidate_all
+                                WHERE candidate_all.project_id = :project_id
+                                  AND querytree(to_tsquery('english', :text)) = 'T'
                             ) AS fts_candidate
                               ON fts_candidate.project_id = search_index.project_id
                              AND fts_candidate.id = search_index.id
                              AND fts_candidate.type = search_index.type
-                        """
+                    """
                 document_vector_sql = self._document_fts_vector_sql(probe_texts, params)
                 conditions.append(f"{document_vector_sql} @@ to_tsquery('english', :text)")
 
