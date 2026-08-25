@@ -168,6 +168,35 @@ async def test_postgres_search_repository_index_and_search(session_maker, test_p
 
 
 @pytest.mark.asyncio
+async def test_postgres_search_indexes_full_note_content(session_maker, test_project):
+    """Terms beyond the capped metadata/stems field remain reachable through FTS."""
+    repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
+    now = datetime.now(timezone.utc)
+    deep_content = "shallowmarker " + ("padding " * 1_000) + "deepmarker"
+
+    await repo.index_item(
+        SearchIndexRow(
+            project_id=test_project.id,
+            id=2,
+            title="Deep Search Note",
+            content_stems="deep search note shallowmarker",
+            content_snippet=deep_content,
+            permalink="docs/deep-search-note",
+            file_path="docs/deep-search-note.md",
+            type="entity",
+            metadata={"note_type": "note"},
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    assert len(deep_content) > 6_000
+    results = await repo.search(search_text="shallowmarker AND deepmarker")
+    assert [result.permalink for result in results] == ["docs/deep-search-note"]
+    assert await repo.count(search_text="shallowmarker AND deepmarker") == 1
+
+
+@pytest.mark.asyncio
 async def test_postgres_search_repository_bulk_index_items_and_prepare_terms(
     session_maker, test_project
 ):
