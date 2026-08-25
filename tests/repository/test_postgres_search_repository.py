@@ -169,10 +169,10 @@ async def test_postgres_search_repository_index_and_search(session_maker, test_p
 
 @pytest.mark.asyncio
 async def test_postgres_search_indexes_full_note_content(session_maker, test_project):
-    """Terms beyond the capped metadata/stems field remain reachable through FTS."""
+    """An unbounded note is searchable without creating one unbounded tsvector."""
     repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
     now = datetime.now(timezone.utc)
-    deep_content = "shallowmarker " + ("padding " * 1_000) + "deepmarker"
+    deep_content = "shallowmarker " + ("padding " * 150_000) + "deepmarker"
 
     await repo.index_item(
         SearchIndexRow(
@@ -190,10 +190,10 @@ async def test_postgres_search_indexes_full_note_content(session_maker, test_pro
         )
     )
 
-    assert len(deep_content) > 6_000
-    results = await repo.search(search_text="shallowmarker AND deepmarker")
+    assert len(deep_content.encode()) > 1_048_575
+    results = await repo.search(search_text="deepmarker")
     assert [result.permalink for result in results] == ["docs/deep-search-note"]
-    assert await repo.count(search_text="shallowmarker AND deepmarker") == 1
+    assert await repo.count(search_text="deepmarker") == 1
 
 
 @pytest.mark.asyncio
@@ -356,6 +356,7 @@ async def test_postgres_search_repository_reraises_non_tsquery_db_errors(
     from basic_memory import db
 
     async with db.scoped_session(session_maker) as session:
+        await session.execute(text("DROP TABLE search_index_fts_chunks"))
         await session.execute(text("DROP TABLE search_index"))
         await session.commit()
 

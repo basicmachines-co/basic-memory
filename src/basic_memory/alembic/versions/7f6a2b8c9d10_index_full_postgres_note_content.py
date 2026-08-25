@@ -18,40 +18,57 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def _replace_search_vector(*, include_full_content: bool) -> None:
-    """Replace the generated search vector and rebuild its GIN index."""
-    content_expression = """
-                    coalesce(title, '') || ' ' ||
-                    coalesce(content_stems, '')
-    """
-    if include_full_content:
-        content_expression += " || ' ' ||\n                    coalesce(content_snippet, '')"
-
-    op.execute("DROP INDEX IF EXISTS idx_search_index_fts")
-    op.execute("ALTER TABLE search_index DROP COLUMN IF EXISTS textsearchable_index_col")
-    op.execute(
-        f"""
-        ALTER TABLE search_index
-        ADD COLUMN textsearchable_index_col tsvector
-        GENERATED ALWAYS AS (
-            to_tsvector('english', {content_expression})
-        ) STORED
-        """
-    )
-    op.execute(
-        "CREATE INDEX idx_search_index_fts ON search_index USING gin(textsearchable_index_col)"
-    )
-
-
 def upgrade() -> None:
-    """Include the complete stored note body in PostgreSQL full-text search."""
+    """Index complete note bodies as bounded PostgreSQL FTS chunks."""
     connection = op.get_bind()
     if connection.dialect.name == "postgresql":
-        _replace_search_vector(include_full_content=True)
+        op.execute("""
+            CREATE TABLE search_index_fts_chunks (
+                project_id INTEGER NOT NULL,
+                search_index_id INTEGER NOT NULL,
+                search_index_type VARCHAR NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                chunk_text TEXT NOT NULL,
+                textsearchable_index_col tsvector GENERATED ALWAYS AS (
+                    to_tsvector('english', chunk_text)
+                ) STORED,
+                PRIMARY KEY (project_id, search_index_id, search_index_type, chunk_index),
+                FOREIGN KEY (search_index_id, search_index_type, project_id)
+                    REFERENCES search_index(id, type, project_id)
+                    ON UPDATE CASCADE ON DELETE CASCADE
+            )
+        """)
+        op.execute("""
+            CREATE INDEX idx_search_index_fts_chunks_fts
+            ON search_index_fts_chunks USING gin(textsearchable_index_col)
+        """)
+        op.execute("""
+            INSERT INTO search_index_fts_chunks (
+                project_id,
+                search_index_id,
+                search_index_type,
+                chunk_index,
+                chunk_text
+            )
+            SELECT
+                search_index.project_id,
+                search_index.id,
+                search_index.type,
+                (chunk_start - 1) / 7800,
+                substring(search_index.content_snippet FROM chunk_start FOR 8000)
+            FROM search_index
+            CROSS JOIN LATERAL generate_series(
+                1,
+                length(search_index.content_snippet),
+                7800
+            ) AS chunk_start
+            WHERE search_index.content_snippet IS NOT NULL
+              AND search_index.content_snippet <> ''
+        """)
 
 
 def downgrade() -> None:
-    """Restore the legacy title and capped-stems PostgreSQL search vector."""
+    """Remove the bounded full-content PostgreSQL FTS chunks."""
     connection = op.get_bind()
     if connection.dialect.name == "postgresql":
-        _replace_search_vector(include_full_content=False)
+        op.execute("DROP TABLE IF EXISTS search_index_fts_chunks")

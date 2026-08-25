@@ -13,7 +13,7 @@ def _connection(dialect_name: str) -> SimpleNamespace:
     return SimpleNamespace(dialect=SimpleNamespace(name=dialect_name))
 
 
-def test_upgrade_rebuilds_postgres_vector_with_full_content(monkeypatch) -> None:
+def test_upgrade_creates_and_backfills_bounded_postgres_vectors(monkeypatch) -> None:
     statements: list[str] = []
     monkeypatch.setattr(migration.op, "get_bind", lambda: _connection("postgresql"))
     monkeypatch.setattr(
@@ -22,15 +22,15 @@ def test_upgrade_rebuilds_postgres_vector_with_full_content(monkeypatch) -> None
 
     migration.upgrade()
 
-    generated_column = next(
-        statement for statement in statements if "ADD COLUMN textsearchable_index_col" in statement
-    )
-    assert "coalesce(content_stems, '')" in generated_column
-    assert "coalesce(content_snippet, '')" in generated_column
-    assert statements[-1].startswith("CREATE INDEX idx_search_index_fts")
+    assert "CREATE TABLE search_index_fts_chunks" in statements[0]
+    assert "to_tsvector('english', chunk_text)" in statements[0]
+    assert "CREATE INDEX idx_search_index_fts_chunks_fts" in statements[1]
+    assert "generate_series" in statements[2]
+    assert "FOR 8000" in statements[2]
+    assert "7800" in statements[2]
 
 
-def test_downgrade_restores_capped_postgres_vector(monkeypatch) -> None:
+def test_downgrade_drops_postgres_chunk_table(monkeypatch) -> None:
     statements: list[str] = []
     monkeypatch.setattr(migration.op, "get_bind", lambda: _connection("postgresql"))
     monkeypatch.setattr(
@@ -39,11 +39,7 @@ def test_downgrade_restores_capped_postgres_vector(monkeypatch) -> None:
 
     migration.downgrade()
 
-    generated_column = next(
-        statement for statement in statements if "ADD COLUMN textsearchable_index_col" in statement
-    )
-    assert "coalesce(content_stems, '')" in generated_column
-    assert "content_snippet" not in generated_column
+    assert statements == ["DROP TABLE IF EXISTS search_index_fts_chunks"]
 
 
 def test_migration_is_noop_for_sqlite(monkeypatch) -> None:

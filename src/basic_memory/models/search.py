@@ -36,8 +36,7 @@ CREATE TABLE IF NOT EXISTS search_index (
         to_tsvector(
             'english',
             coalesce(title, '') || ' ' ||
-            coalesce(content_stems, '') || ' ' ||
-            coalesce(content_snippet, '')
+            coalesce(content_stems, '')
         )
     ) STORED,
     PRIMARY KEY (id, type, project_id),
@@ -47,6 +46,30 @@ CREATE TABLE IF NOT EXISTS search_index (
 
 CREATE_POSTGRES_SEARCH_INDEX_FTS = DDL("""
 CREATE INDEX IF NOT EXISTS idx_search_index_fts ON search_index USING gin(textsearchable_index_col)
+""")
+
+# Full note bodies are stored in bounded child rows so one unusually large note
+# cannot exceed PostgreSQL's per-tsvector size limit.
+CREATE_POSTGRES_SEARCH_INDEX_FTS_CHUNKS_TABLE = DDL("""
+CREATE TABLE IF NOT EXISTS search_index_fts_chunks (
+    project_id INTEGER NOT NULL,
+    search_index_id INTEGER NOT NULL,
+    search_index_type VARCHAR NOT NULL,
+    chunk_index INTEGER NOT NULL,
+    chunk_text TEXT NOT NULL,
+    textsearchable_index_col tsvector GENERATED ALWAYS AS (
+        to_tsvector('english', chunk_text)
+    ) STORED,
+    PRIMARY KEY (project_id, search_index_id, search_index_type, chunk_index),
+    FOREIGN KEY (search_index_id, search_index_type, project_id)
+        REFERENCES search_index(id, type, project_id)
+        ON UPDATE CASCADE ON DELETE CASCADE
+)
+""")
+
+CREATE_POSTGRES_SEARCH_INDEX_FTS_CHUNKS_INDEX = DDL("""
+CREATE INDEX IF NOT EXISTS idx_search_index_fts_chunks_fts
+ON search_index_fts_chunks USING gin(textsearchable_index_col)
 """)
 
 CREATE_POSTGRES_SEARCH_INDEX_METADATA = DDL("""
