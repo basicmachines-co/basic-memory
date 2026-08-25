@@ -804,6 +804,8 @@ class TestSearchTermPreparation:
         # Force a real database error (not an FTS5 syntax error) by removing the search index.
         # The repository should re-raise the error rather than returning an empty list.
         async with db.scoped_session(search_repository.session_maker) as session:
+            if is_postgres_backend(search_repository):
+                await session.execute(text("DROP TABLE IF EXISTS search_index_fts_chunks"))
             await session.execute(text("DROP TABLE IF EXISTS search_index"))
             await session.commit()
 
