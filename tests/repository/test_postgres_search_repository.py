@@ -252,6 +252,7 @@ async def test_postgres_search_repository_bulk_index_items_and_prepare_terms(
     )
     assert "FROM search_index AS candidate_parent" in indexed_from
     assert "FROM search_index_fts_chunks AS candidate_chunk" in indexed_from
+    assert "querytree(to_tsquery('english', :text))" in indexed_from
     assert indexed_params["text_candidate"] == "coffee:* | brewing:*"
 
     filtered_from, _where, _params, _order, _score = await repo._build_fts_query_parts(
@@ -264,8 +265,9 @@ async def test_postgres_search_repository_bulk_index_items_and_prepare_terms(
     negated_from, _where, negated_params, _order, _score = await repo._build_fts_query_parts(
         search_text="coffee NOT brewing",
     )
-    assert negated_from == "search_index"
-    assert "text_candidate" not in negated_params
+    assert "AS fts_candidate" in negated_from
+    assert "FROM search_index AS candidate_all" in negated_from
+    assert negated_params["text_candidate"] == "coffee | brewing"
 
     now = datetime.now(timezone.utc)
     rows = [
@@ -303,6 +305,10 @@ async def test_postgres_search_repository_bulk_index_items_and_prepare_terms(
     permalinks = {r.permalink for r in results}
     assert "docs/pour-over" in permalinks
     assert "docs/french-press" in permalinks
+
+    negated_results = await repo.search(search_text="coffee NOT french")
+    assert [result.permalink for result in negated_results] == ["docs/pour-over"]
+    assert await repo.count(search_text="coffee NOT french") == 1
 
 
 @pytest.mark.asyncio
