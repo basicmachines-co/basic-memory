@@ -191,9 +191,9 @@ async def test_postgres_search_indexes_full_note_content(session_maker, test_pro
     )
 
     assert len(deep_content.encode()) > 1_048_575
-    results = await repo.search(search_text="deepmarker")
+    results = await repo.search(search_text="shallowmarker AND deepmarker")
     assert [result.permalink for result in results] == ["docs/deep-search-note"]
-    assert await repo.count(search_text="deepmarker") == 1
+    assert await repo.count(search_text="shallowmarker AND deepmarker") == 1
 
 
 @pytest.mark.asyncio
