@@ -794,6 +794,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         search_item_types: Optional[List[SearchItemType]] = None,
         categories: Optional[List[str]] = None,
         metadata_filters: Optional[dict[str, Any]] = None,
+        allow_relaxed: bool = False,
     ) -> tuple[str, str, dict[str, Any], str, str]:
         """Build Postgres FTS FROM/WHERE params shared by search and count."""
         conditions = []
@@ -811,7 +812,12 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 # Prepare search term for tsquery
                 processed_text = self._prepare_search_term(search_text.strip())
                 params["text"] = processed_text
-                document_vector_sql = self._document_fts_vector_sql(processed_text, params)
+                probe_texts = [processed_text]
+                if allow_relaxed:
+                    relaxed_text = self._relaxed_tsquery_text(search_text)
+                    if relaxed_text:
+                        probe_texts.append(relaxed_text)
+                document_vector_sql = self._document_fts_vector_sql(probe_texts, params)
                 conditions.append(f"{document_vector_sql} @@ to_tsquery('english', :text)")
 
         # Handle title search
@@ -991,10 +997,15 @@ class PostgresSearchRepository(SearchRepositoryBase):
         return from_clause, where_clause, params, order_by_clause, score_expr
 
     @staticmethod
-    def _document_fts_vector_sql(processed_text: str, params: dict[str, Any]) -> str:
+    def _document_fts_vector_sql(processed_texts: Sequence[str], params: dict[str, Any]) -> str:
         """Build a query-sized vector representing lexemes found anywhere in one item."""
+        operands: dict[str, str] = {}
+        for processed_text in processed_texts:
+            for operand, representative in _tsquery_operands(processed_text):
+                operands.setdefault(operand, representative)
+
         present_lexemes: list[str] = []
-        for index, (operand, representative) in enumerate(_tsquery_operands(processed_text)):
+        for index, (operand, representative) in enumerate(operands.items()):
             operand_param = f"text_operand_{index}"
             representative_param = f"text_representative_{index}"
             params[operand_param] = operand
@@ -1077,6 +1088,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             search_item_types=search_item_types,
             categories=categories,
             metadata_filters=metadata_filters,
+            allow_relaxed=allow_relaxed,
         )
 
         # set limit and offset
@@ -1258,6 +1270,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             search_item_types=search_item_types,
             categories=categories,
             metadata_filters=metadata_filters,
+            allow_relaxed=allow_relaxed,
         )
         sql = f"SELECT COUNT(*) FROM {from_clause} WHERE {where_clause}"
         logger.trace(f"Count {sql} params: {params}")

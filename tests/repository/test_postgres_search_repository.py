@@ -1192,3 +1192,34 @@ async def test_postgres_relaxes_after_strict_tsquery_syntax_error(
     search_syntax_error_count = len(syntax_errors)
     assert await repo.count(search_text=query, allow_relaxed=True) == 1
     assert len(syntax_errors) > search_syntax_error_count
+
+
+@pytest.mark.asyncio
+async def test_postgres_relaxed_retry_probes_joined_formatting_characters(
+    session_maker,
+    test_project,
+):
+    """Relaxed probes include words joined after removing formatting characters."""
+    repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
+    now = datetime.now(timezone.utc)
+    await repo.index_item(
+        SearchIndexRow(
+            project_id=test_project.id,
+            id=79,
+            title="Joined word reference",
+            content_stems="a document containing foobar",
+            content_snippet="A document containing foobar.",
+            permalink="docs/joined-word-reference",
+            file_path="docs/joined-word-reference.md",
+            type="entity",
+            metadata={"note_type": "note"},
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    query = "foo\u00adbar absentone absenttwo"
+    results = await repo.search(search_text=query, allow_relaxed=True)
+
+    assert any(row.id == 79 for row in results)
+    assert await repo.count(search_text=query, allow_relaxed=True) == 1
