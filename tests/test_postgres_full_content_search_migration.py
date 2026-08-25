@@ -26,7 +26,8 @@ def test_upgrade_creates_and_backfills_bounded_postgres_vectors(monkeypatch) -> 
     assert "to_tsvector('english', chunk_text)" in statements[0]
     assert "generate_series" in statements[1]
     assert "FOR 8000" in statements[1]
-    assert "7800" in statements[1]
+    assert "5952" in statements[1]
+    assert "2,048-character overlap" in statements[1]
     assert "CREATE INDEX idx_search_index_fts_chunks_fts" in statements[2]
 
 

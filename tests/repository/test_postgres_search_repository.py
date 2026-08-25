@@ -197,6 +197,39 @@ async def test_postgres_search_indexes_full_note_content(session_maker, test_pro
 
 
 @pytest.mark.asyncio
+async def test_postgres_search_preserves_long_lexeme_across_chunk_edge(
+    session_maker,
+    test_project,
+):
+    """A PostgreSQL-indexable lexeme crossing 8,000 characters remains searchable."""
+    repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
+    now = datetime.now(timezone.utc)
+    long_identifier = "lexeme" + ("x" * 394)
+    content = (" " * 7_700) + long_identifier + (" " * 1_000)
+
+    await repo.index_item(
+        SearchIndexRow(
+            project_id=test_project.id,
+            id=3,
+            title="Chunk Edge Note",
+            content_stems="chunk edge note",
+            content_snippet=content,
+            permalink="docs/chunk-edge-note",
+            file_path="docs/chunk-edge-note.md",
+            type="entity",
+            metadata={"note_type": "note"},
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    results = await repo.search(search_text=long_identifier)
+
+    assert [result.permalink for result in results] == ["docs/chunk-edge-note"]
+    assert await repo.count(search_text=long_identifier) == 1
+
+
+@pytest.mark.asyncio
 async def test_postgres_search_repository_bulk_index_items_and_prepare_terms(
     session_maker, test_project
 ):

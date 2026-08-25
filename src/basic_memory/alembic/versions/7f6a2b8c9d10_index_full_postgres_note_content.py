@@ -39,6 +39,9 @@ def upgrade() -> None:
             )
         """)
         op.execute("""
+            -- PostgreSQL ignores lexemes at 2 KiB and above. Stepping 5,952
+            -- characters leaves a conservative 2,048-character overlap, so
+            -- every indexable lexeme split at one edge is complete in the next.
             INSERT INTO search_index_fts_chunks (
                 project_id,
                 search_index_id,
@@ -50,13 +53,13 @@ def upgrade() -> None:
                 search_index.project_id,
                 search_index.id,
                 search_index.type,
-                (chunk_start - 1) / 7800,
+                (chunk_start - 1) / 5952,
                 substring(search_index.content_snippet FROM chunk_start FOR 8000)
             FROM search_index
             CROSS JOIN LATERAL generate_series(
                 1,
                 length(search_index.content_snippet),
-                7800
+                5952
             ) AS chunk_start
             WHERE search_index.content_snippet IS NOT NULL
               AND search_index.content_snippet <> ''
