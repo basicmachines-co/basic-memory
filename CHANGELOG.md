@@ -2,6 +2,48 @@
 
 ## Unreleased
 
+## v0.23.1 (2026-08-25)
+
+Fast-follow patch to v0.23.0 focused on PostgreSQL search parity and a
+search-destroying reindex bug. Postgres now indexes complete note bodies for
+full-text search (previously only titles and capped content stems, unlike
+SQLite), and the per-project search reindex no longer wipes every other
+project's search rows in the same database. Also adds a `#bm:links_to`
+directive for disambiguating prose wiki-links, and hardens `bm update` output
+after in-place upgrades.
+
+### Features
+
+- Added the `#bm:links_to` directive: ending a list item with `#bm:links_to`
+  forces the reference to the implicit `links_to` relation, so a single-token
+  prose prefix (`- Mother [[Alice]] #bm:links_to`) is not parsed as an
+  explicit relation type. The directive stays in the source file but is
+  stripped from indexed observation and relation content.
+
+### Bug Fixes
+
+- PostgreSQL full-text search now covers complete note bodies. Note content is
+  indexed as bounded, overlapping chunks in a new `search_index_fts_chunks`
+  table (a migration backfills existing notes), so deep content matches on
+  Postgres the way it always has on SQLite FTS5. The work includes correct
+  Boolean AND/NOT semantics across chunk boundaries, apostrophe and
+  punctuated-operand handling (`can't`, `v0.13.0b2`, `auth-service`),
+  metadata-filter composition, 100+ operand queries, and candidate
+  preselection so both GIN indexes stay in play.
+- The per-project search reindex (`POST /search/reindex`) no longer drops the
+  shared `search_index` table. Dropping it destroyed every project's search
+  rows in the same database — and on Postgres nothing outside migrations
+  recreates the table, so cloud tenants lost search entirely until manual
+  repair. The rebuild now deletes only the reindexed project's rows (chunk
+  rows cascade), and the chunks migration recreates a missing `search_index`
+  so databases hit by the old behavior migrate cleanly.
+- **#1316**: `bm update` status output no longer crashes after an in-place
+  upgrade removes the running install's files: rich's deferred Unicode width
+  table is preloaded before upgrading, and status lines fall back to plain
+  output instead of failing a completed update.
+- `bm doctor` waits for deferred note materialization before verifying the
+  API-written file, matching the accepted-write contract instead of racing it.
+
 ## v0.23.0 (2026-08-23)
 
 Semantic search grows up and concurrent writes stop deadlocking. Search gains
