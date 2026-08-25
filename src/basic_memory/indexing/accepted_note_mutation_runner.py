@@ -60,6 +60,7 @@ from basic_memory.runtime.storage import (
 )
 from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.schemas.request import EditEntityRequest
+from basic_memory.utils import resolve_directory_casing
 
 type AcceptedNoteMutationChange = RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload]
 type AcceptedNoteMutationUserProfileId = UUID
@@ -233,6 +234,11 @@ class AcceptedNoteMutationEntityRepository(Protocol):
         load_relations: bool = False,
     ) -> Entity | None: ...
 
+    async def get_distinct_directories(
+        self,
+        session: AsyncSession,
+    ) -> list[str]: ...
+
 
 class AcceptedNoteMutationNoteContentRepository(Protocol):
     """note_content lookup capability for accepted-note mutations."""
@@ -379,6 +385,58 @@ async def resolve_accepted_note_source_checksum(
     )
 
 
+async def resolve_accepted_note_directory(
+    session: AsyncSession,
+    *,
+    project_id: ProjectId,
+    directory: str,
+    dependencies: AcceptedNoteMutationDependencies,
+) -> str:
+    """Resolve a requested note directory against existing folder casing (#1326).
+
+    Trigger: the requested directory is not an existing folder but matches
+        exactly one existing folder case-insensitively.
+    Why: LLM callers guess plausible casing ("schemas" beside an existing
+        "Schemas/"); on case-sensitive storage (cloud object storage) the guess
+        silently creates a case-duplicate sibling folder. Folders are derived
+        from indexed entity file paths in the DB, never by probing storage, so
+        local and cloud runtimes resolve identically.
+    Outcome: a unique case-insensitive match adopts the existing folder's
+        casing; exact matches, unknown folders, and ambiguous case-variant
+        siblings keep the requested casing unchanged.
+    """
+    if not directory:
+        return directory
+    entity_repository = dependencies.lookup_repositories.entity_repository(project_id)
+    existing_directories = await entity_repository.get_distinct_directories(session)
+    return resolve_directory_casing(directory, existing_directories)
+
+
+async def resolve_accepted_note_schema_directory(
+    session: AsyncSession,
+    *,
+    project_id: ProjectId,
+    data: EntitySchema,
+    dependencies: AcceptedNoteMutationDependencies,
+) -> EntitySchema:
+    """Return the write schema with its directory resolved to existing casing.
+
+    The schema's ``file_path`` is computed from ``directory``, so adjusting the
+    directory redirects the conflict lookup, preparation, and permalink
+    resolution downstream. The caller's schema is never mutated: a resolved
+    directory yields a copy so route-owned request data stays as received.
+    """
+    resolved_directory = await resolve_accepted_note_directory(
+        session,
+        project_id=project_id,
+        directory=data.directory,
+        dependencies=dependencies,
+    )
+    if resolved_directory == data.directory:
+        return data
+    return data.model_copy(update={"directory": resolved_directory})
+
+
 async def run_accepted_note_create(
     session: AsyncSession,
     *,
@@ -501,10 +559,16 @@ async def _run_accepted_note_create(
         dependencies=dependencies,
     )
 
+    data = await resolve_accepted_note_schema_directory(
+        session,
+        project_id=project.id,
+        data=request.data,
+        dependencies=dependencies,
+    )
     entity_repository = dependencies.lookup_repositories.entity_repository(project.id)
     conflicting_entity = await entity_repository.get_by_file_path(
         session,
-        request.data.file_path,
+        data.file_path,
         load_relations=False,
     )
     reject_accepted_note_file_path_conflict(
@@ -515,7 +579,7 @@ async def _run_accepted_note_create(
     preparer = dependencies.preparer_factory.create_note_preparer(project)
     prepared_write = await prepare_create_or_reject(
         preparer,
-        request.data,
+        data,
         check_storage_exists=dependencies.verify_storage_absent_on_create,
         session=session,
     )
@@ -579,10 +643,16 @@ async def _run_accepted_note_update(
     existing_file_path = entity.file_path if entity is not None else None
     vacated_source: tuple[RuntimeFilePath, RuntimeFileChecksum | None] | None = None
 
+    data = await resolve_accepted_note_schema_directory(
+        session,
+        project_id=project.id,
+        data=request.data,
+        dependencies=dependencies,
+    )
     await reject_conflicting_accepted_note_file_path(
         session,
         project_id=project.id,
-        file_path=request.data.file_path,
+        file_path=data.file_path,
         allowed_entity_external_id=request.entity_external_id,
         dependencies=dependencies,
     )
@@ -600,7 +670,7 @@ async def _run_accepted_note_update(
             reject_stale_base_checksum(current_db_checksum=None)
         prepared_write = await prepare_create_or_reject(
             preparer,
-            request.data,
+            data,
             check_storage_exists=dependencies.verify_storage_absent_on_create,
             session=session,
         )
@@ -630,7 +700,7 @@ async def _run_accepted_note_update(
             try:
                 await preparer.verify_move_destination_absent(
                     source_file_path=entity.file_path,
-                    destination_file_path=request.data.file_path,
+                    destination_file_path=data.file_path,
                 )
             except EntityAlreadyExistsError as error:
                 reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.conflict, str(error))
@@ -644,7 +714,7 @@ async def _run_accepted_note_update(
         # A PUT replacement may also rename the note. Capture the exact source bytes before
         # persistence mutates the entity and note_content to the destination version so delayed
         # cleanup cannot let a later project index recreate the old path as a ghost.
-        if request.data.file_path != entity.file_path:
+        if data.file_path != entity.file_path:
             vacated_source = (
                 entity.file_path,
                 await resolve_accepted_note_source_checksum(
@@ -693,7 +763,7 @@ async def _run_accepted_note_update(
                 preparer,
                 session,
                 entity=entity,
-                data=request.data,
+                data=data,
                 current_note_content=current_note_content,
                 user_profile_value=user_profile_value,
             )
@@ -825,6 +895,18 @@ async def _run_accepted_note_move(
         dependencies=dependencies,
     )
     existing_file_path = entity.file_path
+    # The destination filename keeps its requested casing; only the parent
+    # directory resolves against existing folders (issue #1326). The path is
+    # posix-normalized above, so rpartition splits directory from filename.
+    destination_directory, _, destination_filename = accepted_file_path.rpartition("/")
+    resolved_directory = await resolve_accepted_note_directory(
+        session,
+        project_id=project.id,
+        directory=destination_directory,
+        dependencies=dependencies,
+    )
+    if resolved_directory != destination_directory:
+        accepted_file_path = f"{resolved_directory}/{destination_filename}"
     # Same-path moves fail fast everywhere by decision (2026-07-14): cloud's
     # pre-unification route returned a 200 no-op, local rejected — the unified
     # runner keeps the rejection so a mistaken identity move surfaces instead

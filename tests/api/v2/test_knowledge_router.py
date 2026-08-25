@@ -395,6 +395,88 @@ async def test_create_entity(client: AsyncClient, file_service, v2_project_url):
 
 
 @pytest.mark.asyncio
+async def test_create_entity_resolves_directory_casing(
+    client: AsyncClient, file_service, v2_project_url
+):
+    """A unique case-insensitive folder match adopts the existing casing (#1326)."""
+    seed = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "Call", "directory": "Schemas", "content": "Call schema"},
+    )
+    assert seed.status_code == 202
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "Research", "directory": "schemas", "content": "Research schema"},
+    )
+
+    assert response.status_code == 202
+    entity = EntityResponseV2.model_validate(response.json())
+    assert entity.file_path == "Schemas/Research.md"
+
+    file_content, _ = await file_service.read_file("Schemas/Research.md")
+    assert "Research schema" in file_content
+
+
+@pytest.mark.asyncio
+async def test_create_entity_resolves_nested_directory_casing(client: AsyncClient, v2_project_url):
+    """Each nested path segment resolves against existing folders (#1326)."""
+    seed = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "Seed", "directory": "Schemas/Drafts", "content": "Seed"},
+    )
+    assert seed.status_code == 202
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "Nested", "directory": "schemas/drafts", "content": "Nested"},
+    )
+
+    assert response.status_code == 202
+    entity = EntityResponseV2.model_validate(response.json())
+    assert entity.file_path == "Schemas/Drafts/Nested.md"
+
+
+@pytest.mark.asyncio
+async def test_create_entity_keeps_ambiguous_directory_casing(
+    client: AsyncClient,
+    v2_project_url,
+    test_project: Project,
+    entity_repository,
+    session_maker,
+):
+    """Existing case-variant sibling folders keep today's exact behavior (#1326)."""
+    now = datetime.now(timezone.utc)
+    async with db.scoped_session(session_maker) as session:
+        for file_path, permalink in (
+            ("Schemas/One.md", "schemas/one"),
+            ("SCHEMAS/Two.md", "schemas/two"),
+        ):
+            await entity_repository.add(
+                session,
+                EntityModel(
+                    title=Path(file_path).stem,
+                    note_type="note",
+                    content_type="text/markdown",
+                    file_path=file_path,
+                    permalink=permalink,
+                    created_at=now,
+                    updated_at=now,
+                    project_id=test_project.id,
+                ),
+            )
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "Three", "directory": "schemas", "content": "Ambiguous"},
+    )
+
+    assert response.status_code == 202
+    entity = EntityResponseV2.model_validate(response.json())
+    assert entity.file_path == "schemas/Three.md"
+
+
+@pytest.mark.asyncio
 async def test_create_entity_conflict_returns_409(client: AsyncClient, v2_project_url):
     """Test creating a duplicate entity returns 409 Conflict."""
     data = {
@@ -1316,6 +1398,34 @@ async def test_move_entity(
     assert note_content.file_path == "moved/MovedEntity.md"
     assert note_content.db_version == 2
     assert note_content.file_write_status == "synced"
+
+
+@pytest.mark.asyncio
+async def test_move_entity_resolves_destination_directory_casing(
+    client: AsyncClient, v2_project_url
+):
+    """A move destination parent adopts the unique existing folder casing (#1326)."""
+    seed = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "Seed", "directory": "Schemas", "content": "Seed"},
+    )
+    assert seed.status_code == 202
+
+    create = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "MoveMe", "directory": "test", "content": "Content to move"},
+    )
+    assert create.status_code == 202
+    source_external_id = EntityResponseV2.model_validate(create.json()).external_id
+
+    response = await client.put(
+        f"{v2_project_url}/knowledge/entities/{source_external_id}/move",
+        json={"destination_path": "schemas/MoveMe.md"},
+    )
+
+    assert response.status_code == 202
+    moved = EntityResponseV2.model_validate(response.json())
+    assert moved.file_path == "Schemas/MoveMe.md"
 
 
 @pytest.mark.asyncio

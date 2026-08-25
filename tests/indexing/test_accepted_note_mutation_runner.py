@@ -346,11 +346,14 @@ class _EntityLookupRepository:
         *,
         by_external_id: Entity | None = None,
         by_file_path: Entity | None = None,
+        distinct_directories: list[str] | None = None,
     ) -> None:
         self.by_external_id = by_external_id
         self.by_file_path = by_file_path
+        self.distinct_directories = distinct_directories or []
         self.external_id_calls: list[tuple[AsyncSession, str, bool]] = []
         self.file_path_calls: list[tuple[AsyncSession, str, bool]] = []
+        self.distinct_directory_calls: list[AsyncSession] = []
 
     async def get_by_external_id(
         self,
@@ -371,6 +374,13 @@ class _EntityLookupRepository:
     ) -> Entity | None:
         self.file_path_calls.append((session, file_path, load_relations))
         return self.by_file_path
+
+    async def get_distinct_directories(
+        self,
+        session: AsyncSession,
+    ) -> list[str]:
+        self.distinct_directory_calls.append(session)
+        return self.distinct_directories
 
 
 class _NoteContentLookupRepository:
@@ -1685,6 +1695,210 @@ async def test_run_accepted_note_move_rejects_same_file_path() -> None:
 
     assert exc_info.value.rejection.kind is AcceptedNoteMutationRejectKind.bad_request
     assert exc_info.value.rejection.detail == "Source and destination paths are the same."
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_create_resolves_directory_casing() -> None:
+    """A unique case-insensitive folder match redirects the create (#1326)."""
+    session = cast(AsyncSession, object())
+    schema = _schema()
+    project = _project()
+    entity = _entity()
+    entity_lookup_repository = _EntityLookupRepository(distinct_directories=["Notes", "specs"])
+    preparer = _CreatePreparer(_prepared())
+
+    await run_accepted_note_create(
+        session,
+        request=AcceptedNoteCreateMutation(
+            project_external_id="project-123",
+            data=schema,
+            actor=AcceptedNoteMutationActor(user_profile_id=_ACTOR_ID),
+            source="api",
+        ),
+        dependencies=_dependencies(
+            project_repository=_ProjectRepository(project),
+            entity_lookup_repository=entity_lookup_repository,
+            note_content_lookup_repository=_NoteContentLookupRepository(),
+            preparer_factory=_PreparerFactory(preparer),
+            pending_entity_repository=_PendingEntityRepository(entity),
+            note_content_accept_repository=_NoteContentAcceptRepository(_note_content(entity)),
+            search_repository=_SearchRepository(),
+        ),
+    )
+
+    assert entity_lookup_repository.distinct_directory_calls == [session]
+    # Conflict lookup, filename conflict detection, and preparation all see the
+    # resolved existing casing.
+    assert entity_lookup_repository.file_path_calls == [(session, "Notes/Accepted.md", False)]
+    assert preparer.conflict_calls == [("Notes/Accepted.md", False, session)]
+    prepared_schema = preparer.calls[0][0]
+    assert prepared_schema.directory == "Notes"
+    assert prepared_schema.file_path == "Notes/Accepted.md"
+    # The route-owned request schema stays as received.
+    assert schema.directory == "notes"
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_create_keeps_ambiguous_directory_casing() -> None:
+    """Multiple existing case-variant folders keep today's exact behavior."""
+    session = cast(AsyncSession, object())
+    schema = _schema()
+    project = _project()
+    entity = _entity()
+    entity_lookup_repository = _EntityLookupRepository(distinct_directories=["Notes", "NOTES"])
+    preparer = _CreatePreparer(_prepared())
+
+    await run_accepted_note_create(
+        session,
+        request=AcceptedNoteCreateMutation(
+            project_external_id="project-123",
+            data=schema,
+            actor=AcceptedNoteMutationActor(user_profile_id=_ACTOR_ID),
+            source="api",
+        ),
+        dependencies=_dependencies(
+            project_repository=_ProjectRepository(project),
+            entity_lookup_repository=entity_lookup_repository,
+            note_content_lookup_repository=_NoteContentLookupRepository(),
+            preparer_factory=_PreparerFactory(preparer),
+            pending_entity_repository=_PendingEntityRepository(entity),
+            note_content_accept_repository=_NoteContentAcceptRepository(_note_content(entity)),
+            search_repository=_SearchRepository(),
+        ),
+    )
+
+    assert entity_lookup_repository.file_path_calls == [(session, "notes/Accepted.md", False)]
+    # The unchanged schema is passed through without copying.
+    assert preparer.calls == [(schema, False, session)]
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_update_resolves_directory_casing() -> None:
+    """A PUT with a case-variant directory replaces in place instead of renaming."""
+    session = _MutationSession()
+    schema = _schema()
+    project = _project()
+    entity = _entity(file_path="Notes/Accepted.md")
+    note_content = _note_content(entity)
+    entity_lookup_repository = _EntityLookupRepository(
+        by_external_id=entity,
+        distinct_directories=["Notes"],
+    )
+    preparer = _CreatePreparer(_prepared_replacement())
+    preparer_factory = _PreparerFactory(preparer)
+
+    await run_accepted_note_update(
+        cast(AsyncSession, session),
+        request=AcceptedNoteUpdateMutation(
+            project_external_id="project-123",
+            entity_external_id="note-123",
+            data=schema,
+            actor=AcceptedNoteMutationActor(user_profile_id=_ACTOR_ID),
+            source="api",
+        ),
+        dependencies=_dependencies(
+            project_repository=_ProjectRepository(project),
+            entity_lookup_repository=entity_lookup_repository,
+            note_content_lookup_repository=_NoteContentLookupRepository(note_content),
+            preparer_factory=preparer_factory,
+            pending_entity_repository=_PendingEntityRepository(entity),
+            note_content_accept_repository=_NoteContentAcceptRepository(note_content),
+            search_repository=_SearchRepository(),
+        ),
+    )
+
+    replaced_schema = preparer.replace_calls[0][1]
+    assert replaced_schema.directory == "Notes"
+    assert replaced_schema.file_path == "Notes/Accepted.md"
+    # No rename happened, so no source path was vacated for cleanup.
+    assert preparer_factory.checksum_calls == []
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_move_resolves_destination_directory_casing() -> None:
+    """A move destination parent adopts the unique existing folder casing."""
+    session = _MutationSession()
+    project = _project()
+    entity = _entity(file_path="notes/accepted.md")
+    note_content = _note_content(entity)
+    prepared_move = PreparedEntityMove(
+        file_path=Path("Archive/accepted.md"),
+        markdown_content="# Moved\n",
+        search_content="Moved",
+        permalink="archive/accepted",
+    )
+    entity_lookup_repository = _EntityLookupRepository(
+        by_external_id=entity,
+        distinct_directories=["Archive", "notes"],
+    )
+    preparer = _CreatePreparer(_prepared(), prepared_move=prepared_move)
+
+    result = await run_accepted_note_move(
+        cast(AsyncSession, session),
+        request=AcceptedNoteMoveMutation(
+            project_external_id="project-123",
+            entity_external_id="note-123",
+            destination_path="archive/accepted.md",
+            actor=AcceptedNoteMutationActor(user_profile_id=None),
+            source="mcp",
+        ),
+        dependencies=_dependencies(
+            project_repository=_ProjectRepository(project),
+            entity_lookup_repository=entity_lookup_repository,
+            note_content_lookup_repository=_NoteContentLookupRepository(note_content),
+            preparer_factory=_PreparerFactory(preparer),
+            pending_entity_repository=_PendingEntityRepository(entity),
+            note_content_accept_repository=_NoteContentAcceptRepository(note_content),
+            search_repository=_SearchRepository(),
+        ),
+    )
+
+    assert preparer.move_calls == [
+        (entity, "# Old\n", "Archive/accepted.md", False, cast(AsyncSession, session))
+    ]
+    assert entity.file_path == "Archive/accepted.md"
+    change = result.change
+    assert change.materialization is not None
+    assert change.materialization.previous_file_path == "notes/accepted.md"
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_move_rejects_case_variant_of_current_path() -> None:
+    """A destination resolving onto the note's own path is a same-path move."""
+    session = _MutationSession()
+    project = _project()
+    entity = _entity(file_path="Notes/accepted.md")
+    note_content = _note_content(entity)
+    entity_lookup_repository = _EntityLookupRepository(
+        by_external_id=entity,
+        distinct_directories=["Notes"],
+    )
+    preparer = _CreatePreparer(_prepared())
+
+    with pytest.raises(AcceptedNoteMutationRejected) as exc_info:
+        await run_accepted_note_move(
+            cast(AsyncSession, session),
+            request=AcceptedNoteMoveMutation(
+                project_external_id="project-123",
+                entity_external_id="note-123",
+                destination_path="notes/accepted.md",
+                actor=AcceptedNoteMutationActor(user_profile_id=None),
+                source="mcp",
+            ),
+            dependencies=_dependencies(
+                project_repository=_ProjectRepository(project),
+                entity_lookup_repository=entity_lookup_repository,
+                note_content_lookup_repository=_NoteContentLookupRepository(note_content),
+                preparer_factory=_PreparerFactory(preparer),
+                pending_entity_repository=_PendingEntityRepository(entity),
+                note_content_accept_repository=_NoteContentAcceptRepository(note_content),
+                search_repository=_SearchRepository(),
+            ),
+        )
+
+    assert exc_info.value.rejection.kind is AcceptedNoteMutationRejectKind.bad_request
+    assert exc_info.value.rejection.detail == "Source and destination paths are the same."
+    assert preparer.move_calls == []
 
 
 @pytest.mark.asyncio
