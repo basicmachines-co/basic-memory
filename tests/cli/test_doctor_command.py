@@ -91,3 +91,20 @@ async def test_doctor_reports_api_note_missing_after_materialization_drain(tmp_p
             tmp_path / "doctor" / "missing.md",
             "doctor/missing.md",
         )
+
+
+@pytest.mark.asyncio
+async def test_doctor_cleanup_deletes_project_notes():
+    """Doctor cleanup removes the disposable project's canonical files."""
+
+    deleted: list[tuple[str, bool]] = []
+
+    class ProjectClient:
+        async def delete_project(
+            self, project_external_id: str, delete_notes: bool = False
+        ) -> None:
+            deleted.append((project_external_id, delete_notes))
+
+    await doctor_cmd._delete_doctor_project(ProjectClient(), "doctor-test", "project-id")
+
+    assert deleted == [("project-id", True)]
