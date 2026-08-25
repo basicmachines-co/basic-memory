@@ -24,10 +24,10 @@ def test_upgrade_creates_and_backfills_bounded_postgres_vectors(monkeypatch) -> 
 
     assert "CREATE TABLE search_index_fts_chunks" in statements[0]
     assert "to_tsvector('english', chunk_text)" in statements[0]
-    assert "CREATE INDEX idx_search_index_fts_chunks_fts" in statements[1]
-    assert "generate_series" in statements[2]
-    assert "FOR 8000" in statements[2]
-    assert "7800" in statements[2]
+    assert "generate_series" in statements[1]
+    assert "FOR 8000" in statements[1]
+    assert "7800" in statements[1]
+    assert "CREATE INDEX idx_search_index_fts_chunks_fts" in statements[2]
 
 
 def test_downgrade_drops_postgres_chunk_table(monkeypatch) -> None:

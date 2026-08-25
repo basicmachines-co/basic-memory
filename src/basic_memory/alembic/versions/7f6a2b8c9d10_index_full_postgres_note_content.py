@@ -39,10 +39,6 @@ def upgrade() -> None:
             )
         """)
         op.execute("""
-            CREATE INDEX idx_search_index_fts_chunks_fts
-            ON search_index_fts_chunks USING gin(textsearchable_index_col)
-        """)
-        op.execute("""
             INSERT INTO search_index_fts_chunks (
                 project_id,
                 search_index_id,
@@ -64,6 +60,10 @@ def upgrade() -> None:
             ) AS chunk_start
             WHERE search_index.content_snippet IS NOT NULL
               AND search_index.content_snippet <> ''
+        """)
+        op.execute("""
+            CREATE INDEX idx_search_index_fts_chunks_fts
+            ON search_index_fts_chunks USING gin(textsearchable_index_col)
         """)
 
 
