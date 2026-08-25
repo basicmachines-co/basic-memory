@@ -221,6 +221,28 @@ async def add_project(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post("/doctor", response_model=ProjectStatusResponse, status_code=201)
+async def add_doctor_project(project_service: ProjectServiceDep) -> ProjectStatusResponse:
+    """Create a server-generated disposable project for the local doctor check."""
+    try:
+        new_project = await project_service.add_doctor_project()
+    except ValueError as e:  # pragma: no cover
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return ProjectStatusResponse(
+        message=f"Project '{new_project.name}' added successfully",
+        status="success",
+        default=new_project.is_default or False,
+        new_project=ProjectItem(
+            id=new_project.id,
+            external_id=new_project.external_id,
+            name=new_project.name,
+            path=new_project.path,
+            is_default=new_project.is_default or False,
+        ),
+    )
+
+
 @router.post("/config/sync", response_model=ProjectStatusResponse)
 async def synchronize_projects(
     project_service: ProjectServiceDep,

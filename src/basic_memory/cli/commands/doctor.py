@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 import uuid
 from pathlib import Path
+from typing import Protocol
 
 from loguru import logger
 from rich.console import Console
@@ -21,6 +22,14 @@ from basic_memory.schemas.search import SearchQuery
 from basic_memory.schemas import ProjectIndexRunResponse
 
 console = Console()
+
+
+class DoctorProjectClient(Protocol):
+    """Project-client capability required to clean up doctor state."""
+
+    async def delete_project(
+        self, project_external_id: str, delete_notes: bool = False
+    ) -> object: ...
 
 
 def _is_default_project_delete_error(error: Exception) -> bool:
@@ -61,14 +70,14 @@ async def _delete_doctor_project_locally(project_name: str, project_id: str) -> 
 
 
 async def _delete_doctor_project(
-    project_client: ProjectClient, project_name: str, project_id: str
+    project_client: DoctorProjectClient, project_name: str, project_id: str
 ) -> None:
     """Delete the generated doctor project without weakening the public API guard."""
     # Deferred: ToolError lives in FastMCP's runtime, which must not load at CLI startup (#886).
     from fastmcp.exceptions import ToolError
 
     try:
-        await project_client.delete_project(project_id)
+        await project_client.delete_project(project_id, delete_notes=True)
     except ToolError as exc:
         if not _is_default_project_delete_error(exc):
             raise
@@ -127,9 +136,16 @@ async def run_doctor() -> None:
             project_id: str | None = None
 
             try:
-                status = await project_client.create_project(project_request.model_dump())
+                from basic_memory.config import ConfigManager
+
+                status = (
+                    await project_client.create_doctor_project()
+                    if ConfigManager().config.project_root
+                    else await project_client.create_project(project_request.model_dump())
+                )
                 if not status.new_project:
                     raise ValueError("Failed to create doctor project")
+                project_name = status.new_project.name
                 project_id = status.new_project.external_id
                 # Use the resolved path from the server — when project_root is configured,
                 # the actual project directory differs from the requested temp_path

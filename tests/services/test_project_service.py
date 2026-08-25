@@ -1208,6 +1208,32 @@ async def test_add_project_rejects_nested_child_path(project_service: ProjectSer
 
 
 @pytest.mark.asyncio
+async def test_add_project_rejects_doctor_prefixed_nested_child_path(
+    project_service: ProjectService,
+):
+    """A user-controlled doctor-prefixed name cannot bypass project isolation."""
+    parent_project_name = f"parent-project-{os.urandom(4).hex()}"
+    doctor_project_name = f"doctor-{os.urandom(4).hex()}"
+    with tempfile.TemporaryDirectory() as temp_dir:
+        parent_path = Path(temp_dir) / "parent"
+        parent_path.mkdir()
+
+        try:
+            await project_service.add_project(parent_project_name, parent_path.as_posix())
+
+            with pytest.raises(ValueError, match="nested within existing project"):
+                await project_service.add_project(
+                    doctor_project_name,
+                    (parent_path / "doctor").as_posix(),
+                )
+        finally:
+            if doctor_project_name in project_service.projects:
+                await project_service.remove_project(doctor_project_name)
+            if parent_project_name in project_service.projects:
+                await project_service.remove_project(parent_project_name)
+
+
+@pytest.mark.asyncio
 async def test_add_project_rejects_parent_path_over_existing_child(project_service: ProjectService):
     """Test that adding a parent project over an existing nested project fails."""
     child_project_name = f"child-project-{os.urandom(4).hex()}"
