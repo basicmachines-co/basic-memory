@@ -1143,6 +1143,21 @@ class SearchRepositoryBase(ABC):
             )
             await session.commit()
 
+    async def delete_project_search_rows(self) -> None:
+        """Delete every full-text search row owned by this repository's project.
+
+        Shared across backends: both store rows in `search_index` keyed by
+        project_id, and a project-scoped DELETE leaves sibling projects in the
+        same database untouched. On Postgres the bounded FTS chunk rows follow
+        via their ON DELETE CASCADE foreign key.
+        """
+        async with db.scoped_session(self.session_maker) as session:
+            await session.execute(
+                text("DELETE FROM search_index WHERE project_id = :project_id"),
+                {"project_id": self.project_id},
+            )
+            await session.commit()
+
     async def execute_query(
         self,
         query: Executable,

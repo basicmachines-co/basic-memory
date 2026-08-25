@@ -129,6 +129,10 @@ class SearchRepository(Protocol):
         """Delete item by permalink."""
         ...
 
+    async def delete_project_search_rows(self) -> None:
+        """Delete every full-text search row owned by this project."""
+        ...
+
     async def delete_by_entity_id(self, entity_id: int) -> None:
         """Delete items by entity ID."""
         ...

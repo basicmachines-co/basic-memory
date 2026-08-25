@@ -7,6 +7,7 @@ from sqlalchemy import text
 
 from basic_memory import db
 from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.repository.search_repository import create_search_repository
 from basic_memory.schemas.search import SearchQuery, SearchItemType, SearchRetrievalMode
 from basic_memory.services.search_service import _strip_nul
 from typing import Any
@@ -1720,3 +1721,76 @@ async def test_reindex_vectors_no_callback(
     stats = await search_service.reindex_vectors()
     assert stats["total_entities"] >= 1
     assert stats["embedded"] + stats["errors"] == stats["total_entities"]
+
+
+@pytest.mark.asyncio
+async def test_reindex_all_preserves_sibling_project_search_rows(
+    search_service,
+    session_maker,
+    project_repository,
+    app_config,
+    tmp_path,
+):
+    """Regression: a per-project reindex must not destroy sibling projects' rows.
+
+    The historical implementation dropped the shared search_index table, wiping
+    every project in the database — and on Postgres nothing outside migrations
+    recreates that table, so search stayed broken until manual repair.
+    """
+    async with db.scoped_session(session_maker) as session:
+        sibling_project = await project_repository.create(
+            session,
+            {
+                "name": "sibling-project",
+                "description": "Second project sharing the same database",
+                "path": str(tmp_path / "sibling"),
+                "is_active": True,
+                "is_default": False,
+            },
+        )
+
+    sibling_repository = create_search_repository(
+        session_maker,
+        project_id=sibling_project.id,
+        app_config=app_config,
+    )
+    now = datetime.now(timezone.utc)
+    await sibling_repository.index_item(
+        SearchIndexRow(
+            project_id=sibling_project.id,
+            id=77001,
+            type="entity",
+            title="Sibling Note",
+            content_stems="sibling searchable content",
+            content_snippet="sibling searchable content",
+            permalink="sibling/sibling-note",
+            file_path="sibling/sibling_note.md",
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    # A row in the reindexed project with no backing entity: the rebuild starts
+    # from the entity table, so this row must be gone afterwards.
+    await search_service.repository.index_item(
+        SearchIndexRow(
+            project_id=search_service.repository.project_id,
+            id=77002,
+            type="entity",
+            title="Stale Row",
+            content_stems="stalemarker content",
+            content_snippet="stalemarker content",
+            permalink="test/stale-row",
+            file_path="test/stale_row.md",
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    await search_service.reindex_all()
+
+    sibling_results = await sibling_repository.search(search_text="sibling")
+    assert [row.permalink for row in sibling_results] == ["sibling/sibling-note"]
+
+    own_results = await search_service.repository.search(search_text="stalemarker")
+    assert own_results == []
