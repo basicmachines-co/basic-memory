@@ -1,5 +1,6 @@
 """Tests for V2 project management API routes (ID-based endpoints)."""
 
+import os
 import tempfile
 from pathlib import Path
 
@@ -629,3 +630,47 @@ async def test_resolve_project_empty_identifier(client: AsyncClient, v2_projects
     response = await client.post(f"{v2_projects_url}/resolve", json=resolve_data)
 
     assert response.status_code == 422  # Validation error
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Project root constraints only tested on POSIX systems")
+@pytest.mark.asyncio
+async def test_add_doctor_project_endpoint(
+    client: AsyncClient,
+    v2_projects_url,
+    monkeypatch,
+    tmp_path,
+):
+    """Regression #1323: the doctor endpoint creates a disposable nested project."""
+    root_path = tmp_path / "app" / "data"
+    root_path.mkdir(parents=True)
+    monkeypatch.setenv("BASIC_MEMORY_PROJECT_ROOT", str(root_path))
+    from basic_memory import config as config_module
+
+    config_module._CONFIG_CACHE = None
+    config_module._CONFIG_MTIME = None
+    config_module._CONFIG_SIZE = None
+    try:
+        response = await client.post(f"{v2_projects_url}/doctor")
+
+        assert response.status_code == 201
+        data = response.json()
+        assert data["status"] == "success"
+        assert data["new_project"]["name"].startswith("doctor-")
+        assert Path(data["new_project"]["path"]).resolve().is_relative_to(root_path.resolve())
+    finally:
+        monkeypatch.delenv("BASIC_MEMORY_PROJECT_ROOT", raising=False)
+        config_module._CONFIG_CACHE = None
+        config_module._CONFIG_MTIME = None
+        config_module._CONFIG_SIZE = None
+
+
+@pytest.mark.asyncio
+async def test_add_doctor_project_endpoint_requires_project_root(
+    client: AsyncClient,
+    v2_projects_url,
+):
+    """Without a configured project root the doctor endpoint refuses cleanly."""
+    response = await client.post(f"{v2_projects_url}/doctor")
+
+    assert response.status_code == 400
+    assert "BASIC_MEMORY_PROJECT_ROOT" in response.json()["detail"]

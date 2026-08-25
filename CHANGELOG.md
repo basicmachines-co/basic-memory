@@ -41,6 +41,11 @@ after in-place upgrades.
   upgrade removes the running install's files: rich's deferred Unicode width
   table is preloaded before upgrading, and status lines fall back to plain
   output instead of failing a completed update.
+- **#1323**: `bm doctor` no longer fails when `BASIC_MEMORY_PROJECT_ROOT`
+  points at an existing project's directory. Doctor now asks the server for a
+  disposable `doctor-*` project under the configured root — the only
+  sanctioned exception to the nested-project guard — and cleanup deletes the
+  project's directory along with its registration.
 - `bm doctor` waits for deferred note materialization before verifying the
   API-written file, matching the accepted-write contract instead of racing it.
 

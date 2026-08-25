@@ -528,6 +528,36 @@ class TestProjectClient:
         assert client.http_client is mock_http
 
     @pytest.mark.asyncio
+    async def test_create_doctor_project(self, monkeypatch):
+        """Test create_doctor_project posts to the doctor endpoint."""
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "message": "Project 'doctor-abc12345' added successfully",
+            "status": "success",
+            "default": False,
+            "new_project": {
+                "id": 7,
+                "external_id": "uuid-doctor",
+                "name": "doctor-abc12345",
+                "path": "/app/data/doctor-abc12345",
+                "is_default": False,
+            },
+        }
+
+        async def mock_call_post(client, url, **kwargs):
+            assert url == "/v2/projects/doctor"
+            return mock_response
+
+        monkeypatch.setattr("basic_memory.mcp.tools.utils.call_post", mock_call_post)
+
+        mock_http = MagicMock()
+        client = ProjectClient(mock_http)
+        result = await client.create_doctor_project()
+        assert result.new_project is not None
+        assert result.new_project.name == "doctor-abc12345"
+
+    @pytest.mark.asyncio
     async def test_list_projects(self, monkeypatch):
         """Test list_projects calls correct endpoint."""
 

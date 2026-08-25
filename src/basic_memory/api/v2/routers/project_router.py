@@ -226,7 +226,7 @@ async def add_doctor_project(project_service: ProjectServiceDep) -> ProjectStatu
     """Create a server-generated disposable project for the local doctor check."""
     try:
         new_project = await project_service.add_doctor_project()
-    except ValueError as e:  # pragma: no cover
+    except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     return ProjectStatusResponse(

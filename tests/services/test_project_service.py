@@ -1722,3 +1722,62 @@ async def test_remove_project_rejects_database_default_in_both_modes(
                 project_service.config_manager.remove_project(test_project_name)
             except Exception:
                 pass
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Project root constraints only tested on POSIX systems")
+@pytest.mark.asyncio
+async def test_add_doctor_project_allows_nested_under_configured_root(
+    project_service: ProjectService, config_manager: ConfigManager, monkeypatch
+):
+    """Regression #1323: doctor can create its disposable project under the root.
+
+    When an existing project owns BASIC_MEMORY_PROJECT_ROOT itself, the normal
+    nesting guard rejects any project beneath it. The server-generated doctor
+    project is the sanctioned exception, and cleanup removes its directory.
+    """
+    with tempfile.TemporaryDirectory() as temp_dir:
+        root_path = Path(temp_dir) / "app" / "data"
+        root_path.mkdir(parents=True, exist_ok=True)
+        owner_name = f"root-owner-{os.urandom(4).hex()}"
+
+        # The owner project claims the root itself, as in the issue's Docker setup
+        # (created before project_root constraints applied to it).
+        await project_service.add_project(owner_name, str(root_path))
+
+        monkeypatch.setenv("BASIC_MEMORY_PROJECT_ROOT", str(root_path))
+        from basic_memory import config as config_module
+
+        config_module._CONFIG_CACHE = None
+        config_module._CONFIG_MTIME = None
+        config_module._CONFIG_SIZE = None
+
+        doctor_name = None
+        try:
+            project = await project_service.add_doctor_project()
+            doctor_name = project.name
+
+            assert doctor_name.startswith("doctor-")
+            doctor_path = Path(project.path).resolve()
+            assert doctor_path.is_relative_to(root_path.resolve())
+            assert doctor_path != root_path.resolve()
+            assert doctor_path.exists()
+
+            await project_service.remove_project(doctor_name, delete_notes=True)
+            doctor_name = None
+            assert not doctor_path.exists()
+        finally:
+            if doctor_name and doctor_name in project_service.projects:
+                await project_service.remove_project(doctor_name, delete_notes=True)
+            monkeypatch.delenv("BASIC_MEMORY_PROJECT_ROOT", raising=False)
+            config_module._CONFIG_CACHE = None
+            config_module._CONFIG_MTIME = None
+            config_module._CONFIG_SIZE = None
+            if owner_name in project_service.projects:
+                await project_service.remove_project(owner_name)
+
+
+@pytest.mark.asyncio
+async def test_add_doctor_project_requires_project_root(project_service: ProjectService):
+    """Without a configured root there is no nesting problem for doctor to solve."""
+    with pytest.raises(ValueError, match="BASIC_MEMORY_PROJECT_ROOT"):
+        await project_service.add_doctor_project()
