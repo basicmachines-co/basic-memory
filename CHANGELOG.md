@@ -2,15 +2,23 @@
 
 ## Unreleased
 
+## v0.23.2 (2026-08-25)
+
+Patch release fixing case-duplicate folder creation.
+
 ### Bug Fixes
 
-- `write_note` and `move_note` no longer create case-duplicate folders
-  (`schemas/` beside an existing `Schemas/`). When a requested directory is
-  not an existing folder but matches exactly one existing folder
-  case-insensitively, the note lands in the existing folder; unknown folders
-  are still created as given, and existing case-variant siblings keep today's
-  exact behavior. Folders are resolved from the indexed database paths, so
-  local and cloud runtimes behave identically. (#1326)
+- **#1326**: `write_note` and `move_note` no longer create case-duplicate
+  folders (`schemas/` beside an existing `Schemas/`). When a requested
+  directory is not an existing folder but matches exactly one existing folder
+  case-insensitively, the note lands in the existing folder — nested paths
+  resolve per segment; unknown folders are still created as given, and
+  existing case-variant siblings keep today's exact behavior. Folders are
+  resolved from the indexed database paths, so local and cloud runtimes
+  behave identically, and content-only note updates skip resolution entirely.
+  `move_note` reports the actual landing path on a case-corrected move
+  instead of a false failure, while a basename divergence still fails
+  honestly.
 
 ## v0.23.1 (2026-08-25)
 
