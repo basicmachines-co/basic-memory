@@ -78,6 +78,13 @@ class ProjectClient:
         )
         return ProjectStatusResponse.model_validate(response.json())
 
+    async def create_doctor_project(self) -> ProjectStatusResponse:
+        """Create the server-generated disposable project used by doctor."""
+        from basic_memory.mcp.tools.utils import call_post
+
+        response = await call_post(self.http_client, "/v2/projects/doctor")
+        return ProjectStatusResponse.model_validate(response.json())
+
     async def delete_project(
         self, project_external_id: str, delete_notes: bool = False
     ) -> ProjectStatusResponse:
