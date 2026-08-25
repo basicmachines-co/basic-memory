@@ -47,6 +47,8 @@ from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 POSTGRES_FTS_CHUNK_SIZE = 8_000
 POSTGRES_FTS_CHUNK_OVERLAP = 200
+_TSQUERY_OPERAND_PATTERN = re.compile(r"'(?:''|[^'])*'(?::\*)?|[^\s&|!()]+")
+_TSQUERY_WORD_PATTERN = re.compile(r"[^\W_]+(?:'[^\W_]+)?", re.UNICODE)
 
 
 def _iter_fts_chunks(content: str | None) -> list[tuple[int, str]]:
@@ -59,6 +61,29 @@ def _iter_fts_chunks(content: str | None) -> list[tuple[int, str]]:
         (chunk_index, content[start : start + POSTGRES_FTS_CHUNK_SIZE])
         for chunk_index, start in enumerate(range(0, len(content), step))
     ]
+
+
+def _tsquery_operands(processed_text: str) -> list[tuple[str, str]]:
+    """Return unique (query operand, representative text) pairs in source order."""
+    operands: dict[str, str] = {}
+    for operand in _TSQUERY_OPERAND_PATTERN.findall(processed_text):
+        representative = operand.removesuffix(":*")
+        if representative.startswith("'") and representative.endswith("'"):
+            representative = representative[1:-1].replace("''", "'")
+            operands.setdefault(operand, representative)
+            continue
+
+        # A malformed strict operand (for example ``foo<bar:*``) must not poison
+        # the later relaxed retry. Split punctuation into the same safe word pieces
+        # that PostgreSQL will lex, while the original full tsquery still determines
+        # whether the strict attempt raises and falls back.
+        is_prefix = operand.endswith(":*")
+        words = _TSQUERY_WORD_PATTERN.findall(representative)
+        for word in words or [representative]:
+            escaped_word = "'{}'".format(word.replace("'", "''")) if "'" in word else word
+            safe_operand = f"{escaped_word}:*" if is_prefix else escaped_word
+            operands.setdefault(safe_operand, word)
+    return list(operands.items())
 
 
 def _strip_nul_from_row(row_data: dict[str, Any]) -> dict[str, Any]:
@@ -761,6 +786,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         params = {}
         order_by_clause = ""
         from_clause = "search_index"
+        document_vector_sql: str | None = None
 
         # Handle text search for title and content using tsvector
         if search_text:
@@ -771,18 +797,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 # Prepare search term for tsquery
                 processed_text = self._prepare_search_term(search_text.strip())
                 params["text"] = processed_text
-                # Full bodies live in bounded child vectors because PostgreSQL rejects
-                # any single tsvector larger than roughly 1 MB.
-                conditions.append(
-                    "(search_index.textsearchable_index_col "
-                    "@@ to_tsquery('english', :text) OR EXISTS ("
-                    "SELECT 1 FROM search_index_fts_chunks AS fts_chunk "
-                    "WHERE fts_chunk.project_id = search_index.project_id "
-                    "AND fts_chunk.search_index_id = search_index.id "
-                    "AND fts_chunk.search_index_type = search_index.type "
-                    "AND fts_chunk.textsearchable_index_col "
-                    "@@ to_tsquery('english', :text)))"
-                )
+                document_vector_sql = self._document_fts_vector_sql(processed_text, params)
+                conditions.append(f"{document_vector_sql} @@ to_tsquery('english', :text)")
 
         # Handle title search
         if title:
@@ -941,8 +957,10 @@ class PostgresSearchRepository(SearchRepositoryBase):
         # Build SQL with ts_rank() for scoring
         # Note: If no text search, score will be NULL, so we use COALESCE to default to 0
         if search_text and search_text.strip() and search_text.strip() != "*":
+            assert document_vector_sql is not None
             score_expr = (
                 "GREATEST("
+                f"ts_rank({document_vector_sql}, to_tsquery('english', :text)), "
                 "ts_rank(search_index.textsearchable_index_col, to_tsquery('english', :text)), "
                 "COALESCE((SELECT MAX(ts_rank("
                 "fts_chunk.textsearchable_index_col, to_tsquery('english', :text))) "
@@ -957,6 +975,34 @@ class PostgresSearchRepository(SearchRepositoryBase):
             score_expr = "0"
 
         return from_clause, where_clause, params, order_by_clause, score_expr
+
+    @staticmethod
+    def _document_fts_vector_sql(processed_text: str, params: dict[str, Any]) -> str:
+        """Build a query-sized vector representing lexemes found anywhere in one item."""
+        present_lexemes: list[str] = []
+        for index, (operand, representative) in enumerate(_tsquery_operands(processed_text)):
+            operand_param = f"text_operand_{index}"
+            representative_param = f"text_representative_{index}"
+            params[operand_param] = operand
+            params[representative_param] = representative
+            present_lexemes.append(
+                "CASE WHEN (search_index.textsearchable_index_col "
+                f"@@ to_tsquery('english', :{operand_param}) OR EXISTS ("
+                "SELECT 1 FROM search_index_fts_chunks AS operand_chunk "
+                "WHERE operand_chunk.project_id = search_index.project_id "
+                "AND operand_chunk.search_index_id = search_index.id "
+                "AND operand_chunk.search_index_type = search_index.type "
+                "AND operand_chunk.textsearchable_index_col "
+                f"@@ to_tsquery('english', :{operand_param}))) "
+                f"THEN :{representative_param} ELSE '' END"
+            )
+
+        if not present_lexemes:
+            return "search_index.textsearchable_index_col"
+
+        # The synthesized text contains at most the query operands, never the note body.
+        # This preserves document-wide Boolean semantics without recreating an unbounded vector.
+        return f"to_tsvector('english', concat_ws(' ', {', '.join(present_lexemes)}))"
 
     @override
     async def search(
