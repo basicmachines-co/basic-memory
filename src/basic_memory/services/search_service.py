@@ -11,7 +11,6 @@ from typing import Any, List, Optional, Set, Dict
 from dateparser import parse
 from fastapi import BackgroundTasks
 from loguru import logger
-from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import logfire
@@ -152,11 +151,20 @@ class SearchService:
         logger.info("Starting full reindex")
         # Trigger: a full search rebuild removes every derived row.
         # Why: vector storage may live outside SQL, so cleanup must cross the
-        # repository boundary before the full-text table is recreated.
+        # repository boundary before the full-text rows are rebuilt.
         # Outcome: built-in and extension indexes follow the same lifecycle.
         await self.repository.delete_project_vector_rows()
-        await self.repository.execute_query(text("DROP TABLE IF EXISTS search_index"), params={})
+        # Trigger: this service reindexes exactly one project, but search_index
+        # is shared by every project in the database (local SQLite consolidated
+        # into one memory.db; cloud tenants share one Postgres DB across
+        # projects). The historical DROP TABLE here dated from the one-database-
+        # per-project era and destroyed sibling projects' rows — on Postgres it
+        # also left nothing behind, since only migrations recreate the table.
+        # Why: a project-scoped DELETE clears only rows this rebuild will
+        # repopulate, and on Postgres the FTS chunk rows cascade with them.
+        # Outcome: sibling projects keep serving search while this one rebuilds.
         await self.init_search_index()
+        await self.repository.delete_project_search_rows()
 
         # Reindex all entities
         logger.debug("Indexing entities")
