@@ -240,27 +240,25 @@ class ProjectService:
                             f"In cloud mode, paths are normalized to lowercase to prevent case-sensitivity issues."
                         )  # pragma: no cover
 
-            # Check for nested paths with existing projects
-            for existing in existing_projects:
-                if self._check_nested_paths(resolved_path, existing.path):
-                    # Determine which path is nested within which for appropriate error message
-                    p_new = Path(resolved_path).resolve()
-                    p_existing = Path(existing.path).resolve()
-
-                    # Check if new path is nested under existing project
-                    if p_new.is_relative_to(p_existing):
-                        raise ValueError(
-                            f"Cannot create project at '{resolved_path}': "
-                            f"path is nested within existing project '{existing.name}' at '{existing.path}'. "
-                            f"Projects cannot share directory trees."
-                        )
-                    else:
-                        # Existing project is nested under new path
-                        raise ValueError(
-                            f"Cannot create project at '{resolved_path}': "
-                            f"existing project '{existing.name}' at '{existing.path}' is nested within this path. "
-                            f"Projects cannot share directory trees."
-                        )
+            # Doctor creates a disposable project inside the configured project root.
+            # It must be allowed to coexist with the existing root project.
+            if not name.startswith("doctor-"):
+                for existing in existing_projects:
+                    if self._check_nested_paths(resolved_path, existing.path):
+                        p_new = Path(resolved_path).resolve()
+                        p_existing = Path(existing.path).resolve()
+                        if p_new.is_relative_to(p_existing):
+                            raise ValueError(
+                                f"Cannot create project at '{resolved_path}': "
+                                f"path is nested within existing project '{existing.name}' at '{existing.path}'. "
+                                f"Projects cannot share directory trees."
+                            )
+                        else:
+                            raise ValueError(
+                                f"Cannot create project at '{resolved_path}': "
+                                f"existing project '{existing.name}' at '{existing.path}' is nested within this path. "
+                                f"Projects cannot share directory trees."
+                            )
 
             # Ensure the project directory exists on disk.
             # Trigger: project_root not set means local filesystem mode (not S3/cloud)
