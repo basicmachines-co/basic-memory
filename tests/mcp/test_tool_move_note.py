@@ -142,6 +142,36 @@ async def test_move_note_success(app, client, test_project):
 
 
 @pytest.mark.asyncio
+async def test_move_note_resolves_destination_directory_casing(app, client, test_project):
+    """A case-variant destination folder resolves to the existing casing (#1326)."""
+    await write_note(
+        project=test_project.name,
+        title="Seed",
+        directory="Schemas",
+        content="# Seed\nExisting schema folder",
+    )
+    await write_note(
+        project=test_project.name,
+        title="Research",
+        directory="test",
+        content="# Research\nContent to move",
+    )
+
+    result = await move_note(
+        project=test_project.name,
+        identifier="test/research",
+        destination_path="schemas/Research.md",
+    )
+
+    assert isinstance(result, str)
+    assert "✅ Note moved successfully" in result
+    assert "Schemas/Research.md" in result
+
+    content = await read_note("schemas/research", project=test_project.name)
+    assert "Content to move" in content
+
+
+@pytest.mark.asyncio
 async def test_move_note_with_folder_creation(client, test_project):
     """Test moving note creates necessary folders."""
     # Create initial note

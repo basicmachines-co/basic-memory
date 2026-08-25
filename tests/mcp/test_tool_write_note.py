@@ -115,6 +115,31 @@ async def test_write_note_workspace_invalid_raises_before_routing(app, test_proj
 
 
 @pytest.mark.asyncio
+async def test_write_note_resolves_directory_casing(app, test_project):
+    """A case-variant directory resolves to the existing folder's casing (#1326).
+
+    write_note with directory "schemas" beside an existing "Schemas/" must land
+    in "Schemas/" instead of creating a case-duplicate sibling folder.
+    """
+    await write_note(
+        project=test_project.name,
+        title="Call",
+        directory="Schemas",
+        content="# Call\nCall schema",
+    )
+
+    result = await write_note(
+        project=test_project.name,
+        title="Research",
+        directory="schemas",
+        content="# Research\nResearch schema",
+    )
+
+    assert "# Created note" in result
+    assert "file_path: Schemas/Research.md" in result
+
+
+@pytest.mark.asyncio
 async def test_write_note(app, test_project):
     """Test creating a new note.
 

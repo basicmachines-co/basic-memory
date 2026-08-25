@@ -776,6 +776,52 @@ def detect_potential_file_conflicts(file_path: str, existing_paths: List[str]) -
     return conflicts
 
 
+def resolve_directory_casing(directory: str, existing_directories: List[str]) -> str:
+    """Resolve a requested directory to the casing of existing folders (#1326).
+
+    LLM callers guess plausible-but-wrong casing ("schemas" beside an existing
+    "Schemas/"), and case-sensitive storage backends then grow case-duplicate
+    sibling folders. Each path segment resolves against the folders that exist
+    under the already-resolved parent:
+
+    - Exact match wins: the requested segment casing is kept unchanged.
+    - Unique case-insensitive match: the existing folder's casing is adopted.
+    - No match: the segment is kept as given (a new folder).
+    - Multiple case-variant folders exist: ambiguous, the segment is kept as
+      given (today's exact behavior).
+
+    Args:
+        directory: Requested directory path relative to the project root
+            ("" means the root itself).
+        existing_directories: Known project folders derived from indexed entity
+            file paths (see EntityRepository.get_distinct_directories).
+
+    Returns:
+        The directory path with each segment resolved to existing casing.
+    """
+    if not directory:
+        return directory
+
+    existing = set(existing_directories)
+    resolved_prefix = ""
+    for segment in directory.split("/"):
+        candidate = f"{resolved_prefix}/{segment}" if resolved_prefix else segment
+        if candidate in existing:
+            resolved_prefix = candidate
+            continue
+        # Candidates are constrained to children of the already-resolved parent:
+        # once a parent segment stays ambiguous (kept as requested), a deeper
+        # existing folder under a *different* parent casing must not be spliced in.
+        matches = [
+            existing_directory
+            for existing_directory in existing
+            if existing_directory.lower() == candidate.lower()
+            and existing_directory.rpartition("/")[0] == resolved_prefix
+        ]
+        resolved_prefix = matches[0] if len(matches) == 1 else candidate
+    return resolved_prefix
+
+
 def valid_project_path_value(path: str):
     """Ensure project path is valid."""
     # Allow empty strings as they resolve to the project root

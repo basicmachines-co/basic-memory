@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Bug Fixes
+
+- `write_note` and `move_note` no longer create case-duplicate folders
+  (`schemas/` beside an existing `Schemas/`). When a requested directory is
+  not an existing folder but matches exactly one existing folder
+  case-insensitively, the note lands in the existing folder; unknown folders
+  are still created as given, and existing case-variant siblings keep today's
+  exact behavior. Folders are resolved from the indexed database paths, so
+  local and cloud runtimes behave identically. (#1326)
+
 ## v0.23.1 (2026-08-25)
 
 Fast-follow patch to v0.23.0 focused on PostgreSQL search parity and a

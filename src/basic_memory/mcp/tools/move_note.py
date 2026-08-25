@@ -947,9 +947,15 @@ move_note("{identifier}", destination_folder="notes")
             #      the up-front detection: any divergence the caller did not ask for
             #      surfaces as a failure rather than a fake success.
             # Outcome: report failure with the actual landing path instead of "✅".
+            # A case-only difference is the server resolving the destination folder to
+            # an existing folder's casing (#1326), not a boundary degradation — the
+            # success message below reports the actual landing path either way.
             normalized_requested = PureWindowsPath(destination_path).as_posix().strip("/")
             normalized_actual = PureWindowsPath(result.file_path).as_posix().strip("/")
-            if normalized_actual != normalized_requested:
+            if (
+                normalized_actual != normalized_requested
+                and normalized_actual.lower() != normalized_requested.lower()
+            ):
                 logger.warning(
                     f"Move outcome diverged from intent: requested={destination_path} "
                     f"actual={result.file_path}"
