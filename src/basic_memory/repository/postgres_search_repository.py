@@ -937,7 +937,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         # path parts instead of #>> / #> with interpolated paths.
         if metadata_filters:
             parsed_filters = parse_metadata_filters(metadata_filters)
-            from_clause = "search_index JOIN entity ON search_index.entity_id = entity.id"
+            from_clause = f"{from_clause} JOIN entity ON search_index.entity_id = entity.id"
             metadata_expr = "entity.entity_metadata::jsonb"
 
             for idx, filt in enumerate(parsed_filters):

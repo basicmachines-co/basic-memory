@@ -221,6 +221,13 @@ async def test_postgres_search_repository_bulk_index_items_and_prepare_terms(
     assert "FROM search_index_fts_chunks AS candidate_chunk" in indexed_from
     assert indexed_params["text_candidate"] == "coffee:* | brewing:*"
 
+    filtered_from, _where, _params, _order, _score = await repo._build_fts_query_parts(
+        search_text="coffee brewing",
+        metadata_filters={"status": "active"},
+    )
+    assert "AS fts_candidate" in filtered_from
+    assert "JOIN entity ON search_index.entity_id = entity.id" in filtered_from
+
     negated_from, _where, negated_params, _order, _score = await repo._build_fts_query_parts(
         search_text="coffee NOT brewing",
     )
