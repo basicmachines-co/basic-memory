@@ -1027,7 +1027,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
 
         # The synthesized text contains at most the query operands, never the note body.
         # This preserves document-wide Boolean semantics without recreating an unbounded vector.
-        return f"to_tsvector('english', concat_ws(' ', {', '.join(present_lexemes)}))"
+        lexeme_array = f"ARRAY[{', '.join(present_lexemes)}]"
+        return f"to_tsvector('english', array_to_string({lexeme_array}, ' '))"
 
     @override
     async def search(

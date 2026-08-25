@@ -1223,3 +1223,34 @@ async def test_postgres_relaxed_retry_probes_joined_formatting_characters(
 
     assert any(row.id == 79 for row in results)
     assert await repo.count(search_text=query, allow_relaxed=True) == 1
+
+
+@pytest.mark.asyncio
+async def test_postgres_search_supports_more_than_one_hundred_operands(
+    session_maker,
+    test_project,
+):
+    """Synthetic document vectors do not exceed PostgreSQL's function argument limit."""
+    repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
+    now = datetime.now(timezone.utc)
+    await repo.index_item(
+        SearchIndexRow(
+            project_id=test_project.id,
+            id=80,
+            title="Long query reference",
+            content_stems="a document containing targetterm",
+            content_snippet="A document containing targetterm.",
+            permalink="docs/long-query-reference",
+            file_path="docs/long-query-reference.md",
+            type="entity",
+            metadata={"note_type": "note"},
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    query = " ".join(["targetterm", *(f"absent{index}" for index in range(100))])
+    results = await repo.search(search_text=query, allow_relaxed=True)
+
+    assert any(row.id == 80 for row in results)
+    assert await repo.count(search_text=query, allow_relaxed=True) == 1
