@@ -45,6 +45,22 @@ from basic_memory.repository.pgvector_index import PgVectorIndex
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 
+POSTGRES_FTS_CHUNK_SIZE = 8_000
+POSTGRES_FTS_CHUNK_OVERLAP = 200
+
+
+def _iter_fts_chunks(content: str | None) -> list[tuple[int, str]]:
+    """Split full note text into bounded, slightly overlapping FTS documents."""
+    if not content:
+        return []
+
+    step = POSTGRES_FTS_CHUNK_SIZE - POSTGRES_FTS_CHUNK_OVERLAP
+    return [
+        (chunk_index, content[start : start + POSTGRES_FTS_CHUNK_SIZE])
+        for chunk_index, start in enumerate(range(0, len(content), step))
+    ]
+
+
 def _strip_nul_from_row(row_data: dict[str, Any]) -> dict[str, Any]:
     """Strip NUL bytes from all string values in a row dict.
 
@@ -199,8 +215,60 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 """),
                 insert_data,
             )
+            await self._replace_fts_chunks(session, search_index_row)
             logger.debug(f"indexed row {search_index_row}")
             await session.commit()
+
+    async def _replace_fts_chunks(
+        self,
+        session: AsyncSession,
+        search_index_row: SearchIndexRow,
+    ) -> None:
+        """Replace the bounded full-content FTS rows owned by one search item."""
+        key_params = {
+            "project_id": self.project_id,
+            "search_index_id": search_index_row.id,
+            "search_index_type": search_index_row.type,
+        }
+        await session.execute(
+            text("""
+                DELETE FROM search_index_fts_chunks
+                WHERE project_id = :project_id
+                  AND search_index_id = :search_index_id
+                  AND search_index_type = :search_index_type
+            """),
+            key_params,
+        )
+
+        chunks = _iter_fts_chunks(search_index_row.content_snippet)
+        if not chunks:
+            return
+
+        await session.execute(
+            text("""
+                INSERT INTO search_index_fts_chunks (
+                    project_id,
+                    search_index_id,
+                    search_index_type,
+                    chunk_index,
+                    chunk_text
+                ) VALUES (
+                    :project_id,
+                    :search_index_id,
+                    :search_index_type,
+                    :chunk_index,
+                    :chunk_text
+                )
+            """),
+            [
+                {
+                    **key_params,
+                    "chunk_index": chunk_index,
+                    "chunk_text": chunk_text.replace("\x00", ""),
+                }
+                for chunk_index, chunk_text in chunks
+            ],
+        )
 
     # ------------------------------------------------------------------
     # tsquery preparation (backend-specific)
@@ -657,6 +725,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 """),
                 insert_data_list,
             )
+            for row in search_index_rows:
+                await self._replace_fts_chunks(session, row)
             logger.debug(f"Bulk indexed {len(search_index_rows)} rows")
             await session.commit()
 
@@ -701,9 +771,17 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 # Prepare search term for tsquery
                 processed_text = self._prepare_search_term(search_text.strip())
                 params["text"] = processed_text
-                # Use @@ operator for tsvector matching
+                # Full bodies live in bounded child vectors because PostgreSQL rejects
+                # any single tsvector larger than roughly 1 MB.
                 conditions.append(
-                    "search_index.textsearchable_index_col @@ to_tsquery('english', :text)"
+                    "(search_index.textsearchable_index_col "
+                    "@@ to_tsquery('english', :text) OR EXISTS ("
+                    "SELECT 1 FROM search_index_fts_chunks AS fts_chunk "
+                    "WHERE fts_chunk.project_id = search_index.project_id "
+                    "AND fts_chunk.search_index_id = search_index.id "
+                    "AND fts_chunk.search_index_type = search_index.type "
+                    "AND fts_chunk.textsearchable_index_col "
+                    "@@ to_tsquery('english', :text)))"
                 )
 
         # Handle title search
@@ -864,7 +942,16 @@ class PostgresSearchRepository(SearchRepositoryBase):
         # Note: If no text search, score will be NULL, so we use COALESCE to default to 0
         if search_text and search_text.strip() and search_text.strip() != "*":
             score_expr = (
-                "ts_rank(search_index.textsearchable_index_col, to_tsquery('english', :text))"
+                "GREATEST("
+                "ts_rank(search_index.textsearchable_index_col, to_tsquery('english', :text)), "
+                "COALESCE((SELECT MAX(ts_rank("
+                "fts_chunk.textsearchable_index_col, to_tsquery('english', :text))) "
+                "FROM search_index_fts_chunks AS fts_chunk "
+                "WHERE fts_chunk.project_id = search_index.project_id "
+                "AND fts_chunk.search_index_id = search_index.id "
+                "AND fts_chunk.search_index_type = search_index.type "
+                "AND fts_chunk.textsearchable_index_col "
+                "@@ to_tsquery('english', :text)), 0))"
             )
         else:
             score_expr = "0"
