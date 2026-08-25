@@ -81,6 +81,23 @@ async def _delete_doctor_project(
         await _delete_doctor_project_locally(project_name, project_id)
 
 
+async def _read_materialized_api_note(api_file: Path, file_path: str) -> str:
+    """Wait for the accepted local write, then read its canonical file."""
+    # Deferred: importing the materialization runtime at CLI module load would slow every
+    # command, while doctor is the only command that needs to observe its write immediately.
+    from basic_memory.index.note_content_materialization import drain_pending_materializations
+
+    # Trigger: production accepts note content before its markdown file is materialized.
+    # Why: doctor verifies the complete DB -> file contract, not only write acceptance.
+    # Outcome: wait for the same deferred work drained at normal CLI shutdown before checking.
+    await drain_pending_materializations()
+
+    if not api_file.exists():
+        raise ValueError(f"API note file missing: {file_path}")
+
+    return api_file.read_text(encoding="utf-8")
+
+
 async def run_doctor() -> None:
     """Run local consistency checks for file <-> database flows."""
     # Deferred: the markdown parsing stack is only needed while the checks run,
@@ -132,10 +149,7 @@ async def run_doctor() -> None:
                 api_result = await knowledge_client.create_entity(api_note.model_dump())
 
                 api_file = project_path / api_result.file_path
-                if not api_file.exists():
-                    raise ValueError(f"API note file missing: {api_result.file_path}")
-
-                api_text = api_file.read_text(encoding="utf-8")
+                api_text = await _read_materialized_api_note(api_file, api_result.file_path)
                 if api_note_title not in api_text:
                     raise ValueError("API note content missing from file")
 

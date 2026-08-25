@@ -521,7 +521,6 @@ doctor:
     TMP_HOME=$(mktemp -d)
     TMP_CONFIG=$(mktemp -d)
     HOME="$TMP_HOME" \
-    BASIC_MEMORY_ENV=test \
     BASIC_MEMORY_HOME="$TMP_HOME/basic-memory" \
     BASIC_MEMORY_CONFIG_DIR="$TMP_CONFIG" \
     ./.venv/bin/python -m basic_memory.cli.main doctor --local

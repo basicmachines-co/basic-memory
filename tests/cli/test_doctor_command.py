@@ -6,10 +6,12 @@ is empty, which used to leave users with a blank "Doctor failed:" line.
 
 from typing import Callable, NoReturn
 
+import pytest
 from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
 import basic_memory.cli.commands.doctor as doctor_cmd
+from basic_memory.index import note_content_materialization
 
 runner = CliRunner()
 
@@ -49,3 +51,43 @@ def test_doctor_unexpected_failure_message_never_blank(monkeypatch):
 
     assert result.exit_code == 1
     assert "Doctor failed: RuntimeError()" in result.stderr
+
+
+@pytest.mark.asyncio
+async def test_doctor_waits_for_deferred_api_note_materialization(tmp_path, monkeypatch):
+    api_file = tmp_path / "doctor" / "Doctor API Note.md"
+
+    async def materialize_note() -> None:
+        api_file.parent.mkdir(parents=True)
+        api_file.write_text("# Doctor API Note", encoding="utf-8")
+
+    monkeypatch.setattr(
+        note_content_materialization,
+        "drain_pending_materializations",
+        materialize_note,
+    )
+
+    content = await doctor_cmd._read_materialized_api_note(
+        api_file,
+        "doctor/Doctor API Note.md",
+    )
+
+    assert content == "# Doctor API Note"
+
+
+@pytest.mark.asyncio
+async def test_doctor_reports_api_note_missing_after_materialization_drain(tmp_path, monkeypatch):
+    async def drain_without_writing() -> None:
+        pass
+
+    monkeypatch.setattr(
+        note_content_materialization,
+        "drain_pending_materializations",
+        drain_without_writing,
+    )
+
+    with pytest.raises(ValueError, match="API note file missing: doctor/missing.md"):
+        await doctor_cmd._read_materialized_api_note(
+            tmp_path / "doctor" / "missing.md",
+            "doctor/missing.md",
+        )
