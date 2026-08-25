@@ -1812,6 +1812,52 @@ async def test_run_accepted_note_update_resolves_directory_casing() -> None:
     assert replaced_schema.file_path == "Notes/Accepted.md"
     # No rename happened, so no source path was vacated for cleanup.
     assert preparer_factory.checksum_calls == []
+    # The case-variant request paid exactly one directory scan.
+    assert entity_lookup_repository.distinct_directory_calls == [cast(AsyncSession, session)]
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_update_content_only_skips_directory_scan() -> None:
+    """A PUT into the note's own exact directory never scans project folders.
+
+    Regression for the PR #1329 review: content-only saves (e.g. repeated
+    collaboration-relay writes) are the hot path and must not pay the
+    O(project entities) distinct file_path scan that casing resolution costs.
+    """
+    session = _MutationSession()
+    schema = _schema()
+    project = _project()
+    entity = _entity(file_path="notes/accepted.md")
+    note_content = _note_content(entity)
+    entity_lookup_repository = _EntityLookupRepository(
+        by_external_id=entity,
+        distinct_directories=["notes"],
+    )
+    preparer = _CreatePreparer(_prepared_replacement())
+
+    await run_accepted_note_update(
+        cast(AsyncSession, session),
+        request=AcceptedNoteUpdateMutation(
+            project_external_id="project-123",
+            entity_external_id="note-123",
+            data=schema,
+            actor=AcceptedNoteMutationActor(user_profile_id=_ACTOR_ID),
+            source="api",
+        ),
+        dependencies=_dependencies(
+            project_repository=_ProjectRepository(project),
+            entity_lookup_repository=entity_lookup_repository,
+            note_content_lookup_repository=_NoteContentLookupRepository(note_content),
+            preparer_factory=_PreparerFactory(preparer),
+            pending_entity_repository=_PendingEntityRepository(entity),
+            note_content_accept_repository=_NoteContentAcceptRepository(note_content),
+            search_repository=_SearchRepository(),
+        ),
+    )
+
+    assert entity_lookup_repository.distinct_directory_calls == []
+    # The unchanged request schema is passed through without copying.
+    assert preparer.replace_calls[0][1] is schema
 
 
 @pytest.mark.asyncio

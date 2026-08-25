@@ -643,12 +643,22 @@ async def _run_accepted_note_update(
     existing_file_path = entity.file_path if entity is not None else None
     vacated_source: tuple[RuntimeFilePath, RuntimeFileChecksum | None] | None = None
 
-    data = await resolve_accepted_note_schema_directory(
-        session,
-        project_id=project.id,
-        data=request.data,
-        dependencies=dependencies,
-    )
+    # Trigger: the addressed entity already lives in the exact requested directory.
+    # Why: casing resolution scans every distinct entity file_path in the project,
+    #     and content-only PUTs (e.g. repeated collaboration-relay saves of the
+    #     same note) are the hot path where the directory cannot change; an exact
+    #     match would resolve to itself anyway because exact match always wins.
+    # Outcome: only case-variant or relocating PUTs pay for the directory scan.
+    current_directory = existing_file_path.rpartition("/")[0] if existing_file_path else None
+    if current_directory == request.data.directory:
+        data = request.data
+    else:
+        data = await resolve_accepted_note_schema_directory(
+            session,
+            project_id=project.id,
+            data=request.data,
+            dependencies=dependencies,
+        )
     await reject_conflicting_accepted_note_file_path(
         session,
         project_id=project.id,
