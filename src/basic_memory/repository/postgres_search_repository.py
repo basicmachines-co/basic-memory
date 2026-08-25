@@ -817,6 +817,44 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     relaxed_text = self._relaxed_tsquery_text(search_text)
                     if relaxed_text:
                         probe_texts.append(relaxed_text)
+
+                # Trigger: the query has no negation, so every true result must
+                # contain at least one operand in the parent vector or a content chunk.
+                # Why: evaluating correlated chunk probes against every project row
+                # bypasses both GIN indexes and turns ordinary searches into full scans.
+                # Outcome: an indexed UNION selects a bounded candidate set before the
+                # synthetic vector applies document-wide Boolean semantics.
+                if "!" not in processed_text:
+                    candidate_operands: dict[str, None] = {}
+                    for probe_text in probe_texts:
+                        for operand, _representative in _tsquery_operands(probe_text):
+                            candidate_operands.setdefault(operand, None)
+                    if candidate_operands:
+                        params["text_candidate"] = " | ".join(candidate_operands)
+                        from_clause = """
+                            search_index JOIN (
+                                SELECT
+                                    candidate_parent.project_id,
+                                    candidate_parent.id,
+                                    candidate_parent.type
+                                FROM search_index AS candidate_parent
+                                WHERE candidate_parent.project_id = :project_id
+                                  AND candidate_parent.textsearchable_index_col
+                                      @@ to_tsquery('english', :text_candidate)
+                                UNION
+                                SELECT
+                                    candidate_chunk.project_id,
+                                    candidate_chunk.search_index_id AS id,
+                                    candidate_chunk.search_index_type AS type
+                                FROM search_index_fts_chunks AS candidate_chunk
+                                WHERE candidate_chunk.project_id = :project_id
+                                  AND candidate_chunk.textsearchable_index_col
+                                      @@ to_tsquery('english', :text_candidate)
+                            ) AS fts_candidate
+                              ON fts_candidate.project_id = search_index.project_id
+                             AND fts_candidate.id = search_index.id
+                             AND fts_candidate.type = search_index.type
+                        """
                 document_vector_sql = self._document_fts_vector_sql(probe_texts, params)
                 conditions.append(f"{document_vector_sql} @@ to_tsquery('english', :text)")
 

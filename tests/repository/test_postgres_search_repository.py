@@ -213,6 +213,20 @@ async def test_postgres_search_repository_bulk_index_items_and_prepare_terms(
     assert repo._prepare_single_term("   ") == "   "
     assert repo._prepare_single_term("coffee", is_prefix=False) == "coffee"
 
+    indexed_from, _where, indexed_params, _order, _score = await repo._build_fts_query_parts(
+        search_text="coffee brewing",
+        allow_relaxed=True,
+    )
+    assert "FROM search_index AS candidate_parent" in indexed_from
+    assert "FROM search_index_fts_chunks AS candidate_chunk" in indexed_from
+    assert indexed_params["text_candidate"] == "coffee:* | brewing:*"
+
+    negated_from, _where, negated_params, _order, _score = await repo._build_fts_query_parts(
+        search_text="coffee NOT brewing",
+    )
+    assert negated_from == "search_index"
+    assert "text_candidate" not in negated_params
+
     now = datetime.now(timezone.utc)
     rows = [
         SearchIndexRow(
