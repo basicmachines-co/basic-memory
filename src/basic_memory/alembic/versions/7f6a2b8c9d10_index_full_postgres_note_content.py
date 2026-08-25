@@ -62,6 +62,10 @@ def upgrade() -> None:
             )
         """)
         op.execute("""
+            CREATE INDEX IF NOT EXISTS ix_search_index_project_id
+            ON search_index (project_id)
+        """)
+        op.execute("""
             CREATE INDEX IF NOT EXISTS idx_search_index_fts
             ON search_index USING gin(textsearchable_index_col)
         """)
