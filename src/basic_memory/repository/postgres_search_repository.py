@@ -240,32 +240,48 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 """),
                 insert_data,
             )
-            await self._replace_fts_chunks(session, search_index_row)
+            await self._replace_fts_chunks(session, [search_index_row])
             logger.debug(f"indexed row {search_index_row}")
             await session.commit()
 
     async def _replace_fts_chunks(
         self,
         session: AsyncSession,
-        search_index_row: SearchIndexRow,
+        search_index_rows: Sequence[SearchIndexRow],
     ) -> None:
-        """Replace the bounded full-content FTS rows owned by one search item."""
-        key_params = {
-            "project_id": self.project_id,
-            "search_index_id": search_index_row.id,
-            "search_index_type": search_index_row.type,
-        }
+        """Replace bounded full-content FTS rows for one indexing batch."""
+        if not search_index_rows:
+            return
+
         await session.execute(
             text("""
                 DELETE FROM search_index_fts_chunks
                 WHERE project_id = :project_id
-                  AND search_index_id = :search_index_id
-                  AND search_index_type = :search_index_type
+                  AND (search_index_id, search_index_type) IN (
+                      SELECT search_index_id, search_index_type
+                      FROM unnest(
+                          CAST(:search_index_ids AS INTEGER[]),
+                          CAST(:search_index_types AS VARCHAR[])
+                      ) AS indexed_rows(search_index_id, search_index_type)
+                  )
             """),
-            key_params,
+            {
+                "project_id": self.project_id,
+                "search_index_ids": [row.id for row in search_index_rows],
+                "search_index_types": [row.type for row in search_index_rows],
+            },
         )
 
-        chunks = _iter_fts_chunks(search_index_row.content_snippet)
+        chunks = [
+            {
+                "search_index_id": row.id,
+                "search_index_type": row.type,
+                "chunk_index": chunk_index,
+                "chunk_text": chunk_text.replace("\x00", ""),
+            }
+            for row in search_index_rows
+            for chunk_index, chunk_text in _iter_fts_chunks(row.content_snippet)
+        ]
         if not chunks:
             return
 
@@ -277,22 +293,21 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     search_index_type,
                     chunk_index,
                     chunk_text
-                ) VALUES (
+                )
+                SELECT
                     :project_id,
-                    :search_index_id,
-                    :search_index_type,
-                    :chunk_index,
-                    :chunk_text
+                    chunk.search_index_id,
+                    chunk.search_index_type,
+                    chunk.chunk_index,
+                    chunk.chunk_text
+                FROM jsonb_to_recordset(CAST(:chunks AS JSONB)) AS chunk(
+                    search_index_id INTEGER,
+                    search_index_type VARCHAR,
+                    chunk_index INTEGER,
+                    chunk_text TEXT
                 )
             """),
-            [
-                {
-                    **key_params,
-                    "chunk_index": chunk_index,
-                    "chunk_text": chunk_text.replace("\x00", ""),
-                }
-                for chunk_index, chunk_text in chunks
-            ],
+            {"project_id": self.project_id, "chunks": json.dumps(chunks)},
         )
 
     # ------------------------------------------------------------------
@@ -750,8 +765,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 """),
                 insert_data_list,
             )
-            for row in search_index_rows:
-                await self._replace_fts_chunks(session, row)
+            await self._replace_fts_chunks(session, search_index_rows)
             logger.debug(f"Bulk indexed {len(search_index_rows)} rows")
             await session.commit()
 
