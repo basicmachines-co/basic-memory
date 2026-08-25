@@ -22,6 +22,58 @@ def upgrade() -> None:
     """Index complete note bodies as bounded PostgreSQL FTS chunks."""
     connection = op.get_bind()
     if connection.dialect.name == "postgresql":
+        # --- Repair: recreate search_index if a destructive reindex removed it ---
+        # Trigger: search_index does not exist. Through v0.23.0, the per-project
+        # search reindex ran DROP TABLE IF EXISTS search_index, and on Postgres
+        # nothing outside migrations recreates that table.
+        # Why: the chunk backfill below reads search_index and the chunks table
+        # declares a foreign key to it, so without repair this migration fails
+        # permanently and blocks the database from ever reaching head.
+        # Outcome: healthy databases no-op on IF NOT EXISTS; a repaired database
+        # gets an empty index that the next full reindex repopulates. The DDL
+        # mirrors the current schema in models/search.py.
+        op.execute("""
+            CREATE TABLE IF NOT EXISTS search_index (
+                id INTEGER NOT NULL,
+                project_id INTEGER NOT NULL,
+                title TEXT,
+                content_stems TEXT,
+                content_snippet TEXT,
+                permalink VARCHAR,
+                file_path VARCHAR,
+                type VARCHAR,
+                from_id INTEGER,
+                to_id INTEGER,
+                relation_type VARCHAR,
+                entity_id INTEGER,
+                category VARCHAR,
+                metadata JSONB,
+                created_at TIMESTAMP WITH TIME ZONE,
+                updated_at TIMESTAMP WITH TIME ZONE,
+                textsearchable_index_col tsvector GENERATED ALWAYS AS (
+                    to_tsvector(
+                        'english',
+                        coalesce(title, '') || ' ' ||
+                        coalesce(content_stems, '')
+                    )
+                ) STORED,
+                PRIMARY KEY (id, type, project_id),
+                FOREIGN KEY (project_id) REFERENCES project(id) ON DELETE CASCADE
+            )
+        """)
+        op.execute("""
+            CREATE INDEX IF NOT EXISTS idx_search_index_fts
+            ON search_index USING gin(textsearchable_index_col)
+        """)
+        op.execute("""
+            CREATE INDEX IF NOT EXISTS idx_search_index_metadata_gin
+            ON search_index USING gin(metadata jsonb_path_ops)
+        """)
+        op.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS uix_search_index_permalink_project
+            ON search_index (permalink, project_id)
+            WHERE permalink IS NOT NULL
+        """)
         op.execute("""
             CREATE TABLE search_index_fts_chunks (
                 project_id INTEGER NOT NULL,
