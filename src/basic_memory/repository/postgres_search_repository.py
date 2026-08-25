@@ -73,6 +73,13 @@ def _tsquery_operands(processed_text: str) -> list[tuple[str, str]]:
             operands.setdefault(operand, representative)
             continue
 
+        # PostgreSQL legitimately parses punctuation inside operands such as
+        # ``v0.13.0b2:*`` and ``auth-service:*``. Preserve those bytes so the
+        # synthetic document is tokenized the same way as the original note.
+        if "<" not in representative and ">" not in representative:
+            operands.setdefault(operand, representative)
+            continue
+
         # A malformed strict operand (for example ``foo<bar:*``) must not poison
         # the later relaxed retry. Split punctuation into the same safe word pieces
         # that PostgreSQL will lex, while the original full tsquery still determines
