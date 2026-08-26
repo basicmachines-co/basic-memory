@@ -5,6 +5,7 @@ from typing import List, Any, Dict
 
 from basic_memory.utils import normalize_project_reference
 from markdown_it import MarkdownIt
+from markdown_it.rules_inline.backticks import backtick
 from markdown_it.token import Token
 
 # Transcript timecodes like [00:00:11] or [1:02:03.500] share the bracket shape of
@@ -127,6 +128,84 @@ def parse_observation(token: Token) -> Dict[str, Any]:
 
 
 # Relation handling functions
+def _relation_content(token: Token) -> str:
+    """Return the source content of an inline token."""
+    return token.tag or token.content
+
+
+_CODE_SPANS_KEY = "basic_memory_code_spans"
+_CODE_SPAN_PARSER = MarkdownIt()
+
+
+def _record_inline_code_span(state: Any, silent: bool) -> bool:
+    """Delegate to MarkdownIt and retain exact source spans for code tokens."""
+    start = state.pos
+    token_count = len(state.tokens)
+    matched = backtick(state, silent)
+    if matched and not silent and len(state.tokens) > token_count:
+        if state.tokens[-1].type == "code_inline":
+            state.env[_CODE_SPANS_KEY].append((start, state.pos))
+    return matched
+
+
+_CODE_SPAN_PARSER.inline.ruler.at("backticks", _record_inline_code_span)
+
+
+def _inline_code_spans(content: str) -> list[tuple[int, int]]:
+    """Return source ranges that MarkdownIt classifies as inline code.
+
+    This delegates delimiter and escape handling to the same MarkdownIt inline
+    rule used by the document parser instead of duplicating CommonMark's
+    backtick scanner. It also preserves MarkdownIt's linear-time cache for
+    unmatched delimiter runs.
+    """
+    if "`" not in content:
+        return []
+
+    spans: list[tuple[int, int]] = []
+    _CODE_SPAN_PARSER.inline.parse(content, _CODE_SPAN_PARSER, {_CODE_SPANS_KEY: spans}, [])
+    return spans
+
+
+def _mask_wikilinks_in_inline_code(content: str, code_spans: list[tuple[int, int]]) -> str:
+    """Mask only brackets in code spans, retaining all non-link source text."""
+    if not code_spans:
+        return content
+
+    masked = list(content)
+    for start, end in code_spans:
+        for position in range(start, end):
+            if masked[position] in "[]":
+                masked[position] = " "
+
+    return "".join(masked)
+
+
+def _remove_links_to_directive_outside_inline_code(
+    content: str, code_spans: list[tuple[int, int]]
+) -> tuple[str, bool]:
+    """Remove a terminal directive only when MarkdownIt parsed it as non-code."""
+    directive_content = list(content)
+    for start, end in code_spans:
+        directive_content[start:end] = " " * (end - start)
+
+    match = _LINKS_TO_DIRECTIVE.search("".join(directive_content))
+    if not match:
+        return content, False
+    return content[: match.start()].rstrip(), True
+
+
+def _relation_parsing_content(token: Token) -> tuple[str, str, list[tuple[int, int]]]:
+    """Build source-preserving relation input from MarkdownIt's code spans."""
+    source_content = _relation_content(token)
+    code_spans = _inline_code_spans(source_content)
+    return (
+        source_content,
+        _mask_wikilinks_in_inline_code(source_content, code_spans),
+        code_spans,
+    )
+
+
 def parse_relation_type(content: str) -> str | None:
     """Return the explicit relation label before the first wikilink, if any."""
     before_link = content.partition("[[")[0].strip()
@@ -154,15 +233,17 @@ def is_explicit_relation(token: Token) -> bool:
     if token.type != "inline":  # pragma: no cover
         return False
 
-    # Use token.tag which contains the actual content for test tokens, fallback to content
-    content = (token.tag or token.content).strip()
+    _, content, _ = _relation_parsing_content(token)
     if "[[" not in content or "]]" not in content:
         return False
     return _parse_explicit_relation(content) is not None
 
 
-def _parse_explicit_relation(content: str) -> Dict[str, Any] | None:
+def _parse_explicit_relation(
+    content: str, source_content: str | None = None
+) -> Dict[str, Any] | None:
     """Parse ``type [[target]] (context)``, rejecting lines with a prose tail."""
+    source_content = source_content or content
     rel_type = parse_relation_type(content)
     if rel_type is None:
         return None
@@ -172,7 +253,7 @@ def _parse_explicit_relation(content: str) -> Dict[str, Any] | None:
     if start == -1 or end == -1:
         return None
 
-    target = normalize_project_reference(content[start + 2 : end].strip())
+    target = normalize_project_reference(source_content[start + 2 : end].strip())
     if not target:
         return None
 
@@ -189,7 +270,8 @@ def _parse_explicit_relation(content: str) -> Dict[str, Any] | None:
     if after:
         if not _is_single_parenthesized(after):
             return None
-        context = after[1:-1].strip() or None
+        source_after = source_content[end + 2 :].strip()
+        context = source_after[1:-1].strip() or None
 
     return {"type": rel_type, "target": target, "context": context}
 
@@ -217,13 +299,23 @@ def _is_single_parenthesized(text: str) -> bool:
 
 def parse_relation(token: Token) -> Dict[str, Any] | None:
     """Extract relation parts from token."""
-    # Use token.tag which contains the actual content for test tokens, fallback to content
-    content = (token.tag or token.content).strip()
-    return _parse_explicit_relation(content)
+    source_content, content, _ = _relation_parsing_content(token)
+    return _parse_explicit_relation(content, source_content)
 
 
-def parse_inline_relations(content: str) -> List[Dict[str, Any]]:
-    """Find wiki-style links in regular content."""
+def _is_escaped(content: str, position: int) -> bool:
+    """Whether the character at ``position`` is escaped by an odd slash run."""
+    slash_count = 0
+    position -= 1
+    while position >= 0 and content[position] == "\\":
+        slash_count += 1
+        position -= 1
+    return slash_count % 2 == 1
+
+
+def parse_inline_relations(content: str, source_content: str | None = None) -> List[Dict[str, Any]]:
+    """Find wiki-style links, extracting targets from the original source."""
+    source_content = content if source_content is None else source_content
     relations = []
     start = 0
 
@@ -232,6 +324,9 @@ def parse_inline_relations(content: str) -> List[Dict[str, Any]]:
         start = content.find("[[", start)
         if start == -1:  # pragma: no cover
             break
+        if _is_escaped(content, start):
+            start += 2
+            continue
 
         # Find matching ]]
         depth = 1
@@ -239,10 +334,10 @@ def parse_inline_relations(content: str) -> List[Dict[str, Any]]:
         end = -1
 
         while pos < len(content):
-            if content[pos : pos + 2] == "[[":
+            if content[pos : pos + 2] == "[[" and not _is_escaped(content, pos):
                 depth += 1
                 pos += 2
-            elif content[pos : pos + 2] == "]]":
+            elif content[pos : pos + 2] == "]]" and not _is_escaped(content, pos):
                 depth -= 1
                 if depth == 0:
                     end = pos
@@ -255,7 +350,7 @@ def parse_inline_relations(content: str) -> List[Dict[str, Any]]:
             # No matching ]] found
             break
 
-        target = normalize_project_reference(content[start + 2 : end].strip())
+        target = normalize_project_reference(source_content[start + 2 : end].strip())
         if target:
             relations.append({"type": "links_to", "target": target, "context": None})
 
@@ -336,21 +431,27 @@ def relation_plugin(md: MarkdownIt) -> None:
 
             # Only process inline tokens
             if token.type == "inline":
-                content = token.tag or token.content
-                content_without_directive, has_directive = remove_links_to_directive(content)
+                source_content = _relation_content(token)
+                if "[[" not in source_content:
+                    continue
+
+                code_spans = _inline_code_spans(source_content)
+                relation_content = _mask_wikilinks_in_inline_code(source_content, code_spans)
+                content_without_directive, has_directive = (
+                    _remove_links_to_directive_outside_inline_code(relation_content, code_spans)
+                )
 
                 # Check for explicit relations in list items
-                if in_list_item and not has_directive and is_explicit_relation(token):
-                    rel = parse_relation(token)
+                if in_list_item and not has_directive:
+                    rel = _parse_explicit_relation(relation_content, source_content)
                     if rel:
                         token.meta["relations"] = [rel]
+                        continue
 
                 # Always check for inline links in any text
-                else:
-                    if "[[" in content:
-                        rels = parse_inline_relations(content_without_directive)
-                        if rels:
-                            token.meta["relations"] = token.meta.get("relations", []) + rels
+                rels = parse_inline_relations(content_without_directive, source_content)
+                if rels:
+                    token.meta["relations"] = token.meta.get("relations", []) + rels
 
     # Add the rule after inline processing
     md.core.ruler.after("inline", "relations", relation_rule)

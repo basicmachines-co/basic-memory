@@ -104,6 +104,70 @@ def test_inline_relations():
     assert len(token.meta["relations"]) == 3
 
 
+def test_inline_code_wikilinks_do_not_create_relations():
+    """CommonMark code spans quote wikilinks instead of linking notes (#1332)."""
+    code = "`"
+    cases = [
+        (
+            f"The template is {code}[[Inline Target]]{code}; prose [[Real Target]].",
+            ["Real Target"],
+        ),
+        (
+            f"{code}{code}literal {code} and [[Double Backtick Target]]{code}{code}",
+            [],
+        ),
+    ]
+
+    for source, expected_targets in cases:
+        parsed = parse(source)
+        assert [relation.target for relation in parsed.relations] == expected_targets
+
+
+def test_inline_code_mask_keeps_source_outside_code_spans():
+    """Masking code must not normalize escapes or discard relation context (#1332)."""
+    escaped = parse(r"\[[Literal]]")
+    assert escaped.relations == []
+
+    escaped_backticks = parse(r"\`see [[Target]]\`")
+    assert [relation.target for relation in escaped_backticks.relations] == ["Target"]
+
+    md = MarkdownIt().use(relation_plugin)
+    tokens = md.parse("- implemented_by [[Parser]] (`parse()`)")
+    token = next(t for t in tokens if t.type == "inline")
+    assert parse_relation(token) == {
+        "type": "implemented_by",
+        "target": "Parser",
+        "context": "`parse()`",
+    }
+
+    tokens = md.parse("- `example` implemented_by [[Parser]]")
+    token = next(t for t in tokens if t.type == "inline")
+    assert parse_relation(token) is None
+    assert token.meta["relations"] == [{"type": "links_to", "target": "Parser", "context": None}]
+
+    tokens = md.parse("- calls [[Parser]] `parse()`")
+    token = next(t for t in tokens if t.type == "inline")
+    assert parse_relation(token) is None
+    assert token.meta["relations"] == [{"type": "links_to", "target": "Parser", "context": None}]
+
+    literal_directive = parse("`#bm:links_to` [[Target]]")
+    assert [relation.target for relation in literal_directive.relations] == ["Target"]
+
+    for source, target in [
+        ("[[API `[v2]`]]", "API `[v2]`"),
+        ("[[Outer `[[literal]]` Target]]", "Outer `[[literal]]` Target"),
+    ]:
+        parsed = parse(source)
+        assert [relation.target for relation in parsed.relations] == [target]
+
+
+def test_many_unmatched_backtick_runs_keep_a_real_wikilink():
+    """MarkdownIt's cached scanner avoids quadratic work on unmatched runs (#1332)."""
+    source = " ".join("`" * width for width in range(1, 801)) + " [[Target]]"
+    parsed = parse(source)
+    assert [relation.target for relation in parsed.relations] == ["Target"]
+
+
 def test_prose_tail_falls_back_to_inline_link():
     """A sentence containing a wikilink must not mint a typed relation (#1260).
 
