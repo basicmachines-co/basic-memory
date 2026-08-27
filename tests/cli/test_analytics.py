@@ -68,6 +68,7 @@ class TestTrack:
             mock_thread.return_value = MagicMock()
             track("test-event")
             mock_thread.assert_called_once()
+            assert mock_thread.call_args.kwargs["daemon"] is True
 
     def test_sends_event_when_configured(self, monkeypatch):
         monkeypatch.delenv("BASIC_MEMORY_NO_PROMOS", raising=False)
@@ -76,7 +77,7 @@ class TestTrack:
 
         captured_target = None
 
-        def fake_thread(target):
+        def fake_thread(target, **kwargs):
             nonlocal captured_target
             captured_target = target
             mock = MagicMock()
@@ -103,7 +104,7 @@ class TestTrack:
         with patch("basic_memory.cli.analytics.urllib.request.urlopen", fake_urlopen):
             with patch("basic_memory.cli.analytics.threading.Thread") as mock_thread:
                 # Capture the target function and call it directly
-                def run_target(target):
+                def run_target(target, **kwargs):
                     target()  # Execute synchronously
                     return MagicMock()
 
@@ -130,7 +131,7 @@ class TestTrack:
         with patch("basic_memory.cli.analytics.urllib.request.urlopen", fake_urlopen):
             with patch("basic_memory.cli.analytics.threading.Thread") as mock_thread:
 
-                def run_target(target):
+                def run_target(target, **kwargs):
                     target()  # Should not raise
                     return MagicMock()
 

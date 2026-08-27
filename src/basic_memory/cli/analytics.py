@@ -108,7 +108,7 @@ def track(event_name: str, data: Optional[dict[str, Any]] = None) -> None:
         except Exception:
             pass  # Never break the CLI for analytics
 
-    # Non-daemon so the process waits for the request to complete.
-    # The 3s urllib timeout caps the worst-case exit delay.
-    t = threading.Thread(target=_send)
+    # Analytics must never keep a one-shot CLI process alive during interpreter
+    # shutdown. The request is best-effort and already has a bounded timeout.
+    t = threading.Thread(target=_send, daemon=True)
     t.start()
