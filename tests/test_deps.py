@@ -15,21 +15,23 @@ def _request_for(app: FastAPI) -> Request:
     return Request({"type": "http", "app": app})
 
 
-def test_get_app_config_reads_lifespan_container(app_config):
+@pytest.mark.asyncio
+async def test_get_app_config_reads_lifespan_container(app_config):
     """API requests get the config the lifespan stored on app.state."""
     app = FastAPI()
     app.state.container = ApiContainer(
         config=app_config, mode=resolve_runtime_mode(is_test_env=True)
     )
 
-    assert get_app_config(_request_for(app)) is app_config
+    assert await get_app_config(_request_for(app)) is app_config
 
 
-def test_get_app_config_falls_back_to_composition_root(app_config, config_manager):
+@pytest.mark.asyncio
+async def test_get_app_config_falls_back_to_composition_root(app_config, config_manager):
     """Requests without a lifespan (CLI/MCP local ASGI) resolve via the composition root."""
     app = FastAPI()
 
-    resolved = get_app_config(_request_for(app))
+    resolved = await get_app_config(_request_for(app))
 
     # resolve_container() reads the config the config_manager fixture wrote to disk.
     assert resolved.default_project == app_config.default_project

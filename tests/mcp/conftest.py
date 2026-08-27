@@ -53,7 +53,14 @@ def app(
     """Create test FastAPI application."""
     app = fastapi_app
     previous_overrides = dict(app.dependency_overrides)
-    app.dependency_overrides[get_app_config] = lambda: app_config
+
+    # Async override, matching the production provider: a sync override would
+    # be dispatched to AnyIO's non-daemon worker pool and leave a parked thread
+    # behind, which is exactly the shutdown hang the async provider avoids.
+    async def _app_config():
+        return app_config
+
+    app.dependency_overrides[get_app_config] = _app_config
     app.dependency_overrides[get_engine_factory] = lambda: engine_factory
     try:
         yield app
