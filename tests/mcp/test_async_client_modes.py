@@ -7,6 +7,7 @@ import pytest
 from basic_memory.cli.auth import CLIAuth
 from basic_memory.config import ProjectMode
 from basic_memory.mcp import async_client as async_client_module
+from basic_memory.services import initialization
 from basic_memory.mcp.async_client import (
     get_client,
     get_cloud_control_plane_client,
@@ -78,7 +79,13 @@ async def test_get_client_preinitializes_local_asgi_database(config_manager, mon
         calls.append(db_path)
         return engine, session_maker
 
+    async def skip_project_reconciliation(app_config):
+        """The engine/session maker here are stand-ins; reconciliation needs a real database."""
+
     monkeypatch.setattr(db, "get_or_create_db", fake_get_or_create_db)
+    monkeypatch.setattr(
+        initialization, "reconcile_projects_with_config_once", skip_project_reconciliation
+    )
 
     try:
         async with get_client() as client:
@@ -238,7 +245,13 @@ async def test_get_client_keeps_local_asgi_database_during_overlapping_contexts(
         calls.append(db_path)
         return engine, session_maker
 
+    async def skip_project_reconciliation(app_config):
+        """The engine/session maker here are stand-ins; reconciliation needs a real database."""
+
     monkeypatch.setattr(db, "get_or_create_db", fake_get_or_create_db)
+    monkeypatch.setattr(
+        initialization, "reconcile_projects_with_config_once", skip_project_reconciliation
+    )
 
     first_context = get_client()
     second_context = get_client()

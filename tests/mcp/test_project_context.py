@@ -2407,6 +2407,9 @@ class TestGetProjectClientRoutingOrder:
     @pytest.mark.asyncio
     async def test_local_flag_skips_workspace_resolution(self, config_manager, monkeypatch):
         """--local flag should never trigger workspace resolution, even for cloud projects."""
+        import httpx
+
+        import basic_memory.mcp.project_context as project_context
         from basic_memory.mcp.project_context import get_project_client
         from basic_memory.config import ProjectEntry, ProjectMode
 
@@ -2422,14 +2425,17 @@ class TestGetProjectClientRoutingOrder:
         monkeypatch.setenv("BASIC_MEMORY_FORCE_LOCAL", "true")
         monkeypatch.delenv("BASIC_MEMORY_FORCE_CLOUD", raising=False)
 
-        # Should not raise "Multiple workspaces" — it should skip workspace entirely
-        # It will fail at project validation (no API running), which proves routing worked
-        with pytest.raises(Exception) as exc_info:
-            async with get_project_client(project="cloud-proj"):
-                pass
+        # Any workspace lookup is the failure being guarded against.
+        async def fail_on_workspace_lookup(*args, **kwargs):
+            raise AssertionError("--local must not resolve workspaces")
 
-        # The error should NOT be about workspaces
-        assert "workspace" not in str(exc_info.value).lower()
+        monkeypatch.setattr(project_context, "get_available_workspaces", fail_on_workspace_lookup)
+
+        # The local ASGI client seeds config projects into the database (#1334),
+        # so the cloud-mode entry validates locally and the context enters.
+        async with get_project_client(project="cloud-proj") as (client, active_project):
+            assert isinstance(client._transport, httpx.ASGITransport)  # pyright: ignore[reportPrivateUsage]
+            assert active_project.name == "cloud-proj"
 
     @pytest.mark.asyncio
     async def test_local_route_clears_stale_cached_workspace(self, config_manager, monkeypatch):
