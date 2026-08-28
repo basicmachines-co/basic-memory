@@ -370,7 +370,7 @@ The recipe runs `just lint` + `just typecheck`, then updates every release manif
 
 **Release dry run:** `just release-dry-run v0.21.4` previews the consolidated version update without writing files.
 
-**Development builds:** every commit to `main` publishes a `0.21.3.dev26+468a22f`-style version to PyPI automatically via `.github/workflows/dev-release.yml`. No human action.
+**Development builds are not published.** `main` commits used to publish `0.23.3.devN`-style versions to PyPI via a `dev-release.yml` workflow. That stopped with #1338: every documented install now passes `--prerelease=allow` (required by the FastMCP pre-release pin), and uv applies it to basic-memory itself, so a dev build on PyPI outranked the stable release for every fresh install. To try unreleased `main`, install from git: `uv tool install "basic-memory @ git+https://github.com/basicmachines-co/basic-memory" --prerelease=allow`. Any `.dev` versions still on PyPI from before the change must stay yanked.
 
 **Do not tag releases by hand.** A bare `git tag vX.Y.Z` skips the in-code version bump. Package metadata is still correct (uv-dynamic-versioning derives it from the git tag) but `basic-memory --version` reports the previous release, which is what happened with v0.21.2 → v0.21.3.
 
