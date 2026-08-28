@@ -39,6 +39,10 @@ CREATE TABLE IF NOT EXISTS search_index (
             coalesce(content_stems, '')
         )
     ) STORED,
+    search_tokens TEXT,
+    search_tokens_index_col tsvector GENERATED ALWAYS AS (
+        to_tsvector('simple', coalesce(search_tokens, ''))
+    ) STORED,
     PRIMARY KEY (id, type, project_id),
     FOREIGN KEY (project_id) REFERENCES project(id) ON DELETE CASCADE
 )
@@ -46,6 +50,14 @@ CREATE TABLE IF NOT EXISTS search_index (
 
 CREATE_POSTGRES_SEARCH_INDEX_FTS = DDL("""
 CREATE INDEX IF NOT EXISTS idx_search_index_fts ON search_index USING gin(textsearchable_index_col)
+""")
+
+# Cross-CJK lexical candidates: search_tokens holds whitespace-separated
+# overlapping bigrams for CJK runs (see repository/search_query.py
+# cjk_search_tokens), indexed with the 'simple' parser so Postgres does not
+# stem or stopword-filter the bigrams.
+CREATE_POSTGRES_SEARCH_INDEX_CJK_FTS = DDL("""
+CREATE INDEX IF NOT EXISTS idx_search_index_cjk_fts ON search_index USING gin(search_tokens_index_col)
 """)
 
 # Full note bodies are stored in bounded child rows so one unusually large note
@@ -60,6 +72,10 @@ CREATE TABLE IF NOT EXISTS search_index_fts_chunks (
     textsearchable_index_col tsvector GENERATED ALWAYS AS (
         to_tsvector('english', chunk_text)
     ) STORED,
+    chunk_tokens TEXT,
+    chunk_tokens_index_col tsvector GENERATED ALWAYS AS (
+        to_tsvector('simple', coalesce(chunk_tokens, ''))
+    ) STORED,
     PRIMARY KEY (project_id, search_index_id, search_index_type, chunk_index),
     FOREIGN KEY (search_index_id, search_index_type, project_id)
         REFERENCES search_index(id, type, project_id)
@@ -70,6 +86,11 @@ CREATE TABLE IF NOT EXISTS search_index_fts_chunks (
 CREATE_POSTGRES_SEARCH_INDEX_FTS_CHUNKS_INDEX = DDL("""
 CREATE INDEX IF NOT EXISTS idx_search_index_fts_chunks_fts
 ON search_index_fts_chunks USING gin(textsearchable_index_col)
+""")
+
+CREATE_POSTGRES_SEARCH_INDEX_FTS_CHUNKS_CJK_FTS = DDL("""
+CREATE INDEX IF NOT EXISTS idx_search_index_fts_chunks_cjk_fts
+ON search_index_fts_chunks USING gin(chunk_tokens_index_col)
 """)
 
 CREATE_POSTGRES_SEARCH_INDEX_METADATA = DDL("""
@@ -94,6 +115,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
     title,                 -- Title for searching
     content_stems,         -- Main searchable content split into stems
     content_snippet,       -- File content snippet for display
+    search_tokens,         -- Derived CJK bigram tokens (cjk_search_tokens)
     permalink,             -- Stable identifier (now indexed for path search)
     file_path UNINDEXED,   -- Physical location
     type UNINDEXED,        -- entity/relation/observation
