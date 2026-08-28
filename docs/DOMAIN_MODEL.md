@@ -101,6 +101,13 @@ A relation is a directed semantic statement owned by its source entity.
 Incoming graph navigation does not transfer ownership to the target. Re-indexing the source note
 may recreate, resolve, or remove its outgoing relations.
 
+Deleting the target is not one of those events. When a target entity is deleted, its inbound
+relations survive with `to_id` cleared and `to_name` intact -- the same unresolved state the
+indexer produces for a link to a note that does not exist yet. The source note's markdown still
+carries the reference, so the graph must keep carrying it too; a graph that quietly drops the edge
+reports a clean bill of health over a broken link. Forward-reference resolution re-links the row
+if the target is ever recreated.
+
 ### NoteContent
 
 `NoteContent` is the operational record of accepted Markdown bytes and their file materialization
