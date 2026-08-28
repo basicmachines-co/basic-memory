@@ -1,14 +1,18 @@
 """Tests for the CJK search token schema migration."""
 
+from collections.abc import Callable
 import sqlite3
 from importlib import import_module
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 from alembic import command
 from alembic.config import Config
+import pytest
 
 from basic_memory import db
+from tests import conftest as test_conftest
 
 migration = import_module("basic_memory.alembic.versions.8a7b6c5d4e3f_add_cjk_search_tokens")
 
@@ -49,6 +53,42 @@ def _sqlite_alembic_config(database_path: Path) -> Config:
 
 def _connection(dialect_name: str) -> SimpleNamespace:
     return SimpleNamespace(dialect=SimpleNamespace(name=dialect_name))
+
+
+class _FakeResult:
+    def scalar(self) -> None:
+        return None
+
+
+class _FakeConnection:
+    def __init__(self) -> None:
+        self.statements: list[object] = []
+
+    async def run_sync(self, callback: Callable[..., object]) -> None:
+        del callback
+
+    async def execute(self, statement: object) -> _FakeResult:
+        self.statements.append(statement)
+        return _FakeResult()
+
+
+class _FakeTransaction:
+    def __init__(self, connection: _FakeConnection) -> None:
+        self.connection = connection
+
+    async def __aenter__(self) -> _FakeConnection:
+        return self.connection
+
+    async def __aexit__(self, exc_type: object, exc: object, traceback: object) -> None:
+        del exc_type, exc, traceback
+
+
+class _FakeEngine:
+    def __init__(self, connection: _FakeConnection) -> None:
+        self.connection = connection
+
+    def begin(self) -> _FakeTransaction:
+        return _FakeTransaction(self.connection)
 
 
 def _table_columns(connection: sqlite3.Connection, table_name: str) -> set[str]:
@@ -256,3 +296,19 @@ def test_postgres_downgrade_removes_only_new_columns_and_indexes(monkeypatch) ->
     # Exactly the two new indexes and four new columns come off; a stray
     # seventh statement would mean a pre-existing column/index got touched.
     assert len(normalized) == 6
+
+
+@pytest.mark.asyncio
+async def test_postgres_fixture_recreates_cjk_indexes_without_docker(monkeypatch) -> None:
+    """The shared Postgres fixture must execute both CJK index DDL statements."""
+    connection = _FakeConnection()
+    monkeypatch.setattr(test_conftest.command, "stamp", lambda *args, **kwargs: None)
+
+    await test_conftest._reset_postgres_test_schema(
+        cast(test_conftest.AsyncEngine, _FakeEngine(connection)),
+        "postgresql+asyncpg://test/test",
+    )
+
+    normalized = [" ".join(str(statement).split()) for statement in connection.statements]
+    assert any("idx_search_index_cjk_fts" in statement for statement in normalized)
+    assert any("idx_search_index_fts_chunks_cjk_fts" in statement for statement in normalized)

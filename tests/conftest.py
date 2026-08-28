@@ -151,7 +151,9 @@ def _resolve_postgres_sync_url(postgres_container) -> str:
 async def _reset_postgres_test_schema(engine: AsyncEngine, async_url: str) -> None:
     """Restore the shared Postgres schema to a clean baseline."""
     from basic_memory.models.search import (
+        CREATE_POSTGRES_SEARCH_INDEX_CJK_FTS,
         CREATE_POSTGRES_SEARCH_INDEX_FTS,
+        CREATE_POSTGRES_SEARCH_INDEX_FTS_CHUNKS_CJK_FTS,
         CREATE_POSTGRES_SEARCH_INDEX_FTS_CHUNKS_INDEX,
         CREATE_POSTGRES_SEARCH_INDEX_FTS_CHUNKS_TABLE,
         CREATE_POSTGRES_SEARCH_INDEX_METADATA,
@@ -168,8 +170,10 @@ async def _reset_postgres_test_schema(engine: AsyncEngine, async_url: str) -> No
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_TABLE)
         await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_FTS)
+        await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_CJK_FTS)
         await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_FTS_CHUNKS_TABLE)
         await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_FTS_CHUNKS_INDEX)
+        await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_FTS_CHUNKS_CJK_FTS)
         await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_METADATA)
         await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_PERMALINK)
         await conn.execute(CREATE_POSTGRES_SEARCH_VECTOR_CHUNKS_TABLE)

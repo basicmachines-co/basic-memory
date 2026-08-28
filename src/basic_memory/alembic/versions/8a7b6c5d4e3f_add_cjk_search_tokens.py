@@ -10,6 +10,7 @@ from typing import Sequence, Union
 
 from alembic import op
 from sqlalchemy import text
+from sqlalchemy.engine import Connection
 
 
 # revision identifiers, used by Alembic.
@@ -19,7 +20,7 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
-def _has_fts5_search_index(connection) -> bool:
+def _has_fts5_search_index(connection: Connection) -> bool:
     """Whether a real FTS5 search_index virtual table exists on this connection.
 
     Trigger: SQLite creates search_index as an FTS5 virtual table at runtime
