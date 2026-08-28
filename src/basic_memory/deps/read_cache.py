@@ -12,8 +12,12 @@ from basic_memory.read_cache.policy import (
 )
 
 
-def get_read_cache(request: Request) -> ReadCache | None:
-    """Return the optional host-injected cache backend."""
+async def get_read_cache(request: Request) -> ReadCache | None:
+    """Return the optional host-injected cache backend.
+
+    ``async`` for the same reason as ``get_app_config``: a sync dependency would
+    hop to anyio's worker pool just to read an attribute (#1345).
+    """
     try:
         container = request.app.state.container
     except AttributeError:

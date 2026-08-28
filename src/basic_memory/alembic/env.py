@@ -2,34 +2,24 @@
 
 import asyncio
 import os
-import sys
 from contextlib import suppress
 from logging.config import fileConfig
 
-from loguru import logger
 from sqlalchemy import engine_from_config, pool
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from alembic import context
 
 from basic_memory.config import ConfigManager
-from basic_memory.migration_loop import running_on_uvloop
 
-# Allow nested event loops (needed for pytest-asyncio and other async contexts).
-# nest_asyncio cannot patch a uvloop loop or Python 3.14+; in those cases we skip
-# it and rely on the thread-based fallback in run_migrations_online() instead
-# (see basic_memory.migration_loop for why uvloop must be detected up front).
-if sys.version_info < (3, 14) and not running_on_uvloop():
-    try:
-        import nest_asyncio
-
-        nest_asyncio.apply()
-    except (ImportError, ValueError) as exc:
-        # Trigger: nest_asyncio is absent (ImportError) or refuses to patch the
-        # running loop (ValueError).
-        # Outcome: log at DEBUG (observable, not noisy) and fall through to the
-        # thread-based migration fallback.
-        logger.debug(f"nest_asyncio not applied ({exc!r}); using thread-based migration fallback")
+# Constraint: never apply nest_asyncio here. It replaces asyncio.run and
+# run_until_complete process-wide, and its run_until_complete returns the moment
+# the root task finishes without running that task's done-callbacks. anyio stops
+# its worker threads from exactly such a callback, so any request that touched
+# the thread pool left a non-daemon worker parked forever and one-shot CLI
+# commands hung at interpreter exit on Python < 3.14 (#1333, #1345). Callers
+# already inside a running loop (pytest-asyncio, the API lifespan) take the
+# thread fallback in run_migrations_online(), the only path 3.14 ever used.
 
 # Trigger: only set test env when actually running under pytest
 # Why: alembic/env.py is imported during normal operations (MCP server startup, migrations)

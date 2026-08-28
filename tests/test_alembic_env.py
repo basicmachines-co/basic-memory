@@ -1,5 +1,6 @@
 """Regression tests for Alembic env async migration helpers."""
 
+import asyncio
 import importlib.util
 import uuid
 from contextlib import nullcontext
@@ -59,6 +60,19 @@ def load_alembic_env_module(monkeypatch, tmp_path):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_env_import_leaves_asyncio_unpatched(monkeypatch, tmp_path):
+    """env.py must not apply nest_asyncio (#1333, #1345).
+
+    nest_asyncio swaps asyncio.run/run_until_complete process-wide and its loop
+    skips the root task's done-callbacks — the hook anyio uses to stop its worker
+    threads — so a CLI process that ran migrations hung at interpreter exit.
+    """
+    load_alembic_env_module(monkeypatch, tmp_path)
+
+    assert not getattr(asyncio, "_nest_patched", False)
+    assert asyncio.run.__module__ == "asyncio.runners"
 
 
 def test_asyncio_run_failure_closes_migration_coroutine(monkeypatch, tmp_path):
