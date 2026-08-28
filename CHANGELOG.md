@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+### Bug Fixes
+
+- **#1344**: Deleting a note no longer erases the relations pointing at it. The
+  `relation.to_id` foreign key is now `ON DELETE SET NULL` rather than
+  `ON DELETE CASCADE`, and `Entity.incoming_relations` no longer cascades deletes
+  through the ORM. Deleting a target leaves its inbound relations in the unresolved
+  state the indexer already produces for a link to a note that does not exist yet --
+  `to_id` null, `to_name` holding the source's original link text -- so a
+  broken-link report stops coming back clean over a vault full of them, and
+  recreating the target re-links the references through the existing
+  forward-reference pass. `from_id` keeps `CASCADE`: an entity does own the
+  relations it declares. Rows already lost to the old behavior stay lost; re-index
+  the affected notes to bring them back as unresolved.
+
 ## v0.23.2 (2026-08-25)
 
 Patch release fixing case-duplicate folder creation.
