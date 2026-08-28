@@ -34,6 +34,7 @@ class SearchIndexRow:
     title: Optional[str] = None  # entity
     content_stems: Optional[str] = None  # entity, observation
     content_snippet: Optional[str] = None  # entity, observation
+    search_tokens: Optional[str] = None  # derived CJK search tokens
     entity_id: Optional[int] = None  # observations
     category: Optional[str] = None  # observations
     from_id: Optional[int] = None  # relations
@@ -70,6 +71,7 @@ class SearchIndexRow:
             entity_id=row.get("entity_id"),
             content_stems=row.get("content_stems"),
             content_snippet=row.get("content_snippet"),
+            search_tokens=row.get("search_tokens"),
             category=row.get("category"),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
@@ -127,6 +129,7 @@ class SearchIndexRow:
             "title": self.title,
             "content_stems": self.content_stems,
             "content_snippet": self.content_snippet,
+            "search_tokens": self.search_tokens,
             "permalink": self.permalink,
             "file_path": self.file_path,
             "type": self.type,

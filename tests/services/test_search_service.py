@@ -443,6 +443,73 @@ async def test_update_index(search_service, full_entity):
 
 
 @pytest.mark.asyncio
+async def test_index_entity_persists_cjk_search_tokens_without_changing_display_fields(
+    search_service,
+    session_maker,
+    test_project,
+):
+    """Entity indexing stores CJK bigrams separately from the display fields."""
+    from basic_memory.repository import EntityRepository
+
+    entity_repository = EntityRepository(project_id=test_project.id)
+    title = "标题甲"
+    permalink = "目录/链接乙"
+    content = "正文丙混合 latinword"
+    entity = await _create_entity(
+        session_maker,
+        entity_repository,
+        {
+            "title": title,
+            "note_type": "note",
+            "entity_metadata": {},
+            "content_type": "text/markdown",
+            "file_path": "cjk/display-integrity.md",
+            "permalink": permalink,
+            "project_id": test_project.id,
+            "created_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc),
+        },
+    )
+
+    await search_service.index_entity(entity, content=content)
+
+    async with db.scoped_session(session_maker) as session:
+        row = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT title, permalink, content_stems, content_snippet, search_tokens "
+                        "FROM search_index WHERE project_id = :project_id AND id = :id"
+                    ),
+                    {"project_id": test_project.id, "id": entity.id},
+                )
+            )
+            .mappings()
+            .one()
+        )
+
+    assert row["title"] == title
+    assert row["permalink"] == permalink
+    assert row["content_snippet"] == content
+    assert title in row["content_stems"]
+    assert content in row["content_stems"]
+    assert row["search_tokens"] is not None
+    assert {
+        "标题",
+        "题甲",
+        "目录",
+        "链接",
+        "接乙",
+        "正文",
+        "文丙",
+        "丙混",
+        "混合",
+    } <= set(row["search_tokens"].split())
+    assert "latinword" not in row["search_tokens"]
+    assert "甲链" not in row["search_tokens"]
+
+
+@pytest.mark.asyncio
 async def test_boolean_and_search(search_service, test_graph):
     """Test boolean AND search."""
     # Create an entity with specific terms for testing

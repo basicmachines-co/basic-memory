@@ -20,7 +20,7 @@ from basic_memory.repository.embedding_provider_factory import create_embedding_
 from basic_memory.repository.rerank_provider import RerankProvider
 from basic_memory.repository.rerank_provider_factory import create_rerank_provider
 from basic_memory.repository.search_index_row import SearchIndexRow
-from basic_memory.repository.search_query import relaxed_query_words
+from basic_memory.repository.search_query import cjk_search_tokens, relaxed_query_words
 from basic_memory.repository.semantic_chunking import VectorChunkRecord
 from basic_memory.repository.search_repository_base import (
     SearchRepositoryBase,
@@ -229,13 +229,13 @@ class PostgresSearchRepository(SearchRepositoryBase):
             await session.execute(
                 text("""
                     INSERT INTO search_index (
-                        id, title, content_stems, content_snippet, permalink, file_path, type, metadata,
+                        id, title, content_stems, content_snippet, search_tokens, permalink, file_path, type, metadata,
                         from_id, to_id, relation_type,
                         entity_id, category,
                         created_at, updated_at,
                         project_id
                     ) VALUES (
-                        :id, :title, :content_stems, :content_snippet, :permalink, :file_path, :type, :metadata,
+                        :id, :title, :content_stems, :content_snippet, :search_tokens, :permalink, :file_path, :type, :metadata,
                         :from_id, :to_id, :relation_type,
                         :entity_id, :category,
                         :created_at, :updated_at,
@@ -246,6 +246,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                         title = EXCLUDED.title,
                         content_stems = EXCLUDED.content_stems,
                         content_snippet = EXCLUDED.content_snippet,
+                        search_tokens = EXCLUDED.search_tokens,
                         file_path = EXCLUDED.file_path,
                         type = EXCLUDED.type,
                         metadata = EXCLUDED.metadata,
@@ -291,16 +292,19 @@ class PostgresSearchRepository(SearchRepositoryBase):
             },
         )
 
-        chunks = [
-            {
-                "search_index_id": row.id,
-                "search_index_type": row.type,
-                "chunk_index": chunk_index,
-                "chunk_text": chunk_text.replace("\x00", ""),
-            }
-            for row in search_index_rows
-            for chunk_index, chunk_text in _iter_fts_chunks(row.content_snippet)
-        ]
+        chunks = []
+        for row in search_index_rows:
+            for chunk_index, chunk_text in _iter_fts_chunks(row.content_snippet):
+                chunk_text = chunk_text.replace("\x00", "")
+                chunks.append(
+                    {
+                        "search_index_id": row.id,
+                        "search_index_type": row.type,
+                        "chunk_index": chunk_index,
+                        "chunk_text": chunk_text,
+                        "chunk_tokens": cjk_search_tokens(chunk_text),
+                    }
+                )
         if not chunks:
             return
 
@@ -311,7 +315,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     search_index_id,
                     search_index_type,
                     chunk_index,
-                    chunk_text
+                    chunk_text,
+                    chunk_tokens
                 )
                 SELECT
                     :project_id,
@@ -323,7 +328,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     search_index_id INTEGER,
                     search_index_type VARCHAR,
                     chunk_index INTEGER,
-                    chunk_text TEXT
+                    chunk_text TEXT,
+                    chunk_tokens TEXT
                 )
             """),
             {"project_id": self.project_id, "chunks": json.dumps(chunks)},
@@ -754,13 +760,13 @@ class PostgresSearchRepository(SearchRepositoryBase):
             await session.execute(
                 text("""
                     INSERT INTO search_index (
-                        id, title, content_stems, content_snippet, permalink, file_path, type, metadata,
+                        id, title, content_stems, content_snippet, search_tokens, permalink, file_path, type, metadata,
                         from_id, to_id, relation_type,
                         entity_id, category,
                         created_at, updated_at,
                         project_id
                     ) VALUES (
-                        :id, :title, :content_stems, :content_snippet, :permalink, :file_path, :type, :metadata,
+                        :id, :title, :content_stems, :content_snippet, :search_tokens, :permalink, :file_path, :type, :metadata,
                         :from_id, :to_id, :relation_type,
                         :entity_id, :category,
                         :created_at, :updated_at,
@@ -771,6 +777,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                         title = EXCLUDED.title,
                         content_stems = EXCLUDED.content_stems,
                         content_snippet = EXCLUDED.content_snippet,
+                        search_tokens = EXCLUDED.search_tokens,
                         file_path = EXCLUDED.file_path,
                         type = EXCLUDED.type,
                         metadata = EXCLUDED.metadata,

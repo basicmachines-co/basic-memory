@@ -545,6 +545,117 @@ async def test_to_insert_includes_project_id(search_repository):
     assert insert_data["project_id"] == search_repository.project_id
 
 
+@pytest.mark.asyncio
+async def test_index_item_persists_search_tokens_and_existing_fields(
+    search_repository,
+    search_entity,
+):
+    """Single-row persistence must write the auxiliary token column independently."""
+    tokens = "标题 题甲 目录 录乙"
+    row = SearchIndexRow(
+        id=search_entity.id,
+        type=SearchItemType.ENTITY.value,
+        title="标题甲",
+        content_stems="标题甲 original stems",
+        content_snippet="Original display content",
+        search_tokens=tokens,
+        permalink=search_entity.permalink,
+        file_path=search_entity.file_path,
+        entity_id=search_entity.id,
+        metadata={"note_type": search_entity.note_type},
+        created_at=search_entity.created_at,
+        updated_at=search_entity.updated_at,
+        project_id=search_repository.project_id,
+    )
+
+    await search_repository.index_item(row)
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        persisted = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT title, content_stems, content_snippet, search_tokens "
+                        "FROM search_index WHERE project_id = :project_id AND id = :id"
+                    ),
+                    {"project_id": search_repository.project_id, "id": search_entity.id},
+                )
+            )
+            .mappings()
+            .one()
+        )
+
+    assert persisted["title"] == row.title
+    assert persisted["content_stems"] == row.content_stems
+    assert persisted["content_snippet"] == row.content_snippet
+    assert persisted["search_tokens"] == tokens
+
+
+@pytest.mark.asyncio
+async def test_bulk_index_items_persists_search_tokens(search_repository, search_entity):
+    """Bulk persistence must bind search tokens for every row in the batch."""
+    now = datetime.now(timezone.utc)
+    rows = [
+        SearchIndexRow(
+            id=search_entity.id,
+            type=SearchItemType.ENTITY.value,
+            title="甲标题",
+            content_stems="甲标题 stems",
+            content_snippet="first display",
+            search_tokens="甲标 标题",
+            permalink=search_entity.permalink,
+            file_path=search_entity.file_path,
+            entity_id=search_entity.id,
+            metadata={"note_type": search_entity.note_type},
+            created_at=now,
+            updated_at=now,
+            project_id=search_repository.project_id,
+        ),
+        SearchIndexRow(
+            id=search_entity.id + 1,
+            type=SearchItemType.ENTITY.value,
+            title="乙标题",
+            content_stems="乙标题 stems",
+            content_snippet="second display",
+            search_tokens="乙标 标题",
+            permalink="test/search-test-entity-two",
+            file_path="test/search_test_entity_two.md",
+            entity_id=search_entity.id + 1,
+            metadata={"note_type": search_entity.note_type},
+            created_at=now,
+            updated_at=now,
+            project_id=search_repository.project_id,
+        ),
+    ]
+
+    await search_repository.bulk_index_items(rows)
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        persisted = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT id, content_snippet, search_tokens FROM search_index "
+                        "WHERE project_id = :project_id AND id IN (:first_id, :second_id) "
+                        "ORDER BY id"
+                    ),
+                    {
+                        "project_id": search_repository.project_id,
+                        "first_id": search_entity.id,
+                        "second_id": search_entity.id + 1,
+                    },
+                )
+            )
+            .mappings()
+            .all()
+        )
+
+    assert [(row["content_snippet"], row["search_tokens"]) for row in persisted] == [
+        ("first display", "甲标 标题"),
+        ("second display", "乙标 标题"),
+    ]
+
+
 def test_directory_property():
     """Test the directory property of SearchIndexRow."""
     # Test a file in a nested directory

@@ -12,6 +12,7 @@ from sqlalchemy import text
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 import basic_memory.repository.search_repository_base as search_repository_base_module
+import basic_memory.repository.postgres_search_repository as search_repository_module
 from basic_memory.repository.litellm_provider import LiteLLMEmbeddingProvider
 from basic_memory.repository.postgres_search_repository import (
     PostgresSearchRepository,
@@ -475,6 +476,57 @@ async def test_index_item_strips_nul_bytes(session_maker, test_project):
     assert len(results) == 1
     assert "\x00" not in (results[0].content_snippet or "")
     assert "\x00" not in (results[0].title or "")
+
+
+@pytest.mark.asyncio
+async def test_postgres_chunk_tokens_are_derived_per_chunk(
+    session_maker,
+    test_project,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Chunk token streams must not synthesize bigrams across chunk boundaries."""
+    monkeypatch.setattr(search_repository_module, "POSTGRES_FTS_CHUNK_SIZE", 6)
+    monkeypatch.setattr(search_repository_module, "POSTGRES_FTS_CHUNK_OVERLAP", 2)
+
+    repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
+    now = datetime.now(timezone.utc)
+    await repo.index_item(
+        SearchIndexRow(
+            project_id=test_project.id,
+            id=97,
+            title="Chunked CJK",
+            content_stems="chunked cjk",
+            content_snippet="甲乙丙丁\n\n戊己庚辛",
+            permalink="test/chunked-cjk",
+            file_path="test/chunked-cjk.md",
+            type="entity",
+            metadata={"note_type": "note"},
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        chunks = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT chunk_index, chunk_text, chunk_tokens "
+                        "FROM search_index_fts_chunks "
+                        "WHERE project_id = :project_id AND search_index_id = :id "
+                        "ORDER BY chunk_index"
+                    ),
+                    {"project_id": test_project.id, "id": 97},
+                )
+            )
+            .mappings()
+            .all()
+        )
+
+    assert [(chunk["chunk_text"], chunk["chunk_tokens"]) for chunk in chunks] == [
+        ("甲乙丙丁\n\n", "甲乙 乙丙 丙丁"),
+        ("\n\n戊己庚辛", "戊己 己庚 庚辛"),
+    ]
 
 
 def test_strip_nul_from_row():

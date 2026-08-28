@@ -22,7 +22,7 @@ from basic_memory.repository.search_repository import (
     SearchIndexRow,
     SearchRepository,
 )
-from basic_memory.repository.search_query import relaxed_query_words
+from basic_memory.repository.search_query import cjk_search_tokens, relaxed_query_words
 from basic_memory.repository.search_trace import SearchTraceCollector
 from basic_memory.schemas.base import normalize_note_type
 from basic_memory.schemas.search import SearchQuery, SearchItemType, SearchRetrievalMode
@@ -782,12 +782,14 @@ class SearchService:
         entity: Entity,
     ) -> None:
         # Index entity file with no content
+        title = _strip_nul(entity.title)
         await self.repository.index_item(
             SearchIndexRow(
                 id=entity.id,
                 entity_id=entity.id,
                 type=SearchItemType.ENTITY.value,
-                title=_strip_nul(entity.title),
+                title=title,
+                search_tokens=cjk_search_tokens(title, entity.permalink),
                 permalink=entity.permalink,  # Required for Postgres NOT NULL constraint
                 file_path=entity.file_path,
                 metadata={
@@ -862,13 +864,17 @@ class SearchService:
                     :MAX_CONTENT_STEMS_SIZE
                 ]  # pragma: no cover
 
+            entity_title = _strip_nul(entity.title)
             rows_to_index.append(
                 SearchIndexRow(
                     id=entity.id,
                     type=SearchItemType.ENTITY.value,
-                    title=_strip_nul(entity.title),
+                    title=entity_title,
                     content_stems=entity_content_stems,
                     content_snippet=content_snippet,
+                    search_tokens=cjk_search_tokens(
+                        entity_title, entity.permalink, entity_content_stems
+                    ),
                     permalink=entity.permalink,
                     file_path=entity.file_path,
                     entity_id=entity.id,
@@ -896,13 +902,18 @@ class SearchService:
                     obs_content_stems = obs_content_stems[
                         :MAX_CONTENT_STEMS_SIZE
                     ]  # pragma: no cover
+                obs_title = _strip_nul(f"{obs.category}: {obs.content[:100]}...")
+                obs_content_snippet = _strip_nul(obs.content)
                 rows_to_index.append(
                     SearchIndexRow(
                         id=obs.id,
                         type=SearchItemType.OBSERVATION.value,
-                        title=_strip_nul(f"{obs.category}: {obs.content[:100]}..."),
+                        title=obs_title,
                         content_stems=obs_content_stems,
-                        content_snippet=_strip_nul(obs.content),
+                        content_snippet=obs_content_snippet,
+                        search_tokens=cjk_search_tokens(
+                            obs_title, obs_permalink, obs_content_stems
+                        ),
                         permalink=obs_permalink,
                         file_path=entity.file_path,
                         category=obs.category,
@@ -932,6 +943,9 @@ class SearchService:
                         title=relation_title,
                         permalink=rel.permalink,
                         content_stems=rel_content_stems,
+                        search_tokens=cjk_search_tokens(
+                            relation_title, rel.permalink, rel_content_stems
+                        ),
                         file_path=entity.file_path,
                         type=SearchItemType.RELATION.value,
                         entity_id=entity.id,
