@@ -55,11 +55,16 @@ def _is_cloud_only(entry: ProjectEntry) -> bool:
     """Whether a config entry routes to the cloud with no local copy of the notes.
 
     A local copy is recorded in ``local_sync_path``; older entries recorded it only
-    in ``path``, which ``_require_local_sync_path`` still honors, so both count.
-    ``set-cloud`` clears both, and ``add --cloud`` without ``--local-path`` writes
-    neither.
+    in ``path``, which ``_require_local_sync_path`` still honors — but only when it
+    is absolute. A relative ``path`` on a cloud entry is the remote slug
+    (``config_migrations``), and, like ``is_locally_syncable``, it must never be
+    taken for a local directory: a row for it would resolve against the process
+    cwd. ``set-cloud`` clears both fields; ``add --cloud`` without ``--local-path``
+    writes neither.
     """
-    return entry.mode == ProjectMode.CLOUD and not (entry.local_sync_path or entry.path)
+    if entry.mode != ProjectMode.CLOUD:
+        return False
+    return not (entry.local_sync_path or os.path.isabs(entry.path))
 
 
 class ProjectService:

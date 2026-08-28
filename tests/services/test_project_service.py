@@ -1908,3 +1908,20 @@ async def test_synchronize_projects_keeps_a_row_for_a_legacy_path_only_cloud_cop
     await project_service.synchronize_projects()
 
     assert await _get_project(project_service, "research-legacy") is not None
+
+
+@pytest.mark.asyncio
+async def test_synchronize_projects_treats_a_relative_cloud_path_as_the_remote_slug(
+    project_service: ProjectService,
+):
+    """A cloud entry whose `path` is a slug like `research` has no local copy."""
+    from basic_memory.config import ProjectEntry, ProjectMode
+
+    config_manager = project_service.config_manager
+    config = config_manager.load_config()
+    config.projects["research-slug"] = ProjectEntry(path="research", mode=ProjectMode.CLOUD)
+    config_manager.save_config(config)
+
+    await project_service.synchronize_projects()
+
+    assert await _get_project(project_service, "research-slug") is None
