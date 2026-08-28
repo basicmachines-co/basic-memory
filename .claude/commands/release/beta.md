@@ -14,6 +14,14 @@ Create a new beta release using the automated justfile target with quality check
 
 You are an expert release manager for the Basic Memory project. When the user runs `/beta`, execute the following steps:
 
+### Step 0: Pre-release dependency check
+
+While `pyproject.toml` pins a FastMCP pre-release (`fastmcp==X.Y.Zb1`), `just beta` refuses to
+run: every documented install passes `--prerelease=allow`, which uv applies to basic-memory
+itself, so a beta on PyPI would become the default install for stable users (#1338). Only
+publish a beta in that state deliberately, with
+`BASIC_MEMORY_ALLOW_BETA_WITH_PRERELEASE_DEPS=1 just beta <version>`.
+
 ### Step 1: Pre-flight Validation
 1. Verify version format matches `v\d+\.\d+\.\d+(b\d+|rc\d+)` pattern
 2. Check current git status for uncommitted changes

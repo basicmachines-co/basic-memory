@@ -366,7 +366,7 @@ just release v0.21.3
 
 The recipe runs `just lint` + `just typecheck`, then updates every release manifest through `scripts/update_versions.py`: `src/basic_memory/__init__.py`, `server.json`, the root Claude marketplace, the Claude Code plugin manifest and local marketplace, the Hermes `plugin.yaml`, and the OpenClaw `package.json`. It commits as `chore: update version to X.Y.Z for vX.Y.Z release` on a `release/vX.Y.Z` branch, lands it on `main` via a rebase-merged PR, then tags the rebased commit and pushes the tag. After the tag lands, the `Release` workflow builds the Python package, publishes to PyPI, creates the GitHub release with auto-generated notes, publishes the OpenClaw npm package, and updates the Homebrew formula. The recipe finishes by printing the post-release tasks the workflow doesn't cover.
 
-**Beta release:** `just beta v0.21.3b1` — same flow with a beta-suffixed tag. PyPI consumers install with `pip install basic-memory --pre`.
+**Beta release:** `just beta v0.21.3b1` — same flow with a beta-suffixed tag. PyPI consumers install with `pip install basic-memory --pre`. While `pyproject.toml` pins a FastMCP pre-release, the recipe refuses to publish a beta: every documented install runs with `--prerelease=allow`, which uv applies to basic-memory itself, so a beta on PyPI would become the default install for stable users (#1338). Override deliberately with `BASIC_MEMORY_ALLOW_BETA_WITH_PRERELEASE_DEPS=1`.
 
 **Release dry run:** `just release-dry-run v0.21.4` previews the consolidated version update without writing files.
 
