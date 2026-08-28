@@ -8,13 +8,15 @@ The plugin replaces Hermes's "no external memory provider" with a real graph: se
 
 ## Install
 
-Managed installation requires a Hermes Agent release containing the
-[manifest-v2 installer fix](https://github.com/NousResearch/hermes-agent/pull/85893).
-Hermes Agent v0.20.5 (`v2026.8.19`) and earlier are not supported. If the installer says it only
-supports `manifest_version: 1`, update Hermes to a release containing that fix.
-
 ```bash
 hermes plugins install basicmachines-co/basic-memory/integrations/hermes
+```
+
+Hermes does not install a plugin's Python dependencies (it only prints them), so put the
+`mcp` package into the Hermes venv yourself:
+
+```bash
+uv pip install --python ~/.hermes/hermes-agent/venv/bin/python "mcp>=2,<3"
 ```
 
 Then activate it in `~/.hermes/config.yaml`:
@@ -30,12 +32,14 @@ The plugin self-installs the `basic-memory` CLI on first init via `uv tool insta
 
 ### Prerequisites
 
-- A supported [Hermes Agent](https://github.com/NousResearch/hermes-agent) release as described
-  above
+- [Hermes Agent](https://github.com/NousResearch/hermes-agent) — any release; the plugin
+  declares `manifest_version: 1` so the released installer accepts it while the runtime
+  still reads its newer manifest fields
 - [`uv`](https://docs.astral.sh/uv/) on PATH (used for the bootstrap install)
-- The `mcp` Python package in the Hermes venv. If `hermes plugins install` doesn't auto-install it (it follows `pip_dependencies` in `plugin.yaml`), run:
+- The `mcp` Python package in the Hermes venv. Hermes never installs plugin Python
+  dependencies — it prints the ones declared in `plugin.yaml` — so run:
   ```bash
-  uv pip install --python ~/.hermes/hermes-agent/venv/bin/python mcp
+  uv pip install --python ~/.hermes/hermes-agent/venv/bin/python "mcp>=2,<3"
   ```
 
 ### Verify
