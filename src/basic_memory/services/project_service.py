@@ -542,7 +542,8 @@ class ProjectService:
             # Add projects that exist in config but not in DB
             for name, entry in config_project_names.items():
                 # Trigger: a cloud-only entry — cloud mode with no local sync copy
-                #          (`set-cloud`, `add --cloud` without --local-path).
+                #          (`add --cloud` without --local-path, or a `set-cloud`
+                #          cutover, which clears the sync metadata).
                 # Why: set-cloud deliberately deletes the local row so the project's
                 #      configured state is purely cloud; recreating it here would
                 #      undo that cutover on every reconciliation (#1334 review). A

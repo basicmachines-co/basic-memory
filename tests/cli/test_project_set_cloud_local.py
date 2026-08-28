@@ -383,3 +383,25 @@ class TestSetCloudWithWorkspace:
         config_module._CONFIG_SIZE = None
         updated_data = json.loads(mock_config.read_text())
         assert updated_data["projects"]["research"]["workspace_id"] == "global-default-tenant-id"
+
+
+def test_set_cloud_clears_sync_metadata(runner, mock_config, tmp_path):
+    """A cutover leaves no local_sync_path behind, so reconciliation cannot recreate the row.
+
+    `add --cloud --local-path` entries carry a sync path; set-cloud blanked only
+    `path`, and a surviving local_sync_path read as a local copy (#1334 review).
+    """
+    config = json.loads(mock_config.read_text())
+    config["projects"]["research"].update(
+        {"local_sync_path": str(tmp_path / "research"), "bisync_initialized": True}
+    )
+    mock_config.write_text(json.dumps(config, indent=2))
+
+    result = runner.invoke(app, ["project", "set-cloud", "research"])
+
+    assert result.exit_code == 0, result.stdout
+    entry = json.loads(mock_config.read_text())["projects"]["research"]
+    assert entry["mode"] == "cloud"
+    assert entry["path"] == ""
+    assert entry["local_sync_path"] is None
+    assert entry["bisync_initialized"] is False
