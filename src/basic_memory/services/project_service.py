@@ -541,12 +541,15 @@ class ProjectService:
 
             # Add projects that exist in config but not in DB
             for name, entry in config_project_names.items():
-                # Trigger: the entry routes to the cloud (`set-cloud`, `add --cloud`).
+                # Trigger: a cloud-only entry — cloud mode with no local sync copy
+                #          (`set-cloud`, `add --cloud` without --local-path).
                 # Why: set-cloud deliberately deletes the local row so the project's
                 #      configured state is purely cloud; recreating it here would
-                #      undo that cutover on every reconciliation (#1334 review).
-                # Outcome: cloud-mode entries never get a local projects row.
-                if entry.mode == ProjectMode.CLOUD:
+                #      undo that cutover on every reconciliation (#1334 review). A
+                #      cloud project with a local sync path still needs its row for
+                #      local-side operations (`project ls --local`, watching).
+                # Outcome: cloud-only entries never get a local projects row.
+                if entry.mode == ProjectMode.CLOUD and not entry.local_sync_path:
                     continue
                 if name not in db_projects_by_permalink:
                     logger.info(f"Adding project '{name}' to database")
@@ -582,11 +585,15 @@ class ProjectService:
             config_default = self.config_manager.default_project
             config_default_entry = config_project_names.get(config_default)
 
-            # Trigger: the configured default routes to the cloud.
+            # Trigger: the configured default is cloud-only (no local sync copy).
             # Why: it has no local row by design, so the database default is only
             #      the local fallback and must not overwrite the user's choice.
             # Outcome: config keeps the cloud default; the DB default stays local.
-            if config_default_entry is not None and config_default_entry.mode == ProjectMode.CLOUD:
+            if (
+                config_default_entry is not None
+                and config_default_entry.mode == ProjectMode.CLOUD
+                and not config_default_entry.local_sync_path
+            ):
                 pass
             elif db_default and db_default.name != config_default:
                 # Update config to match DB default
