@@ -32,9 +32,11 @@ The plugin self-installs the `basic-memory` CLI on first init via `uv tool insta
 
 ### Prerequisites
 
-- [Hermes Agent](https://github.com/NousResearch/hermes-agent) — any release; the plugin
-  declares `manifest_version: 1` so the released installer accepts it while the runtime
-  still reads its newer manifest fields
+- [Hermes Agent](https://github.com/NousResearch/hermes-agent) v0.20.x or newer — verified
+  on v0.20.5 (`v2026.8.19`). The plugin declares `manifest_version: 1` so the released
+  installer accepts it while the runtime still reads its newer manifest fields; older
+  builds may lack repository-subdirectory plugin sources, and the `/bm-*` slash commands
+  need Hermes ≥ v0.11.0
 - [`uv`](https://docs.astral.sh/uv/) on PATH (used for the bootstrap install)
 - The `mcp` Python package in the Hermes venv. Hermes never installs plugin Python
   dependencies — it prints the ones declared in `plugin.yaml` — so run:
