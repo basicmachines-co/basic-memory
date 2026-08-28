@@ -796,6 +796,19 @@ beta version:
         exit 1
     fi
     
+    # Trigger: pyproject pins a FastMCP pre-release (fastmcp==X.Y.Zb1).
+    # Why: while that pin exists every documented install/upgrade passes
+    #      --prerelease=allow, and uv applies it to basic-memory itself, so a
+    #      beta on PyPI would become the default install for stable users (#1338).
+    # Outcome: refuse the beta unless explicitly overridden.
+    if grep -Eq '"fastmcp==[0-9.]+(a|b|rc)[0-9]+"' pyproject.toml \
+        && [[ "${BASIC_MEMORY_ALLOW_BETA_WITH_PRERELEASE_DEPS:-}" != "1" ]]; then
+        echo "❌ pyproject.toml pins a FastMCP pre-release. Stable installs run with"
+        echo "   --prerelease=allow, so this beta would be picked up by every fresh install."
+        echo "   Set BASIC_MEMORY_ALLOW_BETA_WITH_PRERELEASE_DEPS=1 to publish anyway."
+        exit 1
+    fi
+
     # Check if tag already exists
     if git tag -l "{{version}}" | grep -q "{{version}}"; then
         echo "❌ Tag {{version}} already exists"
