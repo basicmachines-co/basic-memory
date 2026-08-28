@@ -90,6 +90,7 @@ class RecordingBatchIndexer:
     calls: list[dict[str, IndexInputFile]] = field(default_factory=list)
     max_concurrent: int | None = None
     parse_max_concurrent: int | None = None
+    metadata_update_max_concurrent: int | None = None
     published_generation_by_entity_id: dict[int, int] | None = None
     publish_max_concurrent: int | None = None
 
@@ -99,10 +100,12 @@ class RecordingBatchIndexer:
         *,
         max_concurrent: int,
         parse_max_concurrent: int | None = None,
+        metadata_update_max_concurrent: int | None = None,
     ) -> IndexingBatchResult:
         self.calls.append(dict(files))
         self.max_concurrent = max_concurrent
         self.parse_max_concurrent = parse_max_concurrent
+        self.metadata_update_max_concurrent = metadata_update_max_concurrent
         return self.result
 
     async def publish_relation_generations(
@@ -258,6 +261,7 @@ async def test_index_batch_runtime_indexes_loaded_files_and_reconciles_note_cont
 
     assert batch_indexer.max_concurrent == 4
     assert batch_indexer.parse_max_concurrent == 2
+    assert batch_indexer.metadata_update_max_concurrent == 1
     assert batch_indexer.calls[0]["ok.md"] == IndexInputFile(
         path="ok.md",
         size=5,

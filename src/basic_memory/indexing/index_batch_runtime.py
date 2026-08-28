@@ -56,6 +56,7 @@ class IndexInputBatchExecutor(Protocol):
         *,
         max_concurrent: int,
         parse_max_concurrent: int | None = None,
+        metadata_update_max_concurrent: int | None = None,
     ) -> IndexingBatchResult:
         """Index one batch of storage-neutral input files."""
 
@@ -105,6 +106,7 @@ class IndexBatchRuntime[EntityT: IndexedNoteContentEntity, FileInfoT: LoadedInde
             input_files,
             max_concurrent=max_concurrent,
             parse_max_concurrent=parse_max_concurrent,
+            metadata_update_max_concurrent=metadata_update_max_concurrent,
         )
         reconciliation = await reconcile_indexed_note_content_batch(
             result.indexed,

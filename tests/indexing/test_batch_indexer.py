@@ -193,6 +193,58 @@ async def test_batch_indexer_parses_markdown_with_parallel_path(
 
 
 @pytest.mark.asyncio
+async def test_batch_indexer_honors_explicit_search_refresh_concurrency(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+    monkeypatch,
+):
+    paths = ("notes/one.md", "notes/two.md")
+    for path in paths:
+        await _create_file(project_config.home / path, f"# {Path(path).stem}\n")
+
+    files = {path: await _load_input(file_service, path) for path in paths}
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+    original_index_entity_data = search_service.index_entity_data
+    in_flight = 0
+    max_in_flight = 0
+
+    async def spy_index_entity_data(*args, **kwargs):
+        nonlocal in_flight, max_in_flight
+        in_flight += 1
+        max_in_flight = max(max_in_flight, in_flight)
+        await asyncio.sleep(0.05)
+        try:
+            return await original_index_entity_data(*args, **kwargs)
+        finally:
+            in_flight -= 1
+
+    monkeypatch.setattr(search_service, "index_entity_data", spy_index_entity_data)
+
+    result = await batch_indexer.index_files(
+        files,
+        max_concurrent=2,
+        parse_max_concurrent=2,
+        metadata_update_max_concurrent=1,
+    )
+
+    assert result.errors == []
+    assert len(result.indexed) == 2
+    assert max_in_flight == 1
+
+
+@pytest.mark.asyncio
 async def test_batch_indexer_creates_entities_with_real_db_session(
     app_config,
     entity_service,

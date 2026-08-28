@@ -159,11 +159,14 @@ class BatchIndexer:
         *,
         max_concurrent: int,
         parse_max_concurrent: int | None = None,
+        metadata_update_max_concurrent: int | None = None,
         existing_permalink_by_path: dict[str, str | None] | None = None,
     ) -> IndexingBatchResult:
         """Index one batch of loaded files with bounded concurrency."""
         if max_concurrent <= 0:
             raise ValueError("max_concurrent must be greater than zero")
+        if metadata_update_max_concurrent is not None and metadata_update_max_concurrent <= 0:
+            raise ValueError("metadata_update_max_concurrent must be greater than zero")
 
         ordered_paths = sorted(files)
         if not ordered_paths:
@@ -220,7 +223,11 @@ class BatchIndexer:
 
         refreshed, refresh_errors = await self._run_bounded(
             [path for path in ordered_paths if path in prepared_entities],
-            limit=self.app_config.index_metadata_update_max_concurrent,
+            limit=(
+                self.app_config.index_metadata_update_max_concurrent
+                if metadata_update_max_concurrent is None
+                else metadata_update_max_concurrent
+            ),
             worker=lambda path: self._refresh_search_index(
                 prepared_entities[path],
                 entities_by_id[prepared_entities[path].entity_id],
