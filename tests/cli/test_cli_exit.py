@@ -4,8 +4,47 @@ These tests verify that CLI commands exit cleanly without hanging,
 which was a bug fixed in the database initialization refactor.
 """
 
+import os
 import subprocess
 from pathlib import Path
+
+
+def test_bm_schema_validate_exits_cleanly(tmp_path):
+    """Regression test (#1333, #1345): a command that drives the API in-process must exit.
+
+    ``bm schema validate`` runs migrations (importing alembic/env.py) and then
+    serves one request over the local ASGI transport. On Python < 3.14 the
+    interpreter used to block at shutdown on a non-daemon anyio worker thread
+    that nest_asyncio's patched event loop never stopped.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    # A pristine profile: the developer's or CI's Basic Memory settings must not
+    # leak in, and the promo/analytics path stays out of the picture.
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith("BASIC_MEMORY_") and key != "PYTEST_CURRENT_TEST"
+    }
+    env.update(
+        HOME=str(home),
+        USERPROFILE=str(home),
+        BASIC_MEMORY_HOME=str(home / "basic-memory"),
+        BASIC_MEMORY_CONFIG_DIR=str(home / ".basic-memory"),
+        BASIC_MEMORY_NO_PROMOS="1",
+    )
+    result = subprocess.run(
+        ["uv", "run", "bm", "schema", "validate", "--json", "--local"],
+        capture_output=True,
+        text=True,
+        env=env,
+        # Guards against a hang, not a performance budget: migrations plus one
+        # in-process request take a few seconds on a loaded CI runner.
+        timeout=90,
+        cwd=Path(__file__).parent.parent.parent,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.lstrip().startswith("{"), result.stdout
 
 
 def test_bm_version_exits_cleanly():

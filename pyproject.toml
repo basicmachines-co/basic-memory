@@ -35,7 +35,6 @@ dependencies = [
     "pytest-aio>=1.9.0",
     "aiofiles>=24.1.0",
     "asyncpg>=0.30.0",
-    "nest-asyncio>=1.6.0", # For Alembic migrations with Postgres
     "pytest-asyncio>=1.2.0",
     "psycopg==3.3.1",
     "mdformat>=0.7.22",
