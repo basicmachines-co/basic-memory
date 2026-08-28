@@ -177,6 +177,32 @@ async def reconcile_projects_with_config(app_config: BasicMemoryConfig):
         logger.info("Continuing with initialization despite synchronization error")
 
 
+# Database paths this process has already reconciled config projects into.
+_reconciled_database_paths: set[Path] = set()
+
+
+async def reconcile_projects_with_config_once(app_config: BasicMemoryConfig) -> None:
+    """Reconcile config projects into the database the first time a process opens it.
+
+    Trigger: a request opens the local database outside a server lifespan — the
+    one-shot CLI and the MCP local flow drive the API over an in-process ASGI
+    transport, so nothing else seeds config.json's projects into a fresh database.
+    Why: initialize_app() only runs for the API/MCP servers and a few CLI
+    commands, so a CLI-only fresh install had `main` in config.json but no
+    projects row, and every default-project command failed while
+    `project add main` refused with "already exists" (#1334, regression of #974).
+    Outcome: the same reconciliation the servers run, once per process; cloud and
+    stateless deployments stay untouched, matching initialize_app().
+    """
+    if app_config.skip_local_initialization:
+        return
+    database_path = Path(app_config.database_path)
+    if database_path in _reconciled_database_paths:
+        return
+    _reconciled_database_paths.add(database_path)
+    await reconcile_projects_with_config(app_config)
+
+
 # Strong references for fire-and-forget startup index tasks; the event loop
 # alone would hold only weak references (asyncio.create_task docs).
 _initial_index_tasks: set[asyncio.Task[None]] = set()
