@@ -1821,3 +1821,24 @@ async def test_synchronize_projects_keeps_a_cloud_default_in_config(
     assert config_manager.load_config().default_project == "research-cloud"
     db_default = await _get_default_project(project_service)
     assert db_default is not None and db_default.name != "research-cloud"
+
+
+@pytest.mark.asyncio
+async def test_synchronize_projects_keeps_a_row_for_cloud_projects_with_a_local_sync_copy(
+    project_service: ProjectService, tmp_path
+):
+    """`add --cloud --local-path` entries stay cloud-routed but still need their local row."""
+    from basic_memory.config import ProjectEntry, ProjectMode
+
+    sync_dir = tmp_path / "research-sync"
+    sync_dir.mkdir()
+    config_manager = project_service.config_manager
+    config = config_manager.load_config()
+    config.projects["research-synced"] = ProjectEntry(
+        path=str(sync_dir), mode=ProjectMode.CLOUD, local_sync_path=str(sync_dir)
+    )
+    config_manager.save_config(config)
+
+    await project_service.synchronize_projects()
+
+    assert await _get_project(project_service, "research-synced") is not None
