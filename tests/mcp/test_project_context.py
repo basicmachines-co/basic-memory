@@ -2407,6 +2407,8 @@ class TestGetProjectClientRoutingOrder:
     @pytest.mark.asyncio
     async def test_local_flag_skips_workspace_resolution(self, config_manager, monkeypatch):
         """--local flag should never trigger workspace resolution, even for cloud projects."""
+        import httpx
+
         import basic_memory.mcp.project_context as project_context
         from basic_memory.mcp.project_context import get_project_client
         from basic_memory.config import ProjectEntry, ProjectMode
@@ -2429,14 +2431,12 @@ class TestGetProjectClientRoutingOrder:
 
         monkeypatch.setattr(project_context, "get_available_workspaces", fail_on_workspace_lookup)
 
-        # The local ASGI client seeds config projects into the database (#1334)
-        # but deliberately skips cloud-mode entries, so local validation misses —
-        # and that miss, not a workspace error, is what proves routing stayed local.
-        from fastmcp.exceptions import ToolError
-
-        with pytest.raises(ToolError, match="Project not found: 'cloud-proj'"):
-            async with get_project_client(project="cloud-proj"):
-                pass
+        # This entry is the legacy cloud-with-local-path shape, so the local ASGI
+        # client seeds it into the database (#1334) and validation succeeds on the
+        # local route; any workspace lookup would have tripped the guard above.
+        async with get_project_client(project="cloud-proj") as (client, active_project):
+            assert isinstance(client._transport, httpx.ASGITransport)  # pyright: ignore[reportPrivateUsage]
+            assert active_project.name == "cloud-proj"
 
     @pytest.mark.asyncio
     async def test_local_route_clears_stale_cached_workspace(self, config_manager, monkeypatch):
