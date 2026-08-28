@@ -1925,3 +1925,22 @@ async def test_synchronize_projects_treats_a_relative_cloud_path_as_the_remote_s
     await project_service.synchronize_projects()
 
     assert await _get_project(project_service, "research-slug") is None
+
+
+@pytest.mark.asyncio
+async def test_synchronize_projects_treats_a_relative_local_sync_path_as_no_local_copy(
+    project_service: ProjectService,
+):
+    """`_require_local_sync_path` rejects a relative sync path; reconciliation must agree."""
+    from basic_memory.config import ProjectEntry, ProjectMode
+
+    config_manager = project_service.config_manager
+    config = config_manager.load_config()
+    config.projects["research-rel"] = ProjectEntry(
+        path="", mode=ProjectMode.CLOUD, local_sync_path="research"
+    )
+    config_manager.save_config(config)
+
+    await project_service.synchronize_projects()
+
+    assert await _get_project(project_service, "research-rel") is None
