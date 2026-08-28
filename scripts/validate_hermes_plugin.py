@@ -10,6 +10,8 @@ from pathlib import Path
 from validate_skills import parse_frontmatter
 
 HERMES_INSTALL_COMMAND = "hermes plugins install basicmachines-co/basic-memory/integrations/hermes"
+# The highest manifest_version the released `hermes plugins install` accepts.
+INSTALLER_SUPPORTED_MANIFEST_VERSION = 1
 UNSUPPORTED_HERMES_INSTALL_COMMAND = (
     "hermes plugins install basicmachines-co/basic-memory --path integrations/hermes"
 )
@@ -42,6 +44,15 @@ def validate_hermes_plugin(plugin_dir: Path) -> None:
         raise SystemExit(f"{plugin_yaml}: expected name=basic-memory")
     if not manifest.get("version"):
         raise SystemExit(f"{plugin_yaml}: missing version")
+    # Every released Hermes installer refuses manifest_version > 1 while the
+    # runtime reads the newer fields regardless (#1339). Fail here so a version
+    # bump or manifest cleanup cannot quietly restore the installer rejection.
+    if manifest.get("manifest_version") != str(INSTALLER_SUPPORTED_MANIFEST_VERSION):
+        raise SystemExit(
+            f"{plugin_yaml}: manifest_version must stay {INSTALLER_SUPPORTED_MANIFEST_VERSION} "
+            "until a Hermes release ships installer support for a newer manifest "
+            "(NousResearch/hermes-agent#85893)"
+        )
 
     module_text = module.read_text()
     if "def register(" not in module_text:
