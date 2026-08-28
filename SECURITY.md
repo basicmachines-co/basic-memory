@@ -46,7 +46,7 @@ explicit arguments:
   "mcpServers": {
     "basic-memory": {
       "command": "uvx",
-      "args": ["basic-memory", "mcp"]
+      "args": ["--prerelease=allow", "basic-memory", "mcp"]
     }
   }
 }

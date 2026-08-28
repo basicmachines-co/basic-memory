@@ -412,7 +412,7 @@ def test_install_bm_via_uv_runs_uv_tool_install(bm, monkeypatch):
     assert len(calls) == 1
     argv = calls[0][0]
     assert argv[0] == "/fake/uv"
-    assert argv[1:] == ["tool", "install", "basic-memory", "--quiet"]
+    assert argv[1:] == ["tool", "install", "basic-memory", "--prerelease=allow", "--quiet"]
 
 
 def test_install_bm_via_uv_failed_returncode(bm, monkeypatch):

@@ -525,7 +525,7 @@ def test_uv_tool_pypi_check_triggers_upgrade(monkeypatch, tmp_path):
 
     assert result.status == AutoUpdateStatus.UPDATED
     assert result.latest_version == "9.9.9"
-    assert calls == [["uv", "tool", "upgrade", "basic-memory"]]
+    assert calls == [["uv", "tool", "upgrade", "basic-memory", "--prerelease=allow"]]
 
 
 def test_unknown_manager_returns_manual_update_guidance(monkeypatch, tmp_path):

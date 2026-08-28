@@ -200,7 +200,7 @@ def _check_pypi_update_available() -> tuple[bool, str]:
 def _manual_update_hint(source: InstallSource) -> str:
     """Return manager-appropriate manual update instructions."""
     if source == InstallSource.UV_TOOL:
-        return "Run `uv tool upgrade basic-memory`."
+        return "Run `uv tool upgrade basic-memory --prerelease=allow`."
     if source == InstallSource.HOMEBREW:
         return "Run `brew upgrade basic-memory`."
     return (
@@ -397,8 +397,11 @@ def run_auto_update(
             )
 
         # --- Automatic install ---
+        # uv refuses the FastMCP pre-release basic-memory pins unless asked;
+        # without the flag the upgrade silently resolves to the previous
+        # release that had no pre-release dependencies (#1338).
         command = (
-            ["uv", "tool", "upgrade", PACKAGE_NAME]
+            ["uv", "tool", "upgrade", PACKAGE_NAME, "--prerelease=allow"]
             if source == InstallSource.UV_TOOL
             else ["brew", "upgrade", PACKAGE_NAME]
         )

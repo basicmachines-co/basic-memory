@@ -48,7 +48,7 @@ def test_update_command_check_only_shows_available(monkeypatch):
         "basic_memory.cli.commands.update.run_auto_update",
         lambda **kwargs: _result(
             AutoUpdateStatus.UPDATE_AVAILABLE,
-            message="Update available (latest: 9.9.9). Run `uv tool upgrade basic-memory`.",
+            message="Update available (latest: 9.9.9). Run `uv tool upgrade basic-memory --prerelease=allow`.",
         ),
     )
 

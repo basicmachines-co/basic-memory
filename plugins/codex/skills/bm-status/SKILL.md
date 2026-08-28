@@ -12,7 +12,7 @@ Gather a concise diagnostic. Do not over-investigate.
 1. CLI reachability:
    - `basic-memory --version`
    - fallback `bm --version`
-   - fallback `uvx basic-memory --version`
+   - fallback `uvx --prerelease=allow basic-memory --version`
 
    Keep going if no launcher resolves. The plugin hook scripts can still use
    their uv-managed environment; report hook health as unavailable instead of

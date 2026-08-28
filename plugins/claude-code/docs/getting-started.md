@@ -8,8 +8,10 @@ A ~5-minute walkthrough from zero to a working memory bridge. New to the idea? R
 - **Claude Code.**
 - **Basic Memory** (`>= 0.19.0`) installed and connected as an MCP server:
   ```bash
-  uv tool install basic-memory
+  uv tool install basic-memory --prerelease=allow
   ```
+  (`--prerelease=allow` is required: Basic Memory depends on a FastMCP pre-release,
+  and without the flag uv silently installs an older release.)
   Then add it to Claude Code (`claude mcp add` or your MCP config). Confirm it's
   reachable — Claude should be able to call `list_memory_projects`.
 

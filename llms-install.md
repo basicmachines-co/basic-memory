@@ -10,8 +10,10 @@ steps in order.
 Use one of the following package managers to install:
 
 ```bash
-# Install with uv (recommended)
-uv tool install basic-memory
+# Install with uv (recommended). --prerelease=allow is required: basic-memory
+# depends on a FastMCP pre-release, and without the flag uv silently installs
+# an older release.
+uv tool install basic-memory --prerelease=allow
 
 # Or with pip
 pip install basic-memory
@@ -27,6 +29,7 @@ Add the following to your config:
     "basic-memory": {
       "command": "uvx",
       "args": [
+        "--prerelease=allow",
         "basic-memory",
         "mcp"
       ]

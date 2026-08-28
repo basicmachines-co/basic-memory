@@ -1235,10 +1235,13 @@ def _hook_launcher() -> str:
     # Strip any .dev / +local / build suffix so the constraint is a clean release
     # floor (the shims pin the same way, bumped by update_versions).
     floor = basic_memory.__version__.split(".dev")[0].split("+")[0]
+    # basic-memory pins a FastMCP pre-release, and uv only accepts pre-releases
+    # of transitive dependencies when told to — without the flag a cold cache
+    # cannot resolve the floor at all (#1338).
     if shutil.which("uvx"):
-        return f'uvx "basic-memory>={floor}"'
+        return f'uvx --prerelease=allow "basic-memory>={floor}"'
     if shutil.which("uv"):
-        return f'uv tool run "basic-memory>={floor}"'
+        return f'uv tool run --prerelease=allow "basic-memory>={floor}"'
     return "basic-memory"
 
 

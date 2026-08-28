@@ -103,9 +103,17 @@ export default definePluginEntry({
             log.info(
               "installing basic-memory via uv (this may take a minute)...",
             )
+            // basic-memory pins a FastMCP pre-release; without this flag uv
+            // silently installs the last release that had none (#1338).
             const result = execFileSync(
               "uv",
-              ["tool", "install", "basic-memory", "--force"],
+              [
+                "tool",
+                "install",
+                "basic-memory",
+                "--prerelease=allow",
+                "--force",
+              ],
               {
                 encoding: "utf-8",
                 timeout: 120_000,

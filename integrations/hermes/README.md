@@ -28,7 +28,7 @@ memory:
 
 If you run the gateway, restart it (`hermes gateway restart`). Done.
 
-The plugin self-installs the `basic-memory` CLI on first init via `uv tool install basic-memory` (one-time ~10s pause if it isn't already present). The bm binary lands at `~/.local/bin/bm` — the same location a manual `uv tool install basic-memory` would produce, so a later manual install or upgrade is a no-op rather than a second install.
+The plugin self-installs the `basic-memory` CLI on first init via `uv tool install basic-memory --prerelease=allow` (one-time ~10s pause if it isn't already present). The bm binary lands at `~/.local/bin/bm` — the same location a manual `uv tool install basic-memory` would produce, so a later manual install or upgrade is a no-op rather than a second install.
 
 ### Prerequisites
 
