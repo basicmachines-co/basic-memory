@@ -1218,8 +1218,13 @@ def set_cloud(
     config.set_project_mode(name, ProjectMode.CLOUD)
     if resolved_workspace_id:
         config.projects[name].workspace_id = resolved_workspace_id
-    # Clear local path: source-of-truth for this project is now the cloud
+    # Clear the local path and sync metadata: the source of truth for this
+    # project is now the cloud. A leftover local_sync_path would read as a local
+    # copy and let reconciliation recreate the row this cutover just dropped.
     config.projects[name].path = ""
+    config.projects[name].local_sync_path = None
+    config.projects[name].bisync_initialized = False
+    config.projects[name].last_sync = None
     config_manager.save_config(config)
 
     console.print(f"[green]Project '{name}' set to cloud mode[/green]")

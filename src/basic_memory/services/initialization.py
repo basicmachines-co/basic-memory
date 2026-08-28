@@ -146,8 +146,11 @@ async def initialize_database(app_config: BasicMemoryConfig) -> None:
         raise
 
 
-async def reconcile_projects_with_config(app_config: BasicMemoryConfig):
+async def reconcile_projects_with_config(app_config: BasicMemoryConfig) -> bool:
     """Ensure all projects in config.json exist in the projects table and vice versa.
+
+    Returns True when synchronization completed, False when it failed (the
+    failure is logged; startup continues either way).
 
     This uses the ProjectService's synchronize_projects method to ensure bidirectional
     synchronization between the configuration file and the database.
@@ -171,10 +174,12 @@ async def reconcile_projects_with_config(app_config: BasicMemoryConfig):
     project_service = ProjectService(repository=project_repository, session_maker=session_maker)
     try:
         await project_service.synchronize_projects()
-        logger.info("Projects successfully reconciled between config and database")
     except Exception as e:
         logger.error(f"Error during project synchronization: {e}")
         logger.info("Continuing with initialization despite synchronization error")
+        return False
+    logger.info("Projects successfully reconciled between config and database")
+    return True
 
 
 # Database paths this process has already reconciled config projects into.
@@ -199,8 +204,11 @@ async def reconcile_projects_with_config_once(app_config: BasicMemoryConfig) -> 
     database_path = Path(app_config.database_path)
     if database_path in _reconciled_database_paths:
         return
-    _reconciled_database_paths.add(database_path)
-    await reconcile_projects_with_config(app_config)
+    # Only a completed reconciliation retires this path; a transient failure
+    # (logged inside) leaves the next request to try again rather than pinning
+    # a long-lived MCP process to an unseeded database.
+    if await reconcile_projects_with_config(app_config):
+        _reconciled_database_paths.add(database_path)
 
 
 # Strong references for fire-and-forget startup index tasks; the event loop

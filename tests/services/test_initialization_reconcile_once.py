@@ -12,6 +12,7 @@ async def test_reconcile_projects_with_config_once_runs_once_per_database(app_co
 
     async def fake_reconcile(config):
         calls.append(config)
+        return True
 
     monkeypatch.setattr(initialization, "reconcile_projects_with_config", fake_reconcile)
     monkeypatch.setattr(initialization, "_reconciled_database_paths", set())
@@ -29,6 +30,7 @@ async def test_reconcile_projects_with_config_once_skips_cloud_deployments(app_c
 
     async def fake_reconcile(config):
         calls.append(config)
+        return True
 
     monkeypatch.setattr(initialization, "reconcile_projects_with_config", fake_reconcile)
     monkeypatch.setattr(initialization, "_reconciled_database_paths", set())
@@ -38,3 +40,25 @@ async def test_reconcile_projects_with_config_once_skips_cloud_deployments(app_c
     await initialization.reconcile_projects_with_config_once(app_config)
 
     assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_reconcile_projects_with_config_once_retries_after_a_failed_attempt(
+    app_config, monkeypatch
+):
+    """A transient failure must not pin a long-lived process to an unseeded database."""
+    outcomes = iter([False, True])
+    calls = []
+
+    async def fake_reconcile(config):
+        calls.append(config)
+        return next(outcomes)
+
+    monkeypatch.setattr(initialization, "reconcile_projects_with_config", fake_reconcile)
+    monkeypatch.setattr(initialization, "_reconciled_database_paths", set())
+
+    await initialization.reconcile_projects_with_config_once(app_config)
+    await initialization.reconcile_projects_with_config_once(app_config)
+    await initialization.reconcile_projects_with_config_once(app_config)
+
+    assert calls == [app_config, app_config], "retry once after failure, then stop"
