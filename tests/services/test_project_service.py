@@ -1781,3 +1781,43 @@ async def test_add_doctor_project_requires_project_root(project_service: Project
     """Without a configured root there is no nesting problem for doctor to solve."""
     with pytest.raises(ValueError, match="BASIC_MEMORY_PROJECT_ROOT"):
         await project_service.add_doctor_project()
+
+
+@pytest.mark.asyncio
+async def test_synchronize_projects_skips_cloud_mode_entries(project_service: ProjectService):
+    """A cloud-mode config entry must not get a local projects row (#1334 review).
+
+    `set-cloud` deletes the local row on purpose so the project's configured state
+    is purely cloud. Reconciliation now runs on every CLI process, so recreating the
+    row here would undo that cutover each time.
+    """
+    from basic_memory.config import ProjectEntry, ProjectMode
+
+    config_manager = project_service.config_manager
+    config = config_manager.load_config()
+    config.projects["research-cloud"] = ProjectEntry(path="", mode=ProjectMode.CLOUD)
+    config_manager.save_config(config)
+
+    await project_service.synchronize_projects()
+
+    assert await _get_project(project_service, "research-cloud") is None
+
+
+@pytest.mark.asyncio
+async def test_synchronize_projects_keeps_a_cloud_default_in_config(
+    project_service: ProjectService,
+):
+    """The database default is only the local fallback; a cloud default must survive."""
+    from basic_memory.config import ProjectEntry, ProjectMode
+
+    config_manager = project_service.config_manager
+    config = config_manager.load_config()
+    config.projects["research-cloud"] = ProjectEntry(path="", mode=ProjectMode.CLOUD)
+    config.default_project = "research-cloud"
+    config_manager.save_config(config)
+
+    await project_service.synchronize_projects()
+
+    assert config_manager.load_config().default_project == "research-cloud"
+    db_default = await _get_default_project(project_service)
+    assert db_default is not None and db_default.name != "research-cloud"
