@@ -24,7 +24,7 @@ RELAXATION_CJK_PATTERN = re.compile(
     r"\ud7b0-\ud7ff"  # Hangul Jamo Extended-B
     r"\uf900-\ufaff"  # CJK Compatibility Ideographs
     r"\uff65-\uff9f"  # Halfwidth Katakana
-    r"]"
+    r"]+"
 )
 RELAXATION_EDGE_PUNCTUATION = "?!.,;:，。！？；：、"
 # Written inside a word (Persian U+200C, Indic conjuncts) rather than between words.
@@ -300,3 +300,39 @@ def relaxed_query_words(search_text: str | None) -> list[str] | None:
         return None
     pruned_words = [token for token in tokens if token not in RELAXATION_STOPWORDS]
     return _emit_relaxation_terms(pruned_words or tokens) or None
+
+
+def contains_cjk(text: str) -> bool:
+    """Whether text contains any character from the supported CJK ranges."""
+    return RELAXATION_CJK_PATTERN.search(text) is not None
+
+
+def cjk_bigram_tokens(run: str) -> tuple[str, ...]:
+    """Overlapping two-character windows over one CJK run.
+
+    Un-segmented CJK text has no whitespace between words, so finding a
+    substring match that starts mid-run needs overlapping bigrams rather than
+    whitespace-delimited tokens. A single character has no second character to
+    pair with, so it is kept as a one-character token instead of vanishing.
+    """
+    if not run:
+        return ()
+    if len(run) == 1:
+        return (run,)
+    return tuple(run[index : index + 2] for index in range(len(run) - 1))
+
+
+def cjk_search_tokens(*fields: str | None) -> str:
+    """Space-joined bigram tokens for every CJK run across the given fields.
+
+    Each field is scanned independently so a run can never cross a field
+    boundary, and non-CJK substrings (Latin words, digits) never enter the
+    auxiliary token stream.
+    """
+    tokens: list[str] = []
+    for field in fields:
+        if not field:
+            continue
+        for match in RELAXATION_CJK_PATTERN.finditer(field):
+            tokens.extend(cjk_bigram_tokens(match.group(0)))
+    return " ".join(tokens)
