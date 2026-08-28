@@ -941,22 +941,6 @@ def remove_project(
             result = run_with_cleanup(_remove_project())
         console.print(f"[green]{result.message}[/green]")
 
-        # Clean up local sync directory if it exists and delete_notes is True
-        if delete_notes and local_path_config:
-            local_dir = Path(local_path_config)
-            if local_dir.exists():
-                import shutil
-
-                shutil.rmtree(local_dir)
-                console.print(f"[green]Removed local sync directory: {local_path_config}[/green]")
-
-        # Clean up bisync state if it exists
-        if bisync_state_path is not None and bisync_state_path.exists():
-            import shutil
-
-            shutil.rmtree(bisync_state_path)
-            console.print("[green]Removed bisync state[/green]")
-
         # Trigger: the entry is a cloud-mode routing entry (written by
         # `project add --cloud` or `set-cloud`). An explicit --cloud alone is only
         # a routing override — a same-named local project keeps its entry.
@@ -965,7 +949,9 @@ def remove_project(
         # list-projects kept reporting it as a local project at "/", a second
         # `remove` routed to the cloud again and got "not found", and `add`
         # refused the name as taken (#1340).
-        # Outcome: the stub goes with the project. The default project is the one
+        # Outcome: the stub goes with the project — persisted before the fallible
+        # filesystem cleanups below, so a failed rmtree cannot leave the remote
+        # project deleted and the stub alive. The default project is the one
         # entry config must keep, so it is only scrubbed of sync state and the
         # user is told how to retire it. An explicit --local hands the delete to
         # the local service, which removes the config entry itself.
@@ -987,6 +973,22 @@ def remove_project(
             else:
                 del config.projects[entry_name]
             config_manager.save_config(config)
+
+        # Clean up local sync directory if it exists and delete_notes is True
+        if delete_notes and local_path_config:
+            local_dir = Path(local_path_config)
+            if local_dir.exists():
+                import shutil
+
+                shutil.rmtree(local_dir)
+                console.print(f"[green]Removed local sync directory: {local_path_config}[/green]")
+
+        # Clean up bisync state if it exists
+        if bisync_state_path is not None and bisync_state_path.exists():
+            import shutil
+
+            shutil.rmtree(bisync_state_path)
+            console.print("[green]Removed bisync state[/green]")
 
         # Show informative message if files were not deleted
         if not delete_notes:
