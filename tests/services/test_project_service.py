@@ -1889,3 +1889,22 @@ async def test_synchronize_projects_keeps_a_cloud_default_written_in_display_for
     # Keys are normalized on sync; the default must follow its key, not fall
     # back to the first local project.
     assert config_manager.load_config().default_project == "research-cloud"
+
+
+@pytest.mark.asyncio
+async def test_synchronize_projects_keeps_a_row_for_a_legacy_path_only_cloud_copy(
+    project_service: ProjectService, tmp_path
+):
+    """Older entries record the local copy only in `path`; that is still a local copy."""
+    from basic_memory.config import ProjectEntry, ProjectMode
+
+    sync_dir = tmp_path / "legacy-sync"
+    sync_dir.mkdir()
+    config_manager = project_service.config_manager
+    config = config_manager.load_config()
+    config.projects["research-legacy"] = ProjectEntry(path=str(sync_dir), mode=ProjectMode.CLOUD)
+    config_manager.save_config(config)
+
+    await project_service.synchronize_projects()
+
+    assert await _get_project(project_service, "research-legacy") is not None

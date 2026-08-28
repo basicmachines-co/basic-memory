@@ -52,8 +52,14 @@ type ProjectSearchRepositoryFactory = Callable[[int], SearchRepository]
 
 
 def _is_cloud_only(entry: ProjectEntry) -> bool:
-    """Whether a config entry routes to the cloud with no local copy of the notes."""
-    return entry.mode == ProjectMode.CLOUD and not entry.local_sync_path
+    """Whether a config entry routes to the cloud with no local copy of the notes.
+
+    A local copy is recorded in ``local_sync_path``; older entries recorded it only
+    in ``path``, which ``_require_local_sync_path`` still honors, so both count.
+    ``set-cloud`` clears both, and ``add --cloud`` without ``--local-path`` writes
+    neither.
+    """
+    return entry.mode == ProjectMode.CLOUD and not (entry.local_sync_path or entry.path)
 
 
 class ProjectService:
