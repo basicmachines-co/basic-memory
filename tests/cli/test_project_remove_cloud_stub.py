@@ -8,12 +8,14 @@ so that stub outlived the project: list-projects kept showing it, a second
 
 import json
 from contextlib import asynccontextmanager
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
+from basic_memory.cli.commands.cloud import rclone_commands
 from basic_memory.mcp.clients.project import ProjectClient
 
 # Importing registers project subcommands on the shared app instance.
@@ -25,9 +27,8 @@ def runner():
     return CliRunner()
 
 
-@pytest.fixture
-def config_file(tmp_path, monkeypatch):
-    """An isolated config with a local default and a cloud-only project entry."""
+def _write_config(tmp_path: Path, monkeypatch, projects: dict[str, dict[str, object]]) -> Path:
+    """Write an isolated config with the given project entries and point HOME at it."""
     from basic_memory import config as config_module
 
     config_module._CONFIG_CACHE = None
@@ -38,20 +39,27 @@ def config_file(tmp_path, monkeypatch):
     config_dir.mkdir(parents=True, exist_ok=True)
     path = config_dir / "config.json"
     path.write_text(
-        json.dumps(
-            {
-                "env": "dev",
-                "projects": {
-                    "main": {"path": str(tmp_path / "main"), "mode": "local"},
-                    "openclaw-demo": {"path": "", "mode": "cloud", "workspace_id": "team-drew"},
-                },
-                "default_project": "main",
-            },
-            indent=2,
-        )
+        json.dumps({"env": "dev", "projects": projects, "default_project": "main"}, indent=2)
     )
     monkeypatch.setenv("HOME", str(tmp_path))
     return path
+
+
+def _projects(config_file: Path) -> dict[str, dict[str, object]]:
+    return json.loads(config_file.read_text())["projects"]
+
+
+@pytest.fixture
+def config_file(tmp_path, monkeypatch):
+    """A local default plus a cloud-only routing entry."""
+    return _write_config(
+        tmp_path,
+        monkeypatch,
+        {
+            "main": {"path": str(tmp_path / "main"), "mode": "local"},
+            "openclaw-demo": {"path": "", "mode": "cloud", "workspace_id": "team-drew"},
+        },
+    )
 
 
 @pytest.fixture
@@ -69,7 +77,7 @@ def cloud_delete(monkeypatch):
 
     async def fake_delete_project(self, external_id, delete_notes=False):
         seen["deleted"] = external_id
-        return SimpleNamespace(message="Project 'openclaw-demo' deletion queued")
+        return SimpleNamespace(message="Project deletion queued")
 
     monkeypatch.setattr(project_cmd, "get_client", fake_get_client)
     monkeypatch.setattr(ProjectClient, "resolve_project", fake_resolve_project)
@@ -82,6 +90,81 @@ def test_removing_a_cloud_project_drops_its_local_routing_entry(runner, config_f
 
     assert result.exit_code == 0, result.stdout
     assert cloud_delete == {"workspace": "team-drew", "deleted": "ext-123"}
-    projects = json.loads(config_file.read_text())["projects"]
+    projects = _projects(config_file)
     assert "openclaw-demo" not in projects
     assert "main" in projects, "unrelated entries must survive"
+
+
+def test_permalink_form_of_the_name_still_finds_the_entry(
+    tmp_path, monkeypatch, runner, cloud_delete
+):
+    """The API resolves `my-research` for `My Research`; the config lookup must too."""
+    config_file = _write_config(
+        tmp_path,
+        monkeypatch,
+        {
+            "main": {"path": str(tmp_path / "main"), "mode": "local"},
+            "My Research": {"path": "", "mode": "cloud", "workspace_id": "team-drew"},
+        },
+    )
+
+    result = runner.invoke(app, ["project", "remove", "my-research"])
+
+    assert result.exit_code == 0, result.stdout
+    assert "My Research" not in _projects(config_file)
+
+
+def test_cloud_flag_is_only_a_routing_override_for_a_local_entry(
+    tmp_path, monkeypatch, runner, cloud_delete
+):
+    """`remove --cloud` on a same-named local project deletes the cloud copy, not local config."""
+    config_file = _write_config(
+        tmp_path,
+        monkeypatch,
+        {
+            "main": {"path": str(tmp_path / "main"), "mode": "local"},
+            "research": {"path": str(tmp_path / "research"), "mode": "local"},
+        },
+    )
+
+    result = runner.invoke(app, ["project", "remove", "research", "--cloud"])
+
+    assert result.exit_code == 0, result.stdout
+    assert cloud_delete["deleted"] == "ext-123"
+    assert "research" in _projects(config_file), "the local project keeps its entry"
+
+
+def test_auto_routed_cloud_delete_cleans_local_sync_artifacts(
+    tmp_path, monkeypatch, runner, cloud_delete
+):
+    """Cleanup follows the route the delete takes, not the raw --cloud flag."""
+    local_sync = tmp_path / "research-sync"
+    local_sync.mkdir()
+    config_file = _write_config(
+        tmp_path,
+        monkeypatch,
+        {
+            "main": {"path": str(tmp_path / "main"), "mode": "local"},
+            "research": {
+                "path": str(local_sync),
+                "mode": "cloud",
+                "workspace_id": "team-drew",
+                "local_sync_path": str(local_sync),
+                "bisync_initialized": True,
+            },
+        },
+    )
+    bisync_state = tmp_path / "bisync-state" / "research"
+    bisync_state.mkdir(parents=True)
+    monkeypatch.setattr(
+        rclone_commands, "get_project_bisync_state", lambda project_name: bisync_state
+    )
+
+    result = runner.invoke(app, ["project", "remove", "research"])
+
+    assert result.exit_code == 0, result.stdout
+    assert not bisync_state.exists(), "stale bisync state would let a recreated name skip --resync"
+    assert local_sync.exists(), "notes stay on disk without --delete-notes"
+    # Rich wraps the long temp path across lines, so match the message alone.
+    assert "Local files remain at" in result.stdout
+    assert "research" not in _projects(config_file)

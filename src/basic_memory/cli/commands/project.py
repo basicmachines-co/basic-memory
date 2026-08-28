@@ -894,8 +894,10 @@ def remove_project(
 
     async def _remove_project():
         # Resolve workspace so cloud-only projects auto-route without --cloud
-        config = ConfigManager().config
-        entry = config.projects.get(name)
+        config_manager = ConfigManager()
+        config = config_manager.config
+        entry_name, _ = config_manager.get_project(name)
+        entry = config.projects.get(entry_name) if entry_name else None
         ws = None
         if entry and entry.workspace_id:
             ws = entry.workspace_id
@@ -912,13 +914,20 @@ def remove_project(
             )
 
     try:
-        # Get config to check for local sync path and bisync state
-        config = ConfigManager().config
+        # A display name and its permalink address the same entry, and the API
+        # accepts either, so resolve the config key the same permalink-aware way.
+        config_manager = ConfigManager()
+        config = config_manager.config
+        entry_name, _ = config_manager.get_project(name)
+        entry = config.projects.get(entry_name) if entry_name else None
+        # The delete is cloud-routed on an explicit --cloud or a cloud-mode entry
+        # (per-project routing); local-artifact cleanup must follow the route the
+        # delete actually takes, not just the flag.
+        cloud_routed = cloud or (entry is not None and entry.mode == ProjectMode.CLOUD)
         local_path_config = None
         has_bisync_state = False
 
-        entry = config.projects.get(name)
-        if cloud and entry and entry.local_sync_path:
+        if cloud_routed and entry and entry.local_sync_path:
             local_path_config = entry.local_sync_path
 
             # Check for bisync state
@@ -951,8 +960,9 @@ def remove_project(
                 shutil.rmtree(bisync_state_path)
                 console.print("[green]Removed bisync state[/green]")
 
-        # Trigger: the delete was cloud-routed — an explicit --cloud, or a
-        # cloud-mode entry written by `project add --cloud`.
+        # Trigger: the entry is a cloud-mode routing entry (written by
+        # `project add --cloud` or `set-cloud`). An explicit --cloud alone is only
+        # a routing override — a same-named local project keeps its entry.
         # Why: the local API removes its own config entry, but a cloud delete
         # never touches local config, so the routing stub outlived the project:
         # list-projects kept reporting it as a local project at "/", a second
@@ -961,19 +971,19 @@ def remove_project(
         # Outcome: the stub goes with the project. The default project is the one
         # entry config must keep, so it is only scrubbed of sync state and the
         # user is told how to retire it.
-        if entry and (cloud or entry.mode == ProjectMode.CLOUD):
-            if config.default_project == name:
+        if entry is not None and entry_name is not None and entry.mode == ProjectMode.CLOUD:
+            if config.default_project == entry_name:
                 entry.local_sync_path = None
                 entry.bisync_initialized = False
                 entry.last_sync = None
                 console.print(
-                    f"[yellow]'{name}' is still the default project in local config. "
+                    f"[yellow]'{entry_name}' is still the default project in local config. "
                     "Choose another with `bm project default <name> --local`, then run "
-                    f"`bm project remove {name} --local` to drop this entry.[/yellow]"
+                    f"`bm project remove {entry_name} --local` to drop this entry.[/yellow]"
                 )
             else:
-                del config.projects[name]
-            ConfigManager().save_config(config)
+                del config.projects[entry_name]
+            config_manager.save_config(config)
 
         # Show informative message if files were not deleted
         if not delete_notes:
