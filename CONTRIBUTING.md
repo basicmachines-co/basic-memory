@@ -99,19 +99,33 @@ This project is designed for collaborative development between humans and LLMs (
 
 ## Pull Request Process
 
-1. **Create a Pull Request**: Open a PR against the `main` branch with a clear title and description.
+1. **Create a Pull Request**: Open a PR against the `main` branch with a clear title and description. PR titles must
+   follow the semantic format `type(scope): summary`, enforced by CI — for example `fix(core): unresolve inbound
+   relations on entity delete`. Allowed types: `feat`, `fix`, `chore`, `docs`, `style`, `refactor`, `perf`, `test`,
+   `build`, `ci`. Allowed scopes: `core`, `cli`, `api`, `mcp`, `sync`, `ui`, `ci`, `deps`, `installer`, `plugins`,
+   `skills`, `integrations`.
 2. **Sign the Developer Certificate of Origin (DCO)**: All commits require a `Signed-off-by` line certifying that you
    have the right to submit your contributions. The DCO status check verifies this automatically when you create a PR.
+   See [Signing Your Commits](#signing-your-commits) below, including how to fix commits you already pushed.
 3. **Accept the Contributor License Agreement (CLA)**: All contributors must also accept the
    [Contributor License Agreement](CLA.md). The `license/cla` status check verifies this separately from the DCO check.
+   There is no separate step outside GitHub: when you open your first PR, the CLA assistant bot comments with a link
+   (also at [cla-assistant.io/basicmachines-co/basic-memory](https://cla-assistant.io/basicmachines-co/basic-memory)).
+   Sign in with your GitHub account, agree, and the check turns green on its own. You sign once per GitHub account;
+   it covers your future PRs too.
 4. **PR Description**: Include:
     - What the PR changes
     - Why the change is needed
     - How you tested the changes
     - Any related issues (use "Fixes #123" to automatically close issues)
 5. **Code Review**: Wait for code review and address any feedback.
-6. **CI Checks**: Ensure all CI checks pass.
-7. **Merge**: Once approved, a maintainer will merge your PR.
+6. **CI Checks**: Ensure all CI checks pass. Note that the test matrix runs only on pushes to this repository, so a PR
+   from a fork gets the DCO, CLA, and static checks but not the full test suite. Run `just test` locally before
+   asking for review.
+7. **Merge**: Once approved, a maintainer will merge your PR. For fork PRs, a maintainer usually cherry-picks your
+   commits onto an in-repo branch so the full matrix can run, opens a replacement PR that references yours, and
+   rebase-merges it. Your commits land on `main` with your authorship and sign-off intact; the original PR is closed
+   with a link to the replacement.
 
 ## Developer Certificate of Origin and CLA
 
@@ -136,7 +150,17 @@ Sign your commit:
 git commit -s -m "Your commit message"
 ```
 
-This adds a `Signed-off-by` line to your commit message, certifying that you adhere to the DCO.
+This adds a `Signed-off-by: Your Name <you@example.com>` line to your commit message, certifying that you adhere to
+the DCO. The name and email must match the commit's author (`git config user.name` / `user.email`), or the DCO check
+fails.
+
+If you already made commits without a sign-off, add it retroactively and force-push your branch:
+
+```bash
+# Sign off every commit on your branch (all commits since main)
+git rebase --signoff origin/main
+git push --force-with-lease
+```
 
 The sign-off certifies that you have the right to submit your contribution under the project's license and verifies your
 agreement to the DCO.
