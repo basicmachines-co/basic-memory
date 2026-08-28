@@ -925,16 +925,16 @@ def remove_project(
         # delete actually takes, not just the flag.
         cloud_routed = cloud or (entry is not None and entry.mode == ProjectMode.CLOUD)
         local_path_config = None
-        has_bisync_state = False
+        bisync_state_path: Path | None = None
 
-        if cloud_routed and entry and entry.local_sync_path:
+        if cloud_routed and entry is not None and entry_name is not None and entry.local_sync_path:
             local_path_config = entry.local_sync_path
 
-            # Check for bisync state
+            # Bisync state is keyed by the canonical config name, not the form
+            # the user typed.
             from basic_memory.cli.commands.cloud.rclone_commands import get_project_bisync_state
 
-            bisync_state_path = get_project_bisync_state(name)
-            has_bisync_state = bisync_state_path.exists()
+            bisync_state_path = get_project_bisync_state(entry_name)
 
         # Remove project from cloud/API
         with force_routing(local=local, cloud=cloud):
@@ -951,14 +951,11 @@ def remove_project(
                 console.print(f"[green]Removed local sync directory: {local_path_config}[/green]")
 
         # Clean up bisync state if it exists
-        if has_bisync_state:
-            from basic_memory.cli.commands.cloud.rclone_commands import get_project_bisync_state
+        if bisync_state_path is not None and bisync_state_path.exists():
             import shutil
 
-            bisync_state_path = get_project_bisync_state(name)
-            if bisync_state_path.exists():
-                shutil.rmtree(bisync_state_path)
-                console.print("[green]Removed bisync state[/green]")
+            shutil.rmtree(bisync_state_path)
+            console.print("[green]Removed bisync state[/green]")
 
         # Trigger: the entry is a cloud-mode routing entry (written by
         # `project add --cloud` or `set-cloud`). An explicit --cloud alone is only
@@ -970,8 +967,14 @@ def remove_project(
         # refused the name as taken (#1340).
         # Outcome: the stub goes with the project. The default project is the one
         # entry config must keep, so it is only scrubbed of sync state and the
-        # user is told how to retire it.
-        if entry is not None and entry_name is not None and entry.mode == ProjectMode.CLOUD:
+        # user is told how to retire it. An explicit --local hands the delete to
+        # the local service, which removes the config entry itself.
+        if (
+            not local
+            and entry is not None
+            and entry_name is not None
+            and entry.mode == ProjectMode.CLOUD
+        ):
             if config.default_project == entry_name:
                 entry.local_sync_path = None
                 entry.bisync_initialized = False

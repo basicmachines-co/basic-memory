@@ -168,3 +168,57 @@ def test_auto_routed_cloud_delete_cleans_local_sync_artifacts(
     # Rich wraps the long temp path across lines, so match the message alone.
     assert "Local files remain at" in result.stdout
     assert "research" not in _projects(config_file)
+
+
+def test_bisync_state_cleanup_uses_the_canonical_entry_name(
+    tmp_path, monkeypatch, runner, cloud_delete
+):
+    """Removing `My Research` as `my-research` must clear `bisync-state/My Research`."""
+    local_sync = tmp_path / "research-sync"
+    local_sync.mkdir()
+    _write_config(
+        tmp_path,
+        monkeypatch,
+        {
+            "main": {"path": str(tmp_path / "main"), "mode": "local"},
+            "My Research": {
+                "path": str(local_sync),
+                "mode": "cloud",
+                "workspace_id": "team-drew",
+                "local_sync_path": str(local_sync),
+                "bisync_initialized": True,
+            },
+        },
+    )
+    states = {"My Research": tmp_path / "bisync-state" / "My Research"}
+    states["My Research"].mkdir(parents=True)
+    monkeypatch.setattr(
+        rclone_commands,
+        "get_project_bisync_state",
+        lambda project_name: states.get(project_name, tmp_path / "bisync-state" / project_name),
+    )
+
+    result = runner.invoke(app, ["project", "remove", "my-research"])
+
+    assert result.exit_code == 0, result.stdout
+    assert not states["My Research"].exists()
+
+
+def test_explicit_local_route_leaves_config_removal_to_the_local_service(
+    tmp_path, monkeypatch, runner, cloud_delete
+):
+    """`remove --local` on a cloud-mode entry with a local row: the local API owns the entry."""
+    config_file = _write_config(
+        tmp_path,
+        monkeypatch,
+        {
+            "main": {"path": str(tmp_path / "main"), "mode": "local"},
+            "research": {"path": "", "mode": "cloud", "workspace_id": "team-drew"},
+        },
+    )
+
+    result = runner.invoke(app, ["project", "remove", "research", "--local"])
+
+    assert result.exit_code == 0, result.stdout
+    # The stubbed API did not touch config; the CLI must not double-delete either.
+    assert "research" in _projects(config_file)
