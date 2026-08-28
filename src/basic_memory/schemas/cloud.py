@@ -4,7 +4,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-type ProjectVisibility = Literal["workspace", "shared", "private"]
+# The tiers the cloud's project-share API implements. A "private" (just-me)
+# tier does not exist server-side, so it must not be accepted here (#1343).
+type ProjectVisibility = Literal["workspace", "shared"]
 
 
 class TenantMountInfo(BaseModel):

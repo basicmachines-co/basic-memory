@@ -359,3 +359,17 @@ def test_project_add_rejects_invalid_visibility(runner, mock_config):
 
     assert result.exit_code == 1
     assert "Invalid visibility" in result.stdout
+
+
+def test_project_add_rejects_private_visibility(runner, mock_config, mock_api_client):
+    """The cloud has no "private" tier; accepting it reported a private project the whole team could see (#1343)."""
+    result = runner.invoke(
+        app,
+        ["project", "add", "test-project", "--cloud", "--visibility", "private"],
+    )
+
+    assert result.exit_code == 1
+    assert "Expected one of: workspace, shared." in result.stdout
+    assert mock_api_client["calls"] == [], (
+        "nothing may be created with a tier the cloud can't apply"
+    )
