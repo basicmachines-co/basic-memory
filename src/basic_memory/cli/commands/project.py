@@ -951,11 +951,28 @@ def remove_project(
                 shutil.rmtree(bisync_state_path)
                 console.print("[green]Removed bisync state[/green]")
 
-        # Clean up cloud sync fields on the project entry
-        if cloud and entry and entry.local_sync_path:
-            entry.local_sync_path = None
-            entry.bisync_initialized = False
-            entry.last_sync = None
+        # Trigger: the delete was cloud-routed — an explicit --cloud, or a
+        # cloud-mode entry written by `project add --cloud`.
+        # Why: the local API removes its own config entry, but a cloud delete
+        # never touches local config, so the routing stub outlived the project:
+        # list-projects kept reporting it as a local project at "/", a second
+        # `remove` routed to the cloud again and got "not found", and `add`
+        # refused the name as taken (#1340).
+        # Outcome: the stub goes with the project. The default project is the one
+        # entry config must keep, so it is only scrubbed of sync state and the
+        # user is told how to retire it.
+        if entry and (cloud or entry.mode == ProjectMode.CLOUD):
+            if config.default_project == name:
+                entry.local_sync_path = None
+                entry.bisync_initialized = False
+                entry.last_sync = None
+                console.print(
+                    f"[yellow]'{name}' is still the default project in local config. "
+                    "Choose another with `bm project default <name> --local`, then run "
+                    f"`bm project remove {name} --local` to drop this entry.[/yellow]"
+                )
+            else:
+                del config.projects[name]
             ConfigManager().save_config(config)
 
         # Show informative message if files were not deleted
