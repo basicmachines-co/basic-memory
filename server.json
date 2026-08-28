@@ -15,6 +15,12 @@
       "runtimeHint": "uvx",
       "runtimeArguments": [
         {
+          "type": "named",
+          "name": "--prerelease",
+          "value": "allow",
+          "description": "basic-memory depends on a FastMCP pre-release; uv needs this to resolve it"
+        },
+        {
           "type": "positional",
           "value": "basic-memory"
         },

@@ -253,7 +253,7 @@ Cloud extends local-first — still plain Markdown, still yours. [Start a free t
 
 ## Troubleshooting
 
-**`bm` not found** — Install uv, then restart the gateway. Or install manually: `uv tool install basic-memory`
+**`bm` not found** — Install uv, then restart the gateway. Or install manually: `uv tool install basic-memory --prerelease=allow` (the flag is required — basic-memory depends on a FastMCP pre-release, and without it uv silently installs an older release)
 
 **Search returns nothing** — Check that Basic Memory connected (look for `connected to BM` in logs). Verify files exist in the project directory.
 

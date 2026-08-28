@@ -16,14 +16,17 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 # ── install basic-memory ────────────────────────────────
+# basic-memory pins a FastMCP pre-release; without --prerelease=allow uv
+# silently installs the last release that had none (#1338).
 if [[ -n "${BM_REF}" ]]; then
   echo "Installing basic-memory from ${BM_REPO}@${BM_REF} ..."
   uv tool install \
     "basic-memory @ git+${BM_REPO}@${BM_REF}" \
+    --prerelease=allow \
     --force
 else
   echo "Installing latest basic-memory from PyPI ..."
-  uv tool install basic-memory --force
+  uv tool install basic-memory --prerelease=allow --force
 fi
 
 # ── verify ────────────────────────────────────────────────────────

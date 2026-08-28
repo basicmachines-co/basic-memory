@@ -1496,7 +1496,7 @@ def test_install_uses_uvx_launcher_when_no_binary_on_path(monkeypatch: pytest.Mo
 
     assert result.exit_code == 0
     command = _read_json(_claude_settings_path())["hooks"]["SessionStart"][0]["hooks"][0]["command"]
-    assert command.startswith('uvx "basic-memory>=')
+    assert command.startswith('uvx --prerelease=allow "basic-memory>=')
     assert command.endswith("hook session-start --harness claude")
 
     # remove must still recognize the uvx form via the suffix-based ownership tag.
@@ -1528,7 +1528,7 @@ def test_install_uses_uv_tool_run_when_only_uv(monkeypatch: pytest.MonkeyPatch) 
 
     assert result.exit_code == 0
     command = _read_json(_claude_settings_path())["hooks"]["SessionStart"][0]["hooks"][0]["command"]
-    assert command.startswith('uv tool run "basic-memory>=')
+    assert command.startswith('uv tool run --prerelease=allow "basic-memory>=')
     assert command.endswith("hook session-start --harness claude")
 
 
@@ -1547,7 +1547,7 @@ def test_install_skips_stale_basic_memory_and_uses_uvx(monkeypatch: pytest.Monke
 
     assert result.exit_code == 0
     command = _read_json(_claude_settings_path())["hooks"]["SessionStart"][0]["hooks"][0]["command"]
-    assert command.startswith('uvx "basic-memory>=')
+    assert command.startswith('uvx --prerelease=allow "basic-memory>=')
     assert command.endswith("hook session-start --harness claude")
 
 

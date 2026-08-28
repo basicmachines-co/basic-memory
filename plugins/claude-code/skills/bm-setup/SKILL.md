@@ -20,10 +20,12 @@ First confirm the **Basic Memory MCP server is connected** — call
 wired into Claude Code yet. **Stop and walk the user through it first** (everything
 below depends on it):
 
-1. Install it: `uv tool install basic-memory` (or `pip install basic-memory`),
-   version `>= 0.19.0`.
-2. Connect it: `claude mcp add basic-memory -- uvx basic-memory mcp`, then restart
-   the session so the MCP server loads.
+1. Install it: `uv tool install basic-memory --prerelease=allow` (or
+   `pip install basic-memory`), version `>= 0.19.0`. The `--prerelease=allow`
+   flag is required with uv — Basic Memory depends on a FastMCP pre-release, and
+   without it uv silently installs an older release.
+2. Connect it: `claude mcp add basic-memory -- uvx --prerelease=allow basic-memory mcp`,
+   then restart the session so the MCP server loads.
 
 Re-check `list_memory_projects` before continuing — don't start the interview until
 it succeeds.
@@ -62,7 +64,7 @@ Ask only what you can't infer. Cover:
      - *Cloud project* (the user wants capture in a cloud workspace): pass the
        `workspace` selector (a slug from `list_workspaces`) and a cloud-style path
        like `/<name>`, and create it with a **cloud-connected** MCP server. A purely
-       local server (`uvx basic-memory mcp`) treats the path as a local directory and
+       local server (`uvx --prerelease=allow basic-memory mcp`) treats the path as a local directory and
        fails to create it (e.g. read-only `/`). When both a local and a cloud server
        are connected, route creation *and* the schema seeding through the cloud one,
        and pin `primaryProject` to the new project's `external_id` UUID
@@ -233,7 +235,7 @@ nudge — the config's presence is the signal that setup has run.
 Before you close, prove recall actually resolves — this catches a misnamed project,
 missing cloud credentials, or a ref that doesn't route, while the user is still here
 to fix it. Run the same structured query the SessionStart hook runs, via the CLI it
-uses (`basic-memory` / `bm` / `uvx basic-memory`):
+uses (`basic-memory` / `bm` / `uvx --prerelease=allow basic-memory`):
 
 - **Primary:** `… tool search-notes --type schema --page-size 10` against
   `primaryProject` — use `--project-id <uuid>` for a UUID, `--project <ref>`
@@ -244,7 +246,7 @@ uses (`basic-memory` / `bm` / `uvx basic-memory`):
   return *cleanly* — `0 results` is fine; an **error** means the ref doesn't route.
 - **Hook health:** run
   `basic-memory hook status --harness claude --project-dir <project-root>` with
-  the first available `basic-memory`, `bm`, or `uvx basic-memory` launcher. It
+  the first available `basic-memory`, `bm`, or `uvx --prerelease=allow basic-memory` launcher. It
   must find the intended settings and report the selected project and capture
   state. Record the shared inbox depth and last-flush state in the setup summary;
   the counts include envelopes from every supported harness.

@@ -12,7 +12,7 @@ This is a quick diagnostic — gather the facts and lay them out; don't over-inv
 ## Gather
 
 1. **CLI reachable?** Run `basic-memory --version`, then `bm --version`, then
-   `uvx basic-memory --version`. If no launcher resolves, report the CLI status as
+   `uvx --prerelease=allow basic-memory --version`. If no launcher resolves, report the CLI status as
    unavailable and continue with MCP/config checks. The plugin hooks can still use
    their uv-managed environment.
 

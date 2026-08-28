@@ -362,7 +362,8 @@ def _install_bm_via_uv(timeout: float = 180.0) -> str | None:
     Bootstrap-install basic-memory via `uv tool install`.
 
     Idempotent — re-runs are no-ops when the tool is already installed, so this
-    converges with later manual `uv tool install basic-memory` calls and avoids
+    converges with later manual `uv tool install basic-memory --prerelease=allow`
+    calls and avoids
     the two-installations-sharing-one-config-dir foot-gun.
 
     Returns the resolved bm path on success, or None if uv is unavailable or
@@ -373,20 +374,24 @@ def _install_bm_via_uv(timeout: float = 180.0) -> str | None:
         return None
     try:
         result = subprocess.run(
-            [uv, "tool", "install", "basic-memory", "--quiet"],
+            # basic-memory pins a FastMCP pre-release; without this flag uv
+            # silently installs the last release that had none (#1338).
+            [uv, "tool", "install", "basic-memory", "--prerelease=allow", "--quiet"],
             check=False,
             capture_output=True,
             timeout=timeout,
             env=_clean_child_env(),
         )
     except Exception as e:
-        logger.warning("basic-memory: `uv tool install basic-memory` failed: %s", e)
+        logger.warning(
+            "basic-memory: `uv tool install basic-memory --prerelease=allow` failed: %s", e
+        )
         return None
     if result.returncode != 0:
         # uv prints to stderr; capture the tail so the operator can debug.
         stderr_tail = (result.stderr or b"").decode("utf-8", errors="replace")[-400:]
         logger.warning(
-            "basic-memory: `uv tool install basic-memory` exited %s: %s",
+            "basic-memory: `uv tool install basic-memory --prerelease=allow` exited %s: %s",
             result.returncode,
             stderr_tail.strip(),
         )
@@ -924,7 +929,7 @@ class BasicMemoryProvider(MemoryProvider):
             if _install_bm_via_uv() is None:
                 logger.error(
                     "basic-memory: auto-install via uv failed. Run "
-                    "`uv tool install basic-memory` manually to debug. "
+                    "`uv tool install basic-memory --prerelease=allow` manually to debug. "
                     "Provider will not initialize."
                 )
                 return

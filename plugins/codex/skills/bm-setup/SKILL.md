@@ -16,7 +16,8 @@ Confirm Basic Memory is reachable before changing files:
 1. Prefer MCP: call `list_memory_projects`.
 2. If MCP tools are not available, run `basic-memory --version` or `bm --version`.
 3. If neither works, stop and tell the user to install Basic Memory and connect the
-   MCP server. The plugin bundles an `.mcp.json` that starts `uvx basic-memory mcp`.
+   MCP server. The plugin bundles an `.mcp.json` that starts
+   `uvx --prerelease=allow basic-memory mcp`.
 4. List available projects before the interview. Include cloud/local source,
    workspace, qualified name, and project id when available.
 
@@ -204,7 +205,7 @@ Before closing, prove the mapping works:
   setup, confirm the `Coding Session` schema is present.
 - Search one shared project for open decisions if shared projects were configured.
 - Run `basic-memory hook status --harness codex --project-dir <repo-root>` (using
-  `bm` or `uvx basic-memory` if needed). Confirm that it finds this repo's
+  `bm` or `uvx --prerelease=allow basic-memory` if needed). Confirm that it finds this repo's
   settings, reports the selected project, session profile, repository, and
   intended checkpoint-prompt and capture states.
   Its inbox counts are shared across harnesses.

@@ -7,7 +7,8 @@ On first startup, this plugin checks whether the `bm` (Basic Memory) CLI is avai
 ### What happens
 
 1. The plugin checks if `bm` exists on `PATH`
-2. If missing, it executes `uv tool install basic-memory --force`
+2. If missing, it executes `uv tool install basic-memory --prerelease=allow --force`
+   (the flag is needed because basic-memory depends on a FastMCP pre-release)
 3. This installs the Basic Memory CLI into uv's managed tool directory (`~/.local/bin/bm` on most systems)
 
 ### What this means
@@ -22,7 +23,7 @@ On first startup, this plugin checks whether the `bm` (Basic Memory) CLI is avai
 You can install Basic Memory yourself before enabling the plugin:
 
 ```bash
-uv tool install basic-memory
+uv tool install basic-memory --prerelease=allow
 ```
 
 Or with pip:

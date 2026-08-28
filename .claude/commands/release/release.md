@@ -78,7 +78,7 @@ The GitHub Actions workflow (`.github/workflows/release.yml`) then:
 
 #### PyPI Publication
 1. Verify package published at: https://pypi.org/project/basic-memory/<version>/
-2. Test installation: `uv tool install basic-memory`
+2. Test installation: `uv tool install basic-memory --prerelease=allow`
 3. Verify installed version: `basic-memory --version`
 
 #### Homebrew Formula (Stable Releases Only)
@@ -192,13 +192,13 @@ Before starting, verify:
 🚀 GitHub Actions: Completed
 
 Install with pip/uv:
-  uv tool install basic-memory
+  uv tool install basic-memory --prerelease=allow
 
 Install with Homebrew:
   brew install basicmachines-co/basic-memory/basic-memory
 
 Users can now upgrade:
-  uv tool upgrade basic-memory
+  uv tool upgrade basic-memory --prerelease=allow
   brew upgrade basic-memory
 ```
 

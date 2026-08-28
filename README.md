@@ -81,14 +81,19 @@ Pick the path that fits you. Both run the same product on the same Markdown.
 - Requires Python via [`uv`](https://docs.astral.sh/uv/)
 
 ```bash
-uv tool install basic-memory
+uv tool install basic-memory --prerelease=allow
 ```
+
+`--prerelease=allow` is required: Basic Memory 0.23 depends on a FastMCP 4
+pre-release, and `uv` only accepts pre-releases of transitive dependencies when
+told to — without the flag it silently installs an older release. The same flag
+goes on every `uvx` / `uv tool upgrade` command below.
 
 For Postgres deployments that store semantic vectors in Milvus, install the
 first-party optional extra instead:
 
 ```bash
-uv tool install "basic-memory[milvus]"
+uv tool install "basic-memory[milvus]" --prerelease=allow
 ```
 
 [**Configure your client ↓**](#connect-your-ai-client)
@@ -276,7 +281,7 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
   "mcpServers": {
     "basic-memory": {
       "command": "uvx",
-      "args": ["basic-memory", "mcp"]
+      "args": ["--prerelease=allow", "basic-memory", "mcp"]
     }
   }
 }
@@ -290,7 +295,7 @@ Restart Claude Desktop. Notes live in `~/basic-memory` by default.
 ### Claude Code
 
 ```bash
-claude mcp add basic-memory -- uvx basic-memory mcp
+claude mcp add basic-memory -- uvx --prerelease=allow basic-memory mcp
 ```
 
 For the full memory bridge — session briefings, pre-compaction checkpoints, and
@@ -304,7 +309,7 @@ Add to `~/.codex/config.toml`:
 ```toml
 [mcp_servers.basic-memory]
 command = "uvx"
-args = ["basic-memory", "mcp"]
+args = ["--prerelease=allow", "basic-memory", "mcp"]
 ```
 
 Codex can keep its default MCP approval behavior, or you can pre-approve eligible
@@ -313,7 +318,7 @@ Basic Memory tools by adding this server-scoped setting to the same table:
 ```toml
 [mcp_servers.basic-memory]
 command = "uvx"
-args = ["basic-memory", "mcp"]
+args = ["--prerelease=allow", "basic-memory", "mcp"]
 default_tools_approval_mode = "approve"
 ```
 
@@ -332,7 +337,7 @@ Add to `.cursor/mcp.json` (project) or `~/.cursor/mcp.json` (global):
   "mcpServers": {
     "basic-memory": {
       "command": "uvx",
-      "args": ["basic-memory", "mcp"]
+      "args": ["--prerelease=allow", "basic-memory", "mcp"]
     }
   }
 }
@@ -348,7 +353,7 @@ Add to your User Settings (JSON):
     "servers": {
       "basic-memory": {
         "command": "uvx",
-        "args": ["basic-memory", "mcp"]
+        "args": ["--prerelease=allow", "basic-memory", "mcp"]
       }
     }
   }
