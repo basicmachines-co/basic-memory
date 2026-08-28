@@ -113,11 +113,17 @@ class Entity(Base):
         foreign_keys="[Relation.from_id]",
         cascade="all, delete-orphan",
     )
+    # No delete cascade here, and the asymmetry with outgoing_relations is the point.
+    # An entity owns the relations it declares; it does not own the ones other entities
+    # declare at it. Deleting this entity unresolves the inbound rows (to_id -> NULL) and
+    # leaves to_name holding the source's original link text -- the same state the indexer
+    # produces for a link to a note that does not exist yet. passive_deletes hands the job
+    # to the database's ON DELETE SET NULL instead of having the ORM null the rows itself.
     incoming_relations = relationship(
         "Relation",
         back_populates="to_entity",
         foreign_keys="[Relation.to_id]",
-        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     note_content = relationship(
         "NoteContent",
@@ -354,8 +360,12 @@ class Relation(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)  # pyright: ignore [reportIncompatibleVariableOverride]
     project_id: Mapped[int] = mapped_column(Integer, ForeignKey("project.id"), index=True)
     from_id: Mapped[int] = mapped_column(Integer, ForeignKey("entity.id", ondelete="CASCADE"))
+    # SET NULL, not CASCADE. Deleting the target must not erase the record that some other
+    # entity still points here -- the wikilink is still sitting in that note's markdown, so
+    # a graph that forgets the edge reports a clean bill of health over a broken link.
+    # from_id above keeps CASCADE: an entity really does own the relations it declares.
     to_id: Mapped[Optional[int]] = mapped_column(
-        Integer, ForeignKey("entity.id", ondelete="CASCADE"), nullable=True
+        Integer, ForeignKey("entity.id", ondelete="SET NULL"), nullable=True
     )
     to_name: Mapped[str] = mapped_column(String)
     relation_type: Mapped[str] = mapped_column(String)

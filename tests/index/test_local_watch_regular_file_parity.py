@@ -224,7 +224,19 @@ title: Source
     assert deleted_target is None
     assert source_after is not None
     assert source_after.id == source_entity_id
-    assert source_after.outgoing_relations == []
-    assert stale_relation_rows == []
+    # The relation survives its target's deletion, unresolved. This test is about the
+    # stale search row; the empty-relations assertion was scenery, and keeping it would
+    # have turned an accident into a contract.
+    assert len(source_after.outgoing_relations) == 1
+    assert source_after.outgoing_relations[0].to_id is None
+    assert source_after.outgoing_relations[0].to_name == "asset.pdf"
+    # The search row is repaired in place rather than removed. `asset.pdf` and the target
+    # entity's permalink both reduce to `asset`, so the unresolved relation's permalink is
+    # the same string the resolved one had -- the refresh rewrites that row with a null
+    # target instead of deleting it. Repair either way; what must not happen is a row still
+    # claiming a live target.
+    assert len(stale_relation_rows) == 1
+    assert stale_relation_rows[0].to_id is None
+    assert stale_relation_rows[0].from_id == source_entity_id
     assert watch_service.state.recent_events[0].action == "index"
     assert watch_service.state.recent_events[0].status == "success"

@@ -2140,7 +2140,11 @@ type: note
 
     assert source_after is not None
     assert source_after.id == source_entity_id
-    assert source_after.outgoing_relations == []
+    # Same story as the watcher parity test: the surviving relation is now unresolved
+    # rather than gone. This test is about repairing the survivor's search row.
+    assert len(source_after.outgoing_relations) == 1
+    assert source_after.outgoing_relations[0].to_id is None
+    assert source_after.outgoing_relations[0].to_name == "Deleted Target"
     assert deleted_target is None
     assert deleted_other is None
     assert target_note_content_after is None
