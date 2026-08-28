@@ -279,10 +279,12 @@ def _normalize_project_visibility(visibility: str | None) -> ProjectVisibility:
         return "workspace"
 
     normalized = visibility.strip().lower()
-    if normalized in {"workspace", "shared", "private"}:
+    if normalized == "workspace" or normalized == "shared":
         return normalized
 
-    raise ValueError("Invalid visibility. Expected one of: workspace, shared, private.")
+    # "private" was accepted here while the cloud has no such tier, so users
+    # were told their project was private when the whole team could see it (#1343).
+    raise ValueError("Invalid visibility. Expected one of: workspace, shared.")
 
 
 def _resolve_workspace_id(config, workspace: str | None) -> str | None:
@@ -747,7 +749,7 @@ def add_project(
     visibility: str = typer.Option(
         None,
         "--visibility",
-        help="Cloud project visibility: workspace, shared, or private",
+        help="Cloud project visibility: workspace (everyone in the workspace) or shared (invite-only)",
     ),
     set_default: bool = typer.Option(False, "--default", help="Set as default project"),
     local: bool = typer.Option(
