@@ -323,7 +323,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     chunk.search_index_id,
                     chunk.search_index_type,
                     chunk.chunk_index,
-                    chunk.chunk_text
+                    chunk.chunk_text,
+                    chunk.chunk_tokens
                 FROM jsonb_to_recordset(CAST(:chunks AS JSONB)) AS chunk(
                     search_index_id INTEGER,
                     search_index_type VARCHAR,

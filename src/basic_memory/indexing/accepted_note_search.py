@@ -9,6 +9,7 @@ from pathlib import Path
 
 from basic_memory.file_utils import ParseError, remove_frontmatter
 from basic_memory.repository.accepted_note_search_row import AcceptedNoteSearchRow
+from basic_memory.repository.search_query import cjk_search_tokens
 from basic_memory.schemas.base import normalize_note_type
 
 MAX_ACCEPTED_SEARCH_CONTENT_STEMS_SIZE = 6000
@@ -112,17 +113,20 @@ def build_accepted_note_search_row(
     item_type: str = "entity",
 ) -> AcceptedNoteSearchRow:
     """Build the hot entity search row for one accepted note snapshot."""
+    title_text = strip_search_text(title)
+    content_stems = accepted_note_content_stems(
+        title=title,
+        search_content=search_content,
+        permalink=permalink,
+        file_path=file_path,
+        tags=accepted_note_tags(entity_metadata),
+    )
     return AcceptedNoteSearchRow(
         id=entity_id,
-        title=strip_search_text(title),
-        content_stems=accepted_note_content_stems(
-            title=title,
-            search_content=search_content,
-            permalink=permalink,
-            file_path=file_path,
-            tags=accepted_note_tags(entity_metadata),
-        ),
+        title=title_text,
+        content_stems=content_stems,
         content_snippet=strip_search_text(search_content),
+        search_tokens=cjk_search_tokens(title_text, permalink, content_stems),
         permalink=permalink,
         file_path=Path(file_path).as_posix(),
         item_type=item_type,

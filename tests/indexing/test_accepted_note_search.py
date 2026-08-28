@@ -88,6 +88,7 @@ def test_build_accepted_note_search_row_returns_immutable_hot_search_state() -> 
         title="Project Plan",
         content_stems=row.content_stems,
         content_snippet="Main body",
+        search_tokens="",
         permalink="main/project-plan",
         file_path="notes/project-plan.md",
         item_type="entity",
@@ -102,6 +103,41 @@ def test_build_accepted_note_search_row_returns_immutable_hot_search_state() -> 
 
     with pytest.raises(FrozenInstanceError):
         setattr(row, "title", "Changed")
+
+
+def test_build_accepted_note_search_row_derives_cjk_tokens_without_changing_display_fields() -> (
+    None
+):
+    """Accepted rows keep CJK lexical tokens separate from user-visible text."""
+    row = build_accepted_note_search_row(
+        entity_id=42,
+        title="标题甲",
+        note_type="decision",
+        entity_metadata=None,
+        permalink="目录/链接乙",
+        file_path="notes/display.md",
+        search_content="正文丙混合 latinword",
+        created_at=datetime(2026, 6, 18, 12, 0, tzinfo=UTC),
+        updated_at=datetime(2026, 6, 18, 13, 0, tzinfo=UTC),
+        project_id=7,
+    )
+
+    assert {
+        "标题",
+        "题甲",
+        "目录",
+        "链接",
+        "接乙",
+        "正文",
+        "文丙",
+        "丙混",
+        "混合",
+    } <= set(row.search_tokens.split())
+    assert "latinword" not in row.search_tokens
+    assert "甲目" not in row.search_tokens
+    assert row.title == "标题甲"
+    assert row.permalink == "目录/链接乙"
+    assert row.content_snippet == "正文丙混合 latinword"
 
 
 def test_build_accepted_note_search_row_canonicalizes_legacy_note_type() -> None:

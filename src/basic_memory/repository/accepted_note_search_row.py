@@ -12,6 +12,7 @@ class AcceptedNoteSearchRow:
     title: str
     content_stems: str
     content_snippet: str
+    search_tokens: str
     permalink: str | None
     file_path: str
     item_type: str
