@@ -51,6 +51,11 @@ if TYPE_CHECKING:  # pragma: no cover
 type ProjectSearchRepositoryFactory = Callable[[int], SearchRepository]
 
 
+def _is_cloud_only(entry: ProjectEntry) -> bool:
+    """Whether a config entry routes to the cloud with no local copy of the notes."""
+    return entry.mode == ProjectMode.CLOUD and not entry.local_sync_path
+
+
 class ProjectService:
     """Service for managing Basic Memory projects."""
 
@@ -522,6 +527,11 @@ class ProjectService:
             if normalized_name != name:
                 logger.info(f"Normalizing project name in config: '{name}' -> '{normalized_name}'")
                 config_updated = True
+                # The default must follow its key: config validation resets a
+                # default that no longer matches a project key to the first
+                # project, which would silently replace a cloud default.
+                if config.default_project == name:
+                    config.default_project = normalized_name
 
             updated_config[normalized_name] = entry
 
@@ -539,19 +549,25 @@ class ProjectService:
             db_projects = await self.repository.get_active_projects(session)
             db_projects_by_permalink = {p.permalink: p for p in db_projects}
 
+            # Trigger: a cloud-only entry — cloud mode with no local sync copy
+            #          (`add --cloud` without --local-path, or a `set-cloud`
+            #          cutover, which clears the sync metadata).
+            # Why: set-cloud deliberately deletes the local row so the project's
+            #      configured state is purely cloud; a local row for it would undo
+            #      that cutover and admit the project to local indexing/watching
+            #      (#1334 review). A cloud project with a local sync path still
+            #      needs its row for local-side operations.
+            # Outcome: cloud-only entries are absent from the local-row set — never
+            #          created, and a stale row left by an older reconciliation is
+            #          removed like any other row config no longer claims.
+            local_entries = {
+                name: entry
+                for name, entry in config_project_names.items()
+                if not _is_cloud_only(entry)
+            }
+
             # Add projects that exist in config but not in DB
-            for name, entry in config_project_names.items():
-                # Trigger: a cloud-only entry — cloud mode with no local sync copy
-                #          (`add --cloud` without --local-path, or a `set-cloud`
-                #          cutover, which clears the sync metadata).
-                # Why: set-cloud deliberately deletes the local row so the project's
-                #      configured state is purely cloud; recreating it here would
-                #      undo that cutover on every reconciliation (#1334 review). A
-                #      cloud project with a local sync path still needs its row for
-                #      local-side operations (`project ls --local`, watching).
-                # Outcome: cloud-only entries never get a local projects row.
-                if entry.mode == ProjectMode.CLOUD and not entry.local_sync_path:
-                    continue
+            for name, entry in local_entries.items():
                 if name not in db_projects_by_permalink:
                     logger.info(f"Adding project '{name}' to database")
                     project_data = {
@@ -567,7 +583,7 @@ class ProjectService:
             # Config is the source of truth - if a project was deleted from config,
             # it should be deleted from DB too (fixes issue #193)
             for name, project in db_projects_by_permalink.items():
-                if name not in config_project_names:
+                if name not in local_entries:
                     logger.info(
                         f"Removing project '{name}' from database (deleted from config, source of truth)"
                     )
@@ -584,17 +600,15 @@ class ProjectService:
             # Make sure default project is synchronized between config and database
             db_default = await self.repository.get_default_project(session)
             config_default = self.config_manager.default_project
-            config_default_entry = config_project_names.get(config_default)
+            config_default_entry = (
+                config_project_names.get(config_default) if config_default else None
+            )
 
             # Trigger: the configured default is cloud-only (no local sync copy).
             # Why: it has no local row by design, so the database default is only
             #      the local fallback and must not overwrite the user's choice.
             # Outcome: config keeps the cloud default; the DB default stays local.
-            if (
-                config_default_entry is not None
-                and config_default_entry.mode == ProjectMode.CLOUD
-                and not config_default_entry.local_sync_path
-            ):
+            if config_default_entry is not None and _is_cloud_only(config_default_entry):
                 pass
             elif db_default and db_default.name != config_default:
                 # Update config to match DB default

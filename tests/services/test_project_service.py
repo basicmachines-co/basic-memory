@@ -1842,3 +1842,50 @@ async def test_synchronize_projects_keeps_a_row_for_cloud_projects_with_a_local_
     await project_service.synchronize_projects()
 
     assert await _get_project(project_service, "research-synced") is not None
+
+
+@pytest.mark.asyncio
+async def test_synchronize_projects_removes_a_stale_row_for_a_cloud_only_entry(
+    project_service: ProjectService, tmp_path
+):
+    """A row an older reconciliation recreated for a cut-over project converges away."""
+    from basic_memory.config import ProjectEntry, ProjectMode
+
+    config_manager = project_service.config_manager
+    config = config_manager.load_config()
+    config.projects["research-cloud"] = ProjectEntry(path="", mode=ProjectMode.CLOUD)
+    config_manager.save_config(config)
+    await _create_project(
+        project_service,
+        {
+            "name": "research-cloud",
+            "path": str(tmp_path / "stale-research"),
+            "permalink": "research-cloud",
+            "is_active": True,
+        },
+    )
+    assert await _get_project(project_service, "research-cloud") is not None
+
+    await project_service.synchronize_projects()
+
+    assert await _get_project(project_service, "research-cloud") is None
+
+
+@pytest.mark.asyncio
+async def test_synchronize_projects_keeps_a_cloud_default_written_in_display_form(
+    project_service: ProjectService,
+):
+    """`default_project: Research Cloud` must match the normalized `research-cloud` key."""
+    from basic_memory.config import ProjectEntry, ProjectMode
+
+    config_manager = project_service.config_manager
+    config = config_manager.load_config()
+    config.projects["Research Cloud"] = ProjectEntry(path="", mode=ProjectMode.CLOUD)
+    config.default_project = "Research Cloud"
+    config_manager.save_config(config)
+
+    await project_service.synchronize_projects()
+
+    # Keys are normalized on sync; the default must follow its key, not fall
+    # back to the first local project.
+    assert config_manager.load_config().default_project == "research-cloud"
