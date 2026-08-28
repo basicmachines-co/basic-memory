@@ -44,6 +44,13 @@ async def get_engine_factory(
 
     app_config = resolve_container().config
     engine, session_maker = await db.get_or_create_db(app_config.database_path)
+    # Deferred import for the same reason as resolve_container above: the
+    # services layer is reached through api.app -> routers -> deps.
+    from basic_memory.services.initialization import reconcile_projects_with_config_once
+
+    # No server lifespan ran initialize_app() for this process, so seed
+    # config.json's projects into the database here (#1334).
+    await reconcile_projects_with_config_once(app_config)
     return engine, session_maker
 
 
