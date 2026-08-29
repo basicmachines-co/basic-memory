@@ -120,8 +120,11 @@ def analyze_script_query(text: str) -> ScriptQuery:
         for token in "".join(word_characters).split()
         if any(character.isalnum() for character in token)
     ]
-    word_text = " ".join(word_tokens) or None
+    gram_phrases = tuple(script_run_grams(run) for run in script_runs(normalized))
+    # Preserve punctuation-only input as an explicit backend query. Dropping it would make
+    # the repositories confuse user text with the intentional no-predicate wildcard path.
+    word_text = " ".join(word_tokens) or (text if not gram_phrases else None)
     return ScriptQuery(
         word_text=word_text,
-        gram_phrases=tuple(script_run_grams(run) for run in script_runs(normalized)),
+        gram_phrases=gram_phrases,
     )

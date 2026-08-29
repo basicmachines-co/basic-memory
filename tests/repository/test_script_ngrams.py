@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 
 import pytest
 
+from basic_memory import db
+from basic_memory.models import Entity
 from basic_memory.repository.script_ngrams import (
     analyze_script_query,
     build_script_ngrams,
@@ -103,6 +105,14 @@ def test_analyze_script_query_matches_backend_boolean_whitespace(separator: str)
     assert query.gram_phrases == (("适者",), ("生存",))
 
 
+@pytest.mark.parametrize("text", ["!!!", "😀"])
+def test_analyze_script_query_preserves_punctuation_only_text(text: str) -> None:
+    query = analyze_script_query(text)
+
+    assert query.word_text == text
+    assert query.gram_phrases == ()
+
+
 @pytest.mark.asyncio
 async def test_compatibility_boolean_text_uses_script_substring_search(search_repository) -> None:
     now = datetime.now(timezone.utc)
@@ -145,6 +155,79 @@ async def test_non_space_boolean_text_uses_script_substring_search(search_reposi
     results = await search_repository.search("适者\tAND\t生存")
 
     assert [result.id for result in results] == [1308]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query", ["!!!", "😀"])
+async def test_punctuation_only_search_does_not_return_every_row(
+    search_repository,
+    query: str,
+) -> None:
+    now = datetime.now(timezone.utc)
+    row = SearchIndexRow(
+        project_id=search_repository.project_id,
+        id=1310,
+        type="entity",
+        file_path="notes/punctuation-decoy.md",
+        title="Punctuation decoy",
+        content_stems="ordinary searchable words",
+        content_snippet="ordinary searchable words",
+        permalink="notes/punctuation-decoy",
+        created_at=now,
+        updated_at=now,
+    )
+    await search_repository.index_item(row)
+
+    assert await search_repository.search(query) == []
+
+
+@pytest.mark.asyncio
+async def test_sqlite_script_search_combines_metadata_and_title_filters(
+    search_repository,
+    session_maker,
+) -> None:
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("SQLite-specific FTS5 rowid regression")
+
+    now = datetime.now(timezone.utc)
+    async with db.scoped_session(session_maker) as session:
+        entity = Entity(
+            project_id=search_repository.project_id,
+            title="Evolution match",
+            note_type="note",
+            permalink="notes/evolution-filtered",
+            file_path="notes/evolution-filtered.md",
+            content_type="text/markdown",
+            entity_metadata={"region": "asia"},
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(entity)
+        await session.flush()
+        entity_id = entity.id
+
+    row = SearchIndexRow(
+        project_id=search_repository.project_id,
+        id=entity_id,
+        type="entity",
+        entity_id=entity_id,
+        file_path="notes/evolution-filtered.md",
+        title="Evolution match",
+        content_stems="不适者生存者",
+        content_snippet="不适者生存者",
+        permalink="notes/evolution-filtered",
+        created_at=now,
+        updated_at=now,
+    )
+    await search_repository.index_item(row)
+
+    results = await search_repository.search(
+        "适者",
+        title="Evolution match",
+        metadata_filters={"region": "asia"},
+    )
+
+    assert [result.id for result in results] == [entity_id]
 
 
 @pytest.mark.asyncio
