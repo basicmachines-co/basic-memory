@@ -218,6 +218,18 @@ class TestSplitTextIntoChunks:
                 assert line.startswith("## Observations") or line.startswith("- ")
         assert all(chunk.count("[[") == chunk.count("]]") for chunk in result)
 
+    def test_oversized_nested_list_preserves_indentation_at_boundaries(self):
+        # A chunk that begins mid-block must keep the line's indentation; a naive
+        # strip() would turn a nested item into top-level text in the embedding.
+        nested = "\n".join(f"    - nested detail {index} about the subsystem" for index in range(1, 61))
+        text = f"- parent item\n{nested}"
+
+        result = split_text_into_chunks(text)
+
+        assert len(result) >= 2
+        # A later chunk starts mid-list and keeps its four-space indentation.
+        assert any(chunk.startswith("    - nested detail") for chunk in result[1:])
+
 
 class TestSemanticChunkHelpers:
     """Cover helper preconditions and Markdown list grouping directly."""
