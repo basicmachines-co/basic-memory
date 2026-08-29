@@ -572,3 +572,24 @@ async def test_postgres_batch_sync_tracks_deferred_oversized_entities(monkeypatc
     complete_record = next(record for record in completion_records if record["entity_id"] == 2)
     assert complete_record["entity_complete"] is True
     assert complete_record["oversized_entity"] is False
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        (
+            '"incident response" OR "database recovery"',
+            "(incident & response) | (database & recovery)",
+        ),
+        ('"cash OR check"', "(cash & OR & check)"),
+        ('"unbalanced quote OR recovery', "unbalanced:* & quote:* & recovery:*"),
+        ("incident AND (database recovery)", "incident & ( database & recovery )"),
+        ("recovery AND", "NOSPECIALCHARS:*"),
+    ],
+)
+def test_postgres_quoted_boolean_queries_render_valid_tsquery(
+    query: str,
+    expected: str,
+) -> None:
+    """Quoted user syntax must become a complete tsquery expression before SQL."""
+    assert _make_repo()._prepare_search_term(query) == expected
