@@ -10,10 +10,17 @@ from __future__ import annotations
 
 import argparse
 import importlib.metadata
-import resource
 import sys
 
 import pdf_inspector
+
+# POSIX rlimits are the child's isolation boundary on the Linux workers and on
+# macOS dev machines. Windows has no `resource` module; there the parent's
+# wall-clock deadline is the only ceiling, and the limit helpers below no-op.
+if sys.platform == "win32":  # pragma: no cover - exercised only on Windows CI
+    resource = None
+else:
+    import resource
 
 from basic_memory.document_ingestion.pdf_inspector import (
     PDF_INSPECTOR_ENGINE,
@@ -95,12 +102,14 @@ def inspect_pdf_bytes(
 
 def _apply_cpu_limit(cpu_seconds: int) -> None:
     """Bound native CPU time so a malformed PDF cannot monopolize a worker."""
+    if resource is None:
+        return
     resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds + 1))
 
 
 def _apply_memory_limit(max_memory_bytes: int) -> None:
     """Bound parser address space on Linux before reading source bytes."""
-    if sys.platform != "linux":
+    if resource is None or sys.platform != "linux":
         # RLIMIT_AS is the deployed Linux isolation boundary. Applying the same
         # byte ceiling on macOS constrains its much larger virtual mappings and
         # makes the local subprocess fail before native parsing begins.

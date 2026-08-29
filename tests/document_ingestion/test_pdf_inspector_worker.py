@@ -97,36 +97,47 @@ def test_inspect_pdf_bytes_rejects_inconsistent_native_output(
         )
 
 
+def fake_posix_resource() -> SimpleNamespace:
+    """Stand in for the POSIX ``resource`` module so limit tests run on every OS."""
+    return SimpleNamespace(setrlimit=Mock(), RLIMIT_AS="RLIMIT_AS", RLIMIT_CPU="RLIMIT_CPU")
+
+
 def test_worker_bounds_linux_address_space(monkeypatch: pytest.MonkeyPatch) -> None:
-    setrlimit = Mock()
+    resource = fake_posix_resource()
     monkeypatch.setattr(pdf_inspector_worker.sys, "platform", "linux")
-    monkeypatch.setattr(pdf_inspector_worker.resource, "setrlimit", setrlimit)
+    monkeypatch.setattr(pdf_inspector_worker, "resource", resource)
 
     pdf_inspector_worker._apply_memory_limit(512 * 1024 * 1024)
 
-    setrlimit.assert_called_once_with(
-        pdf_inspector_worker.resource.RLIMIT_AS,
-        (512 * 1024 * 1024, 512 * 1024 * 1024),
-    )
+    resource.setrlimit.assert_called_once_with("RLIMIT_AS", (512 * 1024 * 1024, 512 * 1024 * 1024))
 
 
 def test_worker_skips_address_space_limit_off_linux(monkeypatch: pytest.MonkeyPatch) -> None:
-    setrlimit = Mock()
+    resource = fake_posix_resource()
     monkeypatch.setattr(pdf_inspector_worker.sys, "platform", "darwin")
-    monkeypatch.setattr(pdf_inspector_worker.resource, "setrlimit", setrlimit)
+    monkeypatch.setattr(pdf_inspector_worker, "resource", resource)
 
     pdf_inspector_worker._apply_memory_limit(512 * 1024 * 1024)
 
-    setrlimit.assert_not_called()
+    resource.setrlimit.assert_not_called()
 
 
 def test_worker_bounds_cpu_time(monkeypatch: pytest.MonkeyPatch) -> None:
-    setrlimit = Mock()
-    monkeypatch.setattr(pdf_inspector_worker.resource, "setrlimit", setrlimit)
+    resource = fake_posix_resource()
+    monkeypatch.setattr(pdf_inspector_worker, "resource", resource)
 
     pdf_inspector_worker._apply_cpu_limit(25)
 
-    setrlimit.assert_called_once_with(pdf_inspector_worker.resource.RLIMIT_CPU, (25, 26))
+    resource.setrlimit.assert_called_once_with("RLIMIT_CPU", (25, 26))
+
+
+def test_worker_skips_rlimits_without_posix_resource(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Windows has no rlimits; the parent's deadline is the only ceiling there."""
+    monkeypatch.setattr(pdf_inspector_worker, "resource", None)
+    monkeypatch.setattr(pdf_inspector_worker.sys, "platform", "linux")
+
+    pdf_inspector_worker._apply_cpu_limit(25)
+    pdf_inspector_worker._apply_memory_limit(1024)
 
 
 def test_worker_main_writes_one_json_result(
