@@ -198,7 +198,16 @@ def _split_long_section(section_text: str) -> list[str]:
 
     def flush() -> None:
         nonlocal current, current_len
-        packed = "\n".join(current).strip()
+        # Drop blank lines at the chunk's edges, but keep the indentation of
+        # every remaining line: when a chunk starts mid-block, a naive strip()
+        # would de-indent a nested list item or code line and change its
+        # Markdown meaning in the embedded text.
+        start, end = 0, len(current)
+        while start < end and not current[start].strip():
+            start += 1
+        while end > start and not current[end - 1].strip():
+            end -= 1
+        packed = "\n".join(current[start:end]).rstrip()
         if packed:
             chunks.append(packed)
         current = []
