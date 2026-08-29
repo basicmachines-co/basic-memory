@@ -798,13 +798,16 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 pass
             else:
                 script_query = analyze_script_query(search_text.strip())
-                params["text"] = ""
-                params["script_text"] = ""
-                if script_query.word_text:
-                    # Use _prepare_search_term to handle both Boolean and non-Boolean queries.
-                    prepared_text = self._prepare_search_term(script_query.word_text)
-                    params["text"] = f"{SQLITE_WORD_COLUMNS}: ({prepared_text})"
+                # Trigger: the query contains text from an unsegmented script.
+                # Why: the script channel needs one table-level MATCH alongside word fields.
+                # Outcome: mixed queries rank all terms together; word-only queries retain their
+                # established per-column matching and ranking behavior.
                 if script_query.gram_phrases:
+                    params["text"] = ""
+                    params["script_text"] = ""
+                    if script_query.word_text:
+                        prepared_text = self._prepare_search_term(script_query.word_text)
+                        params["text"] = f"{SQLITE_WORD_COLUMNS}: ({prepared_text})"
                     script_phrases = " AND ".join(
                         f'"{" ".join(phrase)}"' for phrase in script_query.gram_phrases
                     )
@@ -812,9 +815,22 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                     params["script_text"] = (
                         f" AND ({script_clause})" if script_query.word_text else script_clause
                     )
-                # One table-level MATCH keeps every required word and script phrase in the
-                # active FTS5 context so bm25 ranks the complete natural-language query.
-                match_conditions.append("search_index MATCH (:text || :script_text)")
+                    match_conditions.append("search_index MATCH (:text || :script_text)")
+                else:
+                    word_text = (
+                        script_query.word_text
+                        if script_query.word_text is not None
+                        else search_text.strip()
+                    )
+                    processed_text = self._prepare_search_term(word_text)
+                    params["text"] = processed_text
+                    # content_stems is capped for Postgres index-row compatibility, while
+                    # SQLite stores the complete note body in its FTS5 content_snippet column.
+                    match_conditions.append(
+                        "(search_index.title MATCH :text OR "
+                        "search_index.content_stems MATCH :text OR "
+                        "search_index.content_snippet MATCH :text)"
+                    )
 
         # Handle title match search
         if title:
@@ -1117,7 +1133,9 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             relaxed = self._relaxed_fts_text(search_text) if allow_relaxed and not rows else None
             if relaxed and params.get("text"):
                 relaxed_fallback_used = True
-                params["text"] = f"{SQLITE_WORD_COLUMNS}: ({relaxed})"
+                params["text"] = (
+                    f"{SQLITE_WORD_COLUMNS}: ({relaxed})" if "script_text" in params else relaxed
+                )
                 logger.debug(
                     "Strict SQLite FTS returned 0 results; retrying relaxed FTS query "
                     f"strict='{search_text}' relaxed='{relaxed}'"
@@ -1233,7 +1251,11 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                     self._relaxed_fts_text(search_text) if allow_relaxed and total == 0 else None
                 )
                 if relaxed and params.get("text"):
-                    params["text"] = f"{SQLITE_WORD_COLUMNS}: ({relaxed})"
+                    params["text"] = (
+                        f"{SQLITE_WORD_COLUMNS}: ({relaxed})"
+                        if "script_text" in params
+                        else relaxed
+                    )
                     with logfire.span(
                         "search.count.relaxed_fts_retry",
                         backend="sqlite",
