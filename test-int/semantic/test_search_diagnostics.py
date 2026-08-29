@@ -456,15 +456,22 @@ async def test_chunking_produces_reasonable_chunks(sqlite_engine_factory, tmp_pa
     for i, chunk in enumerate(chunks):
         print(f"  Chunk {i} ({len(chunk)} chars): {chunk[:80]}...")
 
-    # Each bullet should be its own chunk (current behavior)
-    bullet_chunks = [c for c in chunks if c.startswith("- [")]
-    print(f"\n  Bullet chunks: {len(bullet_chunks)}")
+    # Bullets are NOT split into their own chunks. Per-fact retrieval vectors
+    # come from the observation/relation search rows, which are embedded
+    # separately with their own identity; the entity body stays packed as
+    # context rather than fragmenting one chunk per line.
+    bare_bullet_chunks = [c for c in chunks if c.lstrip().startswith("- [")]
+    print(f"\n  Bare bullet chunks: {len(bare_bullet_chunks)}")
     print(f"  Total chunks: {len(chunks)}")
+    assert bare_bullet_chunks == [], (
+        f"Observations should not become standalone bullet chunks: {bare_bullet_chunks}"
+    )
 
-    # Verify observations are chunked individually
-    assert len(bullet_chunks) >= 3, "Expected at least 3 bullet chunks for 3 observations"
-
-    # Check if bullets have any context (they shouldn't in current impl)
-    for bc in bullet_chunks:
-        has_context = "Authentication" in bc or "auth-flow" in bc
-        print(f"  Bullet has parent context: {has_context} — '{bc[:60]}'")
+    # The observations heading stays with its list rather than stranding as an
+    # empty chunk, and every fact keeps its surrounding context.
+    observation_chunks = [c for c in chunks if "## Observations" in c]
+    assert len(observation_chunks) == 1
+    context_chunk = observation_chunks[0]
+    assert "JWT tokens" in context_chunk
+    assert "Refresh tokens" in context_chunk
+    assert "OAuth 2.1" in context_chunk

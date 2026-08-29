@@ -85,11 +85,18 @@ class StubLiteLLMEmbeddingProvider(LiteLLMEmbeddingProvider):
         return [StubEmbeddingProvider._vectorize(text) for text in texts]
 
 
-def _oversized_entity_content(bullet_count: int) -> str:
-    """Build deterministic content that produces many vector chunks."""
-    lines = ["# Oversized Entity"]
-    lines.extend(f"- embedding job {index}" for index in range(1, bullet_count + 1))
-    return "\n".join(lines)
+def _oversized_entity_content(section_count: int) -> str:
+    """Build deterministic content that produces many vector chunks.
+
+    Each heading section is sized so it neither packs with its neighbor nor
+    exceeds the per-chunk character budget, yielding exactly one chunk per
+    section. The entity's title and permalink form one additional leading
+    chunk, so the total chunk count is ``section_count + 1``. Chunk count is
+    driven by section size, not by list items — bullets are never split into
+    their own chunks.
+    """
+    filler = "x" * 860
+    return "\n\n".join(f"## Part {index}\n{filler}" for index in range(1, section_count + 1))
 
 
 async def _skip_if_pgvector_unavailable(session_maker) -> None:

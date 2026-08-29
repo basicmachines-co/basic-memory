@@ -138,16 +138,25 @@ class TestSplitTextIntoChunks:
         assert len(result) >= 3
         assert all(len(chunk) <= MAX_VECTOR_CHUNK_CHARS for chunk in result)
 
-    def test_bullets_are_independent_chunks(self):
+    def test_bullets_are_not_split_into_their_own_chunks(self):
+        # A list item is not a standalone retrieval unit in the entity body.
+        # Per-fact vectors come from the observation/relation search rows, which
+        # are embedded separately, so the body keeps its bullets together as
+        # context instead of fragmenting one chunk per line.
         text = "Intro\n- First fact\n  supporting detail\n- Second fact"
 
         result = split_text_into_chunks(text)
 
-        assert result == [
-            "Intro",
-            "- First fact\n  supporting detail",
-            "- Second fact",
-        ]
+        assert result == ["Intro\n- First fact\n  supporting detail\n- Second fact"]
+
+    def test_heading_stays_with_its_bullet_list(self):
+        # Guards the "empty ## Relations chunk" case: a heading is never
+        # stranded from the list that follows it — they chunk together.
+        text = "## Relations\n- supports [[Target]]\n- relates_to [[Other]]"
+
+        result = split_text_into_chunks(text)
+
+        assert result == [text]
 
     def test_sections_that_exceed_combined_limit_remain_separate(self):
         first_section = "a" * 500
@@ -177,12 +186,13 @@ class TestSplitTextIntoChunks:
 class TestSemanticChunkHelpers:
     """Cover helper preconditions and Markdown list grouping directly."""
 
-    def test_split_into_paragraphs_groups_bullet_continuations(self):
+    def test_split_into_paragraphs_keeps_bullet_lists_intact(self):
+        # Only blank lines start a new paragraph; a bullet list is one unit.
         result = semantic_chunking._split_into_paragraphs(
             "\n\n- First fact\ncontinuation\n- Second fact"
         )
 
-        assert result == ["- First fact\ncontinuation", "- Second fact"]
+        assert result == ["- First fact\ncontinuation\n- Second fact"]
 
     def test_empty_helper_inputs_return_no_chunks(self):
         assert semantic_chunking._split_long_section("") == []
