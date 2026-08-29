@@ -43,6 +43,17 @@ describe("edit tool", () => {
         { name: "edit_note" },
       )
     })
+
+    it("tells the model to cite the result permalink (#1341)", () => {
+      registerEditTool(mockApi, mockClient)
+
+      const toolConfig = (mockApi.registerTool as jest.MockedFunction<any>).mock
+        .calls[0][0]
+      expect(toolConfig.description).toContain("permalink")
+      expect(toolConfig.description).toContain(
+        "never report a save that no tool call performed",
+      )
+    })
   })
 
   describe("tool execution", () => {

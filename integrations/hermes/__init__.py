@@ -121,7 +121,11 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     {
         "name": "bm_write",
         "description": (
-            "Create a new note in the knowledge graph. Use clear titles and a folder "
+            "Create a new note in the knowledge graph. Call this whenever the user "
+            "asks to remember, record, save, or note something — acknowledging "
+            "without this call saves nothing. The result returns the note's "
+            "permalink: quote it when confirming the save, never a filename "
+            "recalled from memory. Use clear titles and a folder "
             "(e.g. 'projects', 'decisions', 'meetings')."
         ),
         "parameters": {
@@ -143,7 +147,8 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "name": "bm_edit",
         "description": (
             "Edit an existing note. Operations: append, prepend, find_replace, replace_section. "
-            "find_replace requires find_text. replace_section requires section."
+            "find_replace requires find_text. replace_section requires section. "
+            "The result returns the note's permalink — quote it when confirming the edit."
         ),
         "parameters": {
             "type": "object",
@@ -1127,6 +1132,13 @@ class BasicMemoryProvider(MemoryProvider):
             "active one\n"
             "- `bm_workspaces()` — list BM Cloud workspaces; pair with "
             "`bm_projects` to disambiguate same-named projects\n"
+            "\n"
+            "**Saves must be real.** When the user asks you to remember, "
+            "record, save, or note something, call `bm_write` (or `bm_edit`) "
+            "in that same turn. Never say information was saved, recorded, or "
+            "remembered unless the tool call returned a result, and when "
+            "confirming a save quote the `permalink` from that result — never "
+            "a filename recalled from memory.\n"
             "\n"
             "**Cross-project routing.** Read/write tools accept optional `project` "
             "(name) or `project_id` (UUID). Omit both to use the active "
