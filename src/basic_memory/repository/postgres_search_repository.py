@@ -516,7 +516,10 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 drop_boolean_words=True,
             )
 
-        for placeholder, phrase in quoted_phrases.items():
+        # A multi-digit placeholder contains shorter numeric placeholders as
+        # prefixes, so restore longest names first to keep each token atomic.
+        for placeholder in sorted(quoted_phrases, key=len, reverse=True):
+            phrase = quoted_phrases[placeholder]
             result = result.replace(placeholder, phrase)
 
         return result

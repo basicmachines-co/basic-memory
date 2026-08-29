@@ -596,3 +596,11 @@ def test_postgres_quoted_boolean_queries_render_valid_tsquery(
 ) -> None:
     """Quoted user syntax must become a complete tsquery expression before SQL."""
     assert _make_repo()._prepare_search_term(query) == expected
+
+
+def test_postgres_many_quoted_groups_restore_atomically() -> None:
+    """A placeholder must not rewrite the numeric prefix of a later group."""
+    query = " OR ".join(f'"term{index} word{index}"' for index in range(11))
+    expected = " | ".join(f"(term{index} & word{index})" for index in range(11))
+
+    assert _make_repo()._prepare_search_term(query) == expected
