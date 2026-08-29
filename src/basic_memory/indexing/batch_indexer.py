@@ -512,6 +512,16 @@ class BatchIndexer:
             existing = await self.entity_repository.get_by_file_path(
                 session, file.path, load_relations=False
             )
+            existing_note_content = (
+                await NoteContentRepository(
+                    project_id=self.relation_repository.project_id
+                ).get_by_entity_id(session, existing.id)
+                if existing is not None and existing.is_markdown
+                else None
+            )
+        expected_note_db_version = (
+            existing_note_content.db_version if existing_note_content is not None else None
+        )
         is_new_entity = existing is None
 
         if existing is None:
@@ -573,6 +583,11 @@ class BatchIndexer:
                     project_id=self.relation_repository.project_id,
                     entity_ids=(entity_id,),
                 )
+                locked_note_content = await NoteContentRepository(
+                    project_id=self.relation_repository.project_id
+                ).get_by_entity_id(session, entity_id)
+            else:
+                locked_note_content = None
             existing = await self.entity_repository.get_by_id(
                 session,
                 entity_id,
@@ -581,6 +596,23 @@ class BatchIndexer:
             )
             if existing is None:
                 raise ValueError(f"Entity not found before file metadata update: {file.path}")
+            if (
+                should_clear_note_state
+                and (locked_note_content.db_version if locked_note_content is not None else None)
+                != expected_note_db_version
+            ):
+                # A newer accepted Markdown generation landed after the initial
+                # classification read. This resource pass no longer owns cleanup.
+                return _PreparedEntity(
+                    path=file.path,
+                    entity_id=existing.id,
+                    permalink=existing.permalink,
+                    checksum=existing.checksum or checksum,
+                    content_type=existing.content_type,
+                    search_content=None,
+                    resolve_relations=False,
+                    refresh_search=False,
+                )
             if (
                 not should_clear_note_state
                 and existing.is_markdown
