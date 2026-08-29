@@ -334,6 +334,9 @@ milvus = [
     { name = "pymilvus" },
     { name = "pymilvus", extra = ["milvus-lite"], marker = "sys_platform != 'win32'" },
 ]
+pdf = [
+    { name = "pdf-inspector" },
+]
 redis = [
     { name = "redis" },
 ]
@@ -346,6 +349,7 @@ dev = [
     { name = "icecream" },
     { name = "libcst" },
     { name = "logfire" },
+    { name = "pdf-inspector" },
     { name = "psycopg" },
     { name = "pyright" },
     { name = "pytest" },
@@ -385,6 +389,7 @@ requires-dist = [
     { name = "mdformat-frontmatter", specifier = ">=2.0.8" },
     { name = "mdformat-gfm", specifier = ">=0.3.7" },
     { name = "openai", specifier = ">=1.100.2" },
+    { name = "pdf-inspector", marker = "extra == 'pdf'", specifier = ">=0.2.6,<2" },
     { name = "pillow", specifier = ">=11.1.0" },
     { name = "psutil", specifier = ">=5.9.0" },
     { name = "psycopg", specifier = "==3.3.1" },
@@ -410,7 +415,7 @@ requires-dist = [
     { name = "uvloop", marker = "sys_platform != 'win32'", specifier = ">=0.21.0" },
     { name = "watchfiles", specifier = ">=1.0.4" },
 ]
-provides-extras = ["milvus", "redis"]
+provides-extras = ["milvus", "pdf", "redis"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -420,6 +425,7 @@ dev = [
     { name = "icecream", specifier = ">=2.1.3" },
     { name = "libcst", specifier = ">=1.8.6" },
     { name = "logfire", specifier = ">=4.19.0" },
+    { name = "pdf-inspector", specifier = ">=0.2.6,<2" },
     { name = "psycopg", specifier = ">=3.2.0" },
     { name = "pyright", specifier = ">=1.1.408" },
     { name = "pytest", specifier = ">=8.3.4" },
@@ -2755,6 +2761,19 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/66/f3/5a20387de9bcd0607871bfc2198ee0e15836da7baa4592ccd7f24c27c986/pathable-0.6.0.tar.gz", hash = "sha256:6404b8b82aef5ff0fd478934137128b99b12212ba35afdde5525ca4f8388ea58", size = 18970, upload-time = "2026-05-19T18:15:11.911Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a2/e8/6d75ffd9784bce2e93d1ae4415649427e39a53bb172d4672b2b59c6f0a7b/pathable-0.6.0-py3-none-any.whl", hash = "sha256:82c4ca6c98c502ad12e0d4e9779b6210afee93c38990988c8c5d1b49bdcdf566", size = 18983, upload-time = "2026-05-19T18:15:10.728Z" },
+]
+
+[[package]]
+name = "pdf-inspector"
+version = "1.17.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f0/0c/83033698e9c1a89323209d99b6709c3c542ba8cffb556effd2d7cb86df54/pdf_inspector-1.17.0.tar.gz", hash = "sha256:2494bf571df419c17bcdb3651c0b7a648e1615cc6ee997d51ed9d75505789cd4", size = 1717688, upload-time = "2026-08-21T20:57:51.621Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/83/af/6c1e5ffe1fc8a41705b07053adf28b20cd10ccbd67d4f0437b3390304904/pdf_inspector-1.17.0-cp38-abi3-macosx_10_12_x86_64.whl", hash = "sha256:8012c877900d7872dcc49aa4d83a60b14475540e97cae80c79f5d2e4f0c113d9", size = 4820371, upload-time = "2026-08-21T20:57:41.138Z" },
+    { url = "https://files.pythonhosted.org/packages/58/d9/f49a1de9b6871c1b11c0aa4c184a295fb141605e0f5ba746a6fbae8b8ce1/pdf_inspector-1.17.0-cp38-abi3-macosx_11_0_arm64.whl", hash = "sha256:05845dcf5af014787b50e16e38fe13409e95d6c40abff9372b0b358154bd3318", size = 4590233, upload-time = "2026-08-21T20:57:43.189Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/55/14c205ee0896738a7a48fd759dd295b9b2513668f2664fb8f1173d2dde71/pdf_inspector-1.17.0-cp38-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:40b759e37c70708563f30ba5ba879e654308538584c3696d67cf0cecaaed0c05", size = 5111667, upload-time = "2026-08-21T20:57:45.142Z" },
+    { url = "https://files.pythonhosted.org/packages/5e/26/2fe9f8a620d1c86742c27a87fe5fd15ef5dd8d1c95704223642037b16161/pdf_inspector-1.17.0-cp38-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:1bf93070239efbf781e96930c8389d04fde41a48125ceec2c08e6867acb63176", size = 5347989, upload-time = "2026-08-21T20:57:47.758Z" },
+    { url = "https://files.pythonhosted.org/packages/94/f1/2b8843c594c27f9e7e8e552be4d9901a0c0eee78d93524be56916c4e3b8c/pdf_inspector-1.17.0-cp38-abi3-win_amd64.whl", hash = "sha256:bbe731d39eb620a03e4b79afd6e620dca824f22571560508caab97492a016578", size = 4696320, upload-time = "2026-08-21T20:57:49.704Z" },
 ]
 
 [[package]]

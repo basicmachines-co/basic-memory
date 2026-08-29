@@ -80,7 +80,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install -e ".[dev,milvus]"
+          uv pip install -e ".[dev,milvus,pdf]"
 
       - name: Run type checks
         run: |
@@ -147,7 +147,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install -e ".[dev]"
+          uv pip install -e ".[dev,pdf]"
 
       - name: Run tests
         run: |
@@ -208,7 +208,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install -e ".[dev]"
+          uv pip install -e ".[dev,pdf]"
 
       - name: Run tests
         run: |
@@ -283,7 +283,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install -e ".[dev]"
+          uv pip install -e ".[dev,pdf]"
 
       - name: Run tests
         run: |
@@ -354,7 +354,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install -e ".[dev]"
+          uv pip install -e ".[dev,pdf]"
 
       - name: Run tests
         run: |
@@ -403,7 +403,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv pip install -e ".[dev]"
+          uv pip install -e ".[dev,pdf]"
 
       - name: Run tests
         run: |
@@ -445,7 +445,7 @@ jobs:
 
       - name: Install Milvus extra
         run: |
-          uv pip install -e ".[dev,milvus]"
+          uv pip install -e ".[dev,milvus,pdf]"
 
       - name: Run Milvus tests
         run: |
