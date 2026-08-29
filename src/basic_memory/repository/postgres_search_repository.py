@@ -503,6 +503,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
         # or one following another operator already has a complete tsquery shape.
         result = re.sub(r"(?<=[\w)])\s+!", " & !", result)
         result = re.sub(r"!\s+", "!", result)
+        result = re.sub(r"\(\s+", "(", result)
+        result = re.sub(r"\s+\)", ")", result)
 
         if not _has_valid_boolean_shape(result):
             # Keep the searchable words from malformed Boolean input while
