@@ -798,17 +798,23 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 pass
             else:
                 script_query = analyze_script_query(search_text.strip())
+                params["text"] = ""
+                params["script_text"] = ""
                 if script_query.word_text:
                     # Use _prepare_search_term to handle both Boolean and non-Boolean queries.
                     prepared_text = self._prepare_search_term(script_query.word_text)
                     params["text"] = f"{SQLITE_WORD_COLUMNS}: ({prepared_text})"
-                    # content_stems is capped for Postgres index-row compatibility, while
-                    # SQLite stores the complete note body in its FTS5 content_snippet column.
-                    match_conditions.append("search_index MATCH :text")
-                for index, phrase in enumerate(script_query.gram_phrases):
-                    param_name = f"script_phrase_{index}"
-                    params[param_name] = f'"{" ".join(phrase)}"'
-                    match_conditions.append(f"search_index.script_ngrams MATCH :{param_name}")
+                if script_query.gram_phrases:
+                    script_phrases = " AND ".join(
+                        f'"{" ".join(phrase)}"' for phrase in script_query.gram_phrases
+                    )
+                    script_clause = f"script_ngrams: ({script_phrases})"
+                    params["script_text"] = (
+                        f" AND ({script_clause})" if script_query.word_text else script_clause
+                    )
+                # One table-level MATCH keeps every required word and script phrase in the
+                # active FTS5 context so bm25 ranks the complete natural-language query.
+                match_conditions.append("search_index MATCH (:text || :script_text)")
 
         # Handle title match search
         if title:

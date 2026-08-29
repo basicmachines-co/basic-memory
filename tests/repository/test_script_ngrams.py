@@ -11,6 +11,7 @@ from basic_memory.repository.script_ngrams import (
     script_runs,
 )
 from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 
 
 @pytest.mark.parametrize(
@@ -69,6 +70,13 @@ def test_analyze_script_query_treats_lowercase_boolean_words_as_natural_language
 
     assert query.word_text == "OpenAI and"
     assert query.gram_phrases == (("适者", "者生", "生存"),)
+
+
+def test_analyze_script_query_preserves_quoted_mixed_script_semantics() -> None:
+    query = analyze_script_query('"OpenAI 适者生存"')
+
+    assert query.word_text == '"OpenAI 适者生存"'
+    assert query.gram_phrases == ()
 
 
 @pytest.mark.asyncio
@@ -132,6 +140,69 @@ async def test_mixed_word_and_script_search_preserves_fts_ranking(search_reposit
 
     assert [result.id for result in results] == [1296, 1297]
     assert all(result.score != 0.0 for result in results)
+
+
+@pytest.mark.asyncio
+async def test_search_ranking_includes_every_script_run(search_repository) -> None:
+    now = datetime.now(timezone.utc)
+    row = SearchIndexRow(
+        project_id=search_repository.project_id,
+        id=1300,
+        type="entity",
+        file_path="notes/multiple-runs.md",
+        title="Multiple runs",
+        content_stems="适者 生存 生存",
+        content_snippet="适者 生存 生存",
+        permalink="notes/multiple-runs",
+        created_at=now,
+        updated_at=now,
+    )
+    await search_repository.index_item(row)
+
+    first_run_results = await search_repository.search("适者")
+    all_run_results = await search_repository.search("适者 生存")
+
+    assert [result.id for result in all_run_results] == [1300]
+    assert all_run_results[0].score != first_run_results[0].score
+
+
+@pytest.mark.asyncio
+async def test_quoted_mixed_script_search_preserves_phrase_adjacency(search_repository) -> None:
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("SQLite-specific quoted FTS5 regression")
+
+    now = datetime.now(timezone.utc)
+    rows = [
+        SearchIndexRow(
+            project_id=search_repository.project_id,
+            id=1298,
+            type="entity",
+            file_path="notes/adjacent.md",
+            title="Adjacent",
+            content_stems="OpenAI 适者生存",
+            content_snippet="OpenAI 适者生存",
+            permalink="notes/adjacent",
+            created_at=now,
+            updated_at=now,
+        ),
+        SearchIndexRow(
+            project_id=search_repository.project_id,
+            id=1299,
+            type="entity",
+            file_path="notes/separated.md",
+            title="Separated",
+            content_stems="OpenAI words far away from 适者生存",
+            content_snippet="OpenAI words far away from 适者生存",
+            permalink="notes/separated",
+            created_at=now,
+            updated_at=now,
+        ),
+    ]
+    await search_repository.bulk_index_items(rows)
+
+    results = await search_repository.search('"OpenAI 适者生存"')
+
+    assert [result.id for result in results] == [1298]
 
 
 @pytest.mark.asyncio
