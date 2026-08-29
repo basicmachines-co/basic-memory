@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Awaitable, Callable, Mapping, Sequence, TypeVar
 
 from loguru import logger
+from sqlalchemy import delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -38,10 +39,11 @@ from basic_memory.indexing.relation_resolution import (
     RepositoryRelationResolutionRuntime,
 )
 from basic_memory.indexing.relation_persistence import RelationGenerationPublisher
-from basic_memory.models import Entity
+from basic_memory.models import Entity, RelationSearchRefresh
 from basic_memory.repository import EntityRepository, ObservationRepository, RelationRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
+from basic_memory.repository.relation_repository import lock_note_content_before_entity_mutation
 from basic_memory.runtime.storage import (
     ProjectId,
     RUNTIME_MARKDOWN_CONTENT_TYPE,
@@ -154,6 +156,7 @@ class BatchIndexer:
         self.entity_repository = entity_repository
         self.observation_repository = observation_repository
         self.relation_repository = relation_repository
+        self.note_content_repository = NoteContentRepository(project_id=project_id)
         self.search_service = search_service
         self.file_writer = file_writer
         self.session_maker = session_maker
@@ -166,7 +169,7 @@ class BatchIndexer:
             session_maker=session_maker,
             relation_repository=relation_repository,
             entity_repository=entity_repository,
-            note_content_repository=NoteContentRepository(project_id=project_id),
+            note_content_repository=self.note_content_repository,
             target_resolver=BulkLinkResolver(
                 entity_repository=entity_repository,
                 app_config=app_config,
@@ -556,6 +559,17 @@ class BatchIndexer:
             entity_id = existing.id
 
         async with db.scoped_session(self.session_maker) as session:
+            existing = await self.entity_repository.get_by_id(
+                session,
+                entity_id,
+                load_relations=True,
+                lock_for_update=True,
+            )
+            if existing is None:
+                raise ValueError(f"Entity not found before file metadata update: {file.path}")
+            if existing.is_markdown and content_type != RUNTIME_MARKDOWN_CONTENT_TYPE:
+                await self._clear_note_only_state(session, existing)
+
             metadata_updates = self._resource_metadata_updates(
                 file,
                 checksum,
@@ -564,7 +578,13 @@ class BatchIndexer:
             # MIME alone is the downstream note discriminator. A malformed
             # Markdown basename must therefore be normalized both for new rows
             # and for poison rows created by older indexers.
-            metadata_updates["content_type"] = content_type
+            metadata_updates.update(
+                content_type=content_type,
+                permalink=None,
+                note_type="file",
+                title=Path(file.path).name,
+                entity_metadata={},
+            )
             updated = await self.entity_repository.update(
                 session,
                 entity_id,
@@ -584,6 +604,40 @@ class BatchIndexer:
             observations=(),
             relations=(),
             resolve_relations=False,
+        )
+
+    async def _clear_note_only_state(self, session: AsyncSession, entity: Entity) -> None:
+        """Retire semantic projections when a poison Markdown row becomes a resource."""
+        await lock_note_content_before_entity_mutation(
+            session,
+            project_id=self.relation_repository.project_id,
+            entity_ids=(entity.id,),
+        )
+
+        incoming_source_ids = {
+            relation.from_id
+            for relation in entity.incoming_relations
+            if relation.from_id != entity.id
+        }
+        for relation in entity.incoming_relations:
+            relation.to_id = None
+            relation.to_entity = None
+
+        await self.observation_repository.delete_by_fields(session, entity_id=entity.id)
+        await self.relation_repository.delete_by_fields(session, from_id=entity.id)
+        await self.note_content_repository.delete_by_entity_id(session, entity.id)
+        await session.execute(
+            delete(RelationSearchRefresh).where(
+                RelationSearchRefresh.project_id == self.relation_repository.project_id,
+                RelationSearchRefresh.entity_id == entity.id,
+            )
+        )
+        session.add_all(
+            RelationSearchRefresh(
+                project_id=self.relation_repository.project_id,
+                entity_id=source_id,
+            )
+            for source_id in sorted(incoming_source_ids)
         )
 
     # --- Relations ---

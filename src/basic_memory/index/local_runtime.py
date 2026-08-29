@@ -219,6 +219,7 @@ class LocalInlineStorageEventResultRecorder:
             self.index_embeddings
             and result.status == IndexFileJobStatus.processed
             and result.entity_id is not None
+            and not result.content_superseded
         ):
             await self.search_service.sync_entity_vectors_batch([result.entity_id])
             logger.info(
