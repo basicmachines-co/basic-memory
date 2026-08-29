@@ -33,7 +33,9 @@ async def test_quoted_or_phrases_complete_without_tsquery_recovery(
                 id=91,
                 title="Incident response",
                 content_stems="incident response runbook",
-                content_snippet="The incident response runbook is current.",
+                content_snippet=(
+                    "The incident response runbook covers O'Reilly, auth admin, and bar baz."
+                ),
                 permalink="operations/incident-response",
                 file_path="operations/incident-response.md",
                 type="entity",
@@ -74,6 +76,9 @@ async def test_quoted_or_phrases_complete_without_tsquery_recovery(
         total = await repository.count(search_text=query)
         adjacent_results = await repository.search(search_text='incident"response runbook"')
         grouped_adjacent_results = await repository.search(search_text='"incident"(response)')
+        apostrophe_results = await repository.search(search_text='"incident" AND O\'Reilly')
+        operator_results = await repository.search(search_text='"incident" AND auth|admin')
+        modifier_results = await repository.search(search_text='"incident" AND bar:baz')
         unmatched_results = await repository.search(search_text='"incident response OR database')
 
     assert {result.permalink for result in results} == {
@@ -85,5 +90,8 @@ async def test_quoted_or_phrases_complete_without_tsquery_recovery(
     assert [result.permalink for result in grouped_adjacent_results] == [
         "operations/incident-response"
     ]
+    assert [result.permalink for result in apostrophe_results] == ["operations/incident-response"]
+    assert [result.permalink for result in operator_results] == ["operations/incident-response"]
+    assert [result.permalink for result in modifier_results] == ["operations/incident-response"]
     assert unmatched_results == []
     assert syntax_errors == []

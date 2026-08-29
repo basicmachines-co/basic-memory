@@ -54,6 +54,7 @@ _TSQUERY_OPERAND_PATTERN = re.compile(r"'(?:''|[^'])*'(?::\*)?|[^\s&|!()]+")
 _TSQUERY_WORD_PATTERN = re.compile(r"[^\W_]+(?:'[^\W_]+)?", re.UNICODE)
 _QUOTED_QUERY_PATTERN = re.compile(r'"([^"]*)"')
 _BOOLEAN_WORDS = frozenset({"AND", "OR", "NOT"})
+_TSQUERY_METACHARACTERS = frozenset("&|!:<>")
 
 
 def _iter_fts_chunks(content: str | None) -> list[tuple[int, str]]:
@@ -126,6 +127,17 @@ def _render_tsquery_words(
         escaped_word = "'{}'".format(word.replace("'", "''")) if "'" in word else word
         operands.append(f"{escaped_word}:*" if is_prefix else escaped_word)
     return operator.join(operands)
+
+
+def _render_boolean_operand(operand: str) -> str:
+    """Preserve safe structured text while escaping tsquery syntax bytes."""
+    if "'" not in operand and not any(char in _TSQUERY_METACHARACTERS for char in operand):
+        return operand
+    return _render_tsquery_words(
+        operand,
+        operator=" & ",
+        is_prefix=False,
+    )
 
 
 def _has_valid_boolean_shape(expression: str) -> bool:
@@ -497,7 +509,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     )
                 )
                 continue
-            normalized_parts.append(stripped_part)
+            normalized_parts.append(_render_boolean_operand(stripped_part))
         # Convert operators from the parsed sequence so ``A NOT B`` does not
         # depend on the final character of A. Structured operands such as C++
         # may end in punctuation but still require the conjunction before NOT.
