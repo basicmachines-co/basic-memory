@@ -101,18 +101,40 @@ def analyze_script_query(text: str) -> ScriptQuery:
         return ScriptQuery(word_text=text, gram_phrases=())
 
     word_characters: list[str] = []
-    in_script_run = False
+    token_characters: list[str] = []
+    token_has_script = False
+    token_has_word = False
     for character in text:
-        if in_script_run and unicodedata.category(character) in {"Mn", "Mc", "Me"}:
-            continue
+        category = unicodedata.category(character)
         normalized_character = unicodedata.normalize("NFKC", character)
-        if any(is_script_search_character(unit) for unit in normalized_character):
-            if not in_script_run:
-                word_characters.append(" ")
-            in_script_run = True
+        character_has_script = any(
+            is_script_search_character(unit) for unit in normalized_character
+        )
+        character_has_word = any(
+            unit.isalnum() and not is_script_search_character(unit) for unit in normalized_character
+        )
+        if character.isalnum() or category in {"Mn", "Mc", "Me"}:
+            token_characters.append(character)
+            token_has_script = token_has_script or character_has_script
+            token_has_word = token_has_word or character_has_word
             continue
-        in_script_run = False
+
+        if token_characters:
+            # A mixed token is one lexeme in the existing FTS index. Keeping it intact
+            # preserves exact adjoining text while the script channel supplies substring terms.
+            if token_has_word:
+                word_characters.extend(token_characters)
+            elif token_has_script:
+                word_characters.append(" ")
+            token_characters = []
+            token_has_script = False
+            token_has_word = False
         word_characters.append(character)
+
+    if token_has_word:
+        word_characters.extend(token_characters)
+    elif token_has_script:
+        word_characters.append(" ")
 
     # Operator-shaped tokens outside the literal-space syntax above are words. Lowercase
     # keeps the case-insensitive FTS match while preventing reparsing after reconstruction.

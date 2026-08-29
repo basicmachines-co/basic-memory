@@ -62,6 +62,13 @@ def test_analyze_script_query_separates_word_and_ordered_script_terms() -> None:
     )
 
 
+def test_analyze_script_query_preserves_adjoining_word_and_script_token() -> None:
+    query = analyze_script_query("foo適者bar")
+
+    assert query.word_text == "foo適者bar"
+    assert query.gram_phrases == (("適者",),)
+
+
 def test_analyze_script_query_preserves_explicit_boolean_semantics() -> None:
     query = analyze_script_query("OpenAI OR 适者生存")
 
@@ -263,6 +270,28 @@ async def test_search_matches_cjk_substring_without_matching_reordered_character
     assert [result.id for result in await search_repository.search("猫")] == [1294]
     assert [result.id for result in await search_repository.search("時々")] == [1294]
     assert await search_repository.search("适生者存") == []
+
+
+@pytest.mark.asyncio
+async def test_search_preserves_adjoining_word_and_script_token(search_repository) -> None:
+    now = datetime.now(timezone.utc)
+    row = SearchIndexRow(
+        project_id=search_repository.project_id,
+        id=1311,
+        type="entity",
+        file_path="notes/adjoining-script.md",
+        title="Adjoining script",
+        content_stems="foo適者bar",
+        content_snippet="foo適者bar",
+        permalink="notes/adjoining-script",
+        created_at=now,
+        updated_at=now,
+    )
+    await search_repository.index_item(row)
+
+    results = await search_repository.search("foo適者bar")
+
+    assert [result.id for result in results] == [1311]
 
 
 @pytest.mark.asyncio
