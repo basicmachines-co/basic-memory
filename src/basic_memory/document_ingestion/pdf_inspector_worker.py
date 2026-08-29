@@ -145,7 +145,12 @@ def main() -> None:
         max_pages=args.max_pages,
         max_output_bytes=args.max_output_bytes,
     )
-    sys.stdout.write(result.model_dump_json())
+    payload = result.model_dump_json()
+    # inspect_pdf_bytes bounds the Markdown body; metadata such as the PDF title
+    # is untrusted too, so bound the whole envelope before it crosses the pipe.
+    if len(payload.encode("utf-8")) > args.max_output_bytes:
+        raise ValueError("PDF extraction result exceeds the configured output byte limit")
+    sys.stdout.write(payload)
 
 
 if __name__ == "__main__":

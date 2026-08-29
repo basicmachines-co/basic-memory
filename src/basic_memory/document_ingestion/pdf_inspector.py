@@ -147,7 +147,9 @@ class PdfInspector:
                 ) from error
             try:
                 async with asyncio.timeout(self.limits.timeout_seconds):
-                    stdout, stderr = await process.communicate(input=pdf_bytes)
+                    stdout, stderr = await _communicate_capped(
+                        process, pdf_bytes, cap=self.limits.max_output_bytes
+                    )
             except asyncio.CancelledError:
                 await _kill_and_wait(process)
                 raise
@@ -156,16 +158,16 @@ class PdfInspector:
                 raise PdfInspectorTimeoutError(
                     "PDF extraction exceeded the configured deadline"
                 ) from error
+            except PdfInspectorProcessError:
+                # A pipe crossed its ceiling while the child may still be writing.
+                await _kill_and_wait(process)
+                raise
 
         if process.returncode != 0:
             error_detail = stderr.decode("utf-8", errors="replace")[-2000:].strip()
             raise PdfInspectorProcessError(
                 f"PDF extraction process failed with exit code {process.returncode}: "
                 f"{error_detail or 'no error detail'}"
-            )
-        if len(stdout) > self.limits.max_output_bytes:
-            raise PdfInspectorProcessError(
-                "PDF extraction process exceeded the configured output byte limit"
             )
 
         try:
@@ -186,3 +188,60 @@ async def _kill_and_wait(process: asyncio.subprocess.Process) -> None:
             # Waiting still reaps it and preserves the caller's original outcome.
             pass
     await process.wait()
+
+
+# Read pipes in modest chunks so the ceiling applies as bytes arrive rather than
+# after an entire stream has already been buffered.
+_PIPE_CHUNK_BYTES = 64 * 1024
+
+
+async def _communicate_capped(
+    process: asyncio.subprocess.Process,
+    pdf_bytes: bytes,
+    *,
+    cap: int,
+) -> tuple[bytes, bytes]:
+    """Feed stdin and drain both pipes with a hard byte ceiling on each.
+
+    ``Process.communicate()`` buffers stdout and stderr without limit before the
+    caller can look at their size, so a hostile PDF that makes the worker emit a
+    huge field, or a runaway error stream, would land in parent memory. This
+    variant raises as soon as either pipe crosses ``cap``; the caller kills the
+    child.
+    """
+    stdin, stdout, stderr = process.stdin, process.stdout, process.stderr
+    if stdin is None or stdout is None or stderr is None:  # pragma: no cover - PIPE at spawn
+        raise RuntimeError("PDF extraction process was started without pipes")
+    try:
+        async with asyncio.TaskGroup() as group:
+            stdout_task = group.create_task(_read_capped(stdout, cap=cap, stream_name="stdout"))
+            stderr_task = group.create_task(_read_capped(stderr, cap=cap, stream_name="stderr"))
+            group.create_task(_feed_stdin(stdin, pdf_bytes))
+    except* PdfInspectorProcessError as overflow:
+        raise overflow.exceptions[0] from None
+    await process.wait()
+    return stdout_task.result(), stderr_task.result()
+
+
+async def _read_capped(stream: asyncio.StreamReader, *, cap: int, stream_name: str) -> bytes:
+    buffer = bytearray()
+    while chunk := await stream.read(_PIPE_CHUNK_BYTES):
+        buffer.extend(chunk)
+        if len(buffer) > cap:
+            raise PdfInspectorProcessError(
+                f"PDF extraction process exceeded the configured output byte limit on {stream_name}"
+            )
+    return bytes(buffer)
+
+
+async def _feed_stdin(stdin: asyncio.StreamWriter, pdf_bytes: bytes) -> None:
+    try:
+        stdin.write(pdf_bytes)
+        await stdin.drain()
+    except (BrokenPipeError, ConnectionResetError):
+        # The child exited before consuming its input. Its exit status and
+        # stderr carry the failure; ``Process.communicate()`` ignores the same
+        # pair for the same reason.
+        pass
+    finally:
+        stdin.close()

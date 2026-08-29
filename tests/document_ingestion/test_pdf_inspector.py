@@ -59,8 +59,37 @@ def minimal_text_pdf() -> bytes:
     return bytes(document)
 
 
+class FakeStdin:
+    """Scripted stdin writer; flags when the adapter starts feeding the child."""
+
+    def __init__(self, *, started: asyncio.Event, broken: bool) -> None:
+        self._started = started
+        self._broken = broken
+        self.written = b""
+        self.closed = False
+
+    def write(self, data: bytes) -> None:
+        self._started.set()
+        self.written += data
+
+    async def drain(self) -> None:
+        if self._broken:
+            raise BrokenPipeError
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def pipe(data: bytes, *, eof: bool = True) -> asyncio.StreamReader:
+    reader = asyncio.StreamReader()
+    reader.feed_data(data)
+    if eof:
+        reader.feed_eof()
+    return reader
+
+
 class FakeProcess:
-    """Stand-in for asyncio's subprocess handle with scripted behavior."""
+    """Stand-in for asyncio's subprocess handle with scripted pipes."""
 
     def __init__(
         self,
@@ -70,22 +99,17 @@ class FakeProcess:
         stderr: bytes = b"",
         hang: bool = False,
         kill_raises: bool = False,
+        stdin_broken: bool = False,
     ) -> None:
         self.returncode = returncode
-        self._stdout = stdout
-        self._stderr = stderr
-        self._hang = hang
         self._kill_raises = kill_raises
         self.communicate_started = asyncio.Event()
+        self.stdin = FakeStdin(started=self.communicate_started, broken=stdin_broken)
+        # A hanging child never closes stdout, so the capped read waits forever.
+        self.stdout = pipe(stdout, eof=not hang)
+        self.stderr = pipe(stderr)
         self.killed = False
         self.waited = False
-
-    async def communicate(self, *, input: bytes) -> tuple[bytes, bytes]:
-        _ = input
-        self.communicate_started.set()
-        if self._hang:
-            await asyncio.Event().wait()
-        return self._stdout, self._stderr
 
     def kill(self) -> None:
         if self._kill_raises:
@@ -222,14 +246,53 @@ async def test_pdf_inspector_reports_a_failed_child_without_detail(
 
 
 @pytest.mark.asyncio
-async def test_pdf_inspector_rejects_oversized_child_output(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("stream_name", ["stdout", "stderr"])
+async def test_pdf_inspector_kills_a_child_that_overruns_a_pipe(
+    monkeypatch: pytest.MonkeyPatch, stream_name: str
 ) -> None:
-    install_fake_process(monkeypatch, FakeProcess(stdout=b"x" * 11))
+    """The ceiling applies while bytes stream in, on both pipes, and reaps the child."""
+    overrun = b"x" * 11
+    process = FakeProcess(
+        returncode=None,
+        stdout=overrun if stream_name == "stdout" else b"",
+        stderr=overrun if stream_name == "stderr" else b"",
+    )
+    install_fake_process(monkeypatch, process)
     inspector = PdfInspector(limits=PdfInspectorLimits(max_output_bytes=10))
 
-    with pytest.raises(PdfInspectorProcessError, match="output byte limit"):
+    with pytest.raises(PdfInspectorProcessError, match=f"output byte limit on {stream_name}"):
         await inspector.extract(b"%PDF-test")
+
+    assert process.killed is True
+    assert process.waited is True
+
+
+@pytest.mark.asyncio
+async def test_pdf_inspector_tolerates_a_child_that_exits_before_reading_stdin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = FakeProcess(returncode=2, stderr=b"bad input", stdin_broken=True)
+    install_fake_process(monkeypatch, process)
+    inspector = PdfInspector()
+
+    with pytest.raises(PdfInspectorProcessError, match="exit code 2: bad input"):
+        await inspector.extract(b"%PDF-test")
+
+    assert process.stdin.closed is True
+
+
+@pytest.mark.asyncio
+async def test_pdf_inspector_feeds_the_whole_source_to_the_child(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = FakeProcess(returncode=1)
+    install_fake_process(monkeypatch, process)
+
+    with pytest.raises(PdfInspectorProcessError):
+        await PdfInspector().extract(b"%PDF-test")
+
+    assert process.stdin.written == b"%PDF-test"
+    assert process.stdin.closed is True
 
 
 @pytest.mark.asyncio

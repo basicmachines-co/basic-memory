@@ -30,6 +30,7 @@ def fake_engine(
     pages_needing_ocr: tuple[int, ...] = (2,),
     pages_with_tables: tuple[int, ...] = (),
     pages_with_columns: tuple[int, ...] = (),
+    title: str = "Doc",
 ) -> SimpleNamespace:
     """Script the three pdf_inspector calls the worker makes."""
     if pages is None:
@@ -39,7 +40,7 @@ def fake_engine(
         process_pdf_bytes=lambda data: SimpleNamespace(
             page_count=processed_pages,
             pdf_type="mixed",
-            title="Doc",
+            title=title,
             confidence=0.9,
             processing_time_ms=5,
             has_encoding_issues=False,
@@ -159,11 +160,11 @@ def test_worker_skips_rlimits_without_posix_resource(monkeypatch: pytest.MonkeyP
     pdf_inspector_worker._apply_memory_limit(1024)
 
 
-def test_worker_main_writes_one_json_result(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
+def run_worker_main(
+    monkeypatch: pytest.MonkeyPatch, engine: SimpleNamespace
+) -> list[tuple[str, int]]:
     applied: list[tuple[str, int]] = []
-    monkeypatch.setattr(pdf_inspector_worker, "pdf_inspector", fake_engine())
+    monkeypatch.setattr(pdf_inspector_worker, "pdf_inspector", engine)
     monkeypatch.setattr(
         pdf_inspector_worker, "_apply_memory_limit", lambda n: applied.append(("memory", n))
     )
@@ -186,9 +187,25 @@ def test_worker_main_writes_one_json_result(
             "5",
         ],
     )
-
     pdf_inspector_worker.main()
+    return applied
+
+
+def test_worker_main_writes_one_json_result(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    applied = run_worker_main(monkeypatch, fake_engine())
 
     result = PdfInspectorOutput.model_validate_json(capsys.readouterr().out, strict=True)
     assert result.page_count == 2
     assert applied == [("memory", 1000), ("cpu", 5)]
+
+
+def test_worker_main_bounds_the_whole_result_envelope(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A small body with a huge untrusted title must not cross the pipe."""
+    with pytest.raises(ValueError, match="result exceeds"):
+        run_worker_main(monkeypatch, fake_engine(title="t" * 20_000))
+
+    assert capsys.readouterr().out == ""
