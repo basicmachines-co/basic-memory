@@ -65,14 +65,21 @@ def test_analyze_script_query_separates_word_and_ordered_script_terms() -> None:
 def test_analyze_script_query_preserves_adjoining_word_and_script_token() -> None:
     query = analyze_script_query("foo適者bar")
 
-    assert query.word_text == "foo適者bar"
+    assert query.word_text == "foo"
     assert query.gram_phrases == (("適者",),)
 
 
 def test_analyze_script_query_preserves_punctuation_separated_mixed_token() -> None:
     query = analyze_script_query("foo-適者-bar")
 
-    assert query.word_text == "foo-適者-bar"
+    assert query.word_text == "foo bar"
+    assert query.gram_phrases == (("適者",),)
+
+
+def test_analyze_script_query_does_not_require_script_substring_in_word_channel() -> None:
+    query = analyze_script_query("foo適者")
+
+    assert query.word_text == "foo"
     assert query.gram_phrases == (("適者",),)
 
 
@@ -299,6 +306,28 @@ async def test_search_preserves_adjoining_word_and_script_token(search_repositor
     results = await search_repository.search("foo適者bar")
 
     assert [result.id for result in results] == [1311]
+
+
+@pytest.mark.asyncio
+async def test_search_matches_script_substring_inside_longer_mixed_token(search_repository) -> None:
+    now = datetime.now(timezone.utc)
+    row = SearchIndexRow(
+        project_id=search_repository.project_id,
+        id=1312,
+        type="entity",
+        file_path="notes/longer-adjoining-script.md",
+        title="Longer adjoining script",
+        content_stems="foo不適者bar",
+        content_snippet="foo不適者bar",
+        permalink="notes/longer-adjoining-script",
+        created_at=now,
+        updated_at=now,
+    )
+    await search_repository.index_item(row)
+
+    results = await search_repository.search("foo適者")
+
+    assert [result.id for result in results] == [1312]
 
 
 @pytest.mark.asyncio
