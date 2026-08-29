@@ -588,6 +588,8 @@ async def test_postgres_batch_sync_tracks_deferred_oversized_entities(monkeypatc
         ("incident AND (database recovery)", "incident & (database & recovery)"),
         ("(incident AND response) OR recovery", "(incident & response) | recovery"),
         ("auth-service AND token", "auth-service & token"),
+        ("auth-OR-service AND token", "auth-OR-service & token"),
+        ("config.AND.json OR file", "config.AND.json | file"),
         ("config.json AND file", "config.json & file"),
         ("v0.13.0b2 OR release", "v0.13.0b2 | release"),
         ("C++ NOT Java", "C++ & !Java"),

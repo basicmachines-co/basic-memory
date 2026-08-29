@@ -477,7 +477,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
         # ``auth-service`` and ``config.json`` exactly as it did before quoted
         # query normalization.
         normalized_parts: list[str] = []
-        for part in re.split(r"(\bAND\b|\bOR\b|\bNOT\b|[()])", result):
+        operator_pattern = r"((?<![^\s()])(?:AND|OR|NOT)(?![^\s()])|[()])"
+        for part in re.split(operator_pattern, result):
             stripped_part = part.strip()
             if not stripped_part:
                 continue
