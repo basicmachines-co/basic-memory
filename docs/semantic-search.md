@@ -551,9 +551,9 @@ not change stored embeddings, so it does not require `bm reindex --embeddings`.
 
 ## Similar Notes on Write
 
-When semantic search is enabled, `write_note` checks the vector index after it
-creates a note and appends a **Similar existing notes** section when the index
-holds close neighbors:
+When the project's server has semantic search enabled, `write_note` checks the
+vector index after it creates a note and appends a **Similar existing notes**
+section when the index holds close neighbors:
 
 ```markdown
 ## Similar existing notes
@@ -579,9 +579,12 @@ note score in the same similarity band (roughly 0.78–0.94 on a 200-note vault
 with no true duplicates), so no threshold separates them and no scores are
 shown. Ranking is reliable — the note an agent probably meant is almost always
 first — which is why the list is short and ordered. Only creates ask the index;
-an overwrite already names its target. When the API refuses or cannot complete
-the probe (semantic search disabled server-side, a transport failure), the
-failure is logged and the write is still reported as successful.
+an overwrite already names its target. The probe is always attempted rather
+than gated on the local `semantic_search_enabled` setting, because a local MCP
+can route a write to a cloud project whose server has semantic search on while
+the local install does not; a server that declines the probe (semantic search
+disabled, no embedding provider) or cannot complete it (a transport failure)
+suppresses the section, and the write is still reported as successful.
 
 ## The Reindex Command
 

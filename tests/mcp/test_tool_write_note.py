@@ -1,6 +1,5 @@
 """Tests for note tools that exercise the full stack with SQLite."""
 
-import importlib
 from textwrap import dedent
 from typing import Any
 
@@ -21,10 +20,6 @@ from basic_memory.mcp.tools.write_note import (
 from basic_memory.repository.relation_repository import RelationRepository
 from basic_memory.schemas.search import SearchItemType, SearchResponse, SearchResult
 from basic_memory.workspace_context import workspace_permalink_context
-
-# The tools package re-exports the write_note *function* under the submodule's name,
-# so the module has to be fetched by path to patch what the tool reads.
-write_note_module = importlib.import_module("basic_memory.mcp.tools.write_note")
 
 
 # ---------------------------------------------------------------------------
@@ -1650,28 +1645,8 @@ def stub_search_client(monkeypatch) -> type[_StubSearchClient]:
     return StubSearchClient
 
 
-@pytest.fixture
-def semantic_search_on(monkeypatch, app_config):
-    """Enable the advisory the way write_note sees it, without touching the app's config.
-
-    Flipping the real app_config would also make the API schedule embeddings for every
-    write in this test, which needs the ONNX model. The tool layer only reads two fields.
-    """
-
-    class ToolConfig:
-        write_note_overwrite_default = app_config.write_note_overwrite_default
-        semantic_search_enabled = True
-
-    class ToolConfigManager:
-        config = ToolConfig()
-
-    monkeypatch.setattr(write_note_module, "ConfigManager", ToolConfigManager)
-
-
 @pytest.mark.asyncio
-async def test_write_note_surfaces_similar_existing_notes(
-    app, test_project, semantic_search_on, stub_search_client
-):
+async def test_write_note_surfaces_similar_existing_notes(app, test_project, stub_search_client):
     """A create lists the closest existing notes as a question, never as a decision."""
     new_permalink = f"{test_project.name}/analysis/bu-mapping-analysis"
     reference_permalink = f"{test_project.name}/reference/reference-bu-product-mapping"
@@ -1722,9 +1697,7 @@ async def test_write_note_surfaces_similar_existing_notes(
 
 
 @pytest.mark.asyncio
-async def test_write_note_json_output_carries_similar_notes(
-    app, test_project, semantic_search_on, stub_search_client
-):
+async def test_write_note_json_output_carries_similar_notes(app, test_project, stub_search_client):
     stub_search_client.results = [
         _entity_result(
             "Reference BU Product Mapping",
@@ -1755,7 +1728,7 @@ async def test_write_note_json_output_carries_similar_notes(
 
 @pytest.mark.asyncio
 async def test_write_note_omits_advisory_when_index_has_no_neighbors(
-    app, test_project, semantic_search_on, stub_search_client
+    app, test_project, stub_search_client
 ):
     stub_search_client.results = []
 
@@ -1780,30 +1753,27 @@ async def test_write_note_omits_advisory_when_index_has_no_neighbors(
 
 
 @pytest.mark.asyncio
-async def test_write_note_skips_advisory_when_semantic_search_is_disabled(
-    app, test_project, stub_search_client
-):
-    """The test config leaves semantic search off, so no probe should be attempted."""
-    stub_search_client.results = [
-        _entity_result("Neighbor", f"{test_project.name}/n/neighbor", "n/Neighbor.md", 0.9)
-    ]
+async def test_write_note_omits_advisory_when_server_declines_the_probe(app, test_project):
+    """The test app runs with semantic search off; the API's refusal suppresses the section.
 
+    No stub here: the probe goes through the real search client and the real router, which
+    is the path a local install without embeddings takes on every create. The gate is the
+    routed server's, not this process's config, because a local MCP can route a write to a
+    cloud project whose semantic search is on while the local install's is off.
+    """
     result = await write_note(
         project=test_project.name,
         title="Plain Write",
         directory="analysis",
-        content="# Plain Write\n\nSemantic search is off here.",
+        content="# Plain Write\n\nSemantic search is off on this server.",
     )
 
     assert "# Created note" in result
     assert "## Similar existing notes" not in result
-    assert stub_search_client.calls == []
 
 
 @pytest.mark.asyncio
-async def test_write_note_does_not_probe_on_overwrite(
-    app, test_project, semantic_search_on, stub_search_client
-):
+async def test_write_note_does_not_probe_on_overwrite(app, test_project, stub_search_client):
     """An overwrite already names its target; only creates ask the index."""
     stub_search_client.results = [
         _entity_result("Neighbor", f"{test_project.name}/n/neighbor", "n/Neighbor.md", 0.9)
@@ -1833,7 +1803,7 @@ async def test_write_note_does_not_probe_on_overwrite(
 
 @pytest.mark.asyncio
 async def test_write_note_survives_expected_similar_note_probe_failure(
-    app, test_project, semantic_search_on, stub_search_client
+    app, test_project, stub_search_client
 ):
     """An API refusal or transport failure (ToolError) must not undo a completed write."""
     stub_search_client.error = ToolError("Semantic search is disabled.")
@@ -1853,7 +1823,7 @@ async def test_write_note_survives_expected_similar_note_probe_failure(
 
 @pytest.mark.asyncio
 async def test_write_note_qualifies_similar_note_permalinks_in_workspace_context(
-    app, test_project, semantic_search_on, stub_search_client
+    app, test_project, stub_search_client
 ):
     """Cloud requests carry a workspace slug; neighbors get the same qualified form as the note."""
     stub_search_client.results = [
@@ -1894,7 +1864,7 @@ async def test_write_note_qualifies_similar_note_permalinks_in_workspace_context
 
 @pytest.mark.asyncio
 async def test_write_note_surfaces_unexpected_similar_note_probe_errors(
-    app, test_project, semantic_search_on, stub_search_client
+    app, test_project, stub_search_client
 ):
     """A defect in the probe path stays visible instead of degrading to an empty advisory."""
     stub_search_client.error = RuntimeError("search response contract changed")
