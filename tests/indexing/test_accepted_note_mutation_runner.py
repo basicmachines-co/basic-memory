@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -138,6 +138,10 @@ class _EmptyResult:
 
     def all(self) -> list[object]:
         return []
+
+    def __iter__(self) -> Iterator[object]:
+        # The delete path iterates the surviving-relation-sources scalars directly.
+        return iter(())
 
 
 class _MutationSession:
@@ -1988,6 +1992,7 @@ async def test_run_accepted_note_delete_removes_entity_and_returns_cleanup() -> 
     assert change.file_delete is not None
     assert change.file_delete.file_path == "notes/accepted.md"
     assert change.file_delete.file_checksum == "file-checksum"
+    assert change.relation_cleanup_entity_ids == frozenset()
     assert result.relation_publication is None
 
 

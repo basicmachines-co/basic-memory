@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, Protocol
 
@@ -12,6 +12,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory import file_utils
 from basic_memory.indexing.accepted_note_search import build_accepted_note_search_row
+from basic_memory.indexing.external_file_delete_runner import (
+    relation_cleanup_sources_for_deleted_entity,
+)
 from basic_memory.indexing.models import IndexedObservation, IndexedRelation
 from basic_memory.indexing.relation_persistence import (
     ObservationGenerationStore,
@@ -777,6 +780,14 @@ async def delete_accepted_note(
                 project_id=project_id,
                 entity_id=entity.id,
             )
+        # Capture surviving linkers before the entity delete: its SET NULL cascade
+        # erases their relations' to_id, after which nothing identifies which
+        # sources' search rows still name the deleted target (#1351).
+        relation_cleanup_entity_ids = await relation_cleanup_sources_for_deleted_entity(
+            session,
+            project_id=project_id,
+            entity_id=entity.id,
+        )
         await delete_accepted_note_search_index(
             session,
             project_id=project_id,
@@ -790,4 +801,5 @@ async def delete_accepted_note(
             repositories=repositories,
         )
         await session.delete(entity)
+        accepted = replace(accepted, relation_cleanup_entity_ids=relation_cleanup_entity_ids)
     return accepted

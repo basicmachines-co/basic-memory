@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any, cast
@@ -41,6 +42,7 @@ from basic_memory.runtime.note_content import (
     RuntimeNoteMaterializationJobRequest,
     RuntimeNoteMaterializationResult,
     RuntimeNoteMaterializationStatus,
+    RuntimePendingNoteFileDelete,
     RuntimePendingNoteMaterialization,
     runtime_note_content_payload_as_dict,
 )
@@ -212,6 +214,95 @@ async def test_inline_delete_removes_genuine_old_file(tmp_path) -> None:
     )
 
     assert not old.exists(), "genuine old file was not cleaned up after move"
+
+
+class RecordingRelationCleanupRefresher:
+    def __init__(self) -> None:
+        self.refreshed: list[list[int]] = []
+
+    async def refresh_moved_entities(self, entity_ids: Sequence[int]) -> None:
+        self.refreshed.append(list(entity_ids))
+
+
+class FailingRelationCleanupRefresher:
+    async def refresh_moved_entities(self, entity_ids: Sequence[int]) -> None:
+        raise RuntimeError("search refresh unavailable")
+
+
+def accepted_delete_change(
+    relation_cleanup_entity_ids: frozenset[int] = frozenset(),
+) -> RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload]:
+    # file_checksum=None makes the guarded file cleanup a planning no-op, so these
+    # tests exercise only the post-delete relation search refresh.
+    return RuntimeAcceptedNoteChange(
+        status_code=200,
+        payload={"deleted": True},
+        file_delete=RuntimePendingNoteFileDelete(
+            project_id=7,
+            entity_id=42,
+            file_path="notes/test.md",
+        ),
+        relation_cleanup_entity_ids=relation_cleanup_entity_ids,
+    )
+
+
+def delete_materialization_provider(
+    relation_cleanup_refresher: RecordingRelationCleanupRefresher
+    | FailingRelationCleanupRefresher
+    | None,
+) -> LocalNoteContentMaterializationProvider:
+    return LocalNoteContentMaterializationProvider(
+        session_maker=cast(async_sessionmaker[AsyncSession], object()),
+        file_service=cast(FileService, object()),
+        project_external_id=PROJECT_EXTERNAL_ID,
+        read_cache=None,
+        relation_cleanup_refresher=relation_cleanup_refresher,
+    )
+
+
+@pytest.mark.asyncio
+async def test_materialize_delete_refreshes_surviving_relation_sources() -> None:
+    """Sources that linked to the deleted note get their search rows re-indexed (#1351)."""
+    refresher = RecordingRelationCleanupRefresher()
+    provider = delete_materialization_provider(refresher)
+
+    accepted = accepted_delete_change(relation_cleanup_entity_ids=frozenset({9, 3}))
+    result = await provider.materialize_delete_change(accepted)
+
+    assert result is accepted
+    assert refresher.refreshed == [[3, 9]]
+
+
+@pytest.mark.asyncio
+async def test_materialize_delete_skips_refresh_without_surviving_sources() -> None:
+    refresher = RecordingRelationCleanupRefresher()
+    provider = delete_materialization_provider(refresher)
+
+    await provider.materialize_delete_change(accepted_delete_change())
+
+    assert refresher.refreshed == []
+
+
+@pytest.mark.asyncio
+async def test_materialize_delete_without_refresher_leaves_cleanup_to_runtime() -> None:
+    """A provider wired without the refresher (cloud) must not crash on cleanup ids."""
+    provider = delete_materialization_provider(None)
+
+    accepted = accepted_delete_change(relation_cleanup_entity_ids=frozenset({3}))
+    result = await provider.materialize_delete_change(accepted)
+
+    assert result is accepted
+
+
+@pytest.mark.asyncio
+async def test_materialize_delete_refresh_failure_is_non_fatal() -> None:
+    """The delete already committed; a failed derived-state refresh must not fail it."""
+    provider = delete_materialization_provider(FailingRelationCleanupRefresher())
+
+    accepted = accepted_delete_change(relation_cleanup_entity_ids=frozenset({3}))
+    result = await provider.materialize_delete_change(accepted)
+
+    assert result is accepted
 
 
 @pytest.mark.asyncio

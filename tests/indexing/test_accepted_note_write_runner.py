@@ -218,19 +218,41 @@ def test_accepted_note_write_repositories_name_persistence_behavior() -> None:
     assert isinstance(repositories.relation_repository(7), _RelationRepository)
 
 
+class _RelationSourcesResult:
+    def __init__(self, source_ids: tuple[int, ...]) -> None:
+        self._source_ids = source_ids
+
+    def scalars(self) -> tuple[int, ...]:
+        return self._source_ids
+
+
 class _DeleteSession:
-    def __init__(self, events: list[tuple[str, int]] | None = None) -> None:
+    def __init__(
+        self,
+        events: list[tuple[str, int]] | None = None,
+        *,
+        relation_source_ids: tuple[int, ...] = (),
+    ) -> None:
         self.deleted: list[object] = []
         self.scalar_count = 0
+        self.execute_count = 0
+        self.execute_count_at_entity_delete = 0
         self.events = events
+        self.relation_source_ids = relation_source_ids
 
     async def scalar(self, statement: object) -> int:
         assert statement is not None
         self.scalar_count += 1
         return 42
 
+    async def execute(self, statement: object) -> _RelationSourcesResult:
+        assert statement is not None
+        self.execute_count += 1
+        return _RelationSourcesResult(self.relation_source_ids)
+
     async def delete(self, entity: object) -> None:
         self.deleted.append(entity)
+        self.execute_count_at_entity_delete = self.execute_count
         if self.events is not None:
             self.events.append(("entity", cast(Entity, entity).id))
 
@@ -1138,15 +1160,19 @@ async def test_delete_accepted_note_plans_missing_response_without_deleting() ->
     )
 
     assert session.deleted == []
+    assert session.execute_count == 0, "a missing entity has no relation sources to capture"
     assert accepted.status_code == 200
     assert accepted.payload == {"deleted": False}
     assert accepted.file_delete is None
+    assert accepted.relation_cleanup_entity_ids == frozenset()
 
 
 @pytest.mark.asyncio
 async def test_delete_accepted_note_plans_cleanup_and_deletes_entity() -> None:
     events: list[tuple[str, int]] = []
-    session = _DeleteSession(events)
+    # Two surviving notes still link to the deleted target; their ids must ride
+    # the accepted change so the runtime can refresh their search rows (#1351).
+    session = _DeleteSession(events, relation_source_ids=(11, 5))
     entity = _entity()
     entity.external_id = "entity-42"
     entity.checksum = "entity-file-checksum"
@@ -1166,6 +1192,10 @@ async def test_delete_accepted_note_plans_cleanup_and_deletes_entity() -> None:
     assert search_repository.deleted_vector_entity_ids == [entity.id]
     assert session.scalar_count == 1
     assert session.deleted == [entity]
+    assert accepted.relation_cleanup_entity_ids == frozenset({5, 11})
+    # The capture must precede the entity delete: the SET NULL cascade erases the
+    # to_id evidence that identifies which sources need search repair.
+    assert session.execute_count_at_entity_delete == 1
     assert events == [
         ("search", entity.id),
         ("vectors", entity.id),

@@ -26,6 +26,9 @@ from basic_memory.indexing.note_materialization_runner import (
     RepositoryNoteMaterializationStatusPublisher,
     run_note_materialization,
 )
+from basic_memory.indexing.project_index_maintenance import (
+    ProjectIndexMovedEntitySearchRefresher,
+)
 from basic_memory.runtime.cleanup import (
     RuntimeNoteFileDeleteJobRequest,
     plan_note_file_delete_job_request,
@@ -616,6 +619,10 @@ class LocalNoteContentMaterializationProvider:
     test_mode: bool = False
     materialization_workers: int = 4
     relation_resolution_scheduler: RelationResolutionScheduler | None = None
+    # Re-indexes surviving notes whose relation search rows named a deleted
+    # target (#1351). Optional so providers wired without it (cloud, focused
+    # tests) keep working; cloud relies on its orphan sweeper instead.
+    relation_cleanup_refresher: ProjectIndexMovedEntitySearchRefresher | None = None
 
     async def materialize_write_change(
         self,
@@ -752,4 +759,23 @@ class LocalNoteContentMaterializationProvider:
             storage,
             vacate_clearer=RepositoryMoveVacateClearer(session_maker=self.session_maker),
         ).enqueue_note_file_delete(plan_note_file_delete_job_request(accepted.file_delete))
+
+        # Trigger: surviving notes still linked to the deleted target at commit time.
+        # Why: their relation search rows carry the deleted entity's id and title, and
+        #      nothing else re-indexes those sources on this path — unlike the watcher
+        #      and directory delete paths, which run this same refresh (#1351).
+        # Outcome: re-index each surviving source so its relation rows rebuild from
+        #      the now-unresolved relation table state. Failure stays non-fatal: the
+        #      delete already committed, and stale search rows are derived state that
+        #      converges on the source's next edit or a reindex.
+        if self.relation_cleanup_refresher is not None and accepted.relation_cleanup_entity_ids:
+            try:
+                await self.relation_cleanup_refresher.refresh_moved_entities(
+                    sorted(accepted.relation_cleanup_entity_ids)
+                )
+            except Exception:
+                logger.exception(
+                    "Relation search cleanup failed after accepted note delete",
+                    entity_ids=sorted(accepted.relation_cleanup_entity_ids),
+                )
         return accepted

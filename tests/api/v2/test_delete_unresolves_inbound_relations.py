@@ -14,7 +14,7 @@ directory delete -- plus the unique-constraint question that SET NULL raises.
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from basic_memory import db
 from basic_memory.indexing.forward_reference_resolution import (
@@ -119,6 +119,94 @@ async def test_delete_entity_unresolves_inbound_relation_and_recreate_relinks(
     assert len(after_recreate) == 1
     assert after_recreate[0].to_id == recreated_beta.id
     assert after_recreate[0].to_name == "Beta"
+
+
+async def _relation_search_rows(session_maker, project_id: int, entity_id: int):
+    """Load one note's relation search rows straight from search_index."""
+    async with db.scoped_session(session_maker) as session:
+        rows = (
+            await session.execute(
+                text("""
+                    SELECT title, from_id, to_id
+                    FROM search_index
+                    WHERE project_id = :project_id
+                      AND type = 'relation'
+                      AND entity_id = :entity_id
+                """),
+                {"project_id": project_id, "entity_id": entity_id},
+            )
+        ).all()
+    return rows
+
+
+async def _search_rows_referencing(session_maker, project_id: int, entity_id: int) -> int:
+    """Count search rows that still name an entity as owner, source, or target."""
+    async with db.scoped_session(session_maker) as session:
+        return (
+            await session.execute(
+                text("""
+                    SELECT COUNT(*)
+                    FROM search_index
+                    WHERE project_id = :project_id
+                      AND (entity_id = :entity_id
+                           OR from_id = :entity_id
+                           OR to_id = :entity_id)
+                """),
+                {"project_id": project_id, "entity_id": entity_id},
+            )
+        ).scalar_one()
+
+
+@pytest.mark.asyncio
+async def test_delete_entity_refreshes_linking_notes_search_rows(
+    client: AsyncClient,
+    v2_project_url,
+    entity_repository,
+    session_maker,
+    test_project: Project,
+):
+    """API single-entity delete refreshes the search rows of surviving linkers (#1351).
+
+    Every other delete path (watcher, directory delete, project scan) re-indexes the
+    notes that linked to the deleted target. Before this fix the API/MCP delete left
+    Alpha's relation search row saying "Alpha -> Beta" with Beta's dead id, and
+    nothing ever re-indexed Alpha to repair it.
+    """
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "Beta", "directory": "search-refresh", "content": "# Beta"},
+    )
+    assert response.status_code == 202
+    beta = EntityResponseV2.model_validate(response.json())
+
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={
+            "title": "Alpha",
+            "directory": "search-refresh",
+            "content": "# Alpha\n\n- links_to [[Beta]]",
+        },
+    )
+    assert response.status_code == 202
+    alpha = EntityResponseV2.model_validate(response.json())
+
+    before = await _relation_search_rows(session_maker, test_project.id, alpha.id)
+    assert len(before) == 1
+    assert before[0].to_id == beta.id
+    assert before[0].title == "Alpha -> Beta"
+
+    response = await client.delete(f"{v2_project_url}/knowledge/entities/{beta.external_id}")
+    assert response.status_code == 202
+
+    after = await _relation_search_rows(session_maker, test_project.id, alpha.id)
+    assert len(after) == 1, "the linker keeps a relation search row, rebuilt unresolved"
+    assert after[0].from_id == alpha.id
+    assert after[0].to_id is None
+    assert "Beta" not in after[0].title
+
+    assert await _search_rows_referencing(session_maker, test_project.id, beta.id) == 0, (
+        "no search row may still point at the deleted note"
+    )
 
 
 @pytest.mark.asyncio
