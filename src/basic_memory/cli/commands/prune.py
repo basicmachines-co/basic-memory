@@ -7,7 +7,7 @@ from rich.console import Console
 
 from basic_memory.cli.app import app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
-from basic_memory.config import ConfigManager, ProjectMode
+from basic_memory.config import BasicMemoryConfig, ConfigManager, ProjectMode
 
 console = Console()
 
@@ -35,7 +35,9 @@ def prune(
     run_with_cleanup(_prune(app_config, project=project, dry_run=dry_run, yes=yes))
 
 
-async def _prune(app_config, *, project: str | None, dry_run: bool, yes: bool) -> None:
+async def _prune(
+    app_config: BasicMemoryConfig, *, project: str | None, dry_run: bool, yes: bool
+) -> None:
     # Deferred: SQLAlchemy, repositories, and the indexing stack load only when a
     # prune actually runs, not on every CLI start (#886).
     from basic_memory import db
