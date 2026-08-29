@@ -100,48 +100,17 @@ def analyze_script_query(text: str) -> ScriptQuery:
     if '"' in text or any(f" {operator} " in padded_text for operator in ("AND", "OR", "NOT")):
         return ScriptQuery(word_text=text, gram_phrases=())
 
-    word_characters: list[str] = []
-    token_characters: list[str] = []
-    token_has_script = False
-    token_has_word = False
-    for character in text:
-        category = unicodedata.category(character)
-        normalized_character = unicodedata.normalize("NFKC", character)
-        character_has_script = any(
-            is_script_search_character(unit) for unit in normalized_character
-        )
-        character_has_word = any(
-            unit.isalnum() and not is_script_search_character(unit) for unit in normalized_character
-        )
-        if character.isalnum() or category in {"Mn", "Mc", "Me"}:
-            token_characters.append(character)
-            token_has_script = token_has_script or character_has_script
-            token_has_word = token_has_word or character_has_word
-            continue
-
-        if token_characters:
-            # A mixed token is one lexeme in the existing FTS index. Keeping it intact
-            # preserves exact adjoining text while the script channel supplies substring terms.
-            if token_has_word:
-                word_characters.extend(token_characters)
-            elif token_has_script:
-                word_characters.append(" ")
-            token_characters = []
-            token_has_script = False
-            token_has_word = False
-        word_characters.append(character)
-
-    if token_has_word:
-        word_characters.extend(token_characters)
-    elif token_has_script:
-        word_characters.append(" ")
-
     # Operator-shaped tokens outside the literal-space syntax above are words. Lowercase
     # keeps the case-insensitive FTS match while preventing reparsing after reconstruction.
+    # Whitespace-delimited mixed tokens stay intact because punctuation and script characters
+    # both contribute positions to the existing backend tokenizers.
     word_tokens = [
         token.lower() if token in {"AND", "OR", "NOT"} else token
-        for token in "".join(word_characters).split()
-        if any(character.isalnum() for character in token)
+        for token in text.split()
+        if any(
+            character.isalnum() and not is_script_search_character(character)
+            for character in unicodedata.normalize("NFKC", token)
+        )
     ]
     gram_phrases = tuple(script_run_grams(run) for run in script_runs(normalized))
     # Preserve punctuation-only input as an explicit backend query. Dropping it would make

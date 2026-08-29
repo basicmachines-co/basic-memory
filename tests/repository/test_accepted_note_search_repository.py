@@ -59,7 +59,7 @@ async def test_refresh_entity_replaces_project_scoped_hot_search_row() -> None:
 
     await repository.refresh_entity(cast(AsyncSession, session), row)
 
-    assert len(session.executed) == 3
+    assert len(session.executed) == 4
     delete_sql, delete_params = session.executed[0]
     insert_sql, insert_params = session.executed[1]
     assert "DELETE FROM search_index" in delete_sql
@@ -82,7 +82,14 @@ async def test_refresh_entity_replaces_project_scoped_hot_search_row() -> None:
         "updated_at": updated_at,
         "project_id": 7,
     }
-    chunk_sql, chunk_params = session.executed[2]
+    chunk_delete_sql, chunk_delete_params = session.executed[2]
+    assert "DELETE FROM search_index_fts_chunks" in chunk_delete_sql
+    assert chunk_delete_params == {
+        "project_id": 7,
+        "search_index_id": 42,
+        "search_index_type": "entity",
+    }
+    chunk_sql, chunk_params = session.executed[3]
     assert "INSERT INTO search_index_fts_chunks" in chunk_sql
     assert chunk_params["project_id"] == 7
     assert json.loads(chunk_params["chunks"]) == [
@@ -204,3 +211,48 @@ async def test_postgres_refresh_entity_chunks_large_script_content(
     results = await search_repository.search("适者生存")
 
     assert [result.id for result in results] == [43]
+
+
+@pytest.mark.asyncio
+async def test_postgres_refresh_entity_replaces_cascaded_permalink_chunks(
+    search_repository,
+    session_maker,
+) -> None:
+    if not isinstance(search_repository, PostgresSearchRepository):
+        pytest.skip("PostgreSQL cascades chunk parent keys during permalink upserts")
+
+    repository = AcceptedNoteSearchRepository(project_id=search_repository.project_id)
+    now = datetime(2026, 6, 18, 12, 0, tzinfo=UTC)
+    old_row = build_accepted_note_search_row(
+        entity_id=44,
+        title="Old owner",
+        note_type="note",
+        entity_metadata=None,
+        permalink="main/reassigned",
+        file_path="notes/old-owner.md",
+        search_content="旧所有者内容",
+        created_at=now,
+        updated_at=now,
+        project_id=search_repository.project_id,
+    )
+    new_row = build_accepted_note_search_row(
+        entity_id=45,
+        title="New owner",
+        note_type="note",
+        entity_metadata=None,
+        permalink="main/reassigned",
+        file_path="notes/new-owner.md",
+        search_content="新所有者适者生存",
+        created_at=now,
+        updated_at=now,
+        project_id=search_repository.project_id,
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        await repository.refresh_entity(session, old_row)
+    async with db.scoped_session(session_maker) as session:
+        await repository.refresh_entity(session, new_row)
+
+    results = await search_repository.search("适者生存")
+
+    assert [result.id for result in results] == [45]

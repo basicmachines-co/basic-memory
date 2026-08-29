@@ -110,6 +110,15 @@ INSERT_ACCEPTED_NOTE_FTS_CHUNKS_SQL = text(
     """
 )
 
+DELETE_ACCEPTED_NOTE_FTS_CHUNKS_SQL = text(
+    """
+    DELETE FROM search_index_fts_chunks
+    WHERE project_id = :project_id
+      AND search_index_id = :search_index_id
+      AND search_index_type = :search_index_type
+    """
+)
+
 
 def accepted_note_search_insert_statement(session: AsyncSession):
     """Return the insert statement supported by the active search table backend."""
@@ -183,6 +192,16 @@ class AcceptedNoteSearchRepository:
         if is_sqlite:
             return
 
+        # An upsert can move an older permalink owner's chunks through ON UPDATE CASCADE.
+        # Clear the final parent key before installing this accepted note's replacements.
+        await session.execute(
+            DELETE_ACCEPTED_NOTE_FTS_CHUNKS_SQL,
+            {
+                "project_id": row.project_id,
+                "search_index_id": row.id,
+                "search_index_type": row.item_type,
+            },
+        )
         chunks = [
             {
                 "search_index_id": row.id,

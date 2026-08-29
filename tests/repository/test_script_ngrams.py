@@ -69,6 +69,13 @@ def test_analyze_script_query_preserves_adjoining_word_and_script_token() -> Non
     assert query.gram_phrases == (("適者",),)
 
 
+def test_analyze_script_query_preserves_punctuation_separated_mixed_token() -> None:
+    query = analyze_script_query("foo-適者-bar")
+
+    assert query.word_text == "foo-適者-bar"
+    assert query.gram_phrases == (("適者",),)
+
+
 def test_analyze_script_query_preserves_explicit_boolean_semantics() -> None:
     query = analyze_script_query("OpenAI OR 适者生存")
 
@@ -292,6 +299,28 @@ async def test_search_preserves_adjoining_word_and_script_token(search_repositor
     results = await search_repository.search("foo適者bar")
 
     assert [result.id for result in results] == [1311]
+
+
+@pytest.mark.asyncio
+async def test_search_preserves_punctuation_separated_mixed_token(search_repository) -> None:
+    now = datetime.now(timezone.utc)
+    row = SearchIndexRow(
+        project_id=search_repository.project_id,
+        id=1313,
+        type="entity",
+        file_path="notes/punctuation-separated-script.md",
+        title="Punctuation-separated script",
+        content_stems="foo-適者-bar",
+        content_snippet="foo-適者-bar",
+        permalink="notes/punctuation-separated-script",
+        created_at=now,
+        updated_at=now,
+    )
+    await search_repository.index_item(row)
+
+    results = await search_repository.search("foo-適者-bar")
+
+    assert [result.id for result in results] == [1313]
 
 
 @pytest.mark.asyncio
