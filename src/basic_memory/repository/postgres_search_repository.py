@@ -1058,7 +1058,16 @@ class PostgresSearchRepository(SearchRepositoryBase):
                              AND fts_candidate.type = search_index.type
                         """
                     document_vector_sql = self._document_fts_vector_sql(probe_texts, params)
-                    conditions.append(f"{document_vector_sql} @@ to_tsquery('english', :text)")
+                    word_condition = f"{document_vector_sql} @@ to_tsquery('english', :text)"
+                    if script_query.gram_phrases:
+                        # Trigger: PostgreSQL's English dictionary removes every word term.
+                        # Why: an empty word query must not suppress a required script match.
+                        # Outcome: only mixed queries treat the empty word channel as neutral;
+                        # word-only stopword queries retain their established empty result.
+                        word_condition = (
+                            f"(numnode(to_tsquery('english', :text)) = 0 OR {word_condition})"
+                        )
+                    conditions.append(word_condition)
 
                 if script_query.gram_phrases:
                     script_tsqueries = [
@@ -1067,37 +1076,38 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     ]
                     for index, script_tsquery in enumerate(script_tsqueries):
                         params[f"script_text_{index}"] = script_tsquery
-                    if document_vector_sql is None:
-                        # Trigger: a query contains script grams but no word terms.
-                        # Why: a correlated predicate alone can scan every tenant row.
-                        # Outcome: start from the parent and child GIN indexes.
-                        params["script_candidate_text"] = " | ".join(
-                            f"({script_tsquery})" for script_tsquery in script_tsqueries
-                        )
-                        from_clause = """
-                            search_index JOIN (
-                                SELECT
-                                    script_parent.project_id,
-                                    script_parent.id,
-                                    script_parent.type
-                                FROM search_index AS script_parent
-                                WHERE script_parent.project_id = :project_id
-                                  AND script_parent.script_ngrams_index_col
-                                      @@ to_tsquery('simple', :script_candidate_text)
-                                UNION
-                                SELECT
-                                    script_candidate.project_id,
-                                    script_candidate.search_index_id AS id,
-                                    script_candidate.search_index_type AS type
-                                FROM search_index_fts_chunks AS script_candidate
-                                WHERE script_candidate.project_id = :project_id
-                                  AND script_candidate.script_ngrams_index_col
-                                      @@ to_tsquery('simple', :script_candidate_text)
-                            ) AS fts_candidate
-                              ON fts_candidate.project_id = search_index.project_id
-                             AND fts_candidate.id = search_index.id
-                             AND fts_candidate.type = search_index.type
-                        """
+                    # Trigger: a query contains script grams, with or without word terms.
+                    # Why: every script phrase is required, while an English word clause can
+                    # reduce to an empty tsquery after dictionary processing.
+                    # Outcome: start from the parent and child script GIN indexes, then apply
+                    # every word and script predicate below.
+                    params["script_candidate_text"] = " | ".join(
+                        f"({script_tsquery})" for script_tsquery in script_tsqueries
+                    )
+                    from_clause = """
+                        search_index JOIN (
+                            SELECT
+                                script_parent.project_id,
+                                script_parent.id,
+                                script_parent.type
+                            FROM search_index AS script_parent
+                            WHERE script_parent.project_id = :project_id
+                              AND script_parent.script_ngrams_index_col
+                                  @@ to_tsquery('simple', :script_candidate_text)
+                            UNION
+                            SELECT
+                                script_candidate.project_id,
+                                script_candidate.search_index_id AS id,
+                                script_candidate.search_index_type AS type
+                            FROM search_index_fts_chunks AS script_candidate
+                            WHERE script_candidate.project_id = :project_id
+                              AND script_candidate.script_ngrams_index_col
+                                  @@ to_tsquery('simple', :script_candidate_text)
+                        ) AS fts_candidate
+                          ON fts_candidate.project_id = search_index.project_id
+                         AND fts_candidate.id = search_index.id
+                         AND fts_candidate.type = search_index.type
+                    """
                     conditions.extend(
                         "(search_index.script_ngrams_index_col "
                         f"@@ to_tsquery('simple', :script_text_{index}) OR EXISTS ("

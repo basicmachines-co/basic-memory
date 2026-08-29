@@ -220,6 +220,31 @@ async def test_postgres_ranking_adds_contributions_from_every_script_run(
 
 
 @pytest.mark.asyncio
+async def test_postgres_mixed_search_ignores_empty_stopword_query(search_repository) -> None:
+    if not isinstance(search_repository, PostgresSearchRepository):
+        pytest.skip("PostgreSQL's English dictionary removes stopwords")
+
+    now = datetime.now(timezone.utc)
+    row = SearchIndexRow(
+        project_id=search_repository.project_id,
+        id=1304,
+        type="entity",
+        file_path="notes/stopword-and-script.md",
+        title="Script match",
+        content_stems="適者生存",
+        content_snippet="適者生存",
+        permalink="notes/stopword-and-script",
+        created_at=now,
+        updated_at=now,
+    )
+    await search_repository.index_item(row)
+
+    results = await search_repository.search("the 適者生存")
+
+    assert [result.id for result in results] == [1304]
+
+
+@pytest.mark.asyncio
 async def test_quoted_mixed_script_search_preserves_phrase_adjacency(search_repository) -> None:
     if not isinstance(search_repository, SQLiteSearchRepository):
         pytest.skip("SQLite-specific quoted FTS5 regression")
