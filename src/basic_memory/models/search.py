@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS search_index (
     title TEXT,
     content_stems TEXT,
     content_snippet TEXT,
+    script_ngrams TEXT NOT NULL DEFAULT '',
     permalink VARCHAR,
     file_path VARCHAR,
     type VARCHAR,
@@ -39,6 +40,9 @@ CREATE TABLE IF NOT EXISTS search_index (
             coalesce(content_stems, '')
         )
     ) STORED,
+    script_ngrams_index_col tsvector GENERATED ALWAYS AS (
+        to_tsvector('simple', script_ngrams)
+    ) STORED,
     PRIMARY KEY (id, type, project_id),
     FOREIGN KEY (project_id) REFERENCES project(id) ON DELETE CASCADE
 )
@@ -46,6 +50,11 @@ CREATE TABLE IF NOT EXISTS search_index (
 
 CREATE_POSTGRES_SEARCH_INDEX_FTS = DDL("""
 CREATE INDEX IF NOT EXISTS idx_search_index_fts ON search_index USING gin(textsearchable_index_col)
+""")
+
+CREATE_POSTGRES_SEARCH_INDEX_SCRIPT_NGRAMS_FTS = DDL("""
+CREATE INDEX IF NOT EXISTS idx_search_index_script_ngrams_fts
+ON search_index USING gin(script_ngrams_index_col)
 """)
 
 # Full note bodies are stored in bounded child rows so one unusually large note
@@ -57,8 +66,12 @@ CREATE TABLE IF NOT EXISTS search_index_fts_chunks (
     search_index_type VARCHAR NOT NULL,
     chunk_index INTEGER NOT NULL,
     chunk_text TEXT NOT NULL,
+    script_ngrams TEXT NOT NULL DEFAULT '',
     textsearchable_index_col tsvector GENERATED ALWAYS AS (
         to_tsvector('english', chunk_text)
+    ) STORED,
+    script_ngrams_index_col tsvector GENERATED ALWAYS AS (
+        to_tsvector('simple', script_ngrams)
     ) STORED,
     PRIMARY KEY (project_id, search_index_id, search_index_type, chunk_index),
     FOREIGN KEY (search_index_id, search_index_type, project_id)
@@ -70,6 +83,11 @@ CREATE TABLE IF NOT EXISTS search_index_fts_chunks (
 CREATE_POSTGRES_SEARCH_INDEX_FTS_CHUNKS_INDEX = DDL("""
 CREATE INDEX IF NOT EXISTS idx_search_index_fts_chunks_fts
 ON search_index_fts_chunks USING gin(textsearchable_index_col)
+""")
+
+CREATE_POSTGRES_SEARCH_INDEX_FTS_CHUNKS_SCRIPT_NGRAMS_INDEX = DDL("""
+CREATE INDEX IF NOT EXISTS idx_search_index_fts_chunks_script_ngrams_fts
+ON search_index_fts_chunks USING gin(script_ngrams_index_col)
 """)
 
 CREATE_POSTGRES_SEARCH_INDEX_METADATA = DDL("""
@@ -94,6 +112,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
     title,                 -- Title for searching
     content_stems,         -- Main searchable content split into stems
     content_snippet,       -- File content snippet for display
+    script_ngrams,         -- Portable bigrams for scripts without word boundaries
     permalink,             -- Stable identifier (now indexed for path search)
     file_path UNINDEXED,   -- Physical location
     type UNINDEXED,        -- entity/relation/observation

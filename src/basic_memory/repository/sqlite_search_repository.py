@@ -29,6 +29,7 @@ from basic_memory.repository.rerank_provider_factory import create_rerank_provid
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_query import relaxed_query_words
 from basic_memory.repository.search_repository_base import SearchRepositoryBase
+from basic_memory.repository.script_ngrams import analyze_script_query
 from basic_memory.repository.search_trace import (
     SearchTraceCollector,
     build_fts_page_stage,
@@ -793,15 +794,21 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 # For wildcard searches, don't add any text conditions - return all results
                 pass
             else:
-                # Use _prepare_search_term to handle both Boolean and non-Boolean queries
-                processed_text = self._prepare_search_term(search_text.strip())
-                params["text"] = processed_text
-                # content_stems is capped for Postgres index-row compatibility, while
-                # SQLite stores the complete note body in its FTS5 content_snippet column.
-                match_conditions.append(
-                    "(search_index.title MATCH :text OR search_index.content_stems MATCH :text "
-                    "OR search_index.content_snippet MATCH :text)"
-                )
+                script_query = analyze_script_query(search_text.strip())
+                if script_query.word_text:
+                    # Use _prepare_search_term to handle both Boolean and non-Boolean queries.
+                    params["text"] = self._prepare_search_term(script_query.word_text)
+                    # content_stems is capped for Postgres index-row compatibility, while
+                    # SQLite stores the complete note body in its FTS5 content_snippet column.
+                    match_conditions.append(
+                        "(search_index.title MATCH :text OR "
+                        "search_index.content_stems MATCH :text OR "
+                        "search_index.content_snippet MATCH :text)"
+                    )
+                for index, phrase in enumerate(script_query.gram_phrases):
+                    param_name = f"script_phrase_{index}"
+                    params[param_name] = f'"{" ".join(phrase)}"'
+                    match_conditions.append(f"search_index.script_ngrams MATCH :{param_name}")
 
         # Handle title match search
         if title:
@@ -963,6 +970,17 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                         operator = {"gt": ">", "gte": ">=", "lt": "<", "lte": "<="}[filt.op]
                         conditions.append(f"{compare_expr} {operator} :{value_param}")
                     continue
+
+        # Trigger: SQLite rejects some Boolean combinations of MATCH predicates,
+        # including a word-field OR expression combined with the script channel.
+        # Why: each MATCH must be evaluated in an FTS-valid query context.
+        # Outcome: intersect rowid subqueries when a search has multiple FTS clauses.
+        if len(match_conditions) > 1:
+            conditions.extend(
+                f"search_index.rowid IN (SELECT rowid FROM search_index WHERE {match_condition})"
+                for match_condition in match_conditions
+            )
+            match_conditions = []
 
         # Trigger: SQLite FTS MATCH predicates combined with JOINs can fail with
         # "unable to use function MATCH in the requested context".

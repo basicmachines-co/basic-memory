@@ -32,6 +32,7 @@ from basic_memory.repository.rerank_provider import (
     validate_rerank_scores,
 )
 from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.repository.script_ngrams import build_script_ngrams
 from basic_memory.repository.search_trace import (
     BelowThreshold,
     FilteredOut,
@@ -993,18 +994,23 @@ class SearchRepositoryBase(ABC):
             # The database driver/column type will handle conversion
             insert_data = search_index_row.to_insert(serialize_json=True)
             insert_data["project_id"] = self.project_id
+            insert_data["script_ngrams"] = build_script_ngrams(
+                search_index_row.title,
+                search_index_row.content_stems,
+                search_index_row.content_snippet,
+            )
 
             # Insert new record
             await session.execute(
                 text("""
                     INSERT INTO search_index (
-                        id, title, content_stems, content_snippet, permalink, file_path, type, metadata,
+                        id, title, content_stems, content_snippet, script_ngrams, permalink, file_path, type, metadata,
                         from_id, to_id, relation_type,
                         entity_id, category,
                         created_at, updated_at,
                         project_id
                     ) VALUES (
-                        :id, :title, :content_stems, :content_snippet, :permalink, :file_path, :type, :metadata,
+                        :id, :title, :content_stems, :content_snippet, :script_ngrams, :permalink, :file_path, :type, :metadata,
                         :from_id, :to_id, :relation_type,
                         :entity_id, :category,
                         :created_at, :updated_at,
@@ -1039,19 +1045,24 @@ class SearchRepositoryBase(ABC):
             for row in search_index_rows:
                 insert_data = row.to_insert(serialize_json=True)
                 insert_data["project_id"] = self.project_id
+                insert_data["script_ngrams"] = build_script_ngrams(
+                    row.title,
+                    row.content_stems,
+                    row.content_snippet,
+                )
                 insert_data_list.append(insert_data)
 
             # Batch insert all records using executemany
             await session.execute(
                 text("""
                     INSERT INTO search_index (
-                        id, title, content_stems, content_snippet, permalink, file_path, type, metadata,
+                        id, title, content_stems, content_snippet, script_ngrams, permalink, file_path, type, metadata,
                         from_id, to_id, relation_type,
                         entity_id, category,
                         created_at, updated_at,
                         project_id
                     ) VALUES (
-                        :id, :title, :content_stems, :content_snippet, :permalink, :file_path, :type, :metadata,
+                        :id, :title, :content_stems, :content_snippet, :script_ngrams, :permalink, :file_path, :type, :metadata,
                         :from_id, :to_id, :relation_type,
                         :entity_id, :category,
                         :created_at, :updated_at,

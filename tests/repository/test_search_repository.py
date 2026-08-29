@@ -1265,10 +1265,10 @@ async def test_multiword_query_relaxes_to_or_when_strict_misses(search_repositor
 
 
 @pytest.mark.asyncio
-async def test_cjk_compound_query_relaxes_with_backend_prefix_terms(
+async def test_cjk_compound_query_matches_with_or_without_relaxation(
     search_repository, search_entity
 ):
-    """Whitespace-separated CJK terms should match indexed CJK compounds when relaxed."""
+    """Script n-grams make whitespace-separated CJK terms strict matches."""
     row = SearchIndexRow(
         project_id=search_repository.project_id,
         id=search_entity.id,
@@ -1286,7 +1286,7 @@ async def test_cjk_compound_query_relaxes_with_backend_prefix_terms(
     await search_repository.index_item(row)
 
     strict = await search_repository.search(search_text="季度 报告")
-    assert strict == []
+    assert any(r.entity_id == search_entity.id for r in strict)
 
     results = await search_repository.search(search_text="季度 报告", allow_relaxed=True)
     assert any(r.entity_id == search_entity.id for r in results)
