@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Annotated, List, Union, Optional, Literal
 
 import logfire
+from httpx import HTTPStatusError
 from loguru import logger
 from pydantic import AliasChoices, BeforeValidator, Field
 
@@ -118,6 +119,21 @@ async def _find_similar_notes(
         exclude_permalink=exclude_permalink,
         limit=SIMILAR_NOTES_LIMIT,
     )
+
+
+def _probe_declined_by_server(error: BaseException) -> bool:
+    """Return whether the search API refused the probe outright (HTTP 400).
+
+    That is how the API answers when semantic search is disabled or has no embedding
+    provider: a configuration state of the routed server, not a failure worth a warning
+    on every create.
+    """
+    current: BaseException | None = error
+    while current is not None:
+        if isinstance(current, HTTPStatusError):
+            return current.response.status_code == 400
+        current = current.__cause__
+    return False
 
 
 def _format_similar_notes_section(
@@ -283,8 +299,8 @@ async def write_note(
         - Observation counts by category
         - Relation counts (resolved/unresolved)
         - Tags if present
-        - Closest existing notes when the note was created and semantic search is
-          enabled, so an accidental near-duplicate can be merged instead of kept
+        - Closest existing notes when the note was created and the project's server has
+          semantic search enabled, so an accidental near-duplicate can be merged instead of kept
         - Session tracking metadata for project awareness
 
     Examples:
@@ -336,9 +352,8 @@ async def write_note(
     # Resolve overwrite flag: explicit parameter > config default
     # Trigger: caller omitted the parameter (None)
     # Why: lets users set a global default without breaking per-call overrides
-    app_config = ConfigManager().config
     effective_overwrite = (
-        overwrite if overwrite is not None else app_config.write_note_overwrite_default
+        overwrite if overwrite is not None else ConfigManager().config.write_note_overwrite_default
     )
     project = _compose_workspace_project_route(
         workspace=workspace,
@@ -473,15 +488,19 @@ async def write_note(
                     # Re-raise if it's not a conflict error
                     raise  # pragma: no cover
             # --- Similar-note advisory ---
-            # Trigger: the note was created (not updated) and semantic search is on.
+            # Trigger: the note was created (not updated).
             # Why: agents writing across sessions know the topic but not whether a note on
             #      it already exists (#1259). A near-duplicate and a merely related note are
             #      not separable by similarity score, so nothing is overwritten on the
             #      caller's behalf; the closest notes are surfaced and the call is theirs.
+            #      Whether semantic search is available is the routed server's call, not
+            #      this process's config: a local MCP can route a write to a cloud project
+            #      whose vectors are on while the local install's are off, so the probe is
+            #      always attempted and the server's refusal suppresses it.
             # Outcome: the summary gains a "Similar existing notes" section when the index
             #          has neighbors. The write itself is already complete either way.
             similar_notes: list[SimilarNote] = []
-            if action == "Created" and app_config.semantic_search_enabled:
+            if action == "Created":
                 try:
                     similar_notes = await _find_similar_notes(
                         SearchClient(client, active_project.external_id),
@@ -497,7 +516,10 @@ async def write_note(
                     # is already on disk, so those expected failures must not be reported
                     # as a failed write. Anything else is a defect in this code path and
                     # stays visible rather than degrading to an empty advisory.
-                    logger.warning(
+                    probe_log = (
+                        logger.debug if _probe_declined_by_server(probe_error) else logger.warning
+                    )
+                    probe_log(
                         f"write_note similar-note probe failed project={active_project.name} "
                         f"permalink={result.permalink}: {probe_error}"
                     )
