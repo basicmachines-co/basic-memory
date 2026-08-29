@@ -13,7 +13,6 @@ MAX_VECTOR_CHUNK_CHARS = 900
 VECTOR_CHUNK_OVERLAP_CHARS = 120
 
 _HEADER_LINE_PATTERN = re.compile(r"^\s*#{1,6}\s+")
-_BULLET_PATTERN = re.compile(r"^[\-\*]\s+")
 
 
 class SemanticSourceRow(Protocol):
@@ -137,16 +136,17 @@ def split_text_into_chunks(text_value: str) -> list[str]:
     if not normalized:
         return []
 
-    # Headers and bullets represent natural semantic boundaries. In particular,
-    # keeping bullets separate gives individual facts their own retrieval vector.
+    # Headings are the only structural boundary we split on. Bullets are NOT
+    # given their own chunk: a list item is not a standalone unit of meaning
+    # here. The entity-body vector carries the note's context, so its bullets
+    # stay packed with the surrounding text up to the size budget. Per-fact
+    # retrieval vectors come from the entity's observation and relation search
+    # rows, which are embedded separately and carry their own identity.
     lines = normalized.splitlines()
     sections: list[str] = []
     current_section: list[str] = []
     for line in lines:
         if _HEADER_LINE_PATTERN.match(line) and current_section:
-            sections.append("\n".join(current_section).strip())
-            current_section = [line]
-        elif _BULLET_PATTERN.match(line) and current_section:
             sections.append("\n".join(current_section).strip())
             current_section = [line]
         else:
@@ -158,8 +158,6 @@ def split_text_into_chunks(text_value: str) -> list[str]:
     current_chunk = ""
 
     for section in sections:
-        is_bullet = bool(_BULLET_PATTERN.match(section))
-
         if len(section) > MAX_VECTOR_CHUNK_CHARS:
             if current_chunk:
                 chunked_sections.append(current_chunk)
@@ -168,13 +166,6 @@ def split_text_into_chunks(text_value: str) -> list[str]:
             if long_chunks:
                 chunked_sections.extend(long_chunks[:-1])
                 current_chunk = long_chunks[-1]
-            continue
-
-        if is_bullet:
-            if current_chunk:
-                chunked_sections.append(current_chunk)
-                current_chunk = ""
-            chunked_sections.append(section)
             continue
 
         candidate = section if not current_chunk else f"{current_chunk}\n\n{section}"
@@ -192,27 +183,14 @@ def split_text_into_chunks(text_value: str) -> list[str]:
 
 
 def _split_into_paragraphs(section_text: str) -> list[str]:
-    """Split prose and bullet-list sections into semantic paragraphs."""
-    raw_paragraphs = [paragraph.strip() for paragraph in section_text.split("\n\n")]
-    result: list[str] = []
-    for paragraph in raw_paragraphs:
-        if not paragraph:
-            continue
-        lines = paragraph.split("\n")
-        if not any(_BULLET_PATTERN.match(line) for line in lines):
-            result.append(paragraph)
-            continue
+    """Split an oversized section into paragraphs on blank-line boundaries.
 
-        current_item: list[str] = []
-        for line in lines:
-            if _BULLET_PATTERN.match(line) and current_item:
-                result.append("\n".join(current_item).strip())
-                current_item = [line]
-            else:
-                current_item.append(line)
-        if current_item:
-            result.append("\n".join(current_item).strip())
-    return [paragraph for paragraph in result if paragraph]
+    A bulleted list is kept intact here rather than exploded per item; only a
+    blank line starts a new paragraph. A paragraph that still exceeds the size
+    budget is windowed by the caller.
+    """
+    raw_paragraphs = [paragraph.strip() for paragraph in section_text.split("\n\n")]
+    return [paragraph for paragraph in raw_paragraphs if paragraph]
 
 
 def _split_long_section(section_text: str) -> list[str]:
