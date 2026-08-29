@@ -137,6 +137,7 @@ def app_callback(
         "tool",
         "reset",
         "reindex",
+        "prune",
         "update",
         "watch",
         "workspace",
