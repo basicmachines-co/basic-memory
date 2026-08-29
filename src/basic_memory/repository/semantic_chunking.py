@@ -182,42 +182,45 @@ def split_text_into_chunks(text_value: str) -> list[str]:
     return [chunk for chunk in chunked_sections if chunk.strip()]
 
 
-def _split_into_paragraphs(section_text: str) -> list[str]:
-    """Split an oversized section into paragraphs on blank-line boundaries.
-
-    A bulleted list is kept intact here rather than exploded per item; only a
-    blank line starts a new paragraph. A paragraph that still exceeds the size
-    budget is windowed by the caller.
-    """
-    raw_paragraphs = [paragraph.strip() for paragraph in section_text.split("\n\n")]
-    return [paragraph for paragraph in raw_paragraphs if paragraph]
-
-
 def _split_long_section(section_text: str) -> list[str]:
-    paragraphs = _split_into_paragraphs(section_text)
-    if not paragraphs:
-        return []
+    """Break a section that exceeds the size budget at line boundaries.
 
+    Lines — heading, prose, and bullet lines alike — are packed into chunks up
+    to the budget, so the heading rides the first packed chunk and a word or a
+    ``[[wikilink]]`` is never cut across a chunk edge. A bullet is just a line
+    here; it gets no chunk of its own. Only a single line that is itself over
+    the budget (an unbroken >900-char line, never a normal list) falls back to
+    the character window, which carries the overlap.
+    """
     chunks: list[str] = []
-    current = ""
-    for paragraph in paragraphs:
-        if len(paragraph) > MAX_VECTOR_CHUNK_CHARS:
-            if current:
-                chunks.append(current)
-                current = ""
-            chunks.extend(_split_by_char_window(paragraph))
+    current: list[str] = []
+    current_len = 0
+
+    def flush() -> None:
+        nonlocal current, current_len
+        packed = "\n".join(current).strip()
+        if packed:
+            chunks.append(packed)
+        current = []
+        current_len = 0
+
+    for line in section_text.splitlines():
+        # A single line over the budget cannot be packed at all, so window it on
+        # its own after flushing whatever came before it.
+        if len(line) > MAX_VECTOR_CHUNK_CHARS:
+            flush()
+            chunks.extend(_split_by_char_window(line))
             continue
 
-        candidate = paragraph if not current else f"{current}\n\n{paragraph}"
-        if len(candidate) <= MAX_VECTOR_CHUNK_CHARS:
-            current = candidate
-        else:
-            if current:
-                chunks.append(current)
-            current = paragraph
+        # +1 accounts for the newline that will rejoin this line to the chunk.
+        separator = 1 if current else 0
+        if current and current_len + separator + len(line) > MAX_VECTOR_CHUNK_CHARS:
+            flush()
+            separator = 0
+        current.append(line)
+        current_len += separator + len(line)
 
-    if current:
-        chunks.append(current)
+    flush()
     return chunks
 
 

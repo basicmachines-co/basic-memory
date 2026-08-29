@@ -182,17 +182,45 @@ class TestSplitTextIntoChunks:
 
         assert result == [first_paragraph, second_paragraph]
 
+    def test_oversized_section_packs_at_line_boundaries_keeping_heading(self):
+        # A heading followed (with the conventional blank line) by a relation
+        # list that exceeds the budget must pack at line boundaries: the heading
+        # rides the first chunk and no [[wikilink]] is cut across a chunk edge.
+        bullets = "\n".join(f"- relates_to [[Target {index}]]" for index in range(1, 61))
+        text = f"## Relations\n\n{bullets}"
+
+        result = split_text_into_chunks(text)
+
+        assert len(result) >= 2
+        assert all(len(chunk) <= MAX_VECTOR_CHUNK_CHARS for chunk in result)
+        # The heading rides the first chunk and is never stranded on its own.
+        assert result[0].startswith("## Relations")
+        assert sum(chunk.count("## Relations") for chunk in result) == 1
+        # Balanced brackets in every chunk prove no wikilink was cut mid-token.
+        assert all(chunk.count("[[") == chunk.count("]]") for chunk in result)
+        for index in range(1, 61):
+            assert any(f"[[Target {index}]]" in chunk for chunk in result)
+
+    def test_oversized_tight_list_breaks_on_lines_not_characters(self):
+        # A tight list (no blank lines) over the budget must still break at line
+        # boundaries rather than slicing bullets at arbitrary character offsets.
+        bullets = "\n".join(f"- fact {index} about [[Note {index}]]" for index in range(1, 61))
+        text = f"## Observations\n{bullets}"
+
+        result = split_text_into_chunks(text)
+
+        assert len(result) >= 2
+        assert all(len(chunk) <= MAX_VECTOR_CHUNK_CHARS for chunk in result)
+        assert result[0].startswith("## Observations")
+        # Every line is a whole heading or a whole bullet — nothing cut mid-line.
+        for chunk in result:
+            for line in chunk.splitlines():
+                assert line.startswith("## Observations") or line.startswith("- ")
+        assert all(chunk.count("[[") == chunk.count("]]") for chunk in result)
+
 
 class TestSemanticChunkHelpers:
     """Cover helper preconditions and Markdown list grouping directly."""
-
-    def test_split_into_paragraphs_keeps_bullet_lists_intact(self):
-        # Only blank lines start a new paragraph; a bullet list is one unit.
-        result = semantic_chunking._split_into_paragraphs(
-            "\n\n- First fact\ncontinuation\n- Second fact"
-        )
-
-        assert result == ["- First fact\ncontinuation\n- Second fact"]
 
     def test_empty_helper_inputs_return_no_chunks(self):
         assert semantic_chunking._split_long_section("") == []
