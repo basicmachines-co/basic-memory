@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+### Features
+
+- **#1294**: Chinese, Japanese, and Korean terms now match anywhere in an
+  indexed note, not only at the start of a CJK run. Search indexing derives an
+  index-only stream of overlapping CJK bigrams (`search_tokens` as an extra
+  SQLite FTS5 column; `search_tokens`/`chunk_tokens` text columns with
+  `simple`-configuration generated `tsvector`s and GIN indexes on PostgreSQL),
+  and CJK queries are rendered as exact adjacency phrases against those
+  columns. Bigrams never cross a field or chunk boundary, so scattered
+  characters do not satisfy a contiguous term. Display text is unchanged:
+  titles, permalinks, `content_stems`, snippets, and chunk text keep their
+  original bytes, and pure non-CJK queries take the same SQL and ranking paths
+  as before.
+
+  The migration adds schema only — it does not backfill derived tokens.
+  Existing installations must repopulate the search index once after
+  upgrading:
+
+  ```text
+  basic-memory reindex --full --search
+  ```
+
+  New installs and any note written after the upgrade index CJK tokens
+  automatically.
+
 ## v0.23.2 (2026-08-25)
 
 Patch release fixing case-duplicate folder creation.
