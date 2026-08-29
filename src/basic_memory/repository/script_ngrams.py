@@ -96,7 +96,7 @@ def analyze_script_query(text: str) -> ScriptQuery:
     # operand into a second SQL channel would otherwise change OR/NOT semantics.
     # Compatibility forms are natural-language text because neither backend parses
     # their normalized equivalents as operators.
-    if '"' in text or set(text.split()) & {"AND", "OR", "NOT"}:
+    if '"' in text or any(f" {operator} " in text for operator in ("AND", "OR", "NOT")):
         return ScriptQuery(word_text=text, gram_phrases=())
 
     word_characters: list[str] = []
@@ -113,8 +113,10 @@ def analyze_script_query(text: str) -> ScriptQuery:
         in_script_run = False
         word_characters.append(character)
 
+    # Operator-shaped tokens outside the literal-space syntax above are words. Lowercase
+    # keeps the case-insensitive FTS match while preventing reparsing after reconstruction.
     word_tokens = [
-        token
+        token.lower() if token in {"AND", "OR", "NOT"} else token
         for token in "".join(word_characters).split()
         if any(character.isalnum() for character in token)
     ]

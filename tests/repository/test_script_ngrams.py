@@ -95,6 +95,14 @@ def test_analyze_script_query_treats_compatibility_boolean_text_as_natural_langu
     assert query.gram_phrases == (("适者",), ("生存",))
 
 
+@pytest.mark.parametrize("separator", ["\t", "\n"])
+def test_analyze_script_query_matches_backend_boolean_whitespace(separator: str) -> None:
+    query = analyze_script_query(f"适者{separator}AND{separator}生存")
+
+    assert query.word_text == "and"
+    assert query.gram_phrases == (("适者",), ("生存",))
+
+
 @pytest.mark.asyncio
 async def test_compatibility_boolean_text_uses_script_substring_search(search_repository) -> None:
     now = datetime.now(timezone.utc)
@@ -115,6 +123,28 @@ async def test_compatibility_boolean_text_uses_script_substring_search(search_re
     results = await search_repository.search("适者 ＡＮＤ 生存")
 
     assert [result.id for result in results] == [1307]
+
+
+@pytest.mark.asyncio
+async def test_non_space_boolean_text_uses_script_substring_search(search_repository) -> None:
+    now = datetime.now(timezone.utc)
+    row = SearchIndexRow(
+        project_id=search_repository.project_id,
+        id=1308,
+        type="entity",
+        file_path="notes/non-space-boolean.md",
+        title="Non-space Boolean",
+        content_stems="不适者\tAND\t生存者",
+        content_snippet="不适者\tAND\t生存者",
+        permalink="notes/non-space-boolean",
+        created_at=now,
+        updated_at=now,
+    )
+    await search_repository.index_item(row)
+
+    results = await search_repository.search("适者\tAND\t生存")
+
+    assert [result.id for result in results] == [1308]
 
 
 @pytest.mark.asyncio
