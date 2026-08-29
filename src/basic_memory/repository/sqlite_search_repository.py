@@ -27,7 +27,12 @@ from basic_memory.repository.embedding_provider_factory import create_embedding_
 from basic_memory.repository.rerank_provider import RerankProvider
 from basic_memory.repository.rerank_provider_factory import create_rerank_provider
 from basic_memory.repository.search_index_row import SearchIndexRow
-from basic_memory.repository.search_query import relaxed_query_words
+from basic_memory.repository.search_query import (
+    RELAXATION_CJK_PATTERN,
+    cjk_bigram_tokens,
+    contains_cjk,
+    relaxed_query_words,
+)
 from basic_memory.repository.search_repository_base import SearchRepositoryBase
 from basic_memory.repository.search_trace import (
     SearchTraceCollector,
@@ -396,6 +401,25 @@ class SQLiteSearchRepository(SearchRepositoryBase):
 
         # For non-Boolean queries, use the single term preparation logic
         return self._prepare_single_term(term, is_prefix)
+
+    @staticmethod
+    def _cjk_fts_phrase(term: str) -> str:
+        """Render one CJK run as an adjacent FTS5 phrase of overlapping bigrams."""
+        tokens = cjk_bigram_tokens(term)
+        return f'"{" ".join(tokens)}"*'
+
+    @staticmethod
+    def _cjk_fts_text(search_text: str, *, relaxed: bool = False) -> str:
+        """Render all CJK runs in a query for the auxiliary FTS5 column."""
+        phrases = [
+            SQLiteSearchRepository._cjk_fts_phrase(match.group(0))
+            for match in RELAXATION_CJK_PATTERN.finditer(search_text)
+        ]
+        if relaxed:
+            return " OR ".join(phrases)
+        if re.search(r"\bOR\b", search_text, flags=re.IGNORECASE):
+            return " OR ".join(phrases)
+        return " AND ".join(phrases)
 
     @staticmethod
     def _relaxed_fts_term(word: str) -> str:
@@ -798,10 +822,16 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 params["text"] = processed_text
                 # content_stems is capped for Postgres index-row compatibility, while
                 # SQLite stores the complete note body in its FTS5 content_snippet column.
-                match_conditions.append(
+                lexical_condition = (
                     "(search_index.title MATCH :text OR search_index.content_stems MATCH :text "
                     "OR search_index.content_snippet MATCH :text)"
                 )
+                if contains_cjk(search_text):
+                    params["cjk_text"] = self._cjk_fts_text(search_text.strip())
+                    lexical_condition = (
+                        f"({lexical_condition} OR search_index.search_tokens MATCH :cjk_text)"
+                    )
+                match_conditions.append(lexical_condition)
 
         # Handle title match search
         if title:
@@ -1093,6 +1123,8 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             if relaxed and params.get("text"):
                 relaxed_fallback_used = True
                 params["text"] = relaxed
+                if params.get("cjk_text"):
+                    params["cjk_text"] = self._cjk_fts_text(search_text or "", relaxed=True)
                 logger.debug(
                     "Strict SQLite FTS returned 0 results; retrying relaxed FTS query "
                     f"strict='{search_text}' relaxed='{relaxed}'"
@@ -1209,6 +1241,8 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 )
                 if relaxed and params.get("text"):
                     params["text"] = relaxed
+                    if params.get("cjk_text"):
+                        params["cjk_text"] = self._cjk_fts_text(search_text or "", relaxed=True)
                     with logfire.span(
                         "search.count.relaxed_fts_retry",
                         backend="sqlite",

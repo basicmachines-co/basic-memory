@@ -20,7 +20,13 @@ from basic_memory.repository.embedding_provider_factory import create_embedding_
 from basic_memory.repository.rerank_provider import RerankProvider
 from basic_memory.repository.rerank_provider_factory import create_rerank_provider
 from basic_memory.repository.search_index_row import SearchIndexRow
-from basic_memory.repository.search_query import cjk_search_tokens, relaxed_query_words
+from basic_memory.repository.search_query import (
+    RELAXATION_CJK_PATTERN,
+    cjk_bigram_tokens,
+    cjk_search_tokens,
+    contains_cjk,
+    relaxed_query_words,
+)
 from basic_memory.repository.semantic_chunking import VectorChunkRecord
 from basic_memory.repository.search_repository_base import (
     SearchRepositoryBase,
@@ -363,6 +369,24 @@ class PostgresSearchRepository(SearchRepositoryBase):
 
         # For non-Boolean queries, prepare single term
         return self._prepare_single_term(term, is_prefix)
+
+    @staticmethod
+    def _cjk_tsquery_phrase(term: str) -> str:
+        """Render one CJK run as an adjacent simple-parser tsquery phrase."""
+        return " <-> ".join(f"{token}:*" for token in cjk_bigram_tokens(term))
+
+    @staticmethod
+    def _cjk_tsquery_text(search_text: str, *, relaxed: bool = False) -> str:
+        """Render all CJK runs in a query for the auxiliary simple tsvector."""
+        phrases = [
+            PostgresSearchRepository._cjk_tsquery_phrase(match.group(0))
+            for match in RELAXATION_CJK_PATTERN.finditer(search_text)
+        ]
+        if relaxed:
+            return " | ".join(phrases)
+        if re.search(r"\bOR\b", search_text, flags=re.IGNORECASE):
+            return " | ".join(phrases)
+        return " & ".join(phrases)
 
     @staticmethod
     def _relaxed_tsquery_term(word: str) -> str:
@@ -829,6 +853,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         order_by_clause = ""
         from_clause = "search_index"
         document_vector_sql: str | None = None
+        cjk_text: str | None = None
 
         # Handle text search for title and content using tsvector
         if search_text:
@@ -839,6 +864,9 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 # Prepare search term for tsquery
                 processed_text = self._prepare_search_term(search_text.strip())
                 params["text"] = processed_text
+                if contains_cjk(search_text):
+                    cjk_text = self._cjk_tsquery_text(search_text.strip())
+                    params["cjk_text"] = cjk_text
                 probe_texts = [processed_text]
                 if allow_relaxed:
                     relaxed_text = self._relaxed_tsquery_text(search_text)
@@ -852,13 +880,37 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 if candidate_operands:
                     params["text_candidate"] = " | ".join(candidate_operands)
 
+                    cjk_candidate_arms = ""
+                    if cjk_text is not None:
+                        cjk_candidate_arms = """
+                                UNION
+                                SELECT
+                                    candidate_cjk_parent.project_id,
+                                    candidate_cjk_parent.id,
+                                    candidate_cjk_parent.type
+                                FROM search_index AS candidate_cjk_parent
+                                WHERE candidate_cjk_parent.project_id = :project_id
+                                  AND candidate_cjk_parent.search_tokens_index_col
+                                      @@ to_tsquery('simple', :cjk_text)
+                                UNION
+                                SELECT
+                                    candidate_cjk_chunk.project_id,
+                                    candidate_cjk_chunk.search_index_id AS id,
+                                    candidate_cjk_chunk.search_index_type AS type
+                                FROM search_index_fts_chunks AS candidate_cjk_chunk
+                                WHERE candidate_cjk_chunk.project_id = :project_id
+                                  AND candidate_cjk_chunk.chunk_tokens_index_col
+                                      @@ to_tsquery('simple', :cjk_text)
+                        """
+
                     # Trigger: PostgreSQL can extract a required-positive query tree.
                     # Why: OR-ing its operands is a safe indexed superset even when
                     # terms live in different chunks. Pure/optional negation returns
                     # ``T`` and must retain all project rows for correct semantics.
                     # Outcome: ordinary and required-positive NOT queries use both
                     # GIN indexes; only genuinely unindexable negation scans the project.
-                    from_clause = """
+                    from_clause = (
+                        """
                             search_index JOIN (
                                 SELECT
                                     candidate_parent.project_id,
@@ -886,14 +938,30 @@ class PostgresSearchRepository(SearchRepositoryBase):
                                     candidate_all.type
                                 FROM search_index AS candidate_all
                                 WHERE candidate_all.project_id = :project_id
-                                  AND querytree(to_tsquery('english', :text)) = 'T'
+                                  AND querytree(to_tsquery('english', :text)) = 'T'"""
+                        + cjk_candidate_arms
+                        + """
                             ) AS fts_candidate
                               ON fts_candidate.project_id = search_index.project_id
                              AND fts_candidate.id = search_index.id
                              AND fts_candidate.type = search_index.type
                     """
+                    )
                 document_vector_sql = self._document_fts_vector_sql(probe_texts, params)
-                conditions.append(f"{document_vector_sql} @@ to_tsquery('english', :text)")
+                lexical_condition = f"{document_vector_sql} @@ to_tsquery('english', :text)"
+                if cjk_text is not None:
+                    lexical_condition = (
+                        f"({lexical_condition} OR "
+                        "search_index.search_tokens_index_col "
+                        "@@ to_tsquery('simple', :cjk_text) OR EXISTS ("
+                        "SELECT 1 FROM search_index_fts_chunks AS cjk_chunk "
+                        "WHERE cjk_chunk.project_id = search_index.project_id "
+                        "AND cjk_chunk.search_index_id = search_index.id "
+                        "AND cjk_chunk.search_index_type = search_index.type "
+                        "AND cjk_chunk.chunk_tokens_index_col "
+                        "@@ to_tsquery('simple', :cjk_text)))"
+                    )
+                conditions.append(lexical_condition)
 
         # Handle title search
         if title:
@@ -1053,10 +1121,25 @@ class PostgresSearchRepository(SearchRepositoryBase):
         # Note: If no text search, score will be NULL, so we use COALESCE to default to 0
         if search_text and search_text.strip() and search_text.strip() != "*":
             assert document_vector_sql is not None
+            cjk_score_terms = ""
+            if cjk_text is not None:
+                cjk_score_terms = (
+                    "ts_rank(search_index.search_tokens_index_col, "
+                    "to_tsquery('simple', :cjk_text)), "
+                    "COALESCE((SELECT MAX(ts_rank("
+                    "fts_chunk.chunk_tokens_index_col, to_tsquery('simple', :cjk_text))) "
+                    "FROM search_index_fts_chunks AS fts_chunk "
+                    "WHERE fts_chunk.project_id = search_index.project_id "
+                    "AND fts_chunk.search_index_id = search_index.id "
+                    "AND fts_chunk.search_index_type = search_index.type "
+                    "AND fts_chunk.chunk_tokens_index_col "
+                    "@@ to_tsquery('simple', :cjk_text)), 0), "
+                )
             score_expr = (
                 "GREATEST("
                 f"ts_rank({document_vector_sql}, to_tsquery('english', :text)), "
                 "ts_rank(search_index.textsearchable_index_col, to_tsquery('english', :text)), "
+                f"{cjk_score_terms}"
                 "COALESCE((SELECT MAX(ts_rank("
                 "fts_chunk.textsearchable_index_col, to_tsquery('english', :text))) "
                 "FROM search_index_fts_chunks AS fts_chunk "
@@ -1247,9 +1330,14 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     limit=limit,
                     offset=offset,
                 ):
+                    retry_params = {**params, "text": relaxed}
+                    if "cjk_text" in retry_params:
+                        retry_params["cjk_text"] = self._cjk_tsquery_text(
+                            search_text or "", relaxed=True
+                        )
                     rows = await execute_rows(
                         active_session,
-                        {**params, "text": relaxed},
+                        retry_params,
                     )
             return rows, relaxed_fallback_used
 
@@ -1378,9 +1466,14 @@ class PostgresSearchRepository(SearchRepositoryBase):
                         reason="syntax_error" if strict_syntax_error else "empty_result",
                         token_count=len(relaxed_query_words(search_text) or ()),
                     ):
+                        retry_params = {**params, "text": relaxed}
+                        if "cjk_text" in retry_params:
+                            retry_params["cjk_text"] = self._cjk_tsquery_text(
+                                search_text or "", relaxed=True
+                            )
                         total = await execute_count(
                             session,
-                            {**params, "text": relaxed},
+                            retry_params,
                         )
                 return total
         except Exception as e:

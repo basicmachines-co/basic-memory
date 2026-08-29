@@ -11,6 +11,8 @@ from basic_memory.models import Entity
 from basic_memory.models.project import Project
 from basic_memory.repository.search_repository import SearchIndexRow
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
+from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
+from basic_memory.repository.search_query import cjk_search_tokens
 from basic_memory.schemas.search import SearchItemType
 
 
@@ -699,6 +701,64 @@ class TestSearchTermPreparation:
     Tests with `[asyncio-sqlite]` or `[asyncio-postgres]` test backend-agnostic functionality.
     """
 
+    @pytest.mark.parametrize(
+        ("term", "expected"),
+        [
+            ("适", '"适"*'),
+            ("适者", '"适者"*'),
+            ("适者生", '"适者 者生"*'),
+            ("适者生存", '"适者 者生 生存"*'),
+        ],
+    )
+    def test_sqlite_cjk_phrase_uses_overlapping_adjacent_tokens(
+        self, term: str, expected: str
+    ) -> None:
+        """SQLite renders every CJK substring as one adjacent FTS5 phrase."""
+        assert SQLiteSearchRepository._cjk_fts_phrase(term) == expected
+
+    @pytest.mark.parametrize(
+        ("term", "expected"),
+        [
+            ("适", "适:*"),
+            ("适者", "适者:*"),
+            ("适者生", "适者:* <-> 者生:*"),
+            ("适者生存", "适者:* <-> 者生:* <-> 生存:*"),
+        ],
+    )
+    def test_postgres_cjk_phrase_uses_tsquery_adjacency(self, term: str, expected: str) -> None:
+        """PostgreSQL joins overlapping CJK bigrams with positional adjacency."""
+        assert PostgresSearchRepository._cjk_tsquery_phrase(term) == expected
+
+    @pytest.mark.parametrize(
+        ("search_text", "relaxed", "expected"),
+        [
+            ("季度 报告", False, '"季度"* AND "报告"*'),
+            ("季度 OR 报告", False, '"季度"* OR "报告"*'),
+            ("季度 报告", True, '"季度"* OR "报告"*'),
+        ],
+    )
+    def test_sqlite_cjk_text_joins_multiple_runs_by_boolean_intent(
+        self, search_text: str, relaxed: bool, expected: str
+    ) -> None:
+        """Separate CJK runs in one query AND-join by default; boolean OR or a
+        relaxed retry switches every run's phrase to OR instead."""
+        assert SQLiteSearchRepository._cjk_fts_text(search_text, relaxed=relaxed) == expected
+
+    @pytest.mark.parametrize(
+        ("search_text", "relaxed", "expected"),
+        [
+            ("季度 报告", False, "季度:* & 报告:*"),
+            ("季度 OR 报告", False, "季度:* | 报告:*"),
+            ("季度 报告", True, "季度:* | 报告:*"),
+        ],
+    )
+    def test_postgres_cjk_text_joins_multiple_runs_by_boolean_intent(
+        self, search_text: str, relaxed: bool, expected: str
+    ) -> None:
+        """Separate CJK runs in one query AND-join by default; boolean OR or a
+        relaxed retry switches every run's phrase to OR instead."""
+        assert PostgresSearchRepository._cjk_tsquery_text(search_text, relaxed=relaxed) == expected
+
     def test_simple_terms_get_prefix_wildcard(self, search_repository):
         """Simple alphanumeric terms should get prefix matching."""
         from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
@@ -1050,6 +1110,185 @@ class TestSearchTermPreparation:
         # Test string that becomes empty after strip
         result3 = search_repository._prepare_single_term("\t\n")
         assert result3 == "\t\n"  # Should return original
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query", ["适者", "者生", "者生存", "适者生存"])
+async def test_cjk_search_finds_terms_inside_indexed_runs_and_counts(
+    search_repository,
+    search_entity,
+    query: str,
+):
+    """CJK queries find two-to-four-character terms after another CJK token."""
+    content = "前置适者生存后缀"
+    row = SearchIndexRow(
+        id=search_entity.id,
+        type=SearchItemType.ENTITY.value,
+        title="CJK mid-run search",
+        content_stems=content,
+        content_snippet=content,
+        search_tokens=cjk_search_tokens(content),
+        permalink=search_entity.permalink,
+        file_path=search_entity.file_path,
+        entity_id=search_entity.id,
+        metadata={"note_type": search_entity.note_type},
+        created_at=search_entity.created_at,
+        updated_at=search_entity.updated_at,
+        project_id=search_repository.project_id,
+    )
+    await search_repository.index_item(row)
+
+    results = await search_repository.search(search_text=query)
+
+    assert [result.id for result in results] == [search_entity.id]
+    assert await search_repository.count(search_text=query) == 1
+
+
+@pytest.mark.asyncio
+async def test_cjk_search_supports_single_character_title_and_body_terms(
+    search_repository,
+    search_entity,
+):
+    """A one-character CJK run remains searchable in both title and body indexes."""
+    row = SearchIndexRow(
+        id=search_entity.id,
+        type=SearchItemType.ENTITY.value,
+        title="标题-适",
+        content_stems="body marker",
+        content_snippet="body marker",
+        search_tokens=cjk_search_tokens("标题-适", search_entity.permalink),
+        permalink=search_entity.permalink,
+        file_path=search_entity.file_path,
+        entity_id=search_entity.id,
+        metadata={"note_type": search_entity.note_type},
+        created_at=search_entity.created_at,
+        updated_at=search_entity.updated_at,
+        project_id=search_repository.project_id,
+    )
+    await search_repository.index_item(row)
+
+    results = await search_repository.search(search_text="适")
+
+    assert [result.id for result in results] == [search_entity.id]
+
+
+@pytest.mark.asyncio
+async def test_cjk_search_requires_adjacent_bigrams_and_keeps_mixed_ascii_operand(
+    search_repository,
+    search_entity,
+):
+    """Auxiliary CJK phrases preserve adjacency and do not drop an ASCII AND term."""
+    now = datetime.now(timezone.utc)
+    rows = [
+        SearchIndexRow(
+            id=search_entity.id,
+            type=SearchItemType.ENTITY.value,
+            title="CJK and backend",
+            content_stems="prefix 适者生存 backendmarker",
+            content_snippet="prefix 适者生存 backendmarker",
+            search_tokens="适者 者生 生存 backendmarker",
+            permalink=search_entity.permalink,
+            file_path=search_entity.file_path,
+            entity_id=search_entity.id,
+            metadata={"note_type": search_entity.note_type},
+            created_at=now,
+            updated_at=now,
+            project_id=search_repository.project_id,
+        ),
+        SearchIndexRow(
+            id=search_entity.id + 1,
+            type=SearchItemType.ENTITY.value,
+            title="CJK only",
+            content_stems="prefix nonadjacent",
+            content_snippet="prefix nonadjacent",
+            search_tokens="适者 gap 者生 生存",
+            permalink="test/cjk-only",
+            file_path="test/cjk-only.md",
+            entity_id=search_entity.id + 1,
+            metadata={"note_type": search_entity.note_type},
+            created_at=now,
+            updated_at=now,
+            project_id=search_repository.project_id,
+        ),
+        SearchIndexRow(
+            id=search_entity.id + 2,
+            type=SearchItemType.ENTITY.value,
+            title="Backend only",
+            content_stems="backendmarker",
+            content_snippet="backendmarker",
+            search_tokens="",
+            permalink="test/backend-only",
+            file_path="test/backend-only.md",
+            entity_id=search_entity.id + 2,
+            metadata={"note_type": search_entity.note_type},
+            created_at=now,
+            updated_at=now,
+            project_id=search_repository.project_id,
+        ),
+    ]
+    for row in rows:
+        await search_repository.index_item(row)
+
+    mixed = await search_repository.search(search_text="适者生存 backendmarker")
+    boolean = await search_repository.search(search_text="适者生存 AND backendmarker")
+
+    assert search_entity.id in {result.id for result in mixed}
+    assert search_entity.id in {result.id for result in boolean}
+    assert search_entity.id + 2 not in {result.id for result in mixed}
+    assert search_entity.id + 2 not in {result.id for result in boolean}
+
+    separated = SearchIndexRow(
+        id=search_entity.id + 3,
+        type=SearchItemType.ENTITY.value,
+        title="Separated CJK tokens",
+        content_stems="separated tokens",
+        content_snippet="separated tokens",
+        search_tokens="适者 gap 者生 生存",
+        permalink="test/separated-cjk",
+        file_path="test/separated-cjk.md",
+        entity_id=search_entity.id + 3,
+        metadata={"note_type": search_entity.note_type},
+        created_at=now,
+        updated_at=now,
+        project_id=search_repository.project_id,
+    )
+    await search_repository.index_item(separated)
+
+    cjk_results = await search_repository.search(search_text="适者生存")
+
+    assert {result.id for result in cjk_results} == {search_entity.id}
+
+
+@pytest.mark.asyncio
+async def test_cjk_search_relaxed_retry_uses_auxiliary_tokens(
+    search_repository,
+    search_entity,
+):
+    """Relaxed search retains CJK phrase candidates when strict lexical terms miss."""
+    content = "前置适者生存后缀"
+    row = SearchIndexRow(
+        id=search_entity.id,
+        type=SearchItemType.ENTITY.value,
+        title="CJK relaxed search",
+        content_stems=content,
+        content_snippet=content,
+        search_tokens=cjk_search_tokens(content),
+        permalink=search_entity.permalink,
+        file_path=search_entity.file_path,
+        entity_id=search_entity.id,
+        metadata={"note_type": search_entity.note_type},
+        created_at=search_entity.created_at,
+        updated_at=search_entity.updated_at,
+        project_id=search_repository.project_id,
+    )
+    await search_repository.index_item(row)
+
+    results = await search_repository.search(
+        search_text="不存在 适者生存 另一个缺失词",
+        allow_relaxed=True,
+    )
+
+    assert [result.id for result in results] == [search_entity.id]
 
 
 async def _index_entity_with_metadata(search_repository, session_maker, title, entity_metadata):

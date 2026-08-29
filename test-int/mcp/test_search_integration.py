@@ -549,3 +549,34 @@ async def test_tags_param_vs_tag_query_comma_consistency(mcp_server, app, test_p
             "tags='alpha,beta' param must behave like the tag: shorthand "
             f"(both split commas). query_hit={query_hit} param_hit={param_hit}"
         )
+
+
+@pytest.mark.asyncio
+async def test_search_cjk_mid_run_term_through_public_surface(mcp_server, app, test_project):
+    """A CJK substring in a real note is retrievable through MCP search."""
+    async with Client(mcp_server) as client:
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "CJK lexical search",
+                "directory": "international",
+                "content": (
+                    "# CJK lexical search\n\nThe note contains the longer phrase 前置适者生存后缀."
+                ),
+            },
+        )
+
+        search_result = await client.call_tool(
+            "search_notes",
+            {
+                "project": test_project.name,
+                "query": "者生",
+                "search_type": "text",
+            },
+        )
+
+        result_content = search_result.content[0]
+        assert result_content.type == "text"
+        result_text = result_content.text
+        assert "CJK lexical search" in result_text
