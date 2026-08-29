@@ -39,6 +39,13 @@ type NonEmptyText = Annotated[
     StrictStr,
     StringConstraints(strip_whitespace=True, min_length=1),
 ]
+# Paths must never be silently rewritten: strip_whitespace would let the model
+# accept " a/b " while derive_document_note_path (which validates the raw value)
+# rejects it, so a padded path would resolve to a different object (#1178 review).
+type ProjectRelativePathText = Annotated[
+    StrictStr,
+    StringConstraints(min_length=1),
+]
 type Sha256Checksum = Annotated[
     StrictStr,
     StringConstraints(pattern=r"^sha256:[0-9a-f]{64}$"),
@@ -96,7 +103,7 @@ class DocumentSourceV1(_DocumentContractModel):
         StringConstraints(pattern=r"^[a-z0-9][a-z0-9!#$&^_.+\-]*/[a-z0-9][a-z0-9!#$&^_.+\-]*$"),
     ]
     entity_external_id: UUID
-    file_path: NonEmptyText
+    file_path: ProjectRelativePathText
     checksum: Sha256Checksum
     size_bytes: int = Field(ge=0, strict=True)
     storage_version_id: NonEmptyText | None = None
@@ -309,7 +316,7 @@ class DocumentIngestionRunOutputV1(_DocumentContractModel):
     """Stable document identity and exact revisions produced by an ingestion run."""
 
     document_entity_external_id: UUID
-    document_file_path: NonEmptyText
+    document_file_path: ProjectRelativePathText
     raw: DocumentRevisionReferenceV1
     current: DocumentRevisionReferenceV1 | None = None
 
@@ -814,6 +821,8 @@ def _normalize_run_identity_text(value: str, *, field_name: str) -> str:
 def _validate_project_relative_path(value: str) -> str:
     if not value or "\\" in value or "\x00" in value:
         raise ValueError("path must be a non-empty POSIX project-relative path")
+    if value != value.strip():
+        raise ValueError("path must not have leading or trailing whitespace")
     path = PurePosixPath(value)
     # A Windows drive or rooted path ("C:/x", "C:x", "\\x") passes PurePosixPath's
     # is_absolute() yet escapes the project root when FileService joins it with
