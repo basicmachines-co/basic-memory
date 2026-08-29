@@ -14,6 +14,10 @@ export function registerWriteTool(
       label: "Write Note",
       description:
         "Create a note in the Basic Memory knowledge graph. " +
+        "Call this whenever the user asks to remember, record, save, or note " +
+        "something — saying 'saved' without this call saves nothing. The result " +
+        "returns the note's permalink and file_path: cite those exact values " +
+        "when confirming, never a recalled filename. " +
         "If the note already exists, returns an error by default. " +
         "Pass overwrite=true to replace, or use edit_note for incremental updates.",
       parameters: Type.Object({

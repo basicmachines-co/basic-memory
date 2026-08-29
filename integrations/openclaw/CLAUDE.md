@@ -468,6 +468,8 @@ Use `write_note` when:
 - Meeting notes or insights need to be preserved
 - Creating structured documentation
 
+Any "remember/record/save/note this" request maps to a `write_note` (or `edit_note`) call in that same turn — an acknowledgement without the call saves nothing.
+
 ### Edit for Updates
 Use `edit_note` when:
 - Adding updates to existing notes
@@ -488,6 +490,7 @@ Use `build_context` when:
 - **Search first**: Before answering questions, search the knowledge graph
 - **Suggest connections**: Point out related notes and concepts
 - **Offer to save**: When users share important info, offer to document it
+- **Never claim an unwritten save**: Only say something was saved or recorded after a `write_note`/`edit_note` call returned a result, and cite the `permalink` or `file_path` from that result — never a filename recalled from memory. If you decline to write, say plainly that nothing new was saved
 - **Recommend organization**: Help users structure their knowledge well
 
 ### Helpful Patterns

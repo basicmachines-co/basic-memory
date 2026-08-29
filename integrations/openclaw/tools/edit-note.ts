@@ -14,7 +14,9 @@ export function registerEditTool(
       description:
         "Incrementally edit an existing note in the Basic Memory knowledge graph. " +
         "Supports append, prepend, find/replace, and section replacement " +
-        "without rewriting the entire note.",
+        "without rewriting the entire note. The result returns the note's " +
+        "permalink and file_path: cite those exact values when confirming " +
+        "the edit — never report a save that no tool call performed.",
       parameters: Type.Object({
         identifier: Type.String({
           description: "Note title, permalink, or memory:// URL to edit",

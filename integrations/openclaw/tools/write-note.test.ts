@@ -57,6 +57,18 @@ describe("write tool", () => {
         { name: "write_note" },
       )
     })
+
+    it("insists the write actually happens and the result is cited (#1341)", () => {
+      registerWriteTool(mockApi, mockClient)
+
+      const toolConfig = (mockApi.registerTool as jest.MockedFunction<any>).mock
+        .calls[0][0]
+      expect(toolConfig.description).toContain(
+        "remember, record, save, or note",
+      )
+      expect(toolConfig.description).toContain("permalink")
+      expect(toolConfig.description).toContain("never a recalled filename")
+    })
   })
 
   describe("tool execution", () => {

@@ -220,9 +220,10 @@ Background and current situation.
 
 1. **Search before answering.** If the user asks "what did we decide about X?", run `bm_search` first.
 2. **Offer to capture.** When the user shares decisions or meeting outcomes, ask: "Should I save this as a note?"
-3. **Suggest connections.** When a search returns related notes, surface them so the user knows what already exists.
-4. **Don't over-capture.** Auto-capture is already running per turn. Don't create a `bm_write` for every response — only for substantive content the user wants preserved.
-5. **Sensitive info.** Don't capture credentials or personal data without confirmation.
+3. **Never claim an unwritten save.** "Remember/record/save/note this" means calling `bm_write` (or `bm_edit`) in that turn. Only report a save after the tool returned a result, and quote the returned permalink — never a filename recalled from memory.
+4. **Suggest connections.** When a search returns related notes, surface them so the user knows what already exists.
+5. **Don't over-capture.** Auto-capture is already running per turn. Don't create a `bm_write` for every response — only for substantive content the user wants preserved.
+6. **Sensitive info.** Don't capture credentials or personal data without confirmation.
 
 ## Footgun
 
