@@ -171,6 +171,17 @@ def _entity_row(
     )
 
 
+def _vector_chunk_section(heading: str, body: str = "vector sync section body content.") -> str:
+    """Build one heading section sized to be its own vector chunk.
+
+    Vector chunks split on headings and the size budget, not per bullet, so
+    multi-chunk fixtures use sized heading sections: each is long enough that
+    adjacent sections never pack into one chunk, yet short enough to avoid the
+    long-section windower, so N sections yield N chunks.
+    """
+    return f"## {heading}\n" + " ".join([body] * 15)
+
+
 def _relation_row(
     *,
     project_id: int,
@@ -971,7 +982,9 @@ async def test_sqlite_vector_sync_skips_unchanged_and_reembeds_changed_content(s
             entity_id=111,
             title="Auth and Schema Notes",
             permalink="specs/auth-and-schema",
-            content_stems="# Overview\n- auth token rotation\n- schema migration planning",
+            content_stems=(
+                f"{_vector_chunk_section('Auth')}\n\n{_vector_chunk_section('Schema')}"
+            ),
         )
     )
 
@@ -1011,7 +1024,10 @@ async def test_sqlite_vector_sync_skips_unchanged_and_reembeds_changed_content(s
             entity_id=111,
             title="Auth and Schema Notes",
             permalink="specs/auth-and-schema",
-            content_stems="# Overview\n- auth token rotation\n- database schema migration planning",
+            content_stems=(
+                f"{_vector_chunk_section('Auth')}\n\n"
+                f"{_vector_chunk_section('Schema', 'revised vector section body content.')}"
+            ),
         )
     )
     changed_result = await search_repository.sync_entity_vectors_batch([111])

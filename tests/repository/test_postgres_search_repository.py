@@ -99,6 +99,17 @@ def _oversized_entity_content(section_count: int) -> str:
     return "\n\n".join(f"## Part {index}\n{filler}" for index in range(1, section_count + 1))
 
 
+def _vector_chunk_section(heading: str, body: str = "vector sync section body content.") -> str:
+    """Build one heading section sized to be its own vector chunk.
+
+    Vector chunks split on headings and the size budget, not per bullet, so
+    multi-chunk fixtures use sized heading sections: each is long enough that
+    adjacent sections never pack into one chunk, yet short enough to avoid the
+    long-section windower, so N sections yield N chunks.
+    """
+    return f"## {heading}\n" + " ".join([body] * 15)
+
+
 async def _skip_if_pgvector_unavailable(session_maker) -> None:
     """Skip semantic pgvector tests when extension is not available in test Postgres image."""
     async with db.scoped_session(session_maker) as session:
@@ -671,8 +682,12 @@ async def test_postgres_vector_sync_skips_unchanged_and_reembeds_changed_content
             project_id=test_project.id,
             id=421,
             title="Auth and Schema Notes",
-            content_stems="# Overview\n- auth token rotation\n- schema migration planning",
-            content_snippet="# Overview\n- auth token rotation\n- schema migration planning",
+            content_stems=(
+                f"{_vector_chunk_section('Auth')}\n\n{_vector_chunk_section('Schema')}"
+            ),
+            content_snippet=(
+                f"{_vector_chunk_section('Auth')}\n\n{_vector_chunk_section('Schema')}"
+            ),
             permalink="specs/auth-and-schema",
             file_path="specs/auth-and-schema.md",
             type=SearchItemType.ENTITY.value,
@@ -717,8 +732,14 @@ async def test_postgres_vector_sync_skips_unchanged_and_reembeds_changed_content
             project_id=test_project.id,
             id=421,
             title="Auth and Schema Notes",
-            content_stems="# Overview\n- auth token rotation\n- database schema migration planning",
-            content_snippet="# Overview\n- auth token rotation\n- database schema migration planning",
+            content_stems=(
+                f"{_vector_chunk_section('Auth')}\n\n"
+                f"{_vector_chunk_section('Schema', 'revised vector section body content.')}"
+            ),
+            content_snippet=(
+                f"{_vector_chunk_section('Auth')}\n\n"
+                f"{_vector_chunk_section('Schema', 'revised vector section body content.')}"
+            ),
             permalink="specs/auth-and-schema",
             file_path="specs/auth-and-schema.md",
             type=SearchItemType.ENTITY.value,
@@ -772,7 +793,7 @@ async def test_postgres_litellm_role_change_reembeds_existing_chunks(session_mak
     await repo.init_search_index()
 
     now = datetime.now(timezone.utc)
-    content = "# Retrieval Roles\n- auth token rotation\n- database schema migration planning"
+    content = f"{_vector_chunk_section('Auth')}\n\n{_vector_chunk_section('Schema')}"
     await repo.index_item(
         SearchIndexRow(
             project_id=test_project.id,
