@@ -456,7 +456,9 @@ class PostgresSearchRepository(SearchRepositoryBase):
             while placeholder in query:
                 placeholder += "X"
             quoted_phrases[placeholder] = f"({phrase})"
-            return placeholder
+            # Surround the placeholder so quotes adjacent to plain text become
+            # explicit operands instead of restoring into ``word(group)``.
+            return f" {placeholder} "
 
         result = _QUOTED_QUERY_PATTERN.sub(replace_quoted_phrase, query)
         if '"' in result:
