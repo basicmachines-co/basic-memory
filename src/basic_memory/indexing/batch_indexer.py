@@ -52,6 +52,17 @@ from basic_memory.services.bulk_link_resolver import BulkLinkResolver
 from basic_memory.services.exceptions import SyncFatalError
 
 T = TypeVar("T")
+RUNTIME_RESOURCE_CONTENT_TYPE = "application/octet-stream"
+
+
+def regular_file_content_type(file: IndexInputFile) -> str:
+    """Return a persisted MIME type that cannot reclassify a resource as a note."""
+    if (
+        file.content_type == RUNTIME_MARKDOWN_CONTENT_TYPE
+        and not runtime_file_path_is_markdown_note(Path(file.path).as_posix())
+    ):
+        return RUNTIME_RESOURCE_CONTENT_TYPE
+    return file.content_type or "text/plain"
 
 
 @dataclass(frozen=True, slots=True)
@@ -492,6 +503,7 @@ class BatchIndexer:
 
     async def _upsert_regular_file(self, file: IndexInputFile) -> _PreparedEntity:
         checksum = await self._resolve_checksum(file)
+        content_type = regular_file_content_type(file)
         async with db.scoped_session(self.session_maker) as session:
             existing = await self.entity_repository.get_by_file_path(
                 session, file.path, load_relations=False
@@ -508,7 +520,7 @@ class BatchIndexer:
                 title=Path(file.path).name,
                 created_at=file.created_at or datetime.now().astimezone(),
                 updated_at=file.last_modified or datetime.now().astimezone(),
-                content_type=file.content_type or "text/plain",
+                content_type=content_type,
                 mtime=file.last_modified.timestamp() if file.last_modified else None,
                 size=file.size,
             )
@@ -544,14 +556,19 @@ class BatchIndexer:
             entity_id = existing.id
 
         async with db.scoped_session(self.session_maker) as session:
+            metadata_updates = self._resource_metadata_updates(
+                file,
+                checksum,
+                include_created_at=is_new_entity,
+            )
+            # MIME alone is the downstream note discriminator. A malformed
+            # Markdown basename must therefore be normalized both for new rows
+            # and for poison rows created by older indexers.
+            metadata_updates["content_type"] = content_type
             updated = await self.entity_repository.update(
                 session,
                 entity_id,
-                self._resource_metadata_updates(
-                    file,
-                    checksum,
-                    include_created_at=is_new_entity,
-                ),
+                metadata_updates,
             )
         if updated is None:
             raise ValueError(f"Failed to update file entity metadata for {file.path}")
@@ -561,7 +578,7 @@ class BatchIndexer:
             entity_id=updated.id,
             permalink=updated.permalink,
             checksum=checksum,
-            content_type=file.content_type,
+            content_type=content_type,
             search_content=None,
             markdown_content=None,
             observations=(),
