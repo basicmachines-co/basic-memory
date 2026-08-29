@@ -88,8 +88,18 @@ def _recorder(
     )
 
 
-def _result(status: IndexFileJobStatus, entity_id: int | None) -> IndexFileJobResult:
-    return IndexFileJobResult(status=status, reason="file indexed", entity_id=entity_id)
+def _result(
+    status: IndexFileJobStatus,
+    entity_id: int | None,
+    *,
+    content_superseded: bool = False,
+) -> IndexFileJobResult:
+    return IndexFileJobResult(
+        status=status,
+        reason="file indexed",
+        entity_id=entity_id,
+        content_superseded=content_superseded,
+    )
 
 
 async def test_processed_file_embeds_and_resolves_when_enabled() -> None:
@@ -111,6 +121,20 @@ async def test_processed_file_skips_embedding_when_disabled() -> None:
     await recorder.index_file_completed(_operation(), _result(IndexFileJobStatus.processed, 42))
 
     # Relation repair still runs; embedding is gated off.
+    assert search.batches == []
+    assert relations.resolve_calls == 1
+
+
+async def test_superseded_file_skips_embedding_when_enabled() -> None:
+    search = StubSearchService()
+    relations = StubRelationRuntime()
+    recorder = _recorder(search, relations, index_embeddings=True)
+
+    await recorder.index_file_completed(
+        _operation(),
+        _result(IndexFileJobStatus.processed, 42, content_superseded=True),
+    )
+
     assert search.batches == []
     assert relations.resolve_calls == 1
 

@@ -25,7 +25,6 @@ from basic_memory.indexing.file_indexer import (
     MAX_NOTE_CONTENT_INDEX_ATTEMPTS,
     IndexMarkdownEntityRepository,
     IndexMarkdownNoteContentReconciler,
-    NoteContentChangedDuringIndexError,
 )
 from basic_memory.indexing.index_batch_runtime import (
     IndexBatchRuntime,
@@ -69,7 +68,11 @@ from basic_memory.repository.accepted_note_vector_cleanup import (
     ProjectIndexExternalVectorCleaner,
 )
 from basic_memory.repository.search_repository import create_search_repository
-from basic_memory.runtime.storage import ProjectId, RuntimeFilePath
+from basic_memory.runtime.storage import (
+    ProjectId,
+    RuntimeFilePath,
+    runtime_file_path_is_markdown_note,
+)
 from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.services import EntityService, FileService
 from basic_memory.services.bulk_link_resolver import BulkLinkResolver
@@ -282,7 +285,9 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
         source: str,
     ) -> FileIndexResult:
         """Read and index the current file with markdown-specific reconciliation when needed."""
-        if self.file_service.is_markdown(file_path):
+        if self.file_service.is_markdown(file_path) and runtime_file_path_is_markdown_note(
+            file_path
+        ):
             return await self.index_markdown_file(file_path, source=source)
 
         return await self.index_regular_file(file_path, source=source)
@@ -303,6 +308,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
                 load_relations=False,
             )
         operation = FileIndexOperation.created if existing is None else FileIndexOperation.updated
+        content_superseded = False
 
         for attempt in range(MAX_NOTE_CONTENT_INDEX_ATTEMPTS):
             if attempt > 0:
@@ -334,6 +340,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             # Why: retrying identical bytes cannot make that file lineage current.
             # Outcome: preserve accepted relations and finish without publishing this pass.
             if reconciliation.status == "deferred":
+                content_superseded = True
                 break
 
             if reconciliation.generation is not None:
@@ -352,8 +359,13 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
                 reconciliation_status=reconciliation.status,
             )
         else:
-            raise NoteContentChangedDuringIndexError(
-                f"Note content changed repeatedly while indexing {file_path}"
+            # A hot note already has a newer coalesced write waiting. Returning
+            # the last coherent snapshot prevents futile whole-job retries.
+            content_superseded = True
+            logger.info(
+                "Finished markdown index with superseded derived state: {}",
+                file_path,
+                entity_id=synced.entity.id,
             )
 
         logger.info(
@@ -373,6 +385,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             permalink=synced.entity.permalink,
             checksum=synced.checksum,
             operation=operation,
+            content_superseded=content_superseded,
         )
 
     async def index_regular_file(

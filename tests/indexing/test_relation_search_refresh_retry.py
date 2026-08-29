@@ -8,7 +8,10 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory import db
-from basic_memory.indexing.relation_resolution import RepositoryRelationResolutionRuntime
+from basic_memory.indexing.relation_resolution import (
+    RelationSearchRefreshResult,
+    RepositoryRelationResolutionRuntime,
+)
 from basic_memory.models import Entity, Relation, RelationSearchRefresh
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.note_content_repository import (
@@ -151,14 +154,14 @@ async def test_relation_refresh_retries_after_search_write_failure_and_runtime_r
         entities: Sequence[Entity],
         *,
         content_by_entity_id: Mapping[int, str],
-    ) -> None:
+    ) -> RelationSearchRefreshResult:
         nonlocal refresh_attempts
         assert [entity.id for entity in entities] == [source_id]
         assert content_by_entity_id == {source_id: source_content}
         refresh_attempts += 1
         if refresh_attempts == 1:
             raise OSError("transient search refresh failure")
-        await original_index_entities(
+        return await original_index_entities(
             entities,
             content_by_entity_id=content_by_entity_id,
         )

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Awaitable, Callable, Mapping, Sequence, TypeVar
 
 from loguru import logger
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -33,12 +34,16 @@ from basic_memory.indexing.models import (
     IndexInputFile,
     RelationGenerationBatchResult,
 )
-from basic_memory.indexing.relation_resolution import RepositoryRelationResolutionRuntime
+from basic_memory.indexing.relation_resolution import (
+    RelationSearchRefreshResult,
+    RepositoryRelationResolutionRuntime,
+)
 from basic_memory.indexing.relation_persistence import RelationGenerationPublisher
-from basic_memory.models import Entity
+from basic_memory.models import Entity, NoteContent, Relation, RelationSearchRefresh
 from basic_memory.repository import EntityRepository, ObservationRepository, RelationRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
+from basic_memory.repository.relation_repository import lock_note_content_before_entity_mutation
 from basic_memory.runtime.storage import (
     ProjectId,
     RUNTIME_MARKDOWN_CONTENT_TYPE,
@@ -49,6 +54,17 @@ from basic_memory.services.bulk_link_resolver import BulkLinkResolver
 from basic_memory.services.exceptions import SyncFatalError
 
 T = TypeVar("T")
+RUNTIME_RESOURCE_CONTENT_TYPE = "application/octet-stream"
+
+
+def regular_file_content_type(file: IndexInputFile) -> str:
+    """Return a persisted MIME type that cannot reclassify a resource as a note."""
+    if (
+        file.content_type == RUNTIME_MARKDOWN_CONTENT_TYPE
+        and not runtime_file_path_is_markdown_note(Path(file.path).as_posix())
+    ):
+        return RUNTIME_RESOURCE_CONTENT_TYPE
+    return file.content_type or "text/plain"
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,12 +91,19 @@ class RelationResolutionSearchWriter:
         entities: Sequence[Entity],
         *,
         content_by_entity_id: Mapping[int, str],
-    ) -> None:
+    ) -> RelationSearchRefreshResult:
+        missing_content_entity_ids: set[int] = set()
         for entity in sorted(entities, key=lambda item: item.id):
-            await self.search_writer.index_entity_data(
-                entity,
-                content=content_by_entity_id.get(entity.id),
-            )
+            try:
+                await self.search_writer.index_entity_data(
+                    entity,
+                    content=content_by_entity_id.get(entity.id),
+                )
+            except FileNotFoundError:
+                missing_content_entity_ids.add(entity.id)
+        return RelationSearchRefreshResult(
+            missing_content_entity_ids=frozenset(missing_content_entity_ids)
+        )
 
 
 @dataclass(slots=True)
@@ -104,6 +127,7 @@ class _PreparedEntity:
     observations: tuple[IndexedObservation, ...] = ()
     relations: tuple[IndexedRelation, ...] = ()
     resolve_relations: bool = True
+    refresh_search: bool = True
 
 
 @dataclass(slots=True)
@@ -133,6 +157,7 @@ class BatchIndexer:
         self.entity_repository = entity_repository
         self.observation_repository = observation_repository
         self.relation_repository = relation_repository
+        self.note_content_repository = NoteContentRepository(project_id=project_id)
         self.search_service = search_service
         self.file_writer = file_writer
         self.session_maker = session_maker
@@ -145,7 +170,7 @@ class BatchIndexer:
             session_maker=session_maker,
             relation_repository=relation_repository,
             entity_repository=entity_repository,
-            note_content_repository=NoteContentRepository(project_id=project_id),
+            note_content_repository=self.note_content_repository,
             target_resolver=BulkLinkResolver(
                 entity_repository=entity_repository,
                 app_config=app_config,
@@ -482,10 +507,39 @@ class BatchIndexer:
 
     async def _upsert_regular_file(self, file: IndexInputFile) -> _PreparedEntity:
         checksum = await self._resolve_checksum(file)
+        content_type = regular_file_content_type(file)
         async with db.scoped_session(self.session_maker) as session:
             existing = await self.entity_repository.get_by_file_path(
                 session, file.path, load_relations=False
             )
+            existing_note_content = (
+                await NoteContentRepository(
+                    project_id=self.relation_repository.project_id
+                ).get_by_entity_id(session, existing.id)
+                if existing is not None and existing.is_markdown
+                else None
+            )
+            expected_incoming_source_ids = (
+                frozenset(
+                    int(source_id)
+                    for source_id in await session.scalars(
+                        select(Relation.from_id).where(
+                            Relation.project_id == self.relation_repository.project_id,
+                            Relation.to_id == existing.id,
+                            Relation.from_id != existing.id,
+                        )
+                    )
+                )
+                if (
+                    existing is not None
+                    and existing.is_markdown
+                    and content_type != RUNTIME_MARKDOWN_CONTENT_TYPE
+                )
+                else frozenset()
+            )
+        expected_note_db_version = (
+            existing_note_content.db_version if existing_note_content is not None else None
+        )
         is_new_entity = existing is None
 
         if existing is None:
@@ -498,7 +552,7 @@ class BatchIndexer:
                 title=Path(file.path).name,
                 created_at=file.created_at or datetime.now().astimezone(),
                 updated_at=file.last_modified or datetime.now().astimezone(),
-                content_type=file.content_type or "text/plain",
+                content_type=content_type,
                 mtime=file.last_modified.timestamp() if file.last_modified else None,
                 size=file.size,
             )
@@ -534,14 +588,155 @@ class BatchIndexer:
             entity_id = existing.id
 
         async with db.scoped_session(self.session_maker) as session:
+            should_clear_note_state = (
+                existing is not None
+                and existing.is_markdown
+                and content_type != RUNTIME_MARKDOWN_CONTENT_TYPE
+            )
+            if should_clear_note_state:
+                # Accepted-note writers lock NoteContent before Entity. Poison-row
+                # repair must use the same order or the two paths can deadlock.
+                await lock_note_content_before_entity_mutation(
+                    session,
+                    project_id=self.relation_repository.project_id,
+                    entity_ids=tuple(sorted({entity_id, *expected_incoming_source_ids})),
+                )
+                fenced_source_ids = set(
+                    (
+                        await session.scalars(
+                            select(NoteContent.entity_id).where(
+                                NoteContent.project_id == self.relation_repository.project_id,
+                                NoteContent.entity_id.in_(expected_incoming_source_ids),
+                            )
+                        )
+                    ).all()
+                )
+                if fenced_source_ids != expected_incoming_source_ids:
+                    # Legacy sources without NoteContent cannot join the
+                    # canonical source-before-target lock order. Leave their
+                    # inbound relations untouched until a later indexed pass.
+                    return _PreparedEntity(
+                        path=file.path,
+                        entity_id=entity_id,
+                        permalink=existing.permalink,
+                        checksum=existing.checksum or checksum,
+                        content_type=existing.content_type,
+                        search_content=None,
+                        resolve_relations=False,
+                        refresh_search=False,
+                    )
+                locked_note_content = await NoteContentRepository(
+                    project_id=self.relation_repository.project_id
+                ).get_by_entity_id(session, entity_id)
+            else:
+                locked_note_content = None
+            existing = await self.entity_repository.get_by_id(
+                session,
+                entity_id,
+                load_relations=True,
+                lock_for_update=True,
+            )
+            if existing is None:
+                raise ValueError(f"Entity not found before file metadata update: {file.path}")
+            if should_clear_note_state and locked_note_content is None:
+                # A missing row cannot be locked, so recheck after the Entity
+                # fence. A completed bootstrap is now visible and must win;
+                # a still-absent row is a stable legacy poison row we can repair.
+                bootstrapped_note_content = await NoteContentRepository(
+                    project_id=self.relation_repository.project_id
+                ).get_by_entity_id(
+                    session,
+                    entity_id,
+                )
+                if bootstrapped_note_content is not None:
+                    return _PreparedEntity(
+                        path=file.path,
+                        entity_id=existing.id,
+                        permalink=existing.permalink,
+                        checksum=existing.checksum or checksum,
+                        content_type=existing.content_type,
+                        search_content=None,
+                        resolve_relations=False,
+                        refresh_search=False,
+                    )
+            current_incoming_source_ids = {
+                relation.from_id
+                for relation in existing.incoming_relations
+                if relation.from_id != existing.id
+            }
+            if should_clear_note_state and not current_incoming_source_ids.issubset(
+                expected_incoming_source_ids
+            ):
+                # A source published a new inbound edge after the fence snapshot.
+                # Leave this pass non-destructive so a later pass can lock that
+                # source before rewriting its relation.
+                return _PreparedEntity(
+                    path=file.path,
+                    entity_id=existing.id,
+                    permalink=existing.permalink,
+                    checksum=existing.checksum or checksum,
+                    content_type=existing.content_type,
+                    search_content=None,
+                    resolve_relations=False,
+                    refresh_search=False,
+                )
+            if (
+                should_clear_note_state
+                and (locked_note_content.db_version if locked_note_content is not None else None)
+                != expected_note_db_version
+            ):
+                # A newer accepted Markdown generation landed after the initial
+                # classification read. This resource pass no longer owns cleanup.
+                return _PreparedEntity(
+                    path=file.path,
+                    entity_id=existing.id,
+                    permalink=existing.permalink,
+                    checksum=existing.checksum or checksum,
+                    content_type=existing.content_type,
+                    search_content=None,
+                    resolve_relations=False,
+                    refresh_search=False,
+                )
+            if (
+                not should_clear_note_state
+                and existing.is_markdown
+                and content_type != RUNTIME_MARKDOWN_CONTENT_TYPE
+            ):
+                # A newer Markdown pass won between the initial classification
+                # read and this lock. Preserve its canonical state and projections;
+                # this stale resource pass has nothing left to publish.
+                return _PreparedEntity(
+                    path=file.path,
+                    entity_id=existing.id,
+                    permalink=existing.permalink,
+                    checksum=existing.checksum or checksum,
+                    content_type=existing.content_type,
+                    search_content=None,
+                    resolve_relations=False,
+                    refresh_search=False,
+                )
+            if existing.is_markdown and content_type != RUNTIME_MARKDOWN_CONTENT_TYPE:
+                await self._clear_note_only_state(session, existing)
+
+            metadata_updates = self._resource_metadata_updates(
+                file,
+                checksum,
+                include_created_at=is_new_entity,
+            )
+            # MIME alone is the downstream note discriminator. A malformed
+            # Markdown basename must therefore be normalized both for new rows
+            # and for poison rows created by older indexers.
+            metadata_updates.update(
+                content_type=content_type,
+                permalink=None,
+                note_type="file",
+                title=Path(file.path).name,
+                entity_metadata={},
+            )
             updated = await self.entity_repository.update(
                 session,
                 entity_id,
-                self._resource_metadata_updates(
-                    file,
-                    checksum,
-                    include_created_at=is_new_entity,
-                ),
+                metadata_updates,
             )
         if updated is None:
             raise ValueError(f"Failed to update file entity metadata for {file.path}")
@@ -551,12 +746,40 @@ class BatchIndexer:
             entity_id=updated.id,
             permalink=updated.permalink,
             checksum=checksum,
-            content_type=file.content_type,
+            content_type=content_type,
             search_content=None,
             markdown_content=None,
             observations=(),
             relations=(),
             resolve_relations=False,
+        )
+
+    async def _clear_note_only_state(self, session: AsyncSession, entity: Entity) -> None:
+        """Retire semantic projections when a poison Markdown row becomes a resource."""
+        incoming_source_ids = {
+            relation.from_id
+            for relation in entity.incoming_relations
+            if relation.from_id != entity.id
+        }
+        for relation in entity.incoming_relations:
+            relation.to_id = None
+            relation.to_entity = None
+
+        await self.observation_repository.delete_by_fields(session, entity_id=entity.id)
+        await self.relation_repository.delete_by_fields(session, from_id=entity.id)
+        await self.note_content_repository.delete_by_entity_id(session, entity.id)
+        await session.execute(
+            delete(RelationSearchRefresh).where(
+                RelationSearchRefresh.project_id == self.relation_repository.project_id,
+                RelationSearchRefresh.entity_id == entity.id,
+            )
+        )
+        session.add_all(
+            RelationSearchRefresh(
+                project_id=self.relation_repository.project_id,
+                entity_id=source_id,
+            )
+            for source_id in sorted(incoming_source_ids)
         )
 
     # --- Relations ---
@@ -734,17 +957,18 @@ class BatchIndexer:
     async def _refresh_search_index(
         self, prepared: _PreparedEntity, entity: Entity
     ) -> IndexedEntity:
-        try:
-            await self.search_service.index_entity_data(entity, content=prepared.search_content)
-        except SemanticDependenciesMissingError as exc:
-            # Semantic search is optional infrastructure; missing provider deps must not undo
-            # the durable file/entity work that already completed.
-            logger.warning(
-                "Skipping semantic index refresh because dependencies are unavailable",
-                path=prepared.path,
-                entity_id=entity.id,
-                error=str(exc),
-            )
+        if prepared.refresh_search:
+            try:
+                await self.search_service.index_entity_data(entity, content=prepared.search_content)
+            except SemanticDependenciesMissingError as exc:
+                # Semantic search is optional infrastructure; missing provider deps must not undo
+                # the durable file/entity work that already completed.
+                logger.warning(
+                    "Skipping semantic index refresh because dependencies are unavailable",
+                    path=prepared.path,
+                    entity_id=entity.id,
+                    error=str(exc),
+                )
         return IndexedEntity(
             path=prepared.path,
             entity_id=entity.id,
@@ -936,9 +1160,10 @@ class BatchIndexer:
             setattr(entity, key, value)
 
     def _is_markdown(self, file: IndexInputFile) -> bool:
+        path_is_markdown_note = runtime_file_path_is_markdown_note(Path(file.path).as_posix())
         if file.content_type is not None:
-            return file.content_type == RUNTIME_MARKDOWN_CONTENT_TYPE
-        return runtime_file_path_is_markdown_note(Path(file.path).as_posix())
+            return file.content_type == RUNTIME_MARKDOWN_CONTENT_TYPE and path_is_markdown_note
+        return path_is_markdown_note
 
     async def _run_bounded(
         self,
