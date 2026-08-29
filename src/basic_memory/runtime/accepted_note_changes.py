@@ -215,6 +215,11 @@ class RuntimeAcceptedNoteChange(Generic[_PayloadT_co]):
     payload: _PayloadT_co
     materialization: RuntimePendingNoteMaterialization | None = None
     file_delete: RuntimePendingNoteFileDelete | None = None
+    # Surviving notes whose relations pointed at a deleted target. Their search
+    # rows still carry the deleted entity's id/title, so the runtime re-indexes
+    # them after commit — the same repair the watcher and directory delete paths
+    # run (#1351). Empty for every non-delete change.
+    relation_cleanup_entity_ids: frozenset[RuntimeEntityId] = frozenset()
 
 
 def plan_accepted_note_delete_change(

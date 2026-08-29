@@ -79,6 +79,9 @@ from basic_memory.indexing.directory_delete_runner import (
 )
 from basic_memory.indexing.index_file_runner import IndexFileExecutor
 from basic_memory.indexing.models import StorageIndexFileWriter
+from basic_memory.indexing.project_index_maintenance import (
+    RepositoryProjectIndexMovedEntitySearchRefresher,
+)
 from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.services import EntityService, ProjectService
@@ -509,6 +512,8 @@ async def get_note_content_materialization_provider(
     ],
     file_service: FileServiceV2ExternalDep,
     file_indexer: IndexFileExecutorV2ExternalDep,
+    entity_repository: EntityRepositoryV2ExternalDep,
+    search_service: SearchServiceV2ExternalDep,
     session_maker: SessionMakerDep,
     app_config: AppConfigDep,
     relation_resolution_scheduler: RelationResolutionSchedulerDep,
@@ -529,6 +534,11 @@ async def get_note_content_materialization_provider(
         test_mode=app_config.is_test_env,
         materialization_workers=app_config.materialization_workers,
         relation_resolution_scheduler=relation_resolution_scheduler,
+        relation_cleanup_refresher=RepositoryProjectIndexMovedEntitySearchRefresher(
+            session_maker=session_maker,
+            entity_repository=entity_repository,
+            entity_indexer=search_service,
+        ),
     )
 
 
