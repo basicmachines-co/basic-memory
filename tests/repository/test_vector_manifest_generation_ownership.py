@@ -195,6 +195,22 @@ async def _index_entity(
     )
 
 
+def _vector_chunk_section(heading: str, body: str = "vector sync section body content.") -> str:
+    """Build one heading section sized to be its own vector chunk.
+
+    Vector chunks split on headings and the size budget, not per bullet, so
+    multi-chunk fixtures use sized heading sections: each is long enough that
+    adjacent sections never pack into one chunk, yet short enough to avoid the
+    long-section windower, so N sections yield N chunks.
+    """
+    return f"## {heading}\n" + " ".join([body] * 15)
+
+
+def _generation_content(*headings: str) -> str:
+    """Join sized heading sections into one entity body (one chunk per heading)."""
+    return "\n\n".join(_vector_chunk_section(heading) for heading in headings)
+
+
 async def _manifest_rows(session_maker, *, project_id: int, entity_id: int):
     async with db.scoped_session(session_maker) as session:
         result = await session.execute(
@@ -232,7 +248,7 @@ async def test_superseded_manifest_generation_defers_old_job_without_failure(
     await _index_entity(
         owner,
         entity_id=entity_id,
-        content="# Generation A\n- old alpha\n- old beta\n- old gamma",
+        content=_generation_content("Alpha", "Beta", "Gamma", "Delta"),
     )
 
     owner_task = asyncio.create_task(owner.sync_entity_vectors_batch([entity_id]))
@@ -249,7 +265,7 @@ async def test_superseded_manifest_generation_defers_old_job_without_failure(
         await _index_entity(
             successor,
             entity_id=entity_id,
-            content="# Generation B\n- current vector state",
+            content=_generation_content("Current", "State"),
         )
         successor_result = await successor.sync_entity_vectors_batch([entity_id])
         assert successor_result.entities_synced == 1
