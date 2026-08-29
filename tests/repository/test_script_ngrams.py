@@ -83,6 +83,13 @@ def test_analyze_script_query_does_not_require_script_substring_in_word_channel(
     assert query.gram_phrases == (("適者",),)
 
 
+def test_analyze_script_query_preserves_compatibility_bytes_in_mixed_prefix() -> None:
+    query = analyze_script_query("ＡＢＣ適者")
+
+    assert query.word_text == "ＡＢＣ"
+    assert query.gram_phrases == (("適者",),)
+
+
 def test_analyze_script_query_preserves_explicit_boolean_semantics() -> None:
     query = analyze_script_query("OpenAI OR 适者生存")
 
@@ -328,6 +335,28 @@ async def test_search_matches_script_substring_inside_longer_mixed_token(search_
     results = await search_repository.search("foo適者")
 
     assert [result.id for result in results] == [1312]
+
+
+@pytest.mark.asyncio
+async def test_search_preserves_compatibility_bytes_in_mixed_prefix(search_repository) -> None:
+    now = datetime.now(timezone.utc)
+    row = SearchIndexRow(
+        project_id=search_repository.project_id,
+        id=1314,
+        type="entity",
+        file_path="notes/compatibility-prefix-script.md",
+        title="Compatibility prefix script",
+        content_stems="ＡＢＣ適者",
+        content_snippet="ＡＢＣ適者",
+        permalink="notes/compatibility-prefix-script",
+        created_at=now,
+        updated_at=now,
+    )
+    await search_repository.index_item(row)
+
+    results = await search_repository.search("ＡＢＣ適者")
+
+    assert [result.id for result in results] == [1314]
 
 
 @pytest.mark.asyncio

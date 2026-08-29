@@ -115,11 +115,19 @@ def analyze_script_query(text: str) -> ScriptQuery:
         # token unless punctuation creates a new boundary, so requiring it causes false misses.
         word_prefix: list[str] = []
         script_seen = False
-        for character in normalized_token:
-            if is_script_search_character(character):
+        for character in token:
+            normalized_character = unicodedata.normalize("NFKC", character)
+            character_has_script = any(
+                is_script_search_character(unit) for unit in normalized_character
+            )
+            character_has_word = any(
+                unit.isalnum() and not is_script_search_character(unit)
+                for unit in normalized_character
+            )
+            if character_has_script:
                 script_seen = True
                 continue
-            if character.isalnum() or (
+            if character_has_word or (
                 word_prefix and unicodedata.category(character) in {"Mn", "Mc", "Me"}
             ):
                 if not script_seen:
