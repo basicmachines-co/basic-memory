@@ -360,7 +360,15 @@ def require_document_run_identity(
     document: DocumentMarkdownV1,
     run: DocumentIngestionRunMarkdownV1,
 ) -> None:
-    """Fail unless an accepted document and its run note agree on provenance."""
+    """Fail unless an accepted document and its run note agree on provenance.
+
+    This compares frontmatter only. The run note's ``output.raw.checksum`` is
+    deliberately not compared to the document's accepted db_checksum here: a
+    source move re-accepts the document (new checksum) before the run note is
+    rewritten, and a retry between those two steps must still pass identity so
+    the writer can finish the move. Writers compare the raw checksum themselves
+    once they know the pair is not mid-reconcile.
+    """
     run_extraction = run.frontmatter.extraction
     if run_extraction is None:
         raise RuntimeError("Existing raw ingestion run has no extraction metadata")
