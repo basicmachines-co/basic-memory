@@ -210,9 +210,10 @@ matches the middle of `适者生存`, while a query with the characters in a dif
 not. Mixed queries such as `OpenAI 适者生存` require both the word and script terms.
 
 There is no language, tokenizer, or embedding setting to enable. New and edited notes are indexed
-automatically. After upgrading an existing local project, run `bm reindex --search` once to
-populate script terms for notes already in the index. Hosted Cloud projects receive the same
-Postgres analysis through the managed fleet reindex; Cloud users do not run a local command.
+automatically. After upgrading an existing local project, run `bm reindex --full --search` once
+to force every existing note through search indexing and populate its script terms. Hosted Cloud
+projects receive the same Postgres analysis through the managed full fleet reindex; Cloud users
+do not run a local command.
 
 This is lexical matching, independent of the configured embedding model. Vector and hybrid search
 quality in these languages still depends on choosing a multilingual embedding model such as the
