@@ -45,6 +45,12 @@ async def _prune(app_config, *, project: str | None, dry_run: bool, yes: bool) -
     from basic_memory.services.initialization import reconcile_projects_with_config
 
     project_name = project or app_config.default_project
+    # default_project may be unset on purpose (automatic project resolution
+    # disabled); get_project_mode(None) would report it as an unknown cloud
+    # project, which is the wrong message.
+    if not project_name:
+        console.print("[red]No project given and no default project is set; pass --project.[/red]")
+        raise typer.Exit(1)
     if app_config.get_project_mode(project_name) == ProjectMode.CLOUD:
         console.print(
             f"[yellow]Project '{project_name}' is a cloud project.[/yellow]\n"
