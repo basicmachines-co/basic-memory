@@ -471,9 +471,11 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 drop_boolean_words=True,
             )
 
-        # Boolean syntax is the only structure retained from user input. Render
-        # every remaining operand segment from word tokens so spaces and
-        # punctuation cannot create a second, implicit tsquery grammar.
+        # Boolean syntax is the only structure retained from user input. A
+        # whitespace-delimited operand still needs explicit conjunctions, but
+        # PostgreSQL must tokenize structured single operands such as
+        # ``auth-service`` and ``config.json`` exactly as it did before quoted
+        # query normalization.
         normalized_parts: list[str] = []
         for part in re.split(r"(\bAND\b|\bOR\b|\bNOT\b|[()])", result):
             stripped_part = part.strip()
@@ -485,13 +487,16 @@ class PostgresSearchRepository(SearchRepositoryBase):
             if stripped_part in quoted_phrases:
                 normalized_parts.append(stripped_part)
                 continue
-            normalized_parts.append(
-                _render_tsquery_words(
-                    stripped_part,
-                    operator=" & ",
-                    is_prefix=False,
+            if any(character.isspace() for character in stripped_part):
+                normalized_parts.append(
+                    _render_tsquery_words(
+                        stripped_part,
+                        operator=" & ",
+                        is_prefix=False,
+                    )
                 )
-            )
+                continue
+            normalized_parts.append(stripped_part)
         result = " ".join(normalized_parts)
 
         # Replace Boolean operators with tsquery operators while placeholders
