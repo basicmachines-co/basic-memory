@@ -640,6 +640,15 @@ class TestSearchTermPreparation:
                 == "(hello AND world) OR test"
             )
 
+    def test_postgres_boolean_queries_sanitize_quoted_operands(self, search_repository):
+        if not is_postgres_backend(search_repository):
+            pytest.skip("This test is for PostgreSQL tsquery preparation")
+
+        quoted_or = search_repository._prepare_search_term('"foo bar" OR "baz qux"')
+        assert quoted_or == "foo & bar | baz & qux"
+        assert '"' not in quoted_or
+        assert '"' not in search_repository._prepare_search_term('"unbalanced OR phrase')
+
     def test_hyphenated_terms_with_boolean_operators(self, search_repository):
         """Hyphenated terms with Boolean operators should be properly quoted."""
         if is_postgres_backend(search_repository):

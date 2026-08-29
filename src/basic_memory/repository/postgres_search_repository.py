@@ -391,16 +391,27 @@ class PostgresSearchRepository(SearchRepositoryBase):
             "(pour OR french) AND press" -> "(pour | french) & press"
             "coffee NOT decaf" -> "coffee & !decaf"
         """
-        # Replace Boolean operators with tsquery operators
-        # Keep parentheses for grouping
-        result = query
-        result = re.sub(r"\bAND\b", "&", result)
-        result = re.sub(r"\bOR\b", "|", result)
-        # NOT must be converted to "& !" and the ! must be attached to the following term
-        # "Python NOT Django" -> "Python & !Django"
-        result = re.sub(r"\bNOT\s+", "& !", result)
+        # Split on Boolean keywords first, then sanitize each operand using the
+        # same rules as ordinary terms. This keeps user punctuation (including
+        # quotes and unbalanced grouping characters) from reaching to_tsquery.
+        parts = re.split(r"\b(AND|OR|NOT)\b", query, flags=re.IGNORECASE)
+        result: list[str] = []
+        for index, part in enumerate(parts):
+            if index % 2:
+                operator = part.upper()
+                result.append({"AND": "&", "OR": "|", "NOT": "& !"}[operator])
+                continue
 
-        return result
+            operand = part.strip()
+            opening = len(operand) - len(operand.lstrip("("))
+            closing = len(operand) - len(operand.rstrip(")"))
+            operand = operand[opening : len(operand) - closing if closing else None]
+            operand = operand.replace('"', " ").strip()
+            if operand:
+                prepared = self._prepare_single_term(operand, is_prefix=False)
+                result.append("(" * opening + prepared + ")" * closing)
+
+        return " ".join(result).replace("& ! ", "& !")
 
     def _prepare_single_term(self, term: str, is_prefix: bool = True) -> str:
         """Prepare a single search term for tsquery.
