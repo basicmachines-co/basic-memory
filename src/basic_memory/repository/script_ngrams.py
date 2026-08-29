@@ -96,7 +96,8 @@ def analyze_script_query(text: str) -> ScriptQuery:
     # operand into a second SQL channel would otherwise change OR/NOT semantics.
     # Compatibility forms are natural-language text because neither backend parses
     # their normalized equivalents as operators.
-    if '"' in text or any(f" {operator} " in text for operator in ("AND", "OR", "NOT")):
+    padded_text = f" {text} "
+    if '"' in text or any(f" {operator} " in padded_text for operator in ("AND", "OR", "NOT")):
         return ScriptQuery(word_text=text, gram_phrases=())
 
     word_characters: list[str] = []

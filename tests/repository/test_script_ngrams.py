@@ -69,6 +69,14 @@ def test_analyze_script_query_preserves_explicit_boolean_semantics() -> None:
     assert query.gram_phrases == ()
 
 
+@pytest.mark.parametrize("text", ["NOT 生存", "生存 OR"])
+def test_analyze_script_query_preserves_boundary_boolean_operators(text: str) -> None:
+    query = analyze_script_query(text)
+
+    assert query.word_text == text
+    assert query.gram_phrases == ()
+
+
 def test_analyze_script_query_treats_lowercase_boolean_words_as_natural_language() -> None:
     query = analyze_script_query("OpenAI and 适者生存")
 
