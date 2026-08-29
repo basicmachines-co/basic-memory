@@ -886,3 +886,41 @@ async def test_run_recovery_materialization_does_not_revert_newer_accepted_versi
     assert row.db_version == 2
     assert row.markdown_content == "# Newer accepted v2\n"
     assert row.file_write_status == "writing"
+
+
+def _filesystem_is_case_insensitive(directory) -> bool:
+    probe = directory / "CaseProbe.md"
+    probe.write_text("probe")
+    try:
+        return (directory / "caseprobe.md").exists()
+    finally:
+        probe.unlink()
+
+
+@pytest.mark.asyncio
+async def test_inline_delete_adopts_accepted_casing_for_case_only_rename(tmp_path) -> None:
+    """A case-only rename must leave the directory entry spelled the accepted way (#1281).
+
+    The atomic write replaces bytes through the existing entry, so the entry keeps
+    the old casing; without an explicit rename the next scan reads it as a move
+    back and the rename silently never happens.
+    """
+    if not _filesystem_is_case_insensitive(tmp_path):
+        pytest.skip("requires a case-insensitive filesystem")
+    content = b"# Config\n"
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "config.md").write_bytes(content)
+
+    enqueuer = InlineNoteFileDeleteEnqueuer(LocalNoteContentStorage(FileService(tmp_path)))
+    await enqueuer.enqueue_note_file_delete(
+        RuntimeNoteFileDeleteJobRequest(
+            project_id=1,
+            entity_id=7,
+            file_path="docs/config.md",
+            file_checksum=sha256(content).hexdigest(),
+            live_file_path="docs/Config.md",
+        )
+    )
+
+    assert [p.name for p in (tmp_path / "docs").iterdir()] == ["Config.md"]
+    assert (tmp_path / "docs" / "Config.md").read_bytes() == content

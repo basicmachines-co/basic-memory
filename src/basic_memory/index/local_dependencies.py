@@ -201,6 +201,7 @@ class LocalIndexEntityService(Protocol):
         file_path: Path | str,
         markdown: EntityMarkdown | None = None,
         skip_conflict_check: bool = False,
+        current_file_path: str | None = None,
         session: AsyncSession | None = None,
     ) -> str: ...
 

@@ -298,6 +298,7 @@ class EntityService(BaseService[EntityModel]):
         file_path: Permalink | Path,
         markdown: Optional[EntityMarkdown] = None,
         skip_conflict_check: bool = False,
+        current_file_path: str | None = None,
         session: AsyncSession | None = None,
     ) -> str:
         """Delegate permalink resolution to the shared preparation capability."""
@@ -305,6 +306,7 @@ class EntityService(BaseService[EntityModel]):
             file_path,
             markdown,
             skip_conflict_check=skip_conflict_check,
+            current_file_path=current_file_path,
             session=session,
         )
 

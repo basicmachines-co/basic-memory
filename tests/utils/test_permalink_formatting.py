@@ -191,3 +191,29 @@ async def test_entity_service_workspace_permalink_uses_project_when_prefixes_dis
 
     project_permalink = generate_permalink(project_config.name)
     assert permalink == f"team-paul/{project_permalink}/team/no-project-prefix-service"
+
+
+@pytest.mark.asyncio
+async def test_resolve_permalink_keeps_the_permalink_the_entity_already_owns(
+    entity_service: EntityService,
+):
+    """Re-resolving a row to its own slug (a case-only rename) must not suffix it (#1281)."""
+    from basic_memory.models import Entity
+    from basic_memory import db
+
+    async with db.scoped_session(entity_service.session_maker) as session:
+        entity = Entity(
+            title="Config",
+            note_type="note",
+            file_path="docs/config.md",
+            permalink="docs/config",
+            content_type="text/markdown",
+            project_id=entity_service.repository.project_id,
+        )
+        session.add(entity)
+
+    assert await entity_service.resolve_permalink("docs/Config.md") == "docs/config-1"
+    assert (
+        await entity_service.resolve_permalink("docs/Config.md", current_file_path="docs/config.md")
+        == "docs/config"
+    )
