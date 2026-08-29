@@ -110,6 +110,7 @@ def raw_document() -> DocumentMarkdownV1:
                 run_id=RUN_ID,
                 input_checksum=SOURCE_CHECKSUM,
             ),
+            bm_parse_semantics=False,
         ),
         body="# Extracted report\r\n\r\n- [accidental] not an observation\r\n\r\n[[Not a relation]]\r\n",
     )
@@ -262,6 +263,8 @@ def test_document_frontmatter_requires_consistent_trusted_metadata() -> None:
                 },
             }
         )
+    with pytest.raises(ValidationError, match="bm_parse_semantics"):
+        DocumentNoteFrontmatterV1.model_validate({**frontmatter_data, "bm_parse_semantics": True})
     without_canonical_timestamps = DocumentNoteFrontmatterV1.model_validate(
         {**frontmatter_data, "created": None, "modified": None}
     )
@@ -510,6 +513,7 @@ def test_agent_enrichment_preserves_provenance_and_requires_raw_checksum() -> No
     assert enriched.frontmatter.created == raw.frontmatter.created
     assert enriched.frontmatter.modified == raw.frontmatter.modified
     assert enriched.frontmatter.tags == ("document", "pdf", "imported", "quarterly")
+    assert enriched.frontmatter.bm_parse_semantics is True
     assert "- [summary] Revenue increased. #finance (reported result)" in enriched.body
     assert "- references [[Finance plan]] (supporting plan)" in enriched.body
 
@@ -634,7 +638,40 @@ def test_agent_payload_rejects_unsafe_relation_targets() -> None:
 
 
 @pytest.mark.asyncio
-async def test_raw_note_uses_normal_graph_semantics(tmp_path) -> None:
+async def test_raw_extraction_body_stays_out_of_graph_only_via_opt_out(tmp_path) -> None:
+    """Regression for the Codex P1 on #1178.
+
+    A serialized raw extraction whose body carries observation, hashtag, and wiki-link
+    syntax must parse through the real EntityParser with zero graph semantics while the
+    body text survives for search. The control parse of the same note with the opt-out
+    stripped MUST mint them, proving bm_parse_semantics is the operative suppression.
+    """
+    parser = EntityParser(tmp_path)
+    raw = DocumentMarkdownV1(
+        frontmatter=raw_document().frontmatter,
+        body="# Extracted\n\n- [result] something #hashtag\n\nSee [[Some Note]].\n",
+    )
+    markdown = assemble_document_markdown(raw)
+    assert "bm_parse_semantics: false" in markdown
+
+    parsed = await parser.parse_markdown_content(tmp_path / "raw-doc.md", markdown)
+    assert parsed.observations == []
+    assert parsed.relations == []
+    assert parsed.content is not None
+    assert "- [result] something #hashtag" in parsed.content
+    assert "[[Some Note]]" in parsed.content
+
+    without_opt_out = "\n".join(
+        line for line in markdown.splitlines() if not line.startswith("bm_parse_semantics:")
+    )
+    control = await parser.parse_markdown_content(tmp_path / "control-doc.md", without_opt_out)
+    assert [observation.content for observation in control.observations] == ["something #hashtag"]
+    assert "hashtag" in (control.observations[0].tags or [])
+    assert [relation.target for relation in control.relations] == ["Some Note"]
+
+
+@pytest.mark.asyncio
+async def test_raw_search_only_note_does_not_mint_graph_semantics(tmp_path) -> None:
     parser = EntityParser(tmp_path)
     raw = raw_document()
 
@@ -645,10 +682,8 @@ async def test_raw_note_uses_normal_graph_semantics(tmp_path) -> None:
 
     assert parsed_raw.content is not None
     assert "accidental" in parsed_raw.content
-    assert [observation.content for observation in parsed_raw.observations] == [
-        "not an observation"
-    ]
-    assert [relation.target for relation in parsed_raw.relations] == ["Not a relation"]
+    assert parsed_raw.observations == []
+    assert parsed_raw.relations == []
 
     raw_checksum = document_markdown_checksum(assemble_document_markdown(raw))
     enriched = enrich_document_markdown(
