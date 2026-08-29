@@ -34,6 +34,7 @@ class FakeSession:
 
     def __init__(self) -> None:
         self.rollback_count = 0
+        self.get = AsyncMock(return_value=SimpleNamespace(is_markdown=True))
 
     async def rollback(self) -> None:
         self.rollback_count += 1
@@ -125,6 +126,42 @@ async def test_reconciler_converges_after_concurrent_create_conflict() -> None:
         last_materialization_error=None,
         last_materialization_attempt_at=None,
     )
+
+
+@pytest.mark.asyncio
+async def test_reconciler_does_not_bootstrap_reclassified_resource() -> None:
+    """A resource reclassification that wins the Entity lock blocks bootstrap."""
+    repository = SimpleNamespace(
+        get_by_entity_id=AsyncMock(return_value=None),
+        create=AsyncMock(),
+        update_state_fields=AsyncMock(),
+    )
+    session = FakeSession()
+    session.get.return_value = SimpleNamespace(is_markdown=False)
+
+    @asynccontextmanager
+    async def fake_scoped_session(_session_maker: object):
+        yield session
+
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.setattr(
+            "basic_memory.indexing.note_content_reconciler.db.scoped_session",
+            fake_scoped_session,
+        )
+        outcome = await NoteContentReconciler(
+            note_content_repository=cast(Any, repository),
+            session_maker=cast(Any, object()),
+        ).reconcile(
+            entity=cast(Entity, SimpleNamespace(id=42)),
+            markdown_content="# Stale Markdown\n",
+            observed_at=datetime(2026, 4, 13, 15, 0, tzinfo=UTC),
+            source="file_indexer",
+        )
+
+    session.get.assert_awaited_once_with(Entity, 42, with_for_update=True)
+    repository.create.assert_not_awaited()
+    assert outcome.status == "stale"
+    assert outcome.generation is None
 
 
 @pytest.mark.asyncio

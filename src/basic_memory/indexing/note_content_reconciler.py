@@ -30,7 +30,7 @@ from basic_memory.indexing.note_content_reconciliation import (
     bootstrap_note_content_plan,
     plan_existing_note_content_reconciliation,
 )
-from basic_memory.models import NoteContent
+from basic_memory.models import Entity, NoteContent
 from basic_memory.repository import NoteContentRepository
 from basic_memory.runtime.storage import ProjectId, RuntimeEntityId, RuntimeFilePath
 
@@ -351,6 +351,20 @@ class NoteContentReconciler:
                     return NoteContentReconciliationResult.stale()
 
             if note_content is None:
+                # Missing NoteContent cannot itself fence a bootstrap. Lock and
+                # revalidate the Entity so a resource reclassification that won
+                # the race cannot receive canonical Markdown state afterward.
+                locked_entity = await session.get(
+                    Entity,
+                    entity.id,
+                    with_for_update=True,
+                )
+                if locked_entity is None or not locked_entity.is_markdown:
+                    logger.debug(
+                        "Skipped note_content bootstrap for non-Markdown entity {}",
+                        entity.id,
+                    )
+                    return NoteContentReconciliationResult.stale()
                 bootstrap = bootstrap_note_content_plan(observed=observed)
 
                 try:
