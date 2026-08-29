@@ -91,14 +91,15 @@ def analyze_script_query(text: str) -> ScriptQuery:
     # Explicit Boolean expressions keep the existing backend parser. Splitting one
     # operand into a second SQL channel would otherwise change OR/NOT semantics.
     if '"' in normalized or set(normalized.split()) & {"AND", "OR", "NOT"}:
-        return ScriptQuery(word_text=normalized, gram_phrases=())
+        return ScriptQuery(word_text=text, gram_phrases=())
 
     word_characters: list[str] = []
     in_script_run = False
-    for character in normalized:
+    for character in text:
         if in_script_run and unicodedata.category(character) in {"Mn", "Mc", "Me"}:
             continue
-        if is_script_search_character(character):
+        normalized_character = unicodedata.normalize("NFKC", character)
+        if any(is_script_search_character(unit) for unit in normalized_character):
             if not in_script_run:
                 word_characters.append(" ")
             in_script_run = True

@@ -79,6 +79,13 @@ def test_analyze_script_query_preserves_quoted_mixed_script_semantics() -> None:
     assert query.gram_phrases == ()
 
 
+def test_analyze_script_query_preserves_compatibility_characters_in_word_text() -> None:
+    query = analyze_script_query("ＡＢＣ ﬁnance 适者生存")
+
+    assert query.word_text == "ＡＢＣ ﬁnance"
+    assert query.gram_phrases == (("适者", "者生", "生存"),)
+
+
 @pytest.mark.asyncio
 async def test_search_matches_cjk_substring_without_matching_reordered_characters(
     search_repository,
@@ -203,6 +210,30 @@ async def test_quoted_mixed_script_search_preserves_phrase_adjacency(search_repo
     results = await search_repository.search('"OpenAI 适者生存"')
 
     assert [result.id for result in results] == [1298]
+
+
+@pytest.mark.asyncio
+async def test_word_search_preserves_nfkc_sensitive_compatibility_characters(
+    search_repository,
+) -> None:
+    now = datetime.now(timezone.utc)
+    row = SearchIndexRow(
+        project_id=search_repository.project_id,
+        id=1301,
+        type="entity",
+        file_path="notes/compatibility.md",
+        title="Compatibility",
+        content_stems="ＡＢＣ ﬁnance",
+        content_snippet="ＡＢＣ ﬁnance",
+        permalink="notes/compatibility",
+        created_at=now,
+        updated_at=now,
+    )
+    await search_repository.index_item(row)
+
+    results = await search_repository.search("ＡＢＣ ﬁnance")
+
+    assert [result.id for result in results] == [1301]
 
 
 @pytest.mark.asyncio
