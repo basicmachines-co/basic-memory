@@ -411,3 +411,100 @@ async def test_stale_markdown_snapshot_preserves_newer_note_generation(
     assert note_content is not None
     assert note_content.db_version == 2
     assert note_content.markdown_content == "# Current note"
+
+
+async def test_missing_note_content_fence_preserves_concurrent_bootstrap(
+    monkeypatch,
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+) -> None:
+    project_id = relation_repository.project_id
+    assert project_id is not None
+    now = datetime.now(tz=UTC)
+    note_path = "notes/bootstrap.md"
+    note = Entity(
+        project_id=project_id,
+        title="Bootstrap note",
+        note_type="note",
+        content_type=RUNTIME_MARKDOWN_CONTENT_TYPE,
+        permalink="bootstrap-note",
+        file_path=note_path,
+        checksum="bootstrap-checksum",
+        created_at=now,
+        updated_at=now,
+    )
+    async with db.scoped_session(search_service.session_maker) as session:
+        note = await entity_repository.add(session, note)
+
+    original_get_by_id = entity_repository.get_by_id
+    bootstrapped = False
+
+    async def bootstrap_before_entity_lock(
+        session: AsyncSession,
+        entity_id: int,
+        *,
+        load_relations: bool = True,
+        lock_for_update: bool = False,
+    ) -> Entity | None:
+        nonlocal bootstrapped
+        if lock_for_update and not bootstrapped:
+            await NoteContentRepository(project_id=project_id).create(
+                session,
+                {
+                    "entity_id": note.id,
+                    "markdown_content": "# Accepted during bootstrap",
+                    "db_version": 1,
+                    "db_checksum": "bootstrap-checksum",
+                    "file_write_status": "synced",
+                },
+            )
+            bootstrapped = True
+        return await original_get_by_id(
+            session,
+            entity_id,
+            load_relations=load_relations,
+            lock_for_update=lock_for_update,
+        )
+
+    monkeypatch.setattr(entity_repository, "get_by_id", bootstrap_before_entity_lock)
+    batch_indexer = BatchIndexer(
+        project_id=project_id,
+        app_config=app_config,
+        entity_service=entity_service,
+        entity_repository=entity_repository,
+        observation_repository=entity_service.observation_repository,
+        relation_repository=relation_repository,
+        search_service=search_service,
+        file_writer=StorageIndexFileWriter(storage=file_service),
+        session_maker=search_service.session_maker,
+    )
+
+    result = await batch_indexer.index_files(
+        {
+            note_path: IndexInputFile(
+                path=note_path,
+                content_type=RUNTIME_RESOURCE_CONTENT_TYPE,
+                content=b"stale resource bytes",
+                size=20,
+            )
+        },
+        max_concurrent=1,
+    )
+
+    assert result.errors == []
+    assert result.indexed[0].content_type == RUNTIME_MARKDOWN_CONTENT_TYPE
+    async with db.scoped_session(search_service.session_maker) as session:
+        preserved = await original_get_by_id(session, note.id)
+        note_content = await NoteContentRepository(project_id=project_id).get_by_entity_id(
+            session,
+            note.id,
+        )
+
+    assert preserved is not None
+    assert preserved.is_markdown
+    assert note_content is not None
+    assert note_content.markdown_content == "# Accepted during bootstrap"

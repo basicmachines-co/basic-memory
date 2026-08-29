@@ -614,6 +614,20 @@ class BatchIndexer:
             )
             if existing is None:
                 raise ValueError(f"Entity not found before file metadata update: {file.path}")
+            if should_clear_note_state and locked_note_content is None:
+                # A missing canonical row cannot be fenced against concurrent
+                # bootstrap. Leave the Markdown state intact until a later pass
+                # can lock an accepted NoteContent generation.
+                return _PreparedEntity(
+                    path=file.path,
+                    entity_id=existing.id,
+                    permalink=existing.permalink,
+                    checksum=existing.checksum or checksum,
+                    content_type=existing.content_type,
+                    search_content=None,
+                    resolve_relations=False,
+                    refresh_search=False,
+                )
             current_incoming_source_ids = {
                 relation.from_id
                 for relation in existing.incoming_relations
