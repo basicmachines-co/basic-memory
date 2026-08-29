@@ -120,6 +120,16 @@ async def test_poison_markdown_reclassification_clears_note_only_state(
                 "file_write_status": "synced",
             },
         )
+        await NoteContentRepository(project_id=project_id).create(
+            session,
+            {
+                "entity_id": source.id,
+                "markdown_content": "# Source note",
+                "db_version": 1,
+                "db_checksum": "source-checksum",
+                "file_write_status": "synced",
+            },
+        )
         session.add(
             RelationSearchRefresh(
                 project_id=project_id,
@@ -229,6 +239,100 @@ async def test_poison_markdown_reclassification_clears_note_only_state(
     assert refreshed_inbound.to_id is None
     assert poison_refreshes == []
     assert [refresh.entity_id for refresh in source_refreshes] == [source.id]
+
+
+async def test_unfenced_legacy_inbound_source_defers_poison_cleanup(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+) -> None:
+    project_id = relation_repository.project_id
+    assert project_id is not None
+    now = datetime.now(tz=UTC)
+    poison_path = "_phase7_import/.md"
+    poison = Entity(
+        project_id=project_id,
+        title="Poison note",
+        note_type="note",
+        content_type=RUNTIME_MARKDOWN_CONTENT_TYPE,
+        permalink="poison-note",
+        file_path=poison_path,
+        checksum="old-checksum",
+        created_at=now,
+        updated_at=now,
+    )
+    legacy_source = Entity(
+        project_id=project_id,
+        title="Legacy source",
+        note_type="note",
+        content_type=RUNTIME_MARKDOWN_CONTENT_TYPE,
+        permalink="legacy-source",
+        file_path="notes/legacy-source.md",
+        checksum="legacy-checksum",
+        created_at=now,
+        updated_at=now,
+    )
+    async with db.scoped_session(search_service.session_maker) as session:
+        poison = await entity_repository.add(session, poison)
+        legacy_source = await entity_repository.add(session, legacy_source)
+        inbound = await relation_repository.add(
+            session,
+            Relation(
+                project_id=project_id,
+                from_id=legacy_source.id,
+                to_id=poison.id,
+                to_name="poison-note",
+                relation_type="links-to",
+                generation=0,
+            ),
+        )
+        await NoteContentRepository(project_id=project_id).create(
+            session,
+            {
+                "entity_id": poison.id,
+                "markdown_content": "# Poison note",
+                "db_version": 1,
+                "db_checksum": "old-checksum",
+                "file_write_status": "synced",
+            },
+        )
+
+    batch_indexer = BatchIndexer(
+        project_id=project_id,
+        app_config=app_config,
+        entity_service=entity_service,
+        entity_repository=entity_repository,
+        observation_repository=entity_service.observation_repository,
+        relation_repository=relation_repository,
+        search_service=search_service,
+        file_writer=StorageIndexFileWriter(storage=file_service),
+        session_maker=search_service.session_maker,
+    )
+    result = await batch_indexer.index_files(
+        {
+            poison_path: IndexInputFile(
+                path=poison_path,
+                content_type=RUNTIME_RESOURCE_CONTENT_TYPE,
+                content=b"legacy poison bytes",
+                size=19,
+            )
+        },
+        max_concurrent=1,
+    )
+
+    assert result.errors == []
+    assert result.indexed[0].content_type == RUNTIME_MARKDOWN_CONTENT_TYPE
+    async with db.scoped_session(search_service.session_maker) as session:
+        preserved = await entity_repository.get_by_id(session, poison.id)
+        preserved_inbound = await relation_repository.select_by_id(session, inbound.id)
+
+    assert preserved is not None
+    assert preserved.is_markdown
+    assert preserved_inbound is not None
+    assert preserved_inbound.to_id == poison.id
 
 
 async def test_stale_resource_pass_preserves_newer_markdown_state(

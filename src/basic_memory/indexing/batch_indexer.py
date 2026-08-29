@@ -39,7 +39,7 @@ from basic_memory.indexing.relation_resolution import (
     RepositoryRelationResolutionRuntime,
 )
 from basic_memory.indexing.relation_persistence import RelationGenerationPublisher
-from basic_memory.models import Entity, Relation, RelationSearchRefresh
+from basic_memory.models import Entity, NoteContent, Relation, RelationSearchRefresh
 from basic_memory.repository import EntityRepository, ObservationRepository, RelationRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
@@ -601,6 +601,30 @@ class BatchIndexer:
                     project_id=self.relation_repository.project_id,
                     entity_ids=tuple(sorted({entity_id, *expected_incoming_source_ids})),
                 )
+                fenced_source_ids = set(
+                    (
+                        await session.scalars(
+                            select(NoteContent.entity_id).where(
+                                NoteContent.project_id == self.relation_repository.project_id,
+                                NoteContent.entity_id.in_(expected_incoming_source_ids),
+                            )
+                        )
+                    ).all()
+                )
+                if fenced_source_ids != expected_incoming_source_ids:
+                    # Legacy sources without NoteContent cannot join the
+                    # canonical source-before-target lock order. Leave their
+                    # inbound relations untouched until a later indexed pass.
+                    return _PreparedEntity(
+                        path=file.path,
+                        entity_id=entity_id,
+                        permalink=existing.permalink,
+                        checksum=existing.checksum or checksum,
+                        content_type=existing.content_type,
+                        search_content=None,
+                        resolve_relations=False,
+                        refresh_search=False,
+                    )
                 locked_note_content = await NoteContentRepository(
                     project_id=self.relation_repository.project_id
                 ).get_by_entity_id(session, entity_id)
