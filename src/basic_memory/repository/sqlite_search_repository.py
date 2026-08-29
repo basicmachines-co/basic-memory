@@ -1113,6 +1113,9 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         # set limit on search query
         params["limit"] = limit
         params["offset"] = offset
+        relaxed_search_text = search_text
+        if search_text and "script_text" in params:
+            relaxed_search_text = analyze_script_query(search_text.strip()).word_text
 
         sql = f"""
             SELECT
@@ -1154,7 +1157,9 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             # vector-only.
             # Outcome: one retry with OR-joined prefix terms; bm25 still
             # ranks multi-term matches first.
-            relaxed = self._relaxed_fts_text(search_text) if allow_relaxed and not rows else None
+            relaxed = (
+                self._relaxed_fts_text(relaxed_search_text) if allow_relaxed and not rows else None
+            )
             if relaxed and params.get("text"):
                 relaxed_fallback_used = True
                 params["text"] = (
@@ -1167,7 +1172,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 with logfire.span(
                     "search.relaxed_fts_retry",
                     backend="sqlite",
-                    token_count=len(relaxed_query_words(search_text) or ()),
+                    token_count=len(relaxed_query_words(relaxed_search_text) or ()),
                     limit=limit,
                     offset=offset,
                 ):
@@ -1273,12 +1278,17 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         )
         sql = f"SELECT COUNT(*) FROM {from_clause} WHERE {where_clause}"
         logger.trace(f"Count {sql} params: {params}")
+        relaxed_search_text = search_text
+        if search_text and "script_text" in params:
+            relaxed_search_text = analyze_script_query(search_text.strip()).word_text
         try:
             async with db.scoped_session(self.session_maker) as session:
                 result = await session.execute(text(sql), params)
                 total = int(result.scalar_one())
                 relaxed = (
-                    self._relaxed_fts_text(search_text) if allow_relaxed and total == 0 else None
+                    self._relaxed_fts_text(relaxed_search_text)
+                    if allow_relaxed and total == 0
+                    else None
                 )
                 if relaxed and params.get("text"):
                     params["text"] = (
@@ -1289,7 +1299,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                     with logfire.span(
                         "search.count.relaxed_fts_retry",
                         backend="sqlite",
-                        token_count=len(relaxed_query_words(search_text) or ()),
+                        token_count=len(relaxed_query_words(relaxed_search_text) or ()),
                     ):
                         result = await session.execute(text(sql), params)
                         total = int(result.scalar_one())

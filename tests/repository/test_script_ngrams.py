@@ -371,6 +371,35 @@ async def test_sqlite_mixed_search_requires_all_words_in_one_column(search_repos
 
 
 @pytest.mark.asyncio
+async def test_sqlite_relaxed_search_keeps_word_and_script_channels_distinct(
+    search_repository,
+) -> None:
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("SQLite-specific relaxed FTS5 regression")
+
+    now = datetime.now(timezone.utc)
+    row = SearchIndexRow(
+        project_id=search_repository.project_id,
+        id=1312,
+        type="entity",
+        file_path="notes/script-only.md",
+        title="Script only",
+        content_stems="適者",
+        content_snippet="適者",
+        permalink="notes/script-only",
+        created_at=now,
+        updated_at=now,
+    )
+    await search_repository.index_item(row)
+
+    results = await search_repository.search("missing 適者", allow_relaxed=True)
+    total = await search_repository.count("missing 適者", allow_relaxed=True)
+
+    assert results == []
+    assert total == 0
+
+
+@pytest.mark.asyncio
 async def test_search_ranking_includes_every_script_run(search_repository) -> None:
     now = datetime.now(timezone.utc)
     row = SearchIndexRow(
