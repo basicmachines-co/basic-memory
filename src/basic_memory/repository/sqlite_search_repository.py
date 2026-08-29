@@ -43,6 +43,9 @@ from basic_memory.repository.sqlite_vec_index import SQLiteVecIndex
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 
+SQLITE_WORD_COLUMNS = "{title content_stems content_snippet}"
+
+
 class SQLiteSearchRepository(SearchRepositoryBase):
     """SQLite FTS5 implementation of search repository.
 
@@ -797,14 +800,11 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 script_query = analyze_script_query(search_text.strip())
                 if script_query.word_text:
                     # Use _prepare_search_term to handle both Boolean and non-Boolean queries.
-                    params["text"] = self._prepare_search_term(script_query.word_text)
+                    prepared_text = self._prepare_search_term(script_query.word_text)
+                    params["text"] = f"{SQLITE_WORD_COLUMNS}: ({prepared_text})"
                     # content_stems is capped for Postgres index-row compatibility, while
                     # SQLite stores the complete note body in its FTS5 content_snippet column.
-                    match_conditions.append(
-                        "(search_index.title MATCH :text OR "
-                        "search_index.content_stems MATCH :text OR "
-                        "search_index.content_snippet MATCH :text)"
-                    )
+                    match_conditions.append("search_index MATCH :text")
                 for index, phrase in enumerate(script_query.gram_phrases):
                     param_name = f"script_phrase_{index}"
                     params[param_name] = f'"{" ".join(phrase)}"'
@@ -974,13 +974,14 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         # Trigger: SQLite rejects some Boolean combinations of MATCH predicates,
         # including a word-field OR expression combined with the script channel.
         # Why: each MATCH must be evaluated in an FTS-valid query context.
-        # Outcome: intersect rowid subqueries when a search has multiple FTS clauses.
+        # Outcome: keep one outer MATCH for bm25 ranking and intersect the rest by rowid.
         if len(match_conditions) > 1:
+            ranked_match, *additional_matches = match_conditions
             conditions.extend(
                 f"search_index.rowid IN (SELECT rowid FROM search_index WHERE {match_condition})"
-                for match_condition in match_conditions
+                for match_condition in additional_matches
             )
-            match_conditions = []
+            match_conditions = [ranked_match]
 
         # Trigger: SQLite FTS MATCH predicates combined with JOINs can fail with
         # "unable to use function MATCH in the requested context".
@@ -1110,7 +1111,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             relaxed = self._relaxed_fts_text(search_text) if allow_relaxed and not rows else None
             if relaxed and params.get("text"):
                 relaxed_fallback_used = True
-                params["text"] = relaxed
+                params["text"] = f"{SQLITE_WORD_COLUMNS}: ({relaxed})"
                 logger.debug(
                     "Strict SQLite FTS returned 0 results; retrying relaxed FTS query "
                     f"strict='{search_text}' relaxed='{relaxed}'"
@@ -1226,7 +1227,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                     self._relaxed_fts_text(search_text) if allow_relaxed and total == 0 else None
                 )
                 if relaxed and params.get("text"):
-                    params["text"] = relaxed
+                    params["text"] = f"{SQLITE_WORD_COLUMNS}: ({relaxed})"
                     with logfire.span(
                         "search.count.relaxed_fts_retry",
                         backend="sqlite",

@@ -44,7 +44,7 @@ def test_script_runs_attach_combining_marks_to_the_previous_unit() -> None:
 
 
 def test_build_script_ngrams_keeps_runs_from_matching_across_boundaries() -> None:
-    assert build_script_ngrams("适者", "生存") == "适者 bm_script_boundary 生存"
+    assert build_script_ngrams("适者", "生存") == ("适 者 适者 bm_script_boundary 生 存 生存")
 
 
 def test_analyze_script_query_separates_word_and_ordered_script_terms() -> None:
@@ -64,6 +64,13 @@ def test_analyze_script_query_preserves_explicit_boolean_semantics() -> None:
     assert query.gram_phrases == ()
 
 
+def test_analyze_script_query_treats_lowercase_boolean_words_as_natural_language() -> None:
+    query = analyze_script_query("OpenAI and 适者生存")
+
+    assert query.word_text == "OpenAI and"
+    assert query.gram_phrases == (("适者", "者生", "生存"),)
+
+
 @pytest.mark.asyncio
 async def test_search_matches_cjk_substring_without_matching_reordered_characters(
     search_repository,
@@ -75,8 +82,8 @@ async def test_search_matches_cjk_substring_without_matching_reordered_character
         type="entity",
         file_path="notes/evolution.md",
         title="進化について",
-        content_stems="OpenAI 即适者生存的讨论",
-        content_snippet="OpenAI 即适者生存的讨论",
+        content_stems="OpenAI and 即适者生存的讨论与黑猫",
+        content_snippet="OpenAI and 即适者生存的讨论与黑猫",
         permalink="notes/evolution",
         created_at=now,
         updated_at=now,
@@ -85,7 +92,46 @@ async def test_search_matches_cjk_substring_without_matching_reordered_character
 
     assert [result.id for result in await search_repository.search("适者生存")] == [1294]
     assert [result.id for result in await search_repository.search("OpenAI 适者生存")] == [1294]
+    assert [result.id for result in await search_repository.search("OpenAI and 适者生存")] == [1294]
+    assert [result.id for result in await search_repository.search("猫")] == [1294]
     assert await search_repository.search("适生者存") == []
+
+
+@pytest.mark.asyncio
+async def test_mixed_word_and_script_search_preserves_fts_ranking(search_repository) -> None:
+    now = datetime.now(timezone.utc)
+    rows = [
+        SearchIndexRow(
+            project_id=search_repository.project_id,
+            id=1296,
+            type="entity",
+            file_path="notes/strong-match.md",
+            title="OpenAI OpenAI OpenAI",
+            content_stems="OpenAI 即适者生存",
+            content_snippet="OpenAI 即适者生存",
+            permalink="notes/strong-match",
+            created_at=now,
+            updated_at=now,
+        ),
+        SearchIndexRow(
+            project_id=search_repository.project_id,
+            id=1297,
+            type="entity",
+            file_path="notes/weaker-match.md",
+            title="Weaker match",
+            content_stems="OpenAI 即适者生存",
+            content_snippet="OpenAI 即适者生存",
+            permalink="notes/weaker-match",
+            created_at=now,
+            updated_at=now,
+        ),
+    ]
+    await search_repository.bulk_index_items(rows)
+
+    results = await search_repository.search("OpenAI 适者生存")
+
+    assert [result.id for result in results] == [1296, 1297]
+    assert all(result.score != 0.0 for result in results)
 
 
 @pytest.mark.asyncio

@@ -73,9 +73,15 @@ def script_run_grams(run: tuple[str, ...]) -> tuple[str, ...]:
 
 def build_script_ngrams(*texts: str | None) -> str:
     """Build portable index text without depending on a database tokenizer."""
-    gram_runs = [
-        " ".join(script_run_grams(run)) for text in texts if text for run in script_runs(text)
-    ]
+    gram_runs: list[str] = []
+    for text in texts:
+        if not text:
+            continue
+        for run in script_runs(text):
+            # Unigrams make a single-character query searchable inside a longer run. Keeping
+            # bigrams together after them preserves ordered phrase matching for longer queries.
+            index_terms = run if len(run) == 1 else (*run, *script_run_grams(run))
+            gram_runs.append(" ".join(index_terms))
     return f" {_SCRIPT_BOUNDARY} ".join(gram_runs)
 
 
@@ -84,7 +90,7 @@ def analyze_script_query(text: str) -> ScriptQuery:
     normalized = unicodedata.normalize("NFKC", text)
     # Explicit Boolean expressions keep the existing backend parser. Splitting one
     # operand into a second SQL channel would otherwise change OR/NOT semantics.
-    if {token.upper() for token in normalized.split()} & {"AND", "OR", "NOT"}:
+    if set(normalized.split()) & {"AND", "OR", "NOT"}:
         return ScriptQuery(word_text=normalized, gram_phrases=())
 
     word_characters: list[str] = []
