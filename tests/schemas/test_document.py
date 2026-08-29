@@ -987,7 +987,15 @@ def test_ingestion_run_requires_consistent_terminal_result() -> None:
 
 @pytest.mark.parametrize(
     "invalid_path",
-    ["/absolute/report.pdf", "docs//report.pdf", "docs\\report.pdf", "docs/report.pdf/"],
+    [
+        "/absolute/report.pdf",
+        "docs//report.pdf",
+        "docs\\report.pdf",
+        "docs/report.pdf/",
+        # Windows drive / rooted paths escape the project root when joined (#1178 review).
+        "C:/outside/report.pdf",
+        "C:outside/report.pdf",
+    ],
 )
 def test_document_paths_reject_noncanonical_values(invalid_path: str) -> None:
     with pytest.raises(ValueError, match="path"):

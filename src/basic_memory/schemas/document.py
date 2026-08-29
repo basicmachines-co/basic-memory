@@ -11,7 +11,7 @@ import json
 import re
 from datetime import date, datetime
 from enum import StrEnum
-from pathlib import PurePosixPath
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Annotated, Literal
 from uuid import NAMESPACE_URL, UUID, uuid5
 
@@ -815,9 +815,15 @@ def _validate_project_relative_path(value: str) -> str:
     if not value or "\\" in value or "\x00" in value:
         raise ValueError("path must be a non-empty POSIX project-relative path")
     path = PurePosixPath(value)
+    # A Windows drive or rooted path ("C:/x", "C:x", "\\x") passes PurePosixPath's
+    # is_absolute() yet escapes the project root when FileService joins it with
+    # base_path, so reject it the way note_move validation does (#1178 review).
+    windows_path = PureWindowsPath(value)
     if (
         not path.parts
         or path.is_absolute()
+        or windows_path.drive
+        or windows_path.is_absolute()
         or ".." in path.parts
         or path.as_posix() != value
         or value.endswith("/")
