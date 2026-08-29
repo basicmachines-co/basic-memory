@@ -765,17 +765,39 @@ class LocalNoteContentMaterializationProvider:
         #      nothing else re-indexes those sources on this path — unlike the watcher
         #      and directory delete paths, which run this same refresh (#1351).
         # Outcome: re-index each surviving source so its relation rows rebuild from
-        #      the now-unresolved relation table state. Failure stays non-fatal: the
-        #      delete already committed, and stale search rows are derived state that
-        #      converges on the source's next edit or a reindex.
+        #      the now-unresolved relation table state.
         if self.relation_cleanup_refresher is not None and accepted.relation_cleanup_entity_ids:
-            try:
-                await self.relation_cleanup_refresher.refresh_moved_entities(
-                    sorted(accepted.relation_cleanup_entity_ids)
-                )
-            except Exception:
-                logger.exception(
-                    "Relation search cleanup failed after accepted note delete",
-                    entity_ids=sorted(accepted.relation_cleanup_entity_ids),
+            if self.test_mode:
+                # Inline only so tests can assert search state synchronously.
+                await self._refresh_relation_cleanup(accepted)
+            else:
+                # Deleting a hub note can leave thousands of inbound links, and each
+                # refresh rereads a markdown file and rewrites its search rows. The
+                # DB delete has already committed, so blocking the 202 on that makes
+                # latency scale with inbound degree. Hand it to the same bounded
+                # worker pool that defers materialization, keyed on the deleted note.
+                _materialization_pool.submit(
+                    self._refresh_relation_cleanup(accepted),
+                    workers=self.materialization_workers,
+                    key=(accepted.file_delete.project_id, accepted.file_delete.entity_id),
                 )
         return accepted
+
+    async def _refresh_relation_cleanup(
+        self,
+        accepted: RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload],
+    ) -> None:
+        """Re-index the surviving relation sources; non-fatal derived-state repair."""
+        if self.relation_cleanup_refresher is None:  # pragma: no cover - guarded by caller
+            return
+        try:
+            await self.relation_cleanup_refresher.refresh_moved_entities(
+                sorted(accepted.relation_cleanup_entity_ids)
+            )
+        except Exception:
+            # Non-fatal: the delete already committed, and stale search rows are
+            # derived state that converges on the source's next edit or a reindex.
+            logger.exception(
+                "Relation search cleanup failed after accepted note delete",
+                entity_ids=sorted(accepted.relation_cleanup_entity_ids),
+            )

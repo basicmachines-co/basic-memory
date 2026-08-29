@@ -257,6 +257,10 @@ def delete_materialization_provider(
         project_external_id=PROJECT_EXTERNAL_ID,
         read_cache=None,
         relation_cleanup_refresher=relation_cleanup_refresher,
+        # test_mode keeps the cleanup inline so these unit tests can assert
+        # synchronously; production defers it to the worker pool (see the
+        # deferral test below).
+        test_mode=True,
     )
 
 
@@ -303,6 +307,42 @@ async def test_materialize_delete_refresh_failure_is_non_fatal() -> None:
     result = await provider.materialize_delete_change(accepted)
 
     assert result is accepted
+
+
+@pytest.mark.asyncio
+async def test_materialize_delete_defers_refresh_off_the_response_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """In production the linker reindex is submitted to the pool, not awaited (#1368 review)."""
+    import basic_memory.index.note_content_materialization as materialization_module
+
+    submitted: list[tuple[object, int, tuple[int, int]]] = []
+
+    class _RecordingPool:
+        def submit(self, work, *, workers, key) -> None:
+            submitted.append((work, workers, key))
+            work.close()  # we assert submission, not execution
+
+    monkeypatch.setattr(materialization_module, "_materialization_pool", _RecordingPool())
+
+    refresher = RecordingRelationCleanupRefresher()
+    provider = LocalNoteContentMaterializationProvider(
+        session_maker=cast(async_sessionmaker[AsyncSession], object()),
+        file_service=cast(FileService, object()),
+        project_external_id=PROJECT_EXTERNAL_ID,
+        read_cache=None,
+        relation_cleanup_refresher=refresher,
+        test_mode=False,
+    )
+
+    accepted = accepted_delete_change(relation_cleanup_entity_ids=frozenset({9, 3}))
+    result = await provider.materialize_delete_change(accepted)
+
+    assert result is accepted
+    # The refresh was handed to the pool, keyed on the deleted note, and NOT run inline.
+    assert len(submitted) == 1
+    assert submitted[0][2] == (7, 42)
+    assert refresher.refreshed == []
 
 
 @pytest.mark.asyncio
