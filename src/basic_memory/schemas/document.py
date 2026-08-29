@@ -260,6 +260,16 @@ class DocumentMarkdownV1(_DocumentContractModel):
     frontmatter: DocumentNoteFrontmatterV1
     body: StrictStr
 
+    @field_validator("body")
+    @classmethod
+    def reject_nul_bytes(cls, value: str) -> str:
+        # A raw extractor can emit NUL; assemble_document_markdown preserves it and
+        # the hosted path writes it to Postgres note_content.markdown_content (TEXT),
+        # which rejects NUL before EntityParser's later cleanup runs (#1178 review).
+        if "\x00" in value:
+            raise ValueError("markdown body must not contain NUL bytes")
+        return value
+
 
 class DocumentRevisionReferenceV1(_DocumentContractModel):
     """One exact Markdown revision referenced by an ingestion-run note."""
@@ -818,6 +828,13 @@ def _normalize_run_identity_text(value: str, *, field_name: str) -> str:
     return normalized
 
 
+_WINDOWS_RESERVED_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{n}" for n in range(1, 10)}
+    | {f"LPT{n}" for n in range(1, 10)}
+)
+
+
 def _validate_project_relative_path(value: str) -> str:
     if not value or "\\" in value or "\x00" in value:
         raise ValueError("path must be a non-empty POSIX project-relative path")
@@ -838,4 +855,13 @@ def _validate_project_relative_path(value: str) -> str:
         or value.endswith("/")
     ):
         raise ValueError("path must be a canonical POSIX project-relative path")
+    # A component that is a Windows reserved device name (CON, NUL, COM1 ...) or
+    # carries an NTFS ":stream" suffix never materializes as a portable sidecar on
+    # Windows; no retry, reindex, or sweep can make it converge (#1178 review).
+    for component in path.parts:
+        if ":" in component:
+            raise ValueError("path components must not contain ':'")
+        stem = component.split(".", 1)[0].upper()
+        if stem in _WINDOWS_RESERVED_NAMES:
+            raise ValueError(f"path component '{component}' is a reserved device name")
     return value

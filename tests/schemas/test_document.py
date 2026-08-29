@@ -985,6 +985,12 @@ def test_ingestion_run_requires_consistent_terminal_result() -> None:
         )
 
 
+def test_document_markdown_body_rejects_nul_bytes() -> None:
+    """A raw extractor's NUL byte must be rejected before it reaches Postgres TEXT (#1178 review)."""
+    with pytest.raises(ValueError, match="NUL"):
+        DocumentMarkdownV1(frontmatter=raw_document().frontmatter, body="# Doc\x00body")
+
+
 @pytest.mark.parametrize(
     "invalid_path",
     [
@@ -999,6 +1005,12 @@ def test_ingestion_run_requires_consistent_terminal_result() -> None:
         " docs/report.pdf",
         "docs/report.pdf ",
         "docs/report.pdf\t",
+        # Windows reserved device names and NTFS stream suffixes never materialize
+        # as portable sidecars (#1178 review).
+        "docs/CON.pdf",
+        "docs/nul",
+        "docs/COM1.txt",
+        "docs/report.pdf:stream",
     ],
 )
 def test_document_paths_reject_noncanonical_values(invalid_path: str) -> None:
