@@ -1832,10 +1832,10 @@ async def test_write_note_does_not_probe_on_overwrite(
 
 
 @pytest.mark.asyncio
-async def test_write_note_survives_similar_note_probe_failure(
+async def test_write_note_survives_expected_similar_note_probe_failure(
     app, test_project, semantic_search_on, stub_search_client
 ):
-    """The note is already written when the probe runs; its failure must not undo that."""
+    """An API refusal or transport failure (ToolError) must not undo a completed write."""
     stub_search_client.error = ToolError("Semantic search is disabled.")
 
     result = await write_note(
@@ -1890,3 +1890,23 @@ async def test_write_note_qualifies_similar_note_permalinks_in_workspace_context
             "file_path": "drafts/Unlinked Draft.md",
         },
     ]
+
+
+@pytest.mark.asyncio
+async def test_write_note_surfaces_unexpected_similar_note_probe_errors(
+    app, test_project, semantic_search_on, stub_search_client
+):
+    """A defect in the probe path stays visible instead of degrading to an empty advisory."""
+    stub_search_client.error = RuntimeError("search response contract changed")
+
+    with pytest.raises(RuntimeError, match="contract changed"):
+        await write_note(
+            project=test_project.name,
+            title="Loud Failure",
+            directory="analysis",
+            content="# Loud Failure\n\nThe write lands; the defect is not hidden.",
+        )
+
+    # The note was created before the probe ran, so it is on disk regardless.
+    content = await read_note("analysis/loud-failure", project=test_project.name)
+    assert "The write lands; the defect is not hidden." in content
