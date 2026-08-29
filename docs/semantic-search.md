@@ -549,6 +549,39 @@ Start with the defaults, then tune only if measurements justify it:
 Changing reranker providers, models, candidate counts, or document caps does
 not change stored embeddings, so it does not require `bm reindex --embeddings`.
 
+## Similar Notes on Write
+
+When semantic search is enabled, `write_note` checks the vector index after it
+creates a note and appends a **Similar existing notes** section when the index
+holds close neighbors:
+
+```markdown
+## Similar existing notes
+This note looks similar to notes that already exist. Did you mean to write to one of these?
+- Reference BU Product Mapping (`main/reference/reference-bu-product-mapping`)
+- Product Catalog (`main/reference/product-catalog`)
+
+| If it is... | Then |
+|---|---|
+| The same topic | `read_note("main/reference/reference-bu-product-mapping")`, then `edit_note(..., operation="append", ...)` and `delete_note("main/analysis/bu-mapping-analysis")` |
+| Related but distinct | Add a relation here, e.g. `- relates_to [[Reference BU Product Mapping]]` |
+| Unrelated | Nothing to do |
+```
+
+The probe is the new note's title and opening content, run as a vector-only
+search with the new note's own row removed (vectors publish in the background,
+so it may or may not be indexed yet). `output_format="json"` returns the same
+list as `similar_notes`.
+
+The advisory is deliberately a question, not a decision. On the default
+`bge-small-en-v1.5` model a rewrite of an existing note and a merely related
+note score in the same similarity band (roughly 0.78–0.94 on a 200-note vault
+with no true duplicates), so no threshold separates them and no scores are
+shown. Ranking is reliable — the note an agent probably meant is almost always
+first — which is why the list is short and ordered. Only creates ask the index;
+an overwrite already names its target. A probe failure is logged and never
+fails the write.
+
 ## The Reindex Command
 
 The `bm reindex` command rebuilds search indexes without dropping the database.
