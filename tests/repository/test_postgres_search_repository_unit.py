@@ -584,7 +584,7 @@ async def test_postgres_batch_sync_tracks_deferred_oversized_entities(monkeypatc
         ('"cash OR check"', "(cash & OR & check)"),
         ('"unbalanced quote OR recovery', "unbalanced:* & quote:* & recovery:*"),
         ("incident AND (database recovery)", "incident & ( database & recovery )"),
-        ("recovery AND", "NOSPECIALCHARS:*"),
+        ("recovery AND", "recovery:*"),
     ],
 )
 def test_postgres_quoted_boolean_queries_render_valid_tsquery(

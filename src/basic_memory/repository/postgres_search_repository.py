@@ -500,9 +500,17 @@ class PostgresSearchRepository(SearchRepositoryBase):
         # In the public syntax, ``A NOT B`` means ``A AND NOT B``. A leading NOT
         # or one following another operator already has a complete tsquery shape.
         result = re.sub(r"(?<=[\w)])\s+!", " & !", result)
+        result = re.sub(r"!\s+", "!", result)
 
         if not _has_valid_boolean_shape(result):
-            return "NOSPECIALCHARS:*"
+            # Keep the searchable words from malformed Boolean input while
+            # removing the operators that made its structure incomplete.
+            return _render_tsquery_words(
+                query,
+                operator=" & ",
+                is_prefix=True,
+                drop_boolean_words=True,
+            )
 
         for placeholder, phrase in quoted_phrases.items():
             result = result.replace(placeholder, phrase)
