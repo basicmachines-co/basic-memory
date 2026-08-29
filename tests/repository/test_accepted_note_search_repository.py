@@ -1,5 +1,6 @@
 """Tests for accepted-note search repository operations."""
 
+import json
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -12,6 +13,7 @@ from basic_memory.repository.accepted_note_search_repository import (
     AcceptedNoteSearchRepository,
 )
 from basic_memory.repository.script_ngrams import build_script_ngrams
+from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 
 
 class _Dialect:
@@ -57,7 +59,7 @@ async def test_refresh_entity_replaces_project_scoped_hot_search_row() -> None:
 
     await repository.refresh_entity(cast(AsyncSession, session), row)
 
-    assert len(session.executed) == 2
+    assert len(session.executed) == 3
     delete_sql, delete_params = session.executed[0]
     insert_sql, insert_params = session.executed[1]
     assert "DELETE FROM search_index" in delete_sql
@@ -70,11 +72,7 @@ async def test_refresh_entity_replaces_project_scoped_hot_search_row() -> None:
         "title": "Project Plan",
         "content_stems": row.content_stems,
         "content_snippet": "Main body 适者生存",
-        "script_ngrams": build_script_ngrams(
-            row.title,
-            row.content_stems,
-            row.content_snippet,
-        ),
+        "script_ngrams": build_script_ngrams(row.title, row.content_stems),
         "permalink": "main/project-plan",
         "file_path": "notes/project-plan.md",
         "type": "entity",
@@ -84,6 +82,18 @@ async def test_refresh_entity_replaces_project_scoped_hot_search_row() -> None:
         "updated_at": updated_at,
         "project_id": 7,
     }
+    chunk_sql, chunk_params = session.executed[2]
+    assert "INSERT INTO search_index_fts_chunks" in chunk_sql
+    assert chunk_params["project_id"] == 7
+    assert json.loads(chunk_params["chunks"]) == [
+        {
+            "search_index_id": 42,
+            "search_index_type": "entity",
+            "chunk_index": 0,
+            "chunk_text": "Main body 适者生存",
+            "script_ngrams": build_script_ngrams("Main body 适者生存"),
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -163,3 +173,34 @@ async def test_refresh_entity_is_immediately_searchable_by_script_substring(
     results = await search_repository.search("适者生存")
 
     assert [result.id for result in results] == [42]
+
+
+@pytest.mark.asyncio
+async def test_postgres_refresh_entity_chunks_large_script_content(
+    search_repository,
+    session_maker,
+) -> None:
+    if not isinstance(search_repository, PostgresSearchRepository):
+        pytest.skip("PostgreSQL stores full note bodies in bounded FTS chunks")
+
+    repository = AcceptedNoteSearchRepository(project_id=search_repository.project_id)
+    now = datetime(2026, 6, 18, 12, 0, tzinfo=UTC)
+    row = build_accepted_note_search_row(
+        entity_id=43,
+        title="Long evolution note",
+        note_type="note",
+        entity_metadata=None,
+        permalink="main/long-evolution",
+        file_path="notes/long-evolution.md",
+        search_content=f"{'進化' * 5_000}适者生存",
+        created_at=now,
+        updated_at=now,
+        project_id=search_repository.project_id,
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        await repository.refresh_entity(session, row)
+
+    results = await search_repository.search("适者生存")
+
+    assert [result.id for result in results] == [43]

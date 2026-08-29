@@ -43,31 +43,15 @@ from basic_memory.repository.semantic_vector_index_factory import (
     resolve_semantic_vector_index_name,
 )
 from basic_memory.repository.pgvector_index import PgVectorIndex
+from basic_memory.repository.postgres_fts_chunks import split_postgres_fts_chunks
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 
-POSTGRES_FTS_CHUNK_SIZE = 8_000
-# PostgreSQL ignores lexemes at 2 KiB and above. A 2,048-character overlap is
-# therefore conservative for every indexable lexeme, including multi-byte text:
-# any token split at one 8,000-character edge is complete in the next chunk.
-POSTGRES_FTS_CHUNK_OVERLAP = 2_048
 _TSQUERY_OPERAND_PATTERN = re.compile(r"'(?:''|[^'])*'(?::\*)?|[^\s&|!()]+")
 _TSQUERY_WORD_PATTERN = re.compile(r"[^\W_]+(?:'[^\W_]+)?", re.UNICODE)
 _QUOTED_QUERY_PATTERN = re.compile(r'"([^"]*)"')
 _BOOLEAN_WORDS = frozenset({"AND", "OR", "NOT"})
 _TSQUERY_METACHARACTERS = frozenset("&|!:<>")
-
-
-def _iter_fts_chunks(content: str | None) -> list[tuple[int, str]]:
-    """Split full note text without losing an indexable lexeme at a chunk edge."""
-    if not content:
-        return []
-
-    step = POSTGRES_FTS_CHUNK_SIZE - POSTGRES_FTS_CHUNK_OVERLAP
-    return [
-        (chunk_index, content[start : start + POSTGRES_FTS_CHUNK_SIZE])
-        for chunk_index, start in enumerate(range(0, len(content), step))
-    ]
 
 
 def _tsquery_operands(processed_text: str) -> list[tuple[str, str]]:
@@ -368,7 +352,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 "script_ngrams": build_script_ngrams(chunk_text.replace("\x00", "")),
             }
             for row in search_index_rows
-            for chunk_index, chunk_text in _iter_fts_chunks(row.content_snippet)
+            for chunk_index, chunk_text in split_postgres_fts_chunks(row.content_snippet)
         ]
         if not chunks:
             return
