@@ -1,10 +1,12 @@
 """`bm prune` CLI wiring (#1254)."""
 
 from types import SimpleNamespace
+from typing import cast
 
 from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
+from basic_memory.config import BasicMemoryConfig
 import basic_memory.cli.commands.prune as prune_cmd  # noqa: F401
 
 runner = CliRunner()
@@ -55,9 +57,12 @@ def test_prune_requires_a_project_when_no_default_is_set():
 
     import typer
 
-    app_config = SimpleNamespace(
-        default_project=None,
-        get_project_mode=lambda name: (_ for _ in ()).throw(AssertionError("mode checked")),
+    app_config = cast(
+        BasicMemoryConfig,
+        SimpleNamespace(
+            default_project=None,
+            get_project_mode=lambda name: (_ for _ in ()).throw(AssertionError("mode checked")),
+        ),
     )
 
     async def run():
