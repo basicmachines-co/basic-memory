@@ -89,7 +89,7 @@ async def test_prune_removes_ignored_entries_and_repairs_linking_notes(
                 {"id": keep_id},
             )
         ).all()
-        assert keep_relation_rows == [("Keep",)], (
+        assert keep_relation_rows == [("keep",)], (
             "the linking note's search row no longer names a target"
         )
 
