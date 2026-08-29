@@ -1,7 +1,10 @@
 """Tests for resource MIME normalization at the indexing boundary."""
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
+import basic_memory.indexing.batch_indexer as batch_indexer_module
+from sqlalchemy.ext.asyncio import AsyncSession
 from basic_memory import db
 from basic_memory.indexing.batch_indexer import (
     BatchIndexer,
@@ -36,6 +39,7 @@ def test_regular_file_content_type_preserves_real_resource_mime() -> None:
 
 
 async def test_poison_markdown_reclassification_clears_note_only_state(
+    monkeypatch,
     app_config,
     entity_service,
     entity_repository,
@@ -121,6 +125,46 @@ async def test_poison_markdown_reclassification_clears_note_only_state(
             )
         )
 
+    lock_order: list[str] = []
+    original_note_content_lock = batch_indexer_module.lock_note_content_before_entity_mutation
+    original_get_by_id = entity_repository.get_by_id
+
+    async def record_note_content_lock(
+        session: AsyncSession,
+        *,
+        project_id: int,
+        entity_ids: Sequence[int],
+    ) -> None:
+        lock_order.append("note_content")
+        await original_note_content_lock(
+            session,
+            project_id=project_id,
+            entity_ids=entity_ids,
+        )
+
+    async def record_entity_lock(
+        session: AsyncSession,
+        entity_id: int,
+        *,
+        load_relations: bool = True,
+        lock_for_update: bool = False,
+    ) -> Entity | None:
+        if lock_for_update:
+            lock_order.append("entity")
+        return await original_get_by_id(
+            session,
+            entity_id,
+            load_relations=load_relations,
+            lock_for_update=lock_for_update,
+        )
+
+    monkeypatch.setattr(
+        batch_indexer_module,
+        "lock_note_content_before_entity_mutation",
+        record_note_content_lock,
+    )
+    monkeypatch.setattr(entity_repository, "get_by_id", record_entity_lock)
+
     batch_indexer = BatchIndexer(
         project_id=project_id,
         app_config=app_config,
@@ -145,6 +189,7 @@ async def test_poison_markdown_reclassification_clears_note_only_state(
     )
 
     assert result.errors == []
+    assert lock_order[:2] == ["note_content", "entity"]
     async with db.scoped_session(search_service.session_maker) as session:
         repaired = await entity_repository.get_by_id(session, poison.id)
         note_content = await NoteContentRepository(project_id=project_id).get_by_entity_id(

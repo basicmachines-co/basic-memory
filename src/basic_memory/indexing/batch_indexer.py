@@ -559,6 +559,19 @@ class BatchIndexer:
             entity_id = existing.id
 
         async with db.scoped_session(self.session_maker) as session:
+            should_clear_note_state = (
+                existing is not None
+                and existing.is_markdown
+                and content_type != RUNTIME_MARKDOWN_CONTENT_TYPE
+            )
+            if should_clear_note_state:
+                # Accepted-note writers lock NoteContent before Entity. Poison-row
+                # repair must use the same order or the two paths can deadlock.
+                await lock_note_content_before_entity_mutation(
+                    session,
+                    project_id=self.relation_repository.project_id,
+                    entity_ids=(entity_id,),
+                )
             existing = await self.entity_repository.get_by_id(
                 session,
                 entity_id,
@@ -608,12 +621,6 @@ class BatchIndexer:
 
     async def _clear_note_only_state(self, session: AsyncSession, entity: Entity) -> None:
         """Retire semantic projections when a poison Markdown row becomes a resource."""
-        await lock_note_content_before_entity_mutation(
-            session,
-            project_id=self.relation_repository.project_id,
-            entity_ids=(entity.id,),
-        )
-
         incoming_source_ids = {
             relation.from_id
             for relation in entity.incoming_relations
