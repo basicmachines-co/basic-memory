@@ -127,6 +127,7 @@ class _PreparedEntity:
     observations: tuple[IndexedObservation, ...] = ()
     relations: tuple[IndexedRelation, ...] = ()
     resolve_relations: bool = True
+    refresh_search: bool = True
 
 
 @dataclass(slots=True)
@@ -580,6 +581,24 @@ class BatchIndexer:
             )
             if existing is None:
                 raise ValueError(f"Entity not found before file metadata update: {file.path}")
+            if (
+                not should_clear_note_state
+                and existing.is_markdown
+                and content_type != RUNTIME_MARKDOWN_CONTENT_TYPE
+            ):
+                # A newer Markdown pass won between the initial classification
+                # read and this lock. Preserve its canonical state and projections;
+                # this stale resource pass has nothing left to publish.
+                return _PreparedEntity(
+                    path=file.path,
+                    entity_id=existing.id,
+                    permalink=existing.permalink,
+                    checksum=existing.checksum or checksum,
+                    content_type=existing.content_type,
+                    search_content=None,
+                    resolve_relations=False,
+                    refresh_search=False,
+                )
             if existing.is_markdown and content_type != RUNTIME_MARKDOWN_CONTENT_TYPE:
                 await self._clear_note_only_state(session, existing)
 
@@ -822,17 +841,18 @@ class BatchIndexer:
     async def _refresh_search_index(
         self, prepared: _PreparedEntity, entity: Entity
     ) -> IndexedEntity:
-        try:
-            await self.search_service.index_entity_data(entity, content=prepared.search_content)
-        except SemanticDependenciesMissingError as exc:
-            # Semantic search is optional infrastructure; missing provider deps must not undo
-            # the durable file/entity work that already completed.
-            logger.warning(
-                "Skipping semantic index refresh because dependencies are unavailable",
-                path=prepared.path,
-                entity_id=entity.id,
-                error=str(exc),
-            )
+        if prepared.refresh_search:
+            try:
+                await self.search_service.index_entity_data(entity, content=prepared.search_content)
+            except SemanticDependenciesMissingError as exc:
+                # Semantic search is optional infrastructure; missing provider deps must not undo
+                # the durable file/entity work that already completed.
+                logger.warning(
+                    "Skipping semantic index refresh because dependencies are unavailable",
+                    path=prepared.path,
+                    entity_id=entity.id,
+                    error=str(exc),
+                )
         return IndexedEntity(
             path=prepared.path,
             entity_id=entity.id,

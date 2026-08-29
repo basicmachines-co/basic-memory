@@ -2,12 +2,14 @@
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import basic_memory.indexing.batch_indexer as batch_indexer_module
 from sqlalchemy.ext.asyncio import AsyncSession
 from basic_memory import db
 from basic_memory.indexing.batch_indexer import (
     BatchIndexer,
+    RUNTIME_MARKDOWN_CONTENT_TYPE,
     RUNTIME_RESOURCE_CONTENT_TYPE,
     regular_file_content_type,
 )
@@ -224,3 +226,88 @@ async def test_poison_markdown_reclassification_clears_note_only_state(
     assert refreshed_inbound.to_id is None
     assert poison_refreshes == []
     assert [refresh.entity_id for refresh in source_refreshes] == [source.id]
+
+
+async def test_stale_resource_pass_preserves_newer_markdown_state(
+    monkeypatch,
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+) -> None:
+    project_id = relation_repository.project_id
+    assert project_id is not None
+    now = datetime.now(tz=UTC)
+    note_path = "notes/current.md"
+    note = Entity(
+        project_id=project_id,
+        title="Current note",
+        note_type="note",
+        content_type="text/markdown",
+        permalink="current-note",
+        file_path=note_path,
+        checksum="new-markdown-checksum",
+        created_at=now,
+        updated_at=now,
+    )
+    async with db.scoped_session(search_service.session_maker) as session:
+        note = await entity_repository.add(session, note)
+        await NoteContentRepository(project_id=project_id).create(
+            session,
+            {
+                "entity_id": note.id,
+                "markdown_content": "# Current note",
+                "db_version": 2,
+                "db_checksum": "new-markdown-checksum",
+                "file_write_status": "synced",
+            },
+        )
+
+    async def stale_resource_snapshot(
+        *_args: object,
+        **_kwargs: object,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(id=note.id, is_markdown=False)
+
+    monkeypatch.setattr(entity_repository, "get_by_file_path", stale_resource_snapshot)
+    batch_indexer = BatchIndexer(
+        project_id=project_id,
+        app_config=app_config,
+        entity_service=entity_service,
+        entity_repository=entity_repository,
+        observation_repository=entity_service.observation_repository,
+        relation_repository=relation_repository,
+        search_service=search_service,
+        file_writer=StorageIndexFileWriter(storage=file_service),
+        session_maker=search_service.session_maker,
+    )
+
+    result = await batch_indexer.index_files(
+        {
+            note_path: IndexInputFile(
+                path=note_path,
+                content_type=RUNTIME_RESOURCE_CONTENT_TYPE,
+                content=b"stale resource bytes",
+                size=20,
+            )
+        },
+        max_concurrent=1,
+    )
+
+    assert result.errors == []
+    assert result.indexed[0].content_type == RUNTIME_MARKDOWN_CONTENT_TYPE
+    assert result.indexed[0].checksum == "new-markdown-checksum"
+    async with db.scoped_session(search_service.session_maker) as session:
+        preserved = await entity_repository.get_by_id(session, note.id)
+        note_content = await NoteContentRepository(project_id=project_id).get_by_entity_id(
+            session,
+            note.id,
+        )
+
+    assert preserved is not None
+    assert preserved.is_markdown
+    assert preserved.permalink == "current-note"
+    assert note_content is not None
+    assert note_content.markdown_content == "# Current note"
