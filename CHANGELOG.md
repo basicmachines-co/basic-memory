@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Features
+
+- **#1259**: `write_note` now tells the caller when a freshly created note looks like
+  notes that already exist. With semantic search enabled, a create probes the vector
+  index with the new note's title and opening content and appends a "Similar existing
+  notes" section listing the closest matches, phrased as a question -- did you mean to
+  write to one of these? -- with the ways out spelled out: merge into the existing note
+  with `edit_note` and delete the new one, link the two with a relation, or ignore it.
+  JSON output carries the same list as `similar_notes`. No similarity scores are shown
+  and nothing is overwritten on the caller's behalf: on the default embedding model a
+  near-duplicate and a merely related note score in the same band, so the decision
+  stays with the agent, which has the context the score does not.
+
 ### Bug Fixes
 
 - **#1344**: Deleting a note no longer erases the relations pointing at it. The

@@ -1,15 +1,30 @@
 """Tests for note tools that exercise the full stack with SQLite."""
 
+import importlib
 from textwrap import dedent
 from typing import Any
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 from basic_memory import db
 from basic_memory import config as config_module
+from basic_memory.mcp import clients as clients_module
 from basic_memory.mcp.tools import write_note, read_note, delete_note
-from basic_memory.mcp.tools.write_note import _compose_workspace_project_route
+from basic_memory.mcp.tools.write_note import (
+    SIMILAR_NOTES_LIMIT,
+    SIMILAR_NOTES_PROBE_CHARS,
+    _collapse_similar_notes,
+    _compose_similarity_probe,
+    _compose_workspace_project_route,
+)
 from basic_memory.repository.relation_repository import RelationRepository
+from basic_memory.schemas.search import SearchItemType, SearchResponse, SearchResult
+from basic_memory.workspace_context import workspace_permalink_context
+
+# The tools package re-exports the write_note *function* under the submodule's name,
+# so the module has to be fetched by path to patch what the tool reads.
+write_note_module = importlib.import_module("basic_memory.mcp.tools.write_note")
 
 
 # ---------------------------------------------------------------------------
@@ -1547,3 +1562,331 @@ class TestWriteNoteOverwriteGuard:
             assert stray is None, (
                 f"overwrite=True minted a stray '{suffix}' suffix on the canonical permalink"
             )
+
+
+# ---------------------------------------------------------------------------
+# Similar-note advisory (#1259)
+# ---------------------------------------------------------------------------
+
+
+def _entity_result(title: str, permalink: str | None, file_path: str, score: float) -> SearchResult:
+    return SearchResult(
+        title=title,
+        type=SearchItemType.ENTITY,
+        score=score,
+        permalink=permalink,
+        file_path=file_path,
+    )
+
+
+def test_similarity_probe_leads_with_title_and_drops_frontmatter():
+    probe = _compose_similarity_probe(
+        "BU Product Mapping",
+        "---\ntitle: ignored\n---\n\n# BU Product Mapping\n\nWhich units own which products.",
+    )
+    assert probe.startswith("BU Product Mapping\n\n# BU Product Mapping")
+    assert "title: ignored" not in probe
+
+
+def test_similarity_probe_is_bounded_to_the_index_chunk_size():
+    probe = _compose_similarity_probe("Long", "word " * 1000)
+    assert len(probe) <= SIMILAR_NOTES_PROBE_CHARS
+
+
+def test_collapse_similar_notes_drops_the_new_note_and_repeat_rows():
+    rows = [
+        # The freshly written note, already indexed: matched by file_path ...
+        _entity_result("New", "p/new", "new/New.md", 0.99),
+        # ... and by permalink, in case the index holds it under another path.
+        _entity_result("New again", "p/new", "elsewhere/New.md", 0.98),
+        _entity_result("A", "p/a", "a/A.md", 0.9),
+        _entity_result("A (second row)", "p/a-2", "a/A.md", 0.89),
+        _entity_result("B", "p/b", "b/B.md", 0.8),
+        _entity_result("C", "p/c", "c/C.md", 0.7),
+        _entity_result("D", "p/d", "d/D.md", 0.6),
+    ]
+
+    similar = _collapse_similar_notes(
+        rows, exclude_file_path="new/New.md", exclude_permalink="p/new", limit=3
+    )
+
+    assert [note.title for note in similar] == ["A", "B", "C"]
+    assert similar[0].permalink == "p/a"
+
+
+class _StubSearchClient:
+    """Stands in for the typed search client: records the probe, returns canned rows."""
+
+    calls: list[dict[str, Any]]
+    results: list[SearchResult]
+    error: Exception | None
+
+    def __init__(self, http_client: Any, project_id: str) -> None:
+        self.project_id = project_id
+
+    async def search(self, payload: dict[str, Any], *, page: int, page_size: int) -> SearchResponse:
+        type(self).calls.append({"payload": payload, "page": page, "page_size": page_size})
+        error = type(self).error
+        if error is not None:
+            raise error
+        return SearchResponse(
+            results=type(self).results,
+            current_page=page,
+            page_size=page_size,
+            total=0,
+            total_is_exact=False,
+        )
+
+
+@pytest.fixture
+def stub_search_client(monkeypatch) -> type[_StubSearchClient]:
+    class StubSearchClient(_StubSearchClient):
+        calls: list[dict[str, Any]] = []
+        results: list[SearchResult] = []
+        error: Exception | None = None
+
+    # write_note imports the client at call time, so patching the package attribute is enough.
+    monkeypatch.setattr(clients_module, "SearchClient", StubSearchClient)
+    return StubSearchClient
+
+
+@pytest.fixture
+def semantic_search_on(monkeypatch, app_config):
+    """Enable the advisory the way write_note sees it, without touching the app's config.
+
+    Flipping the real app_config would also make the API schedule embeddings for every
+    write in this test, which needs the ONNX model. The tool layer only reads two fields.
+    """
+
+    class ToolConfig:
+        write_note_overwrite_default = app_config.write_note_overwrite_default
+        semantic_search_enabled = True
+
+    class ToolConfigManager:
+        config = ToolConfig()
+
+    monkeypatch.setattr(write_note_module, "ConfigManager", ToolConfigManager)
+
+
+@pytest.mark.asyncio
+async def test_write_note_surfaces_similar_existing_notes(
+    app, test_project, semantic_search_on, stub_search_client
+):
+    """A create lists the closest existing notes as a question, never as a decision."""
+    new_permalink = f"{test_project.name}/analysis/bu-mapping-analysis"
+    reference_permalink = f"{test_project.name}/reference/reference-bu-product-mapping"
+    stub_search_client.results = [
+        # The note we just wrote may already be indexed; it must not be offered to itself.
+        _entity_result(
+            "BU Mapping Analysis", new_permalink, "analysis/BU Mapping Analysis.md", 0.99
+        ),
+        _entity_result(
+            "Reference BU Product Mapping",
+            reference_permalink,
+            "reference/Reference BU Product Mapping.md",
+            0.86,
+        ),
+        _entity_result(
+            "Product Catalog",
+            f"{test_project.name}/reference/product-catalog",
+            "reference/Product Catalog.md",
+            0.74,
+        ),
+    ]
+
+    result = await write_note(
+        project=test_project.name,
+        title="BU Mapping Analysis",
+        directory="analysis",
+        content="# BU Mapping Analysis\n\nWhich business units (BUs) own which products.",
+    )
+
+    assert isinstance(result, str)
+    assert "# Created note" in result
+    _, section = result.split("## Similar existing notes", 1)
+    assert "Did you mean to write to one of these?" in section
+    assert f"- Reference BU Product Mapping (`{reference_permalink}`)" in section
+    assert "- Product Catalog (`" in section
+    assert "- BU Mapping Analysis (`" not in section
+    assert f'read_note("{reference_permalink}")' in section
+    assert f'delete_note("{new_permalink}")' in section
+    assert "relates_to [[Reference BU Product Mapping]]" in section
+    assert "score" not in section.lower()
+
+    [call] = stub_search_client.calls
+    assert call["payload"]["retrieval_mode"] == "vector"
+    assert call["payload"]["entity_types"] == ["entity"]
+    assert call["payload"]["text"].startswith("BU Mapping Analysis\n\n# BU Mapping Analysis")
+    assert call["page"] == 1
+    assert call["page_size"] == SIMILAR_NOTES_LIMIT + 1
+
+
+@pytest.mark.asyncio
+async def test_write_note_json_output_carries_similar_notes(
+    app, test_project, semantic_search_on, stub_search_client
+):
+    stub_search_client.results = [
+        _entity_result(
+            "Reference BU Product Mapping",
+            f"{test_project.name}/reference/reference-bu-product-mapping",
+            "reference/Reference BU Product Mapping.md",
+            0.86,
+        ),
+    ]
+
+    result = await write_note(
+        project=test_project.name,
+        title="BU Mapping Analysis",
+        directory="analysis",
+        content="# BU Mapping Analysis\n\nWhich business units own which products.",
+        output_format="json",
+    )
+
+    assert isinstance(result, dict)
+    assert result["action"] == "created"
+    assert result["similar_notes"] == [
+        {
+            "title": "Reference BU Product Mapping",
+            "permalink": f"{test_project.name}/reference/reference-bu-product-mapping",
+            "file_path": "reference/Reference BU Product Mapping.md",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_write_note_omits_advisory_when_index_has_no_neighbors(
+    app, test_project, semantic_search_on, stub_search_client
+):
+    stub_search_client.results = []
+
+    text_result = await write_note(
+        project=test_project.name,
+        title="Lonely Note",
+        directory="analysis",
+        content="# Lonely Note\n\nNothing else like it.",
+    )
+    json_result = await write_note(
+        project=test_project.name,
+        title="Lonely Note Two",
+        directory="analysis",
+        content="# Lonely Note Two\n\nStill nothing like it.",
+        output_format="json",
+    )
+
+    assert "# Created note" in text_result
+    assert "## Similar existing notes" not in text_result
+    assert isinstance(json_result, dict)
+    assert json_result["similar_notes"] == []
+
+
+@pytest.mark.asyncio
+async def test_write_note_skips_advisory_when_semantic_search_is_disabled(
+    app, test_project, stub_search_client
+):
+    """The test config leaves semantic search off, so no probe should be attempted."""
+    stub_search_client.results = [
+        _entity_result("Neighbor", f"{test_project.name}/n/neighbor", "n/Neighbor.md", 0.9)
+    ]
+
+    result = await write_note(
+        project=test_project.name,
+        title="Plain Write",
+        directory="analysis",
+        content="# Plain Write\n\nSemantic search is off here.",
+    )
+
+    assert "# Created note" in result
+    assert "## Similar existing notes" not in result
+    assert stub_search_client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_write_note_does_not_probe_on_overwrite(
+    app, test_project, semantic_search_on, stub_search_client
+):
+    """An overwrite already names its target; only creates ask the index."""
+    stub_search_client.results = [
+        _entity_result("Neighbor", f"{test_project.name}/n/neighbor", "n/Neighbor.md", 0.9)
+    ]
+    first = await write_note(
+        project=test_project.name,
+        title="Probe Once",
+        directory="analysis",
+        content="# Probe Once\n\nOriginal",
+    )
+    assert "## Similar existing notes" in first
+    assert len(stub_search_client.calls) == 1
+    stub_search_client.calls.clear()
+
+    second = await write_note(
+        project=test_project.name,
+        title="Probe Once",
+        directory="analysis",
+        content="# Probe Once\n\nReplacement",
+        overwrite=True,
+    )
+
+    assert "# Updated note" in second
+    assert "## Similar existing notes" not in second
+    assert stub_search_client.calls == []
+
+
+@pytest.mark.asyncio
+async def test_write_note_survives_similar_note_probe_failure(
+    app, test_project, semantic_search_on, stub_search_client
+):
+    """The note is already written when the probe runs; its failure must not undo that."""
+    stub_search_client.error = ToolError("Semantic search is disabled.")
+
+    result = await write_note(
+        project=test_project.name,
+        title="Written Anyway",
+        directory="analysis",
+        content="# Written Anyway\n\nThe probe fails, the write does not.",
+    )
+
+    assert "# Created note" in result
+    assert "## Similar existing notes" not in result
+    content = await read_note("analysis/written-anyway", project=test_project.name)
+    assert "The probe fails, the write does not." in content
+
+
+@pytest.mark.asyncio
+async def test_write_note_qualifies_similar_note_permalinks_in_workspace_context(
+    app, test_project, semantic_search_on, stub_search_client
+):
+    """Cloud requests carry a workspace slug; neighbors get the same qualified form as the note."""
+    stub_search_client.results = [
+        _entity_result(
+            "Reference BU Product Mapping",
+            f"{test_project.name}/reference/reference-bu-product-mapping",
+            "reference/Reference BU Product Mapping.md",
+            0.86,
+        ),
+        # A row without a permalink is listed by file path and left alone.
+        _entity_result("Unlinked Draft", None, "drafts/Unlinked Draft.md", 0.7),
+    ]
+
+    with workspace_permalink_context(workspace_slug="team-paul", workspace_type="organization"):
+        result = await write_note(
+            project=test_project.name,
+            title="BU Mapping Analysis",
+            directory="analysis",
+            content="# BU Mapping Analysis\n\nWhich business units own which products.",
+            output_format="json",
+        )
+
+    assert isinstance(result, dict)
+    assert result["permalink"] == f"team-paul/{test_project.name}/analysis/bu-mapping-analysis"
+    assert result["similar_notes"] == [
+        {
+            "title": "Reference BU Product Mapping",
+            "permalink": f"team-paul/{test_project.name}/reference/reference-bu-product-mapping",
+            "file_path": "reference/Reference BU Product Mapping.md",
+        },
+        {
+            "title": "Unlinked Draft",
+            "permalink": None,
+            "file_path": "drafts/Unlinked Draft.md",
+        },
+    ]

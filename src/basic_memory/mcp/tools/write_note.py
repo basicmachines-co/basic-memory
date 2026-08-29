@@ -1,18 +1,27 @@
 """Write note tool for Basic Memory MCP server."""
 
+import dataclasses
 import textwrap
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Annotated, List, Union, Optional, Literal
+from typing import TYPE_CHECKING, Any, Annotated, List, Union, Optional, Literal
 
 import logfire
 from loguru import logger
 from pydantic import AliasChoices, BeforeValidator, Field
 
 from basic_memory.config import ConfigManager
+from basic_memory.file_utils import remove_frontmatter
 from basic_memory.mcp.project_context import get_project_client, add_project_metadata
 from basic_memory.mcp.server import mcp
 from fastmcp import Context
 from basic_memory.schemas.base import Entity
+from basic_memory.schemas.search import (
+    SearchItemType,
+    SearchQuery,
+    SearchResult,
+    SearchRetrievalMode,
+)
 from basic_memory.utils import (
     build_qualified_permalink_reference,
     coerce_dict,
@@ -21,8 +30,122 @@ from basic_memory.utils import (
 )
 from basic_memory.workspace_context import current_workspace_permalink_context
 
+if TYPE_CHECKING:  # pragma: no cover
+    from basic_memory.mcp.clients import SearchClient
+
 # Define TagType as a Union that can accept either a string or a list of strings or None
 TagType = Union[List[str], str, None]
+
+# --- Similar-note advisory -------------------------------------------------------------
+# How many neighbors to surface after a create. Ranking is reliable enough to put the note
+# an agent probably meant at the top; a longer list adds noise, not signal.
+SIMILAR_NOTES_LIMIT = 3
+# The vector index embeds a note's title and opening content as its first chunk, so the
+# probe copies that shape and length to land in the same neighborhood as the note itself.
+SIMILAR_NOTES_PROBE_CHARS = 900
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class SimilarNote:
+    """An existing note the search index ranked closest to a freshly created one."""
+
+    title: str
+    permalink: str | None
+    file_path: str
+
+
+def _compose_similarity_probe(title: str, content: str) -> str:
+    """Build the text used to look for existing notes near a freshly written one."""
+    body = remove_frontmatter(content)
+    return f"{title}\n\n{body}"[:SIMILAR_NOTES_PROBE_CHARS].strip()
+
+
+def _collapse_similar_notes(
+    results: Sequence[SearchResult],
+    *,
+    exclude_file_path: str,
+    exclude_permalink: str | None,
+    limit: int,
+) -> list[SimilarNote]:
+    """Drop the note that was just written and keep one row per remaining note.
+
+    The new note's own row may or may not be indexed yet — vectors publish in the
+    background — so it is removed when present rather than expected.
+    """
+    similar_notes: list[SimilarNote] = []
+    seen_paths: set[str] = set()
+    for result in results:
+        is_new_note = result.file_path == exclude_file_path or (
+            exclude_permalink is not None and result.permalink == exclude_permalink
+        )
+        if is_new_note or result.file_path in seen_paths:
+            continue
+        seen_paths.add(result.file_path)
+        similar_notes.append(
+            SimilarNote(title=result.title, permalink=result.permalink, file_path=result.file_path)
+        )
+        if len(similar_notes) == limit:
+            break
+    return similar_notes
+
+
+async def _find_similar_notes(
+    search_client: "SearchClient",
+    *,
+    title: str,
+    content: str,
+    exclude_file_path: str,
+    exclude_permalink: str | None,
+) -> list[SimilarNote]:
+    """Ask the vector index which existing notes sit closest to the note just written.
+
+    Vector-only retrieval keeps the probe out of the FTS query parser, which would read
+    parentheses and boolean words in ordinary prose as operators.
+    """
+    query = SearchQuery(
+        text=_compose_similarity_probe(title, content),
+        retrieval_mode=SearchRetrievalMode.VECTOR,
+        entity_types=[SearchItemType.ENTITY],
+    )
+    # One extra row leaves room for the new note's own hit before collapsing.
+    response = await search_client.search(
+        query.model_dump(), page=1, page_size=SIMILAR_NOTES_LIMIT + 1
+    )
+    return _collapse_similar_notes(
+        response.results,
+        exclude_file_path=exclude_file_path,
+        exclude_permalink=exclude_permalink,
+        limit=SIMILAR_NOTES_LIMIT,
+    )
+
+
+def _format_similar_notes_section(
+    similar_notes: Sequence[SimilarNote], *, new_permalink: str | None
+) -> str:
+    """Render the advisory as a question with the ways out spelled out.
+
+    Similarity scores are deliberately absent: on the default model a near-duplicate and
+    a merely related note score in the same band, so a number would imply a precision the
+    signal does not have. Ranking is the useful part.
+    """
+    closest = similar_notes[0]
+    closest_ref = closest.permalink or closest.file_path
+    lines = [
+        "",
+        "## Similar existing notes",
+        "This note looks similar to notes that already exist. "
+        "Did you mean to write to one of these?",
+        *(f"- {note.title} (`{note.permalink or note.file_path}`)" for note in similar_notes),
+        "",
+        "| If it is... | Then |",
+        "|---|---|",
+        f'| The same topic | `read_note("{closest_ref}")`, then '
+        f'`edit_note("{closest_ref}", operation="append", content="...")` '
+        f'and `delete_note("{new_permalink}")` |',
+        f"| Related but distinct | Add a relation here, e.g. `- relates_to [[{closest.title}]]` |",
+        "| Unrelated | Nothing to do |",
+    ]
+    return "\n".join(lines)
 
 
 def _compose_workspace_project_route(
@@ -159,6 +282,8 @@ async def write_note(
         - Observation counts by category
         - Relation counts (resolved/unresolved)
         - Tags if present
+        - Closest existing notes when the note was created and semantic search is
+          enabled, so an accidental near-duplicate can be merged instead of kept
         - Session tracking metadata for project awareness
 
     Examples:
@@ -210,8 +335,9 @@ async def write_note(
     # Resolve overwrite flag: explicit parameter > config default
     # Trigger: caller omitted the parameter (None)
     # Why: lets users set a global default without breaking per-call overrides
+    app_config = ConfigManager().config
     effective_overwrite = (
-        overwrite if overwrite is not None else ConfigManager().config.write_note_overwrite_default
+        overwrite if overwrite is not None else app_config.write_note_overwrite_default
     )
     project = _compose_workspace_project_route(
         workspace=workspace,
@@ -281,7 +407,7 @@ async def write_note(
             )
 
             # Import here to avoid circular import
-            from basic_memory.mcp.clients import KnowledgeClient
+            from basic_memory.mcp.clients import KnowledgeClient, SearchClient
 
             # Use typed KnowledgeClient for API calls
             knowledge_client = KnowledgeClient(client, active_project.external_id)
@@ -345,14 +471,55 @@ async def write_note(
                 else:
                     # Re-raise if it's not a conflict error
                     raise  # pragma: no cover
+            # --- Similar-note advisory ---
+            # Trigger: the note was created (not updated) and semantic search is on.
+            # Why: agents writing across sessions know the topic but not whether a note on
+            #      it already exists (#1259). A near-duplicate and a merely related note are
+            #      not separable by similarity score, so nothing is overwritten on the
+            #      caller's behalf; the closest notes are surfaced and the call is theirs.
+            # Outcome: the summary gains a "Similar existing notes" section when the index
+            #          has neighbors. The write itself is already complete either way.
+            similar_notes: list[SimilarNote] = []
+            if action == "Created" and app_config.semantic_search_enabled:
+                try:
+                    similar_notes = await _find_similar_notes(
+                        SearchClient(client, active_project.external_id),
+                        title=title,
+                        content=content,
+                        exclude_file_path=result.file_path,
+                        exclude_permalink=result.permalink,
+                    )
+                except Exception as probe_error:
+                    # The note is on disk. Raising here would report a successful write as
+                    # a failure and invite a retry that creates the very duplicate this
+                    # advisory exists to catch, so the probe degrades to silence.
+                    logger.warning(
+                        f"write_note similar-note probe failed project={active_project.name} "
+                        f"permalink={result.permalink}: {probe_error}"
+                    )
+
             response_permalink = result.permalink
             workspace_context = current_workspace_permalink_context()
-            if response_permalink and workspace_context is not None:
-                response_permalink = build_qualified_permalink_reference(
-                    active_project.permalink,
-                    response_permalink,
-                    workspace_permalink=workspace_context.workspace_slug,
-                )
+            if workspace_context is not None:
+                if response_permalink:
+                    response_permalink = build_qualified_permalink_reference(
+                        active_project.permalink,
+                        response_permalink,
+                        workspace_permalink=workspace_context.workspace_slug,
+                    )
+                similar_notes = [
+                    dataclasses.replace(
+                        note,
+                        permalink=build_qualified_permalink_reference(
+                            active_project.permalink,
+                            note.permalink,
+                            workspace_permalink=workspace_context.workspace_slug,
+                        ),
+                    )
+                    if note.permalink
+                    else note
+                    for note in similar_notes
+                ]
 
             summary = [
                 f"# {action} note",
@@ -393,9 +560,14 @@ async def write_note(
             if tag_list:
                 summary.append(f"\n## Tags\n- {', '.join(tag_list)}")
 
+            if similar_notes:
+                summary.append(
+                    _format_similar_notes_section(similar_notes, new_permalink=response_permalink)
+                )
+
             # Log the response with structured data
             logger.info(
-                f"MCP tool response: tool=write_note project={active_project.name} action={action} permalink={response_permalink} observations_count={len(result.observations)} relations_count={len(result.relations)} resolved_relations={resolved} unresolved_relations={unresolved}"
+                f"MCP tool response: tool=write_note project={active_project.name} action={action} permalink={response_permalink} observations_count={len(result.observations)} relations_count={len(result.relations)} resolved_relations={resolved} unresolved_relations={unresolved} similar_notes_count={len(similar_notes)}"
             )
             if output_format == "json":
                 return {
@@ -404,6 +576,7 @@ async def write_note(
                     "file_path": result.file_path,
                     "checksum": result.checksum,
                     "action": action.lower(),
+                    "similar_notes": [dataclasses.asdict(note) for note in similar_notes],
                 }
 
             summary_result = "\n".join(summary)
