@@ -117,8 +117,8 @@ All settings are fields on `BasicMemoryConfig` and can be set via environment va
 | `milvus_database` | `BASIC_MEMORY_MILVUS_DATABASE` | `"default"` | Milvus database name. |
 | `semantic_embedding_provider` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER` | `"fastembed"` | Embedding provider: `"fastembed"` (local), `"openai"` (API), or `"litellm"` (multi-provider API, **experimental** — advanced users only). |
 | `semantic_embedding_model` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL` | `"bge-small-en-v1.5"` | Model identifier. FastEmbed models must exist in the installed FastEmbed catalog. Auto-adjusted per provider if left at default. |
-| `semantic_embedding_api_base` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_API_BASE` | Unset | Optional custom endpoint for the LiteLLM provider, including local or self-hosted OpenAI-compatible servers. |
-| `semantic_embedding_api_key` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_API_KEY` | Unset | Optional API key passed directly to the LiteLLM provider. When unset, LiteLLM continues to read provider credential env vars such as `OPENAI_API_KEY`. |
+| `semantic_embedding_api_base` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_API_BASE` | Unset | Optional custom endpoint for the `openai` or `litellm` provider — point either at a local or self-hosted OpenAI-compatible server. |
+| `semantic_embedding_api_key` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_API_KEY` | Unset | Optional API key for the `openai` or `litellm` provider. When unset, `openai` falls back to `OPENAI_API_KEY` and `litellm` reads its provider credential env vars. |
 | `semantic_embedding_dimensions` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_DIMENSIONS` | Provider default | Vector dimensions. Defaults to 384 for FastEmbed and 1536 for OpenAI/LiteLLM OpenAI. Set this to the model's output size when choosing a non-default FastEmbed or LiteLLM model. |
 | `semantic_embedding_forward_dimensions` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_FORWARD_DIMENSIONS` | Auto | LiteLLM-only override for whether configured dimensions are sent as a provider-side output-size request. |
 | `semantic_embedding_batch_size` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_BATCH_SIZE` | `2` | Number of texts to embed per batch. |
@@ -228,6 +228,31 @@ export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER=openai
 export OPENAI_API_KEY=sk-...
 ```
+
+#### OpenAI-compatible endpoints (local or self-hosted)
+
+The `openai` provider also honors `semantic_embedding_api_base` and
+`semantic_embedding_api_key`, so you can point it at any OpenAI-compatible
+embedding server — llama.cpp (`llama-server --embedding`), vLLM, Text Embeddings
+Inference, LM Studio, or Ollama's OpenAI shim — without moving to the
+experimental LiteLLM provider:
+
+```bash
+export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER=openai
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL=your-model
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_API_BASE=http://localhost:8080/v1
+# Set the key your server expects; local servers often ignore it, but the
+# OpenAI client still requires a non-empty value.
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_API_KEY=sk-local
+export BASIC_MEMORY_SEMANTIC_EMBEDDING_DIMENSIONS=<model output size>
+bm reindex --embeddings
+```
+
+Set `semantic_embedding_dimensions` to the model's output size — Basic Memory
+creates fixed-dimension vector storage before indexing. The key is optional only
+when the server accepts requests without one and `OPENAI_API_KEY` is set;
+otherwise provide it explicitly.
 
 ### LiteLLM
 

@@ -116,17 +116,17 @@ def _provider_cache_key(app_config: BasicMemoryConfig) -> ProviderCacheKey:
     runtime CPU budget makes the key drift between calls in a container (#872).
     """
     provider_name = app_config.semantic_embedding_provider.strip().lower()
-    litellm_api_base_digest = None
-    litellm_api_key_digest = None
-    if provider_name == "litellm":
-        litellm_api_base_digest = _sensitive_value_digest(app_config.semantic_embedding_api_base)
-        litellm_api_key_digest = _sensitive_value_digest(app_config.semantic_embedding_api_key)
+    api_base_digest = None
+    api_key_digest = None
+    if provider_name in {"openai", "litellm"}:
+        api_base_digest = _sensitive_value_digest(app_config.semantic_embedding_api_base)
+        api_key_digest = _sensitive_value_digest(app_config.semantic_embedding_api_key)
 
     return (
         provider_name,
         app_config.semantic_embedding_model,
-        litellm_api_base_digest,
-        litellm_api_key_digest,
+        api_base_digest,
+        api_key_digest,
         app_config.semantic_embedding_dimensions,
         app_config.semantic_embedding_forward_dimensions,
         app_config.semantic_embedding_batch_size,
@@ -266,6 +266,8 @@ def create_embedding_provider(app_config: BasicMemoryConfig) -> EmbeddingProvide
             model_name = "text-embedding-3-small"
         provider = OpenAIEmbeddingProvider(
             model_name=model_name,
+            api_key=app_config.semantic_embedding_api_key,
+            base_url=app_config.semantic_embedding_api_base,
             batch_size=app_config.semantic_embedding_batch_size,
             request_concurrency=app_config.semantic_embedding_request_concurrency,
             **extra_kwargs,

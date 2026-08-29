@@ -10,6 +10,7 @@ import pytest
 from basic_memory.config import BasicMemoryConfig
 import basic_memory.repository.embedding_provider_factory as embedding_provider_factory_module
 from basic_memory.repository.embedding_provider_factory import (
+    _provider_cache_key,
     create_embedding_provider,
     reset_embedding_provider_cache,
 )
@@ -177,6 +178,47 @@ def test_embedding_provider_factory_selects_openai_and_applies_default_model():
     provider = create_embedding_provider(config)
     assert isinstance(provider, OpenAIEmbeddingProvider)
     assert provider.model_name == "text-embedding-3-small"
+
+
+def test_embedding_provider_factory_forwards_openai_api_configuration():
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="openai",
+        semantic_embedding_api_base="https://embedding.example/v1",
+        semantic_embedding_api_key="test-key",
+    )
+
+    provider = create_embedding_provider(config)
+
+    assert isinstance(provider, OpenAIEmbeddingProvider)
+    assert provider._base_url == "https://embedding.example/v1"
+    assert provider._api_key == "test-key"
+
+
+def test_embedding_provider_factory_separates_openai_api_cache_keys():
+    base = dict(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="openai",
+        semantic_embedding_api_base="https://one.example/v1",
+        semantic_embedding_api_key="test-key",
+    )
+
+    first = _provider_cache_key(BasicMemoryConfig(**base))
+    second = _provider_cache_key(
+        BasicMemoryConfig(**{**base, "semantic_embedding_api_base": "https://two.example/v1"})
+    )
+    third = _provider_cache_key(
+        BasicMemoryConfig(**{**base, "semantic_embedding_api_key": "other-key"})
+    )
+
+    assert first != second
+    assert first != third
 
 
 def test_embedding_provider_factory_rejects_unknown_provider():
