@@ -153,6 +153,45 @@ async def test_mixed_word_and_script_search_preserves_fts_ranking(search_reposit
 
 
 @pytest.mark.asyncio
+async def test_sqlite_mixed_search_requires_all_words_in_one_column(search_repository) -> None:
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("SQLite preserves its established per-column word matching")
+
+    now = datetime.now(timezone.utc)
+    rows = [
+        SearchIndexRow(
+            project_id=search_repository.project_id,
+            id=1305,
+            type="entity",
+            file_path="notes/same-column.md",
+            title="Same column",
+            content_stems="alpha beta 適者生存",
+            content_snippet="alpha beta 適者生存",
+            permalink="notes/same-column",
+            created_at=now,
+            updated_at=now,
+        ),
+        SearchIndexRow(
+            project_id=search_repository.project_id,
+            id=1306,
+            type="entity",
+            file_path="notes/split-columns.md",
+            title="alpha",
+            content_stems="beta 適者生存",
+            content_snippet="beta 適者生存",
+            permalink="notes/split-columns",
+            created_at=now,
+            updated_at=now,
+        ),
+    ]
+    await search_repository.bulk_index_items(rows)
+
+    results = await search_repository.search("alpha beta 適者生存")
+
+    assert [result.id for result in results] == [1305]
+
+
+@pytest.mark.asyncio
 async def test_search_ranking_includes_every_script_run(search_repository) -> None:
     now = datetime.now(timezone.utc)
     row = SearchIndexRow(

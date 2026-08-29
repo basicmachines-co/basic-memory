@@ -7,6 +7,7 @@ import pytest
 from basic_memory import db
 from basic_memory.models.knowledge import Entity
 from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.schemas.search import SearchItemType
 
 
@@ -63,3 +64,34 @@ async def test_search_text_and_metadata_filters_work_together(search_repository,
     )
 
     assert {row.id for row in results} == {active.id}
+
+
+@pytest.mark.asyncio
+async def test_sqlite_script_search_with_metadata_filters_preserves_ranking(
+    search_repository,
+    session_maker,
+) -> None:
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("SQLite-specific FTS5 ranking regression")
+
+    stronger = await _index_entity(
+        search_repository,
+        session_maker,
+        "適者生存 適者生存 適者生存",
+        "active",
+    )
+    weaker = await _index_entity(
+        search_repository,
+        session_maker,
+        "適者生存",
+        "active",
+    )
+
+    results = await search_repository.search(
+        search_text="適者生存",
+        metadata_filters={"status": "active"},
+    )
+
+    assert [row.id for row in results] == [stronger.id, weaker.id]
+    assert results[0].score != results[1].score
+    assert all(row.score != 0.0 for row in results)

@@ -782,13 +782,15 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         search_item_types: Optional[List[SearchItemType]] = None,
         categories: Optional[List[str]] = None,
         metadata_filters: Optional[dict[str, Any]] = None,
-    ) -> tuple[str, str, dict[str, Any], str]:
+    ) -> tuple[str, str, dict[str, Any], str, str]:
         """Build SQLite FTS FROM/WHERE params shared by search and count."""
         conditions = []
         match_conditions = []
         params = {}
         order_by_clause = ""
         from_clause = "search_index"
+        score_expression = "bm25(search_index)"
+        preserve_match_score = False
 
         # Handle text search for title and content
         if search_text:
@@ -803,11 +805,16 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 # Outcome: mixed queries rank all terms together; word-only queries retain their
                 # established per-column matching and ranking behavior.
                 if script_query.gram_phrases:
+                    preserve_match_score = True
                     params["text"] = ""
                     params["script_text"] = ""
                     if script_query.word_text:
                         prepared_text = self._prepare_search_term(script_query.word_text)
-                        params["text"] = f"{SQLITE_WORD_COLUMNS}: ({prepared_text})"
+                        params["text"] = (
+                            f"(title: ({prepared_text}) OR "
+                            f"content_stems: ({prepared_text}) OR "
+                            f"content_snippet: ({prepared_text}))"
+                        )
                     script_phrases = " AND ".join(
                         f'"{" ".join(phrase)}"' for phrase in script_query.gram_phrases
                     )
@@ -1007,13 +1014,23 @@ class SQLiteSearchRepository(SearchRepositoryBase):
 
         # Trigger: SQLite FTS MATCH predicates combined with JOINs can fail with
         # "unable to use function MATCH in the requested context".
-        # Why: MATCH needs to run in an FTS-valid context.
-        # Outcome: evaluate MATCH clauses in an FTS subquery and filter outer rows by rowid.
+        # Why: script queries need MATCH and bm25 together for ranking, while legacy
+        # word-column OR predicates cannot evaluate bm25 in the same derived query.
+        # Outcome: rank script matches before joining metadata; retain the established
+        # rowid-filter path for word-only searches.
         if metadata_filters and match_conditions:
             match_where = " AND ".join(match_conditions)
-            conditions.append(
-                f"search_index.rowid IN (SELECT rowid FROM search_index WHERE {match_where})"
-            )
+            if preserve_match_score:
+                from_clause = (
+                    "(SELECT search_index.*, bm25(search_index) AS fts_score "
+                    f"FROM search_index WHERE {match_where}) AS search_index "
+                    "JOIN entity ON search_index.entity_id = entity.id"
+                )
+                score_expression = "search_index.fts_score"
+            else:
+                conditions.append(
+                    f"search_index.rowid IN (SELECT rowid FROM search_index WHERE {match_where})"
+                )
         else:
             conditions.extend(match_conditions)
 
@@ -1023,7 +1040,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
 
         # Build WHERE clause
         where_clause = " AND ".join(conditions) if conditions else "1=1"
-        return from_clause, where_clause, params, order_by_clause
+        return from_clause, where_clause, params, order_by_clause, score_expression
 
     @override
     async def search(
@@ -1074,7 +1091,13 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             return dispatched
 
         # --- FTS mode (SQLite-specific) ---
-        from_clause, where_clause, params, order_by_clause = await self._build_fts_query_parts(
+        (
+            from_clause,
+            where_clause,
+            params,
+            order_by_clause,
+            score_expression,
+        ) = await self._build_fts_query_parts(
             search_text=search_text,
             permalink=permalink,
             permalink_match=permalink_match,
@@ -1107,7 +1130,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 search_index.category,
                 search_index.created_at,
                 search_index.updated_at,
-                bm25(search_index) as score
+                {score_expression} as score
             FROM {from_clause}
             WHERE {where_clause}
             ORDER BY score ASC {order_by_clause}
@@ -1230,7 +1253,13 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 min_similarity=min_similarity,
             )
 
-        from_clause, where_clause, params, _order_by_clause = await self._build_fts_query_parts(
+        (
+            from_clause,
+            where_clause,
+            params,
+            _order_by_clause,
+            _score_expression,
+        ) = await self._build_fts_query_parts(
             search_text=search_text,
             permalink=permalink,
             permalink_match=permalink_match,
