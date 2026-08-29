@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory.indexing.file_indexer import (
     FileIndexer,
     IndexCurrentMarkdownFileIndexer,
-    NoteContentChangedDuringIndexError,
     build_default_file_indexer,
 )
 from basic_memory.indexing.models import FileIndexOperation, FileIndexResult, SyncedMarkdownFile
@@ -374,8 +373,8 @@ async def test_file_indexer_reloads_entity_after_initial_absence_becomes_stale()
 
 
 @pytest.mark.asyncio
-async def test_file_indexer_fails_for_retry_after_repeated_stale_indexes() -> None:
-    """Repeated concurrent writes must fail the job instead of reporting stale derived state."""
+async def test_file_indexer_reports_superseded_after_repeated_stale_indexes() -> None:
+    """A hot note must finish with a bounded outcome so its next write can converge."""
     existing_entity = _entity(entity_id=7)
     file_indexer, markdown_indexer, note_content_reconciler = _file_indexer(
         existing_entity=existing_entity,
@@ -389,13 +388,10 @@ async def test_file_indexer_fails_for_retry_after_repeated_stale_indexes() -> No
         NoteContentReconciliationResult.stale(),
     ]
 
-    with pytest.raises(
-        NoteContentChangedDuringIndexError,
-        match="changed repeatedly",
-    ):
-        await file_indexer.index_markdown_file("notes/note.md")
+    result = await file_indexer.index_markdown_file("notes/note.md")
 
     assert markdown_indexer.index_current_markdown_file.await_count == 2
+    assert result.content_superseded is True
 
 
 @pytest.mark.asyncio

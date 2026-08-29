@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 import logfire
 
 from basic_memory import db
+from basic_memory.indexing.relation_resolution import RelationSearchRefreshResult
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository
 from basic_memory.repository.search_repository import (
@@ -539,7 +540,7 @@ class SearchService:
         entities: Sequence[Entity],
         *,
         content_by_entity_id: Mapping[int, str],
-    ) -> None:
+    ) -> RelationSearchRefreshResult:
         """Refresh a group of entity search rows through one batch entry point.
 
         Index writes stay sequential because local SQLite connections cannot
@@ -548,11 +549,18 @@ class SearchService:
         Accepted content bypasses the disk read while its Markdown projection
         remains pending.
         """
+        missing_content_entity_ids: set[int] = set()
         for entity in entities:
-            await self.index_entity_data(
-                entity,
-                content=content_by_entity_id.get(entity.id),
-            )
+            try:
+                await self.index_entity_data(
+                    entity,
+                    content=content_by_entity_id.get(entity.id),
+                )
+            except FileNotFoundError:
+                missing_content_entity_ids.add(entity.id)
+        return RelationSearchRefreshResult(
+            missing_content_entity_ids=frozenset(missing_content_entity_ids)
+        )
 
     async def index_entity_data(
         self,

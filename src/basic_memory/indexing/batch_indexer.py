@@ -33,7 +33,10 @@ from basic_memory.indexing.models import (
     IndexInputFile,
     RelationGenerationBatchResult,
 )
-from basic_memory.indexing.relation_resolution import RepositoryRelationResolutionRuntime
+from basic_memory.indexing.relation_resolution import (
+    RelationSearchRefreshResult,
+    RepositoryRelationResolutionRuntime,
+)
 from basic_memory.indexing.relation_persistence import RelationGenerationPublisher
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository, ObservationRepository, RelationRepository
@@ -75,12 +78,19 @@ class RelationResolutionSearchWriter:
         entities: Sequence[Entity],
         *,
         content_by_entity_id: Mapping[int, str],
-    ) -> None:
+    ) -> RelationSearchRefreshResult:
+        missing_content_entity_ids: set[int] = set()
         for entity in sorted(entities, key=lambda item: item.id):
-            await self.search_writer.index_entity_data(
-                entity,
-                content=content_by_entity_id.get(entity.id),
-            )
+            try:
+                await self.search_writer.index_entity_data(
+                    entity,
+                    content=content_by_entity_id.get(entity.id),
+                )
+            except FileNotFoundError:
+                missing_content_entity_ids.add(entity.id)
+        return RelationSearchRefreshResult(
+            missing_content_entity_ids=frozenset(missing_content_entity_ids)
+        )
 
 
 @dataclass(slots=True)
@@ -936,9 +946,10 @@ class BatchIndexer:
             setattr(entity, key, value)
 
     def _is_markdown(self, file: IndexInputFile) -> bool:
+        path_is_markdown_note = runtime_file_path_is_markdown_note(Path(file.path).as_posix())
         if file.content_type is not None:
-            return file.content_type == RUNTIME_MARKDOWN_CONTENT_TYPE
-        return runtime_file_path_is_markdown_note(Path(file.path).as_posix())
+            return file.content_type == RUNTIME_MARKDOWN_CONTENT_TYPE and path_is_markdown_note
+        return path_is_markdown_note
 
     async def _run_bounded(
         self,

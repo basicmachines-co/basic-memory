@@ -216,8 +216,18 @@ class BatchRelationResolutionEntityIndexer(Protocol):
         entities: Sequence[Entity],
         *,
         content_by_entity_id: Mapping[EntityId, str],
-    ) -> None:
-        """Refresh derived index rows for a group of entities."""
+    ) -> RelationSearchRefreshResult | None:
+        """Refresh derived rows, optionally reporting bounded per-entity outcomes.
+
+        ``None`` remains the complete-success result for legacy extension adapters.
+        """
+
+
+@dataclass(frozen=True, slots=True)
+class RelationSearchRefreshResult:
+    """Bounded per-entity outcomes from a relation-driven search refresh."""
+
+    missing_content_entity_ids: frozenset[EntityId] = frozenset()
 
 
 def accepted_search_content_for_pending_notes(
@@ -374,10 +384,19 @@ class RepositoryRelationResolutionRuntime:
             # materializer, while synchronized notes still need missing files to surface.
             # Outcome: pending sources use accepted DB content; all others retain disk fallback.
             content_by_entity_id = accepted_search_content_for_pending_notes(note_contents)
-            await self.entity_indexer.index_entities(
+            refresh_result = await self.entity_indexer.index_entities(
                 sorted(source_entities, key=lambda entity: entity.id),
                 content_by_entity_id=content_by_entity_id,
             )
+            if refresh_result is not None and refresh_result.missing_content_entity_ids:
+                # A synchronized entity whose backing object is gone cannot be
+                # repaired by retrying relation resolution. Orphan cleanup owns
+                # DB/storage convergence; retire this observed refresh marker.
+                logger.warning(
+                    "Skipped relation search refresh for missing entity content",
+                    entity_ids=sorted(refresh_result.missing_content_entity_ids),
+                    entity_count=len(refresh_result.missing_content_entity_ids),
+                )
             async with db.scoped_session(self.session_maker) as session:
                 await self.relation_repository.clear_pending_search_refreshes(
                     session,

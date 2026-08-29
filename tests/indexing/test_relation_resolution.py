@@ -14,6 +14,7 @@ from basic_memory.indexing.relation_resolution import (
     RELATION_RESOLUTION_WRITE_BATCH_SIZE,
     RESOLVE_RELATIONS_DEBOUNCE_SECONDS,
     RepositoryRelationResolutionRuntime,
+    RelationSearchRefreshResult,
     ResolveRelationsJobRequest,
     ResolveRelationsResult,
     plan_index_file_relation_resolution,
@@ -247,10 +248,11 @@ class StubEntityIndexer:
         entities: Sequence[Entity],
         *,
         content_by_entity_id: Mapping[int, str],
-    ) -> None:
+    ) -> RelationSearchRefreshResult:
         self.indexed_batches.append(tuple(entities))
         self.indexed_content_batches.append(dict(content_by_entity_id))
         self.indexed_entities.extend(entities)
+        return RelationSearchRefreshResult()
 
 
 class MissingFileEntityIndexer(StubEntityIndexer):
@@ -262,13 +264,15 @@ class MissingFileEntityIndexer(StubEntityIndexer):
         entities: Sequence[Entity],
         *,
         content_by_entity_id: Mapping[int, str],
-    ) -> None:
+    ) -> RelationSearchRefreshResult:
         missing_entity_ids = [
             entity.id for entity in entities if entity.id not in content_by_entity_id
         ]
         if missing_entity_ids:
-            raise FileNotFoundError(f"Missing Markdown for entities {missing_entity_ids}")
-        await super().index_entities(
+            return RelationSearchRefreshResult(
+                missing_content_entity_ids=frozenset(missing_entity_ids)
+            )
+        return await super().index_entities(
             entities,
             content_by_entity_id=content_by_entity_id,
         )
@@ -749,7 +753,7 @@ async def test_repository_runtime_refreshes_pending_source_from_accepted_content
 
 
 @pytest.mark.asyncio
-async def test_repository_runtime_preserves_missing_file_error_for_synced_source() -> None:
+async def test_repository_runtime_retires_missing_file_refresh_for_synced_source() -> None:
     repo = StubRelationRepository([[FakeRelation(id=1, from_id=10, to_name="Target A")]])
     runtime = build_repository_runtime(
         relation_repository=repo,
@@ -764,8 +768,8 @@ async def test_repository_runtime_preserves_missing_file_error_for_synced_source
         ],
     )
 
-    with pytest.raises(FileNotFoundError, match=r"entities \[10\]"):
-        await runtime.resolve_relations()
+    assert await runtime.resolve_relations() == {10}
+    assert repo.pending_search_refreshes == []
 
 
 @pytest.mark.asyncio

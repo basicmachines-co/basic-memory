@@ -176,6 +176,10 @@ class FileIndexResult:
     permalink: str | None
     checksum: str
     operation: FileIndexOperation
+    # The indexed snapshot committed successfully, but a newer accepted note
+    # generation won before derived relations could be published. The next
+    # coalesced write owns convergence; callers must not enqueue stale followups.
+    content_superseded: bool = False
 
     @classmethod
     def from_fields(
@@ -188,6 +192,7 @@ class FileIndexResult:
         permalink: object,
         checksum: str,
         operation: FileIndexOperation,
+        content_superseded: bool = False,
     ) -> FileIndexResult:
         """Validate entity fields loaded for a completed file-index result.
 
@@ -215,6 +220,7 @@ class FileIndexResult:
             ),
             checksum=checksum,
             operation=operation,
+            content_superseded=content_superseded,
         )
 
 
@@ -296,6 +302,8 @@ def plan_index_file_embedding_job(
     if not context.index_embeddings:
         return None
     if context.result.status != IndexFileJobStatus.processed:
+        return None
+    if context.result.content_superseded:
         return None
     if context.result.entity_id is None:
         raise RuntimeError("index_file processed without an entity id")
@@ -401,7 +409,8 @@ def index_file_job_result_from_indexed_file(
         ),
         db_version=live_update_plan.db_version if live_update_plan is not None else None,
         content_superseded=(
-            live_update_plan.content_superseded if live_update_plan is not None else False
+            indexed_file.content_superseded
+            or (live_update_plan.content_superseded if live_update_plan is not None else False)
         ),
     )
 

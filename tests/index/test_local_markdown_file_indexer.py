@@ -16,7 +16,12 @@ from basic_memory.index.local_dependencies import (
 )
 from basic_memory.indexing.batch_indexer import BatchIndexer
 from basic_memory.indexing.file_indexer import IndexMarkdownNoteContentReconciler
-from basic_memory.indexing.models import IndexEntitySearchWriter, SyncedMarkdownFile
+from basic_memory.indexing.models import (
+    FileIndexOperation,
+    FileIndexResult,
+    IndexEntitySearchWriter,
+    SyncedMarkdownFile,
+)
 from basic_memory.indexing.note_content_reconciliation import NoteContentReconciliationResult
 from basic_memory.services import FileService
 
@@ -107,3 +112,42 @@ async def test_local_file_indexer_logs_brace_path_through_retry(
     assert f"Indexed markdown file: {file_path}" in rendered_messages
     assert result.file_path == file_path
     assert result.title == "{AG} Plan"
+
+
+@pytest.mark.asyncio
+async def test_local_file_indexer_treats_empty_markdown_basename_as_regular_file(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A MIME-marked ``.md`` object is a resource, not a poison markdown job."""
+    file_service = Mock()
+    file_service.is_markdown.return_value = True
+    indexer = LocalMarkdownFileIndexer(
+        file_service=cast(FileService, file_service),
+        session_maker=cast(async_sessionmaker[AsyncSession], _FakeSession),
+        entity_repository=cast(LocalIndexEntityRepository, Mock()),
+        batch_indexer=cast(BatchIndexer, Mock()),
+        search_service=cast(IndexEntitySearchWriter, Mock()),
+        note_content_reconciler=cast(IndexMarkdownNoteContentReconciler, Mock()),
+    )
+    regular_result = FileIndexResult(
+        file_path="_phase7_import/.md",
+        entity_id=42,
+        external_id="resource-42",
+        title=".md",
+        permalink=None,
+        checksum="abc123",
+        operation=FileIndexOperation.created,
+    )
+    markdown_index = AsyncMock()
+    regular_index = AsyncMock(return_value=regular_result)
+    monkeypatch.setattr(LocalMarkdownFileIndexer, "index_markdown_file", markdown_index)
+    monkeypatch.setattr(LocalMarkdownFileIndexer, "index_regular_file", regular_index)
+
+    result = await indexer.index_file("_phase7_import/.md", source="s3_webhook")
+
+    markdown_index.assert_not_awaited()
+    regular_index.assert_awaited_once_with(
+        "_phase7_import/.md",
+        source="s3_webhook",
+    )
+    assert result == regular_result

@@ -185,6 +185,7 @@ class FileIndexer:
                 load_relations=False,
             )
         operation = FileIndexOperation.created if existing is None else FileIndexOperation.updated
+        content_superseded = False
 
         for attempt in range(MAX_NOTE_CONTENT_INDEX_ATTEMPTS):
             if attempt > 0:
@@ -217,6 +218,7 @@ class FileIndexer:
             # Why: retrying identical bytes cannot make that file lineage current.
             # Outcome: preserve accepted relations and finish without publishing this pass.
             if reconciliation.status == "deferred":
+                content_superseded = True
                 break
 
             if reconciliation.generation is not None:
@@ -235,8 +237,14 @@ class FileIndexer:
                 reconciliation_status=reconciliation.status,
             )
         else:
-            raise NoteContentChangedDuringIndexError(
-                f"Note content changed repeatedly while indexing {file_path}"
+            # A continuously edited note is normal convergent workload, not a
+            # retryable failure. Keep the last coherent snapshot and let the
+            # already-coalesced newer write own the next derived-state pass.
+            content_superseded = True
+            log.info(
+                "Finished markdown index with superseded derived state: {}",
+                file_path,
+                entity_id=synced.entity.id,
             )
 
         log.info(
@@ -256,6 +264,7 @@ class FileIndexer:
             permalink=synced.entity.permalink,
             checksum=synced.checksum,
             operation=operation,
+            content_superseded=content_superseded,
         )
 
 
