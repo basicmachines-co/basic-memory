@@ -15,6 +15,7 @@ from basic_memory.file_utils import remove_frontmatter
 from basic_memory.mcp.project_context import get_project_client, add_project_metadata
 from basic_memory.mcp.server import mcp
 from fastmcp import Context
+from fastmcp.exceptions import ToolError
 from basic_memory.schemas.base import Entity
 from basic_memory.schemas.search import (
     SearchItemType,
@@ -489,10 +490,13 @@ async def write_note(
                         exclude_file_path=result.file_path,
                         exclude_permalink=result.permalink,
                     )
-                except Exception as probe_error:
-                    # The note is on disk. Raising here would report a successful write as
-                    # a failure and invite a retry that creates the very duplicate this
-                    # advisory exists to catch, so the probe degrades to silence.
+                except ToolError as probe_error:
+                    # ToolError is what the search client raises when the API refuses or
+                    # cannot complete the probe: semantic search disabled server-side,
+                    # missing embedding dependencies, a 5xx, a transport failure. The note
+                    # is already on disk, so those expected failures must not be reported
+                    # as a failed write. Anything else is a defect in this code path and
+                    # stays visible rather than degrading to an empty advisory.
                     logger.warning(
                         f"write_note similar-note probe failed project={active_project.name} "
                         f"permalink={result.permalink}: {probe_error}"

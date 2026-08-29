@@ -579,8 +579,9 @@ note score in the same similarity band (roughly 0.78–0.94 on a 200-note vault
 with no true duplicates), so no threshold separates them and no scores are
 shown. Ranking is reliable — the note an agent probably meant is almost always
 first — which is why the list is short and ordered. Only creates ask the index;
-an overwrite already names its target. A probe failure is logged and never
-fails the write.
+an overwrite already names its target. When the API refuses or cannot complete
+the probe (semantic search disabled server-side, a transport failure), the
+failure is logged and the write is still reported as successful.
 
 ## The Reindex Command
 
