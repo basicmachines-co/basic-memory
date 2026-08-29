@@ -62,7 +62,9 @@ def test_sqlite_upgrade_and_downgrade_preserve_word_search_rows(tmp_path, monkey
         ]
 
 
-def test_sqlite_upgrade_creates_search_index_for_a_fresh_database(tmp_path, monkeypatch) -> None:
+def test_sqlite_upgrade_leaves_runtime_search_index_creation_to_the_model(
+    tmp_path, monkeypatch
+) -> None:
     database_path = tmp_path / "fresh-script-ngrams.db"
     engine = create_engine(f"sqlite:///{database_path}")
     with engine.begin() as connection:
@@ -74,8 +76,10 @@ def test_sqlite_upgrade_creates_search_index_for_a_fresh_database(tmp_path, monk
         migration.upgrade()
 
     with sqlite3.connect(database_path) as connection:
-        columns = [row[1] for row in connection.execute("PRAGMA table_info(search_index)")]
-        assert "script_ngrams" in columns
+        search_index_exists = connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'search_index'"
+        ).fetchone()
+        assert search_index_exists is None
 
 
 def test_postgres_upgrade_and_downgrade_manage_both_script_indexes(monkeypatch) -> None:

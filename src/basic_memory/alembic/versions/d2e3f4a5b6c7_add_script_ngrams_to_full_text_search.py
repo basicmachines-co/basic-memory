@@ -9,7 +9,7 @@ Create Date: 2026-08-29 00:00:00.000000
 from typing import Sequence, Union
 
 from alembic import op
-from sqlalchemy import inspect
+from sqlalchemy import text
 
 
 revision: str = "d2e3f4a5b6c7"
@@ -27,7 +27,16 @@ SQLITE_COLUMNS = """
 
 def rebuild_sqlite_search_index(*, include_script_ngrams: bool) -> None:
     """Copy the FTS5 table while changing its indexed-column contract."""
-    search_index_exists = inspect(op.get_bind()).has_table("search_index")
+    bind = op.get_bind()
+    search_index_sql: str | None = bind.execute(
+        text("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'search_index'")
+    ).scalar_one_or_none()
+
+    # The runtime owns creation of the derived FTS table, so migrations only transform an
+    # existing FTS5 index. This also leaves unrelated physical tables with the same name alone.
+    if search_index_sql is None or "using fts5" not in search_index_sql.casefold():
+        return
+
     script_definition = "script_ngrams," if include_script_ngrams else ""
     op.execute(f"""
         CREATE VIRTUAL TABLE search_index_rebuilt USING fts5(
@@ -52,10 +61,6 @@ def rebuild_sqlite_search_index(*, include_script_ngrams: bool) -> None:
             prefix='1,2,3,4'
         )
     """)
-
-    if not search_index_exists:
-        op.execute("ALTER TABLE search_index_rebuilt RENAME TO search_index")
-        return
 
     source_columns = SQLITE_COLUMNS.format(script_column="")
     target_columns = SQLITE_COLUMNS.format(
