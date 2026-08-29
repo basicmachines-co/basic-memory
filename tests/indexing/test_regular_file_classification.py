@@ -508,3 +508,62 @@ async def test_missing_note_content_fence_preserves_concurrent_bootstrap(
     assert preserved.is_markdown
     assert note_content is not None
     assert note_content.markdown_content == "# Accepted during bootstrap"
+
+
+async def test_legacy_poison_without_note_content_converges_to_resource(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+) -> None:
+    project_id = relation_repository.project_id
+    assert project_id is not None
+    now = datetime.now(tz=UTC)
+    poison_path = "_phase7_import/.md"
+    poison = Entity(
+        project_id=project_id,
+        title="Legacy poison",
+        note_type="note",
+        content_type=RUNTIME_MARKDOWN_CONTENT_TYPE,
+        permalink="legacy-poison",
+        file_path=poison_path,
+        checksum="old-checksum",
+        created_at=now,
+        updated_at=now,
+    )
+    async with db.scoped_session(search_service.session_maker) as session:
+        poison = await entity_repository.add(session, poison)
+
+    batch_indexer = BatchIndexer(
+        project_id=project_id,
+        app_config=app_config,
+        entity_service=entity_service,
+        entity_repository=entity_repository,
+        observation_repository=entity_service.observation_repository,
+        relation_repository=relation_repository,
+        search_service=search_service,
+        file_writer=StorageIndexFileWriter(storage=file_service),
+        session_maker=search_service.session_maker,
+    )
+    result = await batch_indexer.index_files(
+        {
+            poison_path: IndexInputFile(
+                path=poison_path,
+                content_type=RUNTIME_MARKDOWN_CONTENT_TYPE,
+                content=b"legacy poison bytes",
+                size=19,
+            )
+        },
+        max_concurrent=1,
+    )
+
+    assert result.errors == []
+    assert result.indexed[0].content_type == RUNTIME_RESOURCE_CONTENT_TYPE
+    async with db.scoped_session(search_service.session_maker) as session:
+        repaired = await entity_repository.get_by_id(session, poison.id)
+
+    assert repaired is not None
+    assert repaired.content_type == RUNTIME_RESOURCE_CONTENT_TYPE
+    assert repaired.permalink is None

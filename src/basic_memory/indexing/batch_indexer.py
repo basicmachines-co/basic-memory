@@ -615,19 +615,26 @@ class BatchIndexer:
             if existing is None:
                 raise ValueError(f"Entity not found before file metadata update: {file.path}")
             if should_clear_note_state and locked_note_content is None:
-                # A missing canonical row cannot be fenced against concurrent
-                # bootstrap. Leave the Markdown state intact until a later pass
-                # can lock an accepted NoteContent generation.
-                return _PreparedEntity(
-                    path=file.path,
-                    entity_id=existing.id,
-                    permalink=existing.permalink,
-                    checksum=existing.checksum or checksum,
-                    content_type=existing.content_type,
-                    search_content=None,
-                    resolve_relations=False,
-                    refresh_search=False,
+                # A missing row cannot be locked, so recheck after the Entity
+                # fence. A completed bootstrap is now visible and must win;
+                # a still-absent row is a stable legacy poison row we can repair.
+                bootstrapped_note_content = await NoteContentRepository(
+                    project_id=self.relation_repository.project_id
+                ).get_by_entity_id(
+                    session,
+                    entity_id,
                 )
+                if bootstrapped_note_content is not None:
+                    return _PreparedEntity(
+                        path=file.path,
+                        entity_id=existing.id,
+                        permalink=existing.permalink,
+                        checksum=existing.checksum or checksum,
+                        content_type=existing.content_type,
+                        search_content=None,
+                        resolve_relations=False,
+                        refresh_search=False,
+                    )
             current_incoming_source_ids = {
                 relation.from_id
                 for relation in existing.incoming_relations
