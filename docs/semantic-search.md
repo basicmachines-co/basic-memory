@@ -201,6 +201,19 @@ bm reindex --embeddings
 Rebuild embeddings after changing either prefix so stored document vectors and new query vectors
 use the same model contract.
 
+### Chinese, Japanese, Korean and other unsegmented scripts
+
+Keyword (full-text) search does not segment CJK text. Both backends tokenize a run of CJK
+characters as a single token — SQLite's FTS5 `unicode61` tokenizer and Postgres's default text
+search parser alike — so a query such as `生存` only matches a note where `生存` appears as a
+standalone run, not inside `适者生存`. Prefix matching does not help with substrings in the
+middle of a run.
+
+Until a segmenting tokenizer option ships (tracked in
+[#1294](https://github.com/basicmachines-co/basic-memory/issues/1294)), use semantic or hybrid
+search with a multilingual embedding model for these languages — the Jina Chinese-English model
+or multilingual E5 configured above both work — and treat keyword search as exact-run matching.
+
 ### OpenAI
 
 Uses OpenAI's embeddings API for higher-dimensional vectors. Requires an API key.
