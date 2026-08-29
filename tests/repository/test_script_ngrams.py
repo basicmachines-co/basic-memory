@@ -10,6 +10,7 @@ from basic_memory.repository.script_ngrams import (
     script_run_grams,
     script_runs,
 )
+from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 
@@ -22,6 +23,7 @@ from basic_memory.repository.sqlite_search_repository import SQLiteSearchReposit
         ("サバイバル", (("サ", "バ", "イ", "バ", "ル"),)),
         ("생존 경쟁", (("생", "존"), ("경", "쟁"))),
         ("ภาษาไทย", (("ภ", "า", "ษ", "า", "ไ", "ท", "ย"),)),
+        ("時々", (("時", "々"),)),
         ("ＡＢＣ", ()),
     ],
 )
@@ -97,8 +99,8 @@ async def test_search_matches_cjk_substring_without_matching_reordered_character
         type="entity",
         file_path="notes/evolution.md",
         title="進化について",
-        content_stems="OpenAI and 即适者生存的讨论与黑猫",
-        content_snippet="OpenAI and 即适者生存的讨论与黑猫",
+        content_stems="OpenAI and 即适者生存的讨论与黑猫，時々更新",
+        content_snippet="OpenAI and 即适者生存的讨论与黑猫，時々更新",
         permalink="notes/evolution",
         created_at=now,
         updated_at=now,
@@ -109,6 +111,7 @@ async def test_search_matches_cjk_substring_without_matching_reordered_character
     assert [result.id for result in await search_repository.search("OpenAI 适者生存")] == [1294]
     assert [result.id for result in await search_repository.search("OpenAI and 适者生存")] == [1294]
     assert [result.id for result in await search_repository.search("猫")] == [1294]
+    assert [result.id for result in await search_repository.search("時々")] == [1294]
     assert await search_repository.search("适生者存") == []
 
 
@@ -171,6 +174,49 @@ async def test_search_ranking_includes_every_script_run(search_repository) -> No
 
     assert [result.id for result in all_run_results] == [1300]
     assert all_run_results[0].score != first_run_results[0].score
+
+
+@pytest.mark.asyncio
+async def test_postgres_ranking_adds_contributions_from_every_script_run(
+    search_repository,
+) -> None:
+    if not isinstance(search_repository, PostgresSearchRepository):
+        pytest.skip("PostgreSQL combines independently ranked script phrases")
+
+    now = datetime.now(timezone.utc)
+    shared_first_run = "適者 " * 5
+    rows = [
+        SearchIndexRow(
+            project_id=search_repository.project_id,
+            id=1302,
+            type="entity",
+            file_path="notes/one-secondary-match.md",
+            title="One secondary match",
+            content_stems=f"{shared_first_run}生存",
+            content_snippet=f"{shared_first_run}生存",
+            permalink="notes/one-secondary-match",
+            created_at=now,
+            updated_at=now,
+        ),
+        SearchIndexRow(
+            project_id=search_repository.project_id,
+            id=1303,
+            type="entity",
+            file_path="notes/many-secondary-matches.md",
+            title="Many secondary matches",
+            content_stems=f"{shared_first_run}{'生存 ' * 5}",
+            content_snippet=f"{shared_first_run}{'生存 ' * 5}",
+            permalink="notes/many-secondary-matches",
+            created_at=now,
+            updated_at=now,
+        ),
+    ]
+    await search_repository.bulk_index_items(rows)
+
+    results = await search_repository.search("適者 生存")
+
+    assert [result.id for result in results] == [1303, 1302]
+    assert results[0].score > results[1].score
 
 
 @pytest.mark.asyncio

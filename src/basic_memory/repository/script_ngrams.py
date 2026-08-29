@@ -26,6 +26,10 @@ def is_script_search_character(character: str) -> bool:
             (0x1000, 0x109F),  # Myanmar
             (0x1780, 0x17FF),  # Khmer
             (0x19E0, 0x19FF),  # Khmer symbols
+            (0x3005, 0x3007),  # Ideographic iteration, closing, and zero marks
+            (0x3021, 0x3029),  # Hangzhou numerals
+            (0x3031, 0x3035),  # Vertical kana repeat marks
+            (0x3038, 0x303B),  # Hangzhou tens and vertical iteration mark
             (0x3040, 0x30FF),  # Hiragana and Katakana
             (0x3100, 0x318F),  # Bopomofo and Hangul compatibility Jamo
             (0x31A0, 0x31BF),  # Bopomofo extended

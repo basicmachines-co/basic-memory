@@ -1295,7 +1295,9 @@ class PostgresSearchRepository(SearchRepositoryBase):
             f"@@ to_tsquery('simple', :script_text_{index})), 0))"
             for index in range(len(script_tsqueries))
         )
-        score_expr = f"GREATEST({', '.join(score_parts)})" if score_parts else "0"
+        # Each condition above is required, so every query component should contribute to
+        # relevance. Taking only the strongest rank makes additional script runs invisible.
+        score_expr = " + ".join(score_parts) if score_parts else "0"
 
         return from_clause, where_clause, params, order_by_clause, score_expr
 
