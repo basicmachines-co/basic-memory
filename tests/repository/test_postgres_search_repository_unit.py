@@ -590,6 +590,9 @@ async def test_postgres_batch_sync_tracks_deferred_oversized_entities(monkeypatc
         ("auth-service AND token", "auth-service & token"),
         ("config.json AND file", "config.json & file"),
         ("v0.13.0b2 OR release", "v0.13.0b2 | release"),
+        ("C++ NOT Java", "C++ & !Java"),
+        ("C++ AND NOT Java", "C++ & !Java"),
+        ("NOT C++", "!C++"),
         ("recovery AND", "recovery:*"),
     ],
 )

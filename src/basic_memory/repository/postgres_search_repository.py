@@ -497,16 +497,26 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 )
                 continue
             normalized_parts.append(stripped_part)
-        result = " ".join(normalized_parts)
+        # Convert operators from the parsed sequence so ``A NOT B`` does not
+        # depend on the final character of A. Structured operands such as C++
+        # may end in punctuation but still require the conjunction before NOT.
+        tsquery_parts: list[str] = []
+        for part in normalized_parts:
+            if part == "AND":
+                tsquery_parts.append("&")
+                continue
+            if part == "OR":
+                tsquery_parts.append("|")
+                continue
+            if part == "NOT":
+                if tsquery_parts and tsquery_parts[-1] not in {"&", "|", "!", "("}:
+                    tsquery_parts.append("&")
+                tsquery_parts.append("!")
+                continue
+            tsquery_parts.append(part)
+        result = " ".join(tsquery_parts)
 
-        # Replace Boolean operators with tsquery operators while placeholders
-        # protect quoted content from being interpreted as syntax.
-        result = re.sub(r"\bAND\b", "&", result)
-        result = re.sub(r"\bOR\b", "|", result)
-        result = re.sub(r"\bNOT\b", "!", result)
-        # In the public syntax, ``A NOT B`` means ``A AND NOT B``. A leading NOT
-        # or one following another operator already has a complete tsquery shape.
-        result = re.sub(r"(?<=[\w)])\s+!", " & !", result)
+        # Attach negation to its operand after structural conversion.
         result = re.sub(r"!\s+", "!", result)
         result = re.sub(r"\(\s+", "(", result)
         result = re.sub(r"\s+\)", ")", result)
