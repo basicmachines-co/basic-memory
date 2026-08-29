@@ -648,6 +648,7 @@ class TestSearchTermPreparation:
         assert quoted_or == "foo & bar | baz & qux"
         assert '"' not in quoted_or
         assert '"' not in search_repository._prepare_search_term('"unbalanced OR phrase')
+        assert search_repository._prepare_search_term("foo OR not") == "foo | not"
 
     def test_hyphenated_terms_with_boolean_operators(self, search_repository):
         """Hyphenated terms with Boolean operators should be properly quoted."""

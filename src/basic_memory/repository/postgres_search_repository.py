@@ -394,7 +394,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         # Split on Boolean keywords first, then sanitize each operand using the
         # same rules as ordinary terms. This keeps user punctuation (including
         # quotes and unbalanced grouping characters) from reaching to_tsquery.
-        parts = re.split(r"\b(AND|OR|NOT)\b", query, flags=re.IGNORECASE)
+        parts = re.split(r"\b(AND|OR|NOT)\b", query)
         result: list[str] = []
         for index, part in enumerate(parts):
             if index % 2:
