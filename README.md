@@ -692,14 +692,4 @@ Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 [AGPL-3.0](LICENSE).
 
-## Star History
-
-<a href="https://www.star-history.com/#basicmachines-co/basic-memory&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=basicmachines-co/basic-memory&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=basicmachines-co/basic-memory&type=Date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=basicmachines-co/basic-memory&type=Date" />
- </picture>
-</a>
-
 Built with ♥️ by [Basic Machines](https://basicmachines.co?utm_source=github&utm_medium=referral&utm_campaign=readme)
