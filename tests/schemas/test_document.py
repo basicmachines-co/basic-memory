@@ -1011,6 +1011,14 @@ def test_document_markdown_body_rejects_nul_bytes() -> None:
         "docs/nul",
         "docs/COM1.txt",
         "docs/report.pdf:stream",
+        # Other Windows-invalid components (#1178 review).
+        "docs/report?.pdf",
+        "docs/re*port.pdf",
+        "docs/re<port>.pdf",
+        'docs/re"port.pdf',
+        "docs/pipe|name.pdf",
+        "docs/archive./report.pdf",
+        "docs/trailing /report.pdf",
     ],
 )
 def test_document_paths_reject_noncanonical_values(invalid_path: str) -> None:

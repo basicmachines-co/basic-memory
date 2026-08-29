@@ -828,6 +828,11 @@ def _normalize_run_identity_text(value: str, *, field_name: str) -> str:
     return normalized
 
 
+# Characters Windows forbids in a filename; the backslash and NUL are already
+# rejected above, so this covers the rest.
+_WINDOWS_INVALID_CHARS = frozenset('<>:"|?*')
+
+
 _WINDOWS_RESERVED_NAMES = frozenset(
     {"CON", "PRN", "AUX", "NUL"}
     | {f"COM{n}" for n in range(1, 10)}
@@ -855,12 +860,16 @@ def _validate_project_relative_path(value: str) -> str:
         or value.endswith("/")
     ):
         raise ValueError("path must be a canonical POSIX project-relative path")
-    # A component that is a Windows reserved device name (CON, NUL, COM1 ...) or
-    # carries an NTFS ":stream" suffix never materializes as a portable sidecar on
-    # Windows; no retry, reindex, or sweep can make it converge (#1178 review).
+    # A component that Windows cannot represent verbatim never materializes as a
+    # portable sidecar there; no retry, reindex, or sweep can make canonical note
+    # storage converge, so reject it here (#1178 review). Covers reserved device
+    # names (CON, NUL, COM1 ...), NTFS ":stream" suffixes, the illegal characters
+    # <>:"|?*, and components ending in a dot or space (Windows strips those).
     for component in path.parts:
-        if ":" in component:
-            raise ValueError("path components must not contain ':'")
+        if _WINDOWS_INVALID_CHARS.intersection(component):
+            raise ValueError(f"path component '{component}' contains a Windows-invalid character")
+        if component[-1] in {".", " "}:
+            raise ValueError(f"path component '{component}' must not end with a dot or space")
         stem = component.split(".", 1)[0].upper()
         if stem in _WINDOWS_RESERVED_NAMES:
             raise ValueError(f"path component '{component}' is a reserved device name")
