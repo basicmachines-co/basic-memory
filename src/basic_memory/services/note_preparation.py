@@ -189,9 +189,14 @@ async def resolve_permalink(
     markdown: EntityMarkdown | None = None,
     *,
     skip_conflict_check: bool = False,
+    current_file_path: str | None = None,
     session: AsyncSession | None = None,
 ) -> str:
-    """Resolve the unique canonical permalink for one prepared note."""
+    """Resolve the unique canonical permalink for one prepared note.
+
+    ``current_file_path`` names the row being re-resolved (a move or rename), so a
+    permalink that row already owns is not treated as a collision with itself.
+    """
     file_path_str = Path(file_path).as_posix()
     async with db.scoped_session(dependencies.session_maker, session) as active_session:
         conflicts = await detect_file_path_conflicts(
@@ -240,7 +245,14 @@ async def resolve_permalink(
 
         permalink = desired_permalink
         suffix = 1
-        while await dependencies.entity_repository.permalink_exists(active_session, permalink):
+        while True:
+            owner = await dependencies.entity_repository.get_file_path_for_permalink(
+                active_session, permalink
+            )
+            # A case-only rename resolves to the slug the entity already holds;
+            # suffixing it would churn `config` -> `config-1` on every move (#1281).
+            if owner is None or owner == current_file_path:
+                break
             permalink = f"{desired_permalink}-{suffix}"
             suffix += 1
     return permalink
@@ -815,7 +827,9 @@ async def prepare_move_entity_content(
             update_permalinks_on_move or entity.permalink is None
         )
     if update_permalink:
-        permalink = await resolve_permalink(dependencies, file_path, session=session)
+        permalink = await resolve_permalink(
+            dependencies, file_path, current_file_path=entity.file_path, session=session
+        )
         post = frontmatter.loads(markdown_content)
         post.metadata["permalink"] = permalink
         markdown_content = dump_frontmatter(post)
@@ -923,6 +937,7 @@ class NotePreparation:
         file_path: Permalink | Path,
         markdown: EntityMarkdown | None = None,
         skip_conflict_check: bool = False,
+        current_file_path: str | None = None,
         session: AsyncSession | None = None,
     ) -> str:
         return await resolve_permalink(
@@ -930,6 +945,7 @@ class NotePreparation:
             file_path,
             markdown,
             skip_conflict_check=skip_conflict_check,
+            current_file_path=current_file_path,
             session=session,
         )
 

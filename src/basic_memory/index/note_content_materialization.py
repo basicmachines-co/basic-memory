@@ -579,6 +579,17 @@ class InlineNoteFileDeleteEnqueuer:
                 file_path=request.file_path,
                 live_file_path=request.live_file_path,
             )
+            # Trigger: the two spellings differ only by case.
+            # Why: the atomic write replaced the file's bytes through the existing
+            #      directory entry, so the entry still carries the old casing; the
+            #      next scan would read that as a move back and undo the rename (#1281).
+            # Outcome: rename the entry to the accepted casing so disk agrees with the
+            #          row. On a case-sensitive filesystem the alias check above only
+            #          passes for hard links, where a rename onto itself is a no-op.
+            if request.file_path != request.live_file_path and (
+                request.file_path.casefold() == request.live_file_path.casefold()
+            ):
+                await self.storage.file_service.move_file(request.file_path, request.live_file_path)
             # No separate source object exists: the old path aliases the live destination, so the
             # move is already physically complete and its suppression marker must not outlive it.
             if self.vacate_clearer is not None:

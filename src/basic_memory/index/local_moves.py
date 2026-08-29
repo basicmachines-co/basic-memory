@@ -70,6 +70,7 @@ class LocalMoveEntityService(Protocol):
         file_path: Path | str,
         markdown: EntityMarkdown | None = None,
         skip_conflict_check: bool = False,
+        current_file_path: str | None = None,
         session: AsyncSession | None = None,
     ) -> str: ...
 
@@ -125,6 +126,7 @@ class LocalProjectIndexMoveContentUpdater(ProjectIndexMoveContentUpdater):
         permalink = await self.entity_service.resolve_permalink(
             Path(moved_file.new_path),
             skip_conflict_check=True,
+            current_file_path=moved_file.old_path,
             session=session,
         )
         if permalink == moved_file.old_permalink:
