@@ -58,8 +58,12 @@ def inspect_pdf_bytes(
         raise RuntimeError("pdf-inspector classification and extraction page counts differ")
 
     page_result = pdf_inspector.extract_pages_markdown_bytes(pdf_bytes)
-    if len(page_result.pages) != result.page_count:
-        raise RuntimeError("pdf-inspector omitted pages from the full-document extraction")
+    # Page markers and OCR provenance are keyed by page index, so a repeated,
+    # skipped, or reordered entry would mislabel canonical Markdown even when
+    # the entry count is right. Require exactly 0..page_count-1 in order.
+    page_indexes = [page.page for page in page_result.pages]
+    if page_indexes != list(range(result.page_count)):
+        raise RuntimeError("pdf-inspector page entries do not cover 0..page_count-1 exactly")
 
     markdown_parts: list[str] = []
     for page in page_result.pages:
@@ -76,6 +80,11 @@ def inspect_pdf_bytes(
         page_result.pages_needing_ocr,
         page_count=result.page_count,
     )
+    flagged_pages = tuple(page.page + 1 for page in page_result.pages if page.needs_ocr)
+    if flagged_pages != pages_needing_ocr:
+        raise RuntimeError(
+            "pdf-inspector per-page OCR flags disagree with document-level pages_needing_ocr"
+        )
     return PdfInspectorOutput(
         engine=PDF_INSPECTOR_ENGINE,
         engine_version=engine_version,

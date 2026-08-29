@@ -119,22 +119,32 @@ class PdfInspector:
             )
 
         async with self._semaphore:
-            process = await asyncio.create_subprocess_exec(
-                self.python_executable,
-                "-m",
-                PDF_INSPECTOR_WORKER_MODULE,
-                "--max-pages",
-                str(self.limits.max_pages),
-                "--max-output-bytes",
-                str(self.limits.max_output_bytes),
-                "--max-memory-bytes",
-                str(self.limits.max_memory_bytes),
-                "--cpu-seconds",
-                str(self.limits.cpu_seconds),
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    self.python_executable,
+                    "-m",
+                    PDF_INSPECTOR_WORKER_MODULE,
+                    "--max-pages",
+                    str(self.limits.max_pages),
+                    "--max-output-bytes",
+                    str(self.limits.max_output_bytes),
+                    "--max-memory-bytes",
+                    str(self.limits.max_memory_bytes),
+                    "--cpu-seconds",
+                    str(self.limits.cpu_seconds),
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+            except NotImplementedError as error:
+                # Trigger: the running loop cannot spawn subprocesses. Basic Memory
+                # installs the selector loop on Windows for aiosqlite (see db.py),
+                # and that loop has no subprocess transport.
+                # Outcome: a named adapter error instead of a bare NotImplementedError.
+                raise PdfInspectorProcessError(
+                    "PDF extraction needs an event loop with subprocess support; "
+                    "Basic Memory runs the selector loop on Windows"
+                ) from error
             try:
                 async with asyncio.timeout(self.limits.timeout_seconds):
                     stdout, stderr = await process.communicate(input=pdf_bytes)

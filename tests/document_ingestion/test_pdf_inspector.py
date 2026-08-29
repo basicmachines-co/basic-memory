@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.metadata
+import sys
 from typing import Any, cast
 
 import pytest
@@ -105,6 +106,10 @@ def install_fake_process(monkeypatch: pytest.MonkeyPatch, process: FakeProcess) 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", create_subprocess)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="Basic Memory pins the selector event loop on Windows, which cannot spawn subprocesses",
+)
 @pytest.mark.asyncio
 async def test_pdf_inspector_extracts_native_text_in_subprocess() -> None:
     inspector = PdfInspector(
@@ -141,6 +146,22 @@ async def test_pdf_inspector_rejects_oversized_source_before_spawning(
 
     with pytest.raises(PdfInspectorSourceTooLargeError):
         await inspector.extract(b"four")
+
+
+@pytest.mark.asyncio
+async def test_pdf_inspector_names_a_loop_without_subprocess_support(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Windows selector loop raises NotImplementedError; surface it as an adapter error."""
+
+    async def selector_loop_spawn(*args: object, **kwargs: object) -> None:
+        raise NotImplementedError
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", selector_loop_spawn)
+    inspector = PdfInspector()
+
+    with pytest.raises(PdfInspectorProcessError, match="subprocess support"):
+        await inspector.extract(b"%PDF-test")
 
 
 @pytest.mark.asyncio

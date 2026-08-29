@@ -75,9 +75,28 @@ def test_inspect_pdf_bytes_maps_native_output(monkeypatch: pytest.MonkeyPatch) -
     [
         ({"classified_pages": 3, "processed_pages": 3}, {"max_pages": 2}, ValueError, "page limit"),
         ({"processed_pages": 3}, {}, RuntimeError, "page counts differ"),
-        ({"pages": (FakePage(0, False, "only"),)}, {}, RuntimeError, "omitted pages"),
+        ({"pages": (FakePage(0, False, "only"),)}, {}, RuntimeError, "do not cover"),
+        (
+            {"pages": (FakePage(0, False, "a"), FakePage(0, True, ""))},
+            {},
+            RuntimeError,
+            "do not cover",
+        ),
+        (
+            {"pages": (FakePage(1, True, ""), FakePage(0, False, "a"))},
+            {},
+            RuntimeError,
+            "do not cover",
+        ),
         ({}, {"max_output_bytes": 5}, ValueError, "output byte limit"),
         ({"pages_needing_ocr": (5,)}, {}, ValueError, "outside the document"),
+        ({"pages_needing_ocr": ()}, {}, RuntimeError, "disagree"),
+        (
+            {"pages": (FakePage(0, False, "a"), FakePage(1, False, "b"))},
+            {},
+            RuntimeError,
+            "disagree",
+        ),
     ],
 )
 def test_inspect_pdf_bytes_rejects_inconsistent_native_output(
