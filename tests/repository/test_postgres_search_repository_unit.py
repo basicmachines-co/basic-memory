@@ -584,6 +584,8 @@ async def test_postgres_batch_sync_tracks_deferred_oversized_entities(monkeypatc
         ('"cash OR check"', "(cash & OR & check)"),
         ('foo"bar baz"', "foo & (bar & baz)"),
         ('"foo bar"baz', "(foo & bar) & baz"),
+        ('"foo"(bar)', "(foo) & (bar)"),
+        ('(foo)"bar"', "(foo) & (bar)"),
         ('"unbalanced quote OR recovery', "unbalanced:* & quote:* & recovery:*"),
         ("incident AND (database recovery)", "incident & (database & recovery)"),
         ("(incident AND response) OR recovery", "(incident & response) | recovery"),

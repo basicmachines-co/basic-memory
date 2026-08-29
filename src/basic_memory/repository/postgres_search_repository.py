@@ -514,6 +514,12 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     tsquery_parts.append("&")
                 tsquery_parts.append("!")
                 continue
+            # Quotes are replaced before parentheses are tokenized, so adjacent
+            # groups can arrive as separate operands without an explicit AND.
+            # PostgreSQL requires that conjunction between an operand or closed
+            # group and the next operand or opening group.
+            if part != ")" and tsquery_parts and tsquery_parts[-1] not in {"&", "|", "!", "("}:
+                tsquery_parts.append("&")
             tsquery_parts.append(part)
         result = " ".join(tsquery_parts)
 
