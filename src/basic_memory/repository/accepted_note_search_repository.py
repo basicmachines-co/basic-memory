@@ -13,6 +13,7 @@ from basic_memory.repository.accepted_note_vector_cleanup import (
     ProjectIndexExternalVectorCleaner,
     delete_project_index_vector_rows,
 )
+from basic_memory.repository.script_ngrams import build_script_ngrams
 
 type SearchIndexSqlValue = str | int | datetime | None
 type SearchIndexSqlParams = dict[str, SearchIndexSqlValue]
@@ -28,14 +29,15 @@ DELETE_ACCEPTED_NOTE_SEARCH_SQL = text(
 INSERT_ACCEPTED_NOTE_SEARCH_SQL = text(
     """
     INSERT INTO search_index (
-        id, title, content_stems, content_snippet, permalink, file_path, type, metadata,
+        id, title, content_stems, content_snippet, script_ngrams,
+        permalink, file_path, type, metadata,
         from_id, to_id, relation_type,
         entity_id, category,
         created_at, updated_at,
         project_id
     ) VALUES (
-        :id, :title, :content_stems, :content_snippet, :permalink, :file_path, :type,
-        :metadata,
+        :id, :title, :content_stems, :content_snippet, :script_ngrams,
+        :permalink, :file_path, :type, :metadata,
         NULL, NULL, NULL,
         :entity_id, NULL,
         :created_at, :updated_at,
@@ -47,14 +49,15 @@ INSERT_ACCEPTED_NOTE_SEARCH_SQL = text(
 UPSERT_ACCEPTED_NOTE_SEARCH_SQL = text(
     """
     INSERT INTO search_index (
-        id, title, content_stems, content_snippet, permalink, file_path, type, metadata,
+        id, title, content_stems, content_snippet, script_ngrams,
+        permalink, file_path, type, metadata,
         from_id, to_id, relation_type,
         entity_id, category,
         created_at, updated_at,
         project_id
     ) VALUES (
-        :id, :title, :content_stems, :content_snippet, :permalink, :file_path, :type,
-        CAST(:metadata AS jsonb),
+        :id, :title, :content_stems, :content_snippet, :script_ngrams,
+        :permalink, :file_path, :type, CAST(:metadata AS jsonb),
         NULL, NULL, NULL,
         :entity_id, NULL,
         :created_at, :updated_at,
@@ -65,6 +68,7 @@ UPSERT_ACCEPTED_NOTE_SEARCH_SQL = text(
         title = EXCLUDED.title,
         content_stems = EXCLUDED.content_stems,
         content_snippet = EXCLUDED.content_snippet,
+        script_ngrams = EXCLUDED.script_ngrams,
         file_path = EXCLUDED.file_path,
         type = EXCLUDED.type,
         metadata = EXCLUDED.metadata,
@@ -95,6 +99,11 @@ def accepted_note_search_insert_params(
         "title": row.title,
         "content_stems": row.content_stems,
         "content_snippet": row.content_snippet,
+        "script_ngrams": build_script_ngrams(
+            row.title,
+            row.content_stems,
+            row.content_snippet,
+        ),
         "permalink": row.permalink,
         "file_path": row.file_path,
         "type": row.item_type,
