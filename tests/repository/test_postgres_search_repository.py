@@ -345,19 +345,22 @@ async def test_postgres_search_repository_wildcard_text_and_permalink_match_exac
 
 @pytest.mark.asyncio
 async def test_postgres_search_repository_tsquery_syntax_error_returns_empty(
-    session_maker, test_project
+    session_maker, test_project, monkeypatch: pytest.MonkeyPatch
 ):
     repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
 
-    # Trailing boolean operator creates an invalid tsquery; repository should return []
-    results = await repo.search(search_text="coffee AND")
-    assert results == []
-    assert await repo.count(search_text="coffee AND") == 0
+    # Isolate database-error handling from the user parser, which deliberately
+    # repairs malformed trailing operators before they reach PostgreSQL.
+    with monkeypatch.context() as syntax_error:
+        syntax_error.setattr(repo, "_prepare_search_term", lambda *_args, **_kwargs: "coffee &")
+        results = await repo.search(search_text="coffee")
+        assert results == []
+        assert await repo.count(search_text="coffee") == 0
 
 
 @pytest.mark.asyncio
 async def test_postgres_search_tsquery_error_does_not_poison_caller_session(
-    session_maker, test_project
+    session_maker, test_project, monkeypatch: pytest.MonkeyPatch
 ):
     """A tsquery syntax error on a caller-owned session must not abort its transaction.
 
@@ -391,9 +394,15 @@ async def test_postgres_search_tsquery_error_does_not_poison_caller_session(
         pre = await session.execute(text("SELECT 1"))
         assert pre.scalar_one() == 1
 
-        # Trailing boolean operator produces an invalid tsquery; this used to abort
-        # the caller's transaction. With the savepoint it returns [] cleanly.
-        results = await repo.search(search_text="coffee AND", session=session)
+        # Force the database-facing syntax error independently of parser repair;
+        # without the savepoint it aborts the caller's transaction.
+        with monkeypatch.context() as syntax_error:
+            syntax_error.setattr(
+                repo,
+                "_prepare_search_term",
+                lambda *_args, **_kwargs: "coffee &",
+            )
+            results = await repo.search(search_text="coffee", session=session)
         assert results == []
 
         # Proof the caller-owned transaction survived: a normal query still works,

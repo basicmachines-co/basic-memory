@@ -20,7 +20,7 @@ from basic_memory.repository.embedding_provider_factory import create_embedding_
 from basic_memory.repository.rerank_provider import RerankProvider
 from basic_memory.repository.rerank_provider_factory import create_rerank_provider
 from basic_memory.repository.search_index_row import SearchIndexRow
-from basic_memory.repository.search_query import relaxed_query_words
+from basic_memory.repository.search_query import relaxed_query_words, relaxation_word_tokens
 from basic_memory.repository.semantic_chunking import VectorChunkRecord
 from basic_memory.repository.search_repository_base import (
     SearchRepositoryBase,
@@ -52,6 +52,9 @@ POSTGRES_FTS_CHUNK_SIZE = 8_000
 POSTGRES_FTS_CHUNK_OVERLAP = 2_048
 _TSQUERY_OPERAND_PATTERN = re.compile(r"'(?:''|[^'])*'(?::\*)?|[^\s&|!()]+")
 _TSQUERY_WORD_PATTERN = re.compile(r"[^\W_]+(?:'[^\W_]+)?", re.UNICODE)
+_QUOTED_QUERY_PATTERN = re.compile(r'"([^"]*)"')
+_BOOLEAN_WORDS = frozenset({"AND", "OR", "NOT"})
+_TSQUERY_METACHARACTERS = frozenset("&|!:<>")
 
 
 def _iter_fts_chunks(content: str | None) -> list[tuple[int, str]]:
@@ -103,6 +106,65 @@ def _tsquery_operands(processed_text: str) -> list[tuple[str, str]]:
             safe_operand = f"{escaped_word}:*" if is_prefix else escaped_word
             operands.setdefault(safe_operand, word)
     return list(operands.items())
+
+
+def _render_tsquery_words(
+    text_value: str,
+    *,
+    operator: str,
+    is_prefix: bool,
+    drop_boolean_words: bool = False,
+) -> str:
+    """Render user text as complete, individually escaped tsquery operands."""
+    words = relaxation_word_tokens(text_value)
+    if drop_boolean_words:
+        words = [word for word in words if word.upper() not in _BOOLEAN_WORDS]
+    if not words:
+        return "NOSPECIALCHARS:*"
+
+    operands = []
+    for word in words:
+        escaped_word = "'{}'".format(word.replace("'", "''")) if "'" in word else word
+        operands.append(f"{escaped_word}:*" if is_prefix else escaped_word)
+    return operator.join(operands)
+
+
+def _render_boolean_operand(operand: str) -> str:
+    """Preserve safe structured text while escaping tsquery syntax bytes."""
+    if "'" not in operand and not any(char in _TSQUERY_METACHARACTERS for char in operand):
+        return operand
+    return _render_tsquery_words(
+        operand,
+        operator=" & ",
+        is_prefix=False,
+    )
+
+
+def _has_valid_boolean_shape(expression: str) -> bool:
+    """Reject incomplete operator structure before it reaches strict ``to_tsquery``."""
+    depth = 0
+    for char in expression:
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            if depth < 0:
+                return False
+    if depth:
+        return False
+
+    stripped = expression.strip()
+    if not stripped or stripped[0] in "&|" or stripped[-1] in "&|!":
+        return False
+    return not any(
+        re.search(pattern, stripped)
+        for pattern in (
+            r"[&|]\s*[&|]",
+            r"!\s*[&|)]",
+            r"\(\s*[&|)]",
+            r"[&|!(]\s*\)",
+        )
+    )
 
 
 def _strip_nul_from_row(row_data: dict[str, Any]) -> dict[str, Any]:
@@ -351,7 +413,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         """
         # Check for explicit boolean operators
         boolean_operators = [" AND ", " OR ", " NOT "]
-        if any(op in f" {term} " for op in boolean_operators):
+        if '"' in term or any(op in f" {term} " for op in boolean_operators):
             return self._prepare_boolean_query(term)
 
         # For non-Boolean queries, prepare single term
@@ -391,14 +453,108 @@ class PostgresSearchRepository(SearchRepositoryBase):
             "(pour OR french) AND press" -> "(pour | french) & press"
             "coffee NOT decaf" -> "coffee & !decaf"
         """
-        # Replace Boolean operators with tsquery operators
-        # Keep parentheses for grouping
-        result = query
-        result = re.sub(r"\bAND\b", "&", result)
-        result = re.sub(r"\bOR\b", "|", result)
-        # NOT must be converted to "& !" and the ! must be attached to the following term
-        # "Python NOT Django" -> "Python & !Django"
-        result = re.sub(r"\bNOT\s+", "& !", result)
+        # PostgreSQL's strict to_tsquery grammar does not accept web-style double
+        # quotes. Convert complete quoted groups first so operator-looking words
+        # inside them remain text and every word becomes a complete operand.
+        quoted_phrases: dict[str, str] = {}
+
+        def replace_quoted_phrase(match: re.Match[str]) -> str:
+            phrase = _render_tsquery_words(
+                match.group(1),
+                operator=" & ",
+                is_prefix=False,
+            )
+            placeholder = f"BMQUOTEDPHRASE{len(quoted_phrases)}"
+            while placeholder in query:
+                placeholder += "X"
+            quoted_phrases[placeholder] = f"({phrase})"
+            # Surround the placeholder so quotes adjacent to plain text become
+            # explicit operands instead of restoring into ``word(group)``.
+            return f" {placeholder} "
+
+        result = _QUOTED_QUERY_PATTERN.sub(replace_quoted_phrase, query)
+        if '"' in result:
+            # An unmatched quote is user text, not a reason to abort the database
+            # transaction. Boolean-looking words lose their operator role here.
+            return _render_tsquery_words(
+                query,
+                operator=" & ",
+                is_prefix=True,
+                drop_boolean_words=True,
+            )
+
+        # Boolean syntax is the only structure retained from user input. A
+        # whitespace-delimited operand still needs explicit conjunctions, but
+        # PostgreSQL must tokenize structured single operands such as
+        # ``auth-service`` and ``config.json`` exactly as it did before quoted
+        # query normalization.
+        normalized_parts: list[str] = []
+        operator_pattern = r"((?<![^\s()])(?:AND|OR|NOT)(?![^\s()])|[()])"
+        for part in re.split(operator_pattern, result):
+            stripped_part = part.strip()
+            if not stripped_part:
+                continue
+            if stripped_part in _BOOLEAN_WORDS or stripped_part in {"(", ")"}:
+                normalized_parts.append(stripped_part)
+                continue
+            if stripped_part in quoted_phrases:
+                normalized_parts.append(stripped_part)
+                continue
+            if any(character.isspace() for character in stripped_part):
+                normalized_parts.append(
+                    _render_tsquery_words(
+                        stripped_part,
+                        operator=" & ",
+                        is_prefix=False,
+                    )
+                )
+                continue
+            normalized_parts.append(_render_boolean_operand(stripped_part))
+        # Convert operators from the parsed sequence so ``A NOT B`` does not
+        # depend on the final character of A. Structured operands such as C++
+        # may end in punctuation but still require the conjunction before NOT.
+        tsquery_parts: list[str] = []
+        for part in normalized_parts:
+            if part == "AND":
+                tsquery_parts.append("&")
+                continue
+            if part == "OR":
+                tsquery_parts.append("|")
+                continue
+            if part == "NOT":
+                if tsquery_parts and tsquery_parts[-1] not in {"&", "|", "!", "("}:
+                    tsquery_parts.append("&")
+                tsquery_parts.append("!")
+                continue
+            # Quotes are replaced before parentheses are tokenized, so adjacent
+            # groups can arrive as separate operands without an explicit AND.
+            # PostgreSQL requires that conjunction between an operand or closed
+            # group and the next operand or opening group.
+            if part != ")" and tsquery_parts and tsquery_parts[-1] not in {"&", "|", "!", "("}:
+                tsquery_parts.append("&")
+            tsquery_parts.append(part)
+        result = " ".join(tsquery_parts)
+
+        # Attach negation to its operand after structural conversion.
+        result = re.sub(r"!\s+", "!", result)
+        result = re.sub(r"\(\s+", "(", result)
+        result = re.sub(r"\s+\)", ")", result)
+
+        if not _has_valid_boolean_shape(result):
+            # Keep the searchable words from malformed Boolean input while
+            # removing the operators that made its structure incomplete.
+            return _render_tsquery_words(
+                query,
+                operator=" & ",
+                is_prefix=True,
+                drop_boolean_words=True,
+            )
+
+        # A multi-digit placeholder contains shorter numeric placeholders as
+        # prefixes, so restore longest names first to keep each token atomic.
+        for placeholder in sorted(quoted_phrases, key=len, reverse=True):
+            phrase = quoted_phrases[placeholder]
+            result = result.replace(placeholder, phrase)
 
         return result
 

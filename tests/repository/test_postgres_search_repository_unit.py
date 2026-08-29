@@ -572,3 +572,48 @@ async def test_postgres_batch_sync_tracks_deferred_oversized_entities(monkeypatc
     complete_record = next(record for record in completion_records if record["entity_id"] == 2)
     assert complete_record["entity_complete"] is True
     assert complete_record["oversized_entity"] is False
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        (
+            '"incident response" OR "database recovery"',
+            "(incident & response) | (database & recovery)",
+        ),
+        ('"cash OR check"', "(cash & OR & check)"),
+        ('foo"bar baz"', "foo & (bar & baz)"),
+        ('"foo bar"baz', "(foo & bar) & baz"),
+        ('"foo"(bar)', "(foo) & (bar)"),
+        ('(foo)"bar"', "(foo) & (bar)"),
+        ('"unbalanced quote OR recovery', "unbalanced:* & quote:* & recovery:*"),
+        ("incident AND (database recovery)", "incident & (database & recovery)"),
+        ("(incident AND response) OR recovery", "(incident & response) | recovery"),
+        ("auth-service AND token", "auth-service & token"),
+        ("auth-OR-service AND token", "auth-OR-service & token"),
+        ("config.AND.json OR file", "config.AND.json | file"),
+        ("config.json AND file", "config.json & file"),
+        ("v0.13.0b2 OR release", "v0.13.0b2 | release"),
+        ('"publishing" AND O\'Reilly', "(publishing) & 'O''Reilly'"),
+        ('"publishing" AND auth|admin', "(publishing) & auth & admin"),
+        ('"publishing" AND bar:baz', "(publishing) & bar & baz"),
+        ("C++ NOT Java", "C++ & !Java"),
+        ("C++ AND NOT Java", "C++ & !Java"),
+        ("NOT C++", "!C++"),
+        ("recovery AND", "recovery:*"),
+    ],
+)
+def test_postgres_quoted_boolean_queries_render_valid_tsquery(
+    query: str,
+    expected: str,
+) -> None:
+    """Quoted user syntax must become a complete tsquery expression before SQL."""
+    assert _make_repo()._prepare_search_term(query) == expected
+
+
+def test_postgres_many_quoted_groups_restore_atomically() -> None:
+    """A placeholder must not rewrite the numeric prefix of a later group."""
+    query = " OR ".join(f'"term{index} word{index}"' for index in range(11))
+    expected = " | ".join(f"(term{index} & word{index})" for index in range(11))
+
+    assert _make_repo()._prepare_search_term(query) == expected
