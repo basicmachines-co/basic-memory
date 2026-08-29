@@ -70,6 +70,11 @@ milvus = [
 redis = [
     "redis>=8.0.0,<9",
 ]
+# Native PDF extraction for document ingestion. Optional so the default install
+# stays parser-free; the worker records the installed version in run identity.
+pdf = [
+    "pdf-inspector>=0.2.6,<2",
+]
 
 [project.urls]
 Homepage = "https://github.com/basicmachines-co/basic-memory"
@@ -135,6 +140,7 @@ dev = [
     "freezegun>=1.5.5",
     "testcontainers[postgres]>=4.0.0",
     "redis>=8.0.0,<9",
+    "pdf-inspector>=0.2.6,<2",
     "psycopg>=3.2.0",
     "pyright>=1.1.408",
     "pytest-testmon>=2.2.0",
