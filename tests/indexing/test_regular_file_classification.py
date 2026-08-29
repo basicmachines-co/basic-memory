@@ -128,6 +128,7 @@ async def test_poison_markdown_reclassification_clears_note_only_state(
         )
 
     lock_order: list[str] = []
+    locked_note_content_ids: list[int] = []
     original_note_content_lock = batch_indexer_module.lock_note_content_before_entity_mutation
     original_get_by_id = entity_repository.get_by_id
 
@@ -138,6 +139,7 @@ async def test_poison_markdown_reclassification_clears_note_only_state(
         entity_ids: Sequence[int],
     ) -> None:
         lock_order.append("note_content")
+        locked_note_content_ids.extend(entity_ids)
         await original_note_content_lock(
             session,
             project_id=project_id,
@@ -192,6 +194,7 @@ async def test_poison_markdown_reclassification_clears_note_only_state(
 
     assert result.errors == []
     assert lock_order[:2] == ["note_content", "entity"]
+    assert locked_note_content_ids == sorted([poison.id, source.id])
     async with db.scoped_session(search_service.session_maker) as session:
         repaired = await entity_repository.get_by_id(session, poison.id)
         note_content = await NoteContentRepository(project_id=project_id).get_by_entity_id(

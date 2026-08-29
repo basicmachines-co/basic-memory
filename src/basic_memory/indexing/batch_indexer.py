@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Awaitable, Callable, Mapping, Sequence, TypeVar
 
 from loguru import logger
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -39,7 +39,7 @@ from basic_memory.indexing.relation_resolution import (
     RepositoryRelationResolutionRuntime,
 )
 from basic_memory.indexing.relation_persistence import RelationGenerationPublisher
-from basic_memory.models import Entity, RelationSearchRefresh
+from basic_memory.models import Entity, Relation, RelationSearchRefresh
 from basic_memory.repository import EntityRepository, ObservationRepository, RelationRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
@@ -519,6 +519,24 @@ class BatchIndexer:
                 if existing is not None and existing.is_markdown
                 else None
             )
+            expected_incoming_source_ids = (
+                frozenset(
+                    int(source_id)
+                    for source_id in await session.scalars(
+                        select(Relation.from_id).where(
+                            Relation.project_id == self.relation_repository.project_id,
+                            Relation.to_id == existing.id,
+                            Relation.from_id != existing.id,
+                        )
+                    )
+                )
+                if (
+                    existing is not None
+                    and existing.is_markdown
+                    and content_type != RUNTIME_MARKDOWN_CONTENT_TYPE
+                )
+                else frozenset()
+            )
         expected_note_db_version = (
             existing_note_content.db_version if existing_note_content is not None else None
         )
@@ -581,7 +599,7 @@ class BatchIndexer:
                 await lock_note_content_before_entity_mutation(
                     session,
                     project_id=self.relation_repository.project_id,
-                    entity_ids=(entity_id,),
+                    entity_ids=tuple(sorted({entity_id, *expected_incoming_source_ids})),
                 )
                 locked_note_content = await NoteContentRepository(
                     project_id=self.relation_repository.project_id
@@ -596,6 +614,27 @@ class BatchIndexer:
             )
             if existing is None:
                 raise ValueError(f"Entity not found before file metadata update: {file.path}")
+            current_incoming_source_ids = {
+                relation.from_id
+                for relation in existing.incoming_relations
+                if relation.from_id != existing.id
+            }
+            if should_clear_note_state and not current_incoming_source_ids.issubset(
+                expected_incoming_source_ids
+            ):
+                # A source published a new inbound edge after the fence snapshot.
+                # Leave this pass non-destructive so a later pass can lock that
+                # source before rewriting its relation.
+                return _PreparedEntity(
+                    path=file.path,
+                    entity_id=existing.id,
+                    permalink=existing.permalink,
+                    checksum=existing.checksum or checksum,
+                    content_type=existing.content_type,
+                    search_content=None,
+                    resolve_relations=False,
+                    refresh_search=False,
+                )
             if (
                 should_clear_note_state
                 and (locked_note_content.db_version if locked_note_content is not None else None)
