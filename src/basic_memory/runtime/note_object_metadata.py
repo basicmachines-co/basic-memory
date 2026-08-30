@@ -42,8 +42,18 @@ VALID_NOTE_OBJECT_ACTOR_KINDS: frozenset[RuntimeNoteActorKind] = frozenset(
 # note.updated event echoes this source as the write's actor origin.
 # document_ingestion = a hosted worker accepting a deterministic document
 # extraction or ingestion-run note through the canonical note mutation path.
+# wiki_projector = the deterministic OKF projector accepting generated index
+# and log notes through that same path before materializing them as Markdown.
 VALID_NOTE_OBJECT_SOURCES: frozenset[RuntimeNoteChangeSource] = frozenset(
-    {"api", "collaboration_relay", "document_ingestion", "mcp", "s3_webhook", "web_v2"}
+    {
+        "api",
+        "collaboration_relay",
+        "document_ingestion",
+        "mcp",
+        "s3_webhook",
+        "web_v2",
+        "wiki_projector",
+    }
 )
 # Named because the accepted-note write path special-cases relay writes: the
 # relay superseding its own prior write is never a real conflict (#1589).

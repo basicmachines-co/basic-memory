@@ -5,6 +5,7 @@ from uuid import UUID
 
 import pytest
 
+from basic_memory.indexing.wiki_projector import WIKI_PROJECTOR_SOURCE
 from basic_memory.runtime.cleanup import RuntimeNoteFileDeleteJobRequest
 from basic_memory.runtime.job_payloads import (
     DELETE_NOTE_FILE_ENTRYPOINT,
@@ -144,6 +145,19 @@ def test_runtime_note_materialization_job_payload_normalizes_origin_fields() -> 
     assert payload.actor_kind == NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT
     assert payload.actor_name == "Claude Code"
     assert payload.source == "mcp"
+
+
+def test_runtime_note_materialization_job_payload_accepts_wiki_projector_source() -> None:
+    """Generated OKF notes preserve their projector source through materialization."""
+    payload = RuntimeNoteMaterializationJobPayload(
+        project_id=101,
+        entity_id=42,
+        db_version=4,
+        db_checksum="db-sum",
+        source=WIKI_PROJECTOR_SOURCE,
+    )
+
+    assert payload.source == WIKI_PROJECTOR_SOURCE
 
 
 def test_runtime_note_materialization_job_payload_rejects_unknown_origin_fields() -> None:
