@@ -337,12 +337,15 @@ def process_rss_bytes() -> int:
     return psutil.Process().memory_info().rss
 
 
-def process_peak_rss_bytes() -> int:
+def process_peak_rss_bytes(*, platform_name: str = sys.platform) -> int:
     """Return the process high-water resident memory across supported platforms."""
+    if platform_name == "win32":
+        return int(psutil.Process().memory_info().peak_wset)
+
     import resource
 
     peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    return int(peak if sys.platform == "darwin" else peak * 1024)
+    return int(peak if platform_name == "darwin" else peak * 1024)
 
 
 def model_cache_size_bytes(model_case: EmbeddingModelCase) -> int:
