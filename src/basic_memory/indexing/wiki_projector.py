@@ -321,9 +321,15 @@ def plan_wiki_projection(
         new_changes,
         repair_complete_projection=projector_only_advance,
     )
+    note_by_path = {note.path.casefold(): note.path for note in notes}
     scope_by_casefold: dict[str, str] = {}
     for scope in scopes:
         folded_scope = scope.casefold()
+        if existing_note_path := note_by_path.get(folded_scope):
+            raise ValueError(
+                "Wiki projection scope collides with an existing source note path: "
+                f"{scope}, {existing_note_path}"
+            )
         if existing_scope := scope_by_casefold.get(folded_scope):
             raise ValueError(
                 "Wiki projection scopes must be unique when compared case-insensitively: "
@@ -702,6 +708,7 @@ def _escape_generated_markdown_text(value: str) -> str:
             {
                 "\r": " ",
                 "\n": " ",
+                "&": "&amp;",
                 "\\": "&#92;",
                 "[": "&#91;",
                 "]": "&#93;",

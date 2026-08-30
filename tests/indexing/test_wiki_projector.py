@@ -312,6 +312,11 @@ def test_projection_rejects_case_folded_duplicate_scopes() -> None:
         )
 
 
+def test_projection_rejects_scope_that_collides_with_source_note_path() -> None:
+    with pytest.raises(ValueError, match="collides with an existing source note path"):
+        plan_wiki_projection(_request(scopes=("overview.md",)), _snapshot())
+
+
 def test_projection_result_reports_updating_when_output_lags_source() -> None:
     result = WikiProjectionResult(
         source_watermark=3,
@@ -842,3 +847,47 @@ def test_projection_escapes_dynamic_markdown_structure() -> None:
     assert "\n- relates_to [[evil" not in rendered["index.md"]
     assert "\n- relates_to [[evil" not in rendered["log.md"]
     assert "[[safe-target|Bad&#93;&#93; - relates_to &#91;&#91;evil]]" in rendered["index.md"]
+
+
+@pytest.mark.parametrize(
+    ("title", "escaped_title"),
+    (
+        ("A &amp; B", "A &amp;amp; B"),
+        ("A &#93; B", "A &amp;#93; B"),
+    ),
+)
+def test_projection_preserves_literal_entity_looking_titles(
+    title: str,
+    escaped_title: str,
+) -> None:
+    snapshot = WikiProjectionSnapshot(
+        project_id="project-88",
+        project_name="Project 88",
+        source_partition_position=1,
+        current_output_watermark=0,
+        source_accepted_at=ACCEPTED_AT,
+        notes=(
+            WikiSourceNote(
+                path="entity-title.md",
+                title=title,
+                note_type="Note",
+                checksum="entity-title",
+            ),
+        ),
+        changes=(
+            WikiSourceChange(
+                partition_position=1,
+                operation=WikiChangeOperation.created,
+                path="entity-title.md",
+                title=title,
+                accepted_at=ACCEPTED_AT,
+                materialized=True,
+                source="web",
+            ),
+        ),
+    )
+
+    plan = plan_wiki_projection(_request(position=1, scopes=()), snapshot)
+    rendered = {write.path: write.content.decode() for write in plan.writes}
+
+    assert f"[[entity-title|{escaped_title}]]" in rendered["index.md"]
