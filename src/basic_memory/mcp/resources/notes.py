@@ -125,20 +125,11 @@ async def read_note_markdown(identifier: str, context: Context | None) -> str:
 )
 async def note_resource(project: str, path: str, context: Context | None = None) -> str:
     """Return the raw markdown of one note."""
-    # `man` is the manual's namespace, not (usually) a project, and which template
-    # a server matches first is not guaranteed — so answer as the manual either
-    # way. Nothing reserves the name, though: when no manual page matches, the URI
-    # may be a note in a project that really is called man.
+    # `man` is the manual's namespace; its template registers first and wins the
+    # tie, and manual_page itself falls back to a note in a project really named
+    # man — delegating keeps both templates' answers identical either way.
     if project == "man":
-        try:
-            return manual_page(path)
-        except ResourceError as manual_error:
-            try:
-                return await read_note_markdown(f"{project}/{path}", context)
-            except NoteNotFoundError:
-                # Neither a page nor a note — the manual's hint is the useful one;
-                # an operational note failure keeps its own cause instead.
-                raise manual_error from None
+        return await manual_page(path, context)
 
     # The {workspace}/{project}/info shape belongs to the project_info resource,
     # which itself falls back to a note named .../info — delegating keeps both
