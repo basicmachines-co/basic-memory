@@ -708,6 +708,45 @@ def test_created_and_moved_changes_render_in_the_log() -> None:
     assert "Moved `old.md` to [[moved|Moved]]" in log
 
 
+def test_log_preserves_ampersands_in_code_formatted_paths() -> None:
+    snapshot = WikiProjectionSnapshot(
+        project_id="project-88",
+        project_name="Project 88",
+        source_partition_position=2,
+        current_output_watermark=0,
+        source_accepted_at=ACCEPTED_AT,
+        notes=(),
+        changes=(
+            WikiSourceChange(
+                partition_position=1,
+                operation=WikiChangeOperation.moved,
+                path="new.md",
+                previous_path="old&draft.md",
+                title="Moved",
+                accepted_at=ACCEPTED_AT,
+                materialized=True,
+                source="web",
+            ),
+            WikiSourceChange(
+                partition_position=2,
+                operation=WikiChangeOperation.deleted,
+                path="retired&archived.md",
+                title="Deleted",
+                accepted_at=ACCEPTED_AT,
+                materialized=True,
+                source="web",
+            ),
+        ),
+    )
+
+    plan = plan_wiki_projection(_request(position=2, scopes=()), snapshot)
+    log = next(write.content.decode() for write in plan.writes if write.path == "log.md")
+
+    assert "Moved `old&draft.md` to [[new|Moved]]" in log
+    assert "Deleted `retired&archived.md`" in log
+    assert "&amp;" not in log
+
+
 def test_absolute_paths_are_rejected_at_the_contract_boundary() -> None:
     with pytest.raises(ValueError, match="project-relative"):
         WikiSourceNote(

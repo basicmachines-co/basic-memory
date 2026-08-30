@@ -582,12 +582,9 @@ def _render_log_entry(change: WikiSourceChange) -> str:
         case WikiChangeOperation.moved:
             if change.previous_path is None:
                 raise ValueError("Moved Wiki change requires previous_path")
-            description = (
-                f"Moved `{_escape_generated_markdown_text(change.previous_path)}` to "
-                f"[[{path}|{title}]]"
-            )
+            description = f"Moved `{change.previous_path}` to [[{path}|{title}]]"
         case WikiChangeOperation.deleted:
-            description = f"Deleted `{_escape_generated_markdown_text(change.path)}`"
+            description = f"Deleted `{change.path}`"
     return f"- {timestamp} — {description}"
 
 
