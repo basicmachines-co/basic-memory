@@ -21,6 +21,7 @@ from basic_memory.runtime.storage import (
     RuntimeFileChecksum,
     RuntimeFilePath,
 )
+from basic_memory.runtime.project_partition import RuntimeAcceptedProjectNoteChange
 
 RUNTIME_FILE_SNAPSHOT_TIMESTAMP_MATCH_EPSILON_SECONDS = 0.001
 
@@ -196,6 +197,7 @@ class RuntimeNoteFileDeleteJobRequest:
     entity_id: RuntimeEntityId
     file_path: RuntimeFilePath
     file_checksum: RuntimeFileChecksum | None = None
+    project_change: RuntimeAcceptedProjectNoteChange | None = None
     # Live note path after the move that scheduled this cleanup; a local adapter
     # skips the delete when it shares a physical file with file_path. Not part of
     # dedupe_key: it does not change the logical identity of the delete.
@@ -230,6 +232,7 @@ def plan_note_file_delete_job_request(
         entity_id=file_delete.entity_id,
         file_path=file_delete.file_path,
         file_checksum=file_delete.file_checksum,
+        project_change=file_delete.project_change,
         live_file_path=file_delete.live_file_path,
     )
 

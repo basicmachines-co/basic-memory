@@ -11,7 +11,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.deps.services import get_note_content_materialization_provider
-from basic_memory.models import Entity, NoteContent, Observation, Project, Relation
+from basic_memory.models import (
+    AcceptedProjectNoteChange,
+    Entity,
+    NoteContent,
+    Observation,
+    Project,
+    Relation,
+)
 from basic_memory.runtime.note_content import (
     RuntimeAcceptedNoteChange,
     RuntimeNoteContentResponsePayload,
@@ -24,6 +31,8 @@ from basic_memory.schemas.v2 import EntityResponseV2
 class PersistedAcceptedSnapshot:
     entity: Entity
     note_content: NoteContent
+    project_partition_position: int
+    accepted_project_changes: tuple[AcceptedProjectNoteChange, ...]
     observations: tuple[Observation, ...]
     relations: tuple[Relation, ...]
     search_content: str
@@ -36,6 +45,7 @@ async def _load_persisted_snapshot(
     entity_id: int,
 ) -> PersistedAcceptedSnapshot:
     async with db.scoped_session(session_maker) as session:
+        project = await session.get(Project, project_id)
         entity = await session.get(Entity, entity_id)
         note_content = await session.get(NoteContent, entity_id)
         observations = tuple(
@@ -62,6 +72,15 @@ async def _load_persisted_snapshot(
                 )
             ).all()
         )
+        accepted_project_changes = tuple(
+            (
+                await session.scalars(
+                    select(AcceptedProjectNoteChange)
+                    .where(AcceptedProjectNoteChange.project_id == project_id)
+                    .order_by(AcceptedProjectNoteChange.partition_position)
+                )
+            ).all()
+        )
         search_content = (
             await session.execute(
                 text("""
@@ -77,9 +96,12 @@ async def _load_persisted_snapshot(
 
     assert entity is not None
     assert note_content is not None
+    assert project is not None
     return PersistedAcceptedSnapshot(
         entity=entity,
         note_content=note_content,
+        project_partition_position=project.partition_position,
+        accepted_project_changes=accepted_project_changes,
         observations=observations,
         relations=relations,
         search_content=str(search_content),
@@ -164,6 +186,11 @@ async def test_create_and_update_persist_complete_snapshot_at_materialization_bo
     assert created_snapshot.note_content.markdown_content == created.content
     assert created_snapshot.note_content.db_version == 1
     assert created_snapshot.note_content.file_write_status == "pending"
+    assert created_snapshot.project_partition_position == 1
+    assert [change.partition_position for change in created_snapshot.accepted_project_changes] == [
+        1
+    ]
+    assert created_snapshot.accepted_project_changes[0].materialized_at is None
     assert [observation.content for observation in created_snapshot.observations] == [
         "Create snapshot observation"
     ]
@@ -199,6 +226,11 @@ async def test_create_and_update_persist_complete_snapshot_at_materialization_bo
     assert updated_snapshot.note_content.markdown_content == updated.content
     assert updated_snapshot.note_content.db_version == 2
     assert updated_snapshot.note_content.file_write_status == "pending"
+    assert updated_snapshot.project_partition_position == 2
+    assert [change.partition_position for change in updated_snapshot.accepted_project_changes] == [
+        1,
+        2,
+    ]
     assert [observation.content for observation in updated_snapshot.observations] == [
         "Replacing update observation"
     ]
@@ -208,3 +240,12 @@ async def test_create_and_update_persist_complete_snapshot_at_materialization_bo
     assert "Replacing update observation" in updated_snapshot.search_content
     assert "Create snapshot observation" not in updated_snapshot.search_content
     assert len(materializer.accepted_changes) == 2
+    created_change, updated_change = materializer.accepted_changes
+    assert created_change.project_change is not None
+    assert created_change.project_change.partition_position == 1
+    assert created_change.materialization is not None
+    assert created_change.materialization.project_change is created_change.project_change
+    assert updated_change.project_change is not None
+    assert updated_change.project_change.partition_position == 2
+    assert updated_change.materialization is not None
+    assert updated_change.materialization.project_change is updated_change.project_change

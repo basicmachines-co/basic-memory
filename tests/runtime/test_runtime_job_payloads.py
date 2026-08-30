@@ -1,5 +1,6 @@
 """Tests for portable runtime worker payload boundaries."""
 
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
@@ -14,6 +15,30 @@ from basic_memory.runtime.job_payloads import (
 from basic_memory.runtime.jobs import RuntimeJobRequest
 from basic_memory.runtime.note_content import RuntimeNoteMaterializationJobRequest
 from basic_memory.runtime.note_object_metadata import NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT
+from basic_memory.runtime.project_partition import (
+    RuntimeAcceptedProjectNoteChange,
+    RuntimeProjectNoteOperation,
+)
+
+
+def _project_change() -> RuntimeAcceptedProjectNoteChange:
+    return RuntimeAcceptedProjectNoteChange(
+        project_id=101,
+        project_external_id="project-123",
+        partition_position=7,
+        entity_id=42,
+        note_external_id="note-123",
+        title="A",
+        operation=RuntimeProjectNoteOperation.updated,
+        file_path="notes/a.md",
+        accepted_at=datetime(2026, 8, 29, 12, tzinfo=UTC),
+        source="mcp",
+        db_version=4,
+        db_checksum="db-sum",
+        actor_user_profile_id=UUID("33333333-3333-4333-8333-333333333333"),
+        actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+        actor_name="Claude Code",
+    )
 
 
 def test_runtime_note_file_delete_job_payload_round_trips_runtime_request() -> None:
@@ -23,6 +48,7 @@ def test_runtime_note_file_delete_job_payload_round_trips_runtime_request() -> N
         entity_id=42,
         file_path="notes/a.md",
         file_checksum="file-sum",
+        project_change=_project_change(),
     )
 
     payload = RuntimeNoteFileDeleteJobPayload.from_runtime_request(runtime_request)
@@ -62,6 +88,7 @@ def test_runtime_note_materialization_job_payload_round_trips_runtime_request() 
         entity_id=42,
         db_version=4,
         db_checksum="db-sum",
+        project_change=_project_change(),
         actor_user_profile_id=UUID("33333333-3333-3333-3333-333333333333"),
         actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
         actor_name="Claude Code",

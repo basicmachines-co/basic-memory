@@ -50,6 +50,10 @@ from basic_memory.repository.entity_repository import AcceptedPendingEntityWrite
 from basic_memory.repository.observation_repository import ObservationGenerationWriteResult
 from basic_memory.repository.relation_repository import RelationGenerationWriteResult
 from basic_memory.runtime.note_content import RuntimeAcceptedNoteResponse
+from basic_memory.runtime.project_partition import (
+    RuntimeAcceptedProjectNoteChange,
+    RuntimeProjectNoteOperation,
+)
 from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.schemas.request import EditEntityRequest
 from basic_memory.services.exceptions import EntityAlreadyExistsError
@@ -331,9 +335,12 @@ class _PreparerFactory:
 
 
 class _ProjectRepository:
-    def __init__(self, project: Project | None) -> None:
+    def __init__(self, project: Project | None, *, next_partition_position: int = 1) -> None:
         self.project = project
         self.calls: list[tuple[AsyncSession, str]] = []
+        self.partition_calls: list[tuple[AsyncSession, int]] = []
+        self.recorded_changes: list[RuntimeAcceptedProjectNoteChange] = []
+        self.next_partition_position = next_partition_position
 
     async def get_by_external_id(
         self,
@@ -342,6 +349,24 @@ class _ProjectRepository:
     ) -> Project | None:
         self.calls.append((session, external_id))
         return self.project
+
+    async def advance_partition_position(
+        self,
+        session: AsyncSession,
+        project_id: int,
+    ) -> int:
+        self.partition_calls.append((session, project_id))
+        position = self.next_partition_position
+        self.next_partition_position += 1
+        return position
+
+    async def record_accepted_note_change(
+        self,
+        session: AsyncSession,
+        change: RuntimeAcceptedProjectNoteChange,
+    ) -> None:
+        _ = session
+        self.recorded_changes.append(change)
 
 
 class _EntityLookupRepository:
@@ -772,6 +797,24 @@ async def test_run_accepted_note_create_persists_prepared_markdown(
     assert change.materialization.actor_kind == "user"
     assert change.materialization.actor_name == "Ada"
     assert change.materialization.previous_file_path is None
+    assert project_repository.partition_calls == [(session, project.id)]
+    assert change.project_change is not None
+    project_change = change.project_change
+    assert project_change.partition_position == 1
+    assert project_change.operation is RuntimeProjectNoteOperation.created
+    assert project_change.project_external_id == "project-123"
+    assert project_change.note_external_id == "note-123"
+    assert project_change.file_path == "notes/accepted.md"
+    assert project_change.previous_file_path is None
+    assert project_change.accepted_at == _NOW
+    assert project_change.source == "api"
+    assert project_change.db_version == 1
+    assert project_change.db_checksum == note_content.db_checksum
+    assert project_change.actor_user_profile_id == _ACTOR_ID
+    assert project_change.actor_kind == "user"
+    assert project_change.actor_name == "Ada"
+    assert project_repository.recorded_changes == [project_change]
+    assert change.materialization.project_change is project_change
     assert result.relation_publication is not None
     assert result.relation_publication.generation == 1
     assert persistence_calls[0].await_count == 1
@@ -910,6 +953,13 @@ async def test_run_accepted_note_update_replaces_existing_note_content(
     assert change.materialization is not None
     assert change.materialization.db_version == 2
     assert change.materialization.previous_file_path is None
+    assert project_repository.partition_calls == [(cast(AsyncSession, session), project.id)]
+    assert change.project_change is not None
+    assert change.project_change.operation is RuntimeProjectNoteOperation.moved
+    assert change.project_change.previous_file_path == "notes/accepted.md"
+    assert change.project_change.file_path == "notes/replacement.md"
+    assert change.project_change.db_version == 2
+    assert change.materialization.project_change is change.project_change
     assert result.relation_publication is not None
     assert result.relation_publication.generation == 2
     assert persistence_calls[0].await_count == 1
@@ -1486,6 +1536,12 @@ async def test_run_accepted_note_edit_applies_patch_against_db_content(
     assert change.status_code == 200
     assert change.materialization is not None
     assert change.materialization.source == "mcp"
+    assert project_repository.partition_calls == [(cast(AsyncSession, session), project.id)]
+    assert change.project_change is not None
+    assert change.project_change.operation is RuntimeProjectNoteOperation.updated
+    assert change.project_change.previous_file_path is None
+    assert change.project_change.actor_user_profile_id is None
+    assert change.materialization.project_change is change.project_change
     assert persistence_calls[0].await_count == 1
     assert persistence_calls[1].await_count == 0
 
@@ -1646,6 +1702,15 @@ async def test_run_accepted_note_move_carries_previous_path_and_materialized_cle
     assert change.status_code == 200
     assert change.materialization is not None
     assert change.materialization.previous_file_path == "notes/accepted.md"
+    assert project_repository.partition_calls == [(cast(AsyncSession, session), project.id)]
+    assert change.project_change is not None
+    assert change.project_change.operation is RuntimeProjectNoteOperation.moved
+    assert change.project_change.previous_file_path == "notes/accepted.md"
+    assert change.project_change.file_path == "archive/accepted.md"
+    assert change.project_change.actor_user_profile_id == _ACTOR_ID
+    assert change.project_change.actor_kind == "mcp"
+    assert change.project_change.actor_name == "Claude"
+    assert change.materialization.project_change is change.project_change
     cleanup = change.materialization.cleanup_after_write
     if expected_source_checksum is None:
         assert cleanup is None
@@ -1992,6 +2057,15 @@ async def test_run_accepted_note_delete_removes_entity_and_returns_cleanup() -> 
     assert change.file_delete is not None
     assert change.file_delete.file_path == "notes/accepted.md"
     assert change.file_delete.file_checksum == "file-checksum"
+    assert project_repository.partition_calls == [(cast(AsyncSession, session), project.id)]
+    assert change.project_change is not None
+    assert change.project_change.operation is RuntimeProjectNoteOperation.deleted
+    assert change.project_change.file_path == "notes/accepted.md"
+    assert change.project_change.source == "delete_note"
+    assert change.project_change.db_version == note_content.db_version
+    assert change.project_change.db_checksum == note_content.db_checksum
+    assert change.project_change.actor_user_profile_id is None
+    assert change.file_delete.project_change is change.project_change
     assert change.relation_cleanup_entity_ids == frozenset()
     assert result.relation_publication is None
 

@@ -18,6 +18,7 @@ from basic_memory.runtime.note_object_metadata import (
     VALID_NOTE_OBJECT_SOURCES,
     normalize_actor_name,
 )
+from basic_memory.runtime.project_partition import RuntimeAcceptedProjectNoteChange
 
 
 DELETE_NOTE_FILE_ENTRYPOINT: JobEntrypoint = "delete_note_file"
@@ -31,6 +32,7 @@ class RuntimeNoteFileDeleteJobPayload(BaseModel):
     entity_id: int
     file_path: str
     file_checksum: str | None = None
+    project_change: RuntimeAcceptedProjectNoteChange | None = None
 
     @classmethod
     def from_runtime_request(cls, request: RuntimeNoteFileDeleteJobRequest) -> Self:
@@ -40,6 +42,7 @@ class RuntimeNoteFileDeleteJobPayload(BaseModel):
             entity_id=request.entity_id,
             file_path=request.file_path,
             file_checksum=request.file_checksum,
+            project_change=request.project_change,
         )
 
     def to_runtime_request(self) -> RuntimeNoteFileDeleteJobRequest:
@@ -49,6 +52,7 @@ class RuntimeNoteFileDeleteJobPayload(BaseModel):
             entity_id=self.entity_id,
             file_path=self.file_path,
             file_checksum=self.file_checksum,
+            project_change=self.project_change,
         )
 
     def runtime_job_request(
@@ -72,6 +76,7 @@ class RuntimeNoteMaterializationJobPayload(BaseModel):
     entity_id: int
     db_version: int
     db_checksum: str
+    project_change: RuntimeAcceptedProjectNoteChange | None = None
     actor_user_profile_id: UUID | None = None
     actor_kind: str | None = None
     actor_name: str | None = None
@@ -122,6 +127,7 @@ class RuntimeNoteMaterializationJobPayload(BaseModel):
             entity_id=request.entity_id,
             db_version=request.db_version,
             db_checksum=request.db_checksum,
+            project_change=request.project_change,
             actor_user_profile_id=request.actor_user_profile_id,
             actor_kind=request.actor_kind,
             actor_name=request.actor_name,
@@ -138,6 +144,7 @@ class RuntimeNoteMaterializationJobPayload(BaseModel):
             entity_id=self.entity_id,
             db_version=self.db_version,
             db_checksum=self.db_checksum,
+            project_change=self.project_change,
             actor_user_profile_id=self.actor_user_profile_id,
             actor_kind=self.actor_kind,
             actor_name=self.actor_name,
