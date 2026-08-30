@@ -86,12 +86,17 @@ class WikiSourceNote:
     """One accepted, materialized note visible to a projector snapshot."""
 
     path: str
+    permalink: str
     title: str
     note_type: str
     checksum: str
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "path", _normalize_note_path(self.path))
+        if not self.permalink.strip() or self.permalink != self.permalink.strip():
+            raise ValueError(f"Wiki source note {self.path} requires a canonical permalink")
+        if "::" in self.permalink or any(character in self.permalink for character in "\r\n[]|`<>"):
+            raise ValueError(f"Wiki source note {self.path} has an unsafe canonical permalink")
         if not self.title.strip():
             raise ValueError(f"Wiki source note {self.path} requires a title")
         if not self.note_type.strip():
@@ -321,14 +326,14 @@ def plan_wiki_projection(
         new_changes,
         repair_complete_projection=projector_only_advance,
     )
-    note_by_path = {_portable_path_key(note.path): note.path for note in notes}
+    note_by_path = {_portable_path_key(note.path): note for note in notes}
     scope_by_portable_path: dict[str, str] = {}
     for scope in scopes:
         portable_scope = _portable_path_key(scope)
-        if existing_note_path := note_by_path.get(portable_scope):
+        if existing_note := note_by_path.get(portable_scope):
             raise ValueError(
                 "Wiki projection scope collides with an existing source note path: "
-                f"{scope}, {existing_note_path}"
+                f"{scope}, {existing_note.path}"
             )
         if existing_scope := scope_by_portable_path.get(portable_scope):
             raise ValueError(
@@ -349,6 +354,7 @@ def plan_wiki_projection(
         )
         rendered[_reserved_path(scope, "log.md")] = _render_log(
             snapshot=snapshot,
+            notes=notes,
             changes=changes,
             scope=scope,
             source_watermark=request.through_partition_position,
@@ -506,9 +512,7 @@ def _render_index(
     if direct_notes:
         body.extend(["## Notes", ""])
         body.extend(
-            "- "
-            f"[[{_without_markdown_suffix(note.path)}|"
-            f"{_escape_generated_markdown_text(note.title)}]]"
+            f"- [[{note.permalink}|{_escape_generated_markdown_text(note.title)}]]"
             for note in direct_notes
         )
         body.append("")
@@ -527,6 +531,7 @@ def _render_index(
 def _render_log(
     *,
     snapshot: WikiProjectionSnapshot,
+    notes: tuple[WikiSourceNote, ...],
     changes: tuple[WikiSourceChange, ...],
     scope: str,
     source_watermark: int,
@@ -555,8 +560,15 @@ def _render_log(
         else f"{_display_name(PurePosixPath(scope).name)} log"
     )
     body: list[str] = [f"# {_escape_generated_markdown_text(title)}", ""]
+    note_permalink_by_path = {_portable_path_key(note.path): note.permalink for note in notes}
     if relevant:
-        body.extend(_render_log_entry(change) for change in relevant)
+        body.extend(
+            _render_log_entry(
+                change,
+                note_permalink_by_path.get(_portable_path_key(change.path)),
+            )
+            for change in relevant
+        )
         body.append("")
     else:
         body.extend(["No accepted materialized changes have been recorded yet.", ""])
@@ -570,19 +582,19 @@ def _render_log(
     )
 
 
-def _render_log_entry(change: WikiSourceChange) -> str:
+def _render_log_entry(change: WikiSourceChange, permalink: str | None) -> str:
     timestamp = _isoformat_utc(change.accepted_at)
-    path = _without_markdown_suffix(change.path)
     title = _escape_generated_markdown_text(change.title)
+    current_note = f"[[{permalink}|{title}]]" if permalink is not None else f"`{change.path}`"
     match change.operation:
         case WikiChangeOperation.created:
-            description = f"Created [[{path}|{title}]]"
+            description = f"Created {current_note}"
         case WikiChangeOperation.updated:
-            description = f"Updated [[{path}|{title}]]"
+            description = f"Updated {current_note}"
         case WikiChangeOperation.moved:
             if change.previous_path is None:
                 raise ValueError("Moved Wiki change requires previous_path")
-            description = f"Moved `{change.previous_path}` to [[{path}|{title}]]"
+            description = f"Moved `{change.previous_path}` to {current_note}"
         case WikiChangeOperation.deleted:
             description = f"Deleted `{change.path}`"
     return f"- {timestamp} — {description}"
@@ -767,10 +779,6 @@ def _direct_child_scope(scope: str, note_path: str) -> str | None:
 
 def _display_name(value: str) -> str:
     return value.replace("-", " ").replace("_", " ").strip().title()
-
-
-def _without_markdown_suffix(path: str) -> str:
-    return path[:-3] if path.lower().endswith(".md") else path
 
 
 def _isoformat_utc(value: datetime) -> str:

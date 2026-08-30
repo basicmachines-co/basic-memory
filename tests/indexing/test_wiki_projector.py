@@ -56,18 +56,21 @@ def _snapshot(
         notes=(
             WikiSourceNote(
                 path="overview.md",
+                permalink="overview",
                 title="Overview",
                 note_type="Note",
                 checksum="overview-checksum",
             ),
             WikiSourceNote(
                 path="guides/setup.md",
+                permalink="guides/setup",
                 title="Setup",
                 note_type="Guide",
                 checksum="setup-checksum",
             ),
             WikiSourceNote(
                 path="guides/deep/details.md",
+                permalink="guides/deep/details",
                 title="Details",
                 note_type="Guide",
                 checksum="details-checksum",
@@ -154,6 +157,7 @@ def test_projection_request_rejects_nonportable_scopes(scope: str) -> None:
 def test_source_note_rejects_missing_metadata() -> None:
     note = WikiSourceNote(
         path="note.md",
+        permalink="note",
         title="Note",
         note_type="Note",
         checksum="checksum",
@@ -165,6 +169,10 @@ def test_source_note_rejects_missing_metadata() -> None:
         replace(note, note_type=" ")
     with pytest.raises(ValueError, match="requires a checksum"):
         replace(note, checksum=" ")
+    with pytest.raises(ValueError, match="requires a canonical permalink"):
+        replace(note, permalink=" ")
+    with pytest.raises(ValueError, match="unsafe canonical permalink"):
+        replace(note, permalink="bad|target")
 
 
 @pytest.mark.parametrize(
@@ -183,6 +191,7 @@ def test_source_note_rejects_nonportable_path_components(path: str) -> None:
     with pytest.raises(ValueError, match="Wiki (path|note path)"):
         WikiSourceNote(
             path=path,
+            permalink="note",
             title="Note",
             note_type="Note",
             checksum="checksum",
@@ -194,6 +203,7 @@ def test_source_note_rejects_reserved_wiki_directory_components(path: str) -> No
     with pytest.raises(ValueError, match="reserved Wiki directory name"):
         WikiSourceNote(
             path=path,
+            permalink="note",
             title="Note",
             note_type="Note",
             checksum="checksum",
@@ -299,12 +309,14 @@ def test_projection_rejects_nonportable_duplicate_scopes(
         notes=(
             WikiSourceNote(
                 path=f"{first_scope}/one.md",
+                permalink=f"{first_scope}/one",
                 title="One",
                 note_type="Note",
                 checksum="one-checksum",
             ),
             WikiSourceNote(
                 path=f"{second_scope}/two.md",
+                permalink=f"{second_scope}/two",
                 title="Two",
                 note_type="Note",
                 checksum="two-checksum",
@@ -531,6 +543,7 @@ def test_projector_only_advance_repairs_missing_projection_document() -> None:
 def test_requested_scopes_cannot_omit_a_changed_note_scope() -> None:
     changed_note = WikiSourceNote(
         path="secret/note.md",
+        permalink="secret/note",
         title="Secret note",
         note_type="Note",
         checksum="secret-checksum",
@@ -719,8 +732,8 @@ def test_created_and_moved_changes_render_in_the_log() -> None:
     plan = plan_wiki_projection(_request(position=2, scopes=()), snapshot)
     log = next(write.content.decode() for write in plan.writes if write.path == "log.md")
 
-    assert "Created [[created|Created]]" in log
-    assert "Moved `old.md` to [[moved|Moved]]" in log
+    assert "Created `created.md`" in log
+    assert "Moved `old.md` to `moved.md`" in log
 
 
 def test_log_preserves_ampersands_in_code_formatted_paths() -> None:
@@ -757,7 +770,7 @@ def test_log_preserves_ampersands_in_code_formatted_paths() -> None:
     plan = plan_wiki_projection(_request(position=2, scopes=()), snapshot)
     log = next(write.content.decode() for write in plan.writes if write.path == "log.md")
 
-    assert "Moved `old&draft.md` to [[new|Moved]]" in log
+    assert "Moved `old&draft.md` to `new.md`" in log
     assert "Deleted `retired&archived.md`" in log
     assert "&amp;" not in log
 
@@ -766,6 +779,7 @@ def test_absolute_paths_are_rejected_at_the_contract_boundary() -> None:
     with pytest.raises(ValueError, match="project-relative"):
         WikiSourceNote(
             path="/outside.md",
+            permalink="outside",
             title="Outside",
             note_type="Note",
             checksum="checksum",
@@ -777,6 +791,7 @@ def test_windows_drive_paths_are_rejected_at_the_contract_boundary(path: str) ->
     with pytest.raises(ValueError, match="project-relative"):
         WikiSourceNote(
             path=path,
+            permalink="outside",
             title="Outside",
             note_type="Note",
             checksum="checksum",
@@ -788,6 +803,7 @@ def test_noncanonical_paths_are_rejected_at_the_contract_boundary(path: str) -> 
     with pytest.raises(ValueError, match="project-relative"):
         WikiSourceNote(
             path=path,
+            permalink="noncanonical",
             title="Noncanonical",
             note_type="Note",
             checksum="checksum",
@@ -810,6 +826,7 @@ def test_wikilink_delimiters_are_rejected_at_the_contract_boundary(path: str) ->
     with pytest.raises(ValueError, match="unsupported Markdown delimiters"):
         WikiSourceNote(
             path=path,
+            permalink="unsupported",
             title="Unsupported",
             note_type="Note",
             checksum="checksum",
@@ -821,6 +838,7 @@ def test_non_markdown_note_paths_are_rejected(path: str) -> None:
     with pytest.raises(ValueError, match="project-relative Markdown"):
         WikiSourceNote(
             path=path,
+            permalink="unsupported",
             title="Unsupported",
             note_type="Note",
             checksum="checksum",
@@ -831,6 +849,7 @@ def test_parent_segments_are_rejected_at_the_contract_boundary() -> None:
     with pytest.raises(ValueError, match="project-relative and normalized"):
         WikiSourceNote(
             path="notes/../outside.md",
+            permalink="outside",
             title="Outside",
             note_type="Note",
             checksum="checksum",
@@ -841,12 +860,14 @@ def test_projection_order_is_deterministic_for_case_only_names() -> None:
     notes = (
         WikiSourceNote(
             path="foo.md",
+            permalink="foo",
             title="same",
             note_type="Note",
             checksum="lower",
         ),
         WikiSourceNote(
             path="Foo.md",
+            permalink="foo-1",
             title="Same",
             note_type="Note",
             checksum="upper",
@@ -877,6 +898,39 @@ def test_projection_order_is_deterministic_for_case_only_names() -> None:
     assert first.writes == second.writes
 
 
+def test_projection_links_notes_by_their_canonical_permalinks() -> None:
+    snapshot = WikiProjectionSnapshot(
+        project_id="project-88",
+        project_name="Project 88",
+        source_partition_position=0,
+        current_output_watermark=0,
+        source_accepted_at=ACCEPTED_AT,
+        notes=(
+            WikiSourceNote(
+                path="foo bar.md",
+                permalink="foo-bar",
+                title="Spaced",
+                note_type="Note",
+                checksum="spaced",
+            ),
+            WikiSourceNote(
+                path="foo-bar.md",
+                permalink="foo-bar-1",
+                title="Hyphenated",
+                note_type="Note",
+                checksum="hyphenated",
+            ),
+        ),
+        changes=(),
+    )
+
+    plan = plan_wiki_projection(_request(position=0, scopes=()), snapshot)
+    index = next(write.content.decode() for write in plan.writes if write.path == "index.md")
+
+    assert "[[foo-bar|Spaced]]" in index
+    assert "[[foo-bar-1|Hyphenated]]" in index
+
+
 def test_projection_escapes_dynamic_markdown_structure() -> None:
     injected_title = "Bad]]\n- relates_to [[evil"
     snapshot = WikiProjectionSnapshot(
@@ -888,6 +942,7 @@ def test_projection_escapes_dynamic_markdown_structure() -> None:
         notes=(
             WikiSourceNote(
                 path="safe-target.md",
+                permalink="safe-target",
                 title=injected_title,
                 note_type="Note",
                 checksum="unsafe",
@@ -934,6 +989,7 @@ def test_projection_preserves_literal_entity_looking_titles(
         notes=(
             WikiSourceNote(
                 path="entity-title.md",
+                permalink="entity-title",
                 title=title,
                 note_type="Note",
                 checksum="entity-title",
