@@ -160,7 +160,11 @@ class WikiProjectionSnapshot:
         if self.source_accepted_at.tzinfo is None:
             raise ValueError("Wiki snapshot source_accepted_at must be timezone-aware")
         _require_unique_paths(self.notes, label="source note")
-        _require_unique_paths(self.reserved_documents, label="reserved document")
+        _require_unique_paths(
+            self.reserved_documents,
+            label="reserved document",
+            case_sensitive=False,
+        )
         positions = [change.partition_position for change in self.changes]
         if len(positions) != len(set(positions)):
             raise ValueError("Wiki source changes require unique partition positions")
@@ -588,7 +592,7 @@ def _normalize_note_path(path: str) -> str:
     normalized = _normalize_relative_path(path)
     if not normalized or PurePosixPath(normalized).suffix.lower() != ".md":
         raise ValueError(f"Wiki note path must be project-relative Markdown: {path}")
-    if any(character in normalized for character in "\r\n[]|`<>"):
+    if "::" in normalized or any(character in normalized for character in "\r\n[]|`<>"):
         raise ValueError(f"Wiki note path contains unsupported Markdown delimiters: {path}")
     return normalized
 
@@ -631,8 +635,15 @@ def _escape_generated_markdown_text(value: str) -> str:
     )
 
 
-def _require_unique_paths(values: tuple[object, ...], *, label: str) -> None:
+def _require_unique_paths(
+    values: tuple[object, ...],
+    *,
+    label: str,
+    case_sensitive: bool = True,
+) -> None:
     paths = [getattr(value, "path") for value in values]
+    if not case_sensitive:
+        paths = [path.casefold() for path in paths]
     if len(paths) != len(set(paths)):
         raise ValueError(f"Wiki projection snapshot has duplicate {label} paths")
 
@@ -657,8 +668,6 @@ def _direct_child_scope(scope: str, note_path: str) -> str | None:
     if not note_parent or note_parent == scope:
         return None
     prefix = f"{scope}/" if scope else ""
-    if not note_parent.startswith(prefix):
-        return None
     child_name = note_parent[len(prefix) :].split("/", maxsplit=1)[0]
     return f"{scope}/{child_name}" if scope else child_name
 

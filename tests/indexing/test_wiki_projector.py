@@ -1,5 +1,6 @@
 """Deterministic Wiki Projector contract and byte-output tests."""
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
@@ -11,6 +12,7 @@ from basic_memory.indexing.wiki_projector import (
     WikiChangeOperation,
     WikiProjectionReason,
     WikiProjectionRequest,
+    WikiProjectionResult,
     WikiProjectionSnapshot,
     WikiProjectionState,
     WikiReservedDocument,
@@ -103,6 +105,143 @@ def test_affected_scopes_include_root_and_move_ancestors() -> None:
     )
 
 
+def test_affected_scopes_ignore_missing_paths() -> None:
+    assert affected_wiki_scopes(None) == ("",)
+
+
+def test_projection_request_rejects_invalid_contract_fields() -> None:
+    request = _request()
+
+    with pytest.raises(ValueError, match="requires a project_id"):
+        replace(request, project_id=" ")
+    with pytest.raises(ValueError, match="cannot be negative"):
+        replace(request, through_partition_position=-1)
+    with pytest.raises(ValueError, match="requires a projector_version"):
+        replace(request, projector_version=" ")
+
+
+def test_projection_request_normalizes_and_deduplicates_scopes() -> None:
+    request = _request(scopes=("guides\\deep", "guides/deep", ""))
+
+    assert request.requested_scopes == ("", "guides/deep")
+
+
+def test_source_note_rejects_missing_metadata() -> None:
+    note = WikiSourceNote(
+        path="note.md",
+        title="Note",
+        note_type="Note",
+        checksum="checksum",
+    )
+
+    with pytest.raises(ValueError, match="requires a title"):
+        replace(note, title=" ")
+    with pytest.raises(ValueError, match="requires a note_type"):
+        replace(note, note_type=" ")
+    with pytest.raises(ValueError, match="requires a checksum"):
+        replace(note, checksum=" ")
+
+
+def test_source_change_rejects_invalid_contract_fields() -> None:
+    change = WikiSourceChange(
+        partition_position=1,
+        operation=WikiChangeOperation.updated,
+        path="note.md",
+        title="Note",
+        accepted_at=ACCEPTED_AT,
+        materialized=True,
+        source="web",
+    )
+
+    with pytest.raises(ValueError, match="position must be positive"):
+        replace(change, partition_position=0)
+    with pytest.raises(ValueError, match="requires a title"):
+        replace(change, title=" ")
+    with pytest.raises(ValueError, match="timezone-aware"):
+        replace(change, accepted_at=ACCEPTED_AT.replace(tzinfo=None))
+    with pytest.raises(ValueError, match="requires a source"):
+        replace(change, source=" ")
+
+
+def test_source_change_normalizes_previous_path() -> None:
+    change = WikiSourceChange(
+        partition_position=1,
+        operation=WikiChangeOperation.moved,
+        path="new/note.md",
+        previous_path="old\\note.md",
+        title="Note",
+        accepted_at=ACCEPTED_AT,
+        materialized=True,
+        source="web",
+    )
+
+    assert change.previous_path == "old/note.md"
+
+
+def test_reserved_document_requires_a_reserved_path_and_checksum() -> None:
+    with pytest.raises(ValueError, match="non-reserved path"):
+        _reserved("note.md", b"content")
+    with pytest.raises(ValueError, match="requires a checksum"):
+        WikiReservedDocument(
+            path="index.md",
+            checksum=" ",
+            content=b"content",
+            projector_owned=True,
+        )
+
+
+def test_snapshot_rejects_invalid_contract_fields() -> None:
+    snapshot = _snapshot()
+
+    with pytest.raises(ValueError, match="requires a project_id"):
+        replace(snapshot, project_id=" ")
+    with pytest.raises(ValueError, match="requires a project_name"):
+        replace(snapshot, project_name=" ")
+    with pytest.raises(ValueError, match="cannot be negative"):
+        replace(snapshot, current_output_watermark=-1)
+    with pytest.raises(ValueError, match="timezone-aware"):
+        replace(snapshot, source_accepted_at=ACCEPTED_AT.replace(tzinfo=None))
+
+
+def test_snapshot_rejects_duplicate_note_paths_and_change_positions() -> None:
+    snapshot = _snapshot()
+
+    with pytest.raises(ValueError, match="duplicate source note paths"):
+        replace(snapshot, notes=(snapshot.notes[0], snapshot.notes[0]))
+    with pytest.raises(ValueError, match="unique partition positions"):
+        replace(snapshot, changes=(snapshot.changes[0], snapshot.changes[0]))
+
+
+def test_snapshot_rejects_case_folded_duplicate_reserved_paths() -> None:
+    lower = _reserved("guides/index.md", b"lower")
+    upper = _reserved("guides/Index.md", b"upper")
+
+    with pytest.raises(ValueError, match="duplicate reserved document paths"):
+        replace(_snapshot(), reserved_documents=(lower, upper))
+
+
+def test_projection_result_reports_updating_when_output_lags_source() -> None:
+    result = WikiProjectionResult(
+        source_watermark=3,
+        output_watermark=2,
+        created=0,
+        updated=0,
+        unchanged=0,
+        conflicts=(),
+        warnings=(),
+        pending_materialization=(),
+    )
+
+    assert result.state == WikiProjectionState.updating
+
+
+def test_projection_rejects_mismatched_project_and_stale_request() -> None:
+    with pytest.raises(ValueError, match="project_id differ"):
+        plan_wiki_projection(_request(), replace(_snapshot(), project_id="other"))
+    with pytest.raises(ValueError, match="older than"):
+        plan_wiki_projection(_request(position=2), _snapshot(output_watermark=3))
+
+
 def test_projection_renders_root_and_affected_directory_indexes_and_logs() -> None:
     plan = plan_wiki_projection(_request(), _snapshot())
 
@@ -151,6 +290,28 @@ def test_projection_is_a_byte_identical_noop_at_the_same_watermark() -> None:
     assert replay.unchanged_paths == tuple(write.path for write in first.writes)
     assert replay.result.unchanged == 4
     assert replay.result.state == WikiProjectionState.current
+
+
+def test_full_rebuild_records_unchanged_and_updated_reserved_documents() -> None:
+    request = _request(reason=WikiProjectionReason.manual_rebuild, scopes=())
+    first = plan_wiki_projection(request, _snapshot())
+    first_by_path = {write.path: write for write in first.writes}
+    unchanged = first_by_path["index.md"]
+    stale = _reserved("log.md", b"stale\n")
+    snapshot = _snapshot(
+        reserved_documents=(
+            _reserved(unchanged.path, unchanged.content),
+            stale,
+        )
+    )
+
+    replay = plan_wiki_projection(request, snapshot)
+
+    assert replay.unchanged_paths == ("index.md",)
+    assert replay.result.unchanged == 1
+    assert replay.result.updated == 1
+    updated_log = next(write for write in replay.writes if write.path == "log.md")
+    assert updated_log.expected_checksum == stale.checksum
 
 
 def test_pending_materialization_defers_all_bytes_without_advancing_output() -> None:
@@ -302,6 +463,43 @@ def test_moved_change_requires_previous_path() -> None:
         )
 
 
+def test_created_and_moved_changes_render_in_the_log() -> None:
+    snapshot = WikiProjectionSnapshot(
+        project_id="project-88",
+        project_name="Project 88",
+        current_output_watermark=0,
+        source_accepted_at=ACCEPTED_AT,
+        notes=(),
+        changes=(
+            WikiSourceChange(
+                partition_position=1,
+                operation=WikiChangeOperation.created,
+                path="created.md",
+                title="Created",
+                accepted_at=ACCEPTED_AT,
+                materialized=True,
+                source="web",
+            ),
+            WikiSourceChange(
+                partition_position=2,
+                operation=WikiChangeOperation.moved,
+                path="moved.md",
+                previous_path="old.md",
+                title="Moved",
+                accepted_at=ACCEPTED_AT,
+                materialized=True,
+                source="web",
+            ),
+        ),
+    )
+
+    plan = plan_wiki_projection(_request(position=2, scopes=()), snapshot)
+    log = next(write.content.decode() for write in plan.writes if write.path == "log.md")
+
+    assert "Created [[created|Created]]" in log
+    assert "Moved `old.md` to [[moved|Moved]]" in log
+
+
 def test_absolute_paths_are_rejected_at_the_contract_boundary() -> None:
     with pytest.raises(ValueError, match="project-relative"):
         WikiSourceNote(
@@ -332,6 +530,7 @@ def test_windows_drive_paths_are_rejected_at_the_contract_boundary(path: str) ->
         "notes/code`span.md",
         "notes/html<tag.md",
         "notes/line\nbreak.md",
+        "notes/cross::project.md",
     ),
 )
 def test_wikilink_delimiters_are_rejected_at_the_contract_boundary(path: str) -> None:
@@ -339,6 +538,27 @@ def test_wikilink_delimiters_are_rejected_at_the_contract_boundary(path: str) ->
         WikiSourceNote(
             path=path,
             title="Unsupported",
+            note_type="Note",
+            checksum="checksum",
+        )
+
+
+@pytest.mark.parametrize("path", ("", "note.txt"))
+def test_non_markdown_note_paths_are_rejected(path: str) -> None:
+    with pytest.raises(ValueError, match="project-relative Markdown"):
+        WikiSourceNote(
+            path=path,
+            title="Unsupported",
+            note_type="Note",
+            checksum="checksum",
+        )
+
+
+def test_parent_segments_are_rejected_at_the_contract_boundary() -> None:
+    with pytest.raises(ValueError, match="project-relative and normalized"):
+        WikiSourceNote(
+            path="notes/../outside.md",
+            title="Outside",
             note_type="Note",
             checksum="checksum",
         )
