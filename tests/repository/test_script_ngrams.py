@@ -9,6 +9,7 @@ from basic_memory.models import Entity
 from basic_memory.repository.script_ngrams import (
     analyze_script_query,
     build_script_ngrams,
+    mixed_token_word_terms,
     script_run_grams,
     script_runs,
 )
@@ -52,6 +53,14 @@ def test_build_script_ngrams_keeps_runs_from_matching_across_boundaries() -> Non
     assert build_script_ngrams("适者", "生存") == ("适 者 适者 bm_script_boundary 生 存 生存")
 
 
+def test_mixed_token_word_terms_encode_all_word_fragments() -> None:
+    assert mixed_token_word_terms("foo不適者bar ＡＢＣ適者") == (
+        "bmword666f6f",
+        "bmword626172",
+        "bmword616263",
+    )
+
+
 def test_analyze_script_query_separates_word_and_ordered_script_terms() -> None:
     query = analyze_script_query("OpenAI 适者生存，サバイバル")
 
@@ -65,29 +74,44 @@ def test_analyze_script_query_separates_word_and_ordered_script_terms() -> None:
 def test_analyze_script_query_preserves_adjoining_word_and_script_token() -> None:
     query = analyze_script_query("foo適者bar")
 
-    assert query.word_text == "foo"
-    assert query.gram_phrases == (("適者",),)
+    assert query.word_text is None
+    assert query.gram_phrases == (
+        ("適者",),
+        ("bmword666f6f",),
+        ("bmword626172",),
+    )
 
 
 def test_analyze_script_query_preserves_punctuation_separated_mixed_token() -> None:
     query = analyze_script_query("foo-適者-bar")
 
-    assert query.word_text == "foo bar"
-    assert query.gram_phrases == (("適者",),)
+    assert query.word_text is None
+    assert query.gram_phrases == (
+        ("適者",),
+        ("bmword666f6f",),
+        ("bmword626172",),
+    )
 
 
 def test_analyze_script_query_does_not_require_script_substring_in_word_channel() -> None:
     query = analyze_script_query("foo適者")
 
-    assert query.word_text == "foo"
-    assert query.gram_phrases == (("適者",),)
+    assert query.word_text is None
+    assert query.gram_phrases == (("適者",), ("bmword666f6f",))
 
 
 def test_analyze_script_query_preserves_compatibility_bytes_in_mixed_prefix() -> None:
     query = analyze_script_query("ＡＢＣ適者")
 
-    assert query.word_text == "ＡＢＣ"
-    assert query.gram_phrases == (("適者",),)
+    assert query.word_text is None
+    assert query.gram_phrases == (("適者",), ("bmword616263",))
+
+
+def test_analyze_script_query_retains_trailing_word_in_auxiliary_channel() -> None:
+    query = analyze_script_query("適者OpenAI")
+
+    assert query.word_text is None
+    assert query.gram_phrases == (("適者",), ("bmword6f70656e6169",))
 
 
 def test_analyze_script_query_preserves_explicit_boolean_semantics() -> None:
@@ -357,6 +381,41 @@ async def test_search_preserves_compatibility_bytes_in_mixed_prefix(search_repos
     results = await search_repository.search("ＡＢＣ適者")
 
     assert [result.id for result in results] == [1314]
+
+
+@pytest.mark.asyncio
+async def test_search_requires_trailing_word_in_mixed_token(search_repository) -> None:
+    now = datetime.now(timezone.utc)
+    matching_row = SearchIndexRow(
+        project_id=search_repository.project_id,
+        id=1315,
+        type="entity",
+        file_path="notes/trailing-mixed-word.md",
+        title="Trailing mixed word",
+        content_stems="適者OpenAI",
+        content_snippet="適者OpenAI",
+        permalink="notes/trailing-mixed-word",
+        created_at=now,
+        updated_at=now,
+    )
+    nonmatching_row = SearchIndexRow(
+        project_id=search_repository.project_id,
+        id=1316,
+        type="entity",
+        file_path="notes/script-only.md",
+        title="Script only",
+        content_stems="適者",
+        content_snippet="適者",
+        permalink="notes/script-only",
+        created_at=now,
+        updated_at=now,
+    )
+    await search_repository.index_item(matching_row)
+    await search_repository.index_item(nonmatching_row)
+
+    results = await search_repository.search("適者OpenAI")
+
+    assert [result.id for result in results] == [1315]
 
 
 @pytest.mark.asyncio

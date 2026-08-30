@@ -75,6 +75,37 @@ def script_run_grams(run: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(first + second for first, second in zip(run, run[1:], strict=False))
 
 
+def mixed_token_word_terms(text: str) -> tuple[str, ...]:
+    """Encode word fragments from tokens that also contain script characters."""
+    terms: list[str] = []
+    for token in text.split():
+        normalized_token = unicodedata.normalize("NFKC", token)
+        if not any(is_script_search_character(character) for character in normalized_token):
+            continue
+
+        word_fragment: list[str] = []
+        for character in normalized_token:
+            if is_script_search_character(character):
+                if word_fragment:
+                    fragment = "".join(word_fragment).casefold()
+                    terms.append(f"bmword{fragment.encode('utf-8').hex()}")
+                    word_fragment = []
+                continue
+            if character.isalnum() or (
+                word_fragment and unicodedata.category(character) in {"Mn", "Mc", "Me"}
+            ):
+                word_fragment.append(character)
+                continue
+            if word_fragment:
+                fragment = "".join(word_fragment).casefold()
+                terms.append(f"bmword{fragment.encode('utf-8').hex()}")
+                word_fragment = []
+        if word_fragment:
+            fragment = "".join(word_fragment).casefold()
+            terms.append(f"bmword{fragment.encode('utf-8').hex()}")
+    return tuple(terms)
+
+
 def build_script_ngrams(*texts: str | None) -> str:
     """Build portable index text without depending on a database tokenizer."""
     gram_runs: list[str] = []
@@ -86,6 +117,7 @@ def build_script_ngrams(*texts: str | None) -> str:
             # bigrams together after them preserves ordered phrase matching for longer queries.
             index_terms = run if len(run) == 1 else (*run, *script_run_grams(run))
             gram_runs.append(" ".join(index_terms))
+        gram_runs.extend(mixed_token_word_terms(text))
     return f" {_SCRIPT_BOUNDARY} ".join(gram_runs)
 
 
@@ -100,46 +132,21 @@ def analyze_script_query(text: str) -> ScriptQuery:
     if '"' in text or any(f" {operator} " in padded_text for operator in ("AND", "OR", "NOT")):
         return ScriptQuery(word_text=text, gram_phrases=())
 
-    word_tokens: list[str] = []
-    for token in text.split():
-        normalized_token = unicodedata.normalize("NFKC", token)
-        if not any(is_script_search_character(character) for character in normalized_token):
-            if any(character.isalnum() for character in normalized_token):
-                # Operator-shaped tokens outside the literal-space syntax above are words.
-                # Lowercase prevents the backend from reparsing them after reconstruction.
-                word_tokens.append(token.lower() if token in {"AND", "OR", "NOT"} else token)
-            continue
-
-        # A backend word token that starts with Latin text can be matched by its prefix even
-        # when a longer script run follows. Text after that script run is not a separate word
-        # token unless punctuation creates a new boundary, so requiring it causes false misses.
-        word_prefix: list[str] = []
-        script_seen = False
-        for character in token:
-            normalized_character = unicodedata.normalize("NFKC", character)
-            character_has_script = any(
-                is_script_search_character(unit) for unit in normalized_character
-            )
-            character_has_word = any(
-                unit.isalnum() and not is_script_search_character(unit)
-                for unit in normalized_character
-            )
-            if character_has_script:
-                script_seen = True
-                continue
-            if character_has_word or (
-                word_prefix and unicodedata.category(character) in {"Mn", "Mc", "Me"}
-            ):
-                if not script_seen:
-                    word_prefix.append(character)
-                continue
-            if word_prefix:
-                word_tokens.append("".join(word_prefix))
-            word_prefix = []
-            script_seen = False
-        if word_prefix:
-            word_tokens.append("".join(word_prefix))
-    gram_phrases = tuple(script_run_grams(run) for run in script_runs(normalized))
+    # Mixed tokens use the same application-owned auxiliary channel as script grams. This
+    # avoids assuming that either backend exposes word fragments on both sides of a script run.
+    word_tokens = [
+        token.lower() if token in {"AND", "OR", "NOT"} else token
+        for token in text.split()
+        if not any(
+            is_script_search_character(character)
+            for character in unicodedata.normalize("NFKC", token)
+        )
+        and any(character.isalnum() for character in unicodedata.normalize("NFKC", token))
+    ]
+    gram_phrases = (
+        *(script_run_grams(run) for run in script_runs(normalized)),
+        *((term,) for term in mixed_token_word_terms(text)),
+    )
     # Preserve punctuation-only input as an explicit backend query. Dropping it would make
     # the repositories confuse user text with the intentional no-predicate wildcard path.
     word_text = " ".join(word_tokens) or (text if not gram_phrases else None)
