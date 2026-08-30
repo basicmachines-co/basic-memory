@@ -62,7 +62,15 @@ async def project_info(
     try:
         async with get_project_client(project_route, context) as (client, active_project):
             response = await call_get(client, f"/v2/projects/{active_project.external_id}/info")
-            info = ProjectInfoResponse.model_validate(response.json())
+            try:
+                info = ProjectInfoResponse.model_validate(response.json())
+            except ValueError as payload_error:
+                # A reachable route answered with an incompatible payload — a backend
+                # fault to surface, never a cue for the outer handler to serve a note.
+                raise ResourceError(
+                    f"Project info for '{project_route}' returned an invalid payload: "
+                    f"{payload_error}"
+                ) from payload_error
             return info.model_dump_json(indent=2)
     except (ValueError, RuntimeError) as error:
         # This template also wins ties for {project}/{directory}/info note URIs

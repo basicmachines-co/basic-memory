@@ -4,6 +4,7 @@ from importlib import import_module
 
 import pytest
 from fastmcp import Context
+from fastmcp.exceptions import ResourceError
 from httpx import AsyncClient
 
 from basic_memory.mcp.prompts.ai_assistant_guide import ai_assistant_guide
@@ -82,3 +83,23 @@ async def test_project_info_resource_routes_local_workspace(client, test_project
     )
 
     assert info.project_name == test_project.name
+
+
+@pytest.mark.asyncio
+async def test_project_info_invalid_payload_surfaces_instead_of_note_fallback(
+    client, test_project, monkeypatch: pytest.MonkeyPatch
+):
+    """A reachable route with a broken payload is a backend fault, not a note miss."""
+
+    class FakeResponse:
+        def json(self):
+            return {"bogus": True}
+
+    async def fake_call_get(client_, url):
+        return FakeResponse()
+
+    project_info_module = import_module("basic_memory.mcp.resources.project_info")
+    monkeypatch.setattr(project_info_module, "call_get", fake_call_get)
+
+    with pytest.raises(ResourceError, match="invalid payload"):
+        await project_info(workspace="local", project=test_project.permalink)
