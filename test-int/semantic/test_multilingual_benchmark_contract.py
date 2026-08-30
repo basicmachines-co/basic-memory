@@ -171,6 +171,10 @@ async def test_sqlite_vector_storage_excludes_unrelated_tables(sqlite_engine_fac
     async with engine.begin() as connection:
         raw_connection = await connection.get_raw_connection()
         driver_connection = raw_connection.driver_connection
+        if not hasattr(driver_connection, "enable_load_extension"):
+            pytest.skip(
+                "SQLite loadable-extension support is required for physical vector measurement"
+            )
         await driver_connection.enable_load_extension(True)
         await driver_connection.load_extension(sqlite_vec.loadable_path())
         await driver_connection.enable_load_extension(False)
