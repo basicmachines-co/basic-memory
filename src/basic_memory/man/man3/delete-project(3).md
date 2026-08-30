@@ -3,7 +3,7 @@ title: delete-project(3)
 type: manpage
 section: 3
 name: delete-project
-summary: remove a project from configuration and index (files survive)
+summary: remove a project from configuration and index (files survive by default)
 generated: hand
 tool: delete_project
 verified: 0.21.6 mcp
@@ -13,14 +13,14 @@ verified: 0.21.6 mcp
 
 ## NAME
 
-**delete-project** — remove a project from configuration and index (files survive)
+**delete-project** — remove a project from configuration and index (files survive by default)
 
 ## SYNOPSIS
 
 MCP:
 
 ```
-delete_project(project_name, workspace=None)
+delete_project(project_name, delete_notes=False, workspace=None)
 ```
 
 CLI:
@@ -31,10 +31,12 @@ bm project remove NAME
 
 ## DESCRIPTION
 
-Unregisters a project from Basic Memory's configuration and database. The
-markdown files are **not** deleted — the project simply stops being tracked,
-and re-adding it restores access to all content. This makes delete-project
-far less dangerous than [[delete-note(3)]], which does remove files.
+Unregisters a project from Basic Memory's configuration and database. By
+default the markdown files are **not** deleted — the project simply stops
+being tracked, and re-adding it restores access to all content.
+`delete_notes=True` also deletes the note files themselves (from local disk
+for local projects, from cloud storage for cloud projects); with it, this
+call is as destructive as [[delete-note(3)]] applied to every note.
 
 `workspace` targets a project in a specific cloud workspace (added for
 cross-workspace disambiguation).
@@ -52,7 +54,8 @@ delete_project("manual-scratch-952")
 ## GOTCHAS
 
 - [gotcha] Unlike every sibling tool, delete_project takes no project_id and no output_format — name + workspace is the only addressing mode, and output is text only #parity
-- [gotcha] Files remain on disk; this is unregistration, not deletion — but the search index rows for the project are dropped and rebuilt on re-add #semantics
+- [gotcha] Files remain on disk by default; this is unregistration, not deletion — the search index rows for the project are dropped and rebuilt on re-add #semantics
+- [gotcha] delete_notes=True removes the note files too, and nothing asks twice — there is no confirmation step and no undo #destructive
 
 ## SEE ALSO
 

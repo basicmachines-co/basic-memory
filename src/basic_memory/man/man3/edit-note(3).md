@@ -22,6 +22,7 @@ MCP:
 ```
 edit_note(identifier, operation, content,
           section=None, find_text=None, expected_replacements=None,
+          replace_subsections=None, metadata=None,
           project=None, workspace=None, project_id=None,
           output_format="text")
 ```
@@ -62,6 +63,13 @@ permalink, or memory:// URL — there is no fuzzy fallback for edits.
 - **find_text** — target text for find_replace
 - **expected_replacements** — if set, the edit fails unless the occurrence
   count matches exactly
+- **replace_subsections** — for replace_section. Default (true): the section
+  runs to the next heading of the same or higher level, so replacing
+  `## Section` replaces its `###` subsections too. `False` stops at the next
+  heading of any level and preserves subsections
+- **metadata** — dict of frontmatter fields merged in alongside any operation;
+  given keys overwrite or add, other keys and the body are untouched.
+  `title`, `type`, and `permalink` are ignored; keys cannot be deleted
 - **project** / **project_id** / **workspace** — routing; same semantics as
   [[write-note(3)]]
 

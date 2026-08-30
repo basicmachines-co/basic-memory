@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from basic_memory.man import (
     MAN_DIR,
+    ManPage,
     PageRef,
     bundled_pages,
     find_page,
     parse_page_ref,
     render_index,
 )
+from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools import __all__ as registered_tools
 
 
@@ -83,6 +87,39 @@ def test_section_3_matches_the_tool_registry_except_known_gaps() -> None:
 
     assert set(registered_tools) - documented == TOOLS_WITHOUT_PAGES
     assert documented - set(registered_tools) == PAGES_WITHOUT_LOCAL_TOOLS
+
+
+def _synopsis_parameters(page: ManPage) -> set[str]:
+    """Parameter names in the MCP call shown under SYNOPSIS, positional or keyword."""
+    synopsis = re.search(r"## SYNOPSIS\n(.*?)\n## ", page.body(), re.S)
+    assert synopsis is not None, f"{page.title} has no SYNOPSIS"
+    # Pages with a CLI form label the MCP block "MCP:"; MCP-only pages have one block.
+    call = re.search(r"MCP:\s*```\n(.*?)```", synopsis.group(1), re.S) or re.search(
+        r"```\n(.*?)```", synopsis.group(1), re.S
+    )
+    assert call is not None, f"{page.title} SYNOPSIS has no MCP call"
+    arguments = call.group(1)[call.group(1).find("(") + 1 : call.group(1).rfind(")")]
+    return set(re.findall(r"\b([a-z_][a-z0-9_]*)\b(?=\s*[=,)\n]|$)", arguments)) - {
+        "none",
+        "true",
+        "false",
+    }
+
+
+@pytest.mark.asyncio
+async def test_section_3_synopsis_names_every_tool_parameter() -> None:
+    # The SYNOPSIS is the page's contract with the tool schema clients receive. A
+    # parameter added to a tool without updating its page is exactly the drift the
+    # manual exists to prevent, so it fails here rather than waiting for a reader.
+    tools = {tool.name: tool for tool in await mcp.list_tools(run_middleware=False)}
+
+    for page in bundled_pages():
+        if page.section != 3 or page.tool not in tools:
+            continue
+        schema = set(tools[page.tool].parameters["properties"])
+        documented = _synopsis_parameters(page)
+        assert schema - documented == set(), f"{page.title} SYNOPSIS is missing parameters"
+        assert documented - schema == set(), f"{page.title} SYNOPSIS names unknown parameters"
 
 
 def test_render_index_lists_every_page_with_uri_and_summary() -> None:

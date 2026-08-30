@@ -21,8 +21,9 @@ MCP:
 
 ```
 write_note(title, content, directory,
-           project=None, project_id=None, tags=None, note_type="note",
-           metadata=None, overwrite=None, output_format="text")
+           project=None, workspace=None, project_id=None,
+           tags=None, note_type="note", metadata=None, overwrite=None,
+           output_format="text")
 ```
 
 CLI:
@@ -57,6 +58,8 @@ prepends, or edits sections in place without rewriting the file.
 - **project** / **project_id** — target project by name or UUID; `project_id`
   wins and is unambiguous across workspaces. Omitting both uses the default
   project. Qualified names (`workspace/project`) route across workspaces
+- **workspace** — cloud workspace slug, name, or tenant_id; with `project`,
+  routes as `workspace/project`. Cannot be combined with `project_id`
 - **tags** — list or comma-separated string; external MCP clients should pass
   the string form (`"a,b,c"`)
 - **note_type** (CLI: `--type`) — frontmatter `type:`, default `note`; this is

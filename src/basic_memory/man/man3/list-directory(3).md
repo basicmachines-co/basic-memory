@@ -21,7 +21,8 @@ MCP:
 
 ```
 list_directory(dir_name="/", depth=1, file_name_glob=None,
-               project=None, project_id=None)
+               sort=None, page=1, page_size=10,
+               project=None, project_id=None, output_format="text")
 ```
 
 ## DESCRIPTION
@@ -29,7 +30,11 @@ list_directory(dir_name="/", depth=1, file_name_glob=None,
 Returns a tree-style listing of a project directory: subfolders with paths,
 files with their entity titles and modification dates, and a summary count.
 `depth` (1–10) controls recursion; `file_name_glob` filters filenames
-(`"*.md"`, `"*meeting*"`).
+(`"*.md"`, `"*meeting*"`). `sort` orders files (`title_asc`, `title_desc`,
+`updated_asc`, `updated_desc`; directories always come first), `page` and
+`page_size` paginate (10 per page by default, 200 at most), and
+`output_format="json"` returns the listing plus pagination data as
+structured JSON.
 
 This is the orientation tool — the equivalent of `ls` before surgical
 operations like [[move-note(3)]] and [[delete-note(3)]].
@@ -47,7 +52,6 @@ list_directory(dir_name="/", depth=2, project="manual")
 
 ## GOTCHAS
 
-- [gotcha] Output is text only — there is no structured json output_format on this tool, unlike most siblings #output
 - [gotcha] There is no bm tool list-directory CLI wrapper; use bm project ls for local listing #cli-parity
 
 ## SEE ALSO
