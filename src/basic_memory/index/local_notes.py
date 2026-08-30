@@ -180,7 +180,14 @@ class LocalNoteFileDeleteStorage:
         return await self.file_service.exists(path)
 
     async def compute_checksum(self, path: RuntimeFilePath) -> RuntimeFileChecksum:
-        return await self.file_service.compute_checksum(path)
+        try:
+            return await self.file_service.compute_checksum(path)
+        except FileError as exc:
+            if isinstance(exc.__context__, FileNotFoundError):
+                # Directory cleanup uses the portable guard, where deletion after
+                # the existence probe is the same absent-file outcome.
+                raise FileNotFoundError(path) from exc
+            raise
 
     async def delete_file_if_unchanged(
         self,
