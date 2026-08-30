@@ -569,10 +569,6 @@ class FileService:
 
                 return hasher.hexdigest()
 
-            except FileNotFoundError:
-                # Runtime guards distinguish a concurrently deleted file from a
-                # checksum failure; preserve that domain outcome at the adapter boundary.
-                raise
             except Exception as e:  # pragma: no cover
                 logger.error("Failed to compute checksum", path=str(full_path), error=str(e))
                 raise FileError(f"Failed to compute checksum for {path}: {e}")
