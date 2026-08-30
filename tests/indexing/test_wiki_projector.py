@@ -768,6 +768,17 @@ def test_windows_drive_paths_are_rejected_at_the_contract_boundary(path: str) ->
         )
 
 
+@pytest.mark.parametrize("path", ("notes//foo.md", "notes/./foo.md", "note.md/"))
+def test_noncanonical_paths_are_rejected_at_the_contract_boundary(path: str) -> None:
+    with pytest.raises(ValueError, match="project-relative"):
+        WikiSourceNote(
+            path=path,
+            title="Noncanonical",
+            note_type="Note",
+            checksum="checksum",
+        )
+
+
 @pytest.mark.parametrize(
     "path",
     (

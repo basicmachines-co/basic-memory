@@ -689,11 +689,16 @@ def _normalize_relative_path(path: str) -> str:
     if accepted_path.startswith(("/", "\\")) or windows_path.drive or windows_path.is_absolute():
         raise ValueError(f"Wiki path must be project-relative and normalized: {path}")
     candidate = accepted_path.replace("\\", "/")
-    candidate = candidate.strip("/")
     if not candidate:
         return ""
+    if candidate.endswith("/"):
+        raise ValueError(f"Wiki path must be project-relative and normalized: {path}")
     parsed = PurePosixPath(candidate)
-    if parsed.is_absolute() or any(part in {"", ".", ".."} for part in parsed.parts):
+    if (
+        parsed.is_absolute()
+        or any(part in {"", ".", ".."} for part in parsed.parts)
+        or parsed.as_posix() != candidate
+    ):
         raise ValueError(f"Wiki path must be project-relative and normalized: {path}")
     return parsed.as_posix()
 
