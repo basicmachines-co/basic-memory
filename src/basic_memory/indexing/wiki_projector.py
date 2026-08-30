@@ -309,7 +309,9 @@ def plan_wiki_projection(
         )
 
     scopes = _projection_scopes(request, snapshot, new_changes)
-    existing_by_path = {document.path: document for document in snapshot.reserved_documents}
+    existing_by_path = {
+        document.path.casefold(): document for document in snapshot.reserved_documents
+    }
     notes = tuple(
         note
         for note in snapshot.notes
@@ -336,7 +338,8 @@ def plan_wiki_projection(
             reason="reserved path is not owned by the Wiki Projector",
         )
         for path in sorted(rendered)
-        if (existing := existing_by_path.get(path)) is not None and not existing.projector_owned
+        if (existing := existing_by_path.get(path.casefold())) is not None
+        and not existing.projector_owned
     )
     if conflicts:
         # Indexes and logs describe one project watermark. Writing only the
@@ -363,7 +366,7 @@ def plan_wiki_projection(
     created = 0
     updated = 0
     for path, content in sorted(rendered.items()):
-        existing = existing_by_path.get(path)
+        existing = existing_by_path.get(path.casefold())
         if existing is not None and existing.content == content:
             unchanged_paths.append(path)
             continue
@@ -404,6 +407,11 @@ def _projection_scopes(
 ) -> tuple[str, ...]:
     if request.is_full_rebuild:
         paths = [note.path for note in snapshot.notes]
+        paths.extend(document.path for document in snapshot.reserved_documents)
+        paths.extend(change.path for change in snapshot.changes)
+        paths.extend(
+            change.previous_path for change in snapshot.changes if change.previous_path is not None
+        )
         return affected_wiki_scopes(*paths)
     if request.requested_scopes:
         scopes = {""}
@@ -448,7 +456,7 @@ def _render_index(
         body.extend(["## Sections", ""])
         body.extend(
             "- "
-            f"[[{_escape_generated_markdown_text(f'{child_scope}/index')}|"
+            f"[[{child_scope}/index|"
             f"{_escape_generated_markdown_text(_display_name(PurePosixPath(child_scope).name))}]]"
             for child_scope in child_scopes
         )
@@ -457,7 +465,7 @@ def _render_index(
         body.extend(["## Notes", ""])
         body.extend(
             "- "
-            f"[[{_escape_generated_markdown_text(_without_markdown_suffix(note.path))}|"
+            f"[[{_without_markdown_suffix(note.path)}|"
             f"{_escape_generated_markdown_text(note.title)}]]"
             for note in direct_notes
         )
@@ -522,7 +530,7 @@ def _render_log(
 
 def _render_log_entry(change: WikiSourceChange) -> str:
     timestamp = _isoformat_utc(change.accepted_at)
-    path = _escape_generated_markdown_text(_without_markdown_suffix(change.path))
+    path = _without_markdown_suffix(change.path)
     title = _escape_generated_markdown_text(change.title)
     match change.operation:
         case WikiChangeOperation.created:
@@ -580,6 +588,8 @@ def _normalize_note_path(path: str) -> str:
     normalized = _normalize_relative_path(path)
     if not normalized or PurePosixPath(normalized).suffix.lower() != ".md":
         raise ValueError(f"Wiki note path must be project-relative Markdown: {path}")
+    if any(character in normalized for character in "\r\n[]|`<>"):
+        raise ValueError(f"Wiki note path contains unsupported Markdown delimiters: {path}")
     return normalized
 
 

@@ -176,6 +176,20 @@ def test_user_claimed_reserved_path_is_a_conflict_not_a_write() -> None:
     assert plan.result.state == WikiProjectionState.conflicted
 
 
+def test_user_claimed_reserved_path_matches_case_insensitively() -> None:
+    claimed = _reserved("guides/Index.md", b"# User index\n", owned=False)
+
+    plan = plan_wiki_projection(
+        _request(),
+        _snapshot(reserved_documents=(claimed,)),
+    )
+
+    assert plan.writes == ()
+    assert plan.result.conflicts[0].path == "guides/index.md"
+    assert plan.result.output_watermark == 2
+    assert plan.result.state == WikiProjectionState.conflicted
+
+
 def test_projector_generated_change_is_suppressed_from_writes_and_log() -> None:
     existing = _reserved("index.md", b"existing\n")
     snapshot = WikiProjectionSnapshot(
@@ -221,6 +235,46 @@ def test_full_rebuild_covers_every_note_directory() -> None:
         "guides/deep/index.md",
         "guides/deep/log.md",
     }
+
+
+def test_full_rebuild_covers_orphaned_reserved_document_scopes() -> None:
+    request = _request(
+        reason=WikiProjectionReason.manual_rebuild,
+        scopes=(),
+    )
+    orphaned_index = _reserved("orphaned/index.md", b"# Stale index\n")
+    orphaned_log = _reserved("orphaned/log.md", b"# Stale log\n")
+    snapshot = WikiProjectionSnapshot(
+        project_id="project-88",
+        project_name="Project 88",
+        current_output_watermark=2,
+        source_accepted_at=ACCEPTED_AT,
+        notes=(),
+        changes=(
+            WikiSourceChange(
+                partition_position=3,
+                operation=WikiChangeOperation.deleted,
+                path="orphaned/last-note.md",
+                title="Last note",
+                accepted_at=ACCEPTED_AT,
+                materialized=True,
+                source="web",
+            ),
+        ),
+        reserved_documents=(orphaned_index, orphaned_log),
+    )
+
+    plan = plan_wiki_projection(request, snapshot)
+
+    assert {write.path for write in plan.writes} == {
+        "index.md",
+        "log.md",
+        "orphaned/index.md",
+        "orphaned/log.md",
+    }
+    rendered = {write.path: write.content.decode() for write in plan.writes}
+    assert "No concepts have been projected" in rendered["orphaned/index.md"]
+    assert "Deleted `orphaned/last-note.md`" in rendered["orphaned/log.md"]
 
 
 def test_moved_change_requires_previous_path() -> None:
@@ -269,6 +323,27 @@ def test_windows_drive_paths_are_rejected_at_the_contract_boundary(path: str) ->
         )
 
 
+@pytest.mark.parametrize(
+    "path",
+    (
+        "notes/closing].md",
+        "notes/opening[.md",
+        "notes/alias|target.md",
+        "notes/code`span.md",
+        "notes/html<tag.md",
+        "notes/line\nbreak.md",
+    ),
+)
+def test_wikilink_delimiters_are_rejected_at_the_contract_boundary(path: str) -> None:
+    with pytest.raises(ValueError, match="unsupported Markdown delimiters"):
+        WikiSourceNote(
+            path=path,
+            title="Unsupported",
+            note_type="Note",
+            checksum="checksum",
+        )
+
+
 def test_projection_order_is_deterministic_for_case_only_names() -> None:
     notes = (
         WikiSourceNote(path="foo.md", title="same", note_type="Note", checksum="lower"),
@@ -306,7 +381,7 @@ def test_projection_escapes_dynamic_markdown_structure() -> None:
         source_accepted_at=ACCEPTED_AT,
         notes=(
             WikiSourceNote(
-                path="unsafe]target.md",
+                path="safe-target.md",
                 title=injected_title,
                 note_type="Note",
                 checksum="unsafe",
@@ -316,7 +391,7 @@ def test_projection_escapes_dynamic_markdown_structure() -> None:
             WikiSourceChange(
                 partition_position=1,
                 operation=WikiChangeOperation.updated,
-                path="unsafe]target.md",
+                path="safe-target.md",
                 title=injected_title,
                 accepted_at=ACCEPTED_AT,
                 materialized=True,
@@ -330,4 +405,4 @@ def test_projection_escapes_dynamic_markdown_structure() -> None:
 
     assert "\n- relates_to [[evil" not in rendered["index.md"]
     assert "\n- relates_to [[evil" not in rendered["log.md"]
-    assert "[[unsafe&#93;target|Bad&#93;&#93; - relates_to &#91;&#91;evil]]" in rendered["index.md"]
+    assert "[[safe-target|Bad&#93;&#93; - relates_to &#91;&#91;evil]]" in rendered["index.md"]
