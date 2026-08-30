@@ -47,5 +47,4 @@ cloud_info()
 
 ## SEE ALSO
 
-- see_also [[release-notes(3)]]
 - see_also [[list-workspaces(3)]]

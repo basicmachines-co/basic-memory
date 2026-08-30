@@ -54,4 +54,3 @@ read_content("man5/bm-note(5).md", project="manual")
 
 - see_also [[read-note(3)]]
 - see_also [[view-note(3)]]
-- see_also [[canvas(3)]]

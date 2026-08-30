@@ -122,6 +122,16 @@ async def test_section_3_synopsis_names_every_tool_parameter() -> None:
         assert documented - schema == set(), f"{page.title} SYNOPSIS names unknown parameters"
 
 
+def test_section_3_links_resolve_to_bundled_pages() -> None:
+    # Section 3 ships in full, so a [[name(3)]] link with no page behind it is a
+    # dangling SEE ALSO: a retired tool's page was dropped but not its references.
+    for page in bundled_pages():
+        for name in re.findall(r"\[\[([^\]]+)\(3\)\]\]", page.body()):
+            assert find_page(PageRef(name, 3)) is not None, (
+                f"{page.title} links to {name}(3), which is not bundled"
+            )
+
+
 def test_render_index_marks_pages_whose_tool_this_server_lacks() -> None:
     index = render_index(bundled_pages(), registered_tools=frozenset(registered_tools))
     hosted_only = find_page(PageRef("cloud-info", 3))

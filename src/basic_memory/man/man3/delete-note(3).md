@@ -54,7 +54,8 @@ delete_note("playground/demo-doomed-note", project="manual")
 
 - [gotcha] is_directory=True deletes recursively with no confirmation step — list_directory first and check what you are about to remove #safety
 - [gotcha] Identifier accepts title or permalink; with same-titled notes in different folders, prefer the permalink #identifiers
-- [pattern] For notes that might be referenced elsewhere, prefer moving to an archive/ folder over deletion — relations to deleted notes become permanently unresolved #workflow
+- [gotcha] Relations pointing at a deleted note are kept as unresolved rows (the target id is cleared, the link text stays) and relink on their own when a note with that name is written again, so deletion is recoverable for the graph — but the note's own outgoing relations and observations are gone with the file #graph
+- [pattern] For notes that might be referenced elsewhere, prefer moving to an archive/ folder over deletion — move-note keeps every relation resolved instead of leaving them unresolved until a recreate #workflow
 
 ## SEE ALSO
 
