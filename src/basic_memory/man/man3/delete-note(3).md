@@ -4,7 +4,7 @@ type: manpage
 section: 3
 name: delete-note
 summary: delete a note or directory from the knowledge base
-generated: hand
+generated: registry
 tool: delete_note
 verified: 0.21.6 mcp+cli
 ---
@@ -20,8 +20,8 @@ verified: 0.21.6 mcp+cli
 MCP:
 
 ```
-delete_note(identifier, is_directory=False,
-            project=None, project_id=None, output_format="text")
+delete_note(identifier, is_directory=False, project=None, project_id=None,
+            output_format="text")
 ```
 
 CLI:

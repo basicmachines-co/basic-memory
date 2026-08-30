@@ -4,7 +4,7 @@ type: manpage
 section: 3
 name: write-note
 summary: create or overwrite a markdown note in the knowledge base
-generated: hand
+generated: registry
 tool: write_note
 verified: 0.21.6 mcp+cli
 ---
@@ -20,10 +20,9 @@ verified: 0.21.6 mcp+cli
 MCP:
 
 ```
-write_note(title, content, directory,
-           project=None, workspace=None, project_id=None,
-           tags=None, note_type="note", metadata=None, overwrite=None,
-           output_format="text")
+write_note(title, content, directory, project=None, workspace=None,
+           project_id=None, tags=None, note_type="note", metadata=None,
+           overwrite=None, output_format="text")
 ```
 
 CLI:

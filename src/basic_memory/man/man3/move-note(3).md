@@ -4,7 +4,7 @@ type: manpage
 section: 3
 name: move-note
 summary: move a note or directory, keeping the database consistent
-generated: hand
+generated: registry
 tool: move_note
 verified: 0.21.6 mcp
 ---
@@ -20,10 +20,9 @@ verified: 0.21.6 mcp
 MCP:
 
 ```
-move_note(identifier,
-          destination_path="" | destination_folder=None,
-          is_directory=False,
-          project=None, project_id=None, output_format="text")
+move_note(identifier, destination_path="", destination_folder=None,
+          is_directory=False, project=None, project_id=None,
+          output_format="text")
 ```
 
 ## DESCRIPTION

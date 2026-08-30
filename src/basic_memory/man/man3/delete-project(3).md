@@ -4,7 +4,7 @@ type: manpage
 section: 3
 name: delete-project
 summary: remove a project from configuration and index (files survive by default)
-generated: hand
+generated: registry
 tool: delete_project
 verified: 0.21.6 mcp
 ---

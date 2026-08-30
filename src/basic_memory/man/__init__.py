@@ -12,10 +12,13 @@ See ``docs/manual-pages.md`` for the page anatomy and the verification rules.
 
 from __future__ import annotations
 
+import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
+from typing import Any
 from urllib.parse import unquote
 
 from basic_memory.file_utils import parse_frontmatter, remove_frontmatter
@@ -85,6 +88,7 @@ class ManPage:
     section: int
     name: str
     summary: str
+    generated: str
     tool: str | None
     path: Path
 
@@ -117,6 +121,7 @@ def bundled_pages() -> tuple[ManPage, ...]:
                 section=int(frontmatter["section"]),
                 name=str(frontmatter["name"]),
                 summary=str(frontmatter["summary"]),
+                generated=str(frontmatter["generated"]),
                 tool=str(tool) if tool is not None else None,
                 path=path,
             )
@@ -141,6 +146,96 @@ def find_page(ref: PageRef) -> ManPage | None:
         if page.tool is not None and page.tool.replace("_", "-") == ref.name:
             return page
     return None
+
+
+# --- Registry-generated SYNOPSIS ---
+# The MCP SYNOPSIS block on a section-3 page is a mechanical section: it must show
+# exactly the call the tool schema advertises. These helpers render it from the
+# schema and splice it into a page; scripts/update_man_pages.py runs them over the
+# corpus and a test holds every shipped block byte-equal to the rendering.
+
+SYNOPSIS_WIDTH = 76
+
+# Matches the MCP call block under ## SYNOPSIS. Pages that also show a CLI form
+# label the MCP block "MCP:"; MCP-only pages have a single unlabelled block.
+_MCP_SYNOPSIS_RE = re.compile(r"(## SYNOPSIS\n\n(?:MCP:\n\n)?```\n)(.*?)(\n```)", re.S)
+
+
+def _default_literal(value: object) -> str:
+    """Render a schema default the way the call would be written in Python."""
+    if isinstance(value, str):
+        # json.dumps escapes quotes, backslashes, and control characters, and its
+        # double-quoted output is also a valid Python string literal.
+        return json.dumps(value)
+    # None, booleans, and numbers all repr() to their Python spelling.
+    return repr(value)
+
+
+def render_synopsis(tool_name: str, parameters: Mapping[str, Any]) -> str:
+    """Render a tool's MCP SYNOPSIS call from the JSON schema clients receive.
+
+    Required parameters come first as bare names, then optional ones as
+    ``name=default``, each group in schema order — the order clients see. Lines
+    wrap at the code block's width with continuations aligned under the first
+    argument.
+    """
+    required: list[str] = parameters.get("required") or []
+    properties: Mapping[str, Any] = parameters.get("properties") or {}
+
+    ordered = [name for name in properties if name in required]
+    for name, prop in properties.items():
+        if name in required:
+            continue
+        # A default factory leaves no `default` in the schema; render `name=...` so
+        # the parameter still reads as optional, not as a bare required name.
+        ordered.append(
+            f"{name}={_default_literal(prop['default'])}" if "default" in prop else f"{name}=..."
+        )
+
+    indent = " " * (len(tool_name) + 1)
+    current = f"{tool_name}("
+    lines: list[str] = []
+    for position, argument in enumerate(ordered):
+        piece = argument + ("," if position < len(ordered) - 1 else ")")
+        trial = current + piece if current.endswith("(") else f"{current} {piece}"
+        if len(trial) > SYNOPSIS_WIDTH and not current.endswith("("):
+            lines.append(current)
+            current = indent + piece
+        else:
+            current = trial
+    if not ordered:
+        current += ")"
+    lines.append(current)
+    return "\n".join(lines)
+
+
+def extract_mcp_synopsis(page_text: str) -> str:
+    """The MCP call block a page currently shows under ## SYNOPSIS."""
+    match = _MCP_SYNOPSIS_RE.search(page_text)
+    if match is None:
+        raise ValueError("page has no MCP SYNOPSIS block")
+    return match.group(2)
+
+
+def replace_mcp_synopsis(page_text: str, synopsis: str) -> str:
+    """Return the page with its MCP SYNOPSIS block replaced; other blocks untouched."""
+    match = _MCP_SYNOPSIS_RE.search(page_text)
+    if match is None:
+        raise ValueError("page has no MCP SYNOPSIS block")
+    return f"{page_text[: match.start()]}{match.group(1)}{synopsis}{match.group(3)}{page_text[match.end() :]}"
+
+
+def declare_registry_ownership(page_text: str) -> str:
+    """Flip ``generated: hand`` to ``registry`` — in the frontmatter only.
+
+    A curated body may legally contain a literal ``generated: hand`` line (a YAML
+    example, say); only the opening frontmatter block is the generator's to rewrite.
+    """
+    frontmatter, fence, body = page_text.partition("\n---\n")
+    frontmatter = re.sub(
+        r"^generated: hand$", "generated: registry", frontmatter, count=1, flags=re.M
+    )
+    return frontmatter + fence + body
 
 
 def render_index(pages: tuple[ManPage, ...], registered_tools: frozenset[str] | None = None) -> str:

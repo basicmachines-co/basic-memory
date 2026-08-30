@@ -4,7 +4,7 @@ type: manpage
 section: 3
 name: chatgpt-search
 summary: OpenAI-actions-compatible search adapter
-generated: hand
+generated: registry
 tool: search
 verified: 0.21.6 mcp
 ---

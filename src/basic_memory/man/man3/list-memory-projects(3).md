@@ -4,7 +4,7 @@ type: manpage
 section: 3
 name: list-memory-projects
 summary: list all projects across local config and cloud workspaces
-generated: hand
+generated: registry
 tool: list_memory_projects
 verified: 0.21.6 mcp+cli
 ---

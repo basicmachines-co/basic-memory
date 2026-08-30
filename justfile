@@ -510,6 +510,10 @@ clean:
 format:
     uv run ruff format .
 
+# Regenerate the manual's registry-owned SYNOPSIS blocks from the MCP tool registry
+man-regen:
+    uv run python scripts/update_man_pages.py
+
 # Run MCP inspector tool
 run-inspector:
     npx @modelcontextprotocol/inspector

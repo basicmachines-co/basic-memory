@@ -4,7 +4,7 @@ type: manpage
 section: 3
 name: recent-activity
 summary: list recently changed notes, observations, and relations
-generated: hand
+generated: registry
 tool: recent_activity
 verified: 0.21.6 mcp+cli
 ---
@@ -20,9 +20,8 @@ verified: 0.21.6 mcp+cli
 MCP:
 
 ```
-recent_activity(type="", depth=1, timeframe="7d",
-                project=None, project_id=None,
-                page=1, page_size=10, output_format="text")
+recent_activity(type="", depth=1, timeframe="7d", page=1, page_size=10,
+                project=None, project_id=None, output_format="text")
 ```
 
 CLI:

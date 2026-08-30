@@ -4,7 +4,7 @@ type: manpage
 section: 3
 name: schema-infer
 summary: derive a Picoschema suggestion from existing notes
-generated: hand
+generated: registry
 tool: schema_infer
 verified: 0.21.6 mcp
 ---
@@ -18,8 +18,8 @@ verified: 0.21.6 mcp
 ## SYNOPSIS
 
 ```
-schema_infer(note_type, threshold=0.25,
-             project=None, project_id=None, output_format="text")
+schema_infer(note_type, threshold=0.25, project=None, project_id=None,
+             output_format="text")
 ```
 
 ## DESCRIPTION

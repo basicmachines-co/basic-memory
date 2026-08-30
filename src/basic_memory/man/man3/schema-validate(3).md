@@ -4,7 +4,7 @@ type: manpage
 section: 3
 name: schema-validate
 summary: validate notes against their Picoschema definitions
-generated: hand
+generated: registry
 tool: schema_validate
 verified: 0.21.6 mcp+cli
 ---
@@ -20,8 +20,8 @@ verified: 0.21.6 mcp+cli
 MCP:
 
 ```
-schema_validate(note_type=None, identifier=None,
-                project=None, project_id=None, output_format="text")
+schema_validate(note_type=None, identifier=None, project=None,
+                project_id=None, output_format="text")
 ```
 
 CLI:

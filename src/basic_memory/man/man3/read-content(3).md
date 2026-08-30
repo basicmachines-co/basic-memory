@@ -4,7 +4,7 @@ type: manpage
 section: 3
 name: read-content
 summary: read a file's content without knowledge-graph processing
-generated: hand
+generated: registry
 tool: read_content
 verified: 0.21.6 mcp
 ---

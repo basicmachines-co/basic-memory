@@ -4,7 +4,7 @@ type: manpage
 section: 3
 name: read-note
 summary: read a note by title, permalink, or memory:// URL
-generated: hand
+generated: registry
 tool: read_note
 verified: 0.21.6 mcp+cli
 ---
@@ -20,8 +20,7 @@ verified: 0.21.6 mcp+cli
 MCP:
 
 ```
-read_note(identifier,
-          project=None, project_id=None, page=1, page_size=10,
+read_note(identifier, project=None, project_id=None, page=1, page_size=10,
           output_format="text", include_frontmatter=False)
 ```
 
