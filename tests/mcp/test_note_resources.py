@@ -226,6 +226,32 @@ async def test_note_actually_named_info_still_reads(app, test_project) -> None:
 
 
 @pytest.mark.asyncio
+async def test_workspace_qualified_uris_route_through_their_project(
+    app, test_project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # memory://personal/main/docs/report: the canonical prefix detection names
+    # the workspace-qualified route, and the client must be opened for it —
+    # with its failures surfacing, not falling back to the default project.
+    async def detected(identifier, config, context=None):
+        assert identifier == "memory://personal/main/docs/report"
+        return "personal/main"
+
+    monkeypatch.setattr(notes_module, "detect_project_from_memory_url_prefix", detected)
+    routes: list[str | None] = []
+    real_get_project_client = notes_module.get_project_client
+
+    def recording(project, context=None, project_id=None):
+        routes.append(project)
+        return real_get_project_client(project, context, project_id=project_id)
+
+    monkeypatch.setattr(notes_module, "get_project_client", recording)
+    with pytest.raises(ResourceError):
+        await note_resource(project="personal", path="main/docs/report")
+
+    assert routes == ["personal/main"]
+
+
+@pytest.mark.asyncio
 async def test_unprefixed_permalinks_ignore_project_name_collisions(
     app, test_project, monkeypatch: pytest.MonkeyPatch
 ) -> None:

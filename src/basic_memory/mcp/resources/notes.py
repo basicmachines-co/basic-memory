@@ -10,8 +10,11 @@ from fastmcp import Context
 from fastmcp.exceptions import ResourceError, ToolError
 
 from basic_memory.config import ConfigManager
-from basic_memory.mcp.project_context import get_project_client, resolve_project_and_path
-from basic_memory.utils import generate_permalink
+from basic_memory.mcp.project_context import (
+    detect_project_from_memory_url_prefix,
+    get_project_client,
+    resolve_project_and_path,
+)
 from basic_memory.mcp.resources.man import manual_page
 from basic_memory.mcp.resources.project_info import project_info
 from basic_memory.mcp.server import mcp
@@ -29,24 +32,22 @@ class NoteNotFoundError(ResourceError):
     """
 
 
-def _configured_project(segment: str) -> str | None:
-    """The configured project this segment names, or None when it routes nowhere.
+async def _route_for(identifier: str, context: Context | None) -> str | None:
+    """The project route the URI's prefix names, or None for the default client.
 
     With permalinks_include_project=False the first segment is a directory even
     when it collides with a configured project's name — the active project owns
     unprefixed permalinks, so no pre-routing happens at all. Otherwise the
-    client must be opened for the URI's own project — a cloud-mode project
-    needs its cloud transport, not the default project's — and only the config
-    can say, without I/O, whether the segment is a project at all.
+    canonical prefix detection decides, covering configured local projects and
+    workspace-qualified cloud routes alike: the client must be opened for the
+    URI's own project, because a cloud project needs its own transport.
     """
     config = ConfigManager().config
     if not config.permalinks_include_project:
         return None
-    requested = generate_permalink(segment)
-    for configured_name in config.projects:
-        if generate_permalink(configured_name) == requested:
-            return configured_name
-    return None
+    return await detect_project_from_memory_url_prefix(
+        f"memory://{identifier}", config, context=context
+    )
 
 
 async def read_note_markdown(identifier: str, context: Context | None) -> str:
@@ -58,9 +59,8 @@ async def read_note_markdown(identifier: str, context: Context | None) -> str:
     permalinks_include_project=False — resolve_project_and_path resolves the
     whole path in the active/default project.
     """
-    first_segment, _, remainder = identifier.partition("/")
-    route = _configured_project(first_segment) if remainder else None
     try:
+        route = await _route_for(identifier, context)
         async with get_project_client(route, context) as (client, active_project):
             target, entity_path, _ = await resolve_project_and_path(
                 client, f"memory://{identifier}", active_project.name, context
