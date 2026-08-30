@@ -58,8 +58,11 @@ prepends, or edits sections in place without rewriting the file.
   root. MCP accepts the aliases `folder`, `dir`, and `path`; the CLI flag is
   `--folder`
 - **project** / **project_id** — target project by name or UUID; `project_id`
-  wins and is unambiguous across workspaces. Omitting both uses the default
-  project. Qualified names (`workspace/project`) route across workspaces
+  wins and is unambiguous across workspaces. Omitting both writes to the
+  session's active project — the last one this session touched — and only
+  falls back to the configured default when there is none, so after working
+  in another project pass `project` explicitly. Qualified names
+  (`workspace/project`) route across workspaces
 - **workspace** — cloud workspace slug, name, or tenant_id; with `project`,
   routes as `workspace/project`. Cannot be combined with `project_id`
 - **tags** — list or comma-separated string; external MCP clients should pass
