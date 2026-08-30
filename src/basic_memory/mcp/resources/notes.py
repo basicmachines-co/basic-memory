@@ -9,29 +9,55 @@ note's raw markdown, exactly as it sits on disk, frontmatter included.
 from fastmcp import Context
 from fastmcp.exceptions import ResourceError, ToolError
 
+from basic_memory.config import ConfigManager
 from basic_memory.mcp.project_context import get_project_client, resolve_project_and_path
+from basic_memory.utils import generate_permalink
 from basic_memory.mcp.resources.man import manual_page
 from basic_memory.mcp.resources.project_info import project_info
 from basic_memory.mcp.server import mcp
-from basic_memory.mcp.tools.utils import call_get, resolve_entity_id
+from basic_memory.mcp.tools.utils import call_get, call_post
 
 NOTE_TEMPLATE = "memory://{project}/{path*}"
+
+
+def _configured_project(segment: str) -> str | None:
+    """The configured project this segment names, or None if it names none.
+
+    The client must be opened for the URI's own project — a cloud-mode project
+    needs its cloud transport, not the default project's — and only the config
+    can say, without I/O, whether the segment is a project at all.
+    """
+    requested = generate_permalink(segment)
+    for configured_name in ConfigManager().config.projects:
+        if generate_permalink(configured_name) == requested:
+            return configured_name
+    return None
 
 
 async def read_note_markdown(identifier: str, context: Context | None) -> str:
     """Read one note's raw markdown by its memory:// identifier.
 
-    Routing uses the same semantics as the tools (resolve_project_and_path): a
-    leading segment that names a project routes there, and otherwise — legacy
-    unprefixed permalinks, permalinks_include_project=False — the whole path is
-    resolved in the active/default project.
+    Routing uses the same semantics as the tools: a leading segment that names a
+    configured project routes there (with that project's own client — cloud or
+    local); otherwise — legacy unprefixed permalinks,
+    permalinks_include_project=False — resolve_project_and_path resolves the
+    whole path in the active/default project.
     """
+    first_segment, _, remainder = identifier.partition("/")
+    route = _configured_project(first_segment) if remainder else None
     try:
-        async with get_project_client(None, context) as (client, active_project):
+        async with get_project_client(route, context) as (client, active_project):
             target, entity_path, _ = await resolve_project_and_path(
                 client, f"memory://{identifier}", active_project.name, context
             )
-            entity_id = await resolve_entity_id(client, target.external_id, entity_path)
+            # strict: a resource read returns the addressed document or an error —
+            # never the fuzzy-search guess the tools use for suggestions.
+            resolved = await call_post(
+                client,
+                f"/v2/projects/{target.external_id}/knowledge/resolve",
+                json={"identifier": entity_path, "strict": True},
+            )
+            entity_id = resolved.json()["external_id"]
             response = await call_get(
                 client, f"/v2/projects/{target.external_id}/resource/{entity_id}"
             )
@@ -71,10 +97,19 @@ async def read_note_markdown(identifier: str, context: Context | None) -> str:
 )
 async def note_resource(project: str, path: str, context: Context | None = None) -> str:
     """Return the raw markdown of one note."""
-    # `man` is the manual's namespace, not a project, and which template a server
-    # matches first is not guaranteed — so behave identically to the manual either way.
+    # `man` is the manual's namespace, not (usually) a project, and which template
+    # a server matches first is not guaranteed — so answer as the manual either
+    # way. Nothing reserves the name, though: when no manual page matches, the URI
+    # may be a note in a project that really is called man.
     if project == "man":
-        return manual_page(path)
+        try:
+            return manual_page(path)
+        except ResourceError as manual_error:
+            try:
+                return await read_note_markdown(f"{project}/{path}", context)
+            except ResourceError:
+                # Neither a page nor a note — the manual's hint is the useful one.
+                raise manual_error from None
 
     # The {workspace}/{project}/info shape belongs to the project_info resource,
     # which itself falls back to a note named .../info — delegating keeps both
