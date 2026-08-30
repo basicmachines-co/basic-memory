@@ -309,6 +309,10 @@ def test_chunk_boundary_results_preserve_rank_and_require_the_later_chunk(mocker
         permalink="multilingual/ko-long-retention-exception",
         matched_chunk_text="법적 보존 명령이 적용된 고객 기록",
     )
+    later_chunk_ranked_second = mocker.Mock(
+        permalink="multilingual/ko-long-retention-exception",
+        matched_chunk_text="보관 정책 검토\n---\n법적 보존 명령이 적용된 고객 기록",
+    )
 
     assert result_permalinks([distractor, first_chunk], query) == (
         "multilingual/en-password-reset",
@@ -316,6 +320,9 @@ def test_chunk_boundary_results_preserve_rank_and_require_the_later_chunk(mocker
     assert result_permalinks([distractor, later_chunk], query) == (
         "multilingual/en-password-reset",
         "multilingual/ko-long-retention-exception",
+    )
+    assert result_permalinks([distractor, later_chunk_ranked_second], query) == (
+        "multilingual/en-password-reset",
     )
 
 

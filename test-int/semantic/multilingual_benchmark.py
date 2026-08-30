@@ -255,19 +255,16 @@ def result_permalinks(
 ) -> tuple[str, ...]:
     """Return ranked permalinks, invalidating only a target that fails its chunk oracle."""
     relevant_permalinks = set(query.relevant_permalinks)
-    return tuple(
-        result.permalink
-        for result in results
-        if result.permalink is not None
-        and (
-            query.required_chunk_text is None
-            or result.permalink not in relevant_permalinks
-            or (
-                result.matched_chunk_text is not None
-                and query.required_chunk_text in result.matched_chunk_text
-            )
-        )
-    )
+    permalinks: list[str] = []
+    for result in results:
+        if result.permalink is None:
+            continue
+        if query.required_chunk_text is not None and result.permalink in relevant_permalinks:
+            top_chunk = (result.matched_chunk_text or "").partition("\n---\n")[0]
+            if query.required_chunk_text not in top_chunk:
+                continue
+        permalinks.append(result.permalink)
+    return tuple(permalinks)
 
 
 def percentile_ms(samples: Sequence[float], quantile: float) -> float:
