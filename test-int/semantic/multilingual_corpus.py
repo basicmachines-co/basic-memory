@@ -41,6 +41,7 @@ class MultilingualQuery:
     language: str
     kind: RetrievalCaseKind
     relevant_permalinks: tuple[str, ...]
+    required_chunk_text: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +69,8 @@ class MultilingualCorpus:
                 continue
             if not query.relevant_permalinks:
                 raise ValueError(f"Positive query {query.name!r} needs a relevance judgment")
+            if query.kind is RetrievalCaseKind.CHUNK_BOUNDARY and not query.required_chunk_text:
+                raise ValueError(f"Chunk-boundary query {query.name!r} needs required chunk text")
             unknown = set(query.relevant_permalinks) - known_permalinks
             if unknown:
                 raise ValueError(
@@ -390,6 +393,7 @@ QUERIES = (
         "ko",
         RetrievalCaseKind.CHUNK_BOUNDARY,
         ("multilingual/ko-long-retention-exception",),
+        "법적 보존 명령",
     ),
     MultilingualQuery(
         "long-retention-cross-language",
@@ -397,6 +401,7 @@ QUERIES = (
         "en",
         RetrievalCaseKind.CHUNK_BOUNDARY,
         ("multilingual/ko-long-retention-exception",),
+        "법적 보존 명령",
     ),
     MultilingualQuery(
         "negative-tomato-blight",
