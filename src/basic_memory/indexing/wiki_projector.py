@@ -89,12 +89,9 @@ class WikiSourceNote:
     title: str
     note_type: str
     checksum: str
-    partition_position: int
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "path", _normalize_note_path(self.path))
-        if self.partition_position < 0:
-            raise ValueError("Wiki source note position cannot be negative")
         if not self.title.strip():
             raise ValueError(f"Wiki source note {self.path} requires a title")
         if not self.note_type.strip():
@@ -154,6 +151,7 @@ class WikiProjectionSnapshot:
 
     project_id: str
     project_name: str
+    source_partition_position: int
     current_output_watermark: int
     source_accepted_at: datetime
     notes: tuple[WikiSourceNote, ...]
@@ -165,6 +163,8 @@ class WikiProjectionSnapshot:
             raise ValueError("Wiki projection snapshot requires a project_id")
         if not self.project_name.strip():
             raise ValueError("Wiki projection snapshot requires a project_name")
+        if self.source_partition_position < 0:
+            raise ValueError("Wiki snapshot source position cannot be negative")
         if self.current_output_watermark < 0:
             raise ValueError("Wiki output watermark cannot be negative")
         if self.source_accepted_at.tzinfo is None:
@@ -254,6 +254,8 @@ def plan_wiki_projection(
         raise ValueError("Wiki projection request and snapshot project_id differ")
     if request.through_partition_position < snapshot.current_output_watermark:
         raise ValueError("Wiki projection request is older than the current output watermark")
+    if request.through_partition_position != snapshot.source_partition_position:
+        raise ValueError("Wiki projection requires an exact as-of source snapshot")
 
     changes = tuple(
         sorted(
@@ -292,40 +294,14 @@ def plan_wiki_projection(
             ),
         )
 
-    # A projector-only replay advances the ledger without rewriting its own
-    # generated notes. Full rebuilds and project creation remain explicit work.
     new_changes = tuple(
         change
         for change in changes
         if change.partition_position > snapshot.current_output_watermark
     )
-    if (
-        request.reason == WikiProjectionReason.accepted_note
-        and not new_changes
-        and snapshot.reserved_documents
-    ):
-        return WikiProjectionPlan(
-            request=request,
-            writes=(),
-            unchanged_paths=tuple(
-                sorted(document.path for document in snapshot.reserved_documents)
-            ),
-            result=WikiProjectionResult(
-                source_watermark=request.through_partition_position,
-                output_watermark=request.through_partition_position,
-                created=0,
-                updated=0,
-                unchanged=len(snapshot.reserved_documents),
-                conflicts=(),
-                warnings=(),
-                pending_materialization=(),
-            ),
-        )
-
     notes = tuple(
         note
         for note in snapshot.notes
-        if note.partition_position <= request.through_partition_position
         if PurePosixPath(note.path).name.lower() not in RESERVED_WIKI_FILENAMES
     )
     scopes = _projection_scopes(request, snapshot, notes, changes, new_changes)

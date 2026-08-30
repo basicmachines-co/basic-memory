@@ -50,6 +50,7 @@ def _snapshot(
     return WikiProjectionSnapshot(
         project_id="project-88",
         project_name="Project 88",
+        source_partition_position=3,
         current_output_watermark=output_watermark,
         source_accepted_at=ACCEPTED_AT,
         notes=(
@@ -58,21 +59,18 @@ def _snapshot(
                 title="Overview",
                 note_type="Note",
                 checksum="overview-checksum",
-                partition_position=0,
             ),
             WikiSourceNote(
                 path="guides/setup.md",
                 title="Setup",
                 note_type="Guide",
                 checksum="setup-checksum",
-                partition_position=3,
             ),
             WikiSourceNote(
                 path="guides/deep/details.md",
                 title="Details",
                 note_type="Guide",
                 checksum="details-checksum",
-                partition_position=0,
             ),
         ),
         changes=(
@@ -159,7 +157,6 @@ def test_source_note_rejects_missing_metadata() -> None:
         title="Note",
         note_type="Note",
         checksum="checksum",
-        partition_position=0,
     )
 
     with pytest.raises(ValueError, match="requires a title"):
@@ -168,8 +165,6 @@ def test_source_note_rejects_missing_metadata() -> None:
         replace(note, note_type=" ")
     with pytest.raises(ValueError, match="requires a checksum"):
         replace(note, checksum=" ")
-    with pytest.raises(ValueError, match="position cannot be negative"):
-        replace(note, partition_position=-1)
 
 
 @pytest.mark.parametrize(
@@ -191,7 +186,6 @@ def test_source_note_rejects_nonportable_path_components(path: str) -> None:
             title="Note",
             note_type="Note",
             checksum="checksum",
-            partition_position=0,
         )
 
 
@@ -203,7 +197,6 @@ def test_source_note_rejects_reserved_wiki_directory_components(path: str) -> No
             title="Note",
             note_type="Note",
             checksum="checksum",
-            partition_position=0,
         )
 
 
@@ -268,6 +261,8 @@ def test_snapshot_rejects_invalid_contract_fields() -> None:
         replace(snapshot, project_id=" ")
     with pytest.raises(ValueError, match="requires a project_name"):
         replace(snapshot, project_name=" ")
+    with pytest.raises(ValueError, match="source position cannot be negative"):
+        replace(snapshot, source_partition_position=-1)
     with pytest.raises(ValueError, match="cannot be negative"):
         replace(snapshot, current_output_watermark=-1)
     with pytest.raises(ValueError, match="timezone-aware"):
@@ -427,6 +422,7 @@ def test_projector_generated_change_is_suppressed_from_writes_and_log() -> None:
     snapshot = WikiProjectionSnapshot(
         project_id="project-88",
         project_name="Project 88",
+        source_partition_position=4,
         current_output_watermark=3,
         source_accepted_at=ACCEPTED_AT,
         notes=(),
@@ -446,7 +442,8 @@ def test_projector_generated_change_is_suppressed_from_writes_and_log() -> None:
 
     plan = plan_wiki_projection(_request(position=4, scopes=()), snapshot)
 
-    assert plan.writes == ()
+    rendered = "\n".join(write.content.decode() for write in plan.writes)
+    assert "Updated [[index|Project 88]]" not in rendered
     assert plan.result.output_watermark == 4
     assert plan.result.state == WikiProjectionState.current
 
@@ -457,7 +454,6 @@ def test_requested_scopes_cannot_omit_a_changed_note_scope() -> None:
         title="Secret note",
         note_type="Note",
         checksum="secret-checksum",
-        partition_position=3,
     )
     changed = WikiSourceChange(
         partition_position=3,
@@ -511,6 +507,7 @@ def test_full_rebuild_covers_orphaned_reserved_document_scopes() -> None:
     snapshot = WikiProjectionSnapshot(
         project_id="project-88",
         project_name="Project 88",
+        source_partition_position=3,
         current_output_watermark=2,
         source_accepted_at=ACCEPTED_AT,
         notes=(),
@@ -541,10 +538,11 @@ def test_full_rebuild_covers_orphaned_reserved_document_scopes() -> None:
     assert "Deleted `orphaned/last-note.md`" in rendered["orphaned/log.md"]
 
 
-def test_full_rebuild_excludes_scopes_after_requested_watermark() -> None:
+def test_projection_rejects_a_snapshot_ahead_of_the_requested_watermark() -> None:
     snapshot = WikiProjectionSnapshot(
         project_id="project-88",
         project_name="Project 88",
+        source_partition_position=2,
         current_output_watermark=0,
         source_accepted_at=ACCEPTED_AT,
         notes=(),
@@ -570,58 +568,15 @@ def test_full_rebuild_excludes_scopes_after_requested_watermark() -> None:
         ),
     )
 
-    plan = plan_wiki_projection(
-        _request(
-            position=1,
-            reason=WikiProjectionReason.manual_rebuild,
-            scopes=(),
-        ),
-        snapshot,
-    )
-
-    assert {write.path for write in plan.writes} == {
-        "index.md",
-        "log.md",
-        "included/index.md",
-        "included/log.md",
-    }
-
-
-def test_projection_excludes_notes_after_requested_watermark() -> None:
-    snapshot = replace(
-        _snapshot(output_watermark=0),
-        notes=(
-            WikiSourceNote(
-                path="included.md",
-                title="Included",
-                note_type="Note",
-                checksum="included",
-                partition_position=1,
+    with pytest.raises(ValueError, match="exact as-of source snapshot"):
+        plan_wiki_projection(
+            _request(
+                position=1,
+                reason=WikiProjectionReason.manual_rebuild,
+                scopes=(),
             ),
-            WikiSourceNote(
-                path="future/note.md",
-                title="Future",
-                note_type="Note",
-                checksum="future",
-                partition_position=2,
-            ),
-        ),
-        changes=(),
-    )
-
-    plan = plan_wiki_projection(
-        _request(
-            position=1,
-            reason=WikiProjectionReason.manual_rebuild,
-            scopes=(),
-        ),
-        snapshot,
-    )
-
-    assert {write.path for write in plan.writes} == {"index.md", "log.md"}
-    root_index = next(write.content.decode() for write in plan.writes if write.path == "index.md")
-    assert "[[included|Included]]" in root_index
-    assert "future" not in root_index.lower()
+            snapshot,
+        )
 
 
 def test_moved_change_requires_previous_path() -> None:
@@ -631,6 +586,7 @@ def test_moved_change_requires_previous_path() -> None:
             WikiProjectionSnapshot(
                 project_id="project-88",
                 project_name="Project 88",
+                source_partition_position=3,
                 current_output_watermark=2,
                 source_accepted_at=ACCEPTED_AT,
                 notes=(),
@@ -653,6 +609,7 @@ def test_created_and_moved_changes_render_in_the_log() -> None:
     snapshot = WikiProjectionSnapshot(
         project_id="project-88",
         project_name="Project 88",
+        source_partition_position=2,
         current_output_watermark=0,
         source_accepted_at=ACCEPTED_AT,
         notes=(),
@@ -693,7 +650,6 @@ def test_absolute_paths_are_rejected_at_the_contract_boundary() -> None:
             title="Outside",
             note_type="Note",
             checksum="checksum",
-            partition_position=0,
         )
 
 
@@ -705,7 +661,6 @@ def test_windows_drive_paths_are_rejected_at_the_contract_boundary(path: str) ->
             title="Outside",
             note_type="Note",
             checksum="checksum",
-            partition_position=0,
         )
 
 
@@ -728,7 +683,6 @@ def test_wikilink_delimiters_are_rejected_at_the_contract_boundary(path: str) ->
             title="Unsupported",
             note_type="Note",
             checksum="checksum",
-            partition_position=0,
         )
 
 
@@ -740,7 +694,6 @@ def test_non_markdown_note_paths_are_rejected(path: str) -> None:
             title="Unsupported",
             note_type="Note",
             checksum="checksum",
-            partition_position=0,
         )
 
 
@@ -751,7 +704,6 @@ def test_parent_segments_are_rejected_at_the_contract_boundary() -> None:
             title="Outside",
             note_type="Note",
             checksum="checksum",
-            partition_position=0,
         )
 
 
@@ -762,19 +714,18 @@ def test_projection_order_is_deterministic_for_case_only_names() -> None:
             title="same",
             note_type="Note",
             checksum="lower",
-            partition_position=0,
         ),
         WikiSourceNote(
             path="Foo.md",
             title="Same",
             note_type="Note",
             checksum="upper",
-            partition_position=0,
         ),
     )
     snapshot = WikiProjectionSnapshot(
         project_id="project-88",
         project_name="Project 88",
+        source_partition_position=0,
         current_output_watermark=0,
         source_accepted_at=ACCEPTED_AT,
         notes=notes,
@@ -783,6 +734,7 @@ def test_projection_order_is_deterministic_for_case_only_names() -> None:
     reverse_snapshot = WikiProjectionSnapshot(
         project_id="project-88",
         project_name="Project 88",
+        source_partition_position=0,
         current_output_watermark=0,
         source_accepted_at=ACCEPTED_AT,
         notes=tuple(reversed(notes)),
@@ -800,6 +752,7 @@ def test_projection_escapes_dynamic_markdown_structure() -> None:
     snapshot = WikiProjectionSnapshot(
         project_id="project-88",
         project_name=f"Project\n{injected_title}",
+        source_partition_position=1,
         current_output_watermark=0,
         source_accepted_at=ACCEPTED_AT,
         notes=(
@@ -808,7 +761,6 @@ def test_projection_escapes_dynamic_markdown_structure() -> None:
                 title=injected_title,
                 note_type="Note",
                 checksum="unsafe",
-                partition_position=1,
             ),
         ),
         changes=(
