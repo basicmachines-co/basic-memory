@@ -92,6 +92,44 @@ def _reconcile_project_partition_heads() -> None:
     )
 
 
+def _create_missing_constraints() -> None:
+    inspector = inspect(op.get_bind())
+    foreign_key_exists = any(
+        foreign_key["constrained_columns"] == ["project_id"]
+        and foreign_key["referred_table"] == "project"
+        and foreign_key["referred_columns"] == ["id"]
+        for foreign_key in inspector.get_foreign_keys("accepted_project_note_change")
+    )
+    unique_position_exists = any(
+        constraint["column_names"] == ["project_id", "partition_position"]
+        for constraint in inspector.get_unique_constraints(
+            "accepted_project_note_change"
+        )
+    )
+    if foreign_key_exists and unique_position_exists:
+        return
+
+    # SQLite uses batch mode to recreate the pre-release table with the same
+    # durable constraints that fresh installations receive.
+    with op.batch_alter_table(
+        "accepted_project_note_change",
+        schema=None,
+    ) as batch_op:
+        if not foreign_key_exists:
+            batch_op.create_foreign_key(
+                "fk_accepted_project_note_change_project_id_project",
+                "project",
+                ["project_id"],
+                ["id"],
+                ondelete="CASCADE",
+            )
+        if not unique_position_exists:
+            batch_op.create_unique_constraint(
+                "uq_accepted_project_note_change_project_position",
+                ["project_id", "partition_position"],
+            )
+
+
 def upgrade() -> None:
     """Repair tenants stamped while the preceding revision was still pre-release."""
     connection = op.get_bind()
@@ -162,6 +200,7 @@ def upgrade() -> None:
     }
     _create_missing_indexes(existing_indexes)
     _reconcile_project_partition_heads()
+    _create_missing_constraints()
 
 
 def downgrade() -> None:

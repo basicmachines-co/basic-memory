@@ -202,6 +202,21 @@ def test_upgrade_backfills_permalink_in_pre_release_change_table(
             RETURNING partition_position
             """
         ).fetchone()
+        foreign_keys = connection.execute(
+            "PRAGMA foreign_key_list(accepted_project_note_change)"
+        ).fetchall()
+        unique_column_sets = {
+            tuple(
+                column[2]
+                for column in connection.execute(
+                    f"PRAGMA index_info('{index[1]}')"
+                ).fetchall()
+            )
+            for index in connection.execute(
+                "PRAGMA index_list(accepted_project_note_change)"
+            ).fetchall()
+            if index[2]
+        }
     finally:
         connection.close()
 
@@ -209,3 +224,11 @@ def test_upgrade_backfills_permalink_in_pre_release_change_table(
     assert permalink == ("note-legacy",)
     assert partition_position == (1,)
     assert next_partition_position == 2
+    assert any(
+        foreign_key[2] == "project"
+        and foreign_key[3] == "project_id"
+        and foreign_key[4] == "id"
+        and foreign_key[6] == "CASCADE"
+        for foreign_key in foreign_keys
+    )
+    assert ("project_id", "partition_position") in unique_column_sets
