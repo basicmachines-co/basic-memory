@@ -380,6 +380,37 @@ def test_projector_generated_change_is_suppressed_from_writes_and_log() -> None:
     assert plan.result.state == WikiProjectionState.current
 
 
+def test_requested_scopes_cannot_omit_a_changed_note_scope() -> None:
+    changed_note = WikiSourceNote(
+        path="secret/note.md",
+        title="Secret note",
+        note_type="Note",
+        checksum="secret-checksum",
+    )
+    changed = WikiSourceChange(
+        partition_position=3,
+        operation=WikiChangeOperation.updated,
+        path=changed_note.path,
+        title=changed_note.title,
+        accepted_at=ACCEPTED_AT,
+        materialized=True,
+        source="web",
+    )
+    snapshot = replace(
+        _snapshot(),
+        notes=(*_snapshot().notes, changed_note),
+        changes=(changed,),
+    )
+
+    plan = plan_wiki_projection(_request(scopes=("guides",)), snapshot)
+
+    assert {write.path for write in plan.writes} >= {
+        "secret/index.md",
+        "secret/log.md",
+    }
+    assert plan.result.output_watermark == 3
+
+
 def test_full_rebuild_covers_every_note_directory() -> None:
     request = _request(
         reason=WikiProjectionReason.import_rebuild,

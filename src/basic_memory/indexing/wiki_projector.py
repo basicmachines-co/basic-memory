@@ -417,17 +417,15 @@ def _projection_scopes(
             change.previous_path for change in snapshot.changes if change.previous_path is not None
         )
         return affected_wiki_scopes(*paths)
-    if request.requested_scopes:
-        scopes = {""}
-        for requested_scope in request.requested_scopes:
-            scope = PurePosixPath(requested_scope)
-            while scope != PurePosixPath("."):
-                scopes.add(scope.as_posix())
-                scope = scope.parent
-        return tuple(sorted(scopes))
     paths = [change.path for change in new_changes]
     paths.extend(change.previous_path for change in new_changes if change.previous_path is not None)
-    return affected_wiki_scopes(*paths)
+    scopes = set(affected_wiki_scopes(*paths))
+    for requested_scope in request.requested_scopes:
+        scope = PurePosixPath(requested_scope)
+        while scope != PurePosixPath("."):
+            scopes.add(scope.as_posix())
+            scope = scope.parent
+    return tuple(sorted(scopes))
 
 
 def _render_index(
