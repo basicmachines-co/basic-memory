@@ -81,7 +81,8 @@ The PostgreSQL/pgvector and PostgreSQL/Milvus runs produced the same vector qual
 models. That confirms the model comparison survives both hosted vector-storage paths.
 
 Hybrid retrieval remains backend-sensitive because SQLite FTS5 and PostgreSQL `tsvector` contribute
-their own ranks before reciprocal-rank fusion. The candidate still improved the complete hybrid
+different normalized lexical scores. Production fusion combines the stronger lexical/vector score
+with 30% of the weaker score (`max + 0.3 * min`). The candidate still improved the complete hybrid
 path on both backends:
 
 | Backend | Model | recall@5 | MRR@10 | Wrong top | Negative false positive |
@@ -94,8 +95,9 @@ path on both backends:
 | PostgreSQL/Milvus hybrid | Multilingual MiniLM | 0.8947 | 0.7895 | 0.3158 | 0.0000 |
 
 Cross-language hybrid recall@5 increased from 0.7143 to 1.0000 on both backends. Hybrid MRR does
-not reach vector-only MRR because a lexical rank can still move the correct semantic result below
-an FTS result; that is fusion behavior, not a disagreement between sqlite-vec and pgvector.
+not reach vector-only MRR because the normalized lexical score can still move the correct semantic
+result below an FTS result; that is fusion behavior, not a disagreement between sqlite-vec and
+pgvector.
 
 In vector-only retrieval, MiniLM improves overall MRR and wrong-top rate, retrieves every
 cross-language target within the top five, and rejects every negative query at 0.55. It does not
