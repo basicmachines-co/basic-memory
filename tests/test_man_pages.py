@@ -124,6 +124,9 @@ def test_render_synopsis_orders_required_first_and_wraps() -> None:
     assert rendered.splitlines()[1].startswith(" " * len("demo_tool("))
     assert rendered.endswith(")")
     assert render_synopsis("bare", {"properties": {}}) == "bare()"
+    # A control character in a default must be escaped, not embedded literally.
+    tricky = {"properties": {"sep": {"default": "a\nb"}, "q": {"default": 'say "hi"'}}}
+    assert render_synopsis("demo", tricky) == 'demo(sep="a\\nb", q="say \\"hi\\"")'
 
 
 def test_replace_mcp_synopsis_touches_only_the_mcp_block() -> None:

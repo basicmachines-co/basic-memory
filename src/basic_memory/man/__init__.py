@@ -12,6 +12,7 @@ See ``docs/manual-pages.md`` for the page anatomy and the verification rules.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -163,8 +164,9 @@ _MCP_SYNOPSIS_RE = re.compile(r"(## SYNOPSIS\n\n(?:MCP:\n\n)?```\n)(.*?)(\n```)"
 def _default_literal(value: object) -> str:
     """Render a schema default the way the call would be written in Python."""
     if isinstance(value, str):
-        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-        return f'"{escaped}"'
+        # json.dumps escapes quotes, backslashes, and control characters, and its
+        # double-quoted output is also a valid Python string literal.
+        return json.dumps(value)
     # None, booleans, and numbers all repr() to their Python spelling.
     return repr(value)
 
