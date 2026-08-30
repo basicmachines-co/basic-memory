@@ -18,9 +18,13 @@ rendering, so a forgotten run fails CI with a pointer here.
 from __future__ import annotations
 
 import asyncio
-import re
 
-from basic_memory.man import bundled_pages, render_synopsis, replace_mcp_synopsis
+from basic_memory.man import (
+    bundled_pages,
+    declare_registry_ownership,
+    render_synopsis,
+    replace_mcp_synopsis,
+)
 from basic_memory.mcp.server import mcp
 import basic_memory.mcp.tools  # noqa: F401  (importing registers the tools)
 
@@ -37,7 +41,7 @@ async def main() -> None:
         updated = replace_mcp_synopsis(
             text, render_synopsis(page.tool, tools[page.tool].parameters)
         )
-        updated = re.sub(r"^generated: hand$", "generated: registry", updated, count=1, flags=re.M)
+        updated = declare_registry_ownership(updated)
         if updated != text:
             page.path.write_text(updated, encoding="utf-8")
             changed.append(page.title)

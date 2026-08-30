@@ -219,6 +219,19 @@ def replace_mcp_synopsis(page_text: str, synopsis: str) -> str:
     return f"{page_text[: match.start()]}{match.group(1)}{synopsis}{match.group(3)}{page_text[match.end() :]}"
 
 
+def declare_registry_ownership(page_text: str) -> str:
+    """Flip ``generated: hand`` to ``registry`` — in the frontmatter only.
+
+    A curated body may legally contain a literal ``generated: hand`` line (a YAML
+    example, say); only the opening frontmatter block is the generator's to rewrite.
+    """
+    frontmatter, fence, body = page_text.partition("\n---\n")
+    frontmatter = re.sub(
+        r"^generated: hand$", "generated: registry", frontmatter, count=1, flags=re.M
+    )
+    return frontmatter + fence + body
+
+
 def render_index(pages: tuple[ManPage, ...], registered_tools: frozenset[str] | None = None) -> str:
     """The apropos view: every page, grouped by section, one line each.
 

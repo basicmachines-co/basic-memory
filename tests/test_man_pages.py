@@ -10,6 +10,7 @@ from basic_memory.man import (
     MAN_DIR,
     PageRef,
     bundled_pages,
+    declare_registry_ownership,
     extract_mcp_synopsis,
     find_page,
     parse_page_ref,
@@ -151,6 +152,21 @@ async def test_section_3_synopsis_is_exactly_the_registry_rendering() -> None:
         assert extract_mcp_synopsis(page.read()) == expected, (
             f"{page.title} SYNOPSIS is stale; run `just man-regen` and commit the result"
         )
+
+
+def test_declare_registry_ownership_touches_frontmatter_only() -> None:
+    # A curated body may contain a literal `generated: hand` line (a YAML example);
+    # only the opening frontmatter block is the generator's to rewrite.
+    page = (
+        "---\ntitle: t(3)\ngenerated: hand\ntool: t\n---\n\n# t(3)\n\n"
+        "```yaml\ngenerated: hand\n```\n"
+    )
+
+    flipped = declare_registry_ownership(page)
+
+    assert flipped.startswith("---\ntitle: t(3)\ngenerated: registry\ntool: t\n---\n")
+    assert "```yaml\ngenerated: hand\n```" in flipped
+    assert declare_registry_ownership(flipped) == flipped
 
 
 def test_registry_pages_declare_registry_ownership() -> None:
