@@ -74,6 +74,21 @@ async def test_unprefixed_permalink_reads_in_default_project(app, test_project) 
 
 
 @pytest.mark.asyncio
+async def test_project_route_not_found_is_not_a_note_miss(
+    app, test_project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A stale configured project (backend answers 'Project not found') must
+    # surface the route failure — never claim the note itself is missing.
+    def broken_route(project, context=None, project_id=None):
+        raise ToolError("Project not found: docs")
+
+    monkeypatch.setattr(notes_module, "get_project_client", broken_route)
+    with pytest.raises(ResourceError, match="Project not found") as excinfo:
+        await note_resource(project=test_project.name, path="anything")
+    assert not isinstance(excinfo.value, notes_module.NoteNotFoundError)
+
+
+@pytest.mark.asyncio
 async def test_non_404_failures_keep_their_cause(
     app, test_project, monkeypatch: pytest.MonkeyPatch
 ) -> None:

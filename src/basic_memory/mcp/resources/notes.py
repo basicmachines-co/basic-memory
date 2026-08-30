@@ -66,12 +66,21 @@ async def read_note_markdown(identifier: str, context: Context | None) -> str:
                 client, f"memory://{identifier}", active_project.name, context
             )
             # strict: a resource read returns the addressed document or an error —
-            # never the fuzzy-search guess the tools use for suggestions.
-            resolved = await call_post(
-                client,
-                f"/v2/projects/{target.external_id}/knowledge/resolve",
-                json={"identifier": entity_path, "strict": True},
-            )
+            # never the fuzzy-search guess the tools use for suggestions. Only this
+            # call's not-found is a confirmed note miss; a 'Project not found' from
+            # routing above must surface as the route failure it is.
+            try:
+                resolved = await call_post(
+                    client,
+                    f"/v2/projects/{target.external_id}/knowledge/resolve",
+                    json={"identifier": entity_path, "strict": True},
+                )
+            except ToolError as error:
+                if "not found" in str(error).lower():
+                    raise NoteNotFoundError(
+                        f"No note {identifier!r}; search_notes can find the identifier"
+                    ) from error
+                raise
             entity_id = resolved.json()["external_id"]
             response = await call_get(
                 client, f"/v2/projects/{target.external_id}/resource/{entity_id}"
@@ -81,13 +90,9 @@ async def read_note_markdown(identifier: str, context: Context | None) -> str:
         # route, or the cloud workspace index consulted without credentials).
         raise ResourceError(str(error)) from error
     except ToolError as error:
-        # call_get/call_post wrap every HTTP failure in ToolError; only a confirmed
-        # not-found should read as a missing note — auth, server, and transport
-        # failures keep their actionable cause.
-        if "not found" in str(error).lower():
-            raise NoteNotFoundError(
-                f"No note {identifier!r}; search_notes can find the identifier"
-            ) from error
+        # Routing and content-read failures (a stale project route, auth, server,
+        # transport) keep their actionable cause; the confirmed note miss is
+        # mapped where the entity resolver answers, above.
         raise ResourceError(str(error)) from error
 
     content_type = response.headers.get("content-type", "")
