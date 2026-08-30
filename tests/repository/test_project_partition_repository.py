@@ -31,6 +31,7 @@ def _accepted_change(
     *,
     partition_position: int,
     entity_id: int = 42,
+    note_external_id: str | None = None,
     db_version: int = 3,
 ) -> RuntimeAcceptedProjectNoteChange:
     return RuntimeAcceptedProjectNoteChange(
@@ -38,7 +39,7 @@ def _accepted_change(
         project_external_id=project.external_id,
         partition_position=partition_position,
         entity_id=entity_id,
-        note_external_id=f"note-{entity_id}",
+        note_external_id=note_external_id or f"note-{entity_id}",
         permalink=f"accepted-evidence-{entity_id}",
         title="Accepted evidence",
         operation=RuntimeProjectNoteOperation.updated,
@@ -151,6 +152,43 @@ async def test_materializing_newer_note_change_satisfies_superseded_positions(
     async with db.scoped_session(session_maker) as session:
         changes = await repository.list_accepted_note_changes(session, test_project.id)
         assert [change.materialized_at is not None for change in changes] == [True, False, True]
+
+
+@pytest.mark.asyncio
+async def test_materializing_note_change_does_not_match_reused_entity_id(
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> None:
+    repository = ProjectRepository()
+
+    async with db.scoped_session(session_maker) as session:
+        for position, note_external_id in ((1, "deleted-note"), (2, "replacement-note")):
+            claimed_position = await repository.advance_partition_position(
+                session,
+                test_project.id,
+            )
+            assert claimed_position == position
+            await repository.record_accepted_note_change(
+                session,
+                _accepted_change(
+                    test_project,
+                    partition_position=position,
+                    entity_id=42,
+                    note_external_id=note_external_id,
+                    db_version=position,
+                ),
+            )
+
+        assert await repository.mark_accepted_note_change_materialized(
+            session,
+            test_project.id,
+            2,
+            materialized_at=_ACCEPTED_AT,
+        )
+
+    async with db.scoped_session(session_maker) as session:
+        changes = await repository.list_accepted_note_changes(session, test_project.id)
+        assert [change.materialized_at is not None for change in changes] == [False, True]
 
 
 @pytest.mark.asyncio

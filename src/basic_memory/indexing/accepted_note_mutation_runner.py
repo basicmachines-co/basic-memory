@@ -1130,6 +1130,10 @@ async def _run_accepted_note_move(
         entity_external_id=request.entity_external_id,
         dependencies=dependencies,
     )
+    # The identity lookup precedes the NoteContent lock. Refresh after the lock
+    # so an overlapping move records the committed source path it actually
+    # replaces, rather than the path observed while waiting.
+    await session.refresh(entity)
     existing_file_path = entity.file_path
     # The destination filename keeps its requested casing; only the parent
     # directory resolves against existing folders (issue #1326). The path is

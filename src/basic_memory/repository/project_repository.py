@@ -236,15 +236,15 @@ class ProjectRepository(Repository[Project]):
         materialized_at: datetime,
     ) -> bool:
         """Record when this note's accepted evidence reached canonical storage."""
-        target_entity_id = (
+        target_note_external_id = (
             await session.execute(
-                select(AcceptedProjectNoteChange.entity_id).where(
+                select(AcceptedProjectNoteChange.note_external_id).where(
                     AcceptedProjectNoteChange.project_id == project_id,
                     AcceptedProjectNoteChange.partition_position == partition_position,
                 )
             )
         ).scalar_one_or_none()
-        if target_entity_id is None:
+        if target_note_external_id is None:
             return False
 
         # A newer materialized generation is canonical evidence that every older
@@ -254,7 +254,7 @@ class ProjectRepository(Repository[Project]):
             update(AcceptedProjectNoteChange)
             .where(
                 AcceptedProjectNoteChange.project_id == project_id,
-                AcceptedProjectNoteChange.entity_id == target_entity_id,
+                AcceptedProjectNoteChange.note_external_id == target_note_external_id,
                 AcceptedProjectNoteChange.partition_position <= partition_position,
                 AcceptedProjectNoteChange.materialized_at.is_(None),
             )

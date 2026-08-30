@@ -1817,6 +1817,55 @@ async def test_run_accepted_note_move_rejects_same_file_path() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_accepted_note_move_refreshes_source_path_after_lock(
+    persistence_calls: tuple[AsyncMock, AsyncMock],
+) -> None:
+    session = _MutationSession()
+    project = _project()
+    prepared = _prepared_replacement()
+    prepared_move = _prepared_move()
+    entity = _entity(file_path="notes/original.md")
+    note_content = _note_content(entity)
+    project_repository = _ProjectRepository(project)
+    entity_lookup_repository = _EntityLookupRepository(by_external_id=entity)
+    note_content_lookup_repository = _NoteContentLookupRepository(note_content)
+    preparer = _CreatePreparer(prepared, prepared_move=prepared_move)
+
+    def move_while_waiting(value: object) -> None:
+        if value is entity:
+            entity.file_path = "notes/intermediate.md"
+
+    session.refresh_effect = move_while_waiting
+
+    result = await run_accepted_note_move(
+        cast(AsyncSession, session),
+        request=AcceptedNoteMoveMutation(
+            project_external_id="project-123",
+            entity_external_id="note-123",
+            destination_path="archive/accepted.md",
+            actor=AcceptedNoteMutationActor(user_profile_id=None),
+            source="mcp",
+        ),
+        dependencies=_dependencies(
+            project_repository=project_repository,
+            entity_lookup_repository=entity_lookup_repository,
+            note_content_lookup_repository=note_content_lookup_repository,
+            preparer_factory=_PreparerFactory(preparer),
+            pending_entity_repository=_PendingEntityRepository(entity),
+            note_content_accept_repository=_NoteContentAcceptRepository(note_content),
+            search_repository=_SearchRepository(),
+        ),
+    )
+
+    assert session.refreshed == [entity]
+    assert result.change.project_change is not None
+    assert result.change.project_change.previous_file_path == "notes/intermediate.md"
+    assert result.change.materialization is not None
+    assert result.change.materialization.previous_file_path == "notes/intermediate.md"
+    assert persistence_calls[1].await_count == 1
+
+
+@pytest.mark.asyncio
 async def test_run_accepted_note_create_resolves_directory_casing() -> None:
     """A unique case-insensitive folder match redirects the create (#1326)."""
     session = cast(AsyncSession, object())
