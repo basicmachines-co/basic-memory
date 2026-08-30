@@ -598,6 +598,7 @@ def _normalize_note_path(path: str) -> str:
         raise ValueError(f"Wiki note path must be project-relative Markdown: {path}")
     if "::" in normalized or any(character in normalized for character in "\r\n[]|`<>"):
         raise ValueError(f"Wiki note path contains unsupported Markdown delimiters: {path}")
+    _validate_portable_path_components(normalized, path_kind="note path", source=path)
     return normalized
 
 
@@ -607,15 +608,24 @@ def _normalize_scope(scope: str) -> str:
         return ""
     if "::" in normalized or any(character in normalized for character in "\x00\r\n[]|`<>"):
         raise ValueError(f"Wiki scope contains unsupported Markdown delimiters: {scope}")
+    _validate_portable_path_components(normalized, path_kind="scope", source=scope)
+    return normalized
+
+
+def _validate_portable_path_components(
+    normalized: str,
+    *,
+    path_kind: str,
+    source: str,
+) -> None:
     for component in PurePosixPath(normalized).parts:
         if any(character in component for character in ':"?*'):
-            raise ValueError(f"Wiki scope contains a Windows-invalid character: {scope}")
+            raise ValueError(f"Wiki {path_kind} contains a Windows-invalid character: {source}")
         if component.endswith((".", " ")):
-            raise ValueError(f"Wiki scope contains a non-portable path component: {scope}")
+            raise ValueError(f"Wiki {path_kind} contains a non-portable path component: {source}")
         stem = component.split(".", 1)[0].upper()
         if stem in WINDOWS_RESERVED_NAMES:
-            raise ValueError(f"Wiki scope contains a reserved device name: {scope}")
-    return normalized
+            raise ValueError(f"Wiki {path_kind} contains a reserved device name: {source}")
 
 
 def _normalize_relative_path(path: str) -> str:

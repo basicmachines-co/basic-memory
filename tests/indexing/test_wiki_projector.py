@@ -162,6 +162,24 @@ def test_source_note_rejects_missing_metadata() -> None:
         replace(note, checksum=" ")
 
 
+@pytest.mark.parametrize(
+    "path",
+    (
+        "bad?/note.md",
+        "NUL/note.md",
+        "trailing./note.md",
+    ),
+)
+def test_source_note_rejects_nonportable_path_components(path: str) -> None:
+    with pytest.raises(ValueError, match="Wiki note path"):
+        WikiSourceNote(
+            path=path,
+            title="Note",
+            note_type="Note",
+            checksum="checksum",
+        )
+
+
 def test_source_change_rejects_invalid_contract_fields() -> None:
     change = WikiSourceChange(
         partition_position=1,
