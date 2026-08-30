@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from basic_memory.config import DatabaseBackend
 from basic_memory.repository.embedding_provider_factory import create_embedding_provider
@@ -32,12 +33,27 @@ from semantic.multilingual_benchmark import (
 )
 from semantic.multilingual_corpus import MULTILINGUAL_CORPUS, seed_multilingual_documents
 
+type EngineFactoryResult = tuple[AsyncEngine, async_sessionmaker[AsyncSession]]
+
+
+@pytest.fixture
+def multilingual_engine_factory(
+    request: pytest.FixtureRequest,
+) -> EngineFactoryResult | None:
+    """Resolve only the SQL fixture selected for this benchmark process."""
+    storage_case = benchmark_storage_case(os.getenv("BASIC_MEMORY_MULTILINGUAL_BACKEND", "sqlite"))
+    fixture_name = (
+        "sqlite_engine_factory"
+        if storage_case.database_backend is DatabaseBackend.SQLITE
+        else "postgres_engine_factory"
+    )
+    return request.getfixturevalue(fixture_name)
+
 
 @pytest.mark.asyncio
 @pytest.mark.benchmark
 async def test_multilingual_embedding_benchmark(
-    sqlite_engine_factory,
-    postgres_engine_factory,
+    multilingual_engine_factory: EngineFactoryResult | None,
     tmp_path: Path,
 ) -> None:
     """Measure one model/backend pair in an isolated pytest process."""
@@ -59,12 +75,9 @@ async def test_multilingual_embedding_benchmark(
     )
     skip_if_needed(combo)
 
-    if backend is DatabaseBackend.SQLITE:
-        engine_factory_result = sqlite_engine_factory
-    else:
-        if postgres_engine_factory is None:
-            pytest.skip("Postgres engine not available")
-        engine_factory_result = postgres_engine_factory
+    if multilingual_engine_factory is None:
+        pytest.skip("Selected benchmark engine is not available")
+    engine_factory_result = multilingual_engine_factory
     engine, _ = engine_factory_result
 
     milvus_storage_directory = tmp_path / "milvus"

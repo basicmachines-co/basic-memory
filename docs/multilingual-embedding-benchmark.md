@@ -47,10 +47,11 @@ just benchmark-multilingual-compare milvus vector 0.55
 The recipe installs the locked `milvus` optional extra as needed. The `milvus` backend label means
 PostgreSQL metadata/FTS plus Milvus vector storage; it is not a replacement SQL database.
 
-Supported model keys are `bge-small-en`, `multilingual-minilm`, `multilingual-mpnet`,
-`multilingual-e5-large`, and `jina-embeddings-v3`. E5's required `passage: ` and `query: ` prefixes
-are part of its benchmark contract. A model key being available to the harness does not mean it is
-approved for Cloud redistribution.
+Supported model keys are `bge-small-en`, `multilingual-minilm`, `multilingual-mpnet`, and
+`multilingual-e5-large`. E5's required `passage: ` and `query: ` prefixes are part of its benchmark
+contract. Jina embeddings v3 is intentionally excluded: the production FastEmbed provider does
+not currently express Jina's distinct retrieval-passage and retrieval-query tasks, and its catalog
+license requires separate Cloud clearance.
 
 ## Initial screening results
 
@@ -106,8 +107,8 @@ without measurement.
 
 | Backend | Model | Cold load | Index 17 notes | Notes/sec | Model RSS delta | Cache bytes | Vector storage |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| SQLite | BGE small English | 0.69 s | 1.86 s | 9.13 | 214,073,344 | 67,179,926 | 2,019,328 |
-| SQLite | Multilingual MiniLM | 1.59 s | 1.53 s | 11.14 | 436,699,136 | 252,141,023 | 2,019,328 |
+| SQLite | BGE small English | 0.69 s | 1.86 s | 9.13 | 214,073,344 | 67,179,926 | 1,626,112 |
+| SQLite | Multilingual MiniLM | 1.59 s | 1.53 s | 11.14 | 436,699,136 | 252,141,023 | 1,626,112 |
 | PostgreSQL | BGE small English | 0.50 s | 8.21 s | 2.07 | 227,213,312 | 67,179,926 | 262,144 |
 | PostgreSQL | Multilingual MiniLM | 4.50 s | 11.53 s | 1.47 | 297,451,520 | 252,141,023 | 262,144 |
 | PostgreSQL/Milvus Lite | BGE small English | 0.25 s | 7.02 s | 2.42 | 260,882,432 | 67,179,926 | 40,930 |
@@ -117,6 +118,11 @@ Local PostgreSQL query latency is dominated by testcontainer and `NullPool` conn
 varied substantially between individual queries. Milvus Lite also opens short-lived local clients
 through the production repository boundary. The raw artifact preserves those samples, but neither
 path should be used to size Cloud workers or set a latency SLO.
+
+SQLite vector storage counts `search_vector_chunks`, its indexes, and the sqlite-vec virtual
+table's physical shadow tables through `dbstat`; it excludes entities, FTS rows, and unrelated
+database pages. PostgreSQL counts the vector manifest and embedding relations. Milvus Lite counts
+the isolated vector database files and excludes PostgreSQL manifest storage.
 
 FastEmbed 0.8.0 reports that multilingual MiniLM now uses mean pooling instead of the CLS pooling
 used by older FastEmbed releases. Any rollout decision must therefore pin and record the tested
@@ -132,9 +138,9 @@ RSS and 3.75x cache footprint need validation in the shared Cloud image and tena
 and the similarity cutoff needs calibration on a larger judged set.
 
 Do not benchmark the larger candidates by default. Advance MPNet or E5 only if MiniLM fails the
-Cloud resource/reindex test or a reviewed corpus exposes a material quality gap. The FastEmbed
-catalog labels Jina embeddings v3 as CC-BY-NC-4.0, so it is not a Cloud finalist without explicit
-license clearance.
+Cloud resource/reindex test or a reviewed corpus exposes a material quality gap. Jina embeddings
+v3 requires both task-aware provider support and explicit license clearance before it can become a
+valid Cloud benchmark candidate.
 
 ## Cloud follow-up
 

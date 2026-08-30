@@ -73,14 +73,6 @@ FASTEMBED_MODEL_CASES = (
         document_prefix="passage: ",
         query_prefix="query: ",
     ),
-    EmbeddingModelCase(
-        key="jina-embeddings-v3",
-        model_name="jinaai/jina-embeddings-v3",
-        dimensions=1024,
-        cache_repository="jinaai/jina-embeddings-v3",
-        catalog_size_gb=2.29,
-        license="cc-by-nc-4.0",
-    ),
 )
 
 
@@ -391,8 +383,18 @@ async def vector_storage_size_bytes(
         return directory_size_bytes(milvus_storage_directory)
 
     if storage_case.database_backend is DatabaseBackend.SQLITE:
-        database_path = engine.url.database
-        return Path(database_path).stat().st_size if database_path else 0
+        async with engine.connect() as connection:
+            result = await connection.execute(
+                text(
+                    "SELECT COALESCE(SUM(pgsize), 0) FROM dbstat "
+                    "WHERE name = 'search_vector_chunks' "
+                    "OR name IN ("
+                    "SELECT name FROM sqlite_schema WHERE tbl_name = 'search_vector_chunks'"
+                    ") "
+                    "OR name LIKE 'search_vector_embeddings%'"
+                )
+            )
+            return int(result.scalar_one())
 
     async with engine.connect() as connection:
         result = await connection.execute(
