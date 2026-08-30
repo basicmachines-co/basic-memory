@@ -80,3 +80,15 @@ def test_generator_documents_every_registered_tool_deterministically() -> None:
     assert generate_tool_docs._render(tools) == generate_tool_docs._render(
         generate_tool_docs._collect_tools()
     )
+
+
+def test_checked_in_reference_matches_generator_output() -> None:
+    # docs/mcp-tools.md is a committed artifact the README links to. Without this check a
+    # tool signature or docstring change ships with a stale reference and nothing notices.
+    expected = generate_tool_docs._render(generate_tool_docs._collect_tools())
+    actual = generate_tool_docs.OUTPUT_PATH.read_text(encoding="utf-8")
+
+    assert actual == expected, (
+        "docs/mcp-tools.md is out of date with the MCP tool sources; "
+        "run `just tool-docs` and commit the regenerated file"
+    )
