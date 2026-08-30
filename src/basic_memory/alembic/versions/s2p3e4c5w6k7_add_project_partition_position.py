@@ -38,6 +38,7 @@ def upgrade() -> None:
         sa.Column("partition_position", sa.Integer(), nullable=False),
         sa.Column("entity_id", sa.Integer(), nullable=False),
         sa.Column("note_external_id", sa.String(), nullable=False),
+        sa.Column("permalink", sa.Text(), nullable=False),
         sa.Column("title", sa.Text(), nullable=False),
         sa.Column("operation", sa.String(), nullable=False),
         sa.Column("file_path", sa.Text(), nullable=False),

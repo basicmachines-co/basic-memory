@@ -20,7 +20,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from basic_memory.models.base import Base
-from basic_memory.utils import generate_permalink
+from basic_memory.utils import ensure_timezone_aware, generate_permalink
 
 
 class Project(Base):
@@ -146,6 +146,7 @@ class AcceptedProjectNoteChange(Base):
     partition_position: Mapped[int] = mapped_column(Integer, nullable=False)
     entity_id: Mapped[int] = mapped_column(Integer, nullable=False)
     note_external_id: Mapped[str] = mapped_column(String, nullable=False)
+    permalink: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     operation: Mapped[str] = mapped_column(String, nullable=False)
     file_path: Mapped[str] = mapped_column(Text, nullable=False)
@@ -163,3 +164,13 @@ class AcceptedProjectNoteChange(Base):
     )
 
     project = relationship("Project", back_populates="accepted_note_changes")
+
+    @override
+    def __getattribute__(self, name: str):
+        value = super().__getattribute__(name)
+        # SQLite drops timezone information when persisting DateTime columns.
+        # Normalize project-journal timestamps at the model boundary so the
+        # projector receives the same aware instants on every supported backend.
+        if name in {"accepted_at", "materialized_at"} and isinstance(value, datetime):
+            return ensure_timezone_aware(value)
+        return value

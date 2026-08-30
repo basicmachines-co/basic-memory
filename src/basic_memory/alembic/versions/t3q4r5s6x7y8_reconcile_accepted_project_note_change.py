@@ -28,6 +28,7 @@ def _create_accepted_project_note_change() -> None:
         sa.Column("partition_position", sa.Integer(), nullable=False),
         sa.Column("entity_id", sa.Integer(), nullable=False),
         sa.Column("note_external_id", sa.String(), nullable=False),
+        sa.Column("permalink", sa.Text(), nullable=False),
         sa.Column("title", sa.Text(), nullable=False),
         sa.Column("operation", sa.String(), nullable=False),
         sa.Column("file_path", sa.Text(), nullable=False),
@@ -90,6 +91,46 @@ def upgrade() -> None:
         _create_accepted_project_note_change()
         _create_missing_indexes(set())
         return
+
+    change_columns = {
+        column["name"]
+        for column in inspector.get_columns("accepted_project_note_change")
+    }
+    if "permalink" not in change_columns:
+        with op.batch_alter_table(
+            "accepted_project_note_change",
+            schema=None,
+        ) as batch_op:
+            batch_op.add_column(sa.Column("permalink", sa.Text(), nullable=True))
+
+        # Pre-release journal rows may outlive their source entity. Preserve the
+        # canonical permalink when the entity remains, and use the immutable
+        # external id as stable replay identity for deleted legacy rows.
+        op.execute(
+            sa.text(
+                """
+                UPDATE accepted_project_note_change
+                SET permalink = COALESCE(
+                    (
+                        SELECT entity.permalink
+                        FROM entity
+                        WHERE entity.id = accepted_project_note_change.entity_id
+                          AND entity.project_id = accepted_project_note_change.project_id
+                    ),
+                    note_external_id
+                )
+                """
+            )
+        )
+        with op.batch_alter_table(
+            "accepted_project_note_change",
+            schema=None,
+        ) as batch_op:
+            batch_op.alter_column(
+                "permalink",
+                existing_type=sa.Text(),
+                nullable=False,
+            )
 
     existing_indexes = {
         index["name"]

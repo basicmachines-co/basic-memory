@@ -41,6 +41,7 @@ class RuntimeAcceptedProjectNoteChange:
     partition_position: ProjectPartitionPosition
     entity_id: RuntimeEntityId
     note_external_id: NoteExternalId
+    permalink: str
     title: str
     operation: RuntimeProjectNoteOperation
     file_path: RuntimeFilePath
@@ -60,6 +61,8 @@ class RuntimeAcceptedProjectNoteChange:
             raise ValueError("Accepted project change requires project_external_id")
         if not self.note_external_id.strip():
             raise ValueError("Accepted project change requires note_external_id")
+        if not self.permalink.strip():
+            raise ValueError("Accepted project change requires permalink")
         if not self.title.strip():
             raise ValueError("Accepted project change requires title")
         if not self.file_path.strip():

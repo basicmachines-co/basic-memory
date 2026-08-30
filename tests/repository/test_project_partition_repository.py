@@ -39,6 +39,7 @@ def _accepted_change(
         partition_position=partition_position,
         entity_id=entity_id,
         note_external_id=f"note-{entity_id}",
+        permalink=f"accepted-evidence-{entity_id}",
         title="Accepted evidence",
         operation=RuntimeProjectNoteOperation.updated,
         file_path="notes/accepted-evidence.md",
@@ -90,7 +91,9 @@ async def test_accepted_project_note_change_is_replayable_and_materialization_aw
         )
         assert len(changes) == 1
         assert changes[0].operation == RuntimeProjectNoteOperation.updated.value
+        assert changes[0].permalink == "accepted-evidence-42"
         assert changes[0].db_checksum == "accepted-checksum-3"
+        assert changes[0].accepted_at.tzinfo is not None
         assert changes[0].materialized_at is None
         assert await repository.mark_accepted_note_change_materialized(
             session,
@@ -105,6 +108,7 @@ async def test_accepted_project_note_change_is_replayable_and_materialization_aw
             test_project.id,
         )
         assert materialized.materialized_at is not None
+        assert materialized.materialized_at.tzinfo is not None
         assert not await repository.mark_accepted_note_change_materialized(
             session,
             test_project.id,

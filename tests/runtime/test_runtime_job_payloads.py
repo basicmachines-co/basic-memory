@@ -32,6 +32,7 @@ def _project_change() -> RuntimeAcceptedProjectNoteChange:
         partition_position=7,
         entity_id=42,
         note_external_id="note-123",
+        permalink="a",
         title="A",
         operation=RuntimeProjectNoteOperation.updated,
         file_path="notes/a.md",

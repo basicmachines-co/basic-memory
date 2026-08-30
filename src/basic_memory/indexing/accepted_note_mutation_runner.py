@@ -354,6 +354,10 @@ async def record_accepted_project_note_change(
     dependencies: AcceptedNoteMutationDependencies,
 ) -> RuntimeAcceptedProjectNoteChange:
     """Claim and describe one accepted change in the project's strict partition."""
+    if entity.permalink is None:
+        raise RuntimeError(
+            f"Accepted note is missing permalink for entity_id={entity.id}"
+        )
     position = await dependencies.project_repository.advance_partition_position(
         session,
         project.id,
@@ -364,6 +368,7 @@ async def record_accepted_project_note_change(
         partition_position=position,
         entity_id=entity.id,
         note_external_id=entity.external_id,
+        permalink=entity.permalink,
         title=entity.title,
         operation=operation,
         file_path=entity.file_path,
@@ -798,6 +803,32 @@ async def _run_accepted_note_update(
         load_relations=False,
     )
     created = entity is None
+    current_note_content: NoteContent | None = None
+
+    if entity is not None:
+        # The first lookup resolves the addressed identity, but it is not a
+        # stable source-path snapshot. Claim the note lock, then refresh the
+        # entity before any path-sensitive preparation: a concurrent move may
+        # have changed the accepted predecessor while this PUT was waiting.
+        if not runtime_content_type_is_markdown(entity):
+            reject_accepted_note_mutation(
+                AcceptedNoteMutationRejectKind.unsupported_media_type,
+                "Only markdown note mutations are supported by the note-content path.",
+            )
+        current_note_content = await load_required_accepted_note_content(
+            session,
+            project_id=project.id,
+            entity_id=entity.id,
+            dependencies=dependencies,
+            missing_kind=AcceptedNoteMutationRejectKind.conflict,
+        )
+        await session.refresh(entity)
+        if not runtime_content_type_is_markdown(entity):
+            reject_accepted_note_mutation(
+                AcceptedNoteMutationRejectKind.unsupported_media_type,
+                "Only markdown note mutations are supported by the note-content path.",
+            )
+
     existing_file_path = entity.file_path if entity is not None else None
     vacated_source: tuple[RuntimeFilePath, RuntimeFileChecksum | None] | None = None
 
@@ -852,14 +883,6 @@ async def _run_accepted_note_update(
         )
         current_note_content = None
     else:
-        # A PUT replacement can only target a markdown note. A watcher-indexed binary
-        # entity has no markdown note_content to replace, so reject with 415 like the
-        # edit/move paths instead of a permanent-looking 409 content-backfill retry.
-        if not runtime_content_type_is_markdown(entity):
-            reject_accepted_note_mutation(
-                AcceptedNoteMutationRejectKind.unsupported_media_type,
-                "Only markdown note mutations are supported by the note-content path.",
-            )
         # Local source-of-truth guard: a PUT that renames onto a destination file that
         # exists on disk but is not yet indexed would overwrite/lose that unindexed
         # write. Mirror the create/move storage check before committing DB/search to
@@ -872,13 +895,7 @@ async def _run_accepted_note_update(
                 )
             except EntityAlreadyExistsError as error:
                 reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.conflict, str(error))
-        current_note_content = await load_required_accepted_note_content(
-            session,
-            project_id=project.id,
-            entity_id=entity.id,
-            dependencies=dependencies,
-            missing_kind=AcceptedNoteMutationRejectKind.conflict,
-        )
+        assert current_note_content is not None
         # A PUT replacement may also rename the note. Capture the exact source bytes before
         # persistence mutates the entity and note_content to the destination version so delayed
         # cleanup cannot let a later project index recreate the old path as a ghost.

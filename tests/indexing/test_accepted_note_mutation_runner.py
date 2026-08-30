@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -155,6 +155,7 @@ class _MutationSession:
         self.refreshed: list[object] = []
         self.flush_count = 0
         self.scalar_count = 0
+        self.refresh_effect: Callable[[object], None] | None = None
         self.bind = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
 
     async def delete(self, value: object) -> None:
@@ -177,6 +178,8 @@ class _MutationSession:
 
     async def refresh(self, value: object) -> None:
         self.refreshed.append(value)
+        if self.refresh_effect is not None:
+            self.refresh_effect(value)
 
 
 class _CreatePreparer:
@@ -808,6 +811,7 @@ async def test_run_accepted_note_create_persists_prepared_markdown(
     assert project_change.operation is RuntimeProjectNoteOperation.created
     assert project_change.project_external_id == "project-123"
     assert project_change.note_external_id == "note-123"
+    assert project_change.permalink == "accepted"
     assert project_change.file_path == "notes/accepted.md"
     assert project_change.previous_file_path is None
     assert project_change.accepted_at == _NOW
@@ -968,6 +972,48 @@ async def test_run_accepted_note_update_replaces_existing_note_content(
     assert result.relation_publication.generation == 2
     assert persistence_calls[0].await_count == 1
     assert persistence_calls[1].await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_update_refreshes_source_path_after_lock() -> None:
+    session = _MutationSession()
+    schema = _schema()
+    project = _project()
+    entity = _entity(file_path="notes/accepted.md")
+    note_content = _note_content(entity)
+
+    def refresh_after_concurrent_move(value: object) -> None:
+        if value is entity:
+            entity.file_path = "archive/accepted.md"
+
+    session.refresh_effect = refresh_after_concurrent_move
+    project_repository = _ProjectRepository(project)
+    preparer = _CreatePreparer(_prepared())
+
+    result = await run_accepted_note_update(
+        cast(AsyncSession, session),
+        request=AcceptedNoteUpdateMutation(
+            project_external_id="project-123",
+            entity_external_id="note-123",
+            data=schema,
+            actor=AcceptedNoteMutationActor(user_profile_id=_ACTOR_ID),
+            source="api",
+        ),
+        dependencies=_dependencies(
+            project_repository=project_repository,
+            entity_lookup_repository=_EntityLookupRepository(by_external_id=entity),
+            note_content_lookup_repository=_NoteContentLookupRepository(note_content),
+            preparer_factory=_PreparerFactory(preparer),
+            pending_entity_repository=_PendingEntityRepository(entity),
+            note_content_accept_repository=_NoteContentAcceptRepository(note_content),
+            search_repository=_SearchRepository(),
+        ),
+    )
+
+    assert result.change.project_change is not None
+    assert result.change.project_change.operation is RuntimeProjectNoteOperation.moved
+    assert result.change.project_change.previous_file_path == "archive/accepted.md"
+    assert preparer.replace_calls[0][0].file_path == "notes/accepted.md"
 
 
 @pytest.mark.asyncio

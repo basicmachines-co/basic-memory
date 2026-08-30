@@ -185,6 +185,7 @@ class ProjectRepository(Repository[Project]):
             partition_position=change.partition_position,
             entity_id=change.entity_id,
             note_external_id=change.note_external_id,
+            permalink=change.permalink,
             title=change.title,
             operation=change.operation.value,
             file_path=change.file_path,
