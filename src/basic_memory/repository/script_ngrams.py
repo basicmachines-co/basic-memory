@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 
 _SCRIPT_BOUNDARY = "bm_script_boundary"
-MIXED_WORD_PREFIX_LIMIT = 64
+MIXED_WORD_BLOCK_BYTES = 24
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,23 +116,7 @@ def mixed_token_word_terms(text: str) -> tuple[str, ...]:
         if component_characters:
             components.append((component_kind or "word", "".join(component_characters)))
 
-        word_prefixes: dict[int, tuple[str, ...]] = {}
-        for index, (kind, value) in enumerate(components):
-            if kind != "word":
-                continue
-
-            normalized_word = value.casefold()
-            prefix_count = min(len(normalized_word), MIXED_WORD_PREFIX_LIMIT)
-            prefixes = tuple(normalized_word[:length] for length in range(1, prefix_count + 1))
-            word_prefixes[index] = prefixes
-            terms.extend(
-                f"bmword{hashlib.sha256(prefix.encode()).hexdigest()}" for prefix in prefixes
-            )
-            if len(normalized_word) > MIXED_WORD_PREFIX_LIMIT:
-                terms.append(f"bmwordexact{hashlib.sha256(normalized_word.encode()).hexdigest()}")
-
-        # A word's direction and ordinal distance from the nearest script component preserve
-        # complete component order without multiplying every prefix by every script gram.
+        word_roles: dict[int, list[tuple[str, int]]] = {}
         after_distance = 0
         has_script_before = False
         for index, (kind, _) in enumerate(components):
@@ -143,10 +127,7 @@ def mixed_token_word_terms(text: str) -> tuple[str, ...]:
             if not has_script_before:
                 continue
             after_distance += 1
-            terms.extend(
-                "bmpos" + hashlib.sha256(f"after\0{after_distance}\0{prefix}".encode()).hexdigest()
-                for prefix in word_prefixes[index]
-            )
+            word_roles.setdefault(index, []).append(("after", after_distance))
 
         before_distance = 0
         has_script_after = False
@@ -159,11 +140,36 @@ def mixed_token_word_terms(text: str) -> tuple[str, ...]:
             if not has_script_after:
                 continue
             before_distance += 1
-            terms.extend(
-                "bmpos"
-                + hashlib.sha256(f"before\0{before_distance}\0{prefix}".encode()).hexdigest()
-                for prefix in word_prefixes[index]
-            )
+            word_roles.setdefault(index, []).append(("before", before_distance))
+
+        # Fixed-size blocks preserve arbitrary-length prefix matching while keeping every
+        # generated lexeme and the total auxiliary representation linear in the input size.
+        for index, roles in word_roles.items():
+            word_bytes = components[index][1].casefold().encode()
+            for direction, distance in roles:
+                terms.extend(
+                    f"bmprefix{direction}{distance}x{block_index}x"
+                    f"{word_bytes[start : start + MIXED_WORD_BLOCK_BYTES].hex()}"
+                    for block_index, start in enumerate(
+                        range(0, len(word_bytes), MIXED_WORD_BLOCK_BYTES)
+                    )
+                )
+
+        # Role terms bind the positional word blocks to their neighboring script component.
+        # A separate token cannot satisfy these terms merely by containing the same script gram.
+        for index, (kind, value) in enumerate(components):
+            if kind != "script":
+                continue
+            run = tuple(unit for script_run in script_runs(value) for unit in script_run)
+            run_terms = (*run, *script_run_grams(run))
+            if index > 0 and components[index - 1][0] == "word":
+                terms.extend(
+                    "bmrolebefore" + hashlib.sha256(term.encode()).hexdigest() for term in run_terms
+                )
+            if index + 1 < len(components) and components[index + 1][0] == "word":
+                terms.extend(
+                    "bmroleafter" + hashlib.sha256(term.encode()).hexdigest() for term in run_terms
+                )
     return tuple(dict.fromkeys(terms))
 
 

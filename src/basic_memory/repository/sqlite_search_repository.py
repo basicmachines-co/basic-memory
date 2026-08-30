@@ -816,7 +816,10 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                             f"content_snippet: ({prepared_text}))"
                         )
                     script_phrases = " AND ".join(
-                        f'"{" ".join(phrase)}"' for phrase in script_query.gram_phrases
+                        f'"{" ".join(phrase)}"*'
+                        if len(phrase) == 1 and phrase[0].startswith("bmprefix")
+                        else f'"{" ".join(phrase)}"'
+                        for phrase in script_query.gram_phrases
                     )
                     script_clause = f"script_ngrams: ({script_phrases})"
                     params["script_text"] = (

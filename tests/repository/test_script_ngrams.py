@@ -7,7 +7,7 @@ import pytest
 from basic_memory import db
 from basic_memory.models import Entity
 from basic_memory.repository.script_ngrams import (
-    MIXED_WORD_PREFIX_LIMIT,
+    MIXED_WORD_BLOCK_BYTES,
     analyze_script_query,
     build_script_ngrams,
     mixed_token_word_terms,
@@ -66,16 +66,17 @@ def test_build_script_ngrams_keeps_runs_from_matching_across_boundaries() -> Non
 def test_mixed_token_word_terms_encode_all_word_fragments() -> None:
     terms = mixed_token_word_terms("foo不適者bar ＡＢＣ適者")
 
-    assert "bmword2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae" in terms
-    assert "bmwordfcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9" in terms
-    assert "bmwordba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" in terms
-    assert any(term.startswith("bmpos") for term in terms)
+    assert "bmprefixbefore1x0x666f6f" in terms
+    assert "bmprefixafter1x0x626172" in terms
+    assert "bmprefixbefore1x0x616263" in terms
+    assert any(term.startswith("bmrole") for term in terms)
 
 
 def test_mixed_token_word_terms_bound_long_fragment_expansion() -> None:
     terms = mixed_token_word_terms(f"{'a' * 500}{'漢字' * 250}")
 
-    assert len(terms) <= MIXED_WORD_PREFIX_LIMIT * 2 + 1
+    word_block_count = (500 + MIXED_WORD_BLOCK_BYTES - 1) // MIXED_WORD_BLOCK_BYTES
+    assert len(terms) <= word_block_count + 4
 
 
 def test_analyze_script_query_separates_word_and_ordered_script_terms() -> None:
@@ -93,13 +94,9 @@ def test_analyze_script_query_preserves_adjoining_word_and_script_token() -> Non
 
     assert query.word_text is None
     assert query.gram_phrases[0] == ("適者",)
-    assert (
-        "bmword2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
-    ) in query.gram_phrases
-    assert (
-        "bmwordfcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9",
-    ) in query.gram_phrases
-    assert any(phrase[0].startswith("bmpos") for phrase in query.gram_phrases)
+    assert ("bmprefixbefore1x0x666f6f",) in query.gram_phrases
+    assert ("bmprefixafter1x0x626172",) in query.gram_phrases
+    assert any(phrase[0].startswith("bmrole") for phrase in query.gram_phrases)
 
 
 def test_analyze_script_query_preserves_punctuation_separated_mixed_token() -> None:
@@ -107,13 +104,9 @@ def test_analyze_script_query_preserves_punctuation_separated_mixed_token() -> N
 
     assert query.word_text is None
     assert query.gram_phrases[0] == ("適者",)
-    assert (
-        "bmword2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
-    ) in query.gram_phrases
-    assert (
-        "bmwordfcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9",
-    ) in query.gram_phrases
-    assert any(phrase[0].startswith("bmpos") for phrase in query.gram_phrases)
+    assert ("bmprefixbefore1x0x666f6f",) in query.gram_phrases
+    assert ("bmprefixafter1x0x626172",) in query.gram_phrases
+    assert any(phrase[0].startswith("bmrole") for phrase in query.gram_phrases)
 
 
 def test_analyze_script_query_does_not_require_script_substring_in_word_channel() -> None:
@@ -121,10 +114,8 @@ def test_analyze_script_query_does_not_require_script_substring_in_word_channel(
 
     assert query.word_text is None
     assert query.gram_phrases[0] == ("適者",)
-    assert (
-        "bmword2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
-    ) in query.gram_phrases
-    assert any(phrase[0].startswith("bmpos") for phrase in query.gram_phrases)
+    assert ("bmprefixbefore1x0x666f6f",) in query.gram_phrases
+    assert any(phrase[0].startswith("bmrole") for phrase in query.gram_phrases)
 
 
 def test_analyze_script_query_preserves_compatibility_bytes_in_mixed_prefix() -> None:
@@ -132,10 +123,8 @@ def test_analyze_script_query_preserves_compatibility_bytes_in_mixed_prefix() ->
 
     assert query.word_text is None
     assert query.gram_phrases[0] == ("適者",)
-    assert (
-        "bmwordba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-    ) in query.gram_phrases
-    assert any(phrase[0].startswith("bmpos") for phrase in query.gram_phrases)
+    assert ("bmprefixbefore1x0x616263",) in query.gram_phrases
+    assert any(phrase[0].startswith("bmrole") for phrase in query.gram_phrases)
 
 
 def test_analyze_script_query_retains_trailing_word_in_auxiliary_channel() -> None:
@@ -143,10 +132,8 @@ def test_analyze_script_query_retains_trailing_word_in_auxiliary_channel() -> No
 
     assert query.word_text is None
     assert query.gram_phrases[0] == ("適者",)
-    assert (
-        "bmword7d3194f79e645c42e4396dda38be04766810ec6a00d00aced3ffc2a0a1f1a9ef",
-    ) in query.gram_phrases
-    assert any(phrase[0].startswith("bmpos") for phrase in query.gram_phrases)
+    assert ("bmprefixafter1x0x6f70656e6169",) in query.gram_phrases
+    assert any(phrase[0].startswith("bmrole") for phrase in query.gram_phrases)
 
 
 def test_analyze_script_query_preserves_explicit_boolean_semantics() -> None:
@@ -481,6 +468,30 @@ async def test_search_preserves_prefix_matching_in_mixed_token(search_repository
 
 
 @pytest.mark.asyncio
+async def test_search_preserves_long_prefix_matching_in_mixed_token(search_repository) -> None:
+    now = datetime.now(timezone.utc)
+    indexed_prefix = "a" * 70
+    query_prefix = "a" * 65
+    row = SearchIndexRow(
+        project_id=search_repository.project_id,
+        id=1325,
+        type="entity",
+        file_path="notes/long-mixed-prefix.md",
+        title="Long mixed prefix",
+        content_stems=f"{indexed_prefix}適者",
+        content_snippet=f"{indexed_prefix}適者",
+        permalink="notes/long-mixed-prefix",
+        created_at=now,
+        updated_at=now,
+    )
+    await search_repository.index_item(row)
+
+    results = await search_repository.search(f"{query_prefix}適者")
+
+    assert [result.id for result in results] == [1325]
+
+
+@pytest.mark.asyncio
 async def test_search_preserves_word_fragment_order_in_mixed_token(search_repository) -> None:
     now = datetime.now(timezone.utc)
     rows = [
@@ -514,6 +525,42 @@ async def test_search_preserves_word_fragment_order_in_mixed_token(search_reposi
     results = await search_repository.search("foo適者bar")
 
     assert [result.id for result in results] == [1321]
+
+
+@pytest.mark.asyncio
+async def test_search_binds_word_positions_to_their_script_run(search_repository) -> None:
+    now = datetime.now(timezone.utc)
+    rows = [
+        SearchIndexRow(
+            project_id=search_repository.project_id,
+            id=1326,
+            type="entity",
+            file_path="notes/script-role-match.md",
+            title="Script role match",
+            content_stems="foo適者bar",
+            content_snippet="foo適者bar",
+            permalink="notes/script-role-match",
+            created_at=now,
+            updated_at=now,
+        ),
+        SearchIndexRow(
+            project_id=search_repository.project_id,
+            id=1327,
+            type="entity",
+            file_path="notes/script-role-decoy.md",
+            title="Script role decoy",
+            content_stems="foo生存bar 適者",
+            content_snippet="foo生存bar 適者",
+            permalink="notes/script-role-decoy",
+            created_at=now,
+            updated_at=now,
+        ),
+    ]
+    await search_repository.bulk_index_items(rows)
+
+    results = await search_repository.search("foo適者bar")
+
+    assert [result.id for result in results] == [1326]
 
 
 @pytest.mark.asyncio
