@@ -136,6 +136,8 @@ def test_replace_mcp_synopsis_touches_only_the_mcp_block() -> None:
     assert extract_mcp_synopsis(replace_mcp_synopsis(bare, "new()")) == "new()"
     with pytest.raises(ValueError, match="no MCP SYNOPSIS block"):
         replace_mcp_synopsis("# t\n\n## DESCRIPTION\n", "new()")
+    with pytest.raises(ValueError, match="no MCP SYNOPSIS block"):
+        extract_mcp_synopsis("# t\n\n## DESCRIPTION\n")
 
 
 @pytest.mark.asyncio
