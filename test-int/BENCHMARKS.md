@@ -36,6 +36,23 @@ pytest test-int/test_search_performance_benchmark.py::test_benchmark_search_incr
 pytest test-int/test_search_performance_benchmark.py -v -m benchmark
 ```
 
+### Multilingual embedding model comparison
+
+The multilingual harness runs one FastEmbed model per process so model-load and RSS measurements
+remain isolated. It supports SQLite/sqlite-vec, PostgreSQL/pgvector, and PostgreSQL/Milvus. The
+Milvus case uses the production adapter with an isolated Milvus Lite database:
+
+```bash
+just benchmark-multilingual bge-small-en sqlite vector 0.55
+just benchmark-multilingual multilingual-minilm postgres vector 0.55
+just benchmark-multilingual multilingual-minilm milvus vector 0.55
+just benchmark-multilingual-compare sqlite vector 0.55
+just benchmark-multilingual-compare milvus vector 0.55
+```
+
+See [Multilingual Embedding Benchmark](../docs/multilingual-embedding-benchmark.md) for the corpus,
+model keys, metrics, initial results, and Cloud handoff.
+
 ### Write JSON benchmark artifacts
 ```bash
 BASIC_MEMORY_BENCHMARK_OUTPUT=.benchmarks/search-benchmarks.jsonl \

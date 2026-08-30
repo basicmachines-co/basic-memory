@@ -14,6 +14,17 @@ LOWER_IS_BETTER_SUFFIXES = ("_ms", "_seconds", "_size_mb", "_size_bytes")
 HIGHER_IS_BETTER_SUFFIXES = ("_per_sec",)
 HIGHER_IS_BETTER_PREFIXES = ("hit_rate_", "recall_", "mrr_")
 EQUAL_IS_BETTER_KEYS = {"notes_indexed", "queries_executed"}
+LOWER_IS_BETTER_KEYS = {
+    "accepted_empty_rate",
+    "negative_false_positive_rate",
+    "wrong_top_rate",
+    "model_cache_bytes",
+    "peak_rss_bytes",
+    "rss_after_index_bytes",
+    "rss_after_load_bytes",
+    "rss_model_delta_bytes",
+    "vector_storage_bytes",
+}
 
 
 @dataclass(frozen=True)
@@ -27,6 +38,8 @@ def _preference_for_metric(metric_name: str) -> str:
     """Return optimization preference for a metric."""
     if metric_name in EQUAL_IS_BETTER_KEYS:
         return "equal"
+    if metric_name in LOWER_IS_BETTER_KEYS:
+        return "lower"
     if metric_name.startswith(HIGHER_IS_BETTER_PREFIXES):
         return "higher"
     if metric_name.endswith(HIGHER_IS_BETTER_SUFFIXES):

@@ -44,6 +44,7 @@ from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.repository.search_repository import SearchRepository
+from basic_memory.repository.semantic_vector_index_factory import create_semantic_vector_index
 from basic_memory.services.file_service import FileService
 from basic_memory.services.search_service import SearchService
 
@@ -247,6 +248,7 @@ async def create_search_service(
     embedding_provider: EmbeddingProvider | None = None,
     *,
     reranker_enabled: bool = False,
+    benchmark_config: BasicMemoryConfig | None = None,
 ) -> SearchService:
     """Build a fully wired SearchService for a given combo."""
     engine, session_maker = engine_factory_result
@@ -265,27 +267,44 @@ async def create_search_service(
             },
         )
 
-    # Build app config
-    semantic_enabled = combo.provider_name is not None
-    app_config = BasicMemoryConfig(
-        env="test",
-        projects={"bench-project": str(tmp_path)},
-        default_project="bench-project",
-        database_backend=combo.backend,
-        semantic_search_enabled=semantic_enabled,
-        semantic_min_similarity=BENCHMARK_MIN_SIMILARITY,
-        reranker_enabled=reranker_enabled,
-    )
+    # A model benchmark supplies its complete provider contract so repository identity,
+    # dimensions, and prefixes match the provider that generated the stored vectors.
+    if benchmark_config is not None:
+        if benchmark_config.database_backend is not combo.backend:
+            raise ValueError("Benchmark config backend must match the search combo backend")
+        app_config = benchmark_config
+    else:
+        app_config = BasicMemoryConfig(
+            env="test",
+            projects={"bench-project": str(tmp_path)},
+            default_project="bench-project",
+            database_backend=combo.backend,
+            semantic_search_enabled=combo.provider_name is not None,
+            semantic_min_similarity=BENCHMARK_MIN_SIMILARITY,
+            reranker_enabled=reranker_enabled,
+        )
 
     # Create search repository (backend-specific)
     if combo.backend == DatabaseBackend.POSTGRES:
         from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 
+        vector_index_name = None
+        vector_index = None
+        if embedding_provider is not None:
+            vector_index_name, vector_index = create_semantic_vector_index(
+                session_maker=session_maker,
+                project_id=project.id,
+                app_config=app_config,
+                database_backend=combo.backend,
+                embedding_provider=embedding_provider,
+            )
         search_repo: SearchRepository = PostgresSearchRepository(
             session_maker,
             project_id=project.id,
             app_config=app_config,
             embedding_provider=embedding_provider,
+            vector_index_name=vector_index_name,
+            vector_index=vector_index,
         )
     else:
         from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository

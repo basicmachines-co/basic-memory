@@ -396,6 +396,30 @@ test-litellm-live *args:
 test-semantic-postgres:
     BASIC_MEMORY_ENV=test uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} -m semantic -k postgres test-int/semantic/
 
+# Run one multilingual model/backend pair in its own process so cold-load and RSS
+# measurements are not contaminated by another FastEmbed model.
+benchmark-multilingual model="bge-small-en" backend="sqlite" mode="vector" threshold="0.55":
+    UV_PYTHON=3.12 \
+    BASIC_MEMORY_ENV=test \
+    LOGFIRE_IGNORE_NO_CONFIG=1 \
+    BASIC_MEMORY_MULTILINGUAL_MODEL="{{model}}" \
+    BASIC_MEMORY_MULTILINGUAL_BACKEND="{{backend}}" \
+    BASIC_MEMORY_MULTILINGUAL_RETRIEVAL_MODE="{{mode}}" \
+    BASIC_MEMORY_MULTILINGUAL_THRESHOLD="{{threshold}}" \
+    BASIC_MEMORY_BENCHMARK_OUTPUT=".benchmarks/multilingual-{{model}}-{{backend}}-{{mode}}-{{threshold}}.jsonl" \
+    uv run --extra milvus pytest -p pytest_mock -q --no-cov {{PYTEST_FLAGS}} \
+        test-int/semantic/test_multilingual_embedding_benchmark.py
+
+# Screen the current model and the 384-dimensional multilingual candidate, then
+# compare the latest records from their JSONL artifacts.
+benchmark-multilingual-compare backend="sqlite" mode="vector" threshold="0.55":
+    just benchmark-multilingual bge-small-en "{{backend}}" "{{mode}}" "{{threshold}}"
+    just benchmark-multilingual multilingual-minilm "{{backend}}" "{{mode}}" "{{threshold}}"
+    UV_PYTHON=3.12 uv run python test-int/compare_search_benchmarks.py \
+        ".benchmarks/multilingual-bge-small-en-{{backend}}-{{mode}}-{{threshold}}.jsonl" \
+        ".benchmarks/multilingual-multilingual-minilm-{{backend}}-{{mode}}-{{threshold}}.jsonl" \
+        --format table
+
 # View semantic benchmark results (rich formatted table)
 # Usage: just semantic-report [--filter-combo sqlite] [--filter-suite paraphrase] [--sort-by avg_latency_ms]
 semantic-report *args:
