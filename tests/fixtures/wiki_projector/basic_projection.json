@@ -1,0 +1,11 @@
+{
+  "contract_version": "wiki/1.0.0",
+  "project_id": "project-88",
+  "through_partition_position": 3,
+  "expected_sha256": {
+    "guides/index.md": "c6481bd17c663a3c2595cb35cd22a03da46c6d55465a274482a91363b3af244a",
+    "guides/log.md": "a3bf317e661d40a156a7481478938b8a652d4a69184b06cfa8c1b8b5355307fb",
+    "index.md": "33a4af87c4c1a3d4e128f780e67a8a7084aa1796118fb7a5334bbec4a4e0728d",
+    "log.md": "8e21ce176e930556f6a39f30412af7c488f9724b4118d2946879b72d0eb6c2f3"
+  }
+}
