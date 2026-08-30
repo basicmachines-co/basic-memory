@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastmcp import Client
-from fastmcp.exceptions import ResourceError
+from fastmcp.exceptions import ResourceError, ToolError
 
 import basic_memory.mcp.resources.notes as notes_module
 from basic_memory.mcp.resources.notes import NOTE_TEMPLATE, note_resource
@@ -48,10 +48,53 @@ async def test_note_reads_as_raw_markdown(app, test_project) -> None:
 
 @pytest.mark.asyncio
 async def test_unknown_note_and_unknown_project_raise_resource_errors(app, test_project) -> None:
-    with pytest.raises(ResourceError, match="No note 'nope/missing'"):
+    with pytest.raises(ResourceError, match="No note 'test-project/nope/missing'"):
         await note_resource(project=test_project.name, path="nope/missing")
-    with pytest.raises(ResourceError):
+    # An unknown first segment falls back to the default project (unprefixed
+    # permalinks) and reports the full identifier as missing there.
+    with pytest.raises(ResourceError, match="No note"):
         await note_resource(project="no-such-project-anywhere", path="anything")
+
+
+@pytest.mark.asyncio
+async def test_unprefixed_permalink_reads_in_default_project(app, test_project) -> None:
+    # With permalinks_include_project=False (or legacy notes) the URI's first
+    # segment is a directory, not a project; routing must fall back to the
+    # active/default project with the whole path as the identifier.
+    await write_note(
+        title="Roadmap",
+        directory="docs",
+        content="# Roadmap\n\nUnprefixed permalink read.\n",
+        project=test_project.name,
+    )
+
+    text = await _read("memory://docs/roadmap")
+
+    assert "Unprefixed permalink read." in text
+
+
+@pytest.mark.asyncio
+async def test_non_404_failures_keep_their_cause(
+    app, test_project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def failing_resolve(client, project_external_id, identifier):
+        raise ToolError("Authentication required: You need to authenticate to access 'x'")
+
+    monkeypatch.setattr(notes_module, "resolve_entity_id", failing_resolve)
+    with pytest.raises(ResourceError, match="Authentication required"):
+        await note_resource(project=test_project.name, path="anything")
+
+
+@pytest.mark.asyncio
+async def test_routing_errors_surface_their_cause(
+    app, test_project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def constrained(client, identifier, project, context):
+        raise ValueError("Project is constrained to 'other'")
+
+    monkeypatch.setattr(notes_module, "resolve_project_and_path", constrained)
+    with pytest.raises(ResourceError, match="constrained"):
+        await note_resource(project=test_project.name, path="anything")
 
 
 @pytest.mark.asyncio
@@ -92,15 +135,25 @@ async def test_note_actually_named_info_still_reads(app, test_project) -> None:
         project=test_project.name,
     )
 
-    # Direct: the delegation tries project_info first, fails (not a workspace/
-    # project pair), and falls back to the note.
+    # Direct: the delegation routes through project_info, which falls back to
+    # the note when no such workspace/project pair exists.
     direct = await note_resource(project=test_project.name, path="sub/info")
-    # Served: the 3-segment /info shape belongs to project_info, so the reserved
-    # spelling is escaped with the file path (or the title) — parse, don't validate.
-    served = await _read(f"memory://{test_project.permalink}/sub/info.md")
+    # Served: whichever template wins the 3-segment /info shape, the canonical
+    # extensionless permalink reads — and so does the file path.
+    served = await _read(f"memory://{test_project.permalink}/sub/info")
+    served_md = await _read(f"memory://{test_project.permalink}/sub/info.md")
 
     assert "A note that happens to be called info." in direct
     assert "A note that happens to be called info." in served
+    assert "A note that happens to be called info." in served_md
+
+
+@pytest.mark.asyncio
+async def test_info_uri_that_is_neither_project_nor_note_reports_the_route(
+    app, test_project
+) -> None:
+    with pytest.raises(ResourceError):
+        await notes_module.project_info(workspace="nowhere", project="also-nowhere")
 
 
 @pytest.mark.asyncio
