@@ -9,9 +9,14 @@ documents the tools; the tools verify the manual.
 
 ## Where it lives
 
-The canonical manual is the **`manual` project in the Basic Memory team
-workspace** (cloud, shared). Anyone can build their own: the schema ships as
-an opt-in seed at `plugins/claude-code/schemas/manpage.md` — copy it into any
+Section 3 — one page per MCP tool — is canonical **in the package**, at
+`src/basic_memory/man/man3/`, so every install ships the same pages: local,
+cloud, or offline. The MCP server serves them as resources (`memory://man`
+is the index, `memory://man/search-notes(3)` a page) and `bm man <topic>`
+prints one in a shell. The `manual` project in the Basic Memory team
+workspace (cloud, shared) holds the full manual — sections 5 and 7 are
+canonical there — and anyone can build their own: the schema ships as an
+opt-in seed at `plugins/claude-code/schemas/manpage.md` — copy it into any
 project's folder and start writing pages against it.
 
 Layout:
@@ -102,7 +107,17 @@ bm tool search-notes --project manual          # then filter, or via MCP:
 #   build_context(url="man3/write-note-3", project="manual")
 ```
 
-A future `bm man <topic>` command is thin sugar over exactly these calls.
+From an MCP client, the same pages are resources — no project required:
+
+```
+memory://man                      # the index (apropos)
+memory://man/search-notes(3)      # one page
+memory://man/3/search-notes       # any common spelling resolves,
+memory://man/search_notes         # including the tool name itself
+```
+
+And in a shell, `bm man search-notes` prints the page as Markdown and
+`bm man list` lists every page with its summary.
 
 And for the real thing — `man bm` in an actual terminal:
 
@@ -175,9 +190,12 @@ GOTCHAS, SEE ALSO, observations) survives — that ownership split is what the
   MCP tool registry (docstrings + pydantic schemas), section-1 from Typer
   help; the hand-written corpus is the template spec. Regenerate-and-diff in
   CI becomes the drift gate.
-- **`bm man <topic>`** — CLI sugar over `read_note` + metadata search.
-  (`bm man install` + a hand-written `bm.1` already ship — the first slice
-  of [#610](https://github.com/basicmachines-co/basic-memory/issues/610);
-  the generator will produce per-command pages from the same extraction.)
+- **Projects as consumers** — `bm man install --project <name>` copies the
+  bundled pages into a project as notes, so `SEE ALSO` becomes traversable
+  relations and the pages join search. (`bm man <topic>`, `bm man list`, the
+  `memory://man` resources, and the bundled section 3 already ship — the
+  second slice of [#610](https://github.com/basicmachines-co/basic-memory/issues/610).)
+- **Groff for section 3** — render the bundled pages to roff so
+  `man search-notes` works after `bm man install`, alongside `bm.1`.
 - **Docs site** — the notes remain canonical for sections 5 and 7, code is
   canonical for 1 and 3; both render to the hosted docs site.

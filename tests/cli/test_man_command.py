@@ -1,10 +1,12 @@
-"""Tests for `bm man install` (#952 / #610: make `man bm` work)."""
+"""Tests for `bm man` (#952 / #610): reading bundled pages and making `man bm` work."""
 
 import subprocess
 
+import pytest
 from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
+from basic_memory.man import bundled_pages
 
 # Importing the module registers the man command group on the top-level app.
 import basic_memory.cli.commands.man as man_command  # noqa: F401
@@ -17,6 +19,52 @@ def _flattened(output: str) -> str:
     # local shells and CI — collapse all whitespace so phrase assertions can't
     # be split by a line break.
     return " ".join(output.split())
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["man", "search-notes"],
+        ["man", "search-notes(3)"],
+        ["man", "search_notes"],
+        ["man", "3/search-notes"],
+        ["man", "show", "search-notes"],
+    ],
+)
+def test_man_topic_prints_the_page_as_markdown(argv):
+    """`bm man <topic>` reads like man(1): the topic needs no subcommand and any spelling works."""
+    result = runner.invoke(app, argv)
+
+    assert result.exit_code == 0, result.output
+    assert result.output.startswith("# search-notes(3)\n")
+    assert "## GOTCHAS" in result.output
+    assert "title: search-notes(3)" not in result.output  # frontmatter is not rendered
+
+
+def test_man_unknown_topic_fails_and_points_at_list():
+    result = runner.invoke(app, ["man", "no-such-page"])
+
+    assert result.exit_code == 1
+    assert "No manual entry for no-such-page" in _flattened(result.output)
+    assert "bm man list" in _flattened(result.output)
+
+
+def test_man_list_is_apropos():
+    result = runner.invoke(app, ["man", "list"])
+
+    assert result.exit_code == 0, result.output
+    for page in bundled_pages():
+        assert page.title in result.output
+        assert page.summary in result.output
+
+
+def test_man_help_still_lists_subcommands():
+    """A leading option is not a topic: `--help` reaches the group, not `show`."""
+    result = runner.invoke(app, ["man", "--help"])
+
+    assert result.exit_code == 0, result.output
+    for command in ("install", "list", "show"):
+        assert command in result.output
 
 
 def test_man_install_writes_pages_to_target(tmp_path):

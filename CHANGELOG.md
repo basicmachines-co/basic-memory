@@ -4,6 +4,17 @@
 
 ### Features
 
+- **#610**: The manual ships in the package and is served over MCP. The 21 section-3
+  pages (one per MCP tool -- `search-notes(3)`, `write-note(3)`, ...) now live in
+  `src/basic_memory/man/man3/` as canonical, portable notes. The MCP server exposes
+  them as resources: `memory://man` is the index and `memory://man/<page>` is a page,
+  with every page also listed as a concrete resource so clients that browse
+  `resources/list` see each one with its summary. Page references parse the way people
+  and models actually write them -- `search-notes(3)`, `3/search-notes`,
+  `search_notes`, `man3/search-notes.md` -- and the server instructions point agents at
+  a tool's page before first use. `bm man <topic>` prints a page as Markdown and
+  `bm man list` is apropos; `bm man install` is unchanged.
+
 - **#1259**: `write_note` now tells the caller when a freshly created note looks like
   notes that already exist. On a server with semantic search enabled, a create probes
   the vector index with the new note's title and opening content and appends a
