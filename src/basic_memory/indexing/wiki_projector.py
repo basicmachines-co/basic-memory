@@ -342,6 +342,15 @@ def plan_wiki_projection(
                 "Wiki source note permalink collides with a generated document identity: "
                 f"{note.permalink}"
             )
+    for change in changes:
+        if (
+            change.operation is not WikiChangeOperation.deleted
+            and _portable_path_key(change.permalink) in reserved_permalink_keys
+        ):
+            raise ValueError(
+                "Wiki source change permalink collides with a generated document identity: "
+                f"{change.permalink}"
+            )
     note_by_path = {_portable_path_key(note.path): note for note in notes}
     scope_by_portable_path: dict[str, str] = {}
     for scope in scopes:

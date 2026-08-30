@@ -1009,6 +1009,42 @@ def test_projection_rejects_source_permalink_reserved_for_generated_index() -> N
         plan_wiki_projection(_request(position=0, scopes=()), snapshot)
 
 
+def test_projection_rejects_historical_permalink_reserved_for_generated_index() -> None:
+    snapshot = WikiProjectionSnapshot(
+        project_id="project-88",
+        project_name="Project 88",
+        source_partition_position=2,
+        current_output_watermark=0,
+        source_accepted_at=ACCEPTED_AT,
+        notes=(),
+        changes=(
+            WikiSourceChange(
+                partition_position=1,
+                operation=WikiChangeOperation.created,
+                path="guides/topic.md",
+                permalink="guides/index",
+                title="Deleted topic",
+                accepted_at=ACCEPTED_AT,
+                materialized=True,
+                source="web",
+            ),
+            WikiSourceChange(
+                partition_position=2,
+                operation=WikiChangeOperation.deleted,
+                path="guides/topic.md",
+                permalink="guides/index",
+                title="Deleted topic",
+                accepted_at=ACCEPTED_AT,
+                materialized=True,
+                source="web",
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="generated document identity"):
+        plan_wiki_projection(_request(position=2, scopes=()), snapshot)
+
+
 def test_projection_escapes_dynamic_markdown_structure() -> None:
     injected_title = "Bad]]\n- relates_to [[evil"
     snapshot = WikiProjectionSnapshot(
