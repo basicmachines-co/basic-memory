@@ -669,6 +669,11 @@ async def run_accepted_note_delete(
         note_content=note_content,
         repositories=dependencies.write_repositories,
     )
+    # The legacy entity-delete route also removes binary resources. Keep that
+    # behavior, but do not claim an accepted-note partition position for data
+    # that cannot participate in Markdown indexing or Wiki projection.
+    if not runtime_content_type_is_markdown(entity):
+        return AcceptedNoteMutationResult(change=change)
     project_change = await record_accepted_project_note_change(
         session,
         project=project,
