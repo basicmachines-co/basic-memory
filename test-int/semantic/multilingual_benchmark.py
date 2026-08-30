@@ -32,6 +32,7 @@ class EmbeddingModelCase:
     model_name: str
     dimensions: int
     cache_repository: str
+    model_file: str
     catalog_size_gb: float
     license: str
     fallback_cache_directory: str | None = None
@@ -45,6 +46,7 @@ FASTEMBED_MODEL_CASES = (
         model_name="BAAI/bge-small-en-v1.5",
         dimensions=384,
         cache_repository="qdrant/bge-small-en-v1.5-onnx-q",
+        model_file="model_optimized.onnx",
         catalog_size_gb=0.067,
         license="mit",
     ),
@@ -53,6 +55,7 @@ FASTEMBED_MODEL_CASES = (
         model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
         dimensions=384,
         cache_repository="qdrant/paraphrase-multilingual-MiniLM-L12-v2-onnx-Q",
+        model_file="model_optimized.onnx",
         catalog_size_gb=0.22,
         license="apache-2.0",
     ),
@@ -61,6 +64,7 @@ FASTEMBED_MODEL_CASES = (
         model_name="sentence-transformers/paraphrase-multilingual-mpnet-base-v2",
         dimensions=768,
         cache_repository="xenova/paraphrase-multilingual-mpnet-base-v2",
+        model_file="onnx/model.onnx",
         catalog_size_gb=1.0,
         license="apache-2.0",
     ),
@@ -69,6 +73,7 @@ FASTEMBED_MODEL_CASES = (
         model_name="intfloat/multilingual-e5-large",
         dimensions=1024,
         cache_repository="qdrant/multilingual-e5-large-onnx",
+        model_file="model.onnx",
         catalog_size_gb=2.24,
         license="mit",
         fallback_cache_directory="fast-multilingual-e5-large",
@@ -244,9 +249,24 @@ class RuntimeMeasurements:
         }
 
 
-def result_permalinks(results: Sequence[SearchIndexRow]) -> tuple[str, ...]:
-    """Return result permalinks while preserving rank order."""
-    return tuple(result.permalink for result in results if result.permalink is not None)
+def result_permalinks(
+    results: Sequence[SearchIndexRow],
+    *,
+    required_chunk_text: str | None = None,
+) -> tuple[str, ...]:
+    """Return ranked permalinks whose matched chunk satisfies the query oracle."""
+    return tuple(
+        result.permalink
+        for result in results
+        if result.permalink is not None
+        and (
+            required_chunk_text is None
+            or (
+                result.matched_chunk_text is not None
+                and required_chunk_text in result.matched_chunk_text
+            )
+        )
+    )
 
 
 def percentile_ms(samples: Sequence[float], quantile: float) -> float:
@@ -357,10 +377,13 @@ def model_cache_size_bytes(
     """Measure the selected model's materialized FastEmbed cache subtree."""
     configured_cache = benchmark_config.semantic_embedding_cache_dir
     cache_root = Path(configured_cache or default_fastembed_cache_dir())
-    model_directories = [cache_root / f"models--{model_case.cache_repository.replace('/', '--')}"]
-    if model_case.fallback_cache_directory is not None:
-        model_directories.append(cache_root / model_case.fallback_cache_directory)
-    return max(directory_size_bytes(directory) for directory in model_directories)
+    model_directory = cache_root / f"models--{model_case.cache_repository.replace('/', '--')}"
+    snapshots = model_directory / "snapshots"
+    if any(snapshots.glob(f"*/{model_case.model_file}")):
+        return directory_size_bytes(model_directory)
+    if model_case.fallback_cache_directory is None:
+        return 0
+    return directory_size_bytes(cache_root / model_case.fallback_cache_directory)
 
 
 def directory_size_bytes(directory: Path) -> int:
@@ -388,10 +411,11 @@ async def vector_storage_size_bytes(
     milvus_storage_directory: Path | None = None,
 ) -> int:
     """Measure database storage after the corpus vectors have been indexed."""
+    external_vector_bytes = 0
     if storage_case.vector_index_name == "milvus":
         if milvus_storage_directory is None:
             raise ValueError("Milvus storage measurement requires its local storage directory")
-        return directory_size_bytes(milvus_storage_directory)
+        external_vector_bytes = directory_size_bytes(milvus_storage_directory)
 
     if storage_case.database_backend is DatabaseBackend.SQLITE:
         async with engine.connect() as connection:
@@ -412,13 +436,14 @@ async def vector_storage_size_bytes(
             return int(result.scalar_one())
 
     async with engine.connect() as connection:
-        result = await connection.execute(
-            text(
-                "SELECT pg_total_relation_size('search_vector_chunks') + "
-                "pg_total_relation_size('search_vector_embeddings')"
-            )
+        relations = (
+            "pg_total_relation_size('search_vector_chunks')"
+            if storage_case.vector_index_name == "milvus"
+            else "pg_total_relation_size('search_vector_chunks') + "
+            "pg_total_relation_size('search_vector_embeddings')"
         )
-        return int(result.scalar_one())
+        result = await connection.execute(text(f"SELECT {relations}"))
+        return external_vector_bytes + int(result.scalar_one())
 
 
 def benchmark_context(

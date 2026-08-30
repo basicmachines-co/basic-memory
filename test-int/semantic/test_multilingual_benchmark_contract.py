@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 import sqlite_vec
@@ -28,6 +29,7 @@ from semantic.multilingual_benchmark import (
     embedding_model_case,
     model_cache_size_bytes,
     process_peak_rss_bytes,
+    result_permalinks,
     summarize_retrieval,
     vector_storage_size_bytes,
 )
@@ -135,9 +137,9 @@ def test_directory_size_does_not_double_count_hardlinks(tmp_path) -> None:
 
 def test_model_cache_size_uses_configured_cache_directory(tmp_path) -> None:
     model_case = embedding_model_case("bge-small-en")
-    model_root = tmp_path / "models--qdrant--bge-small-en-v1.5-onnx-q"
-    model_root.mkdir()
-    (model_root / "model.onnx").write_bytes(b"configured-cache")
+    model_root = tmp_path / "models--qdrant--bge-small-en-v1.5-onnx-q" / "snapshots" / "revision"
+    model_root.mkdir(parents=True)
+    (model_root / "model_optimized.onnx").write_bytes(b"configured-cache")
     benchmark_config = embedding_benchmark_config(
         model_case,
         benchmark_storage_case("sqlite"),
@@ -157,6 +159,24 @@ def test_model_cache_size_supports_fastembed_url_fallback(tmp_path) -> None:
     ).model_copy(update={"semantic_embedding_cache_dir": str(tmp_path)})
 
     assert model_cache_size_bytes(model_case, benchmark_config) == len(b"url-fallback")
+
+
+def test_model_cache_size_prefers_materialized_hugging_face_source(tmp_path) -> None:
+    model_case = embedding_model_case("multilingual-e5-large")
+    hugging_face_root = (
+        tmp_path / "models--qdrant--multilingual-e5-large-onnx" / "snapshots" / "revision"
+    )
+    hugging_face_root.mkdir(parents=True)
+    (hugging_face_root / "model.onnx").write_bytes(b"hugging-face")
+    fallback_root = tmp_path / "fast-multilingual-e5-large"
+    fallback_root.mkdir()
+    (fallback_root / "stale.onnx").write_bytes(b"stale-fallback-is-larger")
+    benchmark_config = embedding_benchmark_config(
+        model_case,
+        benchmark_storage_case("sqlite"),
+    ).model_copy(update={"semantic_embedding_cache_dir": str(tmp_path)})
+
+    assert model_cache_size_bytes(model_case, benchmark_config) == len(b"hugging-face")
 
 
 def test_process_peak_rss_uses_windows_peak_working_set(monkeypatch) -> None:
@@ -243,6 +263,48 @@ async def test_sqlite_vector_storage_excludes_unrelated_tables(sqlite_engine_fac
         )
 
     assert await vector_storage_size_bytes(engine, storage_case) == vector_bytes_before
+
+
+@pytest.mark.asyncio
+async def test_milvus_vector_storage_includes_postgres_manifest(tmp_path, mocker) -> None:
+    milvus_directory = tmp_path / "milvus"
+    milvus_directory.mkdir()
+    (milvus_directory / "vectors.db").write_bytes(b"milvus-vectors")
+    relation_result = mocker.Mock()
+    relation_result.scalar_one.return_value = 4096
+    connection = mocker.Mock()
+    connection.execute = AsyncMock(return_value=relation_result)
+    engine = mocker.Mock()
+    engine.connect.return_value.__aenter__ = AsyncMock(return_value=connection)
+    engine.connect.return_value.__aexit__ = AsyncMock(return_value=None)
+
+    measured_bytes = await vector_storage_size_bytes(
+        engine,
+        benchmark_storage_case("milvus"),
+        milvus_storage_directory=milvus_directory,
+    )
+
+    assert measured_bytes == len(b"milvus-vectors") + 4096
+    assert connection.execute.await_args is not None
+    statement = str(connection.execute.await_args.args[0])
+    assert "search_vector_chunks" in statement
+    assert "search_vector_embeddings" not in statement
+
+
+def test_chunk_boundary_results_require_the_matching_later_chunk(mocker) -> None:
+    first_chunk = mocker.Mock(
+        permalink="multilingual/ko-long-retention-exception",
+        matched_chunk_text="보관 정책 검토",
+    )
+    later_chunk = mocker.Mock(
+        permalink="multilingual/ko-long-retention-exception",
+        matched_chunk_text="법적 보존 명령이 적용된 고객 기록",
+    )
+
+    assert result_permalinks([first_chunk], required_chunk_text="법적 보존 명령") == ()
+    assert result_permalinks([later_chunk], required_chunk_text="법적 보존 명령") == (
+        "multilingual/ko-long-retention-exception",
+    )
 
 
 def test_retrieval_summary_separates_ranking_and_threshold_failures() -> None:

@@ -9,7 +9,8 @@ Memory's default embedding model.
 `multilingual-retrieval-v1` contains 17 notes and 23 judged queries covering English, Chinese,
 Japanese, Korean, Arabic, Russian, Spanish, Thai, and mixed-language text. The query set includes
 same-language retrieval, English-to-non-English retrieval, mixed-language notes, a long-note
-chunk-boundary case, and four negative queries.
+chunk-boundary case, and four negative queries. The chunk-boundary judgments count a result only
+when the returned matched chunk contains the relevant later-passage text.
 
 Every run uses the production FastEmbed provider and one production storage pairing:
 SQLite/sqlite-vec, PostgreSQL/pgvector, or PostgreSQL/Milvus. Milvus runs use the first-party
@@ -111,8 +112,8 @@ without measurement.
 | SQLite | Multilingual MiniLM | 2.89 s | 4.76 s | 3.57 | 314,720,256 | 252,141,023 | 1,638,400 |
 | PostgreSQL | BGE small English | 1.04 s | 15.09 s | 1.13 | 212,926,464 | 67,179,926 | 262,144 |
 | PostgreSQL | Multilingual MiniLM | 2.65 s | 6.73 s | 2.53 | 514,326,528 | 252,141,023 | 253,952 |
-| PostgreSQL/Milvus Lite | BGE small English | 3.16 s | 35.42 s | 0.48 | 97,452,032 | 67,179,926 | 42,658 |
-| PostgreSQL/Milvus Lite | Multilingual MiniLM | 1.87 s | 9.72 s | 1.75 | 458,096,640 | 252,141,023 | 42,658 |
+| PostgreSQL/Milvus Lite | BGE small English | 3.16 s | 35.42 s | 0.48 | 97,452,032 | 67,179,926 | 149,154 |
+| PostgreSQL/Milvus Lite | Multilingual MiniLM | 1.87 s | 9.72 s | 1.75 | 458,096,640 | 252,141,023 | 140,962 |
 
 Local PostgreSQL query latency is dominated by testcontainer and `NullPool` connection setup and
 varied substantially between individual queries. Milvus Lite also opens short-lived local clients
@@ -122,7 +123,7 @@ path should be used to size Cloud workers or set a latency SLO.
 SQLite vector storage counts `search_vector_chunks`, its indexes, and the sqlite-vec virtual
 table's physical shadow tables through `dbstat`; it excludes entities, FTS rows, and unrelated
 database pages. PostgreSQL counts the vector manifest and embedding relations. Milvus Lite counts
-the isolated vector database files and excludes PostgreSQL manifest storage.
+the isolated vector database files plus its required PostgreSQL vector manifest.
 
 FastEmbed 0.8.0 reports that multilingual MiniLM now uses mean pooling instead of the CLS pooling
 used by older FastEmbed releases. Any rollout decision must therefore pin and record the tested
