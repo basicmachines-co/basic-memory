@@ -147,6 +147,7 @@ class AcceptedNoteCreateMutation:
     data: EntitySchema
     actor: AcceptedNoteMutationActor
     source: RuntimeNoteChangeSource
+    publish_graph_facts: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,6 +161,7 @@ class AcceptedNoteUpdateMutation:
     source: RuntimeNoteChangeSource
     # db_checksum the caller last synced; None means no precondition (issue #1445).
     base_checksum: str | None = None
+    publish_graph_facts: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -398,6 +400,24 @@ def attach_accepted_project_note_change(
         project_change=project_change,
         materialization=materialization,
         file_delete=file_delete,
+    )
+
+
+def apply_accepted_note_graph_policy(
+    prepared_write: AcceptedPreparedNoteWrite,
+    *,
+    publish_graph_facts: bool,
+) -> AcceptedPreparedNoteWrite:
+    """Keep canonical Markdown while suppressing graph facts for derived documents."""
+    if publish_graph_facts:
+        return prepared_write
+    prepared = prepared_write.prepared
+    graph_silent_markdown = prepared.entity_markdown.model_copy(
+        update={"observations": [], "relations": []}
+    )
+    return replace(
+        prepared_write,
+        prepared=replace(prepared, entity_markdown=graph_silent_markdown),
     )
 
 
@@ -676,7 +696,10 @@ async def _run_accepted_note_create(
         check_storage_exists=dependencies.verify_storage_absent_on_create,
         session=session,
     )
-
+    prepared_write = apply_accepted_note_graph_policy(
+        prepared_write,
+        publish_graph_facts=request.publish_graph_facts,
+    )
     prepared = prepared_write.prepared
     entity = await create_accepted_pending_entity(
         session,
@@ -888,6 +911,10 @@ async def _run_accepted_note_update(
         except (ParseError, ValueError) as error:
             reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.bad_request, str(error))
 
+    prepared_write = apply_accepted_note_graph_policy(
+        prepared_write,
+        publish_graph_facts=request.publish_graph_facts,
+    )
     prepared = prepared_write.prepared
     persisted = await persist_accepted_note_snapshot(
         session,

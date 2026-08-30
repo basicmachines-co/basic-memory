@@ -2148,6 +2148,56 @@ async def test_run_accepted_note_create_returns_graph_publication() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_accepted_note_create_can_suppress_derived_graph_facts() -> None:
+    """Derived documents keep their Markdown without recursively expanding the graph."""
+    session = cast(AsyncSession, object())
+    prepared = _prepared_with_graph(
+        observations=[
+            AcceptedObservationWrite(
+                content="Generated list item",
+                category="note",
+                context=None,
+                tags=None,
+            )
+        ],
+        relations=[
+            AcceptedRelationWrite(
+                relation_type="links_to",
+                target_name="Source Note",
+                context=None,
+            )
+        ],
+    )
+    entity = _entity()
+    note_content = _note_content(entity)
+
+    result = await run_accepted_note_create(
+        session,
+        request=AcceptedNoteCreateMutation(
+            project_external_id="project-123",
+            data=_schema(),
+            actor=AcceptedNoteMutationActor(user_profile_id=None, kind="system"),
+            source="wiki_projector",
+            publish_graph_facts=False,
+        ),
+        dependencies=_dependencies(
+            project_repository=_ProjectRepository(_project()),
+            entity_lookup_repository=_EntityLookupRepository(),
+            note_content_lookup_repository=_NoteContentLookupRepository(),
+            preparer_factory=_PreparerFactory(_CreatePreparer(prepared)),
+            pending_entity_repository=_PendingEntityRepository(entity),
+            note_content_accept_repository=_NoteContentAcceptRepository(note_content),
+            search_repository=_SearchRepository(),
+        ),
+    )
+
+    assert result.change.payload.markdown_content == "# Accepted\n"
+    assert result.relation_publication is not None
+    assert result.relation_publication.observations == ()
+    assert result.relation_publication.relations == ()
+
+
+@pytest.mark.asyncio
 async def test_run_accepted_note_create_pre_resolves_only_unambiguous_self_links() -> None:
     """Safe self aliases resolve inline while ambiguous title aliases stay deferred."""
     session = cast(AsyncSession, object())
@@ -2249,6 +2299,57 @@ async def test_run_accepted_note_update_returns_replacement_graph() -> None:
     assert result.relation_publication is not None
     assert result.relation_publication.observations[0].content == "Replaced"
     assert result.relation_publication.relations[0].target_name == "Other"
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_update_can_clear_derived_graph_facts() -> None:
+    """A graph-silent replacement publishes empty sets so earlier facts are removed."""
+    session = _MutationSession()
+    prepared = _prepared_with_graph(
+        observations=[
+            AcceptedObservationWrite(
+                content="Generated list item",
+                category="note",
+                context=None,
+                tags=None,
+            )
+        ],
+        relations=[
+            AcceptedRelationWrite(
+                relation_type="links_to",
+                target_name="Source Note",
+                context=None,
+            )
+        ],
+    )
+    entity = _entity(file_path="notes/accepted.md")
+    note_content = _note_content(entity)
+
+    result = await run_accepted_note_update(
+        cast(AsyncSession, session),
+        request=AcceptedNoteUpdateMutation(
+            project_external_id="project-123",
+            entity_external_id="note-123",
+            data=_schema(),
+            actor=AcceptedNoteMutationActor(user_profile_id=None, kind="system"),
+            source="wiki_projector",
+            publish_graph_facts=False,
+        ),
+        dependencies=_dependencies(
+            project_repository=_ProjectRepository(_project()),
+            entity_lookup_repository=_EntityLookupRepository(by_external_id=entity),
+            note_content_lookup_repository=_NoteContentLookupRepository(note_content),
+            preparer_factory=_PreparerFactory(_CreatePreparer(prepared)),
+            pending_entity_repository=_PendingEntityRepository(entity),
+            note_content_accept_repository=_NoteContentAcceptRepository(note_content),
+            search_repository=_SearchRepository(),
+        ),
+    )
+
+    assert result.change.payload.markdown_content == "# Accepted\n"
+    assert result.relation_publication is not None
+    assert result.relation_publication.observations == ()
+    assert result.relation_publication.relations == ()
 
 
 @pytest.mark.asyncio
