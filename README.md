@@ -563,6 +563,8 @@ agents can pick the right one without trial-and-error:
 All MCP tools default to text output; pass `output_format="json"` for
 structured responses. Full tool reference in the
 [docs](https://docs.basicmemory.com/?utm_source=github&utm_medium=referral&utm_campaign=readme).
+A per-tool parameter reference generated from the source lives in
+[docs/mcp-tools.md](docs/mcp-tools.md).
 
 ## CLI essentials
 

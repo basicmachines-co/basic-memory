@@ -2,7 +2,7 @@
 
 > **Auto-generated** by `scripts/generate_tool_docs.py`. Do not edit by hand.
 >
-> Regenerate with: `uv run scripts/generate_tool_docs.py`
+> Regenerate with: `just tool-docs` (or `uv run python scripts/generate_tool_docs.py`)
 
 This reference documents all **21** MCP tools registered by Basic Memory. Each entry lists the tool's purpose and its parameters (types, whether they are required, defaults, and descriptions).
 
@@ -22,7 +22,7 @@ This reference documents all **21** MCP tools registered by Basic Memory. Each e
   - [`view_note`](#view_note)
 - [Search](#search)
   - [`fetch`](#fetch)
-  - [`search`](#search)
+  - [`search`](#search-1)
   - [`search_notes`](#search_notes)
 - [Project & Workspace Management](#project--workspace-management)
   - [`create_memory_project`](#create_memory_project)
@@ -352,50 +352,50 @@ If project unknown, use list_memory_projects() or recent_activity() first.
 Set search_all_projects=True to search every accessible project; this is opt-in because it
 performs one search per project.
 
-## Search Syntax Examples
+#### Search Syntax Examples
 
-### Basic Searches
-- `search_notes("my-project", "keyword")` - Find any content containing "keyword"
-- `search_notes("work-docs", "'exact phrase'")` - Search for exact phrase match
+##### Basic Searches
+- `search_notes("keyword", project="my-project")` - Find any content containing "keyword"
+- `search_notes("'exact phrase'", project="work-docs")` - Search for exact phrase match
 
-### Advanced Boolean Searches
-- `search_notes("my-project", "term1 term2")` - Strict implicit-AND first; retries with
+##### Advanced Boolean Searches
+- `search_notes("term1 term2", project="my-project")` - Strict implicit-AND first; retries with
   relaxed OR terms only if strict search returns no results
-- `search_notes("my-project", "term1 AND term2")` - Explicit AND search (both terms required)
-- `search_notes("my-project", "term1 OR term2")` - Either term can be present
-- `search_notes("my-project", "term1 NOT term2")` - Include term1 but exclude term2
-- `search_notes("my-project", "(project OR planning) AND notes")` - Grouped boolean logic
+- `search_notes("term1 AND term2", project="my-project")` - Explicit AND search (both terms required)
+- `search_notes("term1 OR term2", project="my-project")` - Either term can be present
+- `search_notes("term1 NOT term2", project="my-project")` - Include term1 but exclude term2
+- `search_notes("(project OR planning) AND notes", project="my-project")` - Grouped boolean logic
 
-### Content-Specific Searches
-- `search_notes("research", "tag:example")` - Search within specific tags (if supported by content)
-- `search_notes("work-project", "req", entity_types=["observation"], categories=["requirement"])`
+##### Content-Specific Searches
+- `search_notes("tag:example", project="research")` - Search within specific tags (if supported by content)
+- `search_notes("req", project="work-project", entity_types=["observation"], categories=["requirement"])`
   - Return only observations whose category is exactly "requirement"
-- `search_notes("team-docs", "author:username")` - Find content by author (if metadata available)
+- `search_notes("author:username", project="team-docs")` - Find content by author (if metadata available)
 
 **Note:** `tag:` shorthand is automatically converted to a `tags` filter, so it works
 with any search type (text, hybrid, vector). You can also use the `tags` parameter
-directly: `search_notes("project", "query", tags=["my-tag"])`
+directly: `search_notes("query", project="project", tags=["my-tag"])`
 
-### Search Type Examples
-- `search_notes("my-project", "Meeting", search_type="title")` - Search only in titles
-- `search_notes("work-docs", "docs/meeting-*", search_type="permalink")` - Pattern match permalinks
+##### Search Type Examples
+- `search_notes("Meeting", project="my-project", search_type="title")` - Search only in titles
+- `search_notes("docs/meeting-*", project="work-docs", search_type="permalink")` - Pattern match permalinks
   Note: Permalink patterns match the full path (e.g., "project/folder/chapter-13*", not just "chapter-13*").
-- `search_notes("research", "keyword")` - Default search (hybrid when semantic is enabled,
+- `search_notes("keyword", project="research")` - Default search (hybrid when semantic is enabled,
   text when disabled)
 
-### Filtering Options
-- `search_notes("my-project", "query", note_types=["note"])` - Search only notes
-- `search_notes("work-docs", "query", note_types=["note", "person"])` - Multiple note types
-- `search_notes("research", "query", entity_types=["observation"])` - Filter by entity type
-- `search_notes("research", "query", entity_types=["observation"], categories=["requirement"])`
+##### Filtering Options
+- `search_notes("query", project="my-project", note_types=["note"])` - Search only notes
+- `search_notes("query", project="work-docs", note_types=["note", "person"])` - Multiple note types
+- `search_notes("query", project="research", entity_types=["observation"])` - Filter by entity type
+- `search_notes("query", project="research", entity_types=["observation"], categories=["requirement"])`
   - Filter observations to an exact category
-- `search_notes("team-docs", "query", after_date="2024-01-01")` - Recent content only
-- `search_notes("my-project", "query", after_date="1 week")` - Relative date filtering
-- `search_notes("my-project", "query", tags=["security"])` - Filter by frontmatter tags
-- `search_notes("my-project", "query", status="in-progress")` - Filter by frontmatter status
-- `search_notes("my-project", "query", metadata_filters={"priority": {"$in": ["high"]}})`
+- `search_notes("query", project="team-docs", after_date="2024-01-01")` - Recent content only
+- `search_notes("query", project="my-project", after_date="1 week")` - Relative date filtering
+- `search_notes("query", project="my-project", tags=["security"])` - Filter by frontmatter tags
+- `search_notes("query", project="my-project", status="in-progress")` - Filter by frontmatter status
+- `search_notes("query", project="my-project", metadata_filters={"priority": {"$in": ["high"]}})`
 
-### Structured Metadata Filters
+##### Structured Metadata Filters
 Filters are exact matches on frontmatter metadata. Supported forms:
 - Equality: `{"status": "in-progress"}`
 - Array contains (all): `{"tags": ["security", "oauth"]}`
@@ -405,21 +405,21 @@ Filters are exact matches on frontmatter metadata. Supported forms:
   - `$between`: `{"schema.confidence": {"$between": [0.3, 0.6]}}`
 - Nested keys use dot notation (e.g., `"schema.confidence"`).
 
-### Filter-only Searches
+##### Filter-only Searches
 Omit `query` (or pass None) when only using structured filters:
 - `search_notes(metadata_filters={"type": "spec"}, project="my-project")`
 - `search_notes(tags=["security"], project="my-project")`
 - `search_notes(status="draft", project="my-project")`
 
-### Convenience Filters
+##### Convenience Filters
 `tags` and `status` are shorthand for metadata_filters. If the same key exists in
 metadata_filters, that value wins.
 
-### Advanced Pattern Examples
-- `search_notes("work-project", "project AND (meeting OR discussion)")` - Complex boolean logic
-- `search_notes("research", ""exact phrase" AND keyword")` - Combine phrase and keyword search
-- `search_notes("dev-notes", "bug NOT fixed")` - Exclude resolved issues
-- `search_notes("archive", "docs/2024-*", search_type="permalink")` - Year-based permalink search
+##### Advanced Pattern Examples
+- `search_notes("project AND (meeting OR discussion)", project="work-project")` - Complex boolean logic
+- `search_notes(""exact phrase" AND keyword", project="research")` - Combine phrase and keyword search
+- `search_notes("bug NOT fixed", project="dev-notes")` - Exclude resolved issues
+- `search_notes("docs/2024-*", project="archive", search_type="permalink")` - Year-based permalink search
 
 **Parameters:**
 

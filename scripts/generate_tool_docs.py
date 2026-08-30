@@ -190,7 +190,9 @@ def _extract_params(func: ast.AsyncFunctionDef | ast.FunctionDef) -> list[Param]
     return params
 
 
-_SECTION_RE = re.compile(r"^\s*(Args|Arguments|Parameters|Returns|Raises|Examples|Example|Note|Notes|Yields):\s*$")
+_SECTION_RE = re.compile(
+    r"^\s*(Args|Arguments|Parameters|Returns|Raises|Examples|Example|Note|Notes|Yields):\s*$"
+)
 
 
 def _split_docstring(docstring: str) -> tuple[str, str, dict[str, str]]:
@@ -244,8 +246,9 @@ def _parse_args_section(lines: list[str], start: int) -> dict[str, str]:
         indent = len(line) - len(line.lstrip())
         if m and (base_indent is None or indent <= base_indent):
             base_indent = indent
-            current = m.group(2).lstrip("*")
-            result[current] = m.group(3).strip()
+            name = m.group(2).lstrip("*")
+            result[name] = m.group(3).strip()
+            current = name
         elif current is not None:
             # Continuation line for the current parameter.
             result[current] = f"{result[current]} {line.strip()}".strip()
@@ -275,14 +278,15 @@ def _load_registered_tool_names() -> list[str]:
     init_path = TOOLS_DIR / "__init__.py"
     tree = ast.parse(init_path.read_text(encoding="utf-8"))
     for node in tree.body:
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == "__all__":
-                    return [
-                        elt.value
-                        for elt in node.value.elts  # type: ignore[attr-defined]
-                        if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
-                    ]
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, (ast.List, ast.Tuple)):
+            continue
+        for target in node.targets:
+            if isinstance(target, ast.Name) and target.id == "__all__":
+                return [
+                    elt.value
+                    for elt in node.value.elts
+                    if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
+                ]
     raise RuntimeError("Could not find __all__ in tools/__init__.py")
 
 
@@ -342,6 +346,72 @@ def _anchor(text: str) -> str:
     return re.sub(r"\s", "-", text.strip())
 
 
+class AnchorRegistry:
+    """Hand out heading anchors in document order, the way GitHub does.
+
+    GitHub keeps the first heading with a given slug bare and suffixes later
+    ones with ``-1``, ``-2``, ... A ``Search`` category followed by a ``search``
+    tool would otherwise both link to ``#search`` and the tool's TOC entry would
+    land on the category. Every heading in the document must be registered, in
+    order, for the suffixes to line up with what GitHub renders.
+    """
+
+    def __init__(self) -> None:
+        self._occurrences: dict[str, int] = {}
+
+    def register(self, heading_text: str) -> str:
+        base = _anchor(heading_text)
+        anchor = base
+        while anchor in self._occurrences:
+            self._occurrences[base] += 1
+            anchor = f"{base}-{self._occurrences[base]}"
+        self._occurrences[anchor] = 0
+        return anchor
+
+
+_HEADING_RE = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
+_FENCE_MARK = "```"
+TOOL_HEADING_LEVEL = 3
+MAX_HEADING_LEVEL = 6
+
+
+def _headings(lines: list[str]) -> list[tuple[int, int, str]]:
+    """Return ``(line_index, level, text)`` for each heading outside fenced code."""
+    found: list[tuple[int, int, str]] = []
+    in_fence = False
+    for index, line in enumerate(lines):
+        if line.lstrip().startswith(_FENCE_MARK):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        match = _HEADING_RE.match(line)
+        if match:
+            found.append((index, len(match.group(1)), match.group(2)))
+    return found
+
+
+def _nest_headings(text: str, parent_level: int) -> str:
+    """Shift a docstring's own headings so they sit below the tool heading.
+
+    Docstrings are free to structure themselves with ``##``/``###`` (search_notes
+    does). Emitted verbatim under a ``###`` tool heading they close the tool's
+    section, so its parameter table ends up under the docstring's last heading and
+    the docstring headings read as sibling tools in any rendered outline. Shift
+    them so the shallowest embedded heading lands one level below the parent.
+    """
+    lines = text.splitlines()
+    headings = _headings(lines)
+    if not headings:
+        return text
+    shift = max(0, parent_level + 1 - min(level for _, level, _ in headings))
+    if shift == 0:
+        return text
+    for index, level, heading_text in headings:
+        lines[index] = f"{'#' * min(MAX_HEADING_LEVEL, level + shift)} {heading_text}"
+    return "\n".join(lines)
+
+
 def _escape_cell(text: str | None) -> str:
     """Escape a value for use inside a Markdown table cell."""
     if not text:
@@ -372,12 +442,43 @@ def _render(tools: list[Tool]) -> str:
     for tool in sorted(tools, key=lambda t: t.name):
         by_category.setdefault(tool.category, []).append(tool)
 
+    # Anchors are assigned in document order, and the table of contents comes before
+    # the sections it links to, so render the sections first and build the TOC from
+    # the anchors they were actually given.
+    title = "Basic Memory MCP Tool Reference"
+    anchors = AnchorRegistry()
+    anchors.register(title)
+    anchors.register("Table of Contents")
+    category_anchors: dict[str, str] = {}
+    tool_anchors: dict[str, str] = {}
+
+    sections: list[str] = []
+    for category in CATEGORY_ORDER:
+        entries = by_category.get(category)
+        if not entries:
+            continue
+        category_anchors[category] = anchors.register(category)
+        sections.append(f"## {category}\n")
+        for tool in entries:
+            tool_anchors[tool.name] = anchors.register(tool.name)
+            sections.append(f"### `{tool.name}`\n")
+            if tool.summary:
+                sections.append(f"{tool.summary}\n")
+            detail = _nest_headings(tool.description.strip(), TOOL_HEADING_LEVEL)
+            if detail:
+                for _, _, heading_text in _headings(detail.splitlines()):
+                    anchors.register(heading_text)
+                sections.append(f"{detail}\n")
+            sections.append("**Parameters:**\n")
+            sections.append(_render_params_table(tool.params))
+            sections.append(f"_Source: `src/basic_memory/mcp/tools/{tool.source_file}`_\n")
+
     out: list[str] = []
-    out.append("# Basic Memory MCP Tool Reference\n")
+    out.append(f"# {title}\n")
     out.append(
         "> **Auto-generated** by `scripts/generate_tool_docs.py`. Do not edit by hand.\n"
         ">\n"
-        "> Regenerate with: `uv run scripts/generate_tool_docs.py`\n"
+        "> Regenerate with: `just tool-docs` (or `uv run python scripts/generate_tool_docs.py`)\n"
     )
     out.append(
         f"This reference documents all **{len(tools)}** MCP tools registered by "
@@ -385,34 +486,17 @@ def _render(tools: list[Tool]) -> str:
         "(types, whether they are required, defaults, and descriptions).\n"
     )
 
-    # Table of contents.
     out.append("## Table of Contents\n")
     for category in CATEGORY_ORDER:
         entries = by_category.get(category)
         if not entries:
             continue
-        out.append(f"- [{category}](#{_anchor(category)})")
+        out.append(f"- [{category}](#{category_anchors[category]})")
         for tool in entries:
-            out.append(f"  - [`{tool.name}`](#{_anchor(tool.name)})")
+            out.append(f"  - [`{tool.name}`](#{tool_anchors[tool.name]})")
     out.append("")
 
-    # Sections.
-    for category in CATEGORY_ORDER:
-        entries = by_category.get(category)
-        if not entries:
-            continue
-        out.append(f"## {category}\n")
-        for tool in entries:
-            out.append(f"### `{tool.name}`\n")
-            if tool.summary:
-                out.append(f"{tool.summary}\n")
-            detail = tool.description.strip()
-            if detail:
-                out.append(f"{detail}\n")
-            out.append("**Parameters:**\n")
-            out.append(_render_params_table(tool.params))
-            out.append(f"_Source: `src/basic_memory/mcp/tools/{tool.source_file}`_\n")
-
+    out.extend(sections)
     return "\n".join(out).rstrip() + "\n"
 
 

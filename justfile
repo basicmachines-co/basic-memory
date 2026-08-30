@@ -510,6 +510,10 @@ clean:
 format:
     uv run ruff format .
 
+# Regenerate docs/mcp-tools.md from the MCP tool sources
+tool-docs:
+    uv run python scripts/generate_tool_docs.py
+
 # Run MCP inspector tool
 run-inspector:
     npx @modelcontextprotocol/inspector
