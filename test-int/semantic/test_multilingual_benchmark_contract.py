@@ -153,6 +153,14 @@ def test_process_peak_rss_uses_windows_peak_working_set(monkeypatch) -> None:
 async def test_sqlite_vector_storage_excludes_unrelated_tables(sqlite_engine_factory) -> None:
     engine, _ = sqlite_engine_factory
     storage_case = benchmark_storage_case("sqlite")
+
+    async with engine.connect() as connection:
+        dbstat_available = await connection.scalar(
+            text("SELECT sqlite_compileoption_used('ENABLE_DBSTAT_VTAB')")
+        )
+    if not dbstat_available:
+        pytest.skip("SQLite dbstat is required for physical vector-storage measurement")
+
     vector_bytes_before = await vector_storage_size_bytes(engine, storage_case)
 
     async with engine.begin() as connection:
