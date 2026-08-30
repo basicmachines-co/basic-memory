@@ -15,7 +15,10 @@ from basic_memory.runtime.job_payloads import (
 )
 from basic_memory.runtime.jobs import RuntimeJobRequest
 from basic_memory.runtime.note_content import RuntimeNoteMaterializationJobRequest
-from basic_memory.runtime.note_object_metadata import NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT
+from basic_memory.runtime.note_object_metadata import (
+    NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+    NOTE_OBJECT_ACTOR_KIND_SYSTEM,
+)
 from basic_memory.runtime.project_partition import (
     RuntimeAcceptedProjectNoteChange,
     RuntimeProjectNoteOperation,
@@ -154,9 +157,13 @@ def test_runtime_note_materialization_job_payload_accepts_wiki_projector_source(
         entity_id=42,
         db_version=4,
         db_checksum="db-sum",
+        actor_kind=NOTE_OBJECT_ACTOR_KIND_SYSTEM,
+        actor_name="Basic Memory Wiki Projector",
         source=WIKI_PROJECTOR_SOURCE,
     )
 
+    assert payload.actor_kind == NOTE_OBJECT_ACTOR_KIND_SYSTEM
+    assert payload.actor_name == "Basic Memory Wiki Projector"
     assert payload.source == WIKI_PROJECTOR_SOURCE
 
 
