@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import text
 
 from basic_memory.config import DatabaseBackend
+from basic_memory.repository.semantic_chunking import split_text_into_chunks
 from basic_memory.schemas.search import SearchRetrievalMode
 
 from semantic.multilingual_benchmark import (
@@ -33,6 +34,20 @@ def test_multilingual_corpus_covers_required_languages_and_behaviors() -> None:
     document_languages = {document.language for document in MULTILINGUAL_CORPUS.documents}
     assert {"en", "zh", "ja", "ko", "ar", "ru", "es", "th", "mixed"} <= document_languages
     assert {query.kind for query in MULTILINGUAL_CORPUS.queries} == set(RetrievalCaseKind)
+
+
+def test_chunk_boundary_document_places_relevant_text_after_first_chunk() -> None:
+    document = next(
+        document
+        for document in MULTILINGUAL_CORPUS.documents
+        if document.permalink == "multilingual/ko-long-retention-exception"
+    )
+    source_text = "\n\n".join((document.title, document.permalink, document.content))
+
+    chunks = split_text_into_chunks(source_text)
+
+    assert len(chunks) >= 2
+    assert any("법적 보존 명령" in chunk for chunk in chunks[1:])
 
 
 def test_multilingual_corpus_rejects_unknown_relevance_judgment() -> None:

@@ -66,11 +66,11 @@ model evidence; it is not a Cloud capacity test or a meaningful HNSW scale test.
 | Slice | Metric | BGE small English | Multilingual MiniLM |
 | --- | --- | ---: | ---: |
 | Overall | recall@5 | 0.9474 | 1.0000 |
-| Overall | MRR@10 | 0.8474 | 1.0000 |
-| Overall | wrong top | 0.2105 | 0.0000 |
+| Overall | MRR@10 | 0.8211 | 1.0000 |
+| Overall | wrong top | 0.2632 | 0.0000 |
 | Overall | accepted empty | 0.0000 | 0.1579 |
 | Negative queries | false positive | 0.7500 | 0.0000 |
-| Same-language | MRR@10 | 0.9048 | 1.0000 |
+| Same-language | MRR@10 | 0.8333 | 1.0000 |
 | Cross-language | recall@5 | 0.8571 | 1.0000 |
 | Cross-language | MRR@10 | 0.7762 | 1.0000 |
 | English baseline | MRR@10 | 1.0000 | 1.0000 |
@@ -84,11 +84,11 @@ path on both backends:
 
 | Backend | Model | recall@5 | MRR@10 | Wrong top | Negative false positive |
 | --- | --- | ---: | ---: | ---: | ---: |
-| SQLite hybrid | BGE small English | 0.8947 | 0.7531 | 0.3684 | 0.7500 |
+| SQLite hybrid | BGE small English | 0.8947 | 0.7268 | 0.4211 | 0.7500 |
 | SQLite hybrid | Multilingual MiniLM | 1.0000 | 0.8947 | 0.2105 | 0.0000 |
-| PostgreSQL hybrid | BGE small English | 0.8947 | 0.8070 | 0.2632 | 0.7500 |
+| PostgreSQL hybrid | BGE small English | 0.8947 | 0.7807 | 0.3158 | 0.7500 |
 | PostgreSQL hybrid | Multilingual MiniLM | 1.0000 | 0.9211 | 0.1579 | 0.0000 |
-| PostgreSQL/Milvus hybrid | BGE small English | 0.8947 | 0.8070 | 0.2632 | 0.7500 |
+| PostgreSQL/Milvus hybrid | BGE small English | 0.8947 | 0.7807 | 0.3158 | 0.7500 |
 | PostgreSQL/Milvus hybrid | Multilingual MiniLM | 1.0000 | 0.9211 | 0.1579 | 0.0000 |
 
 Cross-language hybrid recall@5 increased from 0.7143 to 1.0000 on both backends. Hybrid MRR does
@@ -107,12 +107,12 @@ without measurement.
 
 | Backend | Model | Cold load | Index 17 notes | Notes/sec | Model RSS delta | Cache bytes | Vector storage |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| SQLite | BGE small English | 0.69 s | 1.86 s | 9.13 | 214,073,344 | 67,179,926 | 1,626,112 |
-| SQLite | Multilingual MiniLM | 1.59 s | 1.53 s | 11.14 | 436,699,136 | 252,141,023 | 1,626,112 |
-| PostgreSQL | BGE small English | 0.50 s | 8.21 s | 2.07 | 227,213,312 | 67,179,926 | 262,144 |
-| PostgreSQL | Multilingual MiniLM | 4.50 s | 11.53 s | 1.47 | 297,451,520 | 252,141,023 | 262,144 |
-| PostgreSQL/Milvus Lite | BGE small English | 0.25 s | 7.02 s | 2.42 | 260,882,432 | 67,179,926 | 40,930 |
-| PostgreSQL/Milvus Lite | Multilingual MiniLM | 1.01 s | 4.57 s | 3.72 | 684,883,968 | 252,141,023 | 40,930 |
+| SQLite | BGE small English | 0.41 s | 6.31 s | 2.70 | 186,286,080 | 67,179,926 | 1,630,208 |
+| SQLite | Multilingual MiniLM | 2.89 s | 4.76 s | 3.57 | 314,720,256 | 252,141,023 | 1,630,208 |
+| PostgreSQL | BGE small English | 1.04 s | 15.09 s | 1.13 | 212,926,464 | 67,179,926 | 262,144 |
+| PostgreSQL | Multilingual MiniLM | 2.65 s | 6.73 s | 2.53 | 514,326,528 | 252,141,023 | 253,952 |
+| PostgreSQL/Milvus Lite | BGE small English | 3.16 s | 35.42 s | 0.48 | 97,452,032 | 67,179,926 | 42,658 |
+| PostgreSQL/Milvus Lite | Multilingual MiniLM | 1.87 s | 9.72 s | 1.75 | 458,096,640 | 252,141,023 | 42,658 |
 
 Local PostgreSQL query latency is dominated by testcontainer and `NullPool` connection setup and
 varied substantially between individual queries. Milvus Lite also opens short-lived local clients
