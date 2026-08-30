@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 
 import pytest
+from sqlalchemy import text
 
 from basic_memory.config import DatabaseBackend
 from basic_memory.schemas.search import SearchRetrievalMode
@@ -17,6 +18,7 @@ from semantic.multilingual_benchmark import (
     embedding_benchmark_config,
     embedding_model_case,
     summarize_retrieval,
+    vector_storage_size_bytes,
 )
 from semantic.multilingual_corpus import (
     MULTILINGUAL_CORPUS,
@@ -103,6 +105,21 @@ def test_directory_size_does_not_double_count_hardlinks(tmp_path) -> None:
     os.link(model_file, tmp_path / "snapshot-model.onnx")
 
     assert directory_size_bytes(tmp_path) == len(b"model-bytes")
+
+
+@pytest.mark.asyncio
+async def test_sqlite_vector_storage_excludes_unrelated_tables(sqlite_engine_factory) -> None:
+    engine, _ = sqlite_engine_factory
+    storage_case = benchmark_storage_case("sqlite")
+    vector_bytes_before = await vector_storage_size_bytes(engine, storage_case)
+
+    async with engine.begin() as connection:
+        await connection.execute(text("CREATE TABLE unrelated_payload (content BLOB NOT NULL)"))
+        await connection.execute(
+            text("INSERT INTO unrelated_payload (content) VALUES (zeroblob(1048576))")
+        )
+
+    assert await vector_storage_size_bytes(engine, storage_case) == vector_bytes_before
 
 
 def test_retrieval_summary_separates_ranking_and_threshold_failures() -> None:
