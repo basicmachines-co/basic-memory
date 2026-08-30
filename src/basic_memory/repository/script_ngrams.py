@@ -82,34 +82,77 @@ def script_run_grams(run: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def mixed_token_word_terms(text: str) -> tuple[str, ...]:
-    """Encode word fragments from tokens that also contain script characters."""
+    """Encode prefix-searchable word fragments and their order around script runs."""
     terms: list[str] = []
     for token in text.split():
         normalized_token = unicodedata.normalize("NFKC", token)
         if not any(is_script_search_character(character) for character in normalized_token):
             continue
 
-        word_fragment: list[str] = []
+        components: list[tuple[str, str]] = []
+        component_kind: str | None = None
+        component_characters: list[str] = []
         for character in normalized_token:
-            if is_script_search_character(character):
-                if word_fragment:
-                    fragment = "".join(word_fragment).casefold()
-                    terms.append(f"bmword{hashlib.sha256(fragment.encode()).hexdigest()}")
-                    word_fragment = []
+            if character in {"\u200c", "\u200d"}:
                 continue
-            if character.isalnum() or (
-                word_fragment and unicodedata.category(character) in {"Mn", "Mc", "Me"}
-            ):
-                word_fragment.append(character)
+            if component_characters and unicodedata.category(character) in {"Mn", "Mc", "Me"}:
+                component_characters.append(character)
                 continue
-            if word_fragment:
-                fragment = "".join(word_fragment).casefold()
-                terms.append(f"bmword{hashlib.sha256(fragment.encode()).hexdigest()}")
-                word_fragment = []
-        if word_fragment:
-            fragment = "".join(word_fragment).casefold()
-            terms.append(f"bmword{hashlib.sha256(fragment.encode()).hexdigest()}")
-    return tuple(terms)
+
+            next_kind = (
+                "script"
+                if is_script_search_character(character)
+                else "word"
+                if character.isalnum()
+                else None
+            )
+            if next_kind != component_kind and component_characters:
+                components.append((component_kind or "word", "".join(component_characters)))
+                component_characters = []
+            component_kind = next_kind
+            if next_kind is not None:
+                component_characters.append(character)
+        if component_characters:
+            components.append((component_kind or "word", "".join(component_characters)))
+
+        word_prefixes: dict[int, tuple[str, ...]] = {}
+        script_terms: dict[int, tuple[str, ...]] = {}
+        for index, (kind, value) in enumerate(components):
+            if kind == "word":
+                normalized_word = value.casefold()
+                prefixes = tuple(
+                    normalized_word[:length] for length in range(1, len(normalized_word) + 1)
+                )
+                word_prefixes[index] = prefixes
+                terms.extend(
+                    f"bmword{hashlib.sha256(prefix.encode()).hexdigest()}" for prefix in prefixes
+                )
+                continue
+
+            run = tuple(unit for script_run in script_runs(value) for unit in script_run)
+            script_terms[index] = (*run, *script_run_grams(run))
+
+        for index, ((first_kind, _), (second_kind, _)) in enumerate(
+            zip(components, components[1:], strict=False)
+        ):
+            if first_kind == "word" and second_kind == "script":
+                ordered_pairs = (
+                    f"word-script\0{prefix}\0{script_term}"
+                    for prefix in word_prefixes[index]
+                    for script_term in script_terms[index + 1]
+                )
+            elif first_kind == "script" and second_kind == "word":
+                ordered_pairs = (
+                    f"script-word\0{script_term}\0{prefix}"
+                    for script_term in script_terms[index]
+                    for prefix in word_prefixes[index + 1]
+                )
+            else:
+                continue
+            terms.extend(
+                f"bmseq{hashlib.sha256(pair.encode()).hexdigest()}" for pair in ordered_pairs
+            )
+    return tuple(dict.fromkeys(terms))
 
 
 def build_script_ngrams(*texts: str | None) -> str:

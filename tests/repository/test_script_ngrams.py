@@ -63,11 +63,12 @@ def test_build_script_ngrams_keeps_runs_from_matching_across_boundaries() -> Non
 
 
 def test_mixed_token_word_terms_encode_all_word_fragments() -> None:
-    assert mixed_token_word_terms("foo不適者bar ＡＢＣ適者") == (
-        "bmword2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
-        "bmwordfcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9",
-        "bmwordba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-    )
+    terms = mixed_token_word_terms("foo不適者bar ＡＢＣ適者")
+
+    assert "bmword2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae" in terms
+    assert "bmwordfcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9" in terms
+    assert "bmwordba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad" in terms
+    assert any(term.startswith("bmseq") for term in terms)
 
 
 def test_analyze_script_query_separates_word_and_ordered_script_terms() -> None:
@@ -84,52 +85,61 @@ def test_analyze_script_query_preserves_adjoining_word_and_script_token() -> Non
     query = analyze_script_query("foo適者bar")
 
     assert query.word_text is None
-    assert query.gram_phrases == (
-        ("適者",),
-        ("bmword2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",),
-        ("bmwordfcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9",),
-    )
+    assert query.gram_phrases[0] == ("適者",)
+    assert (
+        "bmword2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+    ) in query.gram_phrases
+    assert (
+        "bmwordfcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9",
+    ) in query.gram_phrases
+    assert any(phrase[0].startswith("bmseq") for phrase in query.gram_phrases)
 
 
 def test_analyze_script_query_preserves_punctuation_separated_mixed_token() -> None:
     query = analyze_script_query("foo-適者-bar")
 
     assert query.word_text is None
-    assert query.gram_phrases == (
-        ("適者",),
-        ("bmword2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",),
-        ("bmwordfcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9",),
-    )
+    assert query.gram_phrases[0] == ("適者",)
+    assert (
+        "bmword2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+    ) in query.gram_phrases
+    assert (
+        "bmwordfcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9",
+    ) in query.gram_phrases
+    assert any(phrase[0].startswith("bmseq") for phrase in query.gram_phrases)
 
 
 def test_analyze_script_query_does_not_require_script_substring_in_word_channel() -> None:
     query = analyze_script_query("foo適者")
 
     assert query.word_text is None
-    assert query.gram_phrases == (
-        ("適者",),
-        ("bmword2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",),
-    )
+    assert query.gram_phrases[0] == ("適者",)
+    assert (
+        "bmword2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+    ) in query.gram_phrases
+    assert any(phrase[0].startswith("bmseq") for phrase in query.gram_phrases)
 
 
 def test_analyze_script_query_preserves_compatibility_bytes_in_mixed_prefix() -> None:
     query = analyze_script_query("ＡＢＣ適者")
 
     assert query.word_text is None
-    assert query.gram_phrases == (
-        ("適者",),
-        ("bmwordba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",),
-    )
+    assert query.gram_phrases[0] == ("適者",)
+    assert (
+        "bmwordba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+    ) in query.gram_phrases
+    assert any(phrase[0].startswith("bmseq") for phrase in query.gram_phrases)
 
 
 def test_analyze_script_query_retains_trailing_word_in_auxiliary_channel() -> None:
     query = analyze_script_query("適者OpenAI")
 
     assert query.word_text is None
-    assert query.gram_phrases == (
-        ("適者",),
-        ("bmword7d3194f79e645c42e4396dda38be04766810ec6a00d00aced3ffc2a0a1f1a9ef",),
-    )
+    assert query.gram_phrases[0] == ("適者",)
+    assert (
+        "bmword7d3194f79e645c42e4396dda38be04766810ec6a00d00aced3ffc2a0a1f1a9ef",
+    ) in query.gram_phrases
+    assert any(phrase[0].startswith("bmseq") for phrase in query.gram_phrases)
 
 
 def test_analyze_script_query_preserves_explicit_boolean_semantics() -> None:
@@ -439,6 +449,64 @@ async def test_search_matches_script_substring_inside_longer_mixed_token(search_
     results = await search_repository.search("foo適者")
 
     assert [result.id for result in results] == [1312]
+
+
+@pytest.mark.asyncio
+async def test_search_preserves_prefix_matching_in_mixed_token(search_repository) -> None:
+    now = datetime.now(timezone.utc)
+    row = SearchIndexRow(
+        project_id=search_repository.project_id,
+        id=1320,
+        type="entity",
+        file_path="notes/mixed-prefix.md",
+        title="Mixed prefix",
+        content_stems="foobar不適者",
+        content_snippet="foobar不適者",
+        permalink="notes/mixed-prefix",
+        created_at=now,
+        updated_at=now,
+    )
+    await search_repository.index_item(row)
+
+    results = await search_repository.search("foo適者")
+
+    assert [result.id for result in results] == [1320]
+
+
+@pytest.mark.asyncio
+async def test_search_preserves_word_fragment_order_in_mixed_token(search_repository) -> None:
+    now = datetime.now(timezone.utc)
+    rows = [
+        SearchIndexRow(
+            project_id=search_repository.project_id,
+            id=1321,
+            type="entity",
+            file_path="notes/mixed-order-match.md",
+            title="Mixed order match",
+            content_stems="foo適者bar",
+            content_snippet="foo適者bar",
+            permalink="notes/mixed-order-match",
+            created_at=now,
+            updated_at=now,
+        ),
+        SearchIndexRow(
+            project_id=search_repository.project_id,
+            id=1322,
+            type="entity",
+            file_path="notes/mixed-order-reversed.md",
+            title="Mixed order reversed",
+            content_stems="bar適者foo",
+            content_snippet="bar適者foo",
+            permalink="notes/mixed-order-reversed",
+            created_at=now,
+            updated_at=now,
+        ),
+    ]
+    await search_repository.bulk_index_items(rows)
+
+    results = await search_repository.search("foo適者bar")
+
+    assert [result.id for result in results] == [1321]
 
 
 @pytest.mark.asyncio
