@@ -4,7 +4,7 @@ type: manpage
 section: 3
 name: search-notes
 summary: search the knowledge base by text, similarity, or metadata
-generated: hand
+generated: registry
 tool: search_notes
 verified: 0.21.6 mcp+cli
 ---
@@ -20,12 +20,12 @@ verified: 0.21.6 mcp+cli
 MCP:
 
 ```
-search_notes(query=None,
-             project=None, project_id=None, search_type=None,
-             note_types=None, entity_types=None, categories=None,
-             metadata_filters=None, tags=None, status=None, after_date=None,
-             min_similarity=None, search_all_projects=False,
-             page=1, page_size=10, output_format="text")
+search_notes(query=None, project=None, project_id=None,
+             search_all_projects=False, page=1, page_size=10,
+             search_type=None, output_format="text", note_types=None,
+             entity_types=None, categories=None, after_date=None,
+             metadata_filters=None, tags=None, status=None,
+             min_similarity=None)
 ```
 
 CLI:

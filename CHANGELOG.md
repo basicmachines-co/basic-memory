@@ -4,6 +4,15 @@
 
 ### Features
 
+- **#610**: The manual's SYNOPSIS blocks are now generated from the tool registry.
+  `just man-regen` renders the MCP call on every section-3 page from the schema
+  clients actually receive (required parameters first, then defaults, in schema
+  order) and a test holds the shipped blocks byte-equal to the rendering -- change
+  a tool signature without regenerating and CI points at the fix. Those pages
+  declare `generated: registry`; curated sections stay hand-owned. The manual also
+  gains `basic-memory-diagnostics(3)`, closing the one gap between the section-3
+  corpus and the tool registry.
+
 - **#610**: The manual ships in the package and is served over MCP. The 21 section-3
   pages (one per MCP tool -- `search-notes(3)`, `write-note(3)`, ...) now live in
   `src/basic_memory/man/man3/` as canonical, portable notes. The MCP server exposes

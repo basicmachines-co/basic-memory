@@ -4,7 +4,7 @@ type: manpage
 section: 3
 name: edit-note
 summary: 'edit a note in place: append, prepend, find/replace, or section surgery'
-generated: hand
+generated: registry
 tool: edit_note
 verified: 0.21.6 mcp+cli
 ---
@@ -20,11 +20,10 @@ verified: 0.21.6 mcp+cli
 MCP:
 
 ```
-edit_note(identifier, operation, content,
-          section=None, find_text=None, expected_replacements=None,
-          replace_subsections=None, metadata=None,
-          project=None, workspace=None, project_id=None,
-          output_format="text")
+edit_note(identifier, operation, content, project=None, workspace=None,
+          project_id=None, section=None, find_text=None,
+          expected_replacements=None, replace_subsections=None,
+          metadata=None, output_format="text")
 ```
 
 CLI:

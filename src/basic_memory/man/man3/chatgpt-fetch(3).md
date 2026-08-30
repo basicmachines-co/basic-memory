@@ -4,7 +4,7 @@ type: manpage
 section: 3
 name: chatgpt-fetch
 summary: OpenAI-actions-compatible document fetch adapter
-generated: hand
+generated: registry
 tool: fetch
 verified: 0.21.6 mcp
 ---

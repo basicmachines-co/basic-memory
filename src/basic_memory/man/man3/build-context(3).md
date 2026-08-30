@@ -4,7 +4,7 @@ type: manpage
 section: 3
 name: build-context
 summary: traverse the knowledge graph outward from a memory:// URL
-generated: hand
+generated: registry
 tool: build_context
 verified: 0.21.6 mcp
 ---
@@ -20,9 +20,8 @@ verified: 0.21.6 mcp
 MCP:
 
 ```
-build_context(url, depth=1, timeframe="7d", max_related=10,
-              project=None, project_id=None,
-              page=1, page_size=10, output_format="json")
+build_context(url, project=None, project_id=None, depth=1, timeframe="7d",
+              page=1, page_size=10, max_related=10, output_format="json")
 ```
 
 CLI:

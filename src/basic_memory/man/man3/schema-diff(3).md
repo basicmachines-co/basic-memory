@@ -4,7 +4,7 @@ type: manpage
 section: 3
 name: schema-diff
 summary: detect drift between a schema and actual note usage
-generated: hand
+generated: registry
 tool: schema_diff
 verified: 0.21.6 mcp
 ---

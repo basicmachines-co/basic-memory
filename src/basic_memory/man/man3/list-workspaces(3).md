@@ -4,7 +4,7 @@ type: manpage
 section: 3
 name: list-workspaces
 summary: list cloud workspaces available to the authenticated user
-generated: hand
+generated: registry
 tool: list_workspaces
 verified: 0.21.6 mcp+cli
 ---

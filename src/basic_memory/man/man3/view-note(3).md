@@ -4,7 +4,7 @@ type: manpage
 section: 3
 name: view-note
 summary: retrieve a note formatted for artifact display
-generated: hand
+generated: registry
 tool: view_note
 verified: 0.21.6 mcp
 ---

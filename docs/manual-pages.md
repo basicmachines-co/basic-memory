@@ -186,10 +186,12 @@ GOTCHAS, SEE ALSO, observations) survives — that ownership split is what the
 
 ## Roadmap
 
-- **Registry generator** — section-3 SYNOPSIS/PARAMETERS generated from the
-  MCP tool registry (docstrings + pydantic schemas), section-1 from Typer
-  help; the hand-written corpus is the template spec. Regenerate-and-diff in
-  CI becomes the drift gate.
+- **Registry generator (SYNOPSIS: shipped)** — `just man-regen` renders every
+  section-3 MCP SYNOPSIS block from the live tool registry and a test holds
+  the shipped blocks byte-equal to the rendering, so a tool change without a
+  regenerate fails CI. Those pages declare `generated: registry`. Still to
+  come: PARAMETERS from the schema descriptions, and section-1 from Typer
+  help — the hand-written corpus remains the template spec.
 - **Projects as consumers** — `bm man install --project <name>` copies the
   bundled pages into a project as notes, so `SEE ALSO` becomes traversable
   relations and the pages join search. (`bm man <topic>`, `bm man list`, the

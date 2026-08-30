@@ -4,7 +4,7 @@ type: manpage
 section: 3
 name: create-memory-project
 summary: create a new project, locally or in a cloud workspace
-generated: hand
+generated: registry
 tool: create_memory_project
 verified: 0.21.6 mcp+cli
 ---
@@ -20,9 +20,8 @@ verified: 0.21.6 mcp+cli
 MCP:
 
 ```
-create_memory_project(project_name, project_path,
-                      set_default=False, workspace=None,
-                      output_format="text")
+create_memory_project(project_name, project_path, set_default=False,
+                      workspace=None, output_format="text")
 ```
 
 CLI:

@@ -8,12 +8,14 @@ import pytest
 
 from basic_memory.man import (
     MAN_DIR,
-    ManPage,
     PageRef,
     bundled_pages,
+    extract_mcp_synopsis,
     find_page,
     parse_page_ref,
     render_index,
+    render_synopsis,
+    replace_mcp_synopsis,
 )
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools import __all__ as registered_tools
@@ -88,7 +90,7 @@ def test_bundled_pages_are_well_formed_and_sorted() -> None:
 # The section-3 corpus and the tool registry are meant to match one to one. Both
 # lists change deliberately; this pins the known gaps so a new tool without a page
 # (or a page for a retired tool) shows up here instead of going unnoticed.
-TOOLS_WITHOUT_PAGES = {"basic_memory_diagnostics"}
+TOOLS_WITHOUT_PAGES: set[str] = set()
 PAGES_WITHOUT_LOCAL_TOOLS = {"cloud_info"}  # hosted-only; see cloud-info(3)
 
 
@@ -99,37 +101,66 @@ def test_section_3_matches_the_tool_registry_except_known_gaps() -> None:
     assert documented - set(registered_tools) == PAGES_WITHOUT_LOCAL_TOOLS
 
 
-def _synopsis_parameters(page: ManPage) -> set[str]:
-    """Parameter names in the MCP call shown under SYNOPSIS, positional or keyword."""
-    synopsis = re.search(r"## SYNOPSIS\n(.*?)\n## ", page.body(), re.S)
-    assert synopsis is not None, f"{page.title} has no SYNOPSIS"
-    # Pages with a CLI form label the MCP block "MCP:"; MCP-only pages have one block.
-    call = re.search(r"MCP:\s*```\n(.*?)```", synopsis.group(1), re.S) or re.search(
-        r"```\n(.*?)```", synopsis.group(1), re.S
-    )
-    assert call is not None, f"{page.title} SYNOPSIS has no MCP call"
-    arguments = call.group(1)[call.group(1).find("(") + 1 : call.group(1).rfind(")")]
-    return set(re.findall(r"\b([a-z_][a-z0-9_]*)\b(?=\s*[=,)\n]|$)", arguments)) - {
-        "none",
-        "true",
-        "false",
+def test_render_synopsis_orders_required_first_and_wraps() -> None:
+    parameters = {
+        "required": ["query"],
+        "properties": {
+            "alpha": {"default": None},
+            "query": {"type": "string"},
+            "flag": {"default": False},
+            "mode": {"default": "text"},
+            "count": {"default": 10},
+        },
     }
+    assert (
+        render_synopsis("demo", parameters)
+        == 'demo(query, alpha=None, flag=False, mode="text", count=10)'
+    )
+
+    wide = {"required": [], "properties": {f"parameter_{i}": {"default": None} for i in range(9)}}
+    rendered = render_synopsis("demo_tool", wide)
+    assert all(len(line) <= 76 for line in rendered.splitlines())
+    assert rendered.splitlines()[1].startswith(" " * len("demo_tool("))
+    assert rendered.endswith(")")
+    assert render_synopsis("bare", {"properties": {}}) == "bare()"
+
+
+def test_replace_mcp_synopsis_touches_only_the_mcp_block() -> None:
+    labelled = "# t\n\n## SYNOPSIS\n\nMCP:\n\n```\nold()\n```\n\nCLI:\n\n```\nbm t\n```\n\n## DESCRIPTION\n"
+    bare = "# t\n\n## SYNOPSIS\n\n```\nold()\n```\n\n## DESCRIPTION\n"
+
+    replaced = replace_mcp_synopsis(labelled, "new(a, b=1)")
+    assert extract_mcp_synopsis(replaced) == "new(a, b=1)"
+    assert "```\nbm t\n```" in replaced  # the CLI block is not the generator's to rewrite
+    assert extract_mcp_synopsis(replace_mcp_synopsis(bare, "new()")) == "new()"
+    with pytest.raises(ValueError, match="no MCP SYNOPSIS block"):
+        replace_mcp_synopsis("# t\n\n## DESCRIPTION\n", "new()")
 
 
 @pytest.mark.asyncio
-async def test_section_3_synopsis_names_every_tool_parameter() -> None:
-    # The SYNOPSIS is the page's contract with the tool schema clients receive. A
-    # parameter added to a tool without updating its page is exactly the drift the
-    # manual exists to prevent, so it fails here rather than waiting for a reader.
+async def test_section_3_synopsis_is_exactly_the_registry_rendering() -> None:
+    # The MCP SYNOPSIS block is a mechanical section owned by the registry
+    # generator: byte-equal to the rendering of the schema clients receive. A tool
+    # change without regenerating the pages fails here, pointing at the fix.
     tools = {tool.name: tool for tool in await mcp.list_tools(run_middleware=False)}
 
     for page in bundled_pages():
         if page.section != 3 or page.tool not in tools:
             continue
-        schema = set(tools[page.tool].parameters["properties"])
-        documented = _synopsis_parameters(page)
-        assert schema - documented == set(), f"{page.title} SYNOPSIS is missing parameters"
-        assert documented - schema == set(), f"{page.title} SYNOPSIS names unknown parameters"
+        expected = render_synopsis(page.tool, tools[page.tool].parameters)
+        assert extract_mcp_synopsis(page.read()) == expected, (
+            f"{page.title} SYNOPSIS is stale; run `just man-regen` and commit the result"
+        )
+
+
+def test_registry_pages_declare_registry_ownership() -> None:
+    # generated: declares who may rewrite the mechanical sections. Every page whose
+    # tool this build registers is generator-managed; hosted-only pages stay hand.
+    for page in bundled_pages():
+        if page.section != 3:
+            continue
+        expected = "registry" if page.tool in set(registered_tools) else "hand"
+        assert page.generated == expected, f"{page.title} declares generated: {page.generated}"
 
 
 def test_section_3_links_resolve_to_bundled_pages() -> None:

@@ -4,7 +4,7 @@ type: manpage
 section: 3
 name: list-directory
 summary: browse project folders with depth and glob filtering
-generated: hand
+generated: registry
 tool: list_directory
 verified: 0.21.6 mcp
 ---
@@ -20,9 +20,9 @@ verified: 0.21.6 mcp
 MCP:
 
 ```
-list_directory(dir_name="/", depth=1, file_name_glob=None,
-               sort=None, page=1, page_size=10,
-               project=None, project_id=None, output_format="text")
+list_directory(dir_name="/", depth=1, file_name_glob=None, sort=None,
+               page=1, page_size=10, output_format="text", project=None,
+               project_id=None)
 ```
 
 ## DESCRIPTION
