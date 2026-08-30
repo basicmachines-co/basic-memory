@@ -251,19 +251,20 @@ class RuntimeMeasurements:
 
 def result_permalinks(
     results: Sequence[SearchIndexRow],
-    *,
-    required_chunk_text: str | None = None,
+    query: MultilingualQuery,
 ) -> tuple[str, ...]:
-    """Return ranked permalinks whose matched chunk satisfies the query oracle."""
+    """Return ranked permalinks, invalidating only a target that fails its chunk oracle."""
+    relevant_permalinks = set(query.relevant_permalinks)
     return tuple(
         result.permalink
         for result in results
         if result.permalink is not None
         and (
-            required_chunk_text is None
+            query.required_chunk_text is None
+            or result.permalink not in relevant_permalinks
             or (
                 result.matched_chunk_text is not None
-                and required_chunk_text in result.matched_chunk_text
+                and query.required_chunk_text in result.matched_chunk_text
             )
         )
     )

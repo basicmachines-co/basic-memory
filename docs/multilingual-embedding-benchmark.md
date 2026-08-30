@@ -6,7 +6,7 @@ Memory's default embedding model.
 
 ## Corpus and measurements
 
-`multilingual-retrieval-v1` contains 17 notes and 23 judged queries covering English, Chinese,
+`multilingual-retrieval-v2` contains 17 notes and 23 judged queries covering English, Chinese,
 Japanese, Korean, Arabic, Russian, Spanish, Thai, and mixed-language text. The query set includes
 same-language retrieval, English-to-non-English retrieval, mixed-language notes, a long-note
 chunk-boundary case, and four negative queries. The chunk-boundary judgments count a result only
@@ -67,8 +67,8 @@ model evidence; it is not a Cloud capacity test or a meaningful HNSW scale test.
 | Slice | Metric | BGE small English | Multilingual MiniLM |
 | --- | --- | ---: | ---: |
 | Overall | recall@5 | 0.9474 | 1.0000 |
-| Overall | MRR@10 | 0.8211 | 1.0000 |
-| Overall | wrong top | 0.2632 | 0.0000 |
+| Overall | MRR@10 | 0.8211 | 0.9737 |
+| Overall | wrong top | 0.2632 | 0.0526 |
 | Overall | accepted empty | 0.0000 | 0.1579 |
 | Negative queries | false positive | 0.7500 | 0.0000 |
 | Same-language | MRR@10 | 0.8333 | 1.0000 |
@@ -85,19 +85,20 @@ path on both backends:
 
 | Backend | Model | recall@5 | MRR@10 | Wrong top | Negative false positive |
 | --- | --- | ---: | ---: | ---: | ---: |
-| SQLite hybrid | BGE small English | 0.8947 | 0.7268 | 0.4211 | 0.7500 |
-| SQLite hybrid | Multilingual MiniLM | 1.0000 | 0.8947 | 0.2105 | 0.0000 |
+| SQLite hybrid | BGE small English | 0.8947 | 0.7531 | 0.3684 | 0.7500 |
+| SQLite hybrid | Multilingual MiniLM | 1.0000 | 0.8684 | 0.2632 | 0.0000 |
 | PostgreSQL hybrid | BGE small English | 0.8947 | 0.7807 | 0.3158 | 0.7500 |
-| PostgreSQL hybrid | Multilingual MiniLM | 1.0000 | 0.9211 | 0.1579 | 0.0000 |
+| PostgreSQL hybrid | Multilingual MiniLM | 1.0000 | 0.8947 | 0.2105 | 0.0000 |
 | PostgreSQL/Milvus hybrid | BGE small English | 0.8947 | 0.7807 | 0.3158 | 0.7500 |
-| PostgreSQL/Milvus hybrid | Multilingual MiniLM | 1.0000 | 0.9211 | 0.1579 | 0.0000 |
+| PostgreSQL/Milvus hybrid | Multilingual MiniLM | 1.0000 | 0.8947 | 0.2105 | 0.0000 |
 
 Cross-language hybrid recall@5 increased from 0.7143 to 1.0000 on both backends. Hybrid MRR does
 not reach vector-only MRR because a lexical rank can still move the correct semantic result below
 an FTS result; that is fusion behavior, not a disagreement between sqlite-vec and pgvector.
 
-In vector-only retrieval, MiniLM ranks every positive query first and rejects every negative query
-at 0.55, but that cutoff also hides three correctly ranked positive results: Japanese watcher
+In vector-only retrieval, MiniLM retrieves every positive query within the top five, ranks 18 of
+19 first, and rejects every negative query at 0.55. The Japanese mixed-language runbook query ranks
+second. The cutoff also hides three correctly ranked positive results: Japanese watcher
 reconciliation, English to Spanish sourdough retrieval, and the Japanese mixed-language runbook
 query. At 0.50, the cross-language miss is recovered without introducing a negative-query false
 positive; the Japanese same-language and mixed-language queries remain below the cutoff. A model
@@ -108,12 +109,12 @@ without measurement.
 
 | Backend | Model | Cold load | Index 17 notes | Notes/sec | Model RSS delta | Cache bytes | Vector storage |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| SQLite | BGE small English | 0.41 s | 6.31 s | 2.70 | 186,286,080 | 67,179,926 | 1,638,400 |
-| SQLite | Multilingual MiniLM | 2.89 s | 4.76 s | 3.57 | 314,720,256 | 252,141,023 | 1,638,400 |
-| PostgreSQL | BGE small English | 1.04 s | 15.09 s | 1.13 | 212,926,464 | 67,179,926 | 262,144 |
-| PostgreSQL | Multilingual MiniLM | 2.65 s | 6.73 s | 2.53 | 514,326,528 | 252,141,023 | 253,952 |
-| PostgreSQL/Milvus Lite | BGE small English | 3.16 s | 35.42 s | 0.48 | 97,452,032 | 67,179,926 | 149,154 |
-| PostgreSQL/Milvus Lite | Multilingual MiniLM | 1.87 s | 9.72 s | 1.75 | 458,096,640 | 252,141,023 | 140,962 |
+| SQLite | BGE small English | 0.22 s | 2.59 s | 6.56 | 229,113,856 | 67,179,926 | 1,638,400 |
+| SQLite | Multilingual MiniLM | 0.74 s | 1.21 s | 14.00 | 512,311,296 | 252,141,023 | 1,642,496 |
+| PostgreSQL | BGE small English | 0.18 s | 6.10 s | 2.79 | 244,563,968 | 67,179,926 | 270,336 |
+| PostgreSQL | Multilingual MiniLM | 0.72 s | 5.25 s | 3.24 | 593,084,416 | 252,141,023 | 262,144 |
+| PostgreSQL/Milvus Lite | BGE small English | 0.23 s | 5.50 s | 3.09 | 248,348,672 | 67,179,926 | 159,050 |
+| PostgreSQL/Milvus Lite | Multilingual MiniLM | 0.80 s | 4.60 s | 3.70 | 579,305,472 | 252,141,023 | 150,858 |
 
 Local PostgreSQL query latency is dominated by testcontainer and `NullPool` connection setup and
 varied substantially between individual queries. Milvus Lite also opens short-lived local clients

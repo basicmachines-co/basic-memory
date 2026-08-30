@@ -148,14 +148,8 @@ async def test_multilingual_embedding_benchmark(
         observations.append(
             RetrievalObservation(
                 query=query,
-                ranked_permalinks=result_permalinks(
-                    ranked_results,
-                    required_chunk_text=query.required_chunk_text,
-                ),
-                accepted_permalinks=result_permalinks(
-                    accepted_results,
-                    required_chunk_text=query.required_chunk_text,
-                ),
+                ranked_permalinks=result_permalinks(ranked_results, query),
+                accepted_permalinks=result_permalinks(accepted_results, query),
                 ranking_latency_seconds=ranking_latency,
                 accepted_latency_seconds=accepted_latency,
             )
