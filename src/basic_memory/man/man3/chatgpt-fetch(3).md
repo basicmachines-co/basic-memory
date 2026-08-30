@@ -23,6 +23,10 @@ fetch(id)
 
 ## DESCRIPTION
 
+**Availability:** `fetch` answers only OpenAI clients (ChatGPT connectors).
+Any other MCP client gets the error `Unsupported MCP client` without a
+search being run — use [[search-notes(3)]] and [[read-note(3)]] instead.
+
 Companion to [[chatgpt-search(3)]]: takes an `id` from a search result
 (permalink, title, or memory URL) and returns the full document as a
 JSON-in-text payload with `id`, `title`, `text` (the full markdown including

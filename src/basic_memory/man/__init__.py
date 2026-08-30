@@ -125,9 +125,20 @@ def bundled_pages() -> tuple[ManPage, ...]:
 
 
 def find_page(ref: PageRef) -> ManPage | None:
-    """Resolve a reference the way man(1) does: the named section, else the lowest."""
-    for page in bundled_pages():
-        if page.name == ref.name and (ref.section is None or page.section == ref.section):
+    """Resolve a reference the way man(1) does: the named section, else the lowest.
+
+    A page may be named differently from the tool it documents (chatgpt-search(3)
+    documents `search`), so the tool name is an alias for the page name. An exact
+    page name wins over an alias.
+    """
+    candidates = [
+        page for page in bundled_pages() if ref.section is None or page.section == ref.section
+    ]
+    for page in candidates:
+        if page.name == ref.name:
+            return page
+    for page in candidates:
+        if page.tool is not None and page.tool.replace("_", "-") == ref.name:
             return page
     return None
 

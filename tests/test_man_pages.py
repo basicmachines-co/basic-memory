@@ -52,6 +52,16 @@ def test_parse_page_ref_leaves_unknown_names_to_resolution(text: str) -> None:
     assert find_page(parse_page_ref(text)) is None
 
 
+def test_find_page_accepts_the_tool_name_as_an_alias() -> None:
+    # chatgpt-search(3) documents the `search` tool; memory://man/search(3) must land there.
+    by_alias = find_page(PageRef("search", 3))
+    without_section = find_page(PageRef("fetch", None))
+    exact = find_page(PageRef("search-notes", 3))
+    assert by_alias is not None and by_alias.name == "chatgpt-search"
+    assert without_section is not None and without_section.name == "chatgpt-fetch"
+    assert exact is not None and exact.name == "search-notes"
+
+
 def test_find_page_uses_named_section_or_lowest() -> None:
     assert find_page(PageRef("search-notes", 3)) is not None
     assert find_page(PageRef("search-notes", None)) is not None

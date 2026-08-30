@@ -45,7 +45,8 @@ Verified against playground/:
 
 ```
 move_note("playground/demo-cli-stdin",
-          destination_folder="playground/archive", project="manual")
+          destination_folder="playground/archive", project="manual",
+          output_format="json")
 # → {"moved": true,
 #    "source": "playground/demo-cli-stdin",
 #    "destination": "playground/archive/Demo - CLI stdin.md",
@@ -54,7 +55,7 @@ move_note("playground/demo-cli-stdin",
 
 ## GOTCHAS
 
-- [gotcha] A permalink pinned in frontmatter survives the move unchanged — links keep working, but the permalink no longer mirrors the file path (note the example above: file in archive/, permalink still playground/) #permalinks
+- [gotcha] By default a permalink pinned in frontmatter survives the move unchanged — links keep working, but the permalink no longer mirrors the file path (note the example above: file in archive/, permalink still playground/). With update_permalinks_on_move=True in the project config, or when the note had no permalink, the permalink is rewritten from the destination path and old memory:// links stop resolving #permalinks
 - [gotcha] destination_folder and destination_path are mutually exclusive, and destination_folder cannot be used for directory moves #parameters
 - [gotcha] There is no bm tool move-note CLI wrapper — moves are MCP-only (or plain mv + re-sync for local projects) #cli-parity
 

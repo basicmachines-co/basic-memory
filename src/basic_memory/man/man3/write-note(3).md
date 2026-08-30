@@ -83,6 +83,7 @@ write_note(
     project="manual",
     tags=["demo", "manpage-example"],
     content="...markdown with observations and [[relations]]...",
+    output_format="json",
 )
 # → {"action": "created", "permalink": "<workspace>/manual/playground/demo-pour-over-method", ...}
 ```

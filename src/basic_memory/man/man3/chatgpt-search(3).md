@@ -23,6 +23,10 @@ search(query)
 
 ## DESCRIPTION
 
+**Availability:** `search` answers only OpenAI clients (ChatGPT connectors).
+Any other MCP client gets the error `Unsupported MCP client` without a
+search being run — use [[search-notes(3)]] and [[read-note(3)]] instead.
+
 A minimal adapter for clients that expect the OpenAI actions search shape
 (ChatGPT connectors). Delegates to [[search-notes(3)]] with defaults
 (page 1, size 10) and re-encodes the response as a single text content item

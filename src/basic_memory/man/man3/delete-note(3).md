@@ -45,7 +45,8 @@ extension (`"docs"`, `"projects/2025"`).
 Verified against playground/ (create-then-delete):
 
 ```
-delete_note("playground/demo-doomed-note", project="manual")
+delete_note("playground/demo-doomed-note", project="manual",
+            output_format="json")
 # → {"deleted": true, "title": "Demo - Doomed Note",
 #    "permalink": "manual/playground/demo-doomed-note"}
 ```

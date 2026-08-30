@@ -66,6 +66,13 @@ async def test_any_spelling_of_a_page_reads_the_same_page(uri: str) -> None:
     assert "## GOTCHAS" in page
 
 
+@pytest.mark.asyncio
+async def test_tool_name_reaches_the_page_that_documents_it() -> None:
+    page = await _read("memory://man/fetch(3)")
+
+    assert page.startswith("---\ntitle: chatgpt-fetch(3)\n")
+
+
 def test_unknown_pages_point_at_the_index() -> None:
     with pytest.raises(ResourceError, match="No manual entry for nope; read memory://man"):
         manual_page("nope")
