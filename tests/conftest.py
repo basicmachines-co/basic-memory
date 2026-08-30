@@ -153,7 +153,9 @@ async def _reset_postgres_test_schema(engine: AsyncEngine, async_url: str) -> No
     from basic_memory.models.search import (
         CREATE_POSTGRES_SEARCH_INDEX_FTS,
         CREATE_POSTGRES_SEARCH_INDEX_FTS_CHUNKS_INDEX,
+        CREATE_POSTGRES_SEARCH_INDEX_FTS_CHUNKS_SCRIPT_NGRAMS_INDEX,
         CREATE_POSTGRES_SEARCH_INDEX_FTS_CHUNKS_TABLE,
+        CREATE_POSTGRES_SEARCH_INDEX_SCRIPT_NGRAMS_FTS,
         CREATE_POSTGRES_SEARCH_INDEX_METADATA,
         CREATE_POSTGRES_SEARCH_INDEX_PERMALINK,
         CREATE_POSTGRES_SEARCH_INDEX_TABLE,
@@ -168,8 +170,10 @@ async def _reset_postgres_test_schema(engine: AsyncEngine, async_url: str) -> No
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_TABLE)
         await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_FTS)
+        await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_SCRIPT_NGRAMS_FTS)
         await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_FTS_CHUNKS_TABLE)
         await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_FTS_CHUNKS_INDEX)
+        await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_FTS_CHUNKS_SCRIPT_NGRAMS_INDEX)
         await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_METADATA)
         await conn.execute(CREATE_POSTGRES_SEARCH_INDEX_PERMALINK)
         await conn.execute(CREATE_POSTGRES_SEARCH_VECTOR_CHUNKS_TABLE)

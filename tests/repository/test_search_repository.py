@@ -283,6 +283,32 @@ async def test_sqlite_text_search_matches_full_content_snippet(search_repository
 
 
 @pytest.mark.asyncio
+async def test_sqlite_word_query_keeps_terms_in_one_search_column(search_repository, search_entity):
+    """Adding the script channel must not broaden established word-query matches."""
+    if is_postgres_backend(search_repository):
+        pytest.skip("SQLite's per-column FTS matching is backend-specific")
+
+    search_row = SearchIndexRow(
+        id=search_entity.id,
+        type=SearchItemType.ENTITY.value,
+        title="alpha",
+        content_stems="beta",
+        content_snippet="beta",
+        permalink=search_entity.permalink,
+        file_path=search_entity.file_path,
+        entity_id=search_entity.id,
+        metadata={"note_type": search_entity.note_type},
+        created_at=search_entity.created_at,
+        updated_at=search_entity.updated_at,
+        project_id=search_repository.project_id,
+    )
+    await search_repository.index_item(search_row)
+
+    assert await search_repository.search(search_text="alpha beta") == []
+    assert await search_repository.count(search_text="alpha beta") == 0
+
+
+@pytest.mark.asyncio
 async def test_index_item_upsert_on_duplicate_permalink(search_repository, search_entity):
     """Test that indexing the same permalink twice uses upsert instead of failing.
 
@@ -1265,10 +1291,10 @@ async def test_multiword_query_relaxes_to_or_when_strict_misses(search_repositor
 
 
 @pytest.mark.asyncio
-async def test_cjk_compound_query_relaxes_with_backend_prefix_terms(
+async def test_cjk_compound_query_matches_with_or_without_relaxation(
     search_repository, search_entity
 ):
-    """Whitespace-separated CJK terms should match indexed CJK compounds when relaxed."""
+    """Script n-grams make whitespace-separated CJK terms strict matches."""
     row = SearchIndexRow(
         project_id=search_repository.project_id,
         id=search_entity.id,
@@ -1286,7 +1312,7 @@ async def test_cjk_compound_query_relaxes_with_backend_prefix_terms(
     await search_repository.index_item(row)
 
     strict = await search_repository.search(search_text="季度 报告")
-    assert strict == []
+    assert any(r.entity_id == search_entity.id for r in strict)
 
     results = await search_repository.search(search_text="季度 报告", allow_relaxed=True)
     assert any(r.entity_id == search_entity.id for r in results)

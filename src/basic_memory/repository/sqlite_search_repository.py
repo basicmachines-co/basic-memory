@@ -29,6 +29,7 @@ from basic_memory.repository.rerank_provider_factory import create_rerank_provid
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_query import relaxed_query_words
 from basic_memory.repository.search_repository_base import SearchRepositoryBase
+from basic_memory.repository.script_ngrams import analyze_script_query
 from basic_memory.repository.search_trace import (
     SearchTraceCollector,
     build_fts_page_stage,
@@ -40,6 +41,9 @@ from basic_memory.repository.semantic_vector_sync import StagedVectorDeletion
 from basic_memory.repository.semantic_vector_index_factory import build_vector_index_scope
 from basic_memory.repository.sqlite_vec_index import SQLiteVecIndex
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
+
+
+SQLITE_WORD_COLUMNS = "{title content_stems content_snippet}"
 
 
 class SQLiteSearchRepository(SearchRepositoryBase):
@@ -778,13 +782,15 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         search_item_types: Optional[List[SearchItemType]] = None,
         categories: Optional[List[str]] = None,
         metadata_filters: Optional[dict[str, Any]] = None,
-    ) -> tuple[str, str, dict[str, Any], str]:
+    ) -> tuple[str, str, dict[str, Any], str, str]:
         """Build SQLite FTS FROM/WHERE params shared by search and count."""
         conditions = []
         match_conditions = []
         params = {}
         order_by_clause = ""
         from_clause = "search_index"
+        score_expression = "bm25(search_index)"
+        preserve_match_score = False
 
         # Handle text search for title and content
         if search_text:
@@ -793,15 +799,45 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 # For wildcard searches, don't add any text conditions - return all results
                 pass
             else:
-                # Use _prepare_search_term to handle both Boolean and non-Boolean queries
-                processed_text = self._prepare_search_term(search_text.strip())
-                params["text"] = processed_text
-                # content_stems is capped for Postgres index-row compatibility, while
-                # SQLite stores the complete note body in its FTS5 content_snippet column.
-                match_conditions.append(
-                    "(search_index.title MATCH :text OR search_index.content_stems MATCH :text "
-                    "OR search_index.content_snippet MATCH :text)"
-                )
+                script_query = analyze_script_query(search_text.strip())
+                # Trigger: the query contains text from an unsegmented script.
+                # Why: the script channel needs one table-level MATCH alongside word fields.
+                # Outcome: mixed queries rank all terms together; word-only queries retain their
+                # established per-column matching and ranking behavior.
+                if script_query.gram_phrases:
+                    preserve_match_score = True
+                    params["text"] = ""
+                    params["script_text"] = ""
+                    if script_query.word_text:
+                        prepared_text = self._prepare_search_term(script_query.word_text)
+                        params["text"] = (
+                            f"(title: ({prepared_text}) OR "
+                            f"content_stems: ({prepared_text}) OR "
+                            f"content_snippet: ({prepared_text}))"
+                        )
+                    script_phrases = " AND ".join(
+                        f'"{" ".join(phrase)}"' for phrase in script_query.gram_phrases
+                    )
+                    script_clause = f"script_ngrams: ({script_phrases})"
+                    params["script_text"] = (
+                        f" AND ({script_clause})" if script_query.word_text else script_clause
+                    )
+                    match_conditions.append("search_index MATCH (:text || :script_text)")
+                else:
+                    word_text = (
+                        script_query.word_text
+                        if script_query.word_text is not None
+                        else search_text.strip()
+                    )
+                    processed_text = self._prepare_search_term(word_text)
+                    params["text"] = processed_text
+                    # content_stems is capped for Postgres index-row compatibility, while
+                    # SQLite stores the complete note body in its FTS5 content_snippet column.
+                    match_conditions.append(
+                        "(search_index.title MATCH :text OR "
+                        "search_index.content_stems MATCH :text OR "
+                        "search_index.content_snippet MATCH :text)"
+                    )
 
         # Handle title match search
         if title:
@@ -964,15 +1000,38 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                         conditions.append(f"{compare_expr} {operator} :{value_param}")
                     continue
 
+        # Trigger: SQLite rejects some Boolean combinations of MATCH predicates,
+        # including a word-field OR expression combined with the script channel.
+        # Why: each MATCH must be evaluated in an FTS-valid query context.
+        # Outcome: keep one outer MATCH for bm25 ranking and intersect the rest by rowid.
+        if len(match_conditions) > 1:
+            ranked_match, *additional_matches = match_conditions
+            conditions.extend(
+                f"search_index.rowid IN (SELECT rowid FROM search_index WHERE {match_condition})"
+                for match_condition in additional_matches
+            )
+            match_conditions = [ranked_match]
+
         # Trigger: SQLite FTS MATCH predicates combined with JOINs can fail with
         # "unable to use function MATCH in the requested context".
-        # Why: MATCH needs to run in an FTS-valid context.
-        # Outcome: evaluate MATCH clauses in an FTS subquery and filter outer rows by rowid.
+        # Why: script queries need MATCH and bm25 together for ranking, while legacy
+        # word-column OR predicates cannot evaluate bm25 in the same derived query.
+        # Outcome: rank script matches before joining metadata; retain the established
+        # rowid-filter path for word-only searches.
         if metadata_filters and match_conditions:
             match_where = " AND ".join(match_conditions)
-            conditions.append(
-                f"search_index.rowid IN (SELECT rowid FROM search_index WHERE {match_where})"
-            )
+            if preserve_match_score:
+                from_clause = (
+                    "(SELECT search_index.rowid AS rowid, search_index.*, "
+                    "bm25(search_index) AS fts_score "
+                    f"FROM search_index WHERE {match_where}) AS search_index "
+                    "JOIN entity ON search_index.entity_id = entity.id"
+                )
+                score_expression = "search_index.fts_score"
+            else:
+                conditions.append(
+                    f"search_index.rowid IN (SELECT rowid FROM search_index WHERE {match_where})"
+                )
         else:
             conditions.extend(match_conditions)
 
@@ -982,7 +1041,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
 
         # Build WHERE clause
         where_clause = " AND ".join(conditions) if conditions else "1=1"
-        return from_clause, where_clause, params, order_by_clause
+        return from_clause, where_clause, params, order_by_clause, score_expression
 
     @override
     async def search(
@@ -1033,7 +1092,13 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             return dispatched
 
         # --- FTS mode (SQLite-specific) ---
-        from_clause, where_clause, params, order_by_clause = await self._build_fts_query_parts(
+        (
+            from_clause,
+            where_clause,
+            params,
+            order_by_clause,
+            score_expression,
+        ) = await self._build_fts_query_parts(
             search_text=search_text,
             permalink=permalink,
             permalink_match=permalink_match,
@@ -1048,6 +1113,9 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         # set limit on search query
         params["limit"] = limit
         params["offset"] = offset
+        relaxed_search_text = search_text
+        if search_text and "script_text" in params:
+            relaxed_search_text = analyze_script_query(search_text.strip()).word_text
 
         sql = f"""
             SELECT
@@ -1066,7 +1134,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 search_index.category,
                 search_index.created_at,
                 search_index.updated_at,
-                bm25(search_index) as score
+                {score_expression} as score
             FROM {from_clause}
             WHERE {where_clause}
             ORDER BY score ASC {order_by_clause}
@@ -1089,10 +1157,14 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             # vector-only.
             # Outcome: one retry with OR-joined prefix terms; bm25 still
             # ranks multi-term matches first.
-            relaxed = self._relaxed_fts_text(search_text) if allow_relaxed and not rows else None
+            relaxed = (
+                self._relaxed_fts_text(relaxed_search_text) if allow_relaxed and not rows else None
+            )
             if relaxed and params.get("text"):
                 relaxed_fallback_used = True
-                params["text"] = relaxed
+                params["text"] = (
+                    f"{SQLITE_WORD_COLUMNS}: ({relaxed})" if "script_text" in params else relaxed
+                )
                 logger.debug(
                     "Strict SQLite FTS returned 0 results; retrying relaxed FTS query "
                     f"strict='{search_text}' relaxed='{relaxed}'"
@@ -1100,7 +1172,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 with logfire.span(
                     "search.relaxed_fts_retry",
                     backend="sqlite",
-                    token_count=len(relaxed_query_words(search_text) or ()),
+                    token_count=len(relaxed_query_words(relaxed_search_text) or ()),
                     limit=limit,
                     offset=offset,
                 ):
@@ -1187,7 +1259,13 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 min_similarity=min_similarity,
             )
 
-        from_clause, where_clause, params, _order_by_clause = await self._build_fts_query_parts(
+        (
+            from_clause,
+            where_clause,
+            params,
+            _order_by_clause,
+            _score_expression,
+        ) = await self._build_fts_query_parts(
             search_text=search_text,
             permalink=permalink,
             permalink_match=permalink_match,
@@ -1200,19 +1278,28 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         )
         sql = f"SELECT COUNT(*) FROM {from_clause} WHERE {where_clause}"
         logger.trace(f"Count {sql} params: {params}")
+        relaxed_search_text = search_text
+        if search_text and "script_text" in params:
+            relaxed_search_text = analyze_script_query(search_text.strip()).word_text
         try:
             async with db.scoped_session(self.session_maker) as session:
                 result = await session.execute(text(sql), params)
                 total = int(result.scalar_one())
                 relaxed = (
-                    self._relaxed_fts_text(search_text) if allow_relaxed and total == 0 else None
+                    self._relaxed_fts_text(relaxed_search_text)
+                    if allow_relaxed and total == 0
+                    else None
                 )
                 if relaxed and params.get("text"):
-                    params["text"] = relaxed
+                    params["text"] = (
+                        f"{SQLITE_WORD_COLUMNS}: ({relaxed})"
+                        if "script_text" in params
+                        else relaxed
+                    )
                     with logfire.span(
                         "search.count.relaxed_fts_retry",
                         backend="sqlite",
-                        token_count=len(relaxed_query_words(search_text) or ()),
+                        token_count=len(relaxed_query_words(relaxed_search_text) or ()),
                     ):
                         result = await session.execute(text(sql), params)
                         total = int(result.scalar_one())

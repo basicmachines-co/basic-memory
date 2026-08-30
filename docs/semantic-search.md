@@ -203,17 +203,21 @@ use the same model contract.
 
 ### Chinese, Japanese, Korean and other unsegmented scripts
 
-Keyword (full-text) search does not segment CJK text. Both backends tokenize a run of CJK
-characters as a single token — SQLite's FTS5 `unicode61` tokenizer and Postgres's default text
-search parser alike. Query terms are matched as prefixes, so `生存` finds a note containing
-`生存竞争` (the run starts with the query) but not one containing only `适者生存`, where the
-query sits in the middle of a run.
+Full-text search automatically adds an ordered script n-gram channel for writing systems that do
+not reliably separate words with spaces. It covers Han, Hiragana, Katakana, Hangul, Bopomofo,
+Thai, Lao, Tibetan, Myanmar, and Khmer text on both SQLite and Postgres. For example, `生存`
+matches the middle of `适者生存`, while a query with the characters in a different order does
+not. Mixed queries such as `OpenAI 适者生存` require both the word and script terms.
 
-Until a segmenting tokenizer option ships (tracked in
-[#1294](https://github.com/basicmachines-co/basic-memory/issues/1294)), use semantic or hybrid
-search with a multilingual embedding model for these languages — the Jina Chinese-English model
-or multilingual E5 configured above both work — and expect keyword search to match whole runs
-and run prefixes only.
+There is no language, tokenizer, or embedding setting to enable. New and edited notes are indexed
+automatically. After upgrading an existing local project, run `bm reindex --full --search` once
+to force every existing note through search indexing and populate its script terms. Hosted Cloud
+projects receive the same Postgres analysis through the managed full fleet reindex; Cloud users
+do not run a local command.
+
+This is lexical matching, independent of the configured embedding model. Vector and hybrid search
+quality in these languages still depends on choosing a multilingual embedding model such as the
+Jina Chinese-English model or multilingual E5 configured above.
 
 ### OpenAI
 

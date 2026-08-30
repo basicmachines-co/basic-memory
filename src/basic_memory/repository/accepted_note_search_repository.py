@@ -13,6 +13,8 @@ from basic_memory.repository.accepted_note_vector_cleanup import (
     ProjectIndexExternalVectorCleaner,
     delete_project_index_vector_rows,
 )
+from basic_memory.repository.postgres_fts_chunks import split_postgres_fts_chunks
+from basic_memory.repository.script_ngrams import build_script_ngrams
 
 type SearchIndexSqlValue = str | int | datetime | None
 type SearchIndexSqlParams = dict[str, SearchIndexSqlValue]
@@ -28,14 +30,15 @@ DELETE_ACCEPTED_NOTE_SEARCH_SQL = text(
 INSERT_ACCEPTED_NOTE_SEARCH_SQL = text(
     """
     INSERT INTO search_index (
-        id, title, content_stems, content_snippet, permalink, file_path, type, metadata,
+        id, title, content_stems, content_snippet, script_ngrams,
+        permalink, file_path, type, metadata,
         from_id, to_id, relation_type,
         entity_id, category,
         created_at, updated_at,
         project_id
     ) VALUES (
-        :id, :title, :content_stems, :content_snippet, :permalink, :file_path, :type,
-        :metadata,
+        :id, :title, :content_stems, :content_snippet, :script_ngrams,
+        :permalink, :file_path, :type, :metadata,
         NULL, NULL, NULL,
         :entity_id, NULL,
         :created_at, :updated_at,
@@ -47,14 +50,15 @@ INSERT_ACCEPTED_NOTE_SEARCH_SQL = text(
 UPSERT_ACCEPTED_NOTE_SEARCH_SQL = text(
     """
     INSERT INTO search_index (
-        id, title, content_stems, content_snippet, permalink, file_path, type, metadata,
+        id, title, content_stems, content_snippet, script_ngrams,
+        permalink, file_path, type, metadata,
         from_id, to_id, relation_type,
         entity_id, category,
         created_at, updated_at,
         project_id
     ) VALUES (
-        :id, :title, :content_stems, :content_snippet, :permalink, :file_path, :type,
-        CAST(:metadata AS jsonb),
+        :id, :title, :content_stems, :content_snippet, :script_ngrams,
+        :permalink, :file_path, :type, CAST(:metadata AS jsonb),
         NULL, NULL, NULL,
         :entity_id, NULL,
         :created_at, :updated_at,
@@ -65,6 +69,7 @@ UPSERT_ACCEPTED_NOTE_SEARCH_SQL = text(
         title = EXCLUDED.title,
         content_stems = EXCLUDED.content_stems,
         content_snippet = EXCLUDED.content_snippet,
+        script_ngrams = EXCLUDED.script_ngrams,
         file_path = EXCLUDED.file_path,
         type = EXCLUDED.type,
         metadata = EXCLUDED.metadata,
@@ -78,6 +83,42 @@ UPSERT_ACCEPTED_NOTE_SEARCH_SQL = text(
     """
 )
 
+INSERT_ACCEPTED_NOTE_FTS_CHUNKS_SQL = text(
+    """
+    INSERT INTO search_index_fts_chunks (
+        project_id,
+        search_index_id,
+        search_index_type,
+        chunk_index,
+        chunk_text,
+        script_ngrams
+    )
+    SELECT
+        :project_id,
+        chunk.search_index_id,
+        chunk.search_index_type,
+        chunk.chunk_index,
+        chunk.chunk_text,
+        chunk.script_ngrams
+    FROM jsonb_to_recordset(CAST(:chunks AS JSONB)) AS chunk(
+        search_index_id INTEGER,
+        search_index_type VARCHAR,
+        chunk_index INTEGER,
+        chunk_text TEXT,
+        script_ngrams TEXT
+    )
+    """
+)
+
+DELETE_ACCEPTED_NOTE_FTS_CHUNKS_SQL = text(
+    """
+    DELETE FROM search_index_fts_chunks
+    WHERE project_id = :project_id
+      AND search_index_id = :search_index_id
+      AND search_index_type = :search_index_type
+    """
+)
+
 
 def accepted_note_search_insert_statement(session: AsyncSession):
     """Return the insert statement supported by the active search table backend."""
@@ -88,13 +129,19 @@ def accepted_note_search_insert_statement(session: AsyncSession):
 
 def accepted_note_search_insert_params(
     row: AcceptedNoteSearchRow,
+    *,
+    include_full_content_grams: bool,
 ) -> SearchIndexSqlParams:
     """Build SQL parameters for one accepted-note search row."""
+    script_texts = (row.title, row.content_stems)
+    if include_full_content_grams:
+        script_texts = (*script_texts, row.content_snippet)
     return {
         "id": row.id,
         "title": row.title,
         "content_stems": row.content_stems,
         "content_snippet": row.content_snippet,
+        "script_ngrams": build_script_ngrams(*script_texts),
         "permalink": row.permalink,
         "file_path": row.file_path,
         "type": row.item_type,
@@ -134,10 +181,42 @@ class AcceptedNoteSearchRepository:
             DELETE_ACCEPTED_NOTE_SEARCH_SQL,
             {"entity_id": row.entity_id, "project_id": row.project_id},
         )
+        is_sqlite = session.get_bind().dialect.name == "sqlite"
         await session.execute(
             accepted_note_search_insert_statement(session),
-            accepted_note_search_insert_params(row),
+            accepted_note_search_insert_params(
+                row,
+                include_full_content_grams=is_sqlite,
+            ),
         )
+        if is_sqlite:
+            return
+
+        # An upsert can move an older permalink owner's chunks through ON UPDATE CASCADE.
+        # Clear the final parent key before installing this accepted note's replacements.
+        await session.execute(
+            DELETE_ACCEPTED_NOTE_FTS_CHUNKS_SQL,
+            {
+                "project_id": row.project_id,
+                "search_index_id": row.id,
+                "search_index_type": row.item_type,
+            },
+        )
+        chunks = [
+            {
+                "search_index_id": row.id,
+                "search_index_type": row.item_type,
+                "chunk_index": chunk_index,
+                "chunk_text": chunk_text,
+                "script_ngrams": build_script_ngrams(chunk_text),
+            }
+            for chunk_index, chunk_text in split_postgres_fts_chunks(row.content_snippet)
+        ]
+        if chunks:
+            await session.execute(
+                INSERT_ACCEPTED_NOTE_FTS_CHUNKS_SQL,
+                {"project_id": row.project_id, "chunks": json.dumps(chunks)},
+            )
 
     async def delete_entity(
         self,

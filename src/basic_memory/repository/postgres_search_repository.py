@@ -21,6 +21,7 @@ from basic_memory.repository.rerank_provider import RerankProvider
 from basic_memory.repository.rerank_provider_factory import create_rerank_provider
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_query import relaxed_query_words, relaxation_word_tokens
+from basic_memory.repository.script_ngrams import analyze_script_query, build_script_ngrams
 from basic_memory.repository.semantic_chunking import VectorChunkRecord
 from basic_memory.repository.search_repository_base import (
     SearchRepositoryBase,
@@ -42,31 +43,15 @@ from basic_memory.repository.semantic_vector_index_factory import (
     resolve_semantic_vector_index_name,
 )
 from basic_memory.repository.pgvector_index import PgVectorIndex
+from basic_memory.repository.postgres_fts_chunks import split_postgres_fts_chunks
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 
-POSTGRES_FTS_CHUNK_SIZE = 8_000
-# PostgreSQL ignores lexemes at 2 KiB and above. A 2,048-character overlap is
-# therefore conservative for every indexable lexeme, including multi-byte text:
-# any token split at one 8,000-character edge is complete in the next chunk.
-POSTGRES_FTS_CHUNK_OVERLAP = 2_048
 _TSQUERY_OPERAND_PATTERN = re.compile(r"'(?:''|[^'])*'(?::\*)?|[^\s&|!()]+")
 _TSQUERY_WORD_PATTERN = re.compile(r"[^\W_]+(?:'[^\W_]+)?", re.UNICODE)
 _QUOTED_QUERY_PATTERN = re.compile(r'"([^"]*)"')
 _BOOLEAN_WORDS = frozenset({"AND", "OR", "NOT"})
 _TSQUERY_METACHARACTERS = frozenset("&|!:<>")
-
-
-def _iter_fts_chunks(content: str | None) -> list[tuple[int, str]]:
-    """Split full note text without losing an indexable lexeme at a chunk edge."""
-    if not content:
-        return []
-
-    step = POSTGRES_FTS_CHUNK_SIZE - POSTGRES_FTS_CHUNK_OVERLAP
-    return [
-        (chunk_index, content[start : start + POSTGRES_FTS_CHUNK_SIZE])
-        for chunk_index, start in enumerate(range(0, len(content), step))
-    ]
 
 
 def _tsquery_operands(processed_text: str) -> list[tuple[str, str]]:
@@ -282,6 +267,10 @@ class PostgresSearchRepository(SearchRepositoryBase):
             # Serialize JSON for raw SQL
             insert_data = search_index_row.to_insert(serialize_json=True)
             insert_data["project_id"] = self.project_id
+            insert_data["script_ngrams"] = build_script_ngrams(
+                search_index_row.title,
+                search_index_row.content_stems,
+            )
             insert_data = _strip_nul_from_row(insert_data)
 
             # Use upsert to handle race conditions during parallel indexing
@@ -291,13 +280,13 @@ class PostgresSearchRepository(SearchRepositoryBase):
             await session.execute(
                 text("""
                     INSERT INTO search_index (
-                        id, title, content_stems, content_snippet, permalink, file_path, type, metadata,
+                        id, title, content_stems, content_snippet, script_ngrams, permalink, file_path, type, metadata,
                         from_id, to_id, relation_type,
                         entity_id, category,
                         created_at, updated_at,
                         project_id
                     ) VALUES (
-                        :id, :title, :content_stems, :content_snippet, :permalink, :file_path, :type, :metadata,
+                        :id, :title, :content_stems, :content_snippet, :script_ngrams, :permalink, :file_path, :type, :metadata,
                         :from_id, :to_id, :relation_type,
                         :entity_id, :category,
                         :created_at, :updated_at,
@@ -308,6 +297,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                         title = EXCLUDED.title,
                         content_stems = EXCLUDED.content_stems,
                         content_snippet = EXCLUDED.content_snippet,
+                        script_ngrams = EXCLUDED.script_ngrams,
                         file_path = EXCLUDED.file_path,
                         type = EXCLUDED.type,
                         metadata = EXCLUDED.metadata,
@@ -359,9 +349,10 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 "search_index_type": row.type,
                 "chunk_index": chunk_index,
                 "chunk_text": chunk_text.replace("\x00", ""),
+                "script_ngrams": build_script_ngrams(chunk_text.replace("\x00", "")),
             }
             for row in search_index_rows
-            for chunk_index, chunk_text in _iter_fts_chunks(row.content_snippet)
+            for chunk_index, chunk_text in split_postgres_fts_chunks(row.content_snippet)
         ]
         if not chunks:
             return
@@ -373,19 +364,22 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     search_index_id,
                     search_index_type,
                     chunk_index,
-                    chunk_text
+                    chunk_text,
+                    script_ngrams
                 )
                 SELECT
                     :project_id,
                     chunk.search_index_id,
                     chunk.search_index_type,
                     chunk.chunk_index,
-                    chunk.chunk_text
+                    chunk.chunk_text,
+                    chunk.script_ngrams
                 FROM jsonb_to_recordset(CAST(:chunks AS JSONB)) AS chunk(
                     search_index_id INTEGER,
                     search_index_type VARCHAR,
                     chunk_index INTEGER,
-                    chunk_text TEXT
+                    chunk_text TEXT,
+                    script_ngrams TEXT
                 )
             """),
             {"project_id": self.project_id, "chunks": json.dumps(chunks)},
@@ -901,6 +895,10 @@ class PostgresSearchRepository(SearchRepositoryBase):
             for row in search_index_rows:
                 insert_data = row.to_insert(serialize_json=True)
                 insert_data["project_id"] = self.project_id
+                insert_data["script_ngrams"] = build_script_ngrams(
+                    row.title,
+                    row.content_stems,
+                )
                 insert_data_list.append(_strip_nul_from_row(insert_data))
 
             # Use upsert to handle race conditions during parallel indexing
@@ -910,13 +908,13 @@ class PostgresSearchRepository(SearchRepositoryBase):
             await session.execute(
                 text("""
                     INSERT INTO search_index (
-                        id, title, content_stems, content_snippet, permalink, file_path, type, metadata,
+                        id, title, content_stems, content_snippet, script_ngrams, permalink, file_path, type, metadata,
                         from_id, to_id, relation_type,
                         entity_id, category,
                         created_at, updated_at,
                         project_id
                     ) VALUES (
-                        :id, :title, :content_stems, :content_snippet, :permalink, :file_path, :type, :metadata,
+                        :id, :title, :content_stems, :content_snippet, :script_ngrams, :permalink, :file_path, :type, :metadata,
                         :from_id, :to_id, :relation_type,
                         :entity_id, :category,
                         :created_at, :updated_at,
@@ -927,6 +925,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                         title = EXCLUDED.title,
                         content_stems = EXCLUDED.content_stems,
                         content_snippet = EXCLUDED.content_snippet,
+                        script_ngrams = EXCLUDED.script_ngrams,
                         file_path = EXCLUDED.file_path,
                         type = EXCLUDED.type,
                         metadata = EXCLUDED.metadata,
@@ -977,6 +976,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         order_by_clause = ""
         from_clause = "search_index"
         document_vector_sql: str | None = None
+        script_tsqueries: list[str] = []
 
         # Handle text search for title and content using tsvector
         if search_text:
@@ -984,29 +984,30 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 # For wildcard searches, don't add any text conditions
                 pass
             else:
-                # Prepare search term for tsquery
-                processed_text = self._prepare_search_term(search_text.strip())
-                params["text"] = processed_text
-                probe_texts = [processed_text]
-                if allow_relaxed:
-                    relaxed_text = self._relaxed_tsquery_text(search_text)
-                    if relaxed_text:
-                        probe_texts.append(relaxed_text)
+                script_query = analyze_script_query(search_text.strip())
+                if script_query.word_text:
+                    processed_text = self._prepare_search_term(script_query.word_text)
+                    params["text"] = processed_text
+                    probe_texts = [processed_text]
+                    if allow_relaxed:
+                        relaxed_text = self._relaxed_tsquery_text(script_query.word_text)
+                        if relaxed_text:
+                            probe_texts.append(relaxed_text)
 
-                candidate_operands: dict[str, None] = {}
-                for probe_text in probe_texts:
-                    for operand, _representative in _tsquery_operands(probe_text):
-                        candidate_operands.setdefault(operand, None)
-                if candidate_operands:
-                    params["text_candidate"] = " | ".join(candidate_operands)
+                    candidate_operands: dict[str, None] = {}
+                    for probe_text in probe_texts:
+                        for operand, _representative in _tsquery_operands(probe_text):
+                            candidate_operands.setdefault(operand, None)
+                    if candidate_operands:
+                        params["text_candidate"] = " | ".join(candidate_operands)
 
-                    # Trigger: PostgreSQL can extract a required-positive query tree.
-                    # Why: OR-ing its operands is a safe indexed superset even when
-                    # terms live in different chunks. Pure/optional negation returns
-                    # ``T`` and must retain all project rows for correct semantics.
-                    # Outcome: ordinary and required-positive NOT queries use both
-                    # GIN indexes; only genuinely unindexable negation scans the project.
-                    from_clause = """
+                        # Trigger: PostgreSQL can extract a required-positive query tree.
+                        # Why: OR-ing its operands is a safe indexed superset even when
+                        # terms live in different chunks. Pure/optional negation returns
+                        # ``T`` and must retain all project rows for correct semantics.
+                        # Outcome: ordinary and required-positive NOT queries use both
+                        # GIN indexes; only genuinely unindexable negation scans the project.
+                        from_clause = """
                             search_index JOIN (
                                 SELECT
                                     candidate_parent.project_id,
@@ -1039,9 +1040,69 @@ class PostgresSearchRepository(SearchRepositoryBase):
                               ON fts_candidate.project_id = search_index.project_id
                              AND fts_candidate.id = search_index.id
                              AND fts_candidate.type = search_index.type
+                        """
+                    document_vector_sql = self._document_fts_vector_sql(probe_texts, params)
+                    word_condition = f"{document_vector_sql} @@ to_tsquery('english', :text)"
+                    if script_query.gram_phrases:
+                        # Trigger: PostgreSQL's English dictionary removes every word term.
+                        # Why: an empty word query must not suppress a required script match.
+                        # Outcome: only mixed queries treat the empty word channel as neutral;
+                        # word-only stopword queries retain their established empty result.
+                        word_condition = (
+                            f"(numnode(to_tsquery('english', :text)) = 0 OR {word_condition})"
+                        )
+                    conditions.append(word_condition)
+
+                if script_query.gram_phrases:
+                    script_tsqueries = [
+                        " <-> ".join(f"'{gram}'" for gram in phrase)
+                        for phrase in script_query.gram_phrases
+                    ]
+                    for index, script_tsquery in enumerate(script_tsqueries):
+                        params[f"script_text_{index}"] = script_tsquery
+                    # Trigger: a query contains script grams, with or without word terms.
+                    # Why: every script phrase is required, while an English word clause can
+                    # reduce to an empty tsquery after dictionary processing.
+                    # Outcome: start from the parent and child script GIN indexes, then apply
+                    # every word and script predicate below.
+                    params["script_candidate_text"] = " | ".join(
+                        f"({script_tsquery})" for script_tsquery in script_tsqueries
+                    )
+                    from_clause = """
+                        search_index JOIN (
+                            SELECT
+                                script_parent.project_id,
+                                script_parent.id,
+                                script_parent.type
+                            FROM search_index AS script_parent
+                            WHERE script_parent.project_id = :project_id
+                              AND script_parent.script_ngrams_index_col
+                                  @@ to_tsquery('simple', :script_candidate_text)
+                            UNION
+                            SELECT
+                                script_candidate.project_id,
+                                script_candidate.search_index_id AS id,
+                                script_candidate.search_index_type AS type
+                            FROM search_index_fts_chunks AS script_candidate
+                            WHERE script_candidate.project_id = :project_id
+                              AND script_candidate.script_ngrams_index_col
+                                  @@ to_tsquery('simple', :script_candidate_text)
+                        ) AS fts_candidate
+                          ON fts_candidate.project_id = search_index.project_id
+                         AND fts_candidate.id = search_index.id
+                         AND fts_candidate.type = search_index.type
                     """
-                document_vector_sql = self._document_fts_vector_sql(probe_texts, params)
-                conditions.append(f"{document_vector_sql} @@ to_tsquery('english', :text)")
+                    conditions.extend(
+                        "(search_index.script_ngrams_index_col "
+                        f"@@ to_tsquery('simple', :script_text_{index}) OR EXISTS ("
+                        "SELECT 1 FROM search_index_fts_chunks AS script_chunk "
+                        "WHERE script_chunk.project_id = search_index.project_id "
+                        "AND script_chunk.search_index_id = search_index.id "
+                        "AND script_chunk.search_index_type = search_index.type "
+                        "AND script_chunk.script_ngrams_index_col "
+                        f"@@ to_tsquery('simple', :script_text_{index})))"
+                        for index in range(len(script_tsqueries))
+                    )
 
         # Handle title search
         if title:
@@ -1199,9 +1260,9 @@ class PostgresSearchRepository(SearchRepositoryBase):
 
         # Build SQL with ts_rank() for scoring
         # Note: If no text search, score will be NULL, so we use COALESCE to default to 0
-        if search_text and search_text.strip() and search_text.strip() != "*":
-            assert document_vector_sql is not None
-            score_expr = (
+        score_parts: list[str] = []
+        if document_vector_sql is not None:
+            score_parts.append(
                 "GREATEST("
                 f"ts_rank({document_vector_sql}, to_tsquery('english', :text)), "
                 "ts_rank(search_index.textsearchable_index_col, to_tsquery('english', :text)), "
@@ -1214,8 +1275,23 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 "AND fts_chunk.textsearchable_index_col "
                 "@@ to_tsquery('english', :text)), 0))"
             )
-        else:
-            score_expr = "0"
+        score_parts.extend(
+            "GREATEST("
+            "ts_rank(search_index.script_ngrams_index_col, "
+            f"to_tsquery('simple', :script_text_{index})), "
+            "COALESCE((SELECT MAX(ts_rank(script_rank.script_ngrams_index_col, "
+            f"to_tsquery('simple', :script_text_{index}))) "
+            "FROM search_index_fts_chunks AS script_rank "
+            "WHERE script_rank.project_id = search_index.project_id "
+            "AND script_rank.search_index_id = search_index.id "
+            "AND script_rank.search_index_type = search_index.type "
+            "AND script_rank.script_ngrams_index_col "
+            f"@@ to_tsquery('simple', :script_text_{index})), 0))"
+            for index in range(len(script_tsqueries))
+        )
+        # Each condition above is required, so every query component should contribute to
+        # relevance. Taking only the strongest rank makes additional script runs invisible.
+        score_expr = " + ".join(score_parts) if score_parts else "0"
 
         return from_clause, where_clause, params, order_by_clause, score_expr
 
