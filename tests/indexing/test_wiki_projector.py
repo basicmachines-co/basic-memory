@@ -58,18 +58,21 @@ def _snapshot(
                 title="Overview",
                 note_type="Note",
                 checksum="overview-checksum",
+                partition_position=0,
             ),
             WikiSourceNote(
                 path="guides/setup.md",
                 title="Setup",
                 note_type="Guide",
                 checksum="setup-checksum",
+                partition_position=3,
             ),
             WikiSourceNote(
                 path="guides/deep/details.md",
                 title="Details",
                 note_type="Guide",
                 checksum="details-checksum",
+                partition_position=0,
             ),
         ),
         changes=(
@@ -156,6 +159,7 @@ def test_source_note_rejects_missing_metadata() -> None:
         title="Note",
         note_type="Note",
         checksum="checksum",
+        partition_position=0,
     )
 
     with pytest.raises(ValueError, match="requires a title"):
@@ -164,6 +168,8 @@ def test_source_note_rejects_missing_metadata() -> None:
         replace(note, note_type=" ")
     with pytest.raises(ValueError, match="requires a checksum"):
         replace(note, checksum=" ")
+    with pytest.raises(ValueError, match="position cannot be negative"):
+        replace(note, partition_position=-1)
 
 
 @pytest.mark.parametrize(
@@ -185,7 +191,26 @@ def test_source_note_rejects_nonportable_path_components(path: str) -> None:
             title="Note",
             note_type="Note",
             checksum="checksum",
+            partition_position=0,
         )
+
+
+@pytest.mark.parametrize("path", ("index.md/note.md", "guides/LOG.md/note.md"))
+def test_source_note_rejects_reserved_wiki_directory_components(path: str) -> None:
+    with pytest.raises(ValueError, match="reserved Wiki directory name"):
+        WikiSourceNote(
+            path=path,
+            title="Note",
+            note_type="Note",
+            checksum="checksum",
+            partition_position=0,
+        )
+
+
+@pytest.mark.parametrize("scope", ("index.md", "guides/LOG.md"))
+def test_request_rejects_reserved_wiki_directory_scopes(scope: str) -> None:
+    with pytest.raises(ValueError, match="reserved Wiki directory name"):
+        _request(scopes=(scope,))
 
 
 def test_source_change_rejects_invalid_contract_fields() -> None:
@@ -432,6 +457,7 @@ def test_requested_scopes_cannot_omit_a_changed_note_scope() -> None:
         title="Secret note",
         note_type="Note",
         checksum="secret-checksum",
+        partition_position=3,
     )
     changed = WikiSourceChange(
         partition_position=3,
@@ -561,6 +587,43 @@ def test_full_rebuild_excludes_scopes_after_requested_watermark() -> None:
     }
 
 
+def test_projection_excludes_notes_after_requested_watermark() -> None:
+    snapshot = replace(
+        _snapshot(output_watermark=0),
+        notes=(
+            WikiSourceNote(
+                path="included.md",
+                title="Included",
+                note_type="Note",
+                checksum="included",
+                partition_position=1,
+            ),
+            WikiSourceNote(
+                path="future/note.md",
+                title="Future",
+                note_type="Note",
+                checksum="future",
+                partition_position=2,
+            ),
+        ),
+        changes=(),
+    )
+
+    plan = plan_wiki_projection(
+        _request(
+            position=1,
+            reason=WikiProjectionReason.manual_rebuild,
+            scopes=(),
+        ),
+        snapshot,
+    )
+
+    assert {write.path for write in plan.writes} == {"index.md", "log.md"}
+    root_index = next(write.content.decode() for write in plan.writes if write.path == "index.md")
+    assert "[[included|Included]]" in root_index
+    assert "future" not in root_index.lower()
+
+
 def test_moved_change_requires_previous_path() -> None:
     with pytest.raises(ValueError, match="requires previous_path"):
         plan_wiki_projection(
@@ -630,6 +693,7 @@ def test_absolute_paths_are_rejected_at_the_contract_boundary() -> None:
             title="Outside",
             note_type="Note",
             checksum="checksum",
+            partition_position=0,
         )
 
 
@@ -641,6 +705,7 @@ def test_windows_drive_paths_are_rejected_at_the_contract_boundary(path: str) ->
             title="Outside",
             note_type="Note",
             checksum="checksum",
+            partition_position=0,
         )
 
 
@@ -663,6 +728,7 @@ def test_wikilink_delimiters_are_rejected_at_the_contract_boundary(path: str) ->
             title="Unsupported",
             note_type="Note",
             checksum="checksum",
+            partition_position=0,
         )
 
 
@@ -674,6 +740,7 @@ def test_non_markdown_note_paths_are_rejected(path: str) -> None:
             title="Unsupported",
             note_type="Note",
             checksum="checksum",
+            partition_position=0,
         )
 
 
@@ -684,13 +751,26 @@ def test_parent_segments_are_rejected_at_the_contract_boundary() -> None:
             title="Outside",
             note_type="Note",
             checksum="checksum",
+            partition_position=0,
         )
 
 
 def test_projection_order_is_deterministic_for_case_only_names() -> None:
     notes = (
-        WikiSourceNote(path="foo.md", title="same", note_type="Note", checksum="lower"),
-        WikiSourceNote(path="Foo.md", title="Same", note_type="Note", checksum="upper"),
+        WikiSourceNote(
+            path="foo.md",
+            title="same",
+            note_type="Note",
+            checksum="lower",
+            partition_position=0,
+        ),
+        WikiSourceNote(
+            path="Foo.md",
+            title="Same",
+            note_type="Note",
+            checksum="upper",
+            partition_position=0,
+        ),
     )
     snapshot = WikiProjectionSnapshot(
         project_id="project-88",
@@ -728,6 +808,7 @@ def test_projection_escapes_dynamic_markdown_structure() -> None:
                 title=injected_title,
                 note_type="Note",
                 checksum="unsafe",
+                partition_position=1,
             ),
         ),
         changes=(

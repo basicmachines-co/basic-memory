@@ -89,9 +89,12 @@ class WikiSourceNote:
     title: str
     note_type: str
     checksum: str
+    partition_position: int
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "path", _normalize_note_path(self.path))
+        if self.partition_position < 0:
+            raise ValueError("Wiki source note position cannot be negative")
         if not self.title.strip():
             raise ValueError(f"Wiki source note {self.path} requires a title")
         if not self.note_type.strip():
@@ -319,15 +322,16 @@ def plan_wiki_projection(
             ),
         )
 
-    scopes = _projection_scopes(request, snapshot, changes, new_changes)
-    existing_by_path = {
-        document.path.casefold(): document for document in snapshot.reserved_documents
-    }
     notes = tuple(
         note
         for note in snapshot.notes
+        if note.partition_position <= request.through_partition_position
         if PurePosixPath(note.path).name.lower() not in RESERVED_WIKI_FILENAMES
     )
+    scopes = _projection_scopes(request, snapshot, notes, changes, new_changes)
+    existing_by_path = {
+        document.path.casefold(): document for document in snapshot.reserved_documents
+    }
     rendered: dict[str, bytes] = {}
     for scope in scopes:
         rendered[_reserved_path(scope, "index.md")] = _render_index(
@@ -414,11 +418,12 @@ def plan_wiki_projection(
 def _projection_scopes(
     request: WikiProjectionRequest,
     snapshot: WikiProjectionSnapshot,
+    notes: tuple[WikiSourceNote, ...],
     changes: tuple[WikiSourceChange, ...],
     new_changes: tuple[WikiSourceChange, ...],
 ) -> tuple[str, ...]:
     if request.is_full_rebuild:
-        paths = [note.path for note in snapshot.notes]
+        paths = [note.path for note in notes]
         paths.extend(document.path for document in snapshot.reserved_documents)
         paths.extend(change.path for change in changes)
         paths.extend(change.previous_path for change in changes if change.previous_path is not None)
@@ -599,6 +604,11 @@ def _normalize_note_path(path: str) -> str:
     if "::" in normalized or any(character in normalized for character in "\r\n[]|`<>"):
         raise ValueError(f"Wiki note path contains unsupported Markdown delimiters: {path}")
     _validate_portable_path_components(normalized, path_kind="note path", source=path)
+    _reject_reserved_wiki_directory_components(
+        PurePosixPath(normalized).parts[:-1],
+        path_kind="note path",
+        source=path,
+    )
     return normalized
 
 
@@ -609,7 +619,22 @@ def _normalize_scope(scope: str) -> str:
     if "::" in normalized or any(character in normalized for character in "\x00\r\n[]|`<>"):
         raise ValueError(f"Wiki scope contains unsupported Markdown delimiters: {scope}")
     _validate_portable_path_components(normalized, path_kind="scope", source=scope)
+    _reject_reserved_wiki_directory_components(
+        PurePosixPath(normalized).parts,
+        path_kind="scope",
+        source=scope,
+    )
     return normalized
+
+
+def _reject_reserved_wiki_directory_components(
+    components: tuple[str, ...],
+    *,
+    path_kind: str,
+    source: str,
+) -> None:
+    if any(component.casefold() in RESERVED_WIKI_FILENAMES for component in components):
+        raise ValueError(f"Wiki {path_kind} contains a reserved Wiki directory name: {source}")
 
 
 def _validate_portable_path_components(
