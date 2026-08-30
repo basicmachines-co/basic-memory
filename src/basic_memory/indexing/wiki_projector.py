@@ -11,9 +11,15 @@ from pathlib import PurePosixPath, PureWindowsPath
 
 OKF_VERSION = "0.2"
 WIKI_PROFILE = "wiki/1"
+WIKI_PROJECTOR_VERSION = "wiki/1.0.0"
 WIKI_PROJECTOR_NAME = "Basic Memory Wiki Projector"
 WIKI_PROJECTOR_SOURCE = "wiki_projector"
 RESERVED_WIKI_FILENAMES = frozenset({"index.md", "log.md"})
+WINDOWS_RESERVED_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"}
+    | {f"COM{number}" for number in range(1, 10)}
+    | {f"LPT{number}" for number in range(1, 10)}
+)
 
 
 class WikiProjectionReason(StrEnum):
@@ -59,8 +65,8 @@ class WikiProjectionRequest:
             raise ValueError("Wiki projection requires a project_id")
         if self.through_partition_position < 0:
             raise ValueError("Wiki projection position cannot be negative")
-        if not self.projector_version.strip():
-            raise ValueError("Wiki projection requires a projector_version")
+        if self.projector_version != WIKI_PROJECTOR_VERSION:
+            raise ValueError(f"Wiki projection requires projector_version {WIKI_PROJECTOR_VERSION}")
         normalized_scopes = tuple(
             sorted({_normalize_scope(scope) for scope in self.requested_scopes})
         )
@@ -596,7 +602,20 @@ def _normalize_note_path(path: str) -> str:
 
 
 def _normalize_scope(scope: str) -> str:
-    return _normalize_relative_path(scope)
+    normalized = _normalize_relative_path(scope)
+    if not normalized:
+        return ""
+    if "::" in normalized or any(character in normalized for character in "\x00\r\n[]|`<>"):
+        raise ValueError(f"Wiki scope contains unsupported Markdown delimiters: {scope}")
+    for component in PurePosixPath(normalized).parts:
+        if any(character in component for character in ':"?*'):
+            raise ValueError(f"Wiki scope contains a Windows-invalid character: {scope}")
+        if component.endswith((".", " ")):
+            raise ValueError(f"Wiki scope contains a non-portable path component: {scope}")
+        stem = component.split(".", 1)[0].upper()
+        if stem in WINDOWS_RESERVED_NAMES:
+            raise ValueError(f"Wiki scope contains a reserved device name: {scope}")
+    return normalized
 
 
 def _normalize_relative_path(path: str) -> str:

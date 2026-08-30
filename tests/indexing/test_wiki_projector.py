@@ -15,6 +15,7 @@ from basic_memory.indexing.wiki_projector import (
     WikiProjectionResult,
     WikiProjectionSnapshot,
     WikiProjectionState,
+    WIKI_PROJECTOR_VERSION,
     WikiReservedDocument,
     WikiSourceChange,
     WikiSourceNote,
@@ -34,7 +35,7 @@ def _request(
     return WikiProjectionRequest(
         project_id="project-88",
         through_partition_position=position,
-        projector_version="wiki/1.0.0",
+        projector_version=WIKI_PROJECTOR_VERSION,
         reason=reason,
         requested_scopes=scopes,
     )
@@ -116,14 +117,33 @@ def test_projection_request_rejects_invalid_contract_fields() -> None:
         replace(request, project_id=" ")
     with pytest.raises(ValueError, match="cannot be negative"):
         replace(request, through_partition_position=-1)
-    with pytest.raises(ValueError, match="requires a projector_version"):
+    with pytest.raises(ValueError, match="requires projector_version wiki/1.0.0"):
         replace(request, projector_version=" ")
+    with pytest.raises(ValueError, match="requires projector_version wiki/1.0.0"):
+        replace(request, projector_version="wiki/2.0.0")
 
 
 def test_projection_request_normalizes_and_deduplicates_scopes() -> None:
     request = _request(scopes=("guides\\deep", "guides/deep", ""))
 
     assert request.requested_scopes == ("", "guides/deep")
+
+
+@pytest.mark.parametrize(
+    "scope",
+    (
+        "bad|scope",
+        "bad::scope",
+        "bad\nscope",
+        "bad\x00scope",
+        "bad:scope",
+        "CON",
+        "guides/trailing.",
+    ),
+)
+def test_projection_request_rejects_nonportable_scopes(scope: str) -> None:
+    with pytest.raises(ValueError, match="Wiki (path|scope)"):
+        _request(scopes=(scope,))
 
 
 def test_source_note_rejects_missing_metadata() -> None:
