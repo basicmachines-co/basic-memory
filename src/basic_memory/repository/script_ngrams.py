@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 
 _SCRIPT_BOUNDARY = "bm_script_boundary"
+MIXED_WORD_PREFIX_LIMIT = 64
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,41 +117,52 @@ def mixed_token_word_terms(text: str) -> tuple[str, ...]:
             components.append((component_kind or "word", "".join(component_characters)))
 
         word_prefixes: dict[int, tuple[str, ...]] = {}
-        script_terms: dict[int, tuple[str, ...]] = {}
         for index, (kind, value) in enumerate(components):
-            if kind == "word":
-                normalized_word = value.casefold()
-                prefixes = tuple(
-                    normalized_word[:length] for length in range(1, len(normalized_word) + 1)
-                )
-                word_prefixes[index] = prefixes
-                terms.extend(
-                    f"bmword{hashlib.sha256(prefix.encode()).hexdigest()}" for prefix in prefixes
-                )
+            if kind != "word":
                 continue
 
-            run = tuple(unit for script_run in script_runs(value) for unit in script_run)
-            script_terms[index] = (*run, *script_run_grams(run))
-
-        for index, ((first_kind, _), (second_kind, _)) in enumerate(
-            zip(components, components[1:], strict=False)
-        ):
-            if first_kind == "word" and second_kind == "script":
-                ordered_pairs = (
-                    f"word-script\0{prefix}\0{script_term}"
-                    for prefix in word_prefixes[index]
-                    for script_term in script_terms[index + 1]
-                )
-            elif first_kind == "script" and second_kind == "word":
-                ordered_pairs = (
-                    f"script-word\0{script_term}\0{prefix}"
-                    for script_term in script_terms[index]
-                    for prefix in word_prefixes[index + 1]
-                )
-            else:
-                continue
+            normalized_word = value.casefold()
+            prefix_count = min(len(normalized_word), MIXED_WORD_PREFIX_LIMIT)
+            prefixes = tuple(normalized_word[:length] for length in range(1, prefix_count + 1))
+            word_prefixes[index] = prefixes
             terms.extend(
-                f"bmseq{hashlib.sha256(pair.encode()).hexdigest()}" for pair in ordered_pairs
+                f"bmword{hashlib.sha256(prefix.encode()).hexdigest()}" for prefix in prefixes
+            )
+            if len(normalized_word) > MIXED_WORD_PREFIX_LIMIT:
+                terms.append(f"bmwordexact{hashlib.sha256(normalized_word.encode()).hexdigest()}")
+
+        # A word's direction and ordinal distance from the nearest script component preserve
+        # complete component order without multiplying every prefix by every script gram.
+        after_distance = 0
+        has_script_before = False
+        for index, (kind, _) in enumerate(components):
+            if kind == "script":
+                after_distance = 0
+                has_script_before = True
+                continue
+            if not has_script_before:
+                continue
+            after_distance += 1
+            terms.extend(
+                "bmpos" + hashlib.sha256(f"after\0{after_distance}\0{prefix}".encode()).hexdigest()
+                for prefix in word_prefixes[index]
+            )
+
+        before_distance = 0
+        has_script_after = False
+        for index in range(len(components) - 1, -1, -1):
+            kind, _ = components[index]
+            if kind == "script":
+                before_distance = 0
+                has_script_after = True
+                continue
+            if not has_script_after:
+                continue
+            before_distance += 1
+            terms.extend(
+                "bmpos"
+                + hashlib.sha256(f"before\0{before_distance}\0{prefix}".encode()).hexdigest()
+                for prefix in word_prefixes[index]
             )
     return tuple(dict.fromkeys(terms))
 
