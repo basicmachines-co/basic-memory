@@ -321,23 +321,23 @@ def plan_wiki_projection(
         new_changes,
         repair_complete_projection=projector_only_advance,
     )
-    note_by_path = {note.path.casefold(): note.path for note in notes}
-    scope_by_casefold: dict[str, str] = {}
+    note_by_path = {_portable_path_key(note.path): note.path for note in notes}
+    scope_by_portable_path: dict[str, str] = {}
     for scope in scopes:
-        folded_scope = scope.casefold()
-        if existing_note_path := note_by_path.get(folded_scope):
+        portable_scope = _portable_path_key(scope)
+        if existing_note_path := note_by_path.get(portable_scope):
             raise ValueError(
                 "Wiki projection scope collides with an existing source note path: "
                 f"{scope}, {existing_note_path}"
             )
-        if existing_scope := scope_by_casefold.get(folded_scope):
+        if existing_scope := scope_by_portable_path.get(portable_scope):
             raise ValueError(
-                "Wiki projection scopes must be unique when compared case-insensitively: "
+                "Wiki projection scopes must be unique when compared as portable paths: "
                 f"{existing_scope}, {scope}"
             )
-        scope_by_casefold[folded_scope] = scope
+        scope_by_portable_path[portable_scope] = scope
     existing_by_path = {
-        document.path.casefold(): document for document in snapshot.reserved_documents
+        _portable_path_key(document.path): document for document in snapshot.reserved_documents
     }
     rendered: dict[str, bytes] = {}
     for scope in scopes:
@@ -360,7 +360,7 @@ def plan_wiki_projection(
             reason="reserved path is not owned by the Wiki Projector",
         )
         for path in sorted(rendered)
-        if (existing := existing_by_path.get(path.casefold())) is not None
+        if (existing := existing_by_path.get(_portable_path_key(path))) is not None
         and not existing.projector_owned
     )
     if conflicts:
@@ -388,7 +388,7 @@ def plan_wiki_projection(
     created = 0
     updated = 0
     for path, content in sorted(rendered.items()):
-        existing = existing_by_path.get(path.casefold())
+        existing = existing_by_path.get(_portable_path_key(path))
         if existing is not None and (
             existing.content == content
             or (
@@ -731,9 +731,14 @@ def _require_unique_paths(
 ) -> None:
     paths = [getattr(value, "path") for value in values]
     if not case_sensitive:
-        paths = [path.casefold() for path in paths]
+        paths = [_portable_path_key(path) for path in paths]
     if len(paths) != len(set(paths)):
         raise ValueError(f"Wiki projection snapshot has duplicate {label} paths")
+
+
+def _portable_path_key(path: str) -> str:
+    """Compare paths the way normalization-insensitive filesystems do."""
+    return unicodedata.normalize("NFC", path).casefold()
 
 
 def _reserved_path(scope: str, filename: str) -> str:

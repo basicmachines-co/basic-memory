@@ -286,18 +286,25 @@ def test_snapshot_rejects_case_folded_duplicate_reserved_paths() -> None:
         replace(_snapshot(), reserved_documents=(lower, upper))
 
 
-def test_projection_rejects_case_folded_duplicate_scopes() -> None:
+@pytest.mark.parametrize(
+    ("first_scope", "second_scope"),
+    (("Foo", "foo"), ("caf\u00e9", "cafe\u0301")),
+)
+def test_projection_rejects_nonportable_duplicate_scopes(
+    first_scope: str,
+    second_scope: str,
+) -> None:
     snapshot = replace(
         _snapshot(),
         notes=(
             WikiSourceNote(
-                path="Foo/one.md",
+                path=f"{first_scope}/one.md",
                 title="One",
                 note_type="Note",
                 checksum="one-checksum",
             ),
             WikiSourceNote(
-                path="foo/two.md",
+                path=f"{second_scope}/two.md",
                 title="Two",
                 note_type="Note",
                 checksum="two-checksum",
@@ -305,11 +312,19 @@ def test_projection_rejects_case_folded_duplicate_scopes() -> None:
         ),
     )
 
-    with pytest.raises(ValueError, match="unique when compared case-insensitively"):
+    with pytest.raises(ValueError, match="unique when compared as portable paths"):
         plan_wiki_projection(
             _request(reason=WikiProjectionReason.manual_rebuild, scopes=()),
             snapshot,
         )
+
+
+def test_snapshot_rejects_unicode_normalized_duplicate_reserved_paths() -> None:
+    composed = _reserved("caf\u00e9/index.md", b"composed")
+    decomposed = _reserved("cafe\u0301/index.md", b"decomposed")
+
+    with pytest.raises(ValueError, match="duplicate reserved document paths"):
+        replace(_snapshot(), reserved_documents=(composed, decomposed))
 
 
 def test_projection_rejects_scope_that_collides_with_source_note_path() -> None:
