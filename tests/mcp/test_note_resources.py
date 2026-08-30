@@ -252,6 +252,40 @@ async def test_workspace_qualified_uris_route_through_their_project(
 
 
 @pytest.mark.asyncio
+async def test_workspace_routes_survive_disabled_project_prefixes(
+    app, test_project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # permalinks_include_project=False drops only local project-name collisions;
+    # cloud permalinks stay workspace-qualified regardless of the flag, so a
+    # detected workspace route must still open that route's client.
+    class StubConfig:
+        permalinks_include_project = False
+        projects = {test_project.name: test_project.path}
+
+    class StubConfigManager:
+        config = StubConfig()
+
+    monkeypatch.setattr(notes_module, "ConfigManager", StubConfigManager)
+
+    async def detected(identifier, config, context=None):
+        return "team-paul/main"
+
+    monkeypatch.setattr(notes_module, "detect_project_from_memory_url_prefix", detected)
+    routes: list[str | None] = []
+    real_get_project_client = notes_module.get_project_client
+
+    def recording(project, context=None, project_id=None):
+        routes.append(project)
+        return real_get_project_client(project, context, project_id=project_id)
+
+    monkeypatch.setattr(notes_module, "get_project_client", recording)
+    with pytest.raises(ResourceError):
+        await note_resource(project="team-paul", path="main/team/note")
+
+    assert routes == ["team-paul/main"]
+
+
+@pytest.mark.asyncio
 async def test_unprefixed_permalinks_ignore_project_name_collisions(
     app, test_project, monkeypatch: pytest.MonkeyPatch
 ) -> None:

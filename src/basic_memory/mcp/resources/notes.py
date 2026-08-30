@@ -19,6 +19,7 @@ from basic_memory.mcp.resources.man import manual_page
 from basic_memory.mcp.resources.project_info import project_info
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import call_get, call_post
+from basic_memory.utils import generate_permalink
 
 NOTE_TEMPLATE = "memory://{project}/{path*}"
 
@@ -35,19 +36,26 @@ class NoteNotFoundError(ResourceError):
 async def _route_for(identifier: str, context: Context | None) -> str | None:
     """The project route the URI's prefix names, or None for the default client.
 
-    With permalinks_include_project=False the first segment is a directory even
-    when it collides with a configured project's name — the active project owns
-    unprefixed permalinks, so no pre-routing happens at all. Otherwise the
-    canonical prefix detection decides, covering configured local projects and
-    workspace-qualified cloud routes alike: the client must be opened for the
-    URI's own project, because a cloud project needs its own transport.
+    The canonical prefix detection decides, covering configured local projects
+    and workspace-qualified cloud routes alike: the client must be opened for
+    the URI's own project, because a cloud project needs its own transport.
+
+    One refinement: with permalinks_include_project=False a *local* project
+    match is a directory collision — the active project owns unprefixed
+    permalinks — so it is dropped. Workspace-qualified cloud routes keep their
+    workspace/project segments regardless of that flag, so they still route.
     """
     config = ConfigManager().config
-    if not config.permalinks_include_project:
-        return None
-    return await detect_project_from_memory_url_prefix(
+    route = await detect_project_from_memory_url_prefix(
         f"memory://{identifier}", config, context=context
     )
+    if route is None or config.permalinks_include_project:
+        return route
+    requested = generate_permalink(route)
+    for configured_name in config.projects:
+        if generate_permalink(configured_name) == requested:
+            return None
+    return route
 
 
 async def read_note_markdown(identifier: str, context: Context | None) -> str:
