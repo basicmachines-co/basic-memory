@@ -108,6 +108,31 @@ def test_upgrade_backfills_permalink_in_pre_release_change_table(
         )
         connection.execute(
             """
+            INSERT INTO project (
+                id,
+                external_id,
+                name,
+                permalink,
+                path,
+                is_active,
+                created_at,
+                updated_at,
+                partition_position
+            ) VALUES (
+                1,
+                'project-1',
+                'Project 1',
+                'project-1',
+                '/project-1',
+                1,
+                '2026-08-29 12:00:00',
+                '2026-08-29 12:00:00',
+                0
+            )
+            """
+        )
+        connection.execute(
+            """
             CREATE TABLE accepted_project_note_change (
                 id INTEGER PRIMARY KEY,
                 project_id INTEGER NOT NULL,
@@ -166,8 +191,21 @@ def test_upgrade_backfills_permalink_in_pre_release_change_table(
         permalink = connection.execute(
             "SELECT permalink FROM accepted_project_note_change WHERE id = 1"
         ).fetchone()
+        partition_position = connection.execute(
+            "SELECT partition_position FROM project WHERE id = 1"
+        ).fetchone()
+        [next_partition_position] = connection.execute(
+            """
+            UPDATE project
+            SET partition_position = partition_position + 1
+            WHERE id = 1
+            RETURNING partition_position
+            """
+        ).fetchone()
     finally:
         connection.close()
 
     assert column[3] == 1
     assert permalink == ("note-legacy",)
+    assert partition_position == (1,)
+    assert next_partition_position == 2

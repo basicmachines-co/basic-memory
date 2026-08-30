@@ -69,6 +69,29 @@ def _create_missing_indexes(existing_indexes: set[str]) -> None:
             )
 
 
+def _reconcile_project_partition_heads() -> None:
+    # Some pre-release databases retained journal rows while the project head
+    # was absent or reset. The durable journal is authoritative: the next
+    # accepted mutation must claim a position strictly above every retained row.
+    op.execute(
+        sa.text(
+            """
+            UPDATE project
+            SET partition_position = (
+                SELECT MAX(accepted_project_note_change.partition_position)
+                FROM accepted_project_note_change
+                WHERE accepted_project_note_change.project_id = project.id
+            )
+            WHERE partition_position < (
+                SELECT MAX(accepted_project_note_change.partition_position)
+                FROM accepted_project_note_change
+                WHERE accepted_project_note_change.project_id = project.id
+            )
+            """
+        )
+    )
+
+
 def upgrade() -> None:
     """Repair tenants stamped while the preceding revision was still pre-release."""
     connection = op.get_bind()
@@ -138,6 +161,7 @@ def upgrade() -> None:
         if index["name"] is not None
     }
     _create_missing_indexes(existing_indexes)
+    _reconcile_project_partition_heads()
 
 
 def downgrade() -> None:
