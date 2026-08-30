@@ -63,10 +63,8 @@ bm project add manual --cloud \
 
 ## GOTCHAS
 
-- [bug] On a local MCP server with OAuth-only credentials, the workspace parameter is silently dropped: the create routes to the local API instead of the cloud workspace — either failing on the cloud-style path or silently creating a local project. Fixed in #981 (pending release): selectors now route to the cloud proxy, or fail fast without credentials — see basicmachines-co/basic-memory#954 #routing
 - [gotcha] Cloud project paths are tenant-relative ("/manual"); passing one to a local create attempts a literal filesystem mkdir #paths
 - [gotcha] Re-creating an existing name is not an error — check already_exists in the json response #semantics
-- [gotcha] Projects created out-of-band are invisible to running MCP sessions until restart — see basicmachines-co/basic-memory#956 (fixed in #981, pending release) #caching
 
 ## SEE ALSO
 

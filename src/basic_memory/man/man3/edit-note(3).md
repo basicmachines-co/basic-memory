@@ -111,7 +111,6 @@ edit_note("playground/demo-cli-stdin", "find_replace", "standard input",
 ```
 
 ## GOTCHAS
-- [gotcha] On the current cloud deployment (0.21.6-era), content added via edit_note is not searchable until a reindex — write_note indexes immediately but edits leave the FTS index stale; verified fixed at HEAD (local edit→search round-trips instantly) — see basicmachines-co/basic-memory-cloud#1173 #version-skew #indexing
 
 - [gotcha] find_replace searches the whole file including YAML frontmatter — title and permalink fields can be silently rewritten if your find_text matches them; count occurrences with expected_replacements to guard #frontmatter
 - [gotcha] The CLI defaults --expected-replacements to 1, but the MCP tool defaults to no validation at all — the same edit can fail via CLI and succeed via MCP #cli-parity

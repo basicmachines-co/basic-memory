@@ -142,6 +142,14 @@ def test_section_3_links_resolve_to_bundled_pages() -> None:
             )
 
 
+@pytest.mark.parametrize("stale", ["pending release", "unreleased", "fixed at HEAD"])
+def test_pages_carry_no_release_pending_claims(stale: str) -> None:
+    # The pages ship with the code, so a fix described as pending or unreleased is
+    # already in every package that carries the page; such a note is always stale.
+    for page in bundled_pages():
+        assert stale not in page.body().lower(), f"{page.title} still says '{stale}'"
+
+
 def test_render_index_marks_pages_whose_tool_this_server_lacks() -> None:
     index = render_index(bundled_pages(), registered_tools=frozenset(registered_tools))
     hosted_only = find_page(PageRef("cloud-info", 3))

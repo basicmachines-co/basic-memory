@@ -41,10 +41,6 @@ cloud_info()
 # → "# Basic Memory Cloud (optional) ..." markdown
 ```
 
-## GOTCHAS
-
-- [bug] The OSS discount line currently renders a literal {{OSS_DISCOUNT_CODE}} placeholder instead of the code — see basicmachines-co/basic-memory#958 (fixed in #971, pending release) #templating
-
 ## SEE ALSO
 
 - see_also [[list-workspaces(3)]]

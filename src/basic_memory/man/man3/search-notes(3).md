@@ -95,13 +95,11 @@ bm tool search-notes "conflict error" --project manual --page-size 2
 ```
 
 ## GOTCHAS
-- [gotcha] The categories filter is accepted and documented on v0.21.6 but silently ignored — the implementation (#908) is on main, unreleased; the API drops unknown filter fields instead of rejecting them, so there is no error when filtering doesn't happen #version-skew
 
 - [gotcha] Hybrid and vector searches return total: 0 even with results — counting would cost a second semantic pass, so only has_more is meaningful there; exact totals exist only in text/title/permalink modes #pagination
 - [gotcha] Score semantics differ by mode: FTS rank scores in text mode, similarity scores in hybrid/vector — don't compare across modes #scoring
 - [gotcha] The CLI takes QUERY positionally; there is no --query flag #cli-parity
 - [gotcha] search_all_projects is silently ignored when a project is specified #routing
-- [bug] Routing by project_id fails for projects created after the session's workspace index was built — see basicmachines-co/basic-memory#956 (fixed in #981, pending release) #routing
 
 ## SEE ALSO
 

@@ -67,8 +67,6 @@ build_context("man3/write-note-3", project="manual", depth=1,
 
 ## GOTCHAS
 
-- [bug] Unresolved forward references render as [[None]] instead of the stored target name, in both text and json output — see basicmachines-co/basic-memory#955 (fixed in #981, pending release) #rendering
-- [bug] Pattern URLs (folder/*) match nothing on cloud workspace projects: the pattern is workspace-qualified but index permalinks are project-relative — see basicmachines-co/basic-memory#957 (fixed in #981 — client patterns follow the workspace contextvar, server falls back past the prefix for legacy rows; pending release) #patterns
 - [gotcha] Default output_format is json here, unlike most sibling tools that default to text #output
 - [gotcha] depth is measured in graph steps where one hop consumes two levels (relation + entity) — depth=1 returns direct neighbors only #traversal
 - [pattern] Capture memory:// URLs in conversation summaries and handoffs; build_context on that URL is the cheapest way to restore working state #workflow

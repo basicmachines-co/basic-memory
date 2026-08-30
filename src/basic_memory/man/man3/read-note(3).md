@@ -99,7 +99,6 @@ read_note("xyzzy definitely missing note", project="dev")
 - [gotcha] page/page_size never chunk the note — an exact match returns the full note regardless; they only page the miss-suggestion listing #pagination
 - [gotcha] The CLI identifier is a positional argument, unlike write-note where everything is a flag #cli-parity
 - [gotcha] Exact-title lookup walks its own fixed-size internal pages, so a tiny page_size cannot displace an exact match out of the lookup window #pagination
-- [bug] The fuzzy-fallback path re-resolves the project by project_id against the session's cached workspace index; for projects created after session start it errors instead of returning suggestions — see basicmachines-co/basic-memory#956 (fixed in #981, pending release) #routing
 
 ## SEE ALSO
 

@@ -56,7 +56,6 @@ list_workspaces(output_format="json")
 ## GOTCHAS
 
 - [gotcha] The synthesized "personal" workspace for local-only users is display-only — it is not valid as a routing selector #routing
-- [gotcha] Workspace discovery is read-path only: historically, seeing a workspace here did not mean create_memory_project could route to it from a local MCP server — fixed in #981 (pending release); see basicmachines-co/basic-memory#954 #routing
 
 ## SEE ALSO
 

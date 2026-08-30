@@ -61,7 +61,6 @@ bm tool list-projects   # same JSON payload
 
 ## GOTCHAS
 
-- [bug] The cloud project list is cached per session and never refreshed on miss — projects created out-of-band (CLI, teammates in a shared workspace) stay invisible until the session restarts, and project_id routing to them fails — see basicmachines-co/basic-memory#956 (fixed in #981, pending release) #caching
 - [gotcha] A bare project name that exists in multiple workspaces resolves to the default workspace; use qualified_name or external_id to disambiguate #routing
 - [pattern] Discover once, then route by project_id — names are for humans, UUIDs are for tools #routing
 
