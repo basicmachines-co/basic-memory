@@ -12,6 +12,7 @@ from basic_memory.mcp.resources.man import (
     manual_index,
     manual_page,
 )
+import basic_memory.mcp.resources.notes as notes_module
 from basic_memory.mcp.server import mcp
 
 
@@ -73,8 +74,26 @@ async def test_tool_name_reaches_the_page_that_documents_it() -> None:
     assert page.startswith("---\ntitle: chatgpt-fetch(3)\n")
 
 
-def test_unknown_pages_point_at_the_index() -> None:
+@pytest.mark.asyncio
+async def test_unknown_pages_point_at_the_index(app, test_project) -> None:
+    # The miss falls through to a note lookup in a project named man; when that
+    # is a confirmed miss too, the manual's index hint is the error.
     with pytest.raises(ResourceError, match="No manual entry for nope; read memory://man"):
-        manual_page("nope")
+        await manual_page("nope")
     with pytest.raises(ResourceError, match="not a manual page reference; read memory://man"):
-        manual_page("docs/nope")
+        await manual_page("docs/nope")
+
+
+@pytest.mark.asyncio
+async def test_man_template_falls_back_to_a_project_named_man(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The man template registers first and wins ties over the notes template, so
+    # the note fallback must live here for the served path to reach it.
+    async def note_read(identifier, context):
+        assert identifier == "man/guides/setup"
+        return "note from the man project"
+
+    monkeypatch.setattr(notes_module, "read_note_markdown", note_read)
+
+    assert await _read("memory://man/guides/setup") == "note from the man project"
