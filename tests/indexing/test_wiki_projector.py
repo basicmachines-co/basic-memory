@@ -286,6 +286,32 @@ def test_snapshot_rejects_case_folded_duplicate_reserved_paths() -> None:
         replace(_snapshot(), reserved_documents=(lower, upper))
 
 
+def test_projection_rejects_case_folded_duplicate_scopes() -> None:
+    snapshot = replace(
+        _snapshot(),
+        notes=(
+            WikiSourceNote(
+                path="Foo/one.md",
+                title="One",
+                note_type="Note",
+                checksum="one-checksum",
+            ),
+            WikiSourceNote(
+                path="foo/two.md",
+                title="Two",
+                note_type="Note",
+                checksum="two-checksum",
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="unique when compared case-insensitively"):
+        plan_wiki_projection(
+            _request(reason=WikiProjectionReason.manual_rebuild, scopes=()),
+            snapshot,
+        )
+
+
 def test_projection_result_reports_updating_when_output_lags_source() -> None:
     result = WikiProjectionResult(
         source_watermark=3,

@@ -305,6 +305,15 @@ def plan_wiki_projection(
         if PurePosixPath(note.path).name.lower() not in RESERVED_WIKI_FILENAMES
     )
     scopes = _projection_scopes(request, snapshot, notes, changes, new_changes)
+    scope_by_casefold: dict[str, str] = {}
+    for scope in scopes:
+        folded_scope = scope.casefold()
+        if existing_scope := scope_by_casefold.get(folded_scope):
+            raise ValueError(
+                "Wiki projection scopes must be unique when compared case-insensitively: "
+                f"{existing_scope}, {scope}"
+            )
+        scope_by_casefold[folded_scope] = scope
     existing_by_path = {
         document.path.casefold(): document for document in snapshot.reserved_documents
     }
