@@ -18,6 +18,7 @@ from basic_memory.models.search import (
     create_sqlite_search_vector_embeddings,
 )
 from basic_memory.repository.semantic_chunking import split_text_into_chunks
+from basic_memory.repository.search_repository_base import SMALL_NOTE_CONTENT_LIMIT
 from basic_memory.schemas.search import SearchRetrievalMode
 
 from semantic.multilingual_benchmark import (
@@ -59,6 +60,7 @@ def test_chunk_boundary_document_places_relevant_text_after_first_chunk() -> Non
 
     chunks = split_text_into_chunks(source_text)
 
+    assert len(document.content) > SMALL_NOTE_CONTENT_LIMIT
     assert len(chunks) >= 2
     assert any("법적 보존 명령" in chunk for chunk in chunks[1:])
 
@@ -291,7 +293,14 @@ async def test_milvus_vector_storage_includes_postgres_manifest(tmp_path, mocker
     assert "search_vector_embeddings" not in statement
 
 
-def test_chunk_boundary_results_require_the_matching_later_chunk(mocker) -> None:
+def test_chunk_boundary_results_preserve_rank_and_require_the_later_chunk(mocker) -> None:
+    query = next(
+        query for query in MULTILINGUAL_CORPUS.queries if query.name == "long-retention-korean"
+    )
+    distractor = mocker.Mock(
+        permalink="multilingual/en-password-reset",
+        matched_chunk_text="password reset",
+    )
     first_chunk = mocker.Mock(
         permalink="multilingual/ko-long-retention-exception",
         matched_chunk_text="보관 정책 검토",
@@ -301,8 +310,11 @@ def test_chunk_boundary_results_require_the_matching_later_chunk(mocker) -> None
         matched_chunk_text="법적 보존 명령이 적용된 고객 기록",
     )
 
-    assert result_permalinks([first_chunk], required_chunk_text="법적 보존 명령") == ()
-    assert result_permalinks([later_chunk], required_chunk_text="법적 보존 명령") == (
+    assert result_permalinks([distractor, first_chunk], query) == (
+        "multilingual/en-password-reset",
+    )
+    assert result_permalinks([distractor, later_chunk], query) == (
+        "multilingual/en-password-reset",
         "multilingual/ko-long-retention-exception",
     )
 
