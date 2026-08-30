@@ -9,6 +9,7 @@ from httpx import AsyncClient
 from basic_memory.mcp.prompts.ai_assistant_guide import ai_assistant_guide
 from basic_memory.mcp.resources.project_info import project_info
 from basic_memory.mcp.server import mcp
+from basic_memory.schemas import ProjectInfoResponse
 from basic_memory.schemas.project_info import ProjectItem
 
 
@@ -65,7 +66,9 @@ async def test_project_info_resource_routes_workspace_project(
     project_info_module = import_module("basic_memory.mcp.resources.project_info")
     monkeypatch.setattr(project_info_module, "get_project_client", project_client)
 
-    info = await project_info(workspace="personal", project="test-project")
+    info = ProjectInfoResponse.model_validate_json(
+        await project_info(workspace="personal", project="test-project")
+    )
 
     assert selected_route == "personal/test-project"
     assert info.project_name == test_project.name
@@ -74,6 +77,8 @@ async def test_project_info_resource_routes_workspace_project(
 @pytest.mark.asyncio
 async def test_project_info_resource_routes_local_workspace(client, test_project):
     """The canonical local URI strips its workspace sentinel before local routing."""
-    info = await project_info(workspace="local", project=test_project.permalink)
+    info = ProjectInfoResponse.model_validate_json(
+        await project_info(workspace="local", project=test_project.permalink)
+    )
 
     assert info.project_name == test_project.name
