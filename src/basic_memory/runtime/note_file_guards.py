@@ -61,7 +61,12 @@ async def read_runtime_file_checksum(
     """Return the current runtime file checksum, or None when absent."""
     if not await reader.exists(file_path):
         return None
-    return await reader.compute_checksum(file_path)
+    try:
+        return await reader.compute_checksum(file_path)
+    except FileNotFoundError:
+        # Object stores cannot make exists-plus-read atomic. A concurrent delete
+        # after the probe has the same domain meaning as an initially absent file.
+        return None
 
 
 def runtime_file_conflict(

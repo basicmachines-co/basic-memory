@@ -532,7 +532,14 @@ class LocalNoteContentStorage:
         return await self.file_service.exists(path)
 
     async def compute_checksum(self, path: RuntimeFilePath) -> RuntimeFileChecksum:
-        return await self.file_service.compute_checksum(path)
+        try:
+            return await self.file_service.compute_checksum(path)
+        except file_utils.FileError as exc:
+            if isinstance(exc.__context__, FileNotFoundError):
+                # The general FileService contract reports I/O failures as FileError,
+                # while runtime guards need concurrent deletion as an absent file.
+                raise FileNotFoundError(path) from exc
+            raise
 
     async def delete_file(self, path: RuntimeFilePath) -> None:
         await self.file_service.delete_file(path)
@@ -548,7 +555,12 @@ class LocalNoteContentStorage:
         # atomic precondition; the race is negligible on a filesystem.
         if not await self.file_service.exists(path):
             return False
-        if await self.file_service.compute_checksum(path) != expected_checksum:
+        try:
+            actual_checksum = await self.compute_checksum(path)
+        except FileNotFoundError:
+            # Disappearance after the final existence probe is another safe no-delete outcome.
+            return False
+        if actual_checksum != expected_checksum:
             return False
         await self.file_service.delete_file(path)
         return True
