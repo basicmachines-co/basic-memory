@@ -132,8 +132,13 @@ def find_page(ref: PageRef) -> ManPage | None:
     return None
 
 
-def render_index(pages: tuple[ManPage, ...]) -> str:
-    """The apropos view: every page, grouped by section, one line each."""
+def render_index(pages: tuple[ManPage, ...], registered_tools: frozenset[str] | None = None) -> str:
+    """The apropos view: every page, grouped by section, one line each.
+
+    The same corpus serves the local and the hosted server, whose tool sets differ,
+    so when the caller knows which tools this server registers, pages for the
+    others are marked rather than presented as callable.
+    """
     section_titles = {1: "User commands", 3: "MCP tools", 5: "File formats", 7: "Concepts"}
     lines = [
         "# Basic Memory manual",
@@ -146,5 +151,12 @@ def render_index(pages: tuple[ManPage, ...]) -> str:
             current_section = page.section
             heading = section_titles.get(page.section, f"Section {page.section}")
             lines.extend(["", f"## Section {page.section} — {heading}", ""])
-        lines.append(f"- [{page.title}]({page.uri}) — {page.summary}")
+        line = f"- [{page.title}]({page.uri}) — {page.summary}"
+        if (
+            registered_tools is not None
+            and page.tool is not None
+            and page.tool not in registered_tools
+        ):
+            line += " *(tool not registered on this server)*"
+        lines.append(line)
     return "\n".join(lines) + "\n"

@@ -4,7 +4,7 @@
 
 ### Features
 
-- **#610**: The manual ships in the package and is served over MCP. The 23 section-3
+- **#610**: The manual ships in the package and is served over MCP. The 21 section-3
   pages (one per MCP tool -- `search-notes(3)`, `write-note(3)`, ...) now live in
   `src/basic_memory/man/man3/` as canonical, portable notes. The MCP server exposes
   them as resources: `memory://man` is the index and `memory://man/<page>` is a page,

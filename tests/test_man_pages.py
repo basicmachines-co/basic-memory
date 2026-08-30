@@ -79,7 +79,7 @@ def test_bundled_pages_are_well_formed_and_sorted() -> None:
 # lists change deliberately; this pins the known gaps so a new tool without a page
 # (or a page for a retired tool) shows up here instead of going unnoticed.
 TOOLS_WITHOUT_PAGES = {"basic_memory_diagnostics"}
-PAGES_WITHOUT_LOCAL_TOOLS = {"canvas", "cloud_info", "release_notes"}
+PAGES_WITHOUT_LOCAL_TOOLS = {"cloud_info"}  # hosted-only; see cloud-info(3)
 
 
 def test_section_3_matches_the_tool_registry_except_known_gaps() -> None:
@@ -120,6 +120,16 @@ async def test_section_3_synopsis_names_every_tool_parameter() -> None:
         documented = _synopsis_parameters(page)
         assert schema - documented == set(), f"{page.title} SYNOPSIS is missing parameters"
         assert documented - schema == set(), f"{page.title} SYNOPSIS names unknown parameters"
+
+
+def test_render_index_marks_pages_whose_tool_this_server_lacks() -> None:
+    index = render_index(bundled_pages(), registered_tools=frozenset(registered_tools))
+    hosted_only = find_page(PageRef("cloud-info", 3))
+    local = find_page(PageRef("search-notes", 3))
+    assert hosted_only is not None and local is not None
+
+    assert f"({hosted_only.uri}) — {hosted_only.summary} *(tool not registered" in index
+    assert f"({local.uri}) — {local.summary}\n" in index
 
 
 def test_render_index_lists_every_page_with_uri_and_summary() -> None:

@@ -24,8 +24,11 @@ MANUAL_PAGE_TEMPLATE = "memory://man/{ref*}"
     description="Index of the Basic Memory manual: every page with a one-line summary.",
     mime_type="text/markdown",
 )
-def manual_index() -> str:
-    return render_index(bundled_pages())
+async def manual_index() -> str:
+    # Mark pages whose tool this server does not register (hosted-only tools on a
+    # local server, and vice versa) so an agent does not call a tool that is not there.
+    tools = await mcp.list_tools(run_middleware=False)
+    return render_index(bundled_pages(), frozenset(tool.name for tool in tools))
 
 
 @mcp.resource(

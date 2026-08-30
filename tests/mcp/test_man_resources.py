@@ -39,9 +39,12 @@ async def test_every_page_is_a_listed_resource_and_the_template_is_registered() 
 async def test_index_resource_links_every_page() -> None:
     index = await _read(MANUAL_INDEX_URI)
 
-    assert index == manual_index()
+    assert index == await manual_index()
     for page in bundled_pages():
         assert page.uri in index
+    # Served from a local server, the hosted-only page is marked, not offered.
+    assert "cloud-info(3)](memory://man/cloud-info(3)) — " in index
+    assert "(hosted server only) *(tool not registered on this server)*" in index
 
 
 @pytest.mark.asyncio
