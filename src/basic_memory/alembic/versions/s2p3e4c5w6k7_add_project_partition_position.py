@@ -1,7 +1,7 @@
 """Add the strict accepted-change partition head to projects.
 
 Revision ID: s2p3e4c5w6k7
-Revises: bcdbd5a942ca
+Revises: d2e3f4a5b6c7
 Create Date: 2026-08-29 20:15:00.000000
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 
 revision: str = "s2p3e4c5w6k7"
-down_revision: Union[str, None] = "bcdbd5a942ca"
+down_revision: Union[str, None] = "d2e3f4a5b6c7"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
