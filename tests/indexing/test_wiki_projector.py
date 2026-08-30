@@ -81,6 +81,7 @@ def _snapshot(
                 partition_position=3,
                 operation=WikiChangeOperation.updated,
                 path="guides/setup.md",
+                permalink="guides/setup",
                 title="Setup",
                 accepted_at=ACCEPTED_AT,
                 materialized=materialized,
@@ -221,6 +222,7 @@ def test_source_change_rejects_invalid_contract_fields() -> None:
         partition_position=1,
         operation=WikiChangeOperation.updated,
         path="note.md",
+        permalink="note",
         title="Note",
         accepted_at=ACCEPTED_AT,
         materialized=True,
@@ -231,6 +233,10 @@ def test_source_change_rejects_invalid_contract_fields() -> None:
         replace(change, partition_position=0)
     with pytest.raises(ValueError, match="requires a title"):
         replace(change, title=" ")
+    with pytest.raises(ValueError, match="requires a canonical permalink"):
+        replace(change, permalink=" ")
+    with pytest.raises(ValueError, match="unsafe canonical permalink"):
+        replace(change, permalink="bad|target")
     with pytest.raises(ValueError, match="timezone-aware"):
         replace(change, accepted_at=ACCEPTED_AT.replace(tzinfo=None))
     with pytest.raises(ValueError, match="requires a source"):
@@ -242,6 +248,7 @@ def test_source_change_normalizes_previous_path() -> None:
         partition_position=1,
         operation=WikiChangeOperation.moved,
         path="new/note.md",
+        permalink="new/note",
         previous_path="old\\note.md",
         title="Note",
         accepted_at=ACCEPTED_AT,
@@ -485,6 +492,7 @@ def test_projector_only_advance_preserves_complete_projection_bytes() -> None:
         partition_position=4,
         operation=WikiChangeOperation.updated,
         path="index.md",
+        permalink="index",
         title="Project 88",
         accepted_at=datetime(2026, 8, 29, 18, 31, tzinfo=timezone.utc),
         materialized=True,
@@ -517,6 +525,7 @@ def test_projector_only_advance_repairs_missing_projection_document() -> None:
         partition_position=4,
         operation=WikiChangeOperation.updated,
         path="index.md",
+        permalink="index",
         title="Project 88",
         accepted_at=ACCEPTED_AT,
         materialized=True,
@@ -552,6 +561,7 @@ def test_requested_scopes_cannot_omit_a_changed_note_scope() -> None:
         partition_position=3,
         operation=WikiChangeOperation.updated,
         path=changed_note.path,
+        permalink=changed_note.permalink,
         title=changed_note.title,
         accepted_at=ACCEPTED_AT,
         materialized=True,
@@ -609,6 +619,7 @@ def test_full_rebuild_covers_orphaned_reserved_document_scopes() -> None:
                 partition_position=3,
                 operation=WikiChangeOperation.deleted,
                 path="orphaned/last-note.md",
+                permalink="orphaned/last-note",
                 title="Last note",
                 accepted_at=ACCEPTED_AT,
                 materialized=True,
@@ -644,6 +655,7 @@ def test_projection_rejects_a_snapshot_ahead_of_the_requested_watermark() -> Non
                 partition_position=1,
                 operation=WikiChangeOperation.deleted,
                 path="included/note.md",
+                permalink="included/note",
                 title="Included",
                 accepted_at=ACCEPTED_AT,
                 materialized=True,
@@ -653,6 +665,7 @@ def test_projection_rejects_a_snapshot_ahead_of_the_requested_watermark() -> Non
                 partition_position=2,
                 operation=WikiChangeOperation.deleted,
                 path="future/note.md",
+                permalink="future/note",
                 title="Future",
                 accepted_at=ACCEPTED_AT,
                 materialized=True,
@@ -688,6 +701,7 @@ def test_moved_change_requires_previous_path() -> None:
                         partition_position=3,
                         operation=WikiChangeOperation.moved,
                         path="guides/new.md",
+                        permalink="guides/new",
                         title="Moved",
                         accepted_at=ACCEPTED_AT,
                         materialized=True,
@@ -711,6 +725,7 @@ def test_created_and_moved_changes_render_in_the_log() -> None:
                 partition_position=1,
                 operation=WikiChangeOperation.created,
                 path="created.md",
+                permalink="created",
                 title="Created",
                 accepted_at=ACCEPTED_AT,
                 materialized=True,
@@ -720,6 +735,7 @@ def test_created_and_moved_changes_render_in_the_log() -> None:
                 partition_position=2,
                 operation=WikiChangeOperation.moved,
                 path="moved.md",
+                permalink="moved",
                 previous_path="old.md",
                 title="Moved",
                 accepted_at=ACCEPTED_AT,
@@ -732,8 +748,8 @@ def test_created_and_moved_changes_render_in_the_log() -> None:
     plan = plan_wiki_projection(_request(position=2, scopes=()), snapshot)
     log = next(write.content.decode() for write in plan.writes if write.path == "log.md")
 
-    assert "Created `created.md`" in log
-    assert "Moved `old.md` to `moved.md`" in log
+    assert "Created [[created|Created]]" in log
+    assert "Moved `old.md` to [[moved|Moved]]" in log
 
 
 def test_log_preserves_ampersands_in_code_formatted_paths() -> None:
@@ -749,6 +765,7 @@ def test_log_preserves_ampersands_in_code_formatted_paths() -> None:
                 partition_position=1,
                 operation=WikiChangeOperation.moved,
                 path="new.md",
+                permalink="new",
                 previous_path="old&draft.md",
                 title="Moved",
                 accepted_at=ACCEPTED_AT,
@@ -759,6 +776,7 @@ def test_log_preserves_ampersands_in_code_formatted_paths() -> None:
                 partition_position=2,
                 operation=WikiChangeOperation.deleted,
                 path="retired&archived.md",
+                permalink="retired-archived",
                 title="Deleted",
                 accepted_at=ACCEPTED_AT,
                 materialized=True,
@@ -770,7 +788,7 @@ def test_log_preserves_ampersands_in_code_formatted_paths() -> None:
     plan = plan_wiki_projection(_request(position=2, scopes=()), snapshot)
     log = next(write.content.decode() for write in plan.writes if write.path == "log.md")
 
-    assert "Moved `old&draft.md` to `new.md`" in log
+    assert "Moved `old&draft.md` to [[new|Moved]]" in log
     assert "Deleted `retired&archived.md`" in log
     assert "&amp;" not in log
 
@@ -931,6 +949,66 @@ def test_projection_links_notes_by_their_canonical_permalinks() -> None:
     assert "[[foo-bar-1|Hyphenated]]" in index
 
 
+def test_projection_logs_preserve_each_changes_historical_permalink() -> None:
+    snapshot = WikiProjectionSnapshot(
+        project_id="project-88",
+        project_name="Project 88",
+        source_partition_position=1,
+        current_output_watermark=0,
+        source_accepted_at=ACCEPTED_AT,
+        notes=(
+            WikiSourceNote(
+                path="same.md",
+                permalink="new-note",
+                title="New note",
+                note_type="Note",
+                checksum="new-note",
+            ),
+        ),
+        changes=(
+            WikiSourceChange(
+                partition_position=1,
+                operation=WikiChangeOperation.created,
+                path="same.md",
+                permalink="old-note",
+                title="Old note",
+                accepted_at=ACCEPTED_AT,
+                materialized=True,
+                source="web",
+            ),
+        ),
+    )
+
+    plan = plan_wiki_projection(_request(position=1, scopes=()), snapshot)
+    log = next(write.content.decode() for write in plan.writes if write.path == "log.md")
+
+    assert "Created [[old-note|Old note]]" in log
+    assert "[[new-note|Old note]]" not in log
+
+
+def test_projection_rejects_source_permalink_reserved_for_generated_index() -> None:
+    snapshot = WikiProjectionSnapshot(
+        project_id="project-88",
+        project_name="Project 88",
+        source_partition_position=0,
+        current_output_watermark=0,
+        source_accepted_at=ACCEPTED_AT,
+        notes=(
+            WikiSourceNote(
+                path="guides/topic.md",
+                permalink="guides/index",
+                title="Topic",
+                note_type="Note",
+                checksum="topic",
+            ),
+        ),
+        changes=(),
+    )
+
+    with pytest.raises(ValueError, match="generated document identity"):
+        plan_wiki_projection(_request(position=0, scopes=()), snapshot)
+
+
 def test_projection_escapes_dynamic_markdown_structure() -> None:
     injected_title = "Bad]]\n- relates_to [[evil"
     snapshot = WikiProjectionSnapshot(
@@ -953,6 +1031,7 @@ def test_projection_escapes_dynamic_markdown_structure() -> None:
                 partition_position=1,
                 operation=WikiChangeOperation.updated,
                 path="safe-target.md",
+                permalink="safe-target",
                 title=injected_title,
                 accepted_at=ACCEPTED_AT,
                 materialized=True,
@@ -1000,6 +1079,7 @@ def test_projection_preserves_literal_entity_looking_titles(
                 partition_position=1,
                 operation=WikiChangeOperation.created,
                 path="entity-title.md",
+                permalink="entity-title",
                 title=title,
                 accepted_at=ACCEPTED_AT,
                 materialized=True,

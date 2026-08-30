@@ -93,10 +93,7 @@ class WikiSourceNote:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "path", _normalize_note_path(self.path))
-        if not self.permalink.strip() or self.permalink != self.permalink.strip():
-            raise ValueError(f"Wiki source note {self.path} requires a canonical permalink")
-        if "::" in self.permalink or any(character in self.permalink for character in "\r\n[]|`<>"):
-            raise ValueError(f"Wiki source note {self.path} has an unsafe canonical permalink")
+        _validate_canonical_permalink(self.permalink, label=f"Wiki source note {self.path}")
         if not self.title.strip():
             raise ValueError(f"Wiki source note {self.path} requires a title")
         if not self.note_type.strip():
@@ -112,6 +109,7 @@ class WikiSourceChange:
     partition_position: int
     operation: WikiChangeOperation
     path: str
+    permalink: str
     title: str
     accepted_at: datetime
     materialized: bool
@@ -122,6 +120,7 @@ class WikiSourceChange:
         if self.partition_position <= 0:
             raise ValueError("Wiki source change position must be positive")
         object.__setattr__(self, "path", _normalize_note_path(self.path))
+        _validate_canonical_permalink(self.permalink, label=f"Wiki source change {self.path}")
         if self.previous_path is not None:
             object.__setattr__(self, "previous_path", _normalize_note_path(self.previous_path))
         if not self.title.strip():
@@ -326,6 +325,23 @@ def plan_wiki_projection(
         new_changes,
         repair_complete_projection=projector_only_advance,
     )
+    all_projection_paths: list[str | None] = [note.path for note in notes]
+    all_projection_paths.extend(document.path for document in snapshot.reserved_documents)
+    all_projection_paths.extend(change.path for change in changes)
+    all_projection_paths.extend(
+        change.previous_path for change in changes if change.previous_path is not None
+    )
+    reserved_permalink_keys = {
+        _portable_path_key(_reserved_path(scope, filename).removesuffix(".md"))
+        for scope in affected_wiki_scopes(*all_projection_paths)
+        for filename in RESERVED_WIKI_FILENAMES
+    }
+    for note in notes:
+        if _portable_path_key(note.permalink) in reserved_permalink_keys:
+            raise ValueError(
+                "Wiki source note permalink collides with a generated document identity: "
+                f"{note.permalink}"
+            )
     note_by_path = {_portable_path_key(note.path): note for note in notes}
     scope_by_portable_path: dict[str, str] = {}
     for scope in scopes:
@@ -354,7 +370,6 @@ def plan_wiki_projection(
         )
         rendered[_reserved_path(scope, "log.md")] = _render_log(
             snapshot=snapshot,
-            notes=notes,
             changes=changes,
             scope=scope,
             source_watermark=request.through_partition_position,
@@ -531,7 +546,6 @@ def _render_index(
 def _render_log(
     *,
     snapshot: WikiProjectionSnapshot,
-    notes: tuple[WikiSourceNote, ...],
     changes: tuple[WikiSourceChange, ...],
     scope: str,
     source_watermark: int,
@@ -560,15 +574,8 @@ def _render_log(
         else f"{_display_name(PurePosixPath(scope).name)} log"
     )
     body: list[str] = [f"# {_escape_generated_markdown_text(title)}", ""]
-    note_permalink_by_path = {_portable_path_key(note.path): note.permalink for note in notes}
     if relevant:
-        body.extend(
-            _render_log_entry(
-                change,
-                note_permalink_by_path.get(_portable_path_key(change.path)),
-            )
-            for change in relevant
-        )
+        body.extend(_render_log_entry(change) for change in relevant)
         body.append("")
     else:
         body.extend(["No accepted materialized changes have been recorded yet.", ""])
@@ -582,10 +589,10 @@ def _render_log(
     )
 
 
-def _render_log_entry(change: WikiSourceChange, permalink: str | None) -> str:
+def _render_log_entry(change: WikiSourceChange) -> str:
     timestamp = _isoformat_utc(change.accepted_at)
     title = _escape_generated_markdown_text(change.title)
-    current_note = f"[[{permalink}|{title}]]" if permalink is not None else f"`{change.path}`"
+    current_note = f"[[{change.permalink}|{title}]]"
     match change.operation:
         case WikiChangeOperation.created:
             description = f"Created {current_note}"
@@ -648,6 +655,13 @@ def _normalize_note_path(path: str) -> str:
         source=path,
     )
     return normalized
+
+
+def _validate_canonical_permalink(permalink: str, *, label: str) -> None:
+    if not permalink.strip() or permalink != permalink.strip():
+        raise ValueError(f"{label} requires a canonical permalink")
+    if "::" in permalink or any(character in permalink for character in "\r\n[]|`<>"):
+        raise ValueError(f"{label} has an unsafe canonical permalink")
 
 
 def _normalize_scope(scope: str) -> str:
