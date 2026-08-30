@@ -19,7 +19,7 @@ async def project_info(
     workspace: str,
     project: str,
     context: Context | None = None,
-) -> ProjectInfoResponse:
+) -> str:
     """Get comprehensive information about a workspace-qualified Basic Memory project.
 
     This resource provides detailed statistics and status information about a
@@ -38,7 +38,8 @@ async def project_info(
         context: Optional FastMCP context for performance caching.
 
     Returns:
-        Detailed project information and statistics.
+        Detailed project information and statistics as a JSON document —
+        resources carry text, so the validated response is serialized here.
     """
     logger.info("Getting project info")
 
@@ -59,4 +60,5 @@ async def project_info(
 
     async with get_project_client(project_route, context) as (client, active_project):
         response = await call_get(client, f"/v2/projects/{active_project.external_id}/info")
-        return ProjectInfoResponse.model_validate(response.json())
+        info = ProjectInfoResponse.model_validate(response.json())
+        return info.model_dump_json(indent=2)
