@@ -77,10 +77,10 @@ async def test_unprefixed_permalink_reads_in_default_project(app, test_project) 
 async def test_non_404_failures_keep_their_cause(
     app, test_project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def failing_resolve(client, project_external_id, identifier):
+    async def failing_resolve(client, url, json=None):
         raise ToolError("Authentication required: You need to authenticate to access 'x'")
 
-    monkeypatch.setattr(notes_module, "resolve_entity_id", failing_resolve)
+    monkeypatch.setattr(notes_module, "call_post", failing_resolve)
     with pytest.raises(ResourceError, match="Authentication required"):
         await note_resource(project=test_project.name, path="anything")
 
@@ -106,6 +106,60 @@ async def test_man_namespace_stays_the_manual(app) -> None:
 
     assert direct.startswith("---\ntitle: search-notes(3)\n")
     assert served == direct
+
+
+@pytest.mark.asyncio
+async def test_client_is_opened_for_the_uris_own_project(
+    app, test_project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A cloud-mode project needs its own transport; the client must be routed for
+    # the URI's project when it is configured, and for the default when it is not.
+    routes: list[str | None] = []
+    real_get_project_client = notes_module.get_project_client
+
+    def recording_get_project_client(project, context=None, project_id=None):
+        routes.append(project)
+        return real_get_project_client(project, context, project_id=project_id)
+
+    monkeypatch.setattr(notes_module, "get_project_client", recording_get_project_client)
+
+    await write_note(
+        title="Routed",
+        directory="specs",
+        content="# Routed\n",
+        project=test_project.name,
+    )
+    await _read(f"memory://{test_project.permalink}/specs/routed")
+    # A note exists, so this also proves strict resolution: the miss stays a
+    # miss instead of fuzzy-matching the existing note the way tools would.
+    with pytest.raises(ResourceError, match="No note"):
+        await note_resource(project="docs", path="missing-note")
+
+    assert routes[0] == test_project.name  # configured segment → its own client
+    assert routes[1] is None  # unconfigured segment → default client, path fallback
+
+
+@pytest.mark.asyncio
+async def test_a_project_named_man_is_reachable_behind_the_manual(
+    app, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The manual answers first, but nothing reserves the name: when no page
+    # matches, the URI falls through to a note in a project really named man.
+    async def note_read(identifier, context):
+        assert identifier == "man/guides/setup"
+        return "note content from the man project"
+
+    monkeypatch.setattr(notes_module, "read_note_markdown", note_read)
+    assert await note_resource(project="man", path="guides/setup") == (
+        "note content from the man project"
+    )
+
+    async def note_miss(identifier, context):
+        raise ResourceError("No note")
+
+    monkeypatch.setattr(notes_module, "read_note_markdown", note_miss)
+    with pytest.raises(ResourceError, match="read memory://man for the index"):
+        await note_resource(project="man", path="guides/setup")
 
 
 @pytest.mark.asyncio
