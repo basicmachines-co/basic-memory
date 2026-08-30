@@ -146,6 +146,19 @@ def test_model_cache_size_uses_configured_cache_directory(tmp_path) -> None:
     assert model_cache_size_bytes(model_case, benchmark_config) == len(b"configured-cache")
 
 
+def test_model_cache_size_supports_fastembed_url_fallback(tmp_path) -> None:
+    model_case = embedding_model_case("multilingual-e5-large")
+    model_root = tmp_path / "fast-multilingual-e5-large"
+    model_root.mkdir()
+    (model_root / "model.onnx").write_bytes(b"url-fallback")
+    benchmark_config = embedding_benchmark_config(
+        model_case,
+        benchmark_storage_case("sqlite"),
+    ).model_copy(update={"semantic_embedding_cache_dir": str(tmp_path)})
+
+    assert model_cache_size_bytes(model_case, benchmark_config) == len(b"url-fallback")
+
+
 def test_process_peak_rss_uses_windows_peak_working_set(monkeypatch) -> None:
     monkeypatch.setattr(
         multilingual_benchmark.psutil,

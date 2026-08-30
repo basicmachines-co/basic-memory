@@ -34,6 +34,7 @@ class EmbeddingModelCase:
     cache_repository: str
     catalog_size_gb: float
     license: str
+    fallback_cache_directory: str | None = None
     document_prefix: str | None = None
     query_prefix: str | None = None
 
@@ -70,6 +71,7 @@ FASTEMBED_MODEL_CASES = (
         cache_repository="qdrant/multilingual-e5-large-onnx",
         catalog_size_gb=2.24,
         license="mit",
+        fallback_cache_directory="fast-multilingual-e5-large",
         document_prefix="passage: ",
         query_prefix="query: ",
     ),
@@ -355,8 +357,10 @@ def model_cache_size_bytes(
     """Measure the selected model's materialized FastEmbed cache subtree."""
     configured_cache = benchmark_config.semantic_embedding_cache_dir
     cache_root = Path(configured_cache or default_fastembed_cache_dir())
-    model_root = cache_root / f"models--{model_case.cache_repository.replace('/', '--')}"
-    return directory_size_bytes(model_root)
+    model_directories = [cache_root / f"models--{model_case.cache_repository.replace('/', '--')}"]
+    if model_case.fallback_cache_directory is not None:
+        model_directories.append(cache_root / model_case.fallback_cache_directory)
+    return max(directory_size_bytes(directory) for directory in model_directories)
 
 
 def directory_size_bytes(directory: Path) -> int:
