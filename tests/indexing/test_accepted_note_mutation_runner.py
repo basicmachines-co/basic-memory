@@ -2075,6 +2075,41 @@ async def test_run_accepted_note_delete_removes_entity_and_returns_cleanup() -> 
     assert result.relation_publication is None
 
 
+@pytest.mark.asyncio
+async def test_run_accepted_note_delete_stays_idempotent_after_concurrent_delete() -> None:
+    session = _MutationSession()
+    project = _project()
+    entity = _entity(file_path="notes/accepted.md")
+    entity_lookup_repository = _EntityLookupRepository(by_external_id=entity)
+    entity_lookup_repository.get_by_external_id = AsyncMock(side_effect=[entity, None])
+    search_repository = _SearchRepository()
+
+    result = await run_accepted_note_delete(
+        cast(AsyncSession, session),
+        request=AcceptedNoteDeleteMutation(
+            project_external_id="project-123",
+            entity_external_id="note-123",
+        ),
+        dependencies=_dependencies(
+            project_repository=_ProjectRepository(project),
+            entity_lookup_repository=entity_lookup_repository,
+            note_content_lookup_repository=_NoteContentLookupRepository(),
+            preparer_factory=_PreparerFactory(_CreatePreparer(_prepared())),
+            pending_entity_repository=_PendingEntityRepository(entity),
+            note_content_accept_repository=_NoteContentAcceptRepository(_note_content(entity)),
+            search_repository=search_repository,
+        ),
+    )
+
+    assert result.change.status_code == 200
+    assert result.change.payload == {"deleted": False}
+    assert session.scalar_count == 1
+    assert session.refreshed == []
+    assert session.deleted == []
+    assert search_repository.deleted_entity_ids == []
+    assert search_repository.deleted_vector_entity_ids == []
+
+
 def _prepared_with_graph(
     *,
     observations: Sequence[AcceptedObservationWrite],
