@@ -186,7 +186,11 @@ def render_synopsis(tool_name: str, parameters: Mapping[str, Any]) -> str:
     for name, prop in properties.items():
         if name in required:
             continue
-        ordered.append(f"{name}={_default_literal(prop['default'])}" if "default" in prop else name)
+        # A default factory leaves no `default` in the schema; render `name=...` so
+        # the parameter still reads as optional, not as a bare required name.
+        ordered.append(
+            f"{name}={_default_literal(prop['default'])}" if "default" in prop else f"{name}=..."
+        )
 
     indent = " " * (len(tool_name) + 1)
     current = f"{tool_name}("

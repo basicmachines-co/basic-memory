@@ -127,6 +127,10 @@ def test_render_synopsis_orders_required_first_and_wraps() -> None:
     # A control character in a default must be escaped, not embedded literally.
     tricky = {"properties": {"sep": {"default": "a\nb"}, "q": {"default": 'say "hi"'}}}
     assert render_synopsis("demo", tricky) == 'demo(sep="a\\nb", q="say \\"hi\\"")'
+    # A default factory leaves no schema default; the parameter must still read
+    # as optional (name=...), never as a bare required name.
+    factory = {"required": ["query"], "properties": {"query": {}, "tags": {}}}
+    assert render_synopsis("demo", factory) == "demo(query, tags=...)"
 
 
 def test_replace_mcp_synopsis_touches_only_the_mcp_block() -> None:
