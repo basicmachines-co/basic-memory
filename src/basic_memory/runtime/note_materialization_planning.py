@@ -9,6 +9,7 @@ from typing import Protocol
 from uuid import UUID
 
 from basic_memory.runtime.note_content_deletes import RuntimePendingNoteFileDelete
+from basic_memory.runtime.project_partition import RuntimeAcceptedProjectNoteChange
 from basic_memory.runtime.storage import (
     ProjectId,
     RuntimeEntityId,
@@ -93,6 +94,7 @@ class RuntimePendingNoteMaterialization:
     entity_id: RuntimeEntityId
     db_version: RuntimeNoteContentVersion
     db_checksum: RuntimeNoteContentChecksum
+    project_change: RuntimeAcceptedProjectNoteChange | None = None
     actor_user_profile_id: UUID | None = None
     actor_kind: RuntimeNoteActorKind | None = None
     actor_name: RuntimeNoteActorName | None = None
@@ -137,6 +139,7 @@ class RuntimeNoteMaterializationJobRequest:
     entity_id: RuntimeEntityId
     db_version: RuntimeNoteContentVersion
     db_checksum: RuntimeNoteContentChecksum
+    project_change: RuntimeAcceptedProjectNoteChange | None = None
     actor_user_profile_id: UUID | None = None
     actor_kind: RuntimeNoteActorKind | None = None
     actor_name: RuntimeNoteActorName | None = None
@@ -194,6 +197,7 @@ def plan_note_materialization_job_request(
         entity_id=materialization.entity_id,
         db_version=materialization.db_version,
         db_checksum=materialization.db_checksum,
+        project_change=materialization.project_change,
         actor_user_profile_id=materialization.actor_user_profile_id,
         actor_kind=materialization.actor_kind,
         actor_name=materialization.actor_name,

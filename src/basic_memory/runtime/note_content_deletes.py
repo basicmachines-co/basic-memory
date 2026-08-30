@@ -14,6 +14,7 @@ from basic_memory.runtime.storage import (
     RuntimeFilePath,
     runtime_content_type_is_markdown,
 )
+from basic_memory.runtime.project_partition import RuntimeAcceptedProjectNoteChange
 
 
 class RuntimeDeletedNoteEntitySource(RuntimeContentTypeSource, Protocol):
@@ -222,6 +223,7 @@ class RuntimePendingNoteFileDelete:
     entity_id: RuntimeEntityId
     file_path: RuntimeFilePath
     file_checksum: RuntimeFileChecksum | None = None
+    project_change: RuntimeAcceptedProjectNoteChange | None = None
     # The note's live path after the move that scheduled this cleanup. Object
     # storage treats case-different keys as distinct; a local adapter re-checks
     # it against the physical filesystem before deleting because a case-only

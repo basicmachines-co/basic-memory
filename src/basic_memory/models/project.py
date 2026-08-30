@@ -11,13 +11,16 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     Float,
+    ForeignKey,
     Index,
+    UniqueConstraint,
+    text,
     event,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from basic_memory.models.base import Base
-from basic_memory.utils import generate_permalink
+from basic_memory.utils import ensure_timezone_aware, generate_permalink
 
 
 class Project(Base):
@@ -70,9 +73,26 @@ class Project(Base):
     last_scan_timestamp: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     last_file_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
+    # Strict, project-local ordering for accepted durable changes. This is the
+    # generic partition head that future event-journal projectors can reuse; it
+    # is deliberately not derived from timestamps, webhooks, or scan activity.
+    partition_position: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+    )
+
     # Define relationships to entities, observations, and relations
     # These relationships will be established once we add project_id to those models
     entities = relationship("Entity", back_populates="project", cascade="all, delete-orphan")
+    accepted_note_changes = relationship(
+        "AcceptedProjectNoteChange",
+        back_populates="project",
+        cascade="all, delete-orphan",
+        order_by="AcceptedProjectNoteChange.partition_position",
+        passive_deletes=True,
+    )
 
     @override
     def __repr__(self) -> str:  # pragma: no cover
@@ -90,3 +110,67 @@ def set_project_permalink(mapper, connection, project):
     # If the name changed or permalink is empty, regenerate permalink
     if not project.permalink or project.permalink != generate_permalink(project.name):
         project.permalink = generate_permalink(project.name)
+
+
+class AcceptedProjectNoteChange(Base):
+    """Durable evidence for one accepted note mutation in project order.
+
+    The row intentionally retains note identity and path values instead of an
+    entity foreign key: delete evidence must survive after the entity is gone.
+    """
+
+    __tablename__ = "accepted_project_note_change"
+    __table_args__ = (
+        UniqueConstraint(
+            "project_id",
+            "partition_position",
+            name="uq_accepted_project_note_change_project_position",
+        ),
+        Index(
+            "ix_accepted_project_note_change_project_materialized",
+            "project_id",
+            "materialized_at",
+        ),
+        Index(
+            "ix_accepted_project_note_change_note_external_id",
+            "note_external_id",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("project.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    project_external_id: Mapped[str] = mapped_column(String, nullable=False)
+    partition_position: Mapped[int] = mapped_column(Integer, nullable=False)
+    entity_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    note_external_id: Mapped[str] = mapped_column(String, nullable=False)
+    permalink: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    operation: Mapped[str] = mapped_column(String, nullable=False)
+    file_path: Mapped[str] = mapped_column(Text, nullable=False)
+    previous_file_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    accepted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    db_version: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    db_checksum: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    actor_user_profile_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    actor_kind: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    actor_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    materialized_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    project = relationship("Project", back_populates="accepted_note_changes")
+
+    @override
+    def __getattribute__(self, name: str):
+        value = super().__getattribute__(name)
+        # SQLite drops timezone information when persisting DateTime columns.
+        # Normalize project-journal timestamps at the model boundary so the
+        # projector receives the same aware instants on every supported backend.
+        if name in {"accepted_at", "materialized_at"} and isinstance(value, datetime):
+            return ensure_timezone_aware(value)
+        return value

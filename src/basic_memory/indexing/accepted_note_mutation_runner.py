@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import NoReturn, Protocol
@@ -46,6 +46,10 @@ from basic_memory.runtime.note_content import (
 )
 from basic_memory.runtime.note_move import normalize_note_move_destination_path
 from basic_memory.runtime.note_object_metadata import NOTE_SOURCE_COLLABORATION_RELAY
+from basic_memory.runtime.project_partition import (
+    RuntimeAcceptedProjectNoteChange,
+    RuntimeProjectNoteOperation,
+)
 from basic_memory.runtime.storage import (
     NoteExternalId,
     ProjectExternalId,
@@ -64,6 +68,7 @@ from basic_memory.utils import resolve_directory_casing
 
 type AcceptedNoteMutationChange = RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload]
 type AcceptedNoteMutationUserProfileId = UUID
+ACCEPTED_NOTE_DELETE_SOURCE: RuntimeNoteChangeSource = "delete_note"
 
 
 class AcceptedNoteMutationRejectKind(StrEnum):
@@ -142,6 +147,7 @@ class AcceptedNoteCreateMutation:
     data: EntitySchema
     actor: AcceptedNoteMutationActor
     source: RuntimeNoteChangeSource
+    publish_graph_facts: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,6 +161,7 @@ class AcceptedNoteUpdateMutation:
     source: RuntimeNoteChangeSource
     # db_checksum the caller last synced; None means no precondition (issue #1445).
     base_checksum: str | None = None
+    publish_graph_facts: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -213,6 +220,18 @@ class AcceptedNoteMutationProjectRepository(Protocol):
         session: AsyncSession,
         external_id: ProjectExternalId,
     ) -> Project | None: ...
+
+    async def advance_partition_position(
+        self,
+        session: AsyncSession,
+        project_id: ProjectId,
+    ) -> int: ...
+
+    async def record_accepted_note_change(
+        self,
+        session: AsyncSession,
+        change: RuntimeAcceptedProjectNoteChange,
+    ) -> None: ...
 
 
 class AcceptedNoteMutationEntityRepository(Protocol):
@@ -319,6 +338,92 @@ class AcceptedNoteMutationResult:
 
     change: AcceptedNoteMutationChange
     relation_publication: RelationGenerationPublication | None = None
+
+
+async def record_accepted_project_note_change(
+    session: AsyncSession,
+    *,
+    project: Project,
+    entity: Entity,
+    operation: RuntimeProjectNoteOperation,
+    accepted_at: datetime,
+    source: RuntimeNoteChangeSource,
+    previous_file_path: RuntimeFilePath | None,
+    note_content: NoteContent | None,
+    actor: AcceptedNoteMutationActor | None,
+    dependencies: AcceptedNoteMutationDependencies,
+) -> RuntimeAcceptedProjectNoteChange:
+    """Claim and describe one accepted change in the project's strict partition."""
+    if entity.permalink is None:
+        raise RuntimeError(
+            f"Accepted note is missing permalink for entity_id={entity.id}"
+        )
+    position = await dependencies.project_repository.advance_partition_position(
+        session,
+        project.id,
+    )
+    change = RuntimeAcceptedProjectNoteChange(
+        project_id=project.id,
+        project_external_id=project.external_id,
+        partition_position=position,
+        entity_id=entity.id,
+        note_external_id=entity.external_id,
+        permalink=entity.permalink,
+        title=entity.title,
+        operation=operation,
+        file_path=entity.file_path,
+        previous_file_path=previous_file_path,
+        accepted_at=accepted_at,
+        source=source,
+        db_version=note_content.db_version if note_content is not None else None,
+        db_checksum=note_content.db_checksum if note_content is not None else None,
+        actor_user_profile_id=actor.user_profile_id if actor is not None else None,
+        actor_kind=actor.kind if actor is not None else None,
+        actor_name=actor.name if actor is not None else None,
+    )
+    await dependencies.project_repository.record_accepted_note_change(session, change)
+    return change
+
+
+def attach_accepted_project_note_change(
+    change: AcceptedNoteMutationChange,
+    project_change: RuntimeAcceptedProjectNoteChange,
+) -> AcceptedNoteMutationChange:
+    """Carry accepted partition evidence through existing runtime follow-up work."""
+    materialization = (
+        replace(change.materialization, project_change=project_change)
+        if change.materialization is not None
+        else None
+    )
+    file_delete = (
+        replace(change.file_delete, project_change=project_change)
+        if change.file_delete is not None
+        else None
+    )
+    return replace(
+        change,
+        project_change=project_change,
+        materialization=materialization,
+        file_delete=file_delete,
+    )
+
+
+def apply_accepted_note_graph_policy(
+    prepared_write: AcceptedPreparedNoteWrite,
+    *,
+    publish_graph_facts: bool,
+) -> AcceptedPreparedNoteWrite:
+    """Keep canonical Markdown while suppressing graph facts for derived documents."""
+    if publish_graph_facts:
+        return prepared_write
+    prepared = prepared_write.prepared
+    graph_silent_markdown = prepared.entity_markdown.model_copy(
+        update={"observations": [], "relations": []}
+    )
+    return replace(
+        prepared_write,
+        prepared=replace(prepared, entity_markdown=graph_silent_markdown),
+    )
 
 
 def accepted_note_integrity_rejection(error: IntegrityError) -> AcceptedNoteMutationRejection:
@@ -523,6 +628,31 @@ async def run_accepted_note_delete(
             )
         )
 
+    # The entity lookup above is intentionally unlocked so an already-missing
+    # delete stays idempotent. Once the note exists, claim its mutation lock and
+    # reload it before deleting: another delete may have removed the row while we
+    # waited, while an update or move may have changed its accepted evidence.
+    await lock_accepted_note_content_for_entity_mutation(
+        session,
+        project_id=project.id,
+        entity_id=entity.id,
+    )
+    entity = await entity_repository.get_by_external_id(
+        session,
+        request.entity_external_id,
+        load_relations=False,
+    )
+    if entity is None:
+        return AcceptedNoteMutationResult(
+            change=await delete_accepted_note(
+                session,
+                project_id=project.id,
+                entity=None,
+                repositories=dependencies.write_repositories,
+            )
+        )
+
+    await session.refresh(entity)
     note_content = await load_accepted_note_content(
         session,
         project_id=project.id,
@@ -530,14 +660,34 @@ async def run_accepted_note_delete(
         dependencies=dependencies,
         missing_kind=None,
     )
+    if note_content is not None:
+        await session.refresh(note_content)
+    change = await delete_accepted_note(
+        session,
+        project_id=project.id,
+        entity=entity,
+        note_content=note_content,
+        repositories=dependencies.write_repositories,
+    )
+    # The legacy entity-delete route also removes binary resources. Keep that
+    # behavior, but do not claim an accepted-note partition position for data
+    # that cannot participate in Markdown indexing or Wiki projection.
+    if not runtime_content_type_is_markdown(entity):
+        return AcceptedNoteMutationResult(change=change)
+    project_change = await record_accepted_project_note_change(
+        session,
+        project=project,
+        entity=entity,
+        operation=RuntimeProjectNoteOperation.deleted,
+        accepted_at=accepted_note_mutation_utc_now(),
+        source=ACCEPTED_NOTE_DELETE_SOURCE,
+        previous_file_path=None,
+        note_content=note_content,
+        actor=None,
+        dependencies=dependencies,
+    )
     return AcceptedNoteMutationResult(
-        change=await delete_accepted_note(
-            session,
-            project_id=project.id,
-            entity=entity,
-            note_content=note_content,
-            repositories=dependencies.write_repositories,
-        )
+        change=attach_accepted_project_note_change(change, project_change)
     )
 
 
@@ -583,7 +733,10 @@ async def _run_accepted_note_create(
         check_storage_exists=dependencies.verify_storage_absent_on_create,
         session=session,
     )
-
+    prepared_write = apply_accepted_note_graph_policy(
+        prepared_write,
+        publish_graph_facts=request.publish_graph_facts,
+    )
     prepared = prepared_write.prepared
     entity = await create_accepted_pending_entity(
         session,
@@ -602,15 +755,30 @@ async def _run_accepted_note_create(
         self_relation_resolver=preparer,
         repositories=dependencies.write_repositories,
     )
+    project_change = await record_accepted_project_note_change(
+        session,
+        project=project,
+        entity=entity,
+        operation=RuntimeProjectNoteOperation.created,
+        accepted_at=now,
+        source=request.source,
+        previous_file_path=None,
+        note_content=persisted.note_content,
+        actor=request.actor,
+        dependencies=dependencies,
+    )
     return AcceptedNoteMutationResult(
-        change=plan_accepted_note_write_change(
-            status_code=201,
-            entity=entity,
-            note_content=persisted.note_content,
-            actor_user_profile_id=request.actor.user_profile_id,
-            actor_kind=request.actor.kind,
-            actor_name=request.actor.name,
-            fallback_source=request.source,
+        change=attach_accepted_project_note_change(
+            plan_accepted_note_write_change(
+                status_code=201,
+                entity=entity,
+                note_content=persisted.note_content,
+                actor_user_profile_id=request.actor.user_profile_id,
+                actor_kind=request.actor.kind,
+                actor_name=request.actor.name,
+                fallback_source=request.source,
+            ),
+            project_change,
         ),
         relation_publication=persisted.relation_publication,
     )
@@ -640,6 +808,32 @@ async def _run_accepted_note_update(
         load_relations=False,
     )
     created = entity is None
+    current_note_content: NoteContent | None = None
+
+    if entity is not None:
+        # The first lookup resolves the addressed identity, but it is not a
+        # stable source-path snapshot. Claim the note lock, then refresh the
+        # entity before any path-sensitive preparation: a concurrent move may
+        # have changed the accepted predecessor while this PUT was waiting.
+        if not runtime_content_type_is_markdown(entity):
+            reject_accepted_note_mutation(
+                AcceptedNoteMutationRejectKind.unsupported_media_type,
+                "Only markdown note mutations are supported by the note-content path.",
+            )
+        current_note_content = await load_required_accepted_note_content(
+            session,
+            project_id=project.id,
+            entity_id=entity.id,
+            dependencies=dependencies,
+            missing_kind=AcceptedNoteMutationRejectKind.conflict,
+        )
+        await session.refresh(entity)
+        if not runtime_content_type_is_markdown(entity):
+            reject_accepted_note_mutation(
+                AcceptedNoteMutationRejectKind.unsupported_media_type,
+                "Only markdown note mutations are supported by the note-content path.",
+            )
+
     existing_file_path = entity.file_path if entity is not None else None
     vacated_source: tuple[RuntimeFilePath, RuntimeFileChecksum | None] | None = None
 
@@ -694,14 +888,6 @@ async def _run_accepted_note_update(
         )
         current_note_content = None
     else:
-        # A PUT replacement can only target a markdown note. A watcher-indexed binary
-        # entity has no markdown note_content to replace, so reject with 415 like the
-        # edit/move paths instead of a permanent-looking 409 content-backfill retry.
-        if not runtime_content_type_is_markdown(entity):
-            reject_accepted_note_mutation(
-                AcceptedNoteMutationRejectKind.unsupported_media_type,
-                "Only markdown note mutations are supported by the note-content path.",
-            )
         # Local source-of-truth guard: a PUT that renames onto a destination file that
         # exists on disk but is not yet indexed would overwrite/lose that unindexed
         # write. Mirror the create/move storage check before committing DB/search to
@@ -714,13 +900,7 @@ async def _run_accepted_note_update(
                 )
             except EntityAlreadyExistsError as error:
                 reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.conflict, str(error))
-        current_note_content = await load_required_accepted_note_content(
-            session,
-            project_id=project.id,
-            entity_id=entity.id,
-            dependencies=dependencies,
-            missing_kind=AcceptedNoteMutationRejectKind.conflict,
-        )
+        assert current_note_content is not None
         # A PUT replacement may also rename the note. Capture the exact source bytes before
         # persistence mutates the entity and note_content to the destination version so delayed
         # cleanup cannot let a later project index recreate the old path as a ghost.
@@ -780,6 +960,10 @@ async def _run_accepted_note_update(
         except (ParseError, ValueError) as error:
             reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.bad_request, str(error))
 
+    prepared_write = apply_accepted_note_graph_policy(
+        prepared_write,
+        publish_graph_facts=request.publish_graph_facts,
+    )
     prepared = prepared_write.prepared
     persisted = await persist_accepted_note_snapshot(
         session,
@@ -806,16 +990,43 @@ async def _run_accepted_note_update(
             file_path=vacated_source[0],
             file_checksum=vacated_source[1],
         )
+    operation = (
+        RuntimeProjectNoteOperation.created
+        if created
+        else (
+            RuntimeProjectNoteOperation.moved
+            if existing_file_path != entity.file_path
+            else RuntimeProjectNoteOperation.updated
+        )
+    )
+    previous_file_path = (
+        existing_file_path if operation == RuntimeProjectNoteOperation.moved else None
+    )
+    project_change = await record_accepted_project_note_change(
+        session,
+        project=project,
+        entity=entity,
+        operation=operation,
+        accepted_at=now,
+        source=request.source,
+        previous_file_path=previous_file_path,
+        note_content=persisted.note_content,
+        actor=request.actor,
+        dependencies=dependencies,
+    )
     return AcceptedNoteMutationResult(
-        change=plan_accepted_note_write_change(
-            status_code=201 if created else 200,
-            entity=entity,
-            note_content=persisted.note_content,
-            actor_user_profile_id=request.actor.user_profile_id,
-            actor_kind=request.actor.kind,
-            actor_name=request.actor.name,
-            cleanup_after_write=persisted.previous_file_delete,
-            fallback_source=request.source,
+        change=attach_accepted_project_note_change(
+            plan_accepted_note_write_change(
+                status_code=201 if created else 200,
+                entity=entity,
+                note_content=persisted.note_content,
+                actor_user_profile_id=request.actor.user_profile_id,
+                actor_kind=request.actor.kind,
+                actor_name=request.actor.name,
+                cleanup_after_write=persisted.previous_file_delete,
+                fallback_source=request.source,
+            ),
+            project_change,
         ),
         relation_publication=persisted.relation_publication,
     )
@@ -869,15 +1080,30 @@ async def _run_accepted_note_edit(
         self_relation_resolver=preparer,
         repositories=dependencies.write_repositories,
     )
+    project_change = await record_accepted_project_note_change(
+        session,
+        project=project,
+        entity=entity,
+        operation=RuntimeProjectNoteOperation.updated,
+        accepted_at=now,
+        source=request.source,
+        previous_file_path=None,
+        note_content=persisted.note_content,
+        actor=request.actor,
+        dependencies=dependencies,
+    )
     return AcceptedNoteMutationResult(
-        change=plan_accepted_note_write_change(
-            status_code=200,
-            entity=entity,
-            note_content=persisted.note_content,
-            actor_user_profile_id=request.actor.user_profile_id,
-            actor_kind=request.actor.kind,
-            actor_name=request.actor.name,
-            fallback_source=request.source,
+        change=attach_accepted_project_note_change(
+            plan_accepted_note_write_change(
+                status_code=200,
+                entity=entity,
+                note_content=persisted.note_content,
+                actor_user_profile_id=request.actor.user_profile_id,
+                actor_kind=request.actor.kind,
+                actor_name=request.actor.name,
+                fallback_source=request.source,
+            ),
+            project_change,
         ),
         relation_publication=persisted.relation_publication,
     )
@@ -904,6 +1130,10 @@ async def _run_accepted_note_move(
         entity_external_id=request.entity_external_id,
         dependencies=dependencies,
     )
+    # The identity lookup precedes the NoteContent lock. Refresh after the lock
+    # so an overlapping move records the committed source path it actually
+    # replaces, rather than the path observed while waiting.
+    await session.refresh(entity)
     existing_file_path = entity.file_path
     # The destination filename keeps its requested casing; only the parent
     # directory resolves against existing folders (issue #1326). The path is
@@ -994,17 +1224,32 @@ async def _run_accepted_note_move(
             file_path=existing_file_path,
             file_checksum=vacated_source_checksum,
         )
+    project_change = await record_accepted_project_note_change(
+        session,
+        project=project,
+        entity=entity,
+        operation=RuntimeProjectNoteOperation.moved,
+        accepted_at=now,
+        source=request.source,
+        previous_file_path=existing_file_path,
+        note_content=persisted.note_content,
+        actor=request.actor,
+        dependencies=dependencies,
+    )
     return AcceptedNoteMutationResult(
-        change=plan_accepted_note_write_change(
-            status_code=200,
-            entity=entity,
-            note_content=persisted.note_content,
-            actor_user_profile_id=request.actor.user_profile_id,
-            actor_kind=request.actor.kind,
-            actor_name=request.actor.name,
-            previous_file_path=existing_file_path,
-            cleanup_after_write=persisted.previous_file_delete,
-            fallback_source=request.source,
+        change=attach_accepted_project_note_change(
+            plan_accepted_note_write_change(
+                status_code=200,
+                entity=entity,
+                note_content=persisted.note_content,
+                actor_user_profile_id=request.actor.user_profile_id,
+                actor_kind=request.actor.kind,
+                actor_name=request.actor.name,
+                previous_file_path=existing_file_path,
+                cleanup_after_write=persisted.previous_file_delete,
+                fallback_source=request.source,
+            ),
+            project_change,
         ),
         relation_publication=persisted.relation_publication,
     )

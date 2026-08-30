@@ -9,11 +9,12 @@ from basic_memory.models.knowledge import (
     Observation,
     Relation,
 )
-from basic_memory.models.project import Project
+from basic_memory.models.project import AcceptedProjectNoteChange, Project
 from basic_memory.models.relation_search_refresh import RelationSearchRefresh
 
 __all__ = [
     "Base",
+    "AcceptedProjectNoteChange",
     "Entity",
     "NoteContent",
     "NoteFileVacate",

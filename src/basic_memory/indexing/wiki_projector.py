@@ -625,7 +625,11 @@ def _render_document(
     body: str,
     include_okf_version: bool,
 ) -> bytes:
-    frontmatter = ["---", f"type: {note_type}"]
+    frontmatter = [
+        "---",
+        f"type: {note_type}",
+        "bm_parse_semantics: false",
+    ]
     if include_okf_version:
         frontmatter.append(f'okf_version: "{OKF_VERSION}"')
     frontmatter.extend(

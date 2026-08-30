@@ -29,6 +29,7 @@ from basic_memory.runtime.note_materialization_planning import (
     RuntimePendingNoteMaterializationSource,
     plan_pending_note_materialization,
 )
+from basic_memory.runtime.project_partition import RuntimeAcceptedProjectNoteChange
 from basic_memory.runtime.storage import (
     NoteExternalId,
     ProjectId,
@@ -213,6 +214,7 @@ class RuntimeAcceptedNoteChange(Generic[_PayloadT_co]):
 
     status_code: int
     payload: _PayloadT_co
+    project_change: RuntimeAcceptedProjectNoteChange | None = None
     materialization: RuntimePendingNoteMaterialization | None = None
     file_delete: RuntimePendingNoteFileDelete | None = None
     # Surviving notes whose relations pointed at a deleted target. Their search

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -50,6 +50,10 @@ from basic_memory.repository.entity_repository import AcceptedPendingEntityWrite
 from basic_memory.repository.observation_repository import ObservationGenerationWriteResult
 from basic_memory.repository.relation_repository import RelationGenerationWriteResult
 from basic_memory.runtime.note_content import RuntimeAcceptedNoteResponse
+from basic_memory.runtime.project_partition import (
+    RuntimeAcceptedProjectNoteChange,
+    RuntimeProjectNoteOperation,
+)
 from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.schemas.request import EditEntityRequest
 from basic_memory.services.exceptions import EntityAlreadyExistsError
@@ -148,8 +152,10 @@ class _MutationSession:
     def __init__(self) -> None:
         self.deleted: list[object] = []
         self.added: list[object] = []
+        self.refreshed: list[object] = []
         self.flush_count = 0
         self.scalar_count = 0
+        self.refresh_effect: Callable[[object], None] | None = None
         self.bind = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
 
     async def delete(self, value: object) -> None:
@@ -169,6 +175,11 @@ class _MutationSession:
 
     async def flush(self) -> None:
         self.flush_count += 1
+
+    async def refresh(self, value: object) -> None:
+        self.refreshed.append(value)
+        if self.refresh_effect is not None:
+            self.refresh_effect(value)
 
 
 class _CreatePreparer:
@@ -331,9 +342,12 @@ class _PreparerFactory:
 
 
 class _ProjectRepository:
-    def __init__(self, project: Project | None) -> None:
+    def __init__(self, project: Project | None, *, next_partition_position: int = 1) -> None:
         self.project = project
         self.calls: list[tuple[AsyncSession, str]] = []
+        self.partition_calls: list[tuple[AsyncSession, int]] = []
+        self.recorded_changes: list[RuntimeAcceptedProjectNoteChange] = []
+        self.next_partition_position = next_partition_position
 
     async def get_by_external_id(
         self,
@@ -342,6 +356,24 @@ class _ProjectRepository:
     ) -> Project | None:
         self.calls.append((session, external_id))
         return self.project
+
+    async def advance_partition_position(
+        self,
+        session: AsyncSession,
+        project_id: int,
+    ) -> int:
+        self.partition_calls.append((session, project_id))
+        position = self.next_partition_position
+        self.next_partition_position += 1
+        return position
+
+    async def record_accepted_note_change(
+        self,
+        session: AsyncSession,
+        change: RuntimeAcceptedProjectNoteChange,
+    ) -> None:
+        _ = session
+        self.recorded_changes.append(change)
 
 
 class _EntityLookupRepository:
@@ -772,6 +804,25 @@ async def test_run_accepted_note_create_persists_prepared_markdown(
     assert change.materialization.actor_kind == "user"
     assert change.materialization.actor_name == "Ada"
     assert change.materialization.previous_file_path is None
+    assert project_repository.partition_calls == [(session, project.id)]
+    assert change.project_change is not None
+    project_change = change.project_change
+    assert project_change.partition_position == 1
+    assert project_change.operation is RuntimeProjectNoteOperation.created
+    assert project_change.project_external_id == "project-123"
+    assert project_change.note_external_id == "note-123"
+    assert project_change.permalink == "accepted"
+    assert project_change.file_path == "notes/accepted.md"
+    assert project_change.previous_file_path is None
+    assert project_change.accepted_at == _NOW
+    assert project_change.source == "api"
+    assert project_change.db_version == 1
+    assert project_change.db_checksum == note_content.db_checksum
+    assert project_change.actor_user_profile_id == _ACTOR_ID
+    assert project_change.actor_kind == "user"
+    assert project_change.actor_name == "Ada"
+    assert project_repository.recorded_changes == [project_change]
+    assert change.materialization.project_change is project_change
     assert result.relation_publication is not None
     assert result.relation_publication.generation == 1
     assert persistence_calls[0].await_count == 1
@@ -910,10 +961,59 @@ async def test_run_accepted_note_update_replaces_existing_note_content(
     assert change.materialization is not None
     assert change.materialization.db_version == 2
     assert change.materialization.previous_file_path is None
+    assert project_repository.partition_calls == [(cast(AsyncSession, session), project.id)]
+    assert change.project_change is not None
+    assert change.project_change.operation is RuntimeProjectNoteOperation.moved
+    assert change.project_change.previous_file_path == "notes/accepted.md"
+    assert change.project_change.file_path == "notes/replacement.md"
+    assert change.project_change.db_version == 2
+    assert change.materialization.project_change is change.project_change
     assert result.relation_publication is not None
     assert result.relation_publication.generation == 2
     assert persistence_calls[0].await_count == 1
     assert persistence_calls[1].await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_update_refreshes_source_path_after_lock() -> None:
+    session = _MutationSession()
+    schema = _schema()
+    project = _project()
+    entity = _entity(file_path="notes/accepted.md")
+    note_content = _note_content(entity)
+
+    def refresh_after_concurrent_move(value: object) -> None:
+        if value is entity:
+            entity.file_path = "archive/accepted.md"
+
+    session.refresh_effect = refresh_after_concurrent_move
+    project_repository = _ProjectRepository(project)
+    preparer = _CreatePreparer(_prepared())
+
+    result = await run_accepted_note_update(
+        cast(AsyncSession, session),
+        request=AcceptedNoteUpdateMutation(
+            project_external_id="project-123",
+            entity_external_id="note-123",
+            data=schema,
+            actor=AcceptedNoteMutationActor(user_profile_id=_ACTOR_ID),
+            source="api",
+        ),
+        dependencies=_dependencies(
+            project_repository=project_repository,
+            entity_lookup_repository=_EntityLookupRepository(by_external_id=entity),
+            note_content_lookup_repository=_NoteContentLookupRepository(note_content),
+            preparer_factory=_PreparerFactory(preparer),
+            pending_entity_repository=_PendingEntityRepository(entity),
+            note_content_accept_repository=_NoteContentAcceptRepository(note_content),
+            search_repository=_SearchRepository(),
+        ),
+    )
+
+    assert result.change.project_change is not None
+    assert result.change.project_change.operation is RuntimeProjectNoteOperation.moved
+    assert result.change.project_change.previous_file_path == "archive/accepted.md"
+    assert preparer.replace_calls[0][0].file_path == "notes/accepted.md"
 
 
 @pytest.mark.asyncio
@@ -1486,6 +1586,12 @@ async def test_run_accepted_note_edit_applies_patch_against_db_content(
     assert change.status_code == 200
     assert change.materialization is not None
     assert change.materialization.source == "mcp"
+    assert project_repository.partition_calls == [(cast(AsyncSession, session), project.id)]
+    assert change.project_change is not None
+    assert change.project_change.operation is RuntimeProjectNoteOperation.updated
+    assert change.project_change.previous_file_path is None
+    assert change.project_change.actor_user_profile_id is None
+    assert change.materialization.project_change is change.project_change
     assert persistence_calls[0].await_count == 1
     assert persistence_calls[1].await_count == 0
 
@@ -1646,6 +1752,15 @@ async def test_run_accepted_note_move_carries_previous_path_and_materialized_cle
     assert change.status_code == 200
     assert change.materialization is not None
     assert change.materialization.previous_file_path == "notes/accepted.md"
+    assert project_repository.partition_calls == [(cast(AsyncSession, session), project.id)]
+    assert change.project_change is not None
+    assert change.project_change.operation is RuntimeProjectNoteOperation.moved
+    assert change.project_change.previous_file_path == "notes/accepted.md"
+    assert change.project_change.file_path == "archive/accepted.md"
+    assert change.project_change.actor_user_profile_id == _ACTOR_ID
+    assert change.project_change.actor_kind == "mcp"
+    assert change.project_change.actor_name == "Claude"
+    assert change.materialization.project_change is change.project_change
     cleanup = change.materialization.cleanup_after_write
     if expected_source_checksum is None:
         assert cleanup is None
@@ -1699,6 +1814,55 @@ async def test_run_accepted_note_move_rejects_same_file_path() -> None:
 
     assert exc_info.value.rejection.kind is AcceptedNoteMutationRejectKind.bad_request
     assert exc_info.value.rejection.detail == "Source and destination paths are the same."
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_move_refreshes_source_path_after_lock(
+    persistence_calls: tuple[AsyncMock, AsyncMock],
+) -> None:
+    session = _MutationSession()
+    project = _project()
+    prepared = _prepared_replacement()
+    prepared_move = _prepared_move()
+    entity = _entity(file_path="notes/original.md")
+    note_content = _note_content(entity)
+    project_repository = _ProjectRepository(project)
+    entity_lookup_repository = _EntityLookupRepository(by_external_id=entity)
+    note_content_lookup_repository = _NoteContentLookupRepository(note_content)
+    preparer = _CreatePreparer(prepared, prepared_move=prepared_move)
+
+    def move_while_waiting(value: object) -> None:
+        if value is entity:
+            entity.file_path = "notes/intermediate.md"
+
+    session.refresh_effect = move_while_waiting
+
+    result = await run_accepted_note_move(
+        cast(AsyncSession, session),
+        request=AcceptedNoteMoveMutation(
+            project_external_id="project-123",
+            entity_external_id="note-123",
+            destination_path="archive/accepted.md",
+            actor=AcceptedNoteMutationActor(user_profile_id=None),
+            source="mcp",
+        ),
+        dependencies=_dependencies(
+            project_repository=project_repository,
+            entity_lookup_repository=entity_lookup_repository,
+            note_content_lookup_repository=note_content_lookup_repository,
+            preparer_factory=_PreparerFactory(preparer),
+            pending_entity_repository=_PendingEntityRepository(entity),
+            note_content_accept_repository=_NoteContentAcceptRepository(note_content),
+            search_repository=_SearchRepository(),
+        ),
+    )
+
+    assert session.refreshed == [entity]
+    assert result.change.project_change is not None
+    assert result.change.project_change.previous_file_path == "notes/intermediate.md"
+    assert result.change.materialization is not None
+    assert result.change.materialization.previous_file_path == "notes/intermediate.md"
+    assert persistence_calls[1].await_count == 1
 
 
 @pytest.mark.asyncio
@@ -1987,13 +2151,58 @@ async def test_run_accepted_note_delete_removes_entity_and_returns_cleanup() -> 
     assert session.deleted == [entity]
     assert search_repository.deleted_entity_ids == [entity.id]
     assert search_repository.deleted_vector_entity_ids == [entity.id]
-    assert session.scalar_count == 1
+    assert session.scalar_count == 2
+    assert session.refreshed == [entity, note_content]
     assert change.status_code == 200
     assert change.file_delete is not None
     assert change.file_delete.file_path == "notes/accepted.md"
     assert change.file_delete.file_checksum == "file-checksum"
+    assert project_repository.partition_calls == [(cast(AsyncSession, session), project.id)]
+    assert change.project_change is not None
+    assert change.project_change.operation is RuntimeProjectNoteOperation.deleted
+    assert change.project_change.file_path == "notes/accepted.md"
+    assert change.project_change.source == "delete_note"
+    assert change.project_change.db_version == note_content.db_version
+    assert change.project_change.db_checksum == note_content.db_checksum
+    assert change.project_change.actor_user_profile_id is None
+    assert change.file_delete.project_change is change.project_change
     assert change.relation_cleanup_entity_ids == frozenset()
     assert result.relation_publication is None
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_delete_stays_idempotent_after_concurrent_delete() -> None:
+    session = _MutationSession()
+    project = _project()
+    entity = _entity(file_path="notes/accepted.md")
+    entity_lookup_repository = _EntityLookupRepository(by_external_id=entity)
+    entity_lookup_repository.get_by_external_id = AsyncMock(side_effect=[entity, None])
+    search_repository = _SearchRepository()
+
+    result = await run_accepted_note_delete(
+        cast(AsyncSession, session),
+        request=AcceptedNoteDeleteMutation(
+            project_external_id="project-123",
+            entity_external_id="note-123",
+        ),
+        dependencies=_dependencies(
+            project_repository=_ProjectRepository(project),
+            entity_lookup_repository=entity_lookup_repository,
+            note_content_lookup_repository=_NoteContentLookupRepository(),
+            preparer_factory=_PreparerFactory(_CreatePreparer(_prepared())),
+            pending_entity_repository=_PendingEntityRepository(entity),
+            note_content_accept_repository=_NoteContentAcceptRepository(_note_content(entity)),
+            search_repository=search_repository,
+        ),
+    )
+
+    assert result.change.status_code == 200
+    assert result.change.payload == {"deleted": False}
+    assert session.scalar_count == 1
+    assert session.refreshed == []
+    assert session.deleted == []
+    assert search_repository.deleted_entity_ids == []
+    assert search_repository.deleted_vector_entity_ids == []
 
 
 def _prepared_with_graph(
@@ -2071,6 +2280,57 @@ async def test_run_accepted_note_create_returns_graph_publication() -> None:
         "Engineer",
     ]
     assert result.relation_publication.relations[0].target_name == "XSYS Target"
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_create_can_suppress_derived_graph_facts() -> None:
+    """Derived documents keep their Markdown without recursively expanding the graph."""
+    session = cast(AsyncSession, object())
+    prepared = _prepared_with_graph(
+        observations=[
+            AcceptedObservationWrite(
+                content="Generated list item",
+                category="note",
+                context=None,
+                tags=None,
+            )
+        ],
+        relations=[
+            AcceptedRelationWrite(
+                relation_type="links_to",
+                target_name="Source Note",
+                context=None,
+            )
+        ],
+    )
+    entity = _entity()
+    note_content = _note_content(entity)
+
+    result = await run_accepted_note_create(
+        session,
+        request=AcceptedNoteCreateMutation(
+            project_external_id="project-123",
+            data=_schema(),
+            actor=AcceptedNoteMutationActor(user_profile_id=None, kind="system"),
+            source="wiki_projector",
+            publish_graph_facts=False,
+        ),
+        dependencies=_dependencies(
+            project_repository=_ProjectRepository(_project()),
+            entity_lookup_repository=_EntityLookupRepository(),
+            note_content_lookup_repository=_NoteContentLookupRepository(),
+            preparer_factory=_PreparerFactory(_CreatePreparer(prepared)),
+            pending_entity_repository=_PendingEntityRepository(entity),
+            note_content_accept_repository=_NoteContentAcceptRepository(note_content),
+            search_repository=_SearchRepository(),
+        ),
+    )
+
+    assert isinstance(result.change.payload, RuntimeAcceptedNoteResponse)
+    assert result.change.payload.markdown_content == "# Accepted\n"
+    assert result.relation_publication is not None
+    assert result.relation_publication.observations == ()
+    assert result.relation_publication.relations == ()
 
 
 @pytest.mark.asyncio
@@ -2175,6 +2435,58 @@ async def test_run_accepted_note_update_returns_replacement_graph() -> None:
     assert result.relation_publication is not None
     assert result.relation_publication.observations[0].content == "Replaced"
     assert result.relation_publication.relations[0].target_name == "Other"
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_update_can_clear_derived_graph_facts() -> None:
+    """A graph-silent replacement publishes empty sets so earlier facts are removed."""
+    session = _MutationSession()
+    prepared = _prepared_with_graph(
+        observations=[
+            AcceptedObservationWrite(
+                content="Generated list item",
+                category="note",
+                context=None,
+                tags=None,
+            )
+        ],
+        relations=[
+            AcceptedRelationWrite(
+                relation_type="links_to",
+                target_name="Source Note",
+                context=None,
+            )
+        ],
+    )
+    entity = _entity(file_path="notes/accepted.md")
+    note_content = _note_content(entity)
+
+    result = await run_accepted_note_update(
+        cast(AsyncSession, session),
+        request=AcceptedNoteUpdateMutation(
+            project_external_id="project-123",
+            entity_external_id="note-123",
+            data=_schema(),
+            actor=AcceptedNoteMutationActor(user_profile_id=None, kind="system"),
+            source="wiki_projector",
+            publish_graph_facts=False,
+        ),
+        dependencies=_dependencies(
+            project_repository=_ProjectRepository(_project()),
+            entity_lookup_repository=_EntityLookupRepository(by_external_id=entity),
+            note_content_lookup_repository=_NoteContentLookupRepository(note_content),
+            preparer_factory=_PreparerFactory(_CreatePreparer(prepared)),
+            pending_entity_repository=_PendingEntityRepository(entity),
+            note_content_accept_repository=_NoteContentAcceptRepository(note_content),
+            search_repository=_SearchRepository(),
+        ),
+    )
+
+    assert isinstance(result.change.payload, RuntimeAcceptedNoteResponse)
+    assert result.change.payload.markdown_content == "# Accepted\n"
+    assert result.relation_publication is not None
+    assert result.relation_publication.observations == ()
+    assert result.relation_publication.relations == ()
 
 
 @pytest.mark.asyncio

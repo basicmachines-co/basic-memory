@@ -1,16 +1,18 @@
 """Repository for managing projects in Basic Memory."""
 
+from datetime import datetime
 from pathlib import Path
 from typing import Any, override, Optional, Sequence, Union
 
 
 from loguru import logger
-from sqlalchemy import Executable, inspect as sa_inspect, select, text
+from sqlalchemy import Executable, inspect as sa_inspect, select, text, update
 from sqlalchemy.exc import NoResultFound, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from basic_memory.models.project import Project
+from basic_memory.models.project import AcceptedProjectNoteChange, Project
 from basic_memory.repository.repository import Repository
+from basic_memory.runtime.project_partition import RuntimeAcceptedProjectNoteChange
 
 
 async def _load_sqlite_vec_on_session(session) -> bool:
@@ -152,6 +154,115 @@ class ProjectRepository(Repository[Project]):
         """Get the default project (the one marked as is_default=True)."""
         query = self.select().where(Project.is_default.is_(True))
         return await self.find_one(session, query)
+
+    async def advance_partition_position(
+        self,
+        session: AsyncSession,
+        project_id: int,
+    ) -> int:
+        """Atomically claim the next strict position in one project partition."""
+        statement = (
+            update(Project)
+            .where(Project.id == project_id)
+            .values(partition_position=Project.partition_position + 1)
+            .returning(Project.partition_position)
+            .execution_options(synchronize_session=False)
+        )
+        position = (await session.execute(statement)).scalar_one_or_none()
+        if position is None:
+            raise RuntimeError(f"Project partition is missing for project_id={project_id}")
+        return int(position)
+
+    async def record_accepted_note_change(
+        self,
+        session: AsyncSession,
+        change: RuntimeAcceptedProjectNoteChange,
+    ) -> None:
+        """Persist replayable accepted evidence in the mutation transaction."""
+        persisted = AcceptedProjectNoteChange(
+            project_id=change.project_id,
+            project_external_id=change.project_external_id,
+            partition_position=change.partition_position,
+            entity_id=change.entity_id,
+            note_external_id=change.note_external_id,
+            permalink=change.permalink,
+            title=change.title,
+            operation=change.operation.value,
+            file_path=change.file_path,
+            previous_file_path=change.previous_file_path,
+            accepted_at=change.accepted_at,
+            source=change.source,
+            db_version=change.db_version,
+            db_checksum=change.db_checksum,
+            actor_user_profile_id=(
+                str(change.actor_user_profile_id)
+                if change.actor_user_profile_id is not None
+                else None
+            ),
+            actor_kind=change.actor_kind,
+            actor_name=change.actor_name,
+        )
+        session.add(persisted)
+        await session.flush()
+
+    async def list_accepted_note_changes(
+        self,
+        session: AsyncSession,
+        project_id: int,
+        *,
+        after_position: int = 0,
+        through_position: int | None = None,
+    ) -> Sequence[AcceptedProjectNoteChange]:
+        """List one contiguous project evidence range in strict order."""
+        statement = select(AcceptedProjectNoteChange).where(
+            AcceptedProjectNoteChange.project_id == project_id,
+            AcceptedProjectNoteChange.partition_position > after_position,
+        )
+        if through_position is not None:
+            statement = statement.where(
+                AcceptedProjectNoteChange.partition_position <= through_position
+            )
+        result = await session.execute(
+            statement.order_by(AcceptedProjectNoteChange.partition_position)
+        )
+        return tuple(result.scalars().all())
+
+    async def mark_accepted_note_change_materialized(
+        self,
+        session: AsyncSession,
+        project_id: int,
+        partition_position: int,
+        *,
+        materialized_at: datetime,
+    ) -> bool:
+        """Record when this note's accepted evidence reached canonical storage."""
+        target_note_external_id = (
+            await session.execute(
+                select(AcceptedProjectNoteChange.note_external_id).where(
+                    AcceptedProjectNoteChange.project_id == project_id,
+                    AcceptedProjectNoteChange.partition_position == partition_position,
+                )
+            )
+        ).scalar_one_or_none()
+        if target_note_external_id is None:
+            return False
+
+        # A newer materialized generation is canonical evidence that every older
+        # accepted generation of this note has been superseded. Retire those rows
+        # together so an obsolete queued write cannot block downstream projectors.
+        statement = (
+            update(AcceptedProjectNoteChange)
+            .where(
+                AcceptedProjectNoteChange.project_id == project_id,
+                AcceptedProjectNoteChange.note_external_id == target_note_external_id,
+                AcceptedProjectNoteChange.partition_position <= partition_position,
+                AcceptedProjectNoteChange.materialized_at.is_(None),
+            )
+            .values(materialized_at=materialized_at)
+            .returning(AcceptedProjectNoteChange.id)
+            .execution_options(synchronize_session=False)
+        )
+        return bool((await session.execute(statement)).scalars().all())
 
     async def get_active_projects(self, session: AsyncSession) -> Sequence[Project]:
         """Get all active projects."""
