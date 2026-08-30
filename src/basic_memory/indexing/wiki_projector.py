@@ -299,12 +299,28 @@ def plan_wiki_projection(
         for change in changes
         if change.partition_position > snapshot.current_output_watermark
     )
+    projector_only_advance = (
+        request.reason == WikiProjectionReason.accepted_note
+        and not new_changes
+        and any(
+            _is_projector_change(change)
+            and change.partition_position > snapshot.current_output_watermark
+            for change in snapshot.changes
+        )
+    )
     notes = tuple(
         note
         for note in snapshot.notes
         if PurePosixPath(note.path).name.lower() not in RESERVED_WIKI_FILENAMES
     )
-    scopes = _projection_scopes(request, snapshot, notes, changes, new_changes)
+    scopes = _projection_scopes(
+        request,
+        snapshot,
+        notes,
+        changes,
+        new_changes,
+        repair_complete_projection=projector_only_advance,
+    )
     scope_by_casefold: dict[str, str] = {}
     for scope in scopes:
         folded_scope = scope.casefold()
@@ -367,7 +383,14 @@ def plan_wiki_projection(
     updated = 0
     for path, content in sorted(rendered.items()):
         existing = existing_by_path.get(path.casefold())
-        if existing is not None and existing.content == content:
+        if existing is not None and (
+            existing.content == content
+            or (
+                projector_only_advance
+                and _without_projection_metadata(existing.content)
+                == _without_projection_metadata(content)
+            )
+        ):
             unchanged_paths.append(path)
             continue
         writes.append(
@@ -406,8 +429,10 @@ def _projection_scopes(
     notes: tuple[WikiSourceNote, ...],
     changes: tuple[WikiSourceChange, ...],
     new_changes: tuple[WikiSourceChange, ...],
+    *,
+    repair_complete_projection: bool,
 ) -> tuple[str, ...]:
-    if request.is_full_rebuild:
+    if request.is_full_rebuild or repair_complete_projection:
         paths = [note.path for note in notes]
         paths.extend(document.path for document in snapshot.reserved_documents)
         paths.extend(change.path for change in changes)
@@ -422,6 +447,19 @@ def _projection_scopes(
             scopes.add(scope.as_posix())
             scope = scope.parent
     return tuple(sorted(scopes))
+
+
+def _without_projection_metadata(content: bytes) -> bytes:
+    frontmatter, separator, body = content.partition(b"\n---\n")
+    normalized_frontmatter = b"\n".join(
+        b"  at:"
+        if line.startswith(b"  at: ")
+        else b"  source_watermark:"
+        if line.startswith(b"  source_watermark: ")
+        else line
+        for line in frontmatter.split(b"\n")
+    )
+    return normalized_frontmatter + separator + body
 
 
 def _render_index(

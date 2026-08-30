@@ -443,35 +443,69 @@ def test_user_claimed_reserved_path_matches_case_insensitively() -> None:
     assert plan.result.state == WikiProjectionState.conflicted
 
 
-def test_projector_generated_change_is_suppressed_from_writes_and_log() -> None:
-    existing = _reserved("index.md", b"existing\n")
-    snapshot = WikiProjectionSnapshot(
-        project_id="project-88",
-        project_name="Project 88",
+def test_projector_only_advance_preserves_complete_projection_bytes() -> None:
+    initial_snapshot = _snapshot()
+    initial = plan_wiki_projection(
+        _request(reason=WikiProjectionReason.manual_rebuild, scopes=()),
+        initial_snapshot,
+    )
+    projector_change = WikiSourceChange(
+        partition_position=4,
+        operation=WikiChangeOperation.updated,
+        path="index.md",
+        title="Project 88",
+        accepted_at=datetime(2026, 8, 29, 18, 31, tzinfo=timezone.utc),
+        materialized=True,
+        source="wiki_projector",
+    )
+    snapshot = replace(
+        initial_snapshot,
         source_partition_position=4,
         current_output_watermark=3,
-        source_accepted_at=ACCEPTED_AT,
-        notes=(),
-        changes=(
-            WikiSourceChange(
-                partition_position=4,
-                operation=WikiChangeOperation.updated,
-                path="index.md",
-                title="Project 88",
-                accepted_at=ACCEPTED_AT,
-                materialized=True,
-                source="wiki_projector",
-            ),
-        ),
-        reserved_documents=(existing,),
+        source_accepted_at=projector_change.accepted_at,
+        changes=(*initial_snapshot.changes, projector_change),
+        reserved_documents=tuple(_reserved(write.path, write.content) for write in initial.writes),
     )
 
     plan = plan_wiki_projection(_request(position=4, scopes=()), snapshot)
 
-    rendered = "\n".join(write.content.decode() for write in plan.writes)
-    assert "Updated [[index|Project 88]]" not in rendered
+    assert plan.writes == ()
+    assert plan.unchanged_paths == tuple(write.path for write in initial.writes)
     assert plan.result.output_watermark == 4
     assert plan.result.state == WikiProjectionState.current
+
+
+def test_projector_only_advance_repairs_missing_projection_document() -> None:
+    initial_snapshot = _snapshot()
+    initial = plan_wiki_projection(
+        _request(reason=WikiProjectionReason.manual_rebuild, scopes=()),
+        initial_snapshot,
+    )
+    projector_change = WikiSourceChange(
+        partition_position=4,
+        operation=WikiChangeOperation.updated,
+        path="index.md",
+        title="Project 88",
+        accepted_at=ACCEPTED_AT,
+        materialized=True,
+        source="wiki_projector",
+    )
+    snapshot = replace(
+        initial_snapshot,
+        source_partition_position=4,
+        current_output_watermark=3,
+        changes=(*initial_snapshot.changes, projector_change),
+        reserved_documents=tuple(
+            _reserved(write.path, write.content)
+            for write in initial.writes
+            if write.path != "guides/deep/log.md"
+        ),
+    )
+
+    plan = plan_wiki_projection(_request(position=4, scopes=()), snapshot)
+
+    assert tuple(write.path for write in plan.writes) == ("guides/deep/log.md",)
+    assert "Updated [[index|Project 88]]" not in plan.writes[0].content.decode()
 
 
 def test_requested_scopes_cannot_omit_a_changed_note_scope() -> None:
