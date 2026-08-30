@@ -155,10 +155,18 @@ async def test_a_project_named_man_is_reachable_behind_the_manual(
     )
 
     async def note_miss(identifier, context):
-        raise ResourceError("No note")
+        raise notes_module.NoteNotFoundError("No note")
 
     monkeypatch.setattr(notes_module, "read_note_markdown", note_miss)
     with pytest.raises(ResourceError, match="read memory://man for the index"):
+        await note_resource(project="man", path="guides/setup")
+
+    async def note_error(identifier, context):
+        raise ResourceError("Authentication required: x")
+
+    # An operational note failure keeps its cause instead of the manual's hint.
+    monkeypatch.setattr(notes_module, "read_note_markdown", note_error)
+    with pytest.raises(ResourceError, match="Authentication required"):
         await note_resource(project="man", path="guides/setup")
 
 
@@ -200,6 +208,53 @@ async def test_note_actually_named_info_still_reads(app, test_project) -> None:
     assert "A note that happens to be called info." in direct
     assert "A note that happens to be called info." in served
     assert "A note that happens to be called info." in served_md
+
+
+@pytest.mark.asyncio
+async def test_unprefixed_permalinks_ignore_project_name_collisions(
+    app, test_project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # With permalinks_include_project=False, memory://docs/roadmap is the note
+    # docs/roadmap in the active project even when a project named docs exists.
+    class StubConfig:
+        permalinks_include_project = False
+        projects = {"docs": "/nowhere", test_project.name: test_project.path}
+
+    class StubConfigManager:
+        config = StubConfig()
+
+    monkeypatch.setattr(notes_module, "ConfigManager", StubConfigManager)
+    routes: list[str | None] = []
+    real_get_project_client = notes_module.get_project_client
+
+    def recording(project, context=None, project_id=None):
+        routes.append(project)
+        return real_get_project_client(project, context, project_id=project_id)
+
+    monkeypatch.setattr(notes_module, "get_project_client", recording)
+    await write_note(
+        title="Roadmap",
+        directory="docs",
+        content="# Roadmap\n\nActive project wins.\n",
+        project=test_project.name,
+    )
+
+    text = await note_resource(project="docs", path="roadmap")
+
+    assert "Active project wins." in text
+    assert routes == [None]  # no pre-routing to the colliding project name
+
+
+@pytest.mark.asyncio
+async def test_info_fallback_keeps_operational_note_failures(
+    app, test_project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def note_error(identifier, context):
+        raise ResourceError("Authentication required: x")
+
+    monkeypatch.setattr(notes_module, "read_note_markdown", note_error)
+    with pytest.raises(ResourceError, match="Authentication required"):
+        await notes_module.project_info(workspace="nowhere", project="also-nowhere")
 
 
 @pytest.mark.asyncio

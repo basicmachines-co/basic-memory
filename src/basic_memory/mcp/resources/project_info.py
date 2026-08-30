@@ -69,10 +69,12 @@ async def project_info(
         # (precedence between overlapping template matches is undefined), so a
         # failed workspace/project route may really be a note whose canonical
         # permalink ends in /info. Deferred import: notes.py imports this module.
-        from basic_memory.mcp.resources.notes import read_note_markdown
+        from basic_memory.mcp.resources.notes import NoteNotFoundError, read_note_markdown
 
         try:
             return await read_note_markdown(f"{workspace}/{project}/info", context)
-        except ResourceError:
+        except NoteNotFoundError:
             # Neither a project route nor a note — the route error is the cause.
+            # An operational note failure (auth, server, transport) propagates
+            # with its own cause instead.
             raise ResourceError(str(error)) from error

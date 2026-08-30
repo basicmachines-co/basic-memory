@@ -20,15 +20,30 @@ from basic_memory.mcp.tools.utils import call_get, call_post
 NOTE_TEMPLATE = "memory://{project}/{path*}"
 
 
-def _configured_project(segment: str) -> str | None:
-    """The configured project this segment names, or None if it names none.
+class NoteNotFoundError(ResourceError):
+    """The identifier resolved to no note — distinct from operational failures.
 
-    The client must be opened for the URI's own project — a cloud-mode project
+    Fallback dispatchers (the manual namespace, the /info shape) may only swap
+    in their own error when the note is confirmed missing; auth, server, and
+    transport failures must keep their cause.
+    """
+
+
+def _configured_project(segment: str) -> str | None:
+    """The configured project this segment names, or None when it routes nowhere.
+
+    With permalinks_include_project=False the first segment is a directory even
+    when it collides with a configured project's name — the active project owns
+    unprefixed permalinks, so no pre-routing happens at all. Otherwise the
+    client must be opened for the URI's own project — a cloud-mode project
     needs its cloud transport, not the default project's — and only the config
     can say, without I/O, whether the segment is a project at all.
     """
+    config = ConfigManager().config
+    if not config.permalinks_include_project:
+        return None
     requested = generate_permalink(segment)
-    for configured_name in ConfigManager().config.projects:
+    for configured_name in config.projects:
         if generate_permalink(configured_name) == requested:
             return configured_name
     return None
@@ -70,7 +85,7 @@ async def read_note_markdown(identifier: str, context: Context | None) -> str:
         # not-found should read as a missing note — auth, server, and transport
         # failures keep their actionable cause.
         if "not found" in str(error).lower():
-            raise ResourceError(
+            raise NoteNotFoundError(
                 f"No note {identifier!r}; search_notes can find the identifier"
             ) from error
         raise ResourceError(str(error)) from error
@@ -107,8 +122,9 @@ async def note_resource(project: str, path: str, context: Context | None = None)
         except ResourceError as manual_error:
             try:
                 return await read_note_markdown(f"{project}/{path}", context)
-            except ResourceError:
-                # Neither a page nor a note — the manual's hint is the useful one.
+            except NoteNotFoundError:
+                # Neither a page nor a note — the manual's hint is the useful one;
+                # an operational note failure keeps its own cause instead.
                 raise manual_error from None
 
     # The {workspace}/{project}/info shape belongs to the project_info resource,
