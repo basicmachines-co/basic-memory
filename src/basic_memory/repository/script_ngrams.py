@@ -1,5 +1,6 @@
 """Application-owned lexical analysis for scripts without reliable word boundaries."""
 
+import hashlib
 import unicodedata
 from dataclasses import dataclass
 
@@ -88,7 +89,7 @@ def mixed_token_word_terms(text: str) -> tuple[str, ...]:
             if is_script_search_character(character):
                 if word_fragment:
                     fragment = "".join(word_fragment).casefold()
-                    terms.append(f"bmword{fragment.encode('utf-8').hex()}")
+                    terms.append(f"bmword{hashlib.sha256(fragment.encode()).hexdigest()}")
                     word_fragment = []
                 continue
             if character.isalnum() or (
@@ -98,11 +99,11 @@ def mixed_token_word_terms(text: str) -> tuple[str, ...]:
                 continue
             if word_fragment:
                 fragment = "".join(word_fragment).casefold()
-                terms.append(f"bmword{fragment.encode('utf-8').hex()}")
+                terms.append(f"bmword{hashlib.sha256(fragment.encode()).hexdigest()}")
                 word_fragment = []
         if word_fragment:
             fragment = "".join(word_fragment).casefold()
-            terms.append(f"bmword{fragment.encode('utf-8').hex()}")
+            terms.append(f"bmword{hashlib.sha256(fragment.encode()).hexdigest()}")
     return tuple(terms)
 
 

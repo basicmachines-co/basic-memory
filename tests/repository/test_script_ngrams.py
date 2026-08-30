@@ -55,9 +55,9 @@ def test_build_script_ngrams_keeps_runs_from_matching_across_boundaries() -> Non
 
 def test_mixed_token_word_terms_encode_all_word_fragments() -> None:
     assert mixed_token_word_terms("foo不適者bar ＡＢＣ適者") == (
-        "bmword666f6f",
-        "bmword626172",
-        "bmword616263",
+        "bmword2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",
+        "bmwordfcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9",
+        "bmwordba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
     )
 
 
@@ -77,8 +77,8 @@ def test_analyze_script_query_preserves_adjoining_word_and_script_token() -> Non
     assert query.word_text is None
     assert query.gram_phrases == (
         ("適者",),
-        ("bmword666f6f",),
-        ("bmword626172",),
+        ("bmword2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",),
+        ("bmwordfcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9",),
     )
 
 
@@ -88,8 +88,8 @@ def test_analyze_script_query_preserves_punctuation_separated_mixed_token() -> N
     assert query.word_text is None
     assert query.gram_phrases == (
         ("適者",),
-        ("bmword666f6f",),
-        ("bmword626172",),
+        ("bmword2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",),
+        ("bmwordfcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9",),
     )
 
 
@@ -97,21 +97,30 @@ def test_analyze_script_query_does_not_require_script_substring_in_word_channel(
     query = analyze_script_query("foo適者")
 
     assert query.word_text is None
-    assert query.gram_phrases == (("適者",), ("bmword666f6f",))
+    assert query.gram_phrases == (
+        ("適者",),
+        ("bmword2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae",),
+    )
 
 
 def test_analyze_script_query_preserves_compatibility_bytes_in_mixed_prefix() -> None:
     query = analyze_script_query("ＡＢＣ適者")
 
     assert query.word_text is None
-    assert query.gram_phrases == (("適者",), ("bmword616263",))
+    assert query.gram_phrases == (
+        ("適者",),
+        ("bmwordba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",),
+    )
 
 
 def test_analyze_script_query_retains_trailing_word_in_auxiliary_channel() -> None:
     query = analyze_script_query("適者OpenAI")
 
     assert query.word_text is None
-    assert query.gram_phrases == (("適者",), ("bmword6f70656e6169",))
+    assert query.gram_phrases == (
+        ("適者",),
+        ("bmword7d3194f79e645c42e4396dda38be04766810ec6a00d00aced3ffc2a0a1f1a9ef",),
+    )
 
 
 def test_analyze_script_query_preserves_explicit_boolean_semantics() -> None:
