@@ -13,6 +13,14 @@
   gains `basic-memory-diagnostics(3)`, closing the one gap between the section-3
   corpus and the tool registry.
 
+- Notes are readable as MCP resources. Every `memory://` URL Basic Memory hands out
+  now answers the standard `resources/read`: `memory://<project>/<path>` returns the
+  note's raw markdown, frontmatter included, with the identifier accepted as a
+  permalink, title, or file path. Unknown notes point at `search_notes`; binary files
+  point at `read_content`. `memory://man/...` keeps answering as the manual and
+  `memory://<workspace>/<project>/info` as project info, whichever template the
+  server matches first.
+
 - **#610**: The manual ships in the package and is served over MCP. The 21 section-3
   pages (one per MCP tool -- `search-notes(3)`, `write-note(3)`, ...) now live in
   `src/basic_memory/man/man3/` as canonical, portable notes. The MCP server exposes
@@ -36,6 +44,13 @@
   band, so the decision stays with the agent, which has the context the score does not.
 
 ### Bug Fixes
+
+- The `memory://{workspace}/{project}/info` resource is now actually readable over
+  `resources/read`: it returned a Pydantic model, which the resource runtime rejects
+  (`contents must be str, bytes, or list[ResourceContent]`), so every served read
+  failed. It returns the validated response as JSON text now. Found by the new
+  note-resource tests, which read through a real client session instead of calling
+  the handler directly.
 
 - **#1344**: Deleting a note no longer erases the relations pointing at it. The
   `relation.to_id` foreign key is now `ON DELETE SET NULL` rather than
