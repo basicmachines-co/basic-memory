@@ -398,7 +398,11 @@ async def vector_storage_size_bytes(
                     "OR name IN ("
                     "SELECT name FROM sqlite_schema WHERE tbl_name = 'search_vector_chunks'"
                     ") "
-                    "OR name LIKE 'search_vector_embeddings%'"
+                    "OR name LIKE 'search_vector_embeddings%' "
+                    "OR name IN ("
+                    "SELECT name FROM sqlite_schema "
+                    "WHERE tbl_name LIKE 'search_vector_embeddings%'"
+                    ")"
                 )
             )
             return int(result.scalar_one())

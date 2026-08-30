@@ -107,8 +107,8 @@ without measurement.
 
 | Backend | Model | Cold load | Index 17 notes | Notes/sec | Model RSS delta | Cache bytes | Vector storage |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| SQLite | BGE small English | 0.41 s | 6.31 s | 2.70 | 186,286,080 | 67,179,926 | 1,630,208 |
-| SQLite | Multilingual MiniLM | 2.89 s | 4.76 s | 3.57 | 314,720,256 | 252,141,023 | 1,630,208 |
+| SQLite | BGE small English | 0.41 s | 6.31 s | 2.70 | 186,286,080 | 67,179,926 | 1,638,400 |
+| SQLite | Multilingual MiniLM | 2.89 s | 4.76 s | 3.57 | 314,720,256 | 252,141,023 | 1,638,400 |
 | PostgreSQL | BGE small English | 1.04 s | 15.09 s | 1.13 | 212,926,464 | 67,179,926 | 262,144 |
 | PostgreSQL | Multilingual MiniLM | 2.65 s | 6.73 s | 2.53 | 514,326,528 | 252,141,023 | 253,952 |
 | PostgreSQL/Milvus Lite | BGE small English | 3.16 s | 35.42 s | 0.48 | 97,452,032 | 67,179,926 | 42,658 |

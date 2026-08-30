@@ -6,9 +6,16 @@ import os
 from types import SimpleNamespace
 
 import pytest
+import sqlite_vec
 from sqlalchemy import text
 
 from basic_memory.config import DatabaseBackend
+from basic_memory.models.search import (
+    CREATE_SQLITE_SEARCH_VECTOR_CHUNKS,
+    CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_PROJECT_ENTITY,
+    CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_UNIQUE,
+    create_sqlite_search_vector_embeddings,
+)
 from basic_memory.repository.semantic_chunking import split_text_into_chunks
 from basic_memory.schemas.search import SearchRetrievalMode
 
@@ -161,7 +168,55 @@ async def test_sqlite_vector_storage_excludes_unrelated_tables(sqlite_engine_fac
     if not dbstat_available:
         pytest.skip("SQLite dbstat is required for physical vector-storage measurement")
 
+    async with engine.begin() as connection:
+        raw_connection = await connection.get_raw_connection()
+        driver_connection = raw_connection.driver_connection
+        await driver_connection.enable_load_extension(True)
+        await driver_connection.load_extension(sqlite_vec.loadable_path())
+        await driver_connection.enable_load_extension(False)
+        await connection.execute(CREATE_SQLITE_SEARCH_VECTOR_CHUNKS)
+        await connection.execute(CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_PROJECT_ENTITY)
+        await connection.execute(CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_UNIQUE)
+        await connection.execute(create_sqlite_search_vector_embeddings(4))
+
     vector_bytes_before = await vector_storage_size_bytes(engine, storage_case)
+    async with engine.connect() as connection:
+        vector_relations = set(
+            (
+                await connection.execute(
+                    text(
+                        "SELECT name FROM sqlite_schema "
+                        "WHERE tbl_name = 'search_vector_chunks' "
+                        "OR tbl_name LIKE 'search_vector_embeddings%'"
+                    )
+                )
+            ).scalars()
+        )
+        vector_relations.update(
+            (
+                await connection.execute(
+                    text(
+                        "SELECT DISTINCT name FROM dbstat "
+                        "WHERE name = 'search_vector_chunks' "
+                        "OR name LIKE 'search_vector_embeddings%'"
+                    )
+                )
+            ).scalars()
+        )
+        dbstat_rows = await connection.execute(
+            text("SELECT name, SUM(pgsize) FROM dbstat GROUP BY name")
+        )
+        dbstat_bytes = dict(dbstat_rows.tuples().all())
+
+    autoindexes = {
+        name
+        for name in vector_relations
+        if name.startswith("sqlite_autoindex_search_vector_embeddings_")
+    }
+    vector_dbstat_relations = vector_relations.intersection(dbstat_bytes)
+    assert autoindexes
+    assert autoindexes <= vector_dbstat_relations
+    assert vector_bytes_before == sum(dbstat_bytes[name] for name in vector_dbstat_relations)
 
     async with engine.begin() as connection:
         await connection.execute(text("CREATE TABLE unrelated_payload (content BLOB NOT NULL)"))
