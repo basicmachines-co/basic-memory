@@ -200,7 +200,12 @@ class LocalNoteFileDeleteStorage:
         # guarantee portable: never delete an object that no longer matches (basic-memory-cloud#1618).
         if not await self.file_service.exists(path):
             return False
-        if await self.file_service.compute_checksum(path) != expected_checksum:
+        try:
+            actual_checksum = await self.compute_checksum(path)
+        except FileNotFoundError:
+            # Disappearance after the final existence probe is another safe no-delete outcome.
+            return False
+        if actual_checksum != expected_checksum:
             return False
         await self.file_service.delete_file(path)
         return True
