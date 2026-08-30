@@ -1,6 +1,7 @@
 """Project info resource for Basic Memory MCP server."""
 
 from fastmcp import Context
+from fastmcp.exceptions import ResourceError
 from loguru import logger
 
 from basic_memory.config import ConfigManager, ProjectMode
@@ -58,7 +59,20 @@ async def project_info(
     ):
         project_route = configured_project
 
-    async with get_project_client(project_route, context) as (client, active_project):
-        response = await call_get(client, f"/v2/projects/{active_project.external_id}/info")
-        info = ProjectInfoResponse.model_validate(response.json())
-        return info.model_dump_json(indent=2)
+    try:
+        async with get_project_client(project_route, context) as (client, active_project):
+            response = await call_get(client, f"/v2/projects/{active_project.external_id}/info")
+            info = ProjectInfoResponse.model_validate(response.json())
+            return info.model_dump_json(indent=2)
+    except (ValueError, RuntimeError) as error:
+        # This template also wins ties for {project}/{directory}/info note URIs
+        # (precedence between overlapping template matches is undefined), so a
+        # failed workspace/project route may really be a note whose canonical
+        # permalink ends in /info. Deferred import: notes.py imports this module.
+        from basic_memory.mcp.resources.notes import read_note_markdown
+
+        try:
+            return await read_note_markdown(f"{workspace}/{project}/info", context)
+        except ResourceError:
+            # Neither a project route nor a note — the route error is the cause.
+            raise ResourceError(str(error)) from error
