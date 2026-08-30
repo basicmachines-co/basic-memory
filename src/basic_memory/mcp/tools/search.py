@@ -868,7 +868,7 @@ async def search_notes(
 
     ### Advanced Pattern Examples
     - `search_notes("project AND (meeting OR discussion)", project="work-project")` - Complex boolean logic
-    - `search_notes("\"exact phrase\" AND keyword", project="research")` - Combine phrase and keyword search
+    - `search_notes('"exact phrase" AND keyword', project="research")` - Combine phrase and keyword search
     - `search_notes("bug NOT fixed", project="dev-notes")` - Exclude resolved issues
     - `search_notes("docs/2024-*", project="archive", search_type="permalink")` - Year-based permalink search
 
