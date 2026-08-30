@@ -256,3 +256,78 @@ def test_absolute_paths_are_rejected_at_the_contract_boundary() -> None:
             note_type="Note",
             checksum="checksum",
         )
+
+
+@pytest.mark.parametrize("path", ("C:/outside.md", "C:\\outside.md"))
+def test_windows_drive_paths_are_rejected_at_the_contract_boundary(path: str) -> None:
+    with pytest.raises(ValueError, match="project-relative"):
+        WikiSourceNote(
+            path=path,
+            title="Outside",
+            note_type="Note",
+            checksum="checksum",
+        )
+
+
+def test_projection_order_is_deterministic_for_case_only_names() -> None:
+    notes = (
+        WikiSourceNote(path="foo.md", title="same", note_type="Note", checksum="lower"),
+        WikiSourceNote(path="Foo.md", title="Same", note_type="Note", checksum="upper"),
+    )
+    snapshot = WikiProjectionSnapshot(
+        project_id="project-88",
+        project_name="Project 88",
+        current_output_watermark=0,
+        source_accepted_at=ACCEPTED_AT,
+        notes=notes,
+        changes=(),
+    )
+    reverse_snapshot = WikiProjectionSnapshot(
+        project_id="project-88",
+        project_name="Project 88",
+        current_output_watermark=0,
+        source_accepted_at=ACCEPTED_AT,
+        notes=tuple(reversed(notes)),
+        changes=(),
+    )
+
+    first = plan_wiki_projection(_request(position=0, scopes=()), snapshot)
+    second = plan_wiki_projection(_request(position=0, scopes=()), reverse_snapshot)
+
+    assert first.writes == second.writes
+
+
+def test_projection_escapes_dynamic_markdown_structure() -> None:
+    injected_title = "Bad]]\n- relates_to [[evil"
+    snapshot = WikiProjectionSnapshot(
+        project_id="project-88",
+        project_name=f"Project\n{injected_title}",
+        current_output_watermark=0,
+        source_accepted_at=ACCEPTED_AT,
+        notes=(
+            WikiSourceNote(
+                path="unsafe]target.md",
+                title=injected_title,
+                note_type="Note",
+                checksum="unsafe",
+            ),
+        ),
+        changes=(
+            WikiSourceChange(
+                partition_position=1,
+                operation=WikiChangeOperation.updated,
+                path="unsafe]target.md",
+                title=injected_title,
+                accepted_at=ACCEPTED_AT,
+                materialized=True,
+                source="web",
+            ),
+        ),
+    )
+
+    plan = plan_wiki_projection(_request(position=1, scopes=()), snapshot)
+    rendered = {write.path: write.content.decode() for write in plan.writes}
+
+    assert "\n- relates_to [[evil" not in rendered["index.md"]
+    assert "\n- relates_to [[evil" not in rendered["log.md"]
+    assert "[[unsafe&#93;target|Bad&#93;&#93; - relates_to &#91;&#91;evil]]" in rendered["index.md"]

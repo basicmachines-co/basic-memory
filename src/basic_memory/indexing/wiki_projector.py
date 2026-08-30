@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from hashlib import sha256
 import json
-from pathlib import PurePosixPath
+from pathlib import PurePosixPath, PureWindowsPath
 
 OKF_VERSION = "0.2"
 WIKI_PROFILE = "wiki/1"
@@ -427,7 +427,12 @@ def _render_index(
 ) -> bytes:
     direct_notes = sorted(
         (note for note in notes if _parent_scope(note.path) == scope),
-        key=lambda note: (note.title.casefold(), note.path.casefold()),
+        key=lambda note: (
+            note.title.casefold(),
+            note.path.casefold(),
+            note.title,
+            note.path,
+        ),
     )
     child_scope_set: set[str] = set()
     for note in notes:
@@ -438,18 +443,23 @@ def _render_index(
             child_scope_set.add(child_scope)
     child_scopes = sorted(child_scope_set)
     title = snapshot.project_name if not scope else _display_name(PurePosixPath(scope).name)
-    body: list[str] = [f"# {title}", ""]
+    body: list[str] = [f"# {_escape_generated_markdown_text(title)}", ""]
     if child_scopes:
         body.extend(["## Sections", ""])
         body.extend(
-            f"- [[{child_scope}/index|{_display_name(PurePosixPath(child_scope).name)}]]"
+            "- "
+            f"[[{_escape_generated_markdown_text(f'{child_scope}/index')}|"
+            f"{_escape_generated_markdown_text(_display_name(PurePosixPath(child_scope).name))}]]"
             for child_scope in child_scopes
         )
         body.append("")
     if direct_notes:
         body.extend(["## Notes", ""])
         body.extend(
-            f"- [[{_without_markdown_suffix(note.path)}|{note.title}]]" for note in direct_notes
+            "- "
+            f"[[{_escape_generated_markdown_text(_without_markdown_suffix(note.path))}|"
+            f"{_escape_generated_markdown_text(note.title)}]]"
+            for note in direct_notes
         )
         body.append("")
     if not child_scopes and not direct_notes:
@@ -494,7 +504,7 @@ def _render_log(
         if not scope
         else f"{_display_name(PurePosixPath(scope).name)} log"
     )
-    body: list[str] = [f"# {title}", ""]
+    body: list[str] = [f"# {_escape_generated_markdown_text(title)}", ""]
     if relevant:
         body.extend(_render_log_entry(change) for change in relevant)
         body.append("")
@@ -512,20 +522,22 @@ def _render_log(
 
 def _render_log_entry(change: WikiSourceChange) -> str:
     timestamp = _isoformat_utc(change.accepted_at)
+    path = _escape_generated_markdown_text(_without_markdown_suffix(change.path))
+    title = _escape_generated_markdown_text(change.title)
     match change.operation:
         case WikiChangeOperation.created:
-            description = f"Created [[{_without_markdown_suffix(change.path)}|{change.title}]]"
+            description = f"Created [[{path}|{title}]]"
         case WikiChangeOperation.updated:
-            description = f"Updated [[{_without_markdown_suffix(change.path)}|{change.title}]]"
+            description = f"Updated [[{path}|{title}]]"
         case WikiChangeOperation.moved:
             if change.previous_path is None:
                 raise ValueError("Moved Wiki change requires previous_path")
             description = (
-                f"Moved `{change.previous_path}` to "
-                f"[[{_without_markdown_suffix(change.path)}|{change.title}]]"
+                f"Moved `{_escape_generated_markdown_text(change.previous_path)}` to "
+                f"[[{path}|{title}]]"
             )
         case WikiChangeOperation.deleted:
-            description = f"Deleted `{change.path}`"
+            description = f"Deleted `{_escape_generated_markdown_text(change.path)}`"
     return f"- {timestamp} — {description}"
 
 
@@ -576,9 +588,11 @@ def _normalize_scope(scope: str) -> str:
 
 
 def _normalize_relative_path(path: str) -> str:
-    candidate = path.strip().replace("\\", "/")
-    if candidate.startswith("/"):
+    accepted_path = path.strip()
+    windows_path = PureWindowsPath(accepted_path)
+    if accepted_path.startswith(("/", "\\")) or windows_path.drive or windows_path.is_absolute():
         raise ValueError(f"Wiki path must be project-relative and normalized: {path}")
+    candidate = accepted_path.replace("\\", "/")
     candidate = candidate.strip("/")
     if not candidate:
         return ""
@@ -586,6 +600,25 @@ def _normalize_relative_path(path: str) -> str:
     if parsed.is_absolute() or any(part in {"", ".", ".."} for part in parsed.parts):
         raise ValueError(f"Wiki path must be project-relative and normalized: {path}")
     return parsed.as_posix()
+
+
+def _escape_generated_markdown_text(value: str) -> str:
+    """Keep snapshot metadata from changing generated Markdown structure."""
+    return value.translate(
+        str.maketrans(
+            {
+                "\r": " ",
+                "\n": " ",
+                "\\": "&#92;",
+                "[": "&#91;",
+                "]": "&#93;",
+                "|": "&#124;",
+                "`": "&#96;",
+                "<": "&lt;",
+                ">": "&gt;",
+            }
+        )
+    )
 
 
 def _require_unique_paths(values: tuple[object, ...], *, label: str) -> None:
