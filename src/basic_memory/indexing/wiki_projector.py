@@ -8,6 +8,7 @@ from enum import StrEnum
 from hashlib import sha256
 import json
 from pathlib import PurePosixPath, PureWindowsPath
+import unicodedata
 
 OKF_VERSION = "0.2"
 WIKI_PROFILE = "wiki/1"
@@ -318,7 +319,7 @@ def plan_wiki_projection(
             ),
         )
 
-    scopes = _projection_scopes(request, snapshot, new_changes)
+    scopes = _projection_scopes(request, snapshot, changes, new_changes)
     existing_by_path = {
         document.path.casefold(): document for document in snapshot.reserved_documents
     }
@@ -413,15 +414,14 @@ def plan_wiki_projection(
 def _projection_scopes(
     request: WikiProjectionRequest,
     snapshot: WikiProjectionSnapshot,
+    changes: tuple[WikiSourceChange, ...],
     new_changes: tuple[WikiSourceChange, ...],
 ) -> tuple[str, ...]:
     if request.is_full_rebuild:
         paths = [note.path for note in snapshot.notes]
         paths.extend(document.path for document in snapshot.reserved_documents)
-        paths.extend(change.path for change in snapshot.changes)
-        paths.extend(
-            change.previous_path for change in snapshot.changes if change.previous_path is not None
-        )
+        paths.extend(change.path for change in changes)
+        paths.extend(change.previous_path for change in changes if change.previous_path is not None)
         return affected_wiki_scopes(*paths)
     paths = [change.path for change in new_changes]
     paths.extend(change.previous_path for change in new_changes if change.previous_path is not None)
@@ -619,6 +619,8 @@ def _validate_portable_path_components(
     source: str,
 ) -> None:
     for component in PurePosixPath(normalized).parts:
+        if any(unicodedata.category(character) == "Cc" for character in component):
+            raise ValueError(f"Wiki {path_kind} contains a control character: {source}")
         if any(character in component for character in ':"?*'):
             raise ValueError(f"Wiki {path_kind} contains a Windows-invalid character: {source}")
         if component.endswith((".", " ")):
@@ -629,7 +631,9 @@ def _validate_portable_path_components(
 
 
 def _normalize_relative_path(path: str) -> str:
-    accepted_path = path.strip()
+    if path != path.strip():
+        raise ValueError(f"Wiki path must not contain boundary whitespace: {path}")
+    accepted_path = path
     windows_path = PureWindowsPath(accepted_path)
     if accepted_path.startswith(("/", "\\")) or windows_path.drive or windows_path.is_absolute():
         raise ValueError(f"Wiki path must be project-relative and normalized: {path}")

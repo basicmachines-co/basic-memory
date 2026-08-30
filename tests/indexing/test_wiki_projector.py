@@ -136,9 +136,13 @@ def test_projection_request_normalizes_and_deduplicates_scopes() -> None:
         "bad::scope",
         "bad\nscope",
         "bad\x00scope",
+        "bad\x01scope",
+        "bad\x7fscope",
         "bad:scope",
         "CON",
         "guides/trailing.",
+        " guides",
+        "guides ",
     ),
 )
 def test_projection_request_rejects_nonportable_scopes(scope: str) -> None:
@@ -166,12 +170,16 @@ def test_source_note_rejects_missing_metadata() -> None:
     "path",
     (
         "bad?/note.md",
+        "bad\x01/note.md",
+        "bad\x7f/note.md",
         "NUL/note.md",
         "trailing./note.md",
+        " note.md",
+        "note.md ",
     ),
 )
 def test_source_note_rejects_nonportable_path_components(path: str) -> None:
-    with pytest.raises(ValueError, match="Wiki note path"):
+    with pytest.raises(ValueError, match="Wiki (path|note path)"):
         WikiSourceNote(
             path=path,
             title="Note",
@@ -505,6 +513,52 @@ def test_full_rebuild_covers_orphaned_reserved_document_scopes() -> None:
     rendered = {write.path: write.content.decode() for write in plan.writes}
     assert "No concepts have been projected" in rendered["orphaned/index.md"]
     assert "Deleted `orphaned/last-note.md`" in rendered["orphaned/log.md"]
+
+
+def test_full_rebuild_excludes_scopes_after_requested_watermark() -> None:
+    snapshot = WikiProjectionSnapshot(
+        project_id="project-88",
+        project_name="Project 88",
+        current_output_watermark=0,
+        source_accepted_at=ACCEPTED_AT,
+        notes=(),
+        changes=(
+            WikiSourceChange(
+                partition_position=1,
+                operation=WikiChangeOperation.deleted,
+                path="included/note.md",
+                title="Included",
+                accepted_at=ACCEPTED_AT,
+                materialized=True,
+                source="web",
+            ),
+            WikiSourceChange(
+                partition_position=2,
+                operation=WikiChangeOperation.deleted,
+                path="future/note.md",
+                title="Future",
+                accepted_at=ACCEPTED_AT,
+                materialized=True,
+                source="web",
+            ),
+        ),
+    )
+
+    plan = plan_wiki_projection(
+        _request(
+            position=1,
+            reason=WikiProjectionReason.manual_rebuild,
+            scopes=(),
+        ),
+        snapshot,
+    )
+
+    assert {write.path for write in plan.writes} == {
+        "index.md",
+        "log.md",
+        "included/index.md",
+        "included/log.md",
+    }
 
 
 def test_moved_change_requires_previous_path() -> None:
