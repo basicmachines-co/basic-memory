@@ -48,7 +48,9 @@ prepends, or edits sections in place without rewriting the file.
 
 ## PARAMETERS
 
-- **title** — note title; becomes the H1 and drives the permalink
+- **title** — note title; written to frontmatter and drives the permalink.
+  No H1 is added for you: `content` is saved as given, so include
+  `# Title` yourself if the note should open with a heading
 - **content** — markdown body; may include observations, relations, and its own
   frontmatter (a `type:` in content frontmatter takes precedence over the
   `note_type` parameter)
