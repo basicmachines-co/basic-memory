@@ -1,12 +1,10 @@
 """Application-owned lexical analysis for scripts without reliable word boundaries."""
 
-import hashlib
 import unicodedata
 from dataclasses import dataclass
 
 
 _SCRIPT_BOUNDARY = "bm_script_boundary"
-MIXED_WORD_BLOCK_BYTES = 24
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,97 +80,6 @@ def script_run_grams(run: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(first + second for first, second in zip(run, run[1:], strict=False))
 
 
-def mixed_token_word_terms(text: str) -> tuple[str, ...]:
-    """Encode prefix-searchable word fragments and their order around script runs."""
-    terms: list[str] = []
-    for token in text.split():
-        normalized_token = unicodedata.normalize("NFKC", token)
-        if not any(is_script_search_character(character) for character in normalized_token):
-            continue
-
-        components: list[tuple[str, str]] = []
-        component_kind: str | None = None
-        component_characters: list[str] = []
-        for character in normalized_token:
-            if character in {"\u200c", "\u200d"}:
-                continue
-            if component_characters and unicodedata.category(character) in {"Mn", "Mc", "Me"}:
-                component_characters.append(character)
-                continue
-
-            next_kind = (
-                "script"
-                if is_script_search_character(character)
-                else "word"
-                if character.isalnum()
-                else None
-            )
-            if next_kind != component_kind and component_characters:
-                components.append((component_kind or "word", "".join(component_characters)))
-                component_characters = []
-            component_kind = next_kind
-            if next_kind is not None:
-                component_characters.append(character)
-        if component_characters:
-            components.append((component_kind or "word", "".join(component_characters)))
-
-        word_roles: dict[int, list[tuple[str, int]]] = {}
-        after_distance = 0
-        has_script_before = False
-        for index, (kind, _) in enumerate(components):
-            if kind == "script":
-                after_distance = 0
-                has_script_before = True
-                continue
-            if not has_script_before:
-                continue
-            after_distance += 1
-            word_roles.setdefault(index, []).append(("after", after_distance))
-
-        before_distance = 0
-        has_script_after = False
-        for index in range(len(components) - 1, -1, -1):
-            kind, _ = components[index]
-            if kind == "script":
-                before_distance = 0
-                has_script_after = True
-                continue
-            if not has_script_after:
-                continue
-            before_distance += 1
-            word_roles.setdefault(index, []).append(("before", before_distance))
-
-        # Fixed-size blocks preserve arbitrary-length prefix matching while keeping every
-        # generated lexeme and the total auxiliary representation linear in the input size.
-        for index, roles in word_roles.items():
-            word_bytes = components[index][1].casefold().encode()
-            for direction, distance in roles:
-                terms.extend(
-                    f"bmprefix{direction}{distance}x{block_index}x"
-                    f"{word_bytes[start : start + MIXED_WORD_BLOCK_BYTES].hex()}"
-                    for block_index, start in enumerate(
-                        range(0, len(word_bytes), MIXED_WORD_BLOCK_BYTES)
-                    )
-                )
-
-        # Role terms bind the positional word blocks to their neighboring script component.
-        # A separate token cannot satisfy these terms merely by containing the same script gram.
-        for index, (kind, value) in enumerate(components):
-            if kind != "script":
-                continue
-            run = tuple(unit for script_run in script_runs(value) for unit in script_run)
-            run_terms = (*run, *script_run_grams(run))
-            if index > 0 and components[index - 1][0] == "word":
-                terms.extend(
-                    "bmrolebefore" + hashlib.sha256(term.encode()).hexdigest() for term in run_terms
-                )
-            if index + 1 < len(components) and components[index + 1][0] == "word":
-                terms.extend(
-                    "bmroleafter" + hashlib.sha256(term.encode()).hexdigest() for term in run_terms
-                )
-    return tuple(dict.fromkeys(terms))
-
-
 def build_script_ngrams(*texts: str | None) -> str:
     """Build portable index text without depending on a database tokenizer."""
     gram_runs: list[str] = []
@@ -184,7 +91,6 @@ def build_script_ngrams(*texts: str | None) -> str:
             # bigrams together after them preserves ordered phrase matching for longer queries.
             index_terms = run if len(run) == 1 else (*run, *script_run_grams(run))
             gram_runs.append(" ".join(index_terms))
-        gram_runs.extend(mixed_token_word_terms(text))
     return f" {_SCRIPT_BOUNDARY} ".join(gram_runs)
 
 
@@ -199,21 +105,19 @@ def analyze_script_query(text: str) -> ScriptQuery:
     if '"' in text or any(f" {operator} " in padded_text for operator in ("AND", "OR", "NOT")):
         return ScriptQuery(word_text=text, gram_phrases=())
 
-    # Mixed tokens use the same application-owned auxiliary channel as script grams. This
-    # avoids assuming that either backend exposes word fragments on both sides of a script run.
-    word_tokens = [
-        token.lower() if token in {"AND", "OR", "NOT"} else token
-        for token in text.split()
-        if not any(
-            is_script_search_character(character)
-            for character in unicodedata.normalize("NFKC", token)
+    word_tokens: list[str] = []
+    for token in text.split():
+        normalized_token = unicodedata.normalize("NFKC", token)
+        # Keep mixed-script tokens on the established word-search path. The auxiliary channel
+        # adds script substring recall without inventing new cross-script token semantics.
+        has_word_character = any(
+            character.isalnum() and not is_script_search_character(character)
+            for character in normalized_token
         )
-        and any(character.isalnum() for character in unicodedata.normalize("NFKC", token))
-    ]
-    gram_phrases = (
-        *(script_run_grams(run) for run in script_runs(normalized)),
-        *((term,) for term in mixed_token_word_terms(text)),
-    )
+        if has_word_character:
+            word_tokens.append(token.lower() if token in {"AND", "OR", "NOT"} else token)
+
+    gram_phrases = tuple(script_run_grams(run) for run in script_runs(normalized))
     # Preserve punctuation-only input as an explicit backend query. Dropping it would make
     # the repositories confuse user text with the intentional no-predicate wildcard path.
     word_text = " ".join(word_tokens) or (text if not gram_phrases else None)

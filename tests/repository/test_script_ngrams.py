@@ -7,10 +7,8 @@ import pytest
 from basic_memory import db
 from basic_memory.models import Entity
 from basic_memory.repository.script_ngrams import (
-    MIXED_WORD_BLOCK_BYTES,
     analyze_script_query,
     build_script_ngrams,
-    mixed_token_word_terms,
     script_run_grams,
     script_runs,
 )
@@ -63,22 +61,6 @@ def test_build_script_ngrams_keeps_runs_from_matching_across_boundaries() -> Non
     assert build_script_ngrams("适者", "生存") == ("适 者 适者 bm_script_boundary 生 存 生存")
 
 
-def test_mixed_token_word_terms_encode_all_word_fragments() -> None:
-    terms = mixed_token_word_terms("foo不適者bar ＡＢＣ適者")
-
-    assert "bmprefixbefore1x0x666f6f" in terms
-    assert "bmprefixafter1x0x626172" in terms
-    assert "bmprefixbefore1x0x616263" in terms
-    assert any(term.startswith("bmrole") for term in terms)
-
-
-def test_mixed_token_word_terms_bound_long_fragment_expansion() -> None:
-    terms = mixed_token_word_terms(f"{'a' * 500}{'漢字' * 250}")
-
-    word_block_count = (500 + MIXED_WORD_BLOCK_BYTES - 1) // MIXED_WORD_BLOCK_BYTES
-    assert len(terms) <= word_block_count + 4
-
-
 def test_analyze_script_query_separates_word_and_ordered_script_terms() -> None:
     query = analyze_script_query("OpenAI 适者生存，サバイバル")
 
@@ -92,48 +74,36 @@ def test_analyze_script_query_separates_word_and_ordered_script_terms() -> None:
 def test_analyze_script_query_preserves_adjoining_word_and_script_token() -> None:
     query = analyze_script_query("foo適者bar")
 
-    assert query.word_text is None
-    assert query.gram_phrases[0] == ("適者",)
-    assert ("bmprefixbefore1x0x666f6f",) in query.gram_phrases
-    assert ("bmprefixafter1x0x626172",) in query.gram_phrases
-    assert any(phrase[0].startswith("bmrole") for phrase in query.gram_phrases)
+    assert query.word_text == "foo適者bar"
+    assert query.gram_phrases == (("適者",),)
 
 
 def test_analyze_script_query_preserves_punctuation_separated_mixed_token() -> None:
     query = analyze_script_query("foo-適者-bar")
 
-    assert query.word_text is None
-    assert query.gram_phrases[0] == ("適者",)
-    assert ("bmprefixbefore1x0x666f6f",) in query.gram_phrases
-    assert ("bmprefixafter1x0x626172",) in query.gram_phrases
-    assert any(phrase[0].startswith("bmrole") for phrase in query.gram_phrases)
+    assert query.word_text == "foo-適者-bar"
+    assert query.gram_phrases == (("適者",),)
 
 
-def test_analyze_script_query_does_not_require_script_substring_in_word_channel() -> None:
+def test_analyze_script_query_keeps_mixed_token_on_word_channel() -> None:
     query = analyze_script_query("foo適者")
 
-    assert query.word_text is None
-    assert query.gram_phrases[0] == ("適者",)
-    assert ("bmprefixbefore1x0x666f6f",) in query.gram_phrases
-    assert any(phrase[0].startswith("bmrole") for phrase in query.gram_phrases)
+    assert query.word_text == "foo適者"
+    assert query.gram_phrases == (("適者",),)
 
 
-def test_analyze_script_query_preserves_compatibility_bytes_in_mixed_prefix() -> None:
+def test_analyze_script_query_preserves_compatibility_text_in_mixed_token() -> None:
     query = analyze_script_query("ＡＢＣ適者")
 
-    assert query.word_text is None
-    assert query.gram_phrases[0] == ("適者",)
-    assert ("bmprefixbefore1x0x616263",) in query.gram_phrases
-    assert any(phrase[0].startswith("bmrole") for phrase in query.gram_phrases)
+    assert query.word_text == "ＡＢＣ適者"
+    assert query.gram_phrases == (("適者",),)
 
 
-def test_analyze_script_query_retains_trailing_word_in_auxiliary_channel() -> None:
+def test_analyze_script_query_retains_trailing_word_in_word_channel() -> None:
     query = analyze_script_query("適者OpenAI")
 
-    assert query.word_text is None
-    assert query.gram_phrases[0] == ("適者",)
-    assert ("bmprefixafter1x0x6f70656e6169",) in query.gram_phrases
-    assert any(phrase[0].startswith("bmrole") for phrase in query.gram_phrases)
+    assert query.word_text == "適者OpenAI"
+    assert query.gram_phrases == (("適者",),)
 
 
 def test_analyze_script_query_preserves_explicit_boolean_semantics() -> None:
@@ -424,6 +394,42 @@ async def test_search_preserves_adjoining_word_and_script_token(search_repositor
 
 
 @pytest.mark.asyncio
+async def test_mixed_token_query_does_not_combine_terms_across_tokens(search_repository) -> None:
+    now = datetime.now(timezone.utc)
+    rows = [
+        SearchIndexRow(
+            project_id=search_repository.project_id,
+            id=1326,
+            type="entity",
+            file_path="notes/mixed-token-match.md",
+            title="Mixed token match",
+            content_stems="foo適者bar",
+            content_snippet="foo適者bar",
+            permalink="notes/mixed-token-match",
+            created_at=now,
+            updated_at=now,
+        ),
+        SearchIndexRow(
+            project_id=search_repository.project_id,
+            id=1327,
+            type="entity",
+            file_path="notes/distributed-token-decoy.md",
+            title="Distributed token decoy",
+            content_stems="foo生存bar x適者y",
+            content_snippet="foo生存bar x適者y",
+            permalink="notes/distributed-token-decoy",
+            created_at=now,
+            updated_at=now,
+        ),
+    ]
+    await search_repository.bulk_index_items(rows)
+
+    results = await search_repository.search("foo適者bar")
+
+    assert [result.id for result in results] == [1326]
+
+
+@pytest.mark.asyncio
 async def test_search_matches_script_substring_inside_longer_mixed_token(search_repository) -> None:
     now = datetime.now(timezone.utc)
     row = SearchIndexRow(
@@ -440,163 +446,9 @@ async def test_search_matches_script_substring_inside_longer_mixed_token(search_
     )
     await search_repository.index_item(row)
 
-    results = await search_repository.search("foo適者")
+    results = await search_repository.search("適者")
 
     assert [result.id for result in results] == [1312]
-
-
-@pytest.mark.asyncio
-async def test_search_preserves_prefix_matching_in_mixed_token(search_repository) -> None:
-    now = datetime.now(timezone.utc)
-    row = SearchIndexRow(
-        project_id=search_repository.project_id,
-        id=1320,
-        type="entity",
-        file_path="notes/mixed-prefix.md",
-        title="Mixed prefix",
-        content_stems="foobar不適者",
-        content_snippet="foobar不適者",
-        permalink="notes/mixed-prefix",
-        created_at=now,
-        updated_at=now,
-    )
-    await search_repository.index_item(row)
-
-    results = await search_repository.search("foo適者")
-
-    assert [result.id for result in results] == [1320]
-
-
-@pytest.mark.asyncio
-async def test_search_preserves_long_prefix_matching_in_mixed_token(search_repository) -> None:
-    now = datetime.now(timezone.utc)
-    indexed_prefix = "a" * 70
-    query_prefix = "a" * 65
-    row = SearchIndexRow(
-        project_id=search_repository.project_id,
-        id=1325,
-        type="entity",
-        file_path="notes/long-mixed-prefix.md",
-        title="Long mixed prefix",
-        content_stems=f"{indexed_prefix}適者",
-        content_snippet=f"{indexed_prefix}適者",
-        permalink="notes/long-mixed-prefix",
-        created_at=now,
-        updated_at=now,
-    )
-    await search_repository.index_item(row)
-
-    results = await search_repository.search(f"{query_prefix}適者")
-
-    assert [result.id for result in results] == [1325]
-
-
-@pytest.mark.asyncio
-async def test_search_preserves_word_fragment_order_in_mixed_token(search_repository) -> None:
-    now = datetime.now(timezone.utc)
-    rows = [
-        SearchIndexRow(
-            project_id=search_repository.project_id,
-            id=1321,
-            type="entity",
-            file_path="notes/mixed-order-match.md",
-            title="Mixed order match",
-            content_stems="foo適者bar",
-            content_snippet="foo適者bar",
-            permalink="notes/mixed-order-match",
-            created_at=now,
-            updated_at=now,
-        ),
-        SearchIndexRow(
-            project_id=search_repository.project_id,
-            id=1322,
-            type="entity",
-            file_path="notes/mixed-order-reversed.md",
-            title="Mixed order reversed",
-            content_stems="bar適者foo",
-            content_snippet="bar適者foo",
-            permalink="notes/mixed-order-reversed",
-            created_at=now,
-            updated_at=now,
-        ),
-    ]
-    await search_repository.bulk_index_items(rows)
-
-    results = await search_repository.search("foo適者bar")
-
-    assert [result.id for result in results] == [1321]
-
-
-@pytest.mark.asyncio
-async def test_search_binds_word_positions_to_their_script_run(search_repository) -> None:
-    now = datetime.now(timezone.utc)
-    rows = [
-        SearchIndexRow(
-            project_id=search_repository.project_id,
-            id=1326,
-            type="entity",
-            file_path="notes/script-role-match.md",
-            title="Script role match",
-            content_stems="foo適者bar",
-            content_snippet="foo適者bar",
-            permalink="notes/script-role-match",
-            created_at=now,
-            updated_at=now,
-        ),
-        SearchIndexRow(
-            project_id=search_repository.project_id,
-            id=1327,
-            type="entity",
-            file_path="notes/script-role-decoy.md",
-            title="Script role decoy",
-            content_stems="foo生存bar 適者",
-            content_snippet="foo生存bar 適者",
-            permalink="notes/script-role-decoy",
-            created_at=now,
-            updated_at=now,
-        ),
-    ]
-    await search_repository.bulk_index_items(rows)
-
-    results = await search_repository.search("foo適者bar")
-
-    assert [result.id for result in results] == [1326]
-
-
-@pytest.mark.asyncio
-async def test_search_preserves_same_side_word_fragment_order(search_repository) -> None:
-    now = datetime.now(timezone.utc)
-    rows = [
-        SearchIndexRow(
-            project_id=search_repository.project_id,
-            id=1323,
-            type="entity",
-            file_path="notes/same-side-order-match.md",
-            title="Same-side order match",
-            content_stems="foo-bar-baz適者",
-            content_snippet="foo-bar-baz適者",
-            permalink="notes/same-side-order-match",
-            created_at=now,
-            updated_at=now,
-        ),
-        SearchIndexRow(
-            project_id=search_repository.project_id,
-            id=1324,
-            type="entity",
-            file_path="notes/same-side-order-reversed.md",
-            title="Same-side order reversed",
-            content_stems="bar-foo-baz適者",
-            content_snippet="bar-foo-baz適者",
-            permalink="notes/same-side-order-reversed",
-            created_at=now,
-            updated_at=now,
-        ),
-    ]
-    await search_repository.bulk_index_items(rows)
-
-    results = await search_repository.search("foo-bar-baz適者")
-
-    assert [result.id for result in results] == [1323]
 
 
 @pytest.mark.asyncio

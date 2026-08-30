@@ -1055,10 +1055,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
 
                 if script_query.gram_phrases:
                     script_tsqueries = [
-                        " <-> ".join(
-                            f"'{gram}':*" if gram.startswith("bmprefix") else f"'{gram}'"
-                            for gram in phrase
-                        )
+                        " <-> ".join(f"'{gram}'" for gram in phrase)
                         for phrase in script_query.gram_phrases
                     ]
                     for index, script_tsquery in enumerate(script_tsqueries):
