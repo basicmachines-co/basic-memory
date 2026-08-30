@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import text
@@ -18,9 +19,11 @@ from semantic.multilingual_benchmark import (
     directory_size_bytes,
     embedding_benchmark_config,
     embedding_model_case,
+    process_peak_rss_bytes,
     summarize_retrieval,
     vector_storage_size_bytes,
 )
+from semantic import multilingual_benchmark
 from semantic.multilingual_corpus import (
     MULTILINGUAL_CORPUS,
     MultilingualCorpus,
@@ -120,6 +123,16 @@ def test_directory_size_does_not_double_count_hardlinks(tmp_path) -> None:
     os.link(model_file, tmp_path / "snapshot-model.onnx")
 
     assert directory_size_bytes(tmp_path) == len(b"model-bytes")
+
+
+def test_process_peak_rss_uses_windows_peak_working_set(monkeypatch) -> None:
+    monkeypatch.setattr(
+        multilingual_benchmark.psutil,
+        "Process",
+        lambda: SimpleNamespace(memory_info=lambda: SimpleNamespace(peak_wset=4096)),
+    )
+
+    assert process_peak_rss_bytes(platform_name="win32") == 4096
 
 
 @pytest.mark.asyncio

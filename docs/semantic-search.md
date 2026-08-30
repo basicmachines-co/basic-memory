@@ -156,6 +156,8 @@ across multiple languages can opt into multilingual MiniLM:
 
 ```bash
 basic-memory config set semantic_embedding_provider fastembed
+basic-memory config unset semantic_embedding_document_prefix
+basic-memory config unset semantic_embedding_query_prefix
 basic-memory config set semantic_embedding_model \
   sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
 basic-memory config set semantic_embedding_dimensions 384
