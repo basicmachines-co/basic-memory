@@ -150,6 +150,31 @@ Basic Memory passes `semantic_embedding_model` to FastEmbed, so you can select a
 embedding model registered by the installed FastEmbed version. Basic Memory does not maintain a
 second model allowlist or add arbitrary Hugging Face models to FastEmbed.
 
+The default remains `BAAI/bge-small-en-v1.5`. It is the smaller, lower-memory choice and avoids an
+automatic embedding rebuild for existing installations. Projects that need semantic retrieval
+across multiple languages can opt into multilingual MiniLM:
+
+```bash
+basic-memory config set semantic_embedding_provider fastembed
+basic-memory config set semantic_embedding_model \
+  sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+basic-memory config set semantic_embedding_dimensions 384
+bm reindex --embeddings
+```
+
+Multilingual MiniLM covers many languages and keeps the default model's 384 dimensions.
+The matching dimensions avoid a vector-schema dimension change, but the two models' vectors are
+not interchangeable: switching in either direction still requires `bm reindex --embeddings`.
+
+Basic Memory's checked-in multilingual evaluation found that MiniLM preserved the English
+baseline while improving same-language, cross-language, and mixed-language ranking across
+Chinese, Japanese, Korean, Arabic, Russian, Spanish, and Thai. It also has a larger local artifact
+and materially higher memory use than the default. The current `0.55` similarity cutoff hid some
+correctly ranked MiniLM results in the small judged corpus, so deployments should measure their
+own queries before changing `semantic_min_similarity`. See the
+[multilingual embedding benchmark](multilingual-embedding-benchmark.md) for the corpus, results,
+limitations, and Cloud follow-up.
+
 List the models available in the same Python environment as Basic Memory. For a `uv tool`
 installation on macOS or Linux:
 
@@ -216,8 +241,8 @@ projects receive the same Postgres analysis through the managed full fleet reind
 do not run a local command.
 
 This is lexical matching, independent of the configured embedding model. Vector and hybrid search
-quality in these languages still depends on choosing a multilingual embedding model such as the
-Jina Chinese-English model or multilingual E5 configured above.
+quality in these languages still depends on choosing a multilingual embedding model such as
+multilingual MiniLM or multilingual E5 configured above.
 
 ### OpenAI
 
