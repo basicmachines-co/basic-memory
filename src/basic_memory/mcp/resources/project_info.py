@@ -1,7 +1,7 @@
 """Project info resource for Basic Memory MCP server."""
 
 from fastmcp import Context
-from fastmcp.exceptions import ResourceError
+from fastmcp.exceptions import ResourceError, ToolError
 from loguru import logger
 
 from basic_memory.config import ConfigManager, ProjectMode
@@ -72,7 +72,14 @@ async def project_info(
                     f"{payload_error}"
                 ) from payload_error
             return info.model_dump_json(indent=2)
-    except (ValueError, RuntimeError) as error:
+    except (ValueError, RuntimeError, ToolError) as error:
+        # Trigger: forced-local transports surface an unknown compound route as a
+        #   ToolError rather than ValueError/RuntimeError.
+        # Why: only a missing project route may fall back to a note; auth, server,
+        #   and transport failures on a real route must keep their cause.
+        # Outcome: route misses continue into the fallback; other ToolErrors raise.
+        if isinstance(error, ToolError) and "not found" not in str(error).lower():
+            raise
         # This template also wins ties for {project}/{directory}/info note URIs
         # (precedence between overlapping template matches is undefined), so a
         # failed workspace/project route may really be a note whose canonical

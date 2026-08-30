@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib import import_module
 from types import SimpleNamespace
 
 import pytest
@@ -358,3 +359,41 @@ async def test_binary_content_is_steered_to_read_content(
 
     with pytest.raises(ResourceError, match="use the read_content tool"):
         await note_resource(project=test_project.name, path="specs/binary-decoy")
+
+
+@pytest.mark.asyncio
+async def test_info_fallback_runs_when_forced_local_reports_project_not_found(
+    app, test_project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Forced-local transports surface an unknown compound route as ToolError
+    # ("Project not found"), not ValueError — the note fallback must still run.
+    await write_note(
+        title="Info",
+        directory="sub",
+        content="# Info\n\nStill readable under forced-local routing.\n",
+        project=test_project.name,
+    )
+    project_info_module = import_module("basic_memory.mcp.resources.project_info")
+
+    def missing_route(project, context=None, project_id=None):
+        raise ToolError(f"Project not found: {project}")
+
+    monkeypatch.setattr(project_info_module, "get_project_client", missing_route)
+
+    text = await notes_module.project_info(workspace=test_project.name, project="sub")
+
+    assert "Still readable under forced-local routing." in text
+
+
+@pytest.mark.asyncio
+async def test_info_route_tool_errors_that_are_not_misses_propagate(
+    app, test_project, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project_info_module = import_module("basic_memory.mcp.resources.project_info")
+
+    def broken_route(project, context=None, project_id=None):
+        raise ToolError("Authentication required: x")
+
+    monkeypatch.setattr(project_info_module, "get_project_client", broken_route)
+    with pytest.raises(ToolError, match="Authentication required"):
+        await notes_module.project_info(workspace=test_project.name, project="sub")
