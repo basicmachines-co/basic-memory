@@ -348,9 +348,13 @@ def process_peak_rss_bytes(*, platform_name: str = sys.platform) -> int:
     return int(peak if platform_name == "darwin" else peak * 1024)
 
 
-def model_cache_size_bytes(model_case: EmbeddingModelCase) -> int:
+def model_cache_size_bytes(
+    model_case: EmbeddingModelCase,
+    benchmark_config: BasicMemoryConfig,
+) -> int:
     """Measure the selected model's materialized FastEmbed cache subtree."""
-    cache_root = Path(default_fastembed_cache_dir())
+    configured_cache = benchmark_config.semantic_embedding_cache_dir
+    cache_root = Path(configured_cache or default_fastembed_cache_dir())
     model_root = cache_root / f"models--{model_case.cache_repository.replace('/', '--')}"
     return directory_size_bytes(model_root)
 

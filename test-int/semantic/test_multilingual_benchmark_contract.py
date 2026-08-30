@@ -19,6 +19,7 @@ from semantic.multilingual_benchmark import (
     directory_size_bytes,
     embedding_benchmark_config,
     embedding_model_case,
+    model_cache_size_bytes,
     process_peak_rss_bytes,
     summarize_retrieval,
     vector_storage_size_bytes,
@@ -123,6 +124,19 @@ def test_directory_size_does_not_double_count_hardlinks(tmp_path) -> None:
     os.link(model_file, tmp_path / "snapshot-model.onnx")
 
     assert directory_size_bytes(tmp_path) == len(b"model-bytes")
+
+
+def test_model_cache_size_uses_configured_cache_directory(tmp_path) -> None:
+    model_case = embedding_model_case("bge-small-en")
+    model_root = tmp_path / "models--qdrant--bge-small-en-v1.5-onnx-q"
+    model_root.mkdir()
+    (model_root / "model.onnx").write_bytes(b"configured-cache")
+    benchmark_config = embedding_benchmark_config(
+        model_case,
+        benchmark_storage_case("sqlite"),
+    ).model_copy(update={"semantic_embedding_cache_dir": str(tmp_path)})
+
+    assert model_cache_size_bytes(model_case, benchmark_config) == len(b"configured-cache")
 
 
 def test_process_peak_rss_uses_windows_peak_working_set(monkeypatch) -> None:
