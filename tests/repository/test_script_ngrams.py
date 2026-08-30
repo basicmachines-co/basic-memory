@@ -27,6 +27,7 @@ from basic_memory.repository.sqlite_search_repository import SQLiteSearchReposit
         ("생존 경쟁", (("생", "존"), ("경", "쟁"))),
         ("ภาษาไทย", (("ภ", "า", "ษ", "า", "ไ", "ท", "ย"),)),
         ("時々", (("時", "々"),)),
+        ("\U0001aff0\U0001aff3\U0001affd", (("\U0001aff0", "\U0001aff3", "\U0001affd"),)),
         ("ＡＢＣ", ()),
     ],
 )
@@ -47,6 +48,14 @@ def test_script_runs_attach_combining_marks_to_the_previous_unit() -> None:
 
     assert script_runs(text) == ((text,),)
     assert analyze_script_query(text).word_text is None
+
+
+@pytest.mark.parametrize("join_control", ["\u200c", "\u200d"])
+def test_script_runs_keep_join_controls_inside_ordered_runs(join_control: str) -> None:
+    text = f"ក{join_control}ខ"
+
+    assert script_runs(text) == (("ក", "ខ"),)
+    assert analyze_script_query(text).gram_phrases == (("កខ",),)
 
 
 def test_build_script_ngrams_keeps_runs_from_matching_across_boundaries() -> None:
@@ -324,6 +333,68 @@ async def test_search_matches_cjk_substring_without_matching_reordered_character
     assert [result.id for result in await search_repository.search("猫")] == [1294]
     assert [result.id for result in await search_repository.search("時々")] == [1294]
     assert await search_repository.search("适生者存") == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("join_control", ["\u200c", "\u200d"])
+async def test_search_preserves_order_across_join_controls(
+    search_repository,
+    join_control: str,
+) -> None:
+    now = datetime.now(timezone.utc)
+    rows = [
+        SearchIndexRow(
+            project_id=search_repository.project_id,
+            id=1317,
+            type="entity",
+            file_path="notes/join-control-match.md",
+            title="Join control match",
+            content_stems=f"ក{join_control}ខ",
+            content_snippet=f"ក{join_control}ខ",
+            permalink="notes/join-control-match",
+            created_at=now,
+            updated_at=now,
+        ),
+        SearchIndexRow(
+            project_id=search_repository.project_id,
+            id=1318,
+            type="entity",
+            file_path="notes/join-control-reversed.md",
+            title="Join control reversed",
+            content_stems=f"ខ{join_control}ក",
+            content_snippet=f"ខ{join_control}ក",
+            permalink="notes/join-control-reversed",
+            created_at=now,
+            updated_at=now,
+        ),
+    ]
+    await search_repository.bulk_index_items(rows)
+
+    results = await search_repository.search(f"ក{join_control}ខ")
+
+    assert [result.id for result in results] == [1317]
+
+
+@pytest.mark.asyncio
+async def test_search_matches_katakana_extended_b_substring(search_repository) -> None:
+    now = datetime.now(timezone.utc)
+    row = SearchIndexRow(
+        project_id=search_repository.project_id,
+        id=1319,
+        type="entity",
+        file_path="notes/katakana-extended-b.md",
+        title="Katakana extended B",
+        content_stems="\U0001aff0\U0001aff3\U0001affd",
+        content_snippet="\U0001aff0\U0001aff3\U0001affd",
+        permalink="notes/katakana-extended-b",
+        created_at=now,
+        updated_at=now,
+    )
+    await search_repository.index_item(row)
+
+    results = await search_repository.search("\U0001aff3")
+
+    assert [result.id for result in results] == [1319]
 
 
 @pytest.mark.asyncio

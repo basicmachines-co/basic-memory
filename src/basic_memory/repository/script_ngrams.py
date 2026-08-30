@@ -43,6 +43,7 @@ def is_script_search_character(character: str) -> bool:
             (0xAC00, 0xD7AF),  # Hangul syllables
             (0xD7B0, 0xD7FF),  # Hangul Jamo extended B
             (0xF900, 0xFAFF),  # CJK compatibility ideographs
+            (0x1AFF0, 0x1AFFF),  # Katakana extended B
             (0x1B000, 0x1B16F),  # Kana supplements and extensions
             (0x20000, 0x2FFFF),  # Supplementary CJK ideographs
             (0x30000, 0x323AF),  # CJK unified ideographs extensions G-H
@@ -55,6 +56,10 @@ def script_runs(text: str) -> tuple[tuple[str, ...], ...]:
     runs: list[tuple[str, ...]] = []
     current: list[str] = []
     for character in unicodedata.normalize("NFKC", text):
+        # Join controls shape neighboring script characters without introducing a searchable
+        # unit. Keeping the current run open preserves ordered matching across the control.
+        if character in {"\u200c", "\u200d"}:
+            continue
         if current and unicodedata.category(character) in {"Mn", "Mc", "Me"}:
             current[-1] += character
             continue
