@@ -152,6 +152,7 @@ class _MutationSession:
     def __init__(self) -> None:
         self.deleted: list[object] = []
         self.added: list[object] = []
+        self.refreshed: list[object] = []
         self.flush_count = 0
         self.scalar_count = 0
         self.bind = SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
@@ -173,6 +174,9 @@ class _MutationSession:
 
     async def flush(self) -> None:
         self.flush_count += 1
+
+    async def refresh(self, value: object) -> None:
+        self.refreshed.append(value)
 
 
 class _CreatePreparer:
@@ -2052,7 +2056,8 @@ async def test_run_accepted_note_delete_removes_entity_and_returns_cleanup() -> 
     assert session.deleted == [entity]
     assert search_repository.deleted_entity_ids == [entity.id]
     assert search_repository.deleted_vector_entity_ids == [entity.id]
-    assert session.scalar_count == 1
+    assert session.scalar_count == 2
+    assert session.refreshed == [entity, note_content]
     assert change.status_code == 200
     assert change.file_delete is not None
     assert change.file_delete.file_path == "notes/accepted.md"

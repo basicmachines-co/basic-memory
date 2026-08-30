@@ -623,6 +623,16 @@ async def run_accepted_note_delete(
             )
         )
 
+    # The entity lookup above is intentionally unlocked so an already-missing
+    # delete stays idempotent. Once the note exists, claim its mutation lock and
+    # refresh both evidence rows before deleting: a concurrent update or move may
+    # have committed between the initial lookup and this lock acquisition.
+    await lock_accepted_note_content_for_entity_mutation(
+        session,
+        project_id=project.id,
+        entity_id=entity.id,
+    )
+    await session.refresh(entity)
     note_content = await load_accepted_note_content(
         session,
         project_id=project.id,
@@ -630,6 +640,8 @@ async def run_accepted_note_delete(
         dependencies=dependencies,
         missing_kind=None,
     )
+    if note_content is not None:
+        await session.refresh(note_content)
     change = await delete_accepted_note(
         session,
         project_id=project.id,

@@ -91,6 +91,7 @@ class Project(Base):
         back_populates="project",
         cascade="all, delete-orphan",
         order_by="AcceptedProjectNoteChange.partition_position",
+        passive_deletes=True,
     )
 
     @override

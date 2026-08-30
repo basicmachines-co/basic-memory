@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -20,24 +20,32 @@ from basic_memory.runtime.project_partition import (
 _ACCEPTED_AT = datetime(2026, 8, 29, 20, 15, tzinfo=UTC)
 
 
+def test_project_delete_delegates_partition_journal_cleanup_to_database() -> None:
+    relationship = inspect(Project).relationships["accepted_note_changes"]
+
+    assert relationship.passive_deletes is True
+
+
 def _accepted_change(
     project: Project,
     *,
     partition_position: int,
+    entity_id: int = 42,
+    db_version: int = 3,
 ) -> RuntimeAcceptedProjectNoteChange:
     return RuntimeAcceptedProjectNoteChange(
         project_id=project.id,
         project_external_id=project.external_id,
         partition_position=partition_position,
-        entity_id=42,
-        note_external_id="note-42",
+        entity_id=entity_id,
+        note_external_id=f"note-{entity_id}",
         title="Accepted evidence",
         operation=RuntimeProjectNoteOperation.updated,
         file_path="notes/accepted-evidence.md",
         accepted_at=_ACCEPTED_AT,
         source="api",
-        db_version=3,
-        db_checksum="accepted-checksum",
+        db_version=db_version,
+        db_checksum=f"accepted-checksum-{db_version}",
     )
 
 
@@ -82,7 +90,7 @@ async def test_accepted_project_note_change_is_replayable_and_materialization_aw
         )
         assert len(changes) == 1
         assert changes[0].operation == RuntimeProjectNoteOperation.updated.value
-        assert changes[0].db_checksum == "accepted-checksum"
+        assert changes[0].db_checksum == "accepted-checksum-3"
         assert changes[0].materialized_at is None
         assert await repository.mark_accepted_note_change_materialized(
             session,
@@ -103,6 +111,42 @@ async def test_accepted_project_note_change_is_replayable_and_materialization_aw
             1,
             materialized_at=_ACCEPTED_AT,
         )
+
+
+@pytest.mark.asyncio
+async def test_materializing_newer_note_change_satisfies_superseded_positions(
+    session_maker: async_sessionmaker[AsyncSession],
+    test_project: Project,
+) -> None:
+    repository = ProjectRepository()
+
+    async with db.scoped_session(session_maker) as session:
+        for position, entity_id in ((1, 42), (2, 99), (3, 42)):
+            claimed_position = await repository.advance_partition_position(
+                session,
+                test_project.id,
+            )
+            assert claimed_position == position
+            await repository.record_accepted_note_change(
+                session,
+                _accepted_change(
+                    test_project,
+                    partition_position=position,
+                    entity_id=entity_id,
+                    db_version=position,
+                ),
+            )
+
+        assert await repository.mark_accepted_note_change_materialized(
+            session,
+            test_project.id,
+            3,
+            materialized_at=_ACCEPTED_AT,
+        )
+
+    async with db.scoped_session(session_maker) as session:
+        changes = await repository.list_accepted_note_changes(session, test_project.id)
+        assert [change.materialized_at is not None for change in changes] == [True, False, True]
 
 
 @pytest.mark.asyncio

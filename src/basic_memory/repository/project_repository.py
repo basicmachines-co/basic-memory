@@ -234,19 +234,34 @@ class ProjectRepository(Repository[Project]):
         *,
         materialized_at: datetime,
     ) -> bool:
-        """Record when accepted evidence reached canonical file storage."""
+        """Record when this note's accepted evidence reached canonical storage."""
+        target_entity_id = (
+            await session.execute(
+                select(AcceptedProjectNoteChange.entity_id).where(
+                    AcceptedProjectNoteChange.project_id == project_id,
+                    AcceptedProjectNoteChange.partition_position == partition_position,
+                )
+            )
+        ).scalar_one_or_none()
+        if target_entity_id is None:
+            return False
+
+        # A newer materialized generation is canonical evidence that every older
+        # accepted generation of this note has been superseded. Retire those rows
+        # together so an obsolete queued write cannot block downstream projectors.
         statement = (
             update(AcceptedProjectNoteChange)
             .where(
                 AcceptedProjectNoteChange.project_id == project_id,
-                AcceptedProjectNoteChange.partition_position == partition_position,
+                AcceptedProjectNoteChange.entity_id == target_entity_id,
+                AcceptedProjectNoteChange.partition_position <= partition_position,
                 AcceptedProjectNoteChange.materialized_at.is_(None),
             )
             .values(materialized_at=materialized_at)
             .returning(AcceptedProjectNoteChange.id)
             .execution_options(synchronize_session=False)
         )
-        return (await session.execute(statement)).scalar_one_or_none() is not None
+        return bool((await session.execute(statement)).scalars().all())
 
     async def get_active_projects(self, session: AsyncSession) -> Sequence[Project]:
         """Get all active projects."""
