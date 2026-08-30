@@ -2191,6 +2191,7 @@ async def test_run_accepted_note_create_can_suppress_derived_graph_facts() -> No
         ),
     )
 
+    assert isinstance(result.change.payload, RuntimeAcceptedNoteResponse)
     assert result.change.payload.markdown_content == "# Accepted\n"
     assert result.relation_publication is not None
     assert result.relation_publication.observations == ()
@@ -2346,6 +2347,7 @@ async def test_run_accepted_note_update_can_clear_derived_graph_facts() -> None:
         ),
     )
 
+    assert isinstance(result.change.payload, RuntimeAcceptedNoteResponse)
     assert result.change.payload.markdown_content == "# Accepted\n"
     assert result.relation_publication is not None
     assert result.relation_publication.observations == ()
