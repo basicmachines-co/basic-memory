@@ -164,7 +164,7 @@ async def test_multilingual_embedding_benchmark(
         rss_after_load_bytes=rss_after_load,
         rss_after_index_bytes=rss_after_index,
         peak_rss_bytes=process_peak_rss_bytes(),
-        model_cache_bytes=model_cache_size_bytes(model_case),
+        model_cache_bytes=model_cache_size_bytes(model_case, benchmark_config),
         vector_storage_bytes=await vector_storage_size_bytes(
             engine,
             storage_case,
