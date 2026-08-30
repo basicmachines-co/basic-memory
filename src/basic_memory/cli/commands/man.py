@@ -1,22 +1,72 @@
-"""Install the bundled man pages so `man bm` works."""
+"""`bm man`: read the bundled manual, and install the groff pages so `man bm` works."""
 
 import shutil
 import subprocess
+import sys
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Optional, override
 
 import typer
 from rich.console import Console
+from typer.core import TyperGroup
+
+# Typer vendors its own click; an override must be typed with the base class's
+# types, and these are the ones TyperGroup.resolve_command is declared with.
+from typer._click.core import Command, Context
 
 from basic_memory.cli.app import app
+from basic_memory.man import bundled_pages, find_page, parse_page_ref
 
 console = Console()
 
-man_app = typer.Typer(help="Manage the bm man pages.")
+
+class ManGroup(TyperGroup):
+    """Let `bm man <topic>` read like man(1).
+
+    A first argument that is not a subcommand is a page name, so `bm man search-notes`
+    is `bm man show search-notes` without the ceremony. Real subcommands (`install`,
+    `list`, `show`) and options keep their meaning.
+    """
+
+    @override
+    def resolve_command(
+        self, ctx: Context, args: list[str]
+    ) -> tuple[str | None, Command | None, list[str]]:
+        if args and not args[0].startswith("-") and self.get_command(ctx, args[0]) is None:
+            args = ["show", *args]
+        return super().resolve_command(ctx, args)
+
+
+man_app = typer.Typer(help="Read the Basic Memory manual, or install the man pages.", cls=ManGroup)
 app.add_typer(man_app, name="man")
 
 # Bundled groff sources ship inside the package (src/basic_memory/man).
 _MAN_SOURCE_DIR = Path(__file__).parent.parent.parent / "man"
+
+
+@man_app.command()
+def show(
+    topic: Annotated[str, typer.Argument(help="Page name, e.g. search-notes or search-notes(3)")],
+) -> None:
+    """Print a manual page as Markdown."""
+    try:
+        page = find_page(parse_page_ref(topic))
+    except ValueError as error:
+        console.print(f"[red]{error}[/red]")
+        raise typer.Exit(1) from error
+    if page is None:
+        console.print(f"[red]No manual entry for {topic}[/red]  (try: bm man list)")
+        raise typer.Exit(1)
+    # Raw Markdown, unwrapped: agents and pagers read this as often as eyes do.
+    sys.stdout.write(page.body())
+    sys.stdout.write("\n")
+
+
+@man_app.command(name="list")
+def list_pages() -> None:
+    """List every manual page with its one-line summary (apropos)."""
+    for page in bundled_pages():
+        sys.stdout.write(f"{page.title:<28} {page.summary}\n")
 
 
 def _default_man_root() -> Path:

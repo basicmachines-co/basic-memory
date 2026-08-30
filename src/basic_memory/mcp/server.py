@@ -221,9 +221,12 @@ BASIC_MEMORY_INSTRUCTIONS = (
     "Memory gives them persistent notes shared between the user and their AI, and offer to save "
     "something useful from this conversation as their first note with `write_note` — then wait "
     "for them to agree before writing anything. Do not create notes unprompted.\n\n"
-    "For a fuller guide, read the `memory://ai_assistant_guide` resource. If you have a web or "
-    "fetch tool and need current documentation, fetch `https://docs.basicmemory.com/llms.txt` "
-    "first, then fetch only the relevant linked `/raw/...md` page."
+    "For a fuller guide, read the `memory://ai_assistant_guide` resource. Every tool has a "
+    "manual page with verified examples and gotchas: read `memory://man` for the index, or "
+    "`memory://man/<tool>(3)` (for example `memory://man/search-notes(3)`) before using a tool "
+    "you have not used before. If you have a web or fetch tool and need current "
+    "documentation, fetch `https://docs.basicmemory.com/llms.txt` first, then fetch only the "
+    "relevant linked `/raw/...md` page."
 )
 
 mcp = FastMCP(
