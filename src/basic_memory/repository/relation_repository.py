@@ -34,6 +34,7 @@ from basic_memory.repository.repository import Repository
 
 RESOLVED_RELATION_WRITE_STATEMENT_SIZE = 250
 RELATION_GENERATION_WRITE_STATEMENT_SIZE = 250
+RELATION_SEARCH_REFRESH_DELETE_STATEMENT_SIZE = 500
 LEGACY_RELATION_GENERATION = 0
 
 
@@ -676,12 +677,19 @@ class RelationRepository(Repository[Relation]):
         refresh_ids: Sequence[int],
     ) -> None:
         """Retire only refresh work completed by the caller's successful pass."""
-        await session.execute(
-            delete(RelationSearchRefresh).where(
-                RelationSearchRefresh.project_id == self.project_id,
-                RelationSearchRefresh.id.in_(refresh_ids),
+        # Refresh backlogs can contain tens of thousands of durable markers. Keep each
+        # statement below database-driver parameter ceilings while preserving the caller's
+        # transaction as the atomic retirement boundary.
+        for refresh_id_batch in batched(
+            refresh_ids,
+            RELATION_SEARCH_REFRESH_DELETE_STATEMENT_SIZE,
+        ):
+            await session.execute(
+                delete(RelationSearchRefresh).where(
+                    RelationSearchRefresh.project_id == self.project_id,
+                    RelationSearchRefresh.id.in_(refresh_id_batch),
+                )
             )
-        )
 
     async def complete_search_refresh_for_generation(
         self,
@@ -704,11 +712,14 @@ class RelationRepository(Repository[Relation]):
             entity_id=entity_id,
             generation=generation,
         )
-        if refresh_ids:
+        for refresh_id_batch in batched(
+            refresh_ids,
+            RELATION_SEARCH_REFRESH_DELETE_STATEMENT_SIZE,
+        ):
             await session.execute(
                 delete(RelationSearchRefresh).where(
                     RelationSearchRefresh.project_id == self.project_id,
-                    RelationSearchRefresh.id.in_(refresh_ids),
+                    RelationSearchRefresh.id.in_(refresh_id_batch),
                     generation_is_current,
                 )
             )
