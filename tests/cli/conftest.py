@@ -31,6 +31,11 @@ def isolated_home(tmp_path, monkeypatch) -> Path:
     monkeypatch.setenv("HOME", str(tmp_path))
     if os.name == "nt":
         monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    # Trigger: a contributor runs the suite under a Claude profile wrapper.
+    # Why: CLAUDE_CONFIG_DIR redirects the user-level settings the hook reads,
+    # so an ambient value would point tests at their real config.
+    # Outcome: unset it; tests that exercise it set it explicitly.
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     # Set to tmp_path directly (not tmp_path/basic-memory) so default project
     # home is tmp_path - tests expect to find imported files there
     monkeypatch.setenv("BASIC_MEMORY_HOME", str(tmp_path))

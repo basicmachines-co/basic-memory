@@ -22,8 +22,9 @@ Settings sources are the same files the original plugin hook scripts read
 (ported here; the plugin hooks are now zero-logic shims that exec these
 verbs): the ``basicMemory`` block of ``.claude/settings.json`` /
 ``.claude/settings.local.json`` (nearest ancestor, over the user-level
-``~/.claude/settings.json``) for Claude, and the nearest project
-``.codex/basic-memory.json`` over ``~/.codex/basic-memory.json`` for Codex.
+``$CLAUDE_CONFIG_DIR/settings.json``, default ``~/.claude``) for Claude, and
+the nearest project ``.codex/basic-memory.json`` over
+``~/.codex/basic-memory.json`` for Codex.
 ``install`` / ``remove`` wire the same verbs into the user-level
 harness config for standalone (non-marketplace) users, ownership-tagged so
 removal is surgical.
@@ -237,11 +238,24 @@ def _claude_project_dir(directory: Path) -> Path:
         current = current.parent
 
 
+def _claude_user_dir() -> Path:
+    """User-level Claude config directory.
+
+    Claude Code treats ``CLAUDE_CONFIG_DIR`` as a full replacement for
+    ``~/.claude``, so profile wrappers point it at a per-account directory.
+    Honouring it keeps each profile's settings and hook wiring separate;
+    falling back to ``~/.claude`` leaves single-profile setups unchanged.
+    """
+    override = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+    return Path(override).expanduser() if override else Path.home() / ".claude"
+
+
 def load_claude_settings(directory: Path) -> tuple[dict[str, Any], bool]:
     """Merge basicMemory blocks: user-level settings.json, then project settings.
 
-    Precedence (lowest to highest): ``~/.claude/settings.json``, then the
-    nearest project ``.claude/settings.json`` and ``.claude/settings.local.json``.
+    Precedence (lowest to highest): ``$CLAUDE_CONFIG_DIR/settings.json``
+    (default ``~/.claude/settings.json``), then the nearest project
+    ``.claude/settings.json`` and ``.claude/settings.local.json``.
     A single user-level block can cover every project; any project can still
     pin its own mapping, which wins. ``found`` reports whether any file
     declared a block or was malformed — the first-run sentinel for the setup
@@ -251,23 +265,27 @@ def load_claude_settings(directory: Path) -> tuple[dict[str, Any], bool]:
     """
     merged: dict[str, Any] = {"captureEvents": DEFAULT_CAPTURE_EVENTS}
     found = False
-    home = Path.home()
-    sources: list[tuple[Path, tuple[str, ...]]] = [(home, ("settings.json",))]
+    user_dir = _claude_user_dir()
+    sources: list[Path] = [user_dir / "settings.json"]
     project = _claude_project_dir(directory)
-    if project != home:
-        sources.append((project, ("settings.json", "settings.local.json")))
-    for base, names in sources:
-        for name in names:
-            block, present = _read_claude_block(base / ".claude" / name)
-            if not present:
-                continue
-            found = True
-            if block is None:
-                # Trigger: a configured source exists but cannot be trusted.
-                # Why: its unreadable value may be an explicit capture opt-out.
-                # Outcome: discard every route and disable capture for this event.
-                return {"captureEvents": False}, True
-            merged.update(block)
+    project_dir = project / ".claude"
+    # Trigger: the ancestor walk reaches $HOME, or the active profile dir.
+    # Why: ``~/.claude`` is user-level config, not a project mapping — and with
+    # CLAUDE_CONFIG_DIR set it belongs to a different profile entirely.
+    # Outcome: never re-enter it as a higher-precedence project source.
+    if project != Path.home() and project_dir != user_dir:
+        sources.extend((project_dir / "settings.json", project_dir / "settings.local.json"))
+    for path in sources:
+        block, present = _read_claude_block(path)
+        if not present:
+            continue
+        found = True
+        if block is None:
+            # Trigger: a configured source exists but cannot be trusted.
+            # Why: its unreadable value may be an explicit capture opt-out.
+            # Outcome: discard every route and disable capture for this event.
+            return {"captureEvents": False}, True
+        merged.update(block)
     return merged, found
 
 
@@ -1248,11 +1266,13 @@ def _hook_launcher() -> str:
 def _hook_config_path(harness: Harness) -> Path:
     """User-level hooks config per harness.
 
-    Claude Code reads hooks from the user settings file; Codex standalone
-    hooks use the same hooks.json schema the plugin ships, at the user level.
+    Claude Code reads hooks from the user settings file, which follows
+    ``CLAUDE_CONFIG_DIR`` — installing must not edit another profile's
+    settings. Codex standalone hooks use the same hooks.json schema the
+    plugin ships, at the user level.
     """
     if harness is Harness.claude:
-        return Path.home() / ".claude" / "settings.json"
+        return _claude_user_dir() / "settings.json"
     return Path.home() / ".codex" / "hooks.json"
 
 

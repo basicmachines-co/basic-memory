@@ -2111,3 +2111,117 @@ def test_mapping_dir_fallback_order(tmp_path: Path) -> None:
     assert hook_module._mapping_dir(explicit, "/payload/cwd") == explicit
     assert hook_module._mapping_dir(None, "/payload/cwd") == Path("/payload/cwd")
     assert hook_module._mapping_dir(None, "") == Path.cwd()
+
+
+# --- CLAUDE_CONFIG_DIR (profile-scoped user settings) ---
+
+
+def _write_user_block(config_dir: Path, block: dict[str, Any]) -> None:
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "settings.json").write_text(json.dumps({"basicMemory": block}), encoding="utf-8")
+
+
+def test_claude_config_dir_supplies_user_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = tmp_path / ".claude-profile"
+    _write_user_block(profile, {"primaryProject": "profile-wide"})
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(profile))
+    project = tmp_path / "proj"
+    project.mkdir()
+
+    merged, found = hook_module.load_claude_settings(project)
+
+    assert found is True
+    assert merged["primaryProject"] == "profile-wide"
+
+
+def test_claude_config_dir_ignores_default_home_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_user_block(Path.home() / ".claude", {"primaryProject": "other-profile"})
+    profile = tmp_path / ".claude-profile"
+    _write_user_block(profile, {"primaryProject": "active-profile"})
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(profile))
+    project = tmp_path / "proj"
+    project.mkdir()
+
+    merged, _ = hook_module.load_claude_settings(project)
+
+    # The other profile's routing must not leak into this one.
+    assert merged["primaryProject"] == "active-profile"
+
+
+def test_claude_config_dir_still_loses_to_project_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = tmp_path / ".claude-profile"
+    _write_user_block(profile, {"primaryProject": "profile-wide", "recallTimeframe": "9d"})
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(profile))
+    project = tmp_path / "proj"
+    (project / ".claude").mkdir(parents=True)
+    _write_claude_settings(project, {"primaryProject": "project-level"})
+
+    merged, found = hook_module.load_claude_settings(project)
+
+    assert found is True
+    assert merged["primaryProject"] == "project-level"
+    assert merged["recallTimeframe"] == "9d"
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_claude_config_dir_blank_falls_back_to_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str
+) -> None:
+    _write_user_block(Path.home() / ".claude", {"primaryProject": "home-default"})
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", value)
+    project = tmp_path / "proj"
+    project.mkdir()
+
+    merged, found = hook_module.load_claude_settings(project)
+
+    assert found is True
+    assert merged["primaryProject"] == "home-default"
+
+
+def test_claude_config_dir_expands_user(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_user_block(Path.home() / ".claude-profile", {"primaryProject": "expanded"})
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "~/.claude-profile")
+    project = tmp_path / "proj"
+    project.mkdir()
+
+    merged, _ = hook_module.load_claude_settings(project)
+
+    assert merged["primaryProject"] == "expanded"
+
+
+def test_install_claude_writes_hooks_into_config_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = tmp_path / ".claude-profile"
+    profile.mkdir()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(profile))
+
+    result = runner.invoke(cli_app, ["hook", "install"])
+
+    assert result.exit_code == 0
+    data = _read_json(profile / "settings.json")
+    assert data["hooks"]["SessionStart"][0]["hooks"][0]["command"] == (
+        "basic-memory hook session-start --harness claude"
+    )
+    # The default profile's settings must be left alone.
+    assert not (Path.home() / ".claude" / "settings.json").exists()
+
+
+def test_remove_claude_hooks_from_config_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = tmp_path / ".claude-profile"
+    profile.mkdir()
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(profile))
+    runner.invoke(cli_app, ["hook", "install"])
+
+    result = runner.invoke(cli_app, ["hook", "remove"])
+
+    assert result.exit_code == 0
+    assert _read_json(profile / "settings.json").get("hooks", {}) == {}
