@@ -43,14 +43,16 @@ BEAM_CITATION = "BEAM: Beyond a Million Tokens (ICLR 2026, arXiv 2510.27246)"
 BEAM_LICENSE_NOTE = "Code MIT; benchmark data CC BY-SA 4.0"
 
 # Trailing probe-index marker in message content: "->->" followed by a
-# comma-separated id list. Live-tier variants observed so far: "->-> 1,2",
-# "->-> 2,N/A" (100K/1), and "->-> 2,22, 24" (three ids, space after a
-# comma). The first id is always an int; later ids are ints or N/A, with
-# optional spaces around commas. Kept this narrow deliberately — anything
-# else containing "->->" trips the fail-fast below instead of silently
-# stripping content. The marker links transcript text back to probe
-# indices, so it must never be ingested.
-_INDEX_MARKER_PATTERN = re.compile(r"\s*->->\s*\d+(?:\s*,\s*(?:\d+|N/A))*\s*$")
+# comma-separated id list. A survey of every marker in the 100K tier
+# (2,199 total) found exactly five shapes: " 1,1" (2190), " 1,5)" (6),
+# " 2,N/A" (1), " 2,22, 24" (1), and a double-space variant (1). The
+# first id is always an int; later ids are ints or N/A, spaces around
+# commas optional; the trailing ")" is generator junk (every such message
+# contains zero opening parens), so it strips with the marker. Kept this
+# narrow deliberately — anything else containing "->->" trips the
+# fail-fast below instead of silently stripping content. The marker links
+# transcript text back to probe indices, so it must never be ingested.
+_INDEX_MARKER_PATTERN = re.compile(r"\s*->->\s*\d+(?:\s*,\s*(?:\d+|N/A))*\)?\s*$")
 
 
 @dataclass(frozen=True)
