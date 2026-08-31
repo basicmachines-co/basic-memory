@@ -4,10 +4,11 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Annotated, Optional, override
+from typing import Annotated, Any, Optional, override
 
 import typer
 from rich.console import Console
+from rich.markup import escape as markup_escape
 from typer.core import TyperGroup
 
 # Typer vendors its own click; an override must be typed with the base class's
@@ -15,6 +16,15 @@ from typer.core import TyperGroup
 from typer._click.core import Command, Context
 
 from basic_memory.cli.app import app
+from basic_memory.cli.commands.command_utils import run_with_cleanup
+from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
+from basic_memory.cli.commands.tool import (
+    _display_search_results,
+    _plain_search_results,
+    _print_json,
+    _resolve_output_mode,
+    _validate_output_flags,
+)
 from basic_memory.man import bundled_pages, find_page, parse_page_ref
 
 console = Console()
@@ -44,22 +54,144 @@ app.add_typer(man_app, name="man")
 _MAN_SOURCE_DIR = Path(__file__).parent.parent.parent / "man"
 
 
+def _show_manual_note_fallback(topic: str, project: Optional[str]) -> str:
+    """Read a non-bundled topic as a note from the manual project via the man tool.
+
+    Raises typer.Exit(1) with the man(1)-style miss message when the topic
+    resolves nowhere. A ToolError is the tool's own "No manual entry" miss; a
+    ValueError or RuntimeError means the manual project itself is unreachable
+    (not configured locally, or cloud routing without credentials) — for a
+    reader that is the same outcome, so it degrades to the same hint rather
+    than a traceback (mirroring the man tool's "the hint is the useful error"
+    decision).
+    """
+    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+    from basic_memory.mcp.tools import man as mcp_man
+    from fastmcp.exceptions import ToolError
+
+    try:
+        result = run_with_cleanup(mcp_man(page=topic, project=project))
+    except (ToolError, ValueError, RuntimeError) as error:
+        console.print(f"[red]No manual entry for {markup_escape(topic)}[/red]  (try: bm man list)")
+        raise typer.Exit(1) from error
+    return str(result)
+
+
 @man_app.command()
 def show(
     topic: Annotated[str, typer.Argument(help="Page name, e.g. search-notes or search-notes(3)")],
+    project: Annotated[
+        Optional[str],
+        typer.Option(help="Manual project for non-bundled topics (default: manual)"),
+    ] = None,
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
 ) -> None:
     """Print a manual page as Markdown."""
     try:
-        page = find_page(parse_page_ref(topic))
+        validate_routing_flags(local, cloud)
     except ValueError as error:
-        console.print(f"[red]{error}[/red]")
+        typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(1) from error
-    if page is None:
-        console.print(f"[red]No manual entry for {topic}[/red]  (try: bm man list)")
-        raise typer.Exit(1)
-    # Raw Markdown, unwrapped: agents and pagers read this as often as eyes do.
-    sys.stdout.write(page.body())
+
+    # Bundled pages resolve without the MCP stack or a database, so a broken
+    # local install can never block reading the shipped docs (the reason `man`
+    # sits in app.py's skip_init_commands). Only a bundled miss goes further.
+    try:
+        page = find_page(parse_page_ref(topic))
+    except ValueError:
+        # An unparseable reference may still name a manual note ("docs/foo"),
+        # mirroring the man tool's note fallback for the same input.
+        page = None
+
+    if page is not None:
+        # Raw Markdown, unwrapped: agents and pagers read this as often as eyes do.
+        sys.stdout.write(page.body())
+        sys.stdout.write("\n")
+        return
+
+    with force_routing(local=local, cloud=cloud):
+        body = _show_manual_note_fallback(topic, project)
+    sys.stdout.write(body)
     sys.stdout.write("\n")
+
+
+def _apropos_manual_search(query: str, project: Optional[str]) -> str | dict[str, Any]:
+    """Search the manual project's manpage notes via the man tool.
+
+    Raises typer.Exit(1) with a man-specific hint when the manual project is
+    unreachable (not configured locally, or cloud routing without
+    credentials) — the raw routing error never mentions the manual project
+    apropos actually searches, so on a fresh local install it reads as a
+    demand for cloud credentials the user never asked for. Unlike show's
+    fallback, the underlying error text still prints: for a genuinely
+    cloud-configured install its setup hint is the real fix.
+    """
+    # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+    from basic_memory.mcp.tools import man as mcp_man
+    from fastmcp.exceptions import ToolError
+
+    try:
+        return run_with_cleanup(mcp_man(query=query, project=project))
+    except (ToolError, ValueError, RuntimeError) as error:
+        manual_project = markup_escape(project or "manual")
+        console.print(
+            f"[red]apropos searches the '{manual_project}' project, which is not "
+            f"reachable[/red]  (bundled pages: bm man list)"
+        )
+        typer.echo(f"Error: {error}", err=True)
+        raise typer.Exit(1) from error
+
+
+@man_app.command()
+def apropos(
+    query: Annotated[str, typer.Argument(help="Search text over manual pages")],
+    project: Annotated[
+        Optional[str],
+        typer.Option(help="Manual project to search (default: manual)"),
+    ] = None,
+    json_output: bool = typer.Option(
+        False, "--json", help="Output raw JSON instead of formatted display"
+    ),
+    plain: bool = typer.Option(
+        False, "--plain", help="Output undecorated plain text (no colors/markup), even when piped"
+    ),
+    local: bool = typer.Option(
+        False, "--local", help="Force local API routing (ignore cloud mode)"
+    ),
+    cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
+) -> None:
+    """Search the manual project's pages (`bm man list` indexes the bundled pages).
+
+    Examples:
+
+    bm man apropos "conflict resolution"
+    bm man apropos sync --json
+    """
+    try:
+        validate_routing_flags(local, cloud)
+        _validate_output_flags(json_output, plain)
+    except ValueError as error:
+        typer.echo(f"Error: {error}", err=True)
+        raise typer.Exit(1) from error
+
+    with force_routing(local=local, cloud=cloud):
+        result = _apropos_manual_search(query, project)
+
+    # Query mode returns the search-notes response shape; empty results are
+    # a successful search (exit 0), rendered as the "No results" panel. The
+    # man tool's page mode returns a string — its signature admits one, and
+    # a string has no structured shape to format — so that falls back to
+    # JSON regardless of mode (read-note precedent).
+    mode = _resolve_output_mode(json_output, plain)
+    if mode == "json" or isinstance(result, str):
+        _print_json(result)
+    elif mode == "plain":
+        _plain_search_results(result, query=query)
+    else:
+        _display_search_results(result, query=query)
 
 
 @man_app.command(name="list")

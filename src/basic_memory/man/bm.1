@@ -29,6 +29,27 @@ Knowledge operations:
 CLI access to the MCP tools (write-note, read-note, search-notes,
 build-context, ...). These emit JSON and are the scriptable surface.
 .TP
+.B bm cat
+Print a note, optionally sliced by lines, section, or token budget.
+.TP
+.B bm head
+Print the first lines of a note.
+.TP
+.B bm grep
+Search note content (semantic by default; \-F for literal matching).
+.TP
+.B bm ls
+List one directory level of a project.
+.TP
+.B bm find
+Recursively list files matching a name glob.
+.TP
+.B bm tree
+Show a directory hierarchy.
+.TP
+.B bm tail
+Show recently changed notes, newest first.
+.TP
 .B bm status
 Show sync status between files and the database.
 .TP
@@ -72,7 +93,10 @@ Infrastructure:
 Run the MCP server (hosts the live file watcher).
 .TP
 .B bm man
-Manage these man pages
+Read the bundled manual
+.RB ( "bm man <topic>" ,
+.BR "bm man apropos" ),
+or install these man pages
 .RB ( "bm man install" ).
 .TP
 .B bm reset
