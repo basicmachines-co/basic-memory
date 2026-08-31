@@ -13,9 +13,10 @@ def test_is_available_no_mcp(bm, monkeypatch):
     assert p.is_available() is False
 
 
-def test_is_available_no_bm_no_uv(bm, monkeypatch):
+def test_is_available_no_bm_no_uv(bm, monkeypatch, tmp_path):
     """No bm AND no uv → can't install, can't operate → unavailable."""
     monkeypatch.setattr(bm, "_MCP_AVAILABLE", True)
+    monkeypatch.setattr(bm, "_active_hermes_home", lambda: tmp_path)
     monkeypatch.setattr(bm, "_bm_binary_path", lambda: None)
     monkeypatch.setattr(bm, "_uv_binary_path", lambda: None)
     p = bm.BasicMemoryProvider()
