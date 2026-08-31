@@ -140,8 +140,11 @@ def _normalize_source_chat_ids(value: object, *, ability: str, conv_dir: Path) -
     """Normalize the per-probe evidence ids to a flat sorted list.
 
     Usually a list of ints, but knowledge_update ships a dict (e.g.
-    ``{"original_info": [86], "updated_info": [114]}``) and abstention omits
-    the field entirely — normalize to dict-values union / empty list.
+    ``{"original_info": [86], "updated_info": [114]}``), abstention omits
+    the field entirely, and event_ordering mixes ints with one level of
+    int-list groups when a single event's evidence spans chats (observed in
+    the live 100K tier: ``[116, 118, ..., [136, 138]]``) — normalize to the
+    flattened union / empty list.
     """
     if value is None:
         return []
@@ -161,11 +164,16 @@ def _normalize_source_chat_ids(value: object, *, ability: str, conv_dir: Path) -
         )
     chat_ids: set[int] = set()
     for item in merged:
-        if not isinstance(item, int):
-            raise ValueError(
-                f"BEAM {ability} source_chat_ids must contain ints in {conv_dir}: {item!r}"
-            )
-        chat_ids.add(item)
+        # One level of nesting only: an int-list group is an event whose
+        # evidence spans chats; anything deeper or non-int still fails fast.
+        group_items = item if isinstance(item, list) else [item]
+        for chat_id in group_items:
+            if not isinstance(chat_id, int):
+                raise ValueError(
+                    f"BEAM {ability} source_chat_ids must contain ints or int lists "
+                    f"in {conv_dir}: {item!r}"
+                )
+            chat_ids.add(chat_id)
     return sorted(chat_ids)
 
 

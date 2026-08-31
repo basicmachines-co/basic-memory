@@ -109,6 +109,8 @@ class TestLoadConversation:
         assert by_ability["knowledge_update"].source_chat_ids == [1, 4]
         # abstention omits the field entirely.
         assert by_ability["abstention"].source_chat_ids == []
+        # event_ordering mixes ints with int-list groups (live 100K shape).
+        assert by_ability["event_ordering"].source_chat_ids == [0, 2, 4]
 
     def test_extras_passthrough(self, chats_root: Path) -> None:
         conv = load_beam_conversation(chats_root / "100K" / "1", "100K")
@@ -171,6 +173,14 @@ class TestFailFast:
         conv_dir = write_conversation(tmp_path / "1", conversation_two_full_chat(), probes)
 
         with pytest.raises(ValueError, match="missing abilities"):
+            load_beam_conversation(conv_dir, "100K")
+
+    def test_non_int_in_chat_id_group_raises(self, tmp_path: Path) -> None:
+        probes = minimal_probes()
+        probes["information_extraction"][0]["source_chat_ids"] = [0, ["not-an-int"]]
+        conv_dir = write_conversation(tmp_path / "1", conversation_two_full_chat(), probes)
+
+        with pytest.raises(ValueError, match="must contain ints"):
             load_beam_conversation(conv_dir, "100K")
 
     def test_empty_rubric_raises(self, tmp_path: Path) -> None:
