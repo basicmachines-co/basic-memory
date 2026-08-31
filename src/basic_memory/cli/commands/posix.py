@@ -123,7 +123,9 @@ def _directory_page_summary(result: dict[str, Any]) -> str:
 # --- cat / head rendering ---
 
 
-def _write_slice_footer(result: dict[str, Any], *, plain: bool) -> None:
+def _write_slice_footer(
+    result: dict[str, Any], *, plain: bool, content_terminated: bool = True
+) -> None:
     """Describe an applied slice under the content.
 
     Rich mode prints a dim footer on stdout; plain mode sends it to stderr so
@@ -153,6 +155,11 @@ def _write_slice_footer(result: dict[str, Any], *, plain: bool) -> None:
         # newline, so its last line can sit in stdout's line buffer on a TTY;
         # flush before the unbuffered stderr write or the footer prints first.
         sys.stdout.flush()
+        # An unterminated slice would visually concatenate the footer onto the
+        # last content line in a terminal or merged capture. Lead with the
+        # newline on STDERR so stdout stays byte-exact for pipes.
+        if not content_terminated:
+            text = f"\n{text}"
         print(text, file=sys.stderr)
     else:
         console.print(Text(text, style="dim"))
@@ -171,8 +178,9 @@ def _render_cat(
         # newline — so `bm cat x --plain` pipes and redirects like cat(1) and
         # round-trips the file; slice info goes to stderr.
         content = result.get("content")
-        sys.stdout.write(content if isinstance(content, str) else "")
-        _write_slice_footer(result, plain=True)
+        text = content if isinstance(content, str) else ""
+        sys.stdout.write(text)
+        _write_slice_footer(result, plain=True, content_terminated=text.endswith("\n") or not text)
         return
     # cat's payload is the read_note JSON shape, so the read-note renderer applies.
     _display_read_note(result, include_frontmatter=include_frontmatter)
