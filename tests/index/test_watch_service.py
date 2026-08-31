@@ -85,3 +85,23 @@ async def test_project_is_configured_rereads_current_config(
     assert test_project.name in watch_service.app_config.projects
     assert ConfigManager().config.projects.keys() == {"other-project"}
     assert watch_service._project_is_configured(test_project) is False
+
+
+@pytest.mark.asyncio
+async def test_select_projects_to_watch_matches_constrained_permalink_case_insensitively(
+    app_config: BasicMemoryConfig,
+    project_repository,
+    session_maker,
+    test_project: Project,
+) -> None:
+    """A mixed-case MCP project constraint must select its normalized project."""
+    watch_service = WatchService(
+        app_config=app_config,
+        project_repository=project_repository,
+        session_maker=session_maker,
+        constrained_project="Test Project",
+    )
+
+    projects = await watch_service._select_projects_to_watch()
+
+    assert [project.id for project in projects] == [test_project.id]
