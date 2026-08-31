@@ -116,6 +116,10 @@ class TestTranscriptRendering:
         assert "- **Assistant:** Noted: the dentist appointment is March 29." in corpus_text
         # The multi-id "->-> 2,22, 24" variant (space after a comma) as well.
         assert "- **User:** Update: my salary is now $75,000." in corpus_text
+        # And the paren-suffixed "->-> 1,5)" variant: the ")" is generator
+        # junk (no matching open paren upstream) and strips with the marker.
+        assert "- **Assistant:** Got it, salary updated." in corpus_text
+        assert "salary updated. )" not in corpus_text
 
     def test_surviving_marker_variant_fails_fast(self, tmp_path: Path) -> None:
         # A non-trailing marker escapes the strip pattern; conversion must

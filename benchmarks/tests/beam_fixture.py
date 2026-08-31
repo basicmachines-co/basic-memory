@@ -142,7 +142,10 @@ def conversation_one_chat() -> list[dict[str, Any]]:
                         "Update: my salary is now $75,000. ->-> 2,22, 24",
                         time_anchor="April-02-2024",
                     ),
-                    message("assistant", 5, "Got it, salary updated."),
+                    # ")" after the ids is the paren-suffixed variant ("1,5)"
+                    # x6 in the live 100K tier); it is generator junk, not
+                    # content, and strips with the marker.
+                    message("assistant", 5, "Got it, salary updated. ->-> 1,5)"),
                 ]
             ],
         },
