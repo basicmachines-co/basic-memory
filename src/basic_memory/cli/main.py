@@ -29,6 +29,7 @@ if not _version_only_invocation(sys.argv[1:]):
         man,
         mcp,
         orphans,
+        posix,
         project,
         schema,
         status,

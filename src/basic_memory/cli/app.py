@@ -141,6 +141,15 @@ def app_callback(
         "update",
         "watch",
         "workspace",
+        # POSIX read verbs (#1404): API-hitting commands that initialize via
+        # deps.py, same as status/tool.
+        "cat",
+        "grep",
+        "ls",
+        "find",
+        "tail",
+        "head",
+        "tree",
     }
     if (
         not version

@@ -1,8 +1,10 @@
 """Tests for `bm man` (#952 / #610): reading bundled pages and making `man bm` work."""
 
 import subprocess
+from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastmcp.exceptions import ToolError
 from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
@@ -41,7 +43,14 @@ def test_man_topic_prints_the_page_as_markdown(argv):
     assert "title: search-notes(3)" not in result.output  # frontmatter is not rendered
 
 
-def test_man_unknown_topic_fails_and_points_at_list():
+# A bundled miss now falls through to the MCP man tool (manual-project notes,
+# #1404); mock it so this test stays hermetic regardless of local config.
+@patch(
+    "basic_memory.mcp.tools.man",
+    new_callable=AsyncMock,
+    side_effect=ToolError("No manual entry for no-such-page"),
+)
+def test_man_unknown_topic_fails_and_points_at_list(mock_mcp_man):
     result = runner.invoke(app, ["man", "no-such-page"])
 
     assert result.exit_code == 1
@@ -81,6 +90,21 @@ def test_man_install_writes_pages_to_target(tmp_path):
     assert bm_page.read_text().startswith(".TH BM 1")
     assert alias_page.read_text().strip() == ".so man1/bm.1"
     assert "Try:" in _flattened(result.output)
+
+
+def test_man_install_defaults_to_local_share_man(tmp_path, monkeypatch):
+    """Without --dir, pages land under ~/.local/share/man (HOME is isolated here)."""
+
+    def fake_run(*args, **kwargs):
+        raise FileNotFoundError("manpath")
+
+    monkeypatch.setattr(man_command.subprocess, "run", fake_run)
+    result = runner.invoke(app, ["man", "install"])
+
+    assert result.exit_code == 0, result.output
+    # The isolated_home fixture points HOME at tmp_path, so the default root
+    # resolves inside the test sandbox.
+    assert (tmp_path / ".local" / "share" / "man" / "man1" / "bm.1").exists()
 
 
 def test_man_install_warns_when_root_not_on_manpath(tmp_path, monkeypatch):
