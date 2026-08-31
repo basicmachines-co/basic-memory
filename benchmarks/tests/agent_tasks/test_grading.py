@@ -331,6 +331,43 @@ class TestRelationResolves:
         )
         assert evaluate_grader(grader, ctx).passed is True
 
+    def test_project_prefixed_storage_matches_relative_gold(self, tmp_path: Path) -> None:
+        # Live-run DBs store permalinks project-prefixed
+        # ('at-<run>-<task>/notes/...'); relative gold in the spec must still
+        # match, and a target under a DIFFERENT project prefix must not.
+        ctx = _ctx(tmp_path)
+        _make_db(
+            ctx.db_path,
+            {
+                "project": [(1, "proj")],
+                "entity": [
+                    (10, 1, "proj/notes/source"),
+                    (11, 1, "proj/notes/target"),
+                    (12, 1, "other-proj/notes/target"),
+                ],
+                "relation": [(100, 10, 11, "Target", "relates_to")],
+            },
+        )
+        grader = RelationResolves(
+            source_permalink="notes/source", targets=frozenset({"notes/target"})
+        )
+        assert evaluate_grader(grader, ctx).passed is True
+
+        foreign_only = _ctx(tmp_path / "foreign")
+        (foreign_only.project_dir / "tasks").mkdir(parents=True, exist_ok=True)
+        _make_db(
+            foreign_only.db_path,
+            {
+                "project": [(1, "proj")],
+                "entity": [
+                    (10, 1, "proj/notes/source"),
+                    (12, 1, "other-proj/notes/target"),
+                ],
+                "relation": [(100, 10, 12, "Target", "relates_to")],
+            },
+        )
+        assert evaluate_grader(grader, foreign_only).passed is False
+
     def test_relation_type_filter(self, tmp_path: Path) -> None:
         ctx = _ctx(tmp_path)
         _make_db(
