@@ -2,12 +2,14 @@
 
 import asyncio
 import hashlib
+import os
 import shlex
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import re
-import tempfile
+import secrets
+import stat
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
 import aiofiles
@@ -157,13 +159,25 @@ async def write_file_atomic_bytes(path: FilePath, content: bytes) -> None:
 
 def _create_atomic_temp_path(target: Path) -> Path:
     """Reserve a collision-free staging file beside an atomic-write target."""
-    with tempfile.NamedTemporaryFile(
-        dir=target.parent,
-        prefix=f".{target.name}.",
-        suffix=".tmp",
-        delete=False,
-    ) as staging_file:
-        return Path(staging_file.name)
+    for _attempt in range(10):
+        staging_path = target.parent / f".{target.name}.{secrets.token_hex(8)}.tmp"
+        try:
+            descriptor = os.open(
+                staging_path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o666,
+            )
+        except FileExistsError:  # pragma: no cover - random collision defense
+            continue
+        os.close(descriptor)
+        try:
+            if target.exists():
+                staging_path.chmod(stat.S_IMODE(target.stat().st_mode))
+        except Exception:
+            staging_path.unlink(missing_ok=True)
+            raise
+        return staging_path
+    raise FileWriteError(f"Failed to reserve atomic staging file for {target}")
 
 
 async def format_markdown_builtin(path: Path) -> Optional[str]:

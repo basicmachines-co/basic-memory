@@ -1,6 +1,7 @@
 """Tests for file utilities."""
 
 import random
+import stat
 import string
 import sys
 from pathlib import Path
@@ -90,6 +91,28 @@ async def test_atomic_writes_preserve_legacy_staging_names(tmp_path: Path):
     assert bytes_target.read_bytes() == b"new bytes\n"
     assert text_staging_name.read_text(encoding="utf-8") == "user text\n"
     assert bytes_staging_name.read_bytes() == b"user bytes\n"
+
+
+@skip_on_windows
+@pytest.mark.asyncio
+async def test_atomic_writes_preserve_existing_modes_and_umask_defaults(tmp_path: Path):
+    text_target = tmp_path / "note.md"
+    bytes_target = tmp_path / "index.md"
+    text_target.write_text("old text\n", encoding="utf-8")
+    bytes_target.write_bytes(b"old bytes\n")
+    text_target.chmod(0o664)
+    bytes_target.chmod(0o640)
+    reference = tmp_path / "reference.md"
+    reference.touch()
+    new_target = tmp_path / "new.md"
+
+    await write_file_atomic(text_target, "new text\n")
+    await write_file_atomic_bytes(bytes_target, b"new bytes\n")
+    await write_file_atomic_bytes(new_target, b"new file\n")
+
+    assert stat.S_IMODE(text_target.stat().st_mode) == 0o664
+    assert stat.S_IMODE(bytes_target.stat().st_mode) == 0o640
+    assert stat.S_IMODE(new_target.stat().st_mode) == stat.S_IMODE(reference.stat().st_mode)
 
 
 @pytest.mark.asyncio
