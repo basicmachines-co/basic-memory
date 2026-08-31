@@ -133,6 +133,50 @@ projections. They exist to retrieve and traverse knowledge efficiently.
 - Search results point back to entities and notes; they do not become independent documents.
 - Deleting or rebuilding an index must not mutate canonical content.
 
+### Accepted Change Journal
+
+`RuntimeAcceptedProjectNoteChange` is the canonical temporal record of one accepted note mutation
+inside a project partition, and `Project.partition_position` is the strictly ordered per-project
+watermark those records advance.
+
+- An accepted change is replay-complete evidence: operation, paths, accepted content version and
+  checksum, actor, source, and acceptance time. It is recorded with the accepted mutation, not
+  reconstructed later from derived state.
+- Consumers that need ordering, coalescing, or idempotency — projectors, routines, temporal
+  reads — consume the journal watermark. Human-facing feeds are presentations of the journal,
+  not the substrate.
+- Materialization settling records when durable storage caught up with an accepted position. A
+  consumer that must not run ahead of durable files (the Wiki Projector, portable logs) holds
+  behind unsettled positions instead of guessing.
+- The journal is note-scoped and project-partitioned today. A fuller event envelope (causation,
+  correlation, depth, workspace scope) grows this record; it does not introduce a second journal
+  beside it.
+
+### Event Surfaces And Derivation
+
+Every event-shaped surface is the journal, a projection of it, ingress toward it, or a separate
+family that must not be mistaken for it:
+
+```text
+storage notifications / webhooks          ingress evidence
+  -> reconciliation commands
+    -> accepted change journal            canonical time
+         -> wiki projections              index.md, log.md, navigation
+         -> search / graph / vector       retrieval projections
+         -> activity feeds, live updates  human presentation and transient delivery
+         -> temporal reads (bm log)       CLI/API views over the journal
+```
+
+- A projection may lag the journal and must be rebuildable from it plus canonical Markdown.
+- Delivery events (webhook attempts, storage notifications, SSE publishes) prove delivery, not
+  acceptance; they are never the canonical semantic log.
+- Run ledgers (projection runs, index runs) record operational work, and product telemetry
+  (usage, subscription, journey events) records behavior. Neither is a knowledge event, and
+  neither derives from the journal.
+
+POSIX-shaped reads describe memory space; the accepted change journal describes time; the
+knowledge graph describes meaning; runtimes describe behavior.
+
 ## Source Of Truth And Authority
 
 "Markdown is the source of truth" describes the product representation. Operational authority
