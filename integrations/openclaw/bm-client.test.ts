@@ -140,6 +140,51 @@ describe("BmClient MCP behavior", () => {
     })
   })
 
+  it("writeNote passes metadata, tags, and note_type when provided", async () => {
+    const callTool = jest.fn().mockResolvedValue(
+      mcpResult({
+        title: "Task Note",
+        permalink: "tasks/task-note",
+        file_path: "tasks/task-note.md",
+        action: "created",
+      }),
+    )
+    setConnected(client, callTool)
+
+    await client.writeNote(
+      "Task Note",
+      "hello",
+      "tasks",
+      undefined,
+      undefined,
+      {
+        metadata: {
+          status: "active",
+          scheduling: { due: "2026-09-02" },
+        },
+        tags: "work,priority",
+        noteType: "Task",
+      },
+    )
+
+    expect(callTool).toHaveBeenCalledWith({
+      name: "write_note",
+      arguments: {
+        title: "Task Note",
+        content: "hello",
+        directory: "tasks",
+        output_format: "json",
+        project: DEFAULT_PROJECT,
+        metadata: {
+          status: "active",
+          scheduling: { due: "2026-09-02" },
+        },
+        tags: "work,priority",
+        note_type: "Task",
+      },
+    })
+  })
+
   it("writeNote throws NoteAlreadyExistsError on conflict response", async () => {
     const callTool = jest.fn().mockResolvedValue(
       mcpResult({
@@ -189,6 +234,34 @@ describe("BmClient MCP behavior", () => {
       },
     })
     expect(result.checksum).toBe("abc")
+  })
+
+  it("editNote passes metadata to edit_note", async () => {
+    const callTool = jest.fn().mockResolvedValue(
+      mcpResult({
+        title: "t",
+        permalink: "p",
+        file_path: "notes/t.md",
+        operation: "append",
+      }),
+    )
+    setConnected(client, callTool)
+
+    await client.editNote("t", "append", "new", {
+      metadata: { status: "complete", review: { approved: true } },
+    })
+
+    expect(callTool).toHaveBeenCalledWith({
+      name: "edit_note",
+      arguments: {
+        identifier: "t",
+        operation: "append",
+        content: "new",
+        metadata: { status: "complete", review: { approved: true } },
+        output_format: "json",
+        project: DEFAULT_PROJECT,
+      },
+    })
   })
 
   it("search calls search_notes with paging params", async () => {

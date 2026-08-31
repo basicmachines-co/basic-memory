@@ -59,6 +59,16 @@ export function registerEditTool(
             description: "Target project name (defaults to current project)",
           }),
         ),
+        metadata: Type.Optional(
+          Type.Object(
+            {},
+            {
+              additionalProperties: true,
+              description:
+                "Frontmatter fields to merge independently of the edit operation. Nested objects are supported.",
+            },
+          ),
+        ),
       }),
       async execute(
         _toolCallId: string,
@@ -70,6 +80,7 @@ export function registerEditTool(
           section?: string
           expected_replacements?: number
           project?: string
+          metadata?: Record<string, unknown>
         },
       ) {
         log.debug(`edit_note: id="${params.identifier}" op=${params.operation}`)
@@ -83,6 +94,7 @@ export function registerEditTool(
               find_text: params.find_text,
               section: params.section,
               expected_replacements: params.expected_replacements,
+              metadata: params.metadata,
             },
             params.project,
           )

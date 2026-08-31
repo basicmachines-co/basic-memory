@@ -61,10 +61,17 @@ interface ReadNoteOptions {
   includeFrontmatter?: boolean
 }
 
+interface WriteNoteOptions {
+  metadata?: Record<string, unknown>
+  tags?: string[] | string
+  noteType?: string
+}
+
 interface EditNoteOptions {
   find_text?: string
   section?: string
   expected_replacements?: number
+  metadata?: Record<string, unknown>
 }
 
 export interface ContextResult {
@@ -605,6 +612,7 @@ export class BmClient {
     folder: string,
     project?: string,
     overwrite?: boolean,
+    options: WriteNoteOptions = {},
   ): Promise<NoteResult> {
     const args: Record<string, unknown> = {
       title,
@@ -614,6 +622,9 @@ export class BmClient {
       project: this.routedProject(project),
     }
     if (overwrite !== undefined) args.overwrite = overwrite
+    if (options.metadata !== undefined) args.metadata = options.metadata
+    if (options.tags !== undefined) args.tags = options.tags
+    if (options.noteType !== undefined) args.note_type = options.noteType
 
     const payload = await this.callTool("write_note", args)
 
@@ -707,6 +718,7 @@ export class BmClient {
     if (options.section) args.section = options.section
     if (options.expected_replacements != null)
       args.expected_replacements = options.expected_replacements
+    if (options.metadata !== undefined) args.metadata = options.metadata
 
     const payload = await this.callTool("edit_note", args)
 

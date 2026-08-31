@@ -36,6 +36,10 @@ describe("edit tool", () => {
                 type: "number",
               }),
               project: expect.objectContaining({ type: "string" }),
+              metadata: expect.objectContaining({
+                type: "object",
+                additionalProperties: true,
+              }),
             }),
           }),
           execute: expect.any(Function),
@@ -89,6 +93,7 @@ describe("edit tool", () => {
           find_text: undefined,
           section: undefined,
           expected_replacements: undefined,
+          metadata: undefined,
         },
         undefined,
       )
@@ -126,6 +131,7 @@ describe("edit tool", () => {
           find_text: "old text",
           section: undefined,
           expected_replacements: 3,
+          metadata: undefined,
         },
         undefined,
       )
@@ -154,6 +160,7 @@ describe("edit tool", () => {
           find_text: undefined,
           section: "## This Week",
           expected_replacements: undefined,
+          metadata: undefined,
         },
         undefined,
       )
@@ -182,8 +189,44 @@ describe("edit tool", () => {
           find_text: undefined,
           section: undefined,
           expected_replacements: undefined,
+          metadata: undefined,
         },
         "other-project",
+      )
+    })
+
+    it("passes metadata through independently of the edit operation", async () => {
+      ;(mockClient.editNote as jest.MockedFunction<any>).mockResolvedValue({
+        title: "Test Note",
+        permalink: "test-note",
+        file_path: "notes/test-note.md",
+        operation: "append",
+      })
+
+      await executeFunction("tool-call-id", {
+        identifier: "test-note",
+        operation: "append",
+        content: "new content",
+        metadata: {
+          status: "complete",
+          review: { approved: true },
+        },
+      })
+
+      expect(mockClient.editNote).toHaveBeenCalledWith(
+        "test-note",
+        "append",
+        "new content",
+        {
+          find_text: undefined,
+          section: undefined,
+          expected_replacements: undefined,
+          metadata: {
+            status: "complete",
+            review: { approved: true },
+          },
+        },
+        undefined,
       )
     })
 
