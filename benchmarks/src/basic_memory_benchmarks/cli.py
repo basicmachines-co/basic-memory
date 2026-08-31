@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import uuid
 from pathlib import Path
@@ -9,6 +10,11 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from basic_memory_benchmarks.agent_tasks.driver import run_agent_tasks
+from basic_memory_benchmarks.agent_tasks.models import AgentBudget, AgentTasksConfig
+from basic_memory_benchmarks.agent_tasks.spec import JudgeRubric
+from basic_memory_benchmarks.agent_tasks.surfaces import SURFACES
+from basic_memory_benchmarks.agent_tasks.tasks import select_tasks
 from basic_memory_benchmarks.concurrent_write import (
     ConcurrentWriteConfig,
     run_concurrent_write,
@@ -24,6 +30,7 @@ from basic_memory_benchmarks.datasets.longmemeval import (
     LONGMEMEVAL_S_URL,
     fetch_longmemeval_dataset,
 )
+from basic_memory_benchmarks.llm.tool_agent import create_tool_agent_model
 from basic_memory_benchmarks.models import DatasetProvenance, RunConfig
 from basic_memory_benchmarks.reporting.compare import (
     compare_provider_metric,
@@ -352,13 +359,130 @@ def run_concurrent_write_command(
     console.print(f"Concurrent-write run complete: [green]{run_dir}[/green]")
 
     if strict:
-        import json
-
         summary = json.loads(
             (run_dir / "concurrent-write-summary.json").read_text(encoding="utf-8")
         )
         if not summary["converged"]:
             console.print("[red]Convergence checks failed (--strict)[/red]")
+            raise typer.Exit(code=1)
+
+
+@run_app.command("agent-tasks")
+def run_agent_tasks_command(
+    surfaces: str = typer.Option(
+        "rich", "--surfaces", help="Comma-separated tool surfaces: rich,posix (issue #1401)"
+    ),
+    model: str = typer.Option(
+        ...,
+        "--model",
+        help="Agent under test: openai-compat:<model>@<base_url> | scripted:<path.json>",
+    ),
+    judge: str | None = typer.Option(
+        None,
+        "--judge",
+        help="Judge runner spec (claude:<model> or openai-compat:...); required only "
+        "when a selected task uses a judge_rubric grader",
+    ),
+    tasks: str = typer.Option(
+        "", "--tasks", help="Comma-separated task ids; empty runs all shipped tasks"
+    ),
+    corpus_dir: Path = typer.Option(Path("benchmarks/datasets/agent-tasks/corpus"), "--corpus-dir"),
+    output_root: Path = typer.Option(Path("benchmarks/runs"), "--output-root"),
+    run_id: str | None = typer.Option(None, "--run-id"),
+    bm_source: str = typer.Option("local-checkout", "--bm-source"),
+    bm_local_path: Path = typer.Option(
+        ...,
+        "--bm-local-path",
+        exists=True,
+        file_okay=False,
+        resolve_path=True,
+        help="Pinned Basic Memory git checkout to benchmark",
+    ),
+    max_turns: int = typer.Option(20, "--max-turns"),
+    max_total_tokens: int = typer.Option(200_000, "--max-total-tokens"),
+    task_timeout: float = typer.Option(300.0, "--task-timeout"),
+    tool_timeout: float = typer.Option(120.0, "--tool-timeout"),
+    settle_timeout: float = typer.Option(180.0, "--settle-timeout"),
+    allow_surface_skip: bool = typer.Option(
+        True,
+        "--allow-surface-skip/--strict-surfaces",
+        help="Record an unavailable surface as skipped (default) or abort the run",
+    ),
+    strict: bool = typer.Option(
+        False,
+        "--strict/--no-strict",
+        help="Exit nonzero when any surface is not ok or any task errored; the pass "
+        "rate itself is never a gate",
+    ),
+) -> None:
+    """Agent-in-the-loop eval: same tasks/model/budget, tool surface varies (#1401)."""
+    # dict.fromkeys dedupes while preserving input order (mirroring select_tasks);
+    # a duplicated surface must not create the same surface home twice mid-run.
+    surface_list = list(dict.fromkeys(item.strip() for item in surfaces.split(",") if item.strip()))
+    if not surface_list:
+        raise typer.BadParameter("--surfaces must name at least one surface")
+    unknown_surfaces = [name for name in surface_list if name not in SURFACES]
+    if unknown_surfaces:
+        raise typer.BadParameter(f"Unknown surfaces: {unknown_surfaces}. Known: {sorted(SURFACES)}")
+
+    task_ids = [item.strip() for item in tasks.split(",") if item.strip()]
+    try:
+        selected = select_tasks(task_ids)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    # Fail fast at parse time: a bad model spec (including claude:) and a
+    # missing judge for judge-graded tasks must not survive to mid-run.
+    try:
+        create_tool_agent_model(model)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    judged = [
+        task.id
+        for task in selected
+        if any(isinstance(grader, JudgeRubric) for grader in task.graders)
+    ]
+    if judged and judge is None:
+        raise typer.BadParameter(f"Tasks {judged} use judge_rubric graders; pass --judge")
+
+    resolved_run_id = run_id or f"at-{uuid.uuid4().hex[:12]}"
+    config = AgentTasksConfig(
+        run_id=resolved_run_id,
+        surfaces=surface_list,
+        task_ids=task_ids,
+        model_spec=model,
+        judge_spec=judge,
+        corpus_dir=str(corpus_dir),
+        output_root=str(output_root),
+        bm_source=bm_source,
+        bm_local_path=str(bm_local_path),
+        budget=AgentBudget(
+            max_turns=max_turns,
+            max_total_tokens=max_total_tokens,
+            max_task_seconds=task_timeout,
+        ),
+        tool_timeout_seconds=tool_timeout,
+        settle_timeout_seconds=settle_timeout,
+        allow_surface_skip=allow_surface_skip,
+    )
+    run_dir = run_agent_tasks(config)
+    console.print(f"Agent-task run complete: [green]{run_dir}[/green]")
+    console.print(f"See [cyan]{run_dir / 'summary.md'}[/cyan]")
+
+    if strict:
+        statuses = json.loads((run_dir / "surface-status.json").read_text(encoding="utf-8"))
+        not_ok = [status for status in statuses if status["state"] != "ok"]
+        task_rows = [
+            json.loads(line)
+            for line in (run_dir / "per-task-agent.jsonl").read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        errored = [row for row in task_rows if row.get("error")]
+        if not_ok or errored:
+            console.print(
+                f"[red]--strict: {len(not_ok)} surface(s) not ok,"
+                f" {len(errored)} errored task(s)[/red]"
+            )
             raise typer.Exit(code=1)
 
 
@@ -418,8 +542,6 @@ def run_diagnose_command(
     across providers) from "truly missed" (a real retrieval failure), so QA
     accuracy can be read honestly against the retrieval ceiling.
     """
-    import json
-
     from rich.table import Table
 
     out = run_diagnose_stage(run_dir=run_dir, source=source, recall_field=recall_field)

@@ -1,0 +1,18 @@
+{
+  "_comment": "LLM-free smoke script for `just bench-agent-smoke`. It deliberately knows the curate-orphans answer: the smoke proves harness plumbing (session, dispatch, settle, grading, artifacts), not model quality.",
+  "tasks": {
+    "orphan notes": [
+      {
+        "tool_calls": [
+          {
+            "name": "search_notes",
+            "arguments": {"query": "redis", "project": "{project}"}
+          }
+        ]
+      },
+      {
+        "text": "The orphan notes are listed below.\n```json\n{\"permalinks\": [\"notes/redis-cache-tuning\", \"notes/postgres-vacuum-notes\", \"notes/coffee-brewing-log\"]}\n```"
+      }
+    ]
+  }
+}

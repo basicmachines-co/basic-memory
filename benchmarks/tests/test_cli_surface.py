@@ -1,5 +1,10 @@
+from pathlib import Path
+
+import pytest
 from typer.testing import CliRunner
 
+from basic_memory_benchmarks import cli
+from basic_memory_benchmarks.agent_tasks.models import AgentTasksConfig
 from basic_memory_benchmarks.cli import app
 
 
@@ -41,3 +46,50 @@ def test_run_beam_score_command_wired() -> None:
     assert "--judge" in result.output
     assert "--source" in result.output
     assert "--max-workers" in result.output
+
+
+def test_run_agent_tasks_command_wired() -> None:
+    result = runner.invoke(app, ["run", "agent-tasks", "--help"])
+
+    assert result.exit_code == 0
+    assert "--surfaces" in result.output
+    assert "--model" in result.output
+    assert "--tasks" in result.output
+    assert "--bm-local-path" in result.output
+    assert "--max-turns" in result.output
+    assert "--strict-surfaces" in result.output
+
+
+def test_run_agent_tasks_dedupes_repeated_surfaces(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # `--surfaces rich,rich` used to pass the membership check and then crash
+    # mid-run creating the second identical surface home.
+    captured: dict[str, list[str]] = {}
+
+    def fake_run(config: AgentTasksConfig) -> Path:
+        captured["surfaces"] = config.surfaces
+        return tmp_path / "run"
+
+    monkeypatch.setattr(cli, "run_agent_tasks", fake_run)
+    script = tmp_path / "script.json"
+    script.write_text('{"tasks": {}}', encoding="utf-8")
+    bm_checkout = tmp_path / "bm"
+    bm_checkout.mkdir()
+
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "agent-tasks",
+            "--surfaces",
+            "rich,rich",
+            "--model",
+            f"scripted:{script}",
+            "--bm-local-path",
+            str(bm_checkout),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["surfaces"] == ["rich"]

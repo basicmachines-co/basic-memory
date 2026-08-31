@@ -245,6 +245,37 @@ bench-concurrent-write-load writers="8" notes="200":
       --writers {{writers}} --notes-per-writer {{notes}} \
       --bm-local-path "{{bm_local_path}}"
 
+# --- Agent-task eval: rich vs POSIX tool surfaces (basic-memory#1401) ---
+
+# LLM-free plumbing smoke: scripted model, rich surface, one read-only task, strict
+bench-agent-smoke:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -z "{{bm_local_path}}" ]]; then
+        echo "BM_LOCAL_PATH must point to the Basic Memory git checkout under test" >&2
+        exit 2
+    fi
+    uv run bm-bench run agent-tasks \
+      --surfaces rich \
+      --model scripted:benchmarks/datasets/agent-tasks/smoke-script.json \
+      --tasks curate-orphans \
+      --bm-local-path "{{bm_local_path}}" \
+      --strict
+
+# Full A/B: same tasks, model, budgets, corpus; only the tool surface varies.
+# The posix surface needs a checkout with enable_posix_tools (#1399/#1406 stack).
+bench-agent-tasks surfaces="rich,posix" model="openai-compat:qwen3@http://localhost:11434/v1":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -z "{{bm_local_path}}" ]]; then
+        echo "BM_LOCAL_PATH must point to the Basic Memory git checkout under test" >&2
+        exit 2
+    fi
+    uv run bm-bench run agent-tasks \
+      --surfaces "{{surfaces}}" \
+      --model "{{model}}" \
+      --bm-local-path "{{bm_local_path}}"
+
 # --- Artifacts and comparison ---
 
 bench-latest-run:

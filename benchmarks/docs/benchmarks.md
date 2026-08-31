@@ -322,6 +322,116 @@ Adapted from `mohammadtavakoli78/BEAM` (MIT code / CC BY-SA 4.0 data):
   paper's tables); the HF materialization script and `chat.pickle` (the
   repo's JSON layout is read directly); the 10M tier.
 
+## 6c) Agent-task eval (rich vs POSIX tool surfaces, issue #1401)
+
+An AGENT-IN-THE-LOOP run kind: the same model, budget, task set, and seeded
+corpus, with the TOOL SURFACE as the provider axis — `rich` (today's MCP
+tools) vs `posix` (the `cat`/`grep`/`ls`/`find`/`tail`/`man` read surface from
+#1399/#1406). The model proposes tool calls; the harness dispatches them
+against an ephemeral per-surface `bm mcp` stdio instance, feeds results back,
+and grades the final answer plus the resulting project state.
+
+### Headline: tokens per completed task (xAFS framing)
+
+The question is not "which surface is more accurate" but "what does a
+completed memory task COST through each surface". The headline is
+`(total agent tokens over ALL attempted tasks) / (tasks completed)` — `n/a`
+(never 0) when nothing completed. Accuracy (pass rate), tool-call count,
+turns, and wall time are always reported alongside; the report renders them
+in one table so accuracy can never appear alone. Judge tokens (if a judge is
+configured) are accounted separately and never enter the headline.
+
+### Tasks and grading
+
+Twelve declarative tasks (`agent_tasks/tasks.py`) derived from the shipped
+skills — memory-continue (resume SPEC-9, recency window, two-hop chain),
+memory-curate (find orphans, connect an orphan), memory-metadata-search
+(status+priority, `$gt` boundary, nested review field), memory-tasks (create,
+resume, complete) — plus SPEC-47's manual chain (search the man3/ pages, read
+the right section). Each runs against a fresh copy of the hand-written seed
+corpus (`benchmarks/datasets/agent-tasks/corpus`, ~25 notes with realistic
+frontmatter/observations/relations, three orphans, three manpage-typed
+notes); file mtimes are aged deterministically so the recency task has a
+stable gold set. All twelve grade deterministically (planted `BMEVAL-*`
+markers, fenced-JSON answer sets, frontmatter/observation/relation-row
+predicates against the settled project and the run's SQLite index); a
+`judge_rubric` grader type exists through the package judge seam but no v1
+task uses it. Errored tasks (model transport, dead MCP session) are recorded
+explicitly and excluded from means — never zero-scored, never dropped — and
+keep the partial token/turn accounting already spent, so the cost columns and
+`per-turn.jsonl` never under-report real model calls.
+
+### Fairness contract additions
+
+Same tasks, same model spec, same budgets (`--max-turns`, `--max-total-tokens`,
+`--task-timeout`; the wall clock is also re-checked between tool dispatches so
+one many-call assistant turn cannot overrun it), same corpus snapshot
+(checksummed into the manifest), one
+fixed prompt preamble, a fixed tool-result truncation cap
+(`TOOL_RESULT_MAX_CHARS`), and deterministic tool-schema ordering (the
+surface allowlist order). Only the surface definition varies, and both
+definitions — config overrides, allowlist, and the tool list actually
+observed from the server — are echoed into `manifest.json` as the audit
+trail. `validate_surface_fairness` warns when surfaces attempted different
+task sets. Note one structural asymmetry, by design: posix v1 (#1399) is
+read-side only, so both surfaces share the rich write verbs (`write_note`,
+`edit_note`, `move_note`, `delete_note`) and the A/B isolates the read-side
+surface.
+
+### POSIX surface gating (important)
+
+This branch does NOT contain the posix tools — they live on the 1399/1403
+stack. The surface is data (`agent_tasks/surfaces.py`): selecting it applies
+`BASIC_MEMORY_ENABLE_POSIX_TOOLS=true` to the ephemeral BM env and requires
+the six read tools in the server's advertised tool list. Because an older
+BM silently ignores the unknown env var, the tool list is the authoritative
+check: a missing tool raises `SurfaceUnavailableError` naming the missing
+tools, the flag, and the branch requirement. Under the default
+`--allow-surface-skip` the surface is recorded as `skipped` in
+`surface-status.json` and the run continues; `--strict-surfaces` aborts.
+Point `--bm-local-path` at a checkout with the flag for live posix runs; the
+six tool names in `surfaces.py` are the single place to reconcile if names
+drift on that branch.
+
+### Model transports
+
+The agent under test speaks `openai-compat:<model>@<base_url>` (any
+`/chat/completions` endpoint implementing the `tools` parameter — Ollama,
+vLLM, LM Studio, OpenAI, or an Anthropic model behind a LiteLLM proxy) or
+`scripted:<path.json>` (canned turns for offline tests/smoke). An
+`openai-compat` response must carry a `usage` block: omitting it would
+silently zero the headline token accounting and disarm the tokens budget, so
+it raises an explicit task error instead.
+`claude:<model>` is rejected for the agent under test: `claude -p` runs its
+own loop and cannot hand a `tool_use` block back to the harness — noted as
+future work (Claude Agent SDK or an MCP-proxy recorder). The optional
+`--judge` still accepts `claude:<model>` through the existing judge seam.
+
+### Workflow
+
+```bash
+BM_LOCAL_PATH=.. just bench-agent-smoke     # LLM-free: scripted model, rich surface, strict
+BM_LOCAL_PATH=.. just bench-agent-tasks     # rich,posix A/B with a local openai-compat model
+uv run bm-bench run agent-tasks --surfaces rich,posix \
+  --model openai-compat:qwen3@http://localhost:11434/v1 \
+  --bm-local-path <bm-checkout>
+```
+
+The smoke script deliberately "knows" the curate-orphans answer: it proves
+harness plumbing (session, dispatch, settle, grading, artifacts), not model
+quality.
+
+### Artifacts
+
+`benchmarks/runs/<run-id>/`: `manifest.json` (BM SHA/version, model + judge
+specs, budget, corpus checksum + file count, full surface echoes),
+`surface-status.json` (ok/skipped/error per surface, explicit reasons),
+`per-turn.jsonl` (per model turn and tool dispatch: tokens, tool name,
+latency, result size), `per-task-agent.jsonl`, `agent-tasks-summary.json`,
+`summary.md` (which repeats any skipped surface so the report cannot be
+misread as a completed A/B). `validate-artifacts` remains retrieval-only for now (as for
+concurrent-write); a kind-aware variant is a follow-up.
+
 ## 7) Commit-to-Commit Comparison (Current Manual Method)
 
 Use this workflow today to compare BM revisions while keeping benchmark tooling fixed.

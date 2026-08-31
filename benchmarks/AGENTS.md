@@ -44,6 +44,10 @@ Run end-to-end QA scoring:
 BEAM nugget scoring (post-hoc, after `run qa` on a BEAM run):
 - `uv run bm-bench run beam-score --run-dir benchmarks/runs/<run-id> --judge claude:claude-sonnet-4-6`
 
+Agent-task eval (rich vs POSIX tool surfaces, issue #1401; see docs/benchmarks.md 6c):
+- `uv run bm-bench run agent-tasks --surfaces rich,posix --model openai-compat:<model>@<base_url> --bm-local-path <bm-checkout>`
+- `BM_LOCAL_PATH=.. just bench-agent-smoke` (LLM-free scripted smoke)
+
 Validate and publish:
 - `uv run bm-bench validate-artifacts --run-dir benchmarks/runs/<run-id>`
 - `uv run bm-bench publish --run-dir benchmarks/runs/<run-id> --destination benchmarks/results/public`
