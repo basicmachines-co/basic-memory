@@ -69,6 +69,48 @@ def _response(payload: dict[str, Any]) -> httpx.Response:
     )
 
 
+def test_extra_headers_ride_every_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--model-header values reach the endpoint (e.g. anthropic-workspace-id)."""
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: Any) -> httpx.Response:
+        captured["headers"] = kwargs["headers"]
+        return _response(
+            {
+                "choices": [{"message": {"content": "ok", "tool_calls": []}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            }
+        )
+
+    monkeypatch.setattr(tool_agent.httpx, "post", fake_post)
+    agent = create_tool_agent_model(
+        "openai-compat:claude-sonnet-5@https://api.anthropic.com/v1",
+        api_key="k",
+        extra_headers={"anthropic-workspace-id": "wrkspc_test"},
+    )
+    assert isinstance(agent, OpenAICompatToolAgent)
+    agent.propose([UserMessage(text="hi")], [SEARCH_TOOL])
+
+    assert captured["headers"]["anthropic-workspace-id"] == "wrkspc_test"
+    assert captured["headers"]["Authorization"] == "Bearer k"
+
+
+def test_http_error_includes_response_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A 4xx body names the actual rejection instead of a bare status code."""
+
+    def fake_post(url: str, **kwargs: Any) -> httpx.Response:
+        return httpx.Response(
+            status_code=400,
+            json={"error": {"message": "anthropic-workspace-id is required"}},
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr(tool_agent.httpx, "post", fake_post)
+    agent = OpenAICompatToolAgent("m", "http://localhost/v1", max_retries=0)
+    with pytest.raises(LLMRunnerError, match="anthropic-workspace-id is required"):
+        agent.propose([UserMessage(text="hi")], [SEARCH_TOOL])
+
+
 class TestOpenAICompatToolAgent:
     def _agent(self) -> OpenAICompatToolAgent:
         return OpenAICompatToolAgent("qwen3", "http://localhost:11434/v1", max_retries=0)
