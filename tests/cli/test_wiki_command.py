@@ -11,10 +11,13 @@ from basic_memory.cli.commands.wiki import (
     WikiCommandReport,
     WikiProjectReport,
     _require_matching_project_root,
+    _require_successful_index,
     _selected_local_project_names,
 )
 from basic_memory.cli.main import app as cli_app
 from basic_memory.config import BasicMemoryConfig, ProjectEntry
+from basic_memory.indexing.models import IndexFileBatchJobResult
+from basic_memory.indexing.project_index_coordinator import ProjectIndexCoordinatorResult
 import basic_memory.cli.commands.wiki as wiki_command
 
 runner = CliRunner()
@@ -167,6 +170,28 @@ def test_wiki_rejects_persisted_root_that_differs_from_config(tmp_path):
             configured_path=str(tmp_path / "configured"),
             persisted_path=str(tmp_path / "stale-database-root"),
         )
+
+
+def test_wiki_rebuild_rejects_recorded_index_failures():
+    result = ProjectIndexCoordinatorResult(
+        total_files=2,
+        enqueued_files=2,
+        enqueued_batches=1,
+        deleted_files=0,
+        batch_results=(
+            IndexFileBatchJobResult(
+                total_files=2,
+                processed_files=0,
+                missing_files=0,
+                failed_files=2,
+                file_results=(),
+                vector_targets=(),
+            ),
+        ),
+    )
+
+    with pytest.raises(ValueError, match="indexing failed for 2 project files"):
+        _require_successful_index(result)
 
 
 def test_wiki_rebuild_builds_local_navigation(config_home, config_manager):

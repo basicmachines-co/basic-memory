@@ -15,6 +15,7 @@ from basic_memory.config import BasicMemoryConfig, ConfigManager, ProjectMode
 
 if TYPE_CHECKING:
     from basic_memory.index.local_wiki_projection import LocalWikiInspection
+    from basic_memory.indexing.project_index_coordinator import ProjectIndexCoordinatorResult
 
 console = Console()
 wiki_app = typer.Typer(help="Build and inspect deterministic Wiki navigation")
@@ -284,11 +285,12 @@ async def _execute_wiki_command(
             )
             # The files are canonical locally; indexing makes the generated
             # navigation immediately available through API, MCP, and search.
-            await run_local_project_index_for_project(
+            index_result = await run_local_project_index_for_project(
                 project,
                 runtime_factory=LocalProjectIndexRuntimeFactory(),
                 force_full=False,
             )
+            _require_successful_index(index_result)
             state = LocalWikiState.current
         reports.append(_project_report(inspection, state=state.value))
 
@@ -299,6 +301,13 @@ async def _execute_wiki_command(
         success=success,
         projects=reports,
     )
+
+
+def _require_successful_index(result: ProjectIndexCoordinatorResult) -> None:
+    """Reject rebuilds whose project index recorded any per-file failure."""
+    failed_files = sum(batch.failed_files for batch in result.batch_results)
+    if failed_files:
+        raise ValueError(f"Wiki rebuild indexing failed for {failed_files} project files")
 
 
 def _selected_local_project_names(
