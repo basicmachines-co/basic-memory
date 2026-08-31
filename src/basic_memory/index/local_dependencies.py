@@ -470,6 +470,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             content_type=synced.content_type,
             markdown_content=synced.markdown_content,
             observations=synced.observations,
+            sections=synced.sections,
             relations=synced.relations,
             resolve_relations=synced.resolve_relations,
         )
@@ -600,6 +601,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             updated_at=file_metadata.modified_at,
             size=file_metadata.size,
             observations=indexed.observations,
+            sections=indexed.sections,
             relations=indexed.relations,
             resolve_relations=resolve_relations,
         )
@@ -669,6 +671,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             updated_at=file_metadata.modified_at,
             size=file_metadata.size,
             observations=indexed.observations,
+            sections=indexed.sections,
             relations=indexed.relations,
             resolve_relations=resolve_relations,
         )

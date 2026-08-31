@@ -17,7 +17,7 @@ import os
 import pathlib
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response, Path, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response, Path, status
 from loguru import logger
 
 import logfire
@@ -30,6 +30,14 @@ from basic_memory.ignore_utils import (
     IGNORED_PATH_REJECTION_DETAIL,
     load_gitignore_patterns,
     should_ignore_path,
+)
+from basic_memory.markdown.sections import (
+    LineRange,
+    NoteSliceError,
+    SectionSelector,
+    parse_line_range,
+    parse_section_selector,
+    slice_note_content,
 )
 from basic_memory.deps import (
     create_model_read_cache,
@@ -715,6 +723,80 @@ async def index_file(
 ## Read endpoints
 
 
+def _parse_note_slice_params(
+    *,
+    section: str | None,
+    lines: str | None,
+) -> tuple[SectionSelector | None, LineRange | None]:
+    """Validate raw slice query params into typed selectors, failing fast with 422s."""
+    if section is not None and lines is not None:
+        raise HTTPException(
+            status_code=422,
+            detail="section and lines are mutually exclusive; a section response carries "
+            "content_start_line/content_end_line for follow-up line reads",
+        )
+    selector: SectionSelector | None = None
+    if section is not None:
+        selector = parse_section_selector(section)
+        if selector is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid section selector: '{section}'",
+            )
+    line_range: LineRange | None = None
+    if lines is not None:
+        line_range = parse_line_range(lines)
+        if line_range is None:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid lines range: '{lines}' (expected 'N-M', 'N-', or 'N')",
+            )
+    return selector, line_range
+
+
+def _apply_note_slice(
+    result: EntityResponseV2,
+    *,
+    selector: SectionSelector | None,
+    line_range: LineRange | None,
+    max_tokens: int | None,
+) -> EntityResponseV2:
+    """Slice a full note response after cache retrieval.
+
+    Slice params are deliberately NOT part of the read-cache digest: the cache
+    keeps exactly one pristine full-note entry per entity and every slice is
+    computed from it per request, so differently-sliced reads share one entry
+    and the cached value is never a partial note.
+    """
+    if selector is None and line_range is None and max_tokens is None:
+        return result
+    if result.content is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Entity '{result.external_id}' has no markdown content to slice",
+        )
+    sliced = slice_note_content(
+        result.content,
+        section=selector,
+        lines=line_range,
+        max_tokens=max_tokens,
+        note_title=result.title,
+    )
+    if isinstance(sliced, NoteSliceError):
+        raise HTTPException(status_code=404, detail=sliced.message)
+    return result.model_copy(
+        update={
+            "content": sliced.content,
+            "section": sliced.section,
+            "content_start_line": sliced.start_line,
+            "content_end_line": sliced.end_line,
+            "content_total_lines": sliced.total_lines,
+            "content_truncated": sliced.truncated,
+            "content_continue_line": sliced.continue_line,
+        }
+    )
+
+
 @router.get("/entities/{entity_id}", response_model=EntityResponseV2)
 async def get_entity_by_id(
     project_id: ProjectExternalIdPathDep,
@@ -726,6 +808,22 @@ async def get_entity_by_id(
     session: SessionDep,
     read_cache: EntityReadCacheDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
+    section: str | None = Query(
+        None,
+        description="Return one section by heading text: 'Decisions', path form "
+        "'Auth/Decisions' to disambiguate, bracket form 'Heading[1]' for duplicate "
+        "headings. Mutually exclusive with lines.",
+    ),
+    lines: str | None = Query(
+        None,
+        description="Return a document-absolute line range: 'N-M', 'N-' (to end), or 'N'.",
+    ),
+    max_tokens: int | None = Query(
+        None,
+        ge=1,
+        description="Approximate token budget; longer content is truncated at a "
+        "section or paragraph boundary with an explicit marker and a continue line.",
+    ),
 ) -> EntityResponseV2:
     """Get an entity by its external ID (UUID).
 
@@ -734,12 +832,18 @@ async def get_entity_by_id(
 
     Args:
         entity_id: External ID (UUID string)
+        section: Optional heading selector returning one section slice
+        lines: Optional document-absolute line range slice
+        max_tokens: Optional token-budget truncation of the returned content
 
     Returns:
-        Complete entity with observations and relations
+        Complete entity with observations and relations; when a slice param is
+        set, `content` is the slice and the content_* fields carry its
+        document-absolute coordinates
 
     Raises:
-        HTTPException: 404 if entity not found
+        HTTPException: 404 if entity or requested section not found, 422 for
+            malformed or conflicting slice params
     """
     with logfire.span(
         "api.request.knowledge.get_entity",
@@ -748,6 +852,8 @@ async def get_entity_by_id(
         action="get_entity",
     ):
         logger.info(f"API v2 request: get_entity_by_id entity_id={entity_id}")
+
+        selector, line_range = _parse_note_slice_params(section=section, lines=lines)
 
         cache_key = ReadCacheKey(
             project_id=project_external_id,
@@ -761,7 +867,12 @@ async def get_entity_by_id(
         )
         async with cache_scope as cached:
             if cached.value is not None:
-                return cached.value
+                return _apply_note_slice(
+                    cached.value,
+                    selector=selector,
+                    line_range=line_range,
+                    max_tokens=max_tokens,
+                )
 
             note_payload = (
                 await note_content_query_service.get_note_entity_payload_with_read_repair(
@@ -775,7 +886,12 @@ async def get_entity_by_id(
                 result = entity_response_from_note_content_payload(note_payload)
                 logger.info(f"API v2 response: external_id={entity_id}, title='{result.title}'")
                 cached.value = result
-                return result
+                return _apply_note_slice(
+                    result,
+                    selector=selector,
+                    line_range=line_range,
+                    max_tokens=max_tokens,
+                )
 
             entity = await entity_repository.get_by_external_id(session, entity_id)
             if not entity:
@@ -787,7 +903,12 @@ async def get_entity_by_id(
             result = EntityResponseV2.model_validate(entity)
             logger.info(f"API v2 response: external_id={entity_id}, title='{result.title}'")
             cached.value = result
-            return result
+            return _apply_note_slice(
+                result,
+                selector=selector,
+                line_range=line_range,
+                max_tokens=max_tokens,
+            )
 
 
 ## Create endpoints

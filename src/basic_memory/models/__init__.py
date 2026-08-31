@@ -6,6 +6,7 @@ from basic_memory.models.knowledge import (
     Entity,
     NoteContent,
     NoteFileVacate,
+    NoteSection,
     Observation,
     Relation,
 )
@@ -18,6 +19,7 @@ __all__ = [
     "Entity",
     "NoteContent",
     "NoteFileVacate",
+    "NoteSection",
     "Observation",
     "Relation",
     "RelationSearchRefresh",

@@ -16,13 +16,18 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory import db
 from basic_memory.indexing.change_detector import ChangeDetector
 import basic_memory.indexing.relation_persistence as relation_persistence_module
-from basic_memory.indexing.models import IndexedObservation, IndexedRelation
+from basic_memory.indexing.models import IndexedObservation, IndexedRelation, IndexedSection
 from basic_memory.indexing.relation_persistence import RelationGenerationPublisher
 from basic_memory.models import Entity, Relation, RelationSearchRefresh
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.note_content_repository import (
     AcceptedNoteContentWrite,
     NoteContentRepository,
+)
+from basic_memory.repository.note_section_repository import (
+    AcceptedSectionWrite,
+    NoteSectionRepository,
+    SectionGenerationWriteResult,
 )
 from basic_memory.repository.observation_repository import (
     AcceptedObservationWrite,
@@ -105,6 +110,28 @@ class RecordingObservationGenerationStore:
         return ObservationGenerationWriteResult(generation_is_current=self.generation_is_current)
 
 
+@dataclass(slots=True)
+class RecordingSectionGenerationStore:
+    """Record the fenced section replacement produced by the publisher."""
+
+    generation_is_current: bool = True
+    events: list[str] = field(default_factory=list)
+    calls: list[tuple[int, tuple[AcceptedSectionWrite, ...]]] = field(default_factory=list)
+
+    async def replace_sections_for_generation(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+        generation: int,
+        sections: Sequence[AcceptedSectionWrite],
+    ) -> SectionGenerationWriteResult:
+        assert session is not None
+        self.events.append("sections")
+        self.calls.append((generation, tuple(sections)))
+        return SectionGenerationWriteResult(generation_is_current=self.generation_is_current)
+
+
 @pytest.mark.asyncio
 async def test_relation_generation_publisher_commits_sorted_chunks_before_cleanup(
     monkeypatch: pytest.MonkeyPatch,
@@ -128,9 +155,11 @@ async def test_relation_generation_publisher_commits_sorted_chunks_before_cleanu
     )
     store = RecordingRelationGenerationStore()
     observation_store = RecordingObservationGenerationStore(events=store.events)
+    section_store = RecordingSectionGenerationStore(events=store.events)
     publisher = RelationGenerationPublisher(
         relation_repository=store,
         observation_repository=observation_store,
+        section_repository=section_store,
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
     )
     relations = [
@@ -142,21 +171,37 @@ async def test_relation_generation_publisher_commits_sorted_chunks_before_cleanu
         )
         for index in reversed(range(251))
     ]
+    indexed_section = IndexedSection(
+        heading="Decisions",
+        level=2,
+        heading_path="Auth/Decisions",
+        duplicate_index=0,
+        start_line=3,
+        end_line=9,
+        start_offset=12,
+        end_offset=140,
+    )
 
     generation_is_current = await publisher.publish(
         entity_id=42,
         generation=7,
         relations=relations,
         observations=[IndexedObservation("Observed", "note", None, ["graph"])],
+        sections=[indexed_section],
     )
 
     assert generation_is_current
-    assert store.events == ["begin", "observations", "upsert", "upsert", "cleanup"]
+    assert store.events == ["begin", "observations", "sections", "upsert", "upsert", "cleanup"]
     assert observation_store.calls == [
         (7, (AcceptedObservationWrite("Observed", "note", None, ["graph"]),))
     ]
+    assert section_store.calls == [
+        (7, (AcceptedSectionWrite("Decisions", 2, "Auth/Decisions", 0, 3, 9, 12, 140),))
+    ]
     assert [call[0] for call in store.calls] == ["begin", "upsert", "upsert", "cleanup"]
     assert [len(call[2]) for call in store.calls] == [0, 250, 1, 0]
+    assert len(sessions) == 6
+    assert len({id(session) for session in sessions}) == 6
     published_names = [
         relation.target_name
         for operation, _, relation_chunk in store.calls
@@ -171,8 +216,6 @@ async def test_relation_generation_publisher_commits_sorted_chunks_before_cleanu
         for relation in relation_chunk
     ]
     assert published_targets.count(42) == 1
-    assert len(sessions) == 5
-    assert len({id(session) for session in sessions}) == 5
 
 
 @pytest.mark.asyncio
@@ -198,9 +241,11 @@ async def test_relation_generation_publisher_stops_when_source_fence_is_stale(
     )
     store = RecordingRelationGenerationStore(generation_is_current=False)
     observation_store = RecordingObservationGenerationStore(events=store.events)
+    section_store = RecordingSectionGenerationStore(events=store.events)
     publisher = RelationGenerationPublisher(
         relation_repository=store,
         observation_repository=observation_store,
+        section_repository=section_store,
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
     )
 
@@ -211,9 +256,9 @@ async def test_relation_generation_publisher_stops_when_source_fence_is_stale(
     )
 
     assert not generation_is_current
-    assert store.events == ["begin", "observations", "upsert"]
+    assert store.events == ["begin", "observations", "sections", "upsert"]
     assert [call[0] for call in store.calls] == ["begin", "upsert"]
-    assert transaction_count == 3
+    assert transaction_count == 4
 
 
 @pytest.mark.asyncio
@@ -239,9 +284,11 @@ async def test_relation_generation_publisher_stops_when_publication_cannot_begin
     )
     store = RecordingRelationGenerationStore(begin_is_current=False)
     observation_store = RecordingObservationGenerationStore(events=store.events)
+    section_store = RecordingSectionGenerationStore(events=store.events)
     publisher = RelationGenerationPublisher(
         relation_repository=store,
         observation_repository=observation_store,
+        section_repository=section_store,
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
     )
 
@@ -252,6 +299,7 @@ async def test_relation_generation_publisher_stops_when_publication_cannot_begin
     )
     assert [call[0] for call in store.calls] == ["begin"]
     assert observation_store.calls == []
+    assert section_store.calls == []
     assert transaction_count == 1
 
 
@@ -281,9 +329,11 @@ async def test_relation_generation_publisher_stops_when_observation_fence_is_sta
         generation_is_current=False,
         events=store.events,
     )
+    section_store = RecordingSectionGenerationStore(events=store.events)
     publisher = RelationGenerationPublisher(
         relation_repository=store,
         observation_repository=observation_store,
+        section_repository=section_store,
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
     )
 
@@ -296,7 +346,54 @@ async def test_relation_generation_publisher_stops_when_observation_fence_is_sta
     assert store.events == ["begin", "observations"]
     assert [call[0] for call in store.calls] == ["begin"]
     assert observation_store.calls == [(6, ())]
+    assert section_store.calls == []
     assert transaction_count == 2
+
+
+@pytest.mark.asyncio
+async def test_relation_generation_publisher_stops_when_section_fence_is_stale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A stale section replace stops before relation chunks or cleanup."""
+    transaction_count = 0
+
+    @asynccontextmanager
+    async def fake_scoped_session(
+        session_maker: async_sessionmaker[AsyncSession],
+    ) -> AsyncIterator[AsyncSession]:
+        nonlocal transaction_count
+        assert session_maker is not None
+        transaction_count += 1
+        yield cast(AsyncSession, object())
+
+    monkeypatch.setattr(
+        relation_persistence_module.db,
+        "scoped_session",
+        fake_scoped_session,
+    )
+    store = RecordingRelationGenerationStore()
+    observation_store = RecordingObservationGenerationStore(events=store.events)
+    section_store = RecordingSectionGenerationStore(
+        generation_is_current=False,
+        events=store.events,
+    )
+    publisher = RelationGenerationPublisher(
+        relation_repository=store,
+        observation_repository=observation_store,
+        section_repository=section_store,
+        session_maker=cast(async_sessionmaker[AsyncSession], object()),
+    )
+
+    assert not await publisher.publish(
+        entity_id=42,
+        generation=6,
+        relations=[IndexedRelation("links_to", "Target", None)],
+        sections=[],
+    )
+    assert store.events == ["begin", "observations", "sections"]
+    assert [call[0] for call in store.calls] == ["begin"]
+    assert section_store.calls == [(6, ())]
+    assert transaction_count == 3
 
 
 @pytest.mark.asyncio
@@ -319,9 +416,11 @@ async def test_relation_generation_publisher_deduplicates_pre_resolved_aliases(
     )
     store = RecordingRelationGenerationStore()
     observation_store = RecordingObservationGenerationStore(events=store.events)
+    section_store = RecordingSectionGenerationStore(events=store.events)
     publisher = RelationGenerationPublisher(
         relation_repository=store,
         observation_repository=observation_store,
+        section_repository=section_store,
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
     )
 
@@ -337,6 +436,7 @@ async def test_relation_generation_publisher_deduplicates_pre_resolved_aliases(
 
     assert generation_is_current
     assert observation_store.calls == [(7, ())]
+    assert section_store.calls == [(7, ())]
     assert store.calls == [
         ("begin", 7, ()),
         (
@@ -356,9 +456,11 @@ async def test_relation_generation_publisher_rejects_non_self_pre_resolved_targe
     """Ordinary targets remain resolver-owned even when a caller supplies an ID."""
     store = RecordingRelationGenerationStore()
     observation_store = RecordingObservationGenerationStore(events=store.events)
+    section_store = RecordingSectionGenerationStore(events=store.events)
     publisher = RelationGenerationPublisher(
         relation_repository=store,
         observation_repository=observation_store,
+        section_repository=section_store,
         session_maker=cast(async_sessionmaker[AsyncSession], object()),
     )
 
@@ -442,6 +544,7 @@ async def test_failed_relation_publication_forces_change_detection_retry(
     failing_publisher = RelationGenerationPublisher(
         relation_repository=_FailAfterPublicationBegins(),
         observation_repository=observation_repository,
+        section_repository=NoteSectionRepository(project_id=sample_entity.project_id),
         session_maker=session_maker,
     )
     with pytest.raises(OSError, match="relation chunk write failed"):
@@ -470,6 +573,7 @@ async def test_failed_relation_publication_forces_change_detection_retry(
     retry_publisher = RelationGenerationPublisher(
         relation_repository=relation_repository,
         observation_repository=observation_repository,
+        section_repository=NoteSectionRepository(project_id=sample_entity.project_id),
         session_maker=session_maker,
     )
     assert await retry_publisher.publish(
@@ -537,6 +641,7 @@ async def test_generation_zero_relation_forces_generation_publication(
     publisher = RelationGenerationPublisher(
         relation_repository=relation_repository,
         observation_repository=observation_repository,
+        section_repository=NoteSectionRepository(project_id=sample_entity.project_id),
         session_maker=session_maker,
     )
     assert await publisher.publish(

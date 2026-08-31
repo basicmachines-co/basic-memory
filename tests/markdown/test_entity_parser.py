@@ -353,6 +353,81 @@ async def test_non_scalar_semantic_setting_does_not_crash(
     assert [relation.target for relation in entity.relations] == ["Target"]
 
 
+@pytest.mark.asyncio
+async def test_parse_file_scans_sections(project_config, entity_parser):
+    """parse_file carries body-relative section spans on the parsed entity."""
+    content = dedent("""\
+        ---
+        title: Sectioned
+        type: note
+        ---
+
+        # Spec
+        intro
+        ## Auth
+        first
+        ## Auth
+        second
+        # Tail
+        z
+        """)
+    test_file = project_config.home / "sectioned.md"
+    test_file.write_text(content)
+
+    entity = await entity_parser.parse_file(test_file)
+
+    assert [section.heading_path for section in entity.sections] == [
+        "Spec",
+        "Spec/Auth",
+        "Spec/Auth",
+        "Tail",
+    ]
+    assert [section.duplicate_index for section in entity.sections] == [0, 0, 1, 0]
+    # Coordinates are body-relative (frontmatter stripped): the parsed content
+    # is the exact string the spans index into.
+    spec = entity.sections[0]
+    body_lines = entity.content.split("\n")
+    assert body_lines[spec.start_line - 1] == "# Spec"
+    encoded = entity.content.encode("utf-8")
+    for section in entity.sections:
+        section_text = "\n".join(body_lines[section.start_line - 1 : section.end_line])
+        assert (
+            encoded[section.start_offset : section.end_offset].decode("utf-8").rstrip("\n")
+            == section_text
+        )
+
+
+@pytest.mark.asyncio
+async def test_parse_note_with_lone_carriage_returns_scans_sections(entity_parser):
+    """Stray \\r terminators (pasted terminal/Excel output) must not break parsing.
+
+    Regression for issue #1403 review: scan_sections counted lines by
+    split("\\n") while markdown-it treats a lone \\r as a newline, so this note
+    raised IndexError and could not be written or indexed at all.
+    """
+    entity = await entity_parser.parse_markdown_content(
+        Path("stray-cr.md"), "# One\ralpha\r# Two\rbeta"
+    )
+
+    assert [
+        (section.heading, section.start_line, section.end_line) for section in entity.sections
+    ] == [("One", 1, 2), ("Two", 3, 4)]
+
+
+@pytest.mark.asyncio
+async def test_graph_silent_note_still_gets_sections(entity_parser):
+    """bm_parse_semantics: false suppresses the graph but never the section index."""
+    entity = await entity_parser.parse_markdown_content(
+        Path("graph-silent.md"),
+        "---\nbm_parse_semantics: false\n---\n# Extracted\n- [note] Not an observation\n"
+        "- references [[Not A Relation]]\n",
+    )
+
+    assert entity.observations == []
+    assert entity.relations == []
+    assert [section.heading for section in entity.sections] == ["Extracted"]
+
+
 # @pytest.mark.asyncio
 # async def test_parse_file_invalid_yaml(test_config, entity_parser):
 #     """Test parsing file with invalid YAML frontmatter."""

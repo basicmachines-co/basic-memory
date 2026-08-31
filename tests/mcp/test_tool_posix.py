@@ -130,15 +130,155 @@ async def test_cat_end_line_clamped_to_total(client, test_project):
 
 
 @pytest.mark.asyncio
-async def test_cat_section_not_supported():
-    with pytest.raises(ValueError, match="'section' is not yet supported"):
-        await cat("anything", section="Overview")
+async def test_cat_section_returns_exact_span(client, test_project):
+    await write_note(
+        title="Cat Section Note",
+        directory="test",
+        content="# Guide\nintro\n## First\nalpha\n## Second\nbeta",
+        project=test_project.name,
+    )
+    full = await cat("Cat Section Note", project=test_project.name)
+    full_lines = full["content"].splitlines()
+
+    result = await cat("Cat Section Note", project=test_project.name, section="First")
+
+    assert result["section"] == "Guide/First"
+    assert result["content"].splitlines() == ["## First", "alpha"]
+    assert result["total_lines"] == len(full_lines)
+    # Coordinates are document-absolute: they address the same lines in a
+    # frontmatter-included follow-up range read.
+    assert result["content"] == "\n".join(full_lines[result["start_line"] - 1 : result["end_line"]])
+    # Slices never carry a frontmatter block.
+    assert result["frontmatter"] is None
+    assert "truncated" not in result
+    assert "continue_line" not in result
 
 
 @pytest.mark.asyncio
-async def test_cat_max_tokens_not_supported():
-    with pytest.raises(ValueError, match="'max_tokens' is not yet supported"):
-        await cat("anything", max_tokens=100)
+async def test_cat_section_path_form_disambiguates(client, test_project):
+    await write_note(
+        title="Cat Section Paths",
+        directory="test",
+        content="# Auth\n## Decisions\na\n# Ops\n## Decisions\nb",
+        project=test_project.name,
+    )
+
+    result = await cat("Cat Section Paths", project=test_project.name, section="Ops/Decisions")
+
+    assert result["section"] == "Ops/Decisions"
+    assert result["content"].splitlines() == ["## Decisions", "b"]
+
+
+@pytest.mark.asyncio
+async def test_cat_section_bracket_form_addresses_duplicates(client, test_project):
+    await write_note(
+        title="Cat Section Duplicates",
+        directory="test",
+        content="# Spec\n## Auth\nfirst\n## Auth\nsecond",
+        project=test_project.name,
+    )
+
+    result = await cat("Cat Section Duplicates", project=test_project.name, section="Auth[1]")
+
+    assert result["section"] == "Spec/Auth[1]"
+    assert result["content"].splitlines() == ["## Auth", "second"]
+
+
+@pytest.mark.asyncio
+async def test_cat_unknown_section_lists_available_headings(client, test_project):
+    await write_note(
+        title="Cat Section Missing",
+        directory="test",
+        content="# Guide\n## First\nalpha",
+        project=test_project.name,
+    )
+
+    with pytest.raises(ToolError, match="Available sections") as excinfo:
+        await cat("Cat Section Missing", project=test_project.name, section="Nope")
+    assert "Guide/First" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"section": "A", "start_line": 2}, "cannot be combined with start_line/end_line"),
+        ({"section": "A", "end_line": 3}, "cannot be combined with start_line/end_line"),
+        ({"max_tokens": 0}, "max_tokens must be >= 1"),
+        ({"max_tokens": -5}, "max_tokens must be >= 1"),
+        # A line range with max_tokens is document-absolute (frontmatter included);
+        # include_frontmatter=False ranges are body-relative — mixing the two would
+        # serve frontmatter text despite the opt-out, so the combination is rejected.
+        (
+            {"max_tokens": 5, "start_line": 2, "include_frontmatter": False},
+            "requires include_frontmatter=True",
+        ),
+        (
+            {"max_tokens": 5, "end_line": 3, "include_frontmatter": False},
+            "requires include_frontmatter=True",
+        ),
+    ],
+)
+async def test_cat_rejects_bad_slice_arguments_before_io(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        await cat("anything", **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_cat_max_tokens_truncates_and_resumes(client, test_project):
+    await write_note(
+        title="Cat Token Budget",
+        directory="test",
+        content="# One\n" + "a" * 40 + "\n# Two\n" + "b" * 40,
+        project=test_project.name,
+    )
+    full = await cat("Cat Token Budget", project=test_project.name)
+    full_lines = full["content"].splitlines()
+
+    truncated = await cat("Cat Token Budget", project=test_project.name, max_tokens=20)
+
+    assert truncated["truncated"] is True
+    marker = truncated["content"].splitlines()[-1]
+    assert "truncated at max_tokens=20" in marker
+    assert f"continue with lines={truncated['continue_line']}-" in marker
+    kept_lines = truncated["content"].splitlines()[:-1]
+
+    # Resume flow: a follow-up range read from continue_line returns exactly
+    # the remainder, reconstructing the document body.
+    rest = await cat(
+        "Cat Token Budget",
+        project=test_project.name,
+        start_line=truncated["continue_line"],
+    )
+    assert kept_lines + rest["content"].splitlines() == (full_lines[truncated["start_line"] - 1 :])
+
+
+@pytest.mark.asyncio
+async def test_cat_max_tokens_with_line_range_routes_server_side(client, test_project):
+    await write_note(
+        title="Cat Combined Slice",
+        directory="test",
+        content="alpha\nbravo\ncharlie\ndelta",
+        project=test_project.name,
+    )
+    full = await cat("Cat Combined Slice", project=test_project.name)
+    full_lines = full["content"].splitlines()
+
+    result = await cat(
+        "Cat Combined Slice",
+        project=test_project.name,
+        start_line=2,
+        max_tokens=1000,
+    )
+
+    assert result["content"] == "\n".join(full_lines[1:])
+    assert result["start_line"] == 2
+    assert result["end_line"] == len(full_lines)
+    assert result["total_lines"] == len(full_lines)
+    assert "truncated" not in result
+    # The server-side slice agrees with the client-side range read byte for byte.
+    client_side = await cat("Cat Combined Slice", project=test_project.name, start_line=2)
+    assert result["content"] == client_side["content"]
 
 
 @pytest.mark.asyncio

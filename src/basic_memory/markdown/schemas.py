@@ -5,6 +5,8 @@ from typing import override, TYPE_CHECKING, Any, List, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
+from basic_memory.markdown.sections import MarkdownSection
+
 
 class Observation(BaseModel):
     """An observation about an entity."""
@@ -90,6 +92,9 @@ class EntityMarkdown(BaseModel):
     content: Optional[str] = None
     observations: List[Observation] = []
     relations: List[Relation] = []
+    # Structural pass output: present even for graph-silent notes, unlike the
+    # semantic observations/relations above.
+    sections: List[MarkdownSection] = []
 
     # created, updated will have values after a read
     created: Optional[datetime] = None

@@ -270,7 +270,15 @@ async def test_exact_id_helper_does_not_read_resource_for_present_content(
     class EntityReader:
         calls = 0
 
-        async def get_entity(self, entity_id: str) -> EntityResponseV2:
+        async def get_entity(
+            self,
+            entity_id: str,
+            *,
+            section: str | None = None,
+            lines: str | None = None,
+            max_tokens: int | None = None,
+        ) -> EntityResponseV2:
+            assert section is None and lines is None and max_tokens is None
             self.calls += 1
             assert entity_id == ENTITY_ID
             return _entity(content=accepted_content)
@@ -301,7 +309,15 @@ async def test_exact_id_helper_reads_resource_once_only_when_content_is_absent()
     class EntityReader:
         calls = 0
 
-        async def get_entity(self, entity_id: str) -> EntityResponseV2:
+        async def get_entity(
+            self,
+            entity_id: str,
+            *,
+            section: str | None = None,
+            lines: str | None = None,
+            max_tokens: int | None = None,
+        ) -> EntityResponseV2:
+            assert section is None and lines is None and max_tokens is None
             self.calls += 1
             assert entity_id == ENTITY_ID
             return _entity(content=None)
@@ -331,7 +347,15 @@ async def test_exact_id_helper_reads_resource_once_only_when_content_is_absent()
 @pytest.mark.asyncio
 async def test_exact_id_helper_does_not_fabricate_frontmatter_from_entity_metadata() -> None:
     class EntityReader:
-        async def get_entity(self, entity_id: str) -> EntityResponseV2:
+        async def get_entity(
+            self,
+            entity_id: str,
+            *,
+            section: str | None = None,
+            lines: str | None = None,
+            max_tokens: int | None = None,
+        ) -> EntityResponseV2:
+            assert section is None and lines is None and max_tokens is None
             assert entity_id == ENTITY_ID
             return _entity(content="plain body\n")
 

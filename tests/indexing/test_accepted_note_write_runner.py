@@ -43,7 +43,9 @@ from basic_memory.repository import (
     AcceptedNoteContentWrite,
     AcceptedObservationWrite,
     AcceptedRelationWrite,
+    AcceptedSectionWrite,
 )
+from basic_memory.repository.note_section_repository import SectionGenerationWriteResult
 from basic_memory.repository.observation_repository import ObservationGenerationWriteResult
 from basic_memory.repository.relation_repository import RelationGenerationWriteResult
 from basic_memory.repository.entity_repository import AcceptedPendingEntityWrite
@@ -148,6 +150,22 @@ class _ObservationRepository:
         return ObservationGenerationWriteResult(generation_is_current=True)
 
 
+class _SectionRepository:
+    def __init__(self) -> None:
+        self.calls: list[tuple[int, Sequence[AcceptedSectionWrite]]] = []
+
+    async def replace_sections_for_generation(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+        generation: int,
+        sections: Sequence[AcceptedSectionWrite],
+    ) -> SectionGenerationWriteResult:
+        self.calls.append((entity_id, sections))
+        return SectionGenerationWriteResult(generation_is_current=True)
+
+
 class _RelationRepository:
     def __init__(self) -> None:
         self.calls: list[tuple[int, Sequence[AcceptedRelationWrite]]] = []
@@ -205,6 +223,10 @@ def test_accepted_note_write_repositories_name_persistence_behavior() -> None:
             assert project_id == 7
             return _ObservationRepository()
 
+        def section_repository(self, project_id: int) -> _SectionRepository:
+            assert project_id == 7
+            return _SectionRepository()
+
         def relation_repository(self, project_id: int) -> _RelationRepository:
             assert project_id == 7
             return _RelationRepository()
@@ -215,6 +237,7 @@ def test_accepted_note_write_repositories_name_persistence_behavior() -> None:
     assert isinstance(repositories.note_content_repository(7), _NoteContentRepository)
     assert isinstance(repositories.search_repository(7), _SearchRepository)
     assert isinstance(repositories.observation_repository(7), _ObservationRepository)
+    assert isinstance(repositories.section_repository(7), _SectionRepository)
     assert isinstance(repositories.relation_repository(7), _RelationRepository)
 
 
@@ -407,12 +430,17 @@ def _unexpected_relation_repository(_project_id: int) -> _RelationRepository:
     raise AssertionError("relation repository was not expected")
 
 
+def _unexpected_section_repository(_project_id: int) -> _SectionRepository:
+    raise AssertionError("section repository was not expected")
+
+
 @dataclass(frozen=True, slots=True)
 class _RepositoryProvider:
     pending_entity_repository_result: _PendingEntityRepository | None = None
     note_content_repository_result: _NoteContentRepository | None = None
     search_repository_result: _SearchRepository | None = None
     observation_repository_result: _ObservationRepository | None = None
+    section_repository_result: _SectionRepository | None = None
     relation_repository_result: _RelationRepository | None = None
 
     def pending_entity_repository(self, project_id: int) -> _PendingEntityRepository:
@@ -435,6 +463,11 @@ class _RepositoryProvider:
             return _unexpected_observation_repository(project_id)
         return self.observation_repository_result
 
+    def section_repository(self, project_id: int) -> _SectionRepository:
+        if self.section_repository_result is None:
+            return _unexpected_section_repository(project_id)
+        return self.section_repository_result
+
     def relation_repository(self, project_id: int) -> _RelationRepository:
         if self.relation_repository_result is None:
             return _unexpected_relation_repository(project_id)
@@ -447,12 +480,14 @@ def _repository_provider(
     note_content_repository: _NoteContentRepository | None = None,
     search_repository: _SearchRepository | None = None,
     observation_repository: _ObservationRepository | None = None,
+    section_repository: _SectionRepository | None = None,
     relation_repository: _RelationRepository | None = None,
 ) -> AcceptedNoteWriteRepositories:
     """Build a fail-fast fake repository provider for one focused test."""
     return _RepositoryProvider(
         pending_entity_repository_result=pending_entity_repository,
         observation_repository_result=observation_repository,
+        section_repository_result=section_repository,
         relation_repository_result=relation_repository,
         note_content_repository_result=note_content_repository,
         search_repository_result=search_repository,

@@ -131,6 +131,7 @@ class Entity(Base):
         cascade="all, delete-orphan",
         uselist=False,
     )
+    sections = relationship("NoteSection", back_populates="entity", cascade="all, delete-orphan")
 
     @validates("created_at", "updated_at")
     def _normalize_semantic_timestamp(self, attribute_name: str, value: datetime) -> datetime:
@@ -278,6 +279,58 @@ class NoteFileVacate(Base):
         return (
             f"NoteFileVacate(project_id={self.project_id}, entity_id={self.entity_id}, "
             f"file_path='{self.file_path}')"
+        )
+
+
+class NoteSection(Base):
+    """One heading-bounded span of a note body.
+
+    Sections are an index into canonical markdown, never a copy of it: rows carry
+    body-relative line numbers and utf-8 byte offsets plus the heading path that
+    addresses the span. Like observations, they are a derived projection rebuilt
+    under the note_content generation fence on every (re)index and removed with
+    the entity (SPEC-47 / #1403).
+    """
+
+    __tablename__ = "note_section"
+    __table_args__ = (
+        Index("ix_note_section_entity_id", "entity_id"),
+        Index(
+            "ix_note_section_entity_path",
+            "entity_id",
+            "heading_path_digest",
+            "duplicate_index",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)  # pyright: ignore [reportIncompatibleVariableOverride]
+    project_id: Mapped[int] = mapped_column(Integer, ForeignKey("project.id"), index=True)
+    entity_id: Mapped[int] = mapped_column(Integer, ForeignKey("entity.id", ondelete="CASCADE"))
+    heading: Mapped[str] = mapped_column(Text)
+    level: Mapped[int] = mapped_column(Integer)
+    # Full "Parent/Child" path kept as un-indexed text for display; the lookup
+    # index keys on its fixed-width digest because arbitrary heading text can
+    # exceed PostgreSQL's 2704-byte btree index-row limit (same guard as
+    # Observation.permalink below).
+    heading_path: Mapped[str] = mapped_column(Text)
+    heading_path_digest: Mapped[str] = mapped_column(String(64))
+    duplicate_index: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
+    # Body-relative coordinates: 1-indexed inclusive lines, utf-8 byte offsets
+    # with end_offset exclusive. Body-relative keeps rows valid when frontmatter
+    # normalization rewrites the file head without touching the body (#1090).
+    start_line: Mapped[int] = mapped_column(Integer)
+    end_line: Mapped[int] = mapped_column(Integer)
+    start_offset: Mapped[int] = mapped_column(Integer)
+    end_offset: Mapped[int] = mapped_column(Integer)
+
+    entity = relationship("Entity", back_populates="sections")
+
+    @override
+    def __repr__(self) -> str:  # pragma: no cover
+        return (
+            f"NoteSection(id={self.id}, entity_id={self.entity_id}, "
+            f"heading_path='{self.heading_path}[{self.duplicate_index}]', "
+            f"lines={self.start_line}-{self.end_line})"
         )
 
 

@@ -16,6 +16,7 @@ from basic_memory.indexing.file_index_planning import (
     FileIndexDecision,
     FileIndexDecisionStatus,
 )
+from basic_memory.markdown.sections import MarkdownSection
 from basic_memory.indexing.project_index_progress import (
     ProjectIndexBatchCounterUpdate,
     ProjectIndexCounters,
@@ -124,6 +125,39 @@ class IndexedObservation:
     tags: list[str] | None
 
 
+@dataclass(frozen=True, slots=True)
+class IndexedSection:
+    """One heading-bounded body span waiting for generation-owned publication."""
+
+    heading: str
+    level: int
+    heading_path: str
+    duplicate_index: int
+    start_line: int
+    end_line: int
+    start_offset: int
+    end_offset: int
+
+
+def indexed_sections_from_markdown(
+    sections: Sequence[MarkdownSection],
+) -> tuple[IndexedSection, ...]:
+    """Flatten parsed section paths into the publishable projection shape."""
+    return tuple(
+        IndexedSection(
+            heading=section.heading,
+            level=section.level,
+            heading_path=section.heading_path,
+            duplicate_index=section.duplicate_index,
+            start_line=section.start_line,
+            end_line=section.end_line,
+            start_offset=section.start_offset,
+            end_offset=section.end_offset,
+        )
+        for section in sections
+    )
+
+
 @dataclass(slots=True)
 class IndexedEntity:
     """Stable output describing one file that finished indexing successfully."""
@@ -135,6 +169,7 @@ class IndexedEntity:
     content_type: str | None = None
     markdown_content: str | None = None
     observations: tuple[IndexedObservation, ...] = ()
+    sections: tuple[IndexedSection, ...] = ()
     relations: tuple[IndexedRelation, ...] = ()
     resolve_relations: bool = True
 
@@ -843,6 +878,7 @@ class SyncedMarkdownFile:
     updated_at: datetime
     size: int
     observations: tuple[IndexedObservation, ...] = ()
+    sections: tuple[IndexedSection, ...] = ()
     relations: tuple[IndexedRelation, ...] = ()
     resolve_relations: bool = True
 

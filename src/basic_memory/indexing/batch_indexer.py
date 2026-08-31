@@ -28,11 +28,13 @@ from basic_memory.indexing.models import (
     IndexedEntity,
     IndexedObservation,
     IndexedRelation,
+    IndexedSection,
     IndexFileWriter,
     IndexFrontmatterUpdate,
     IndexingBatchResult,
     IndexInputFile,
     RelationGenerationBatchResult,
+    indexed_sections_from_markdown,
 )
 from basic_memory.indexing.relation_resolution import (
     RelationSearchRefreshResult,
@@ -42,6 +44,7 @@ from basic_memory.indexing.relation_persistence import RelationGenerationPublish
 from basic_memory.models import Entity, NoteContent, Relation, RelationSearchRefresh
 from basic_memory.repository import EntityRepository, ObservationRepository, RelationRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
+from basic_memory.repository.note_section_repository import NoteSectionRepository
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.relation_repository import lock_note_content_before_entity_mutation
 from basic_memory.runtime.storage import (
@@ -125,6 +128,7 @@ class _PreparedEntity:
     search_content: str | None
     markdown_content: str | None = None
     observations: tuple[IndexedObservation, ...] = ()
+    sections: tuple[IndexedSection, ...] = ()
     relations: tuple[IndexedRelation, ...] = ()
     resolve_relations: bool = True
     refresh_search: bool = True
@@ -158,12 +162,14 @@ class BatchIndexer:
         self.observation_repository = observation_repository
         self.relation_repository = relation_repository
         self.note_content_repository = NoteContentRepository(project_id=project_id)
+        self.section_repository = NoteSectionRepository(project_id=project_id)
         self.search_service = search_service
         self.file_writer = file_writer
         self.session_maker = session_maker
         self.relation_generation_publisher = RelationGenerationPublisher(
             relation_repository=relation_repository,
             observation_repository=observation_repository,
+            section_repository=self.section_repository,
             session_maker=session_maker,
         )
         self.relation_resolution = RepositoryRelationResolutionRuntime(
@@ -340,6 +346,7 @@ class BatchIndexer:
             content_type=prepared_entity.content_type,
             markdown_content=prepared_entity.markdown_content,
             observations=prepared_entity.observations,
+            sections=prepared_entity.sections,
             relations=prepared_entity.relations,
             resolve_relations=prepared_entity.resolve_relations,
         )
@@ -766,6 +773,7 @@ class BatchIndexer:
             relation.to_entity = None
 
         await self.observation_repository.delete_by_fields(session, entity_id=entity.id)
+        await self.section_repository.delete_by_fields(session, entity_id=entity.id)
         await self.relation_repository.delete_by_fields(session, from_id=entity.id)
         await self.note_content_repository.delete_by_entity_id(session, entity.id)
         await session.execute(
@@ -796,6 +804,7 @@ class BatchIndexer:
             generation=generation,
             relations=indexed.relations,
             observations=indexed.observations,
+            sections=indexed.sections,
         )
 
     async def publish_relation_generations(
@@ -896,6 +905,7 @@ class BatchIndexer:
             search_content=search_content,
             markdown_content=indexed.markdown_content,
             observations=indexed.observations,
+            sections=indexed.sections,
             relations=indexed.relations,
             resolve_relations=indexed.resolve_relations,
         )
@@ -977,6 +987,7 @@ class BatchIndexer:
             content_type=prepared.content_type,
             markdown_content=prepared.markdown_content,
             observations=prepared.observations,
+            sections=prepared.sections,
             relations=prepared.relations,
             resolve_relations=prepared.resolve_relations,
         )
@@ -1112,6 +1123,7 @@ class BatchIndexer:
             ),
             markdown_content=prepared.content,
             observations=indexed_observations,
+            sections=indexed_sections_from_markdown(prepared.markdown.sections),
             relations=tuple(indexed_relations),
             resolve_relations=resolve_relations,
         )

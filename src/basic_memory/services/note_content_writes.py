@@ -172,9 +172,13 @@ class NoteContentMutationService:
                 publication.project_id
             )
         )
+        section_repository = self.mutation_dependencies.write_repositories.section_repository(
+            publication.project_id
+        )
         publisher = RelationGenerationPublisher(
             relation_repository=repository,
             observation_repository=observation_repository,
+            section_repository=section_repository,
             session_maker=self.session_maker,
         )
         await publisher.publish(
@@ -182,6 +186,7 @@ class NoteContentMutationService:
             generation=publication.generation,
             relations=publication.relations,
             observations=publication.observations,
+            sections=publication.sections,
         )
 
     async def _finish_mutation(

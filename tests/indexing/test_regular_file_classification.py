@@ -14,8 +14,8 @@ from basic_memory.indexing.batch_indexer import (
     regular_file_content_type,
 )
 from basic_memory.indexing.models import IndexInputFile, StorageIndexFileWriter
-from basic_memory.models import Entity, Observation, Relation, RelationSearchRefresh
-from basic_memory.repository import NoteContentRepository
+from basic_memory.models import Entity, NoteSection, Observation, Relation, RelationSearchRefresh
+from basic_memory.repository import NoteContentRepository, NoteSectionRepository
 
 
 def test_markdown_mime_without_note_basename_is_persisted_as_resource() -> None:
@@ -88,6 +88,21 @@ async def test_poison_markdown_reclassification_clears_note_only_state(
                 content="stale observation",
                 category="note",
             ),
+        )
+        session.add(
+            NoteSection(
+                project_id=project_id,
+                entity_id=poison.id,
+                heading="Poison note",
+                level=1,
+                heading_path="Poison note",
+                heading_path_digest="0" * 64,
+                duplicate_index=0,
+                start_line=1,
+                end_line=1,
+                start_offset=0,
+                end_offset=13,
+            )
         )
         await relation_repository.add(
             session,
@@ -215,6 +230,10 @@ async def test_poison_markdown_reclassification_clears_note_only_state(
             session,
             poison.id,
         )
+        sections = await NoteSectionRepository(project_id=project_id).find_by_entity(
+            session,
+            poison.id,
+        )
         refreshed_inbound = await relation_repository.select_by_id(session, inbound.id)
         poison_refreshes = await relation_repository.list_pending_search_refreshes(
             session,
@@ -234,6 +253,7 @@ async def test_poison_markdown_reclassification_clears_note_only_state(
     assert repaired.entity_metadata == {}
     assert note_content is None
     assert observations == []
+    assert sections == []
     assert repaired.outgoing_relations == []
     assert refreshed_inbound is not None
     assert refreshed_inbound.to_id is None

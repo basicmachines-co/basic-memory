@@ -4,6 +4,7 @@ from .note_content_repository import (
     NoteContentRepository,
     NoteContentVersionConflict,
 )
+from .note_section_repository import AcceptedSectionWrite, NoteSectionRepository
 from .observation_repository import AcceptedObservationWrite, ObservationRepository
 from .project_repository import ProjectRepository
 from .relation_repository import AcceptedRelationWrite, RelationRepository
@@ -15,6 +16,8 @@ __all__ = [
     "NoteContentVersionConflict",
     "AcceptedObservationWrite",
     "ObservationRepository",
+    "AcceptedSectionWrite",
+    "NoteSectionRepository",
     "ProjectRepository",
     "AcceptedRelationWrite",
     "RelationRepository",

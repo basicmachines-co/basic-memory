@@ -12,7 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory import db
 from basic_memory.config import ProjectConfig, BasicMemoryConfig
 from basic_memory.file_utils import remove_frontmatter
-from basic_memory.indexing.models import IndexedObservation, IndexedRelation
+from basic_memory.indexing.models import (
+    IndexedObservation,
+    IndexedRelation,
+    indexed_sections_from_markdown,
+)
 from basic_memory.indexing.note_content_reconciliation import NoteContentReconciliationAnchor
 from basic_memory.indexing.note_content_reconciler import NoteContentReconciler
 from basic_memory.indexing.relation_persistence import RelationGenerationPublisher
@@ -26,6 +30,7 @@ from basic_memory.models import Entity as EntityModel
 from basic_memory.repository import ObservationRepository, RelationRepository
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
+from basic_memory.repository.note_section_repository import NoteSectionRepository
 from basic_memory.read_cache import ReadCache, invalidate_cache
 from basic_memory.runtime.note_move import normalize_note_move_destination_path
 from basic_memory.schemas import Entity as EntitySchema
@@ -246,6 +251,7 @@ class EntityService(BaseService[EntityModel]):
         publisher = RelationGenerationPublisher(
             relation_repository=self.relation_repository,
             observation_repository=self.observation_repository,
+            section_repository=NoteSectionRepository(project_id=self.repository.project_id),
             session_maker=self.session_maker,
         )
         published = await publisher.publish(
@@ -253,6 +259,7 @@ class EntityService(BaseService[EntityModel]):
             generation=reconciliation.generation,
             relations=indexed_relations,
             observations=indexed_observations,
+            sections=indexed_sections_from_markdown(markdown.sections),
         )
         if not published:
             return entity
