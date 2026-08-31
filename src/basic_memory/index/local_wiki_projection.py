@@ -53,12 +53,26 @@ class LocalWikiWriteConflict(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class LocalWikiSourceState:
+    """Projection inputs revalidated before publishing generated files."""
+
+    project_external_id: str
+    project_name: str
+    partition_position: int
+    accepted_at: datetime
+    notes: tuple[WikiSourceNote, ...]
+    changes: tuple[WikiSourceChange, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class LocalWikiInspection:
     """One deterministic local projection plan and its user-visible state."""
 
+    project_database_id: int
     project_name: str
     project_root: Path
     state: LocalWikiState
+    source_state: LocalWikiSourceState
     plan: WikiProjectionPlan
 
 
@@ -75,7 +89,16 @@ async def inspect_local_wiki_projection(
     session_maker: async_sessionmaker[AsyncSession],
 ) -> LocalWikiInspection:
     """Plan a full local Wiki rebuild without modifying canonical files."""
-    project_root = Path(project.path).expanduser().resolve()
+    async with db.scoped_session(session_maker) as session:
+        persisted_project = await session.get(Project, project.id)
+    if persisted_project is None:
+        raise ValueError(f"Local project is not registered: {project.name}")
+
+    project = persisted_project
+    configured_root = Path(project.path).expanduser()
+    if not configured_root.is_absolute():
+        raise ValueError(f"Local Wiki project path must be absolute: {project.path}")
+    project_root = configured_root.resolve()
     snapshot = await _load_local_wiki_snapshot(
         project,
         project_root=project_root,
@@ -105,15 +128,19 @@ async def inspect_local_wiki_projection(
     else:
         state = LocalWikiState.current
     return LocalWikiInspection(
+        project_database_id=project.id,
         project_name=project.name,
         project_root=project_root,
         state=state,
+        source_state=_source_state(snapshot),
         plan=plan,
     )
 
 
 async def apply_local_wiki_projection(
     inspection: LocalWikiInspection,
+    *,
+    session_maker: async_sessionmaker[AsyncSession],
 ) -> AppliedLocalWikiProjection:
     """Apply an inspected plan with an all-path checksum preflight."""
     plan = inspection.plan
@@ -124,6 +151,11 @@ async def apply_local_wiki_projection(
         raise LocalWikiWriteConflict(
             f"Wiki projection is waiting for materialized changes: {positions}"
         )
+
+    await _assert_projection_sources_unchanged(
+        inspection,
+        session_maker=session_maker,
+    )
 
     # Every reserved path is checked before the first write. A concurrent edit
     # therefore fails the rebuild without publishing a knowingly mixed projection.
@@ -148,6 +180,41 @@ async def apply_local_wiki_projection(
         target.parent.mkdir(parents=True, exist_ok=True)
         await write_file_atomic_bytes(target, write.content)
     return AppliedLocalWikiProjection(paths=tuple(write.path for write in plan.writes))
+
+
+async def _assert_projection_sources_unchanged(
+    inspection: LocalWikiInspection,
+    *,
+    session_maker: async_sessionmaker[AsyncSession],
+) -> None:
+    async with db.scoped_session(session_maker) as session:
+        project = await session.get(Project, inspection.project_database_id)
+    if project is None:
+        raise LocalWikiWriteConflict("Wiki project disappeared after planning")
+
+    current_root = Path(project.path).expanduser()
+    if not current_root.is_absolute() or current_root.resolve() != inspection.project_root:
+        raise LocalWikiWriteConflict("Wiki project root changed after planning")
+
+    current_snapshot = await _load_local_wiki_snapshot(
+        project,
+        project_root=current_root.resolve(),
+        session_maker=session_maker,
+    )
+    if _source_state(current_snapshot) != inspection.source_state:
+        raise LocalWikiWriteConflict("Wiki source notes or journal changed after planning")
+
+
+def _source_state(snapshot: WikiProjectionSnapshot) -> LocalWikiSourceState:
+    """Return only the projection inputs that generated writes depend on."""
+    return LocalWikiSourceState(
+        project_external_id=snapshot.project_id,
+        project_name=snapshot.project_name,
+        partition_position=snapshot.source_partition_position,
+        accepted_at=snapshot.source_accepted_at,
+        notes=snapshot.notes,
+        changes=snapshot.changes,
+    )
 
 
 async def _load_local_wiki_snapshot(

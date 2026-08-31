@@ -12,7 +12,7 @@ from basic_memory.index.local_wiki_projection import (
     apply_local_wiki_projection,
     inspect_local_wiki_projection,
 )
-from basic_memory.models import AcceptedProjectNoteChange
+from basic_memory.models import AcceptedProjectNoteChange, Project
 
 
 @pytest.mark.asyncio
@@ -34,7 +34,7 @@ async def test_local_wiki_rebuild_is_idempotent(config_home, session_maker, test
         "index.md",
         "log.md",
     ]
-    await apply_local_wiki_projection(first)
+    await apply_local_wiki_projection(first, session_maker=session_maker)
     initial_checksums = {
         path: sha256((config_home / path).read_bytes()).hexdigest()
         for path in ("guides/index.md", "guides/log.md", "index.md", "log.md")
@@ -75,13 +75,13 @@ async def test_local_wiki_reports_outdated_after_source_metadata_changes(
     note = config_home / "note.md"
     note.write_text("---\ntitle: First\n---\n\n# Note\n", encoding="utf-8")
     initial = await inspect_local_wiki_projection(test_project, session_maker=session_maker)
-    await apply_local_wiki_projection(initial)
+    await apply_local_wiki_projection(initial, session_maker=session_maker)
     note.write_text("---\ntitle: Second\n---\n\n# Note\n", encoding="utf-8")
 
     inspection = await inspect_local_wiki_projection(test_project, session_maker=session_maker)
 
     assert inspection.state is LocalWikiState.outdated
-    assert [write.path for write in inspection.plan.writes] == ["index.md", "log.md"]
+    assert [write.path for write in inspection.plan.writes] == ["index.md"]
 
 
 @pytest.mark.asyncio
@@ -92,8 +92,10 @@ async def test_local_wiki_waits_for_pending_accepted_change(
 ):
     note = config_home / "note.md"
     note.write_text("# Note\n", encoding="utf-8")
-    test_project.partition_position = 1
     async with db.scoped_session(session_maker) as session:
+        project = await session.get(Project, test_project.id)
+        assert project is not None
+        project.partition_position = 1
         session.add(
             AcceptedProjectNoteChange(
                 project_id=test_project.id,
@@ -115,7 +117,7 @@ async def test_local_wiki_waits_for_pending_accepted_change(
     assert inspection.state is LocalWikiState.partial
     assert inspection.plan.result.pending_materialization == (1,)
     with pytest.raises(LocalWikiWriteConflict, match="materialized changes: 1"):
-        await apply_local_wiki_projection(inspection)
+        await apply_local_wiki_projection(inspection, session_maker=session_maker)
 
 
 @pytest.mark.asyncio
@@ -133,7 +135,7 @@ async def test_local_wiki_refuses_user_owned_reserved_document(
     assert inspection.plan.writes == ()
     assert [conflict.path for conflict in inspection.plan.result.conflicts] == ["index.md"]
     with pytest.raises(LocalWikiWriteConflict, match="reserved-document conflicts"):
-        await apply_local_wiki_projection(inspection)
+        await apply_local_wiki_projection(inspection, session_maker=session_maker)
     assert existing.read_text(encoding="utf-8") == "# My hand-written index\n"
 
 
@@ -149,7 +151,7 @@ async def test_local_wiki_checks_every_reserved_path_before_writing(
     (config_home / "log.md").write_text("concurrent edit\n", encoding="utf-8")
 
     with pytest.raises(LocalWikiWriteConflict, match="appeared after planning: log.md"):
-        await apply_local_wiki_projection(inspection)
+        await apply_local_wiki_projection(inspection, session_maker=session_maker)
 
     # The preflight sees the later log.md conflict before creating index.md.
     assert not (config_home / "index.md").exists()
@@ -171,7 +173,7 @@ async def test_local_wiki_refuses_changed_existing_reserved_document(
     note = config_home / "note.md"
     note.write_text("---\ntitle: First\n---\n\n# Note\n", encoding="utf-8")
     initial = await inspect_local_wiki_projection(test_project, session_maker=session_maker)
-    await apply_local_wiki_projection(initial)
+    await apply_local_wiki_projection(initial, session_maker=session_maker)
     note.write_text("---\ntitle: Second\n---\n\n# Note\n", encoding="utf-8")
     update = await inspect_local_wiki_projection(test_project, session_maker=session_maker)
     index_path = config_home / "index.md"
@@ -181,7 +183,59 @@ async def test_local_wiki_refuses_changed_existing_reserved_document(
         index_path.unlink()
 
     with pytest.raises(LocalWikiWriteConflict, match=f"{message} after planning"):
-        await apply_local_wiki_projection(update)
+        await apply_local_wiki_projection(update, session_maker=session_maker)
+
+
+@pytest.mark.asyncio
+async def test_local_wiki_refuses_source_note_changed_after_planning(
+    config_home,
+    session_maker,
+    test_project,
+):
+    note = config_home / "note.md"
+    note.write_text("# First\n", encoding="utf-8")
+    inspection = await inspect_local_wiki_projection(test_project, session_maker=session_maker)
+    note.write_text("# Second\n", encoding="utf-8")
+
+    with pytest.raises(LocalWikiWriteConflict, match="source notes or journal changed"):
+        await apply_local_wiki_projection(inspection, session_maker=session_maker)
+
+    assert not (config_home / "index.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_local_wiki_refuses_journal_advanced_after_planning(
+    config_home,
+    session_maker,
+    test_project,
+):
+    note = config_home / "note.md"
+    note.write_text("# Note\n", encoding="utf-8")
+    inspection = await inspect_local_wiki_projection(test_project, session_maker=session_maker)
+    async with db.scoped_session(session_maker) as session:
+        project = await session.get(Project, test_project.id)
+        assert project is not None
+        project.partition_position = 1
+        session.add(
+            AcceptedProjectNoteChange(
+                project_id=test_project.id,
+                project_external_id=test_project.external_id,
+                partition_position=1,
+                entity_id=1,
+                note_external_id="note-1",
+                permalink="note",
+                title="Note",
+                operation="updated",
+                file_path="note.md",
+                accepted_at=datetime.now(UTC),
+                source="write_note",
+            )
+        )
+
+    with pytest.raises(LocalWikiWriteConflict, match="source notes or journal changed"):
+        await apply_local_wiki_projection(inspection, session_maker=session_maker)
+
+    assert not (config_home / "index.md").exists()
 
 
 @pytest.mark.asyncio
@@ -226,7 +280,10 @@ async def test_local_wiki_requires_existing_project_directory(
     session_maker,
     test_project,
 ):
-    test_project.path = str(config_home / "missing")
+    async with db.scoped_session(session_maker) as session:
+        project = await session.get(Project, test_project.id)
+        assert project is not None
+        project.path = str(config_home / "missing")
 
     with pytest.raises(ValueError, match="Local project directory does not exist"):
         await inspect_local_wiki_projection(test_project, session_maker=session_maker)

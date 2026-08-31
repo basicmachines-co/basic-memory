@@ -272,7 +272,10 @@ async def _execute_wiki_command(
                 LocalWikiState.conflicted,
             }
         ):
-            await apply_local_wiki_projection(inspection)
+            await apply_local_wiki_projection(
+                inspection,
+                session_maker=session_maker,
+            )
             # The files are canonical locally; indexing makes the generated
             # navigation immediately available through API, MCP, and search.
             await run_local_project_index_for_project(
@@ -299,9 +302,20 @@ def _selected_local_project_names(
     all_projects: bool,
 ) -> list[str]:
     if all_projects:
-        names = sorted(
-            name for name, entry in app_config.projects.items() if entry.mode == ProjectMode.LOCAL
+        local_entries = {
+            name: entry
+            for name, entry in app_config.projects.items()
+            if entry.mode == ProjectMode.LOCAL
+        }
+        unsafe_names = sorted(
+            name
+            for name, entry in app_config.projects.items()
+            if entry.mode == ProjectMode.LOCAL
+            and not app_config.is_locally_syncable(name, entry.path)
         )
+        if unsafe_names:
+            raise ValueError("Local project paths must be absolute: " + ", ".join(unsafe_names))
+        names = sorted(local_entries)
         if not names:
             raise ValueError("No local projects are configured")
         return names
@@ -316,6 +330,8 @@ def _selected_local_project_names(
         raise ValueError(
             f"Project '{selected}' is a cloud project; Core Wiki commands operate locally"
         )
+    if not app_config.is_locally_syncable(selected, entry.path):
+        raise ValueError(f"Local project '{selected}' must have an absolute path")
     return [selected]
 
 

@@ -3,11 +3,17 @@
 import json
 from types import SimpleNamespace
 
+import pytest
 from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
-from basic_memory.cli.commands.wiki import WikiCommandReport, WikiProjectReport
+from basic_memory.cli.commands.wiki import (
+    WikiCommandReport,
+    WikiProjectReport,
+    _selected_local_project_names,
+)
 from basic_memory.cli.main import app as cli_app
+from basic_memory.config import BasicMemoryConfig, ProjectEntry
 import basic_memory.cli.commands.wiki as wiki_command
 
 runner = CliRunner()
@@ -121,6 +127,36 @@ def test_wiki_rejects_project_and_all_together(monkeypatch):
     assert result.exit_code == 1
     assert "either --project or --all" in result.stdout
     assert captured == []
+
+
+def test_wiki_rejects_relative_local_project_root():
+    app_config = BasicMemoryConfig(
+        projects={"unsafe": ProjectEntry(path="relative-root")},
+        default_project="unsafe",
+    )
+
+    with pytest.raises(ValueError, match="must have an absolute path"):
+        _selected_local_project_names(
+            app_config,
+            project_name="unsafe",
+            all_projects=False,
+        )
+
+
+def test_wiki_all_rejects_relative_local_project_root(tmp_path):
+    app_config = BasicMemoryConfig(
+        projects={
+            "safe": ProjectEntry(path=str(tmp_path / "safe")),
+            "unsafe": ProjectEntry(path="relative-root"),
+        }
+    )
+
+    with pytest.raises(ValueError, match="paths must be absolute: unsafe"):
+        _selected_local_project_names(
+            app_config,
+            project_name=None,
+            all_projects=True,
+        )
 
 
 def test_wiki_rebuild_builds_local_navigation(config_home, config_manager):
