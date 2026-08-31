@@ -19,6 +19,11 @@ from fastmcp.exceptions import ToolError
 from typer.testing import CliRunner
 
 from basic_memory.cli.main import app as cli_app
+from basic_memory.config_models import ProjectEntry
+from basic_memory.mcp.project_context import (
+    ProjectPrefixConflictError,
+    UnqualifiedPathRefusedError,
+)
 
 runner = CliRunner()
 
@@ -138,6 +143,23 @@ LS_RESULT = {
 LS_RESULT_EMPTY = {"nodes": [], "page": 1, "page_size": 10, "total": 0, "has_more": False}
 
 LS_RESULT_MORE = {**LS_RESULT, "has_more": True}
+
+# The mount-point view (#1415): ls "/" with no project addressed returns the
+# active projects as bare directory nodes whose directory_path is the copyable
+# '/<project>' prefix form. Same DirectoryListResponse contract as any listing,
+# so the existing renderers must handle it untouched.
+LS_MOUNT_RESULT = {
+    "nodes": [
+        _dir_node(name="main", directory_path="/main", permalink="main", type="directory"),
+        _dir_node(
+            name="research", directory_path="/research", permalink="research", type="directory"
+        ),
+    ],
+    "page": 1,
+    "page_size": 10,
+    "total": 2,
+    "has_more": False,
+}
 
 FIND_RESULT = {
     "nodes": [
@@ -598,6 +620,29 @@ def test_ls_defaults_and_paging_passthrough(mock_ls):
     assert mock_ls.call_args.kwargs["page_size"] == 50
 
 
+@patch("basic_memory.mcp.tools.ls", new_callable=AsyncMock, return_value=LS_MOUNT_RESULT)
+def test_ls_plain_mount_view_prints_copyable_prefixes(mock_ls):
+    """bm ls with no project emits one '/<project>/' line per mount, so the
+    prefix form the routing rules teach is copyable straight from the output."""
+    result = _tty_invoke(["ls", "--plain"])
+
+    assert result.exit_code == 0, result.output
+    assert result.stdout == "/main/\n/research/\n"
+
+
+@patch("basic_memory.mcp.tools.ls", new_callable=AsyncMock, return_value=LS_MOUNT_RESULT)
+def test_ls_rich_mount_view_renders_bare_directory_nodes(mock_ls):
+    """Mount rows carry no title/updated_at; the rich renderer shows them fine."""
+    result = _tty_invoke(["ls"])
+
+    flat = _flattened(result.output)
+    assert result.exit_code == 0, result.output
+    _assert_not_json(result.output)
+    assert "main/" in result.output
+    assert "research/" in result.output
+    assert "total 2" in flat
+
+
 # ---------------------------------------------------------------------------
 # find
 # ---------------------------------------------------------------------------
@@ -771,6 +816,46 @@ def test_tree_passes_find_arguments_through(mock_find):
     assert mock_find.call_args.kwargs["depth"] == 2
 
 
+# The tool layer strips a recognized '<project>/' prefix (#1415), so a
+# qualified tree root gets back PROJECT-RELATIVE node paths.
+TREE_QUALIFIED_RESULT = {
+    "nodes": [
+        _dir_node(name="notes", directory_path="/notes", type="directory"),
+        _dir_node(name="foo.md", file_path="notes/foo.md", directory_path="/notes/foo.md"),
+    ],
+    "page": 1,
+    "page_size": 10,
+    "total": 2,
+    "has_more": False,
+}
+
+
+@patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=TREE_QUALIFIED_RESULT)
+def test_tree_qualified_path_matches_project_flag_hierarchy(
+    mock_find, config_manager, tmp_path_factory
+):
+    """'bm tree <project>/dir' and 'bm tree /dir --project <project>' are the
+    same call by rule 2, so they must render the same hierarchy: the rebuild
+    strips the routed project-relative root, not the caller's qualified
+    spelling, or the first path segment duplicates under the root (#1415)."""
+    config = config_manager.load_config()
+    config.projects["second-project"] = ProjectEntry(
+        path=str(tmp_path_factory.mktemp("second-project-cli"))
+    )
+    config_manager.save_config(config)
+
+    qualified = _tty_invoke(["tree", "second-project/notes", "--plain"])
+    flagged = _tty_invoke(["tree", "/notes", "--project", "second-project", "--plain"])
+
+    assert qualified.exit_code == 0, qualified.output
+    assert flagged.exit_code == 0, flagged.output
+    assert qualified.stdout == "second-project/notes\n  foo.md\n"
+    # Only the printed root label may differ between the equivalent spellings.
+    assert qualified.stdout.splitlines()[1:] == flagged.stdout.splitlines()[1:]
+    # The tool still receives the caller's spelling; routing stays in the tool layer.
+    assert mock_find.call_args_list[0].args == ("second-project/notes",)
+
+
 # ---------------------------------------------------------------------------
 # Errors and routing (shared command scaffold, exercised per verb)
 # ---------------------------------------------------------------------------
@@ -797,6 +882,41 @@ def test_verb_value_error_exits_nonzero(mock_cat):
 
     assert result.exit_code == 1
     assert "Error: start_line must be >= 1" in result.output
+
+
+@patch(
+    "basic_memory.mcp.tools.ls",
+    new_callable=AsyncMock,
+    side_effect=UnqualifiedPathRefusedError(
+        "no project 'notes' — active projects: main/, research/"
+    ),
+)
+def test_verb_refusal_reaches_stderr_with_exit_1(mock_ls):
+    """The multi-project refusal (#1415) is a ValueError subclass, so the
+    existing verb error mapping delivers its self-teaching message unchanged."""
+    result = _invoke(["ls", "/notes"])
+
+    assert result.exit_code == 1
+    assert "Error: no project 'notes' — active projects: main/, research/" in result.stderr
+
+
+@patch(
+    "basic_memory.mcp.tools.cat",
+    new_callable=AsyncMock,
+    side_effect=ProjectPrefixConflictError(
+        "path names project 'research' but project 'main' was passed — use "
+        "'research/<path>' alone, or project='main' with a project-relative path"
+    ),
+)
+def test_project_flag_with_conflicting_prefix_exits_nonzero(mock_cat):
+    """--project plus a qualified path passes both through verbatim; the tool
+    layer owns the conflict decision and the CLI just reports it."""
+    result = _invoke(["cat", "research/notes/foo", "--project", "main"])
+
+    assert result.exit_code == 1
+    assert mock_cat.call_args.args == ("research/notes/foo",)
+    assert mock_cat.call_args.kwargs["project"] == "main"
+    assert "Error: path names project 'research' but project 'main' was passed" in result.stderr
 
 
 @patch("basic_memory.mcp.tools.cat", new_callable=AsyncMock, return_value=CAT_RESULT)

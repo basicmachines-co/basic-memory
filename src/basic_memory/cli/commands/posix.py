@@ -46,6 +46,10 @@ from basic_memory.cli.commands.tool import (
     _validate_output_flags,
     console,
 )
+
+# project_context is already loaded at CLI import time (command_utils imports
+# it), so this costs nothing beyond the deferred-MCP budget (#886).
+from basic_memory.mcp.project_context import resolve_project_path_route
 from basic_memory.schemas.directory import DEFAULT_DIRECTORY_PAGE_SIZE
 
 # MCP tool functions are imported inside each command: importing
@@ -358,10 +362,16 @@ def _add_tree_branches(branch: Tree, entries: dict[str, _TreeEntry]) -> None:
         _add_tree_branches(child, entry.children)
 
 
-def _display_tree(result: dict[str, Any], path: str) -> None:
-    """Render find results as a Rich tree rooted at the search path."""
-    entries = _build_tree(list(result.get("nodes", [])), path)
-    tree = Tree(f"[bold cyan]{markup_escape(path)}[/bold cyan]")
+def _display_tree(result: dict[str, Any], label: str, root: str) -> None:
+    """Render find results as a Rich tree rooted at the search path.
+
+    ``label`` is the caller's spelling of the root; ``root`` is the routed
+    project-relative path the node paths actually start with — a qualified
+    '<project>/dir' input strips its project prefix in the shared tool layer,
+    so the two differ exactly when the input carried a project prefix (#1415).
+    """
+    entries = _build_tree(list(result.get("nodes", [])), root)
+    tree = Tree(f"[bold cyan]{markup_escape(label)}[/bold cyan]")
     if not entries:
         tree.add("[dim]empty[/dim]")
     _add_tree_branches(tree, entries)
@@ -379,10 +389,14 @@ def _print_plain_tree_level(entries: dict[str, _TreeEntry], depth: int) -> None:
         _print_plain_tree_level(entry.children, depth + 1)
 
 
-def _plain_tree(result: dict[str, Any], path: str) -> None:
-    """Render the tree as two-space-indented lines; pagination note on stderr."""
-    print(path)
-    _print_plain_tree_level(_build_tree(list(result.get("nodes", [])), path), depth=1)
+def _plain_tree(result: dict[str, Any], label: str, root: str) -> None:
+    """Render the tree as two-space-indented lines; pagination note on stderr.
+
+    ``label``/``root`` split as in ``_display_tree``: print the caller's
+    spelling, strip the routed project-relative root from node paths.
+    """
+    print(label)
+    _print_plain_tree_level(_build_tree(list(result.get("nodes", [])), root), depth=1)
     if result.get("has_more") is True:
         print(f"… more entries (page {result.get('page', 1)}; use --page)", file=sys.stderr)
 
@@ -818,25 +832,33 @@ def tree(
         validate_routing_flags(local, cloud)
         _validate_output_flags(json_output, plain)
 
-        with force_routing(local=local, cloud=cloud):
-            result = run_with_cleanup(
-                mcp_find(
-                    path,
-                    name=name,
-                    depth=depth,
-                    page=page,
-                    page_size=page_size,
-                    project=project,
-                    project_id=project_id,
-                )
+        async def _routed_find() -> tuple[dict[str, Any], str]:
+            # find strips a recognized '<project>/' prefix (#1415), so node
+            # paths come back project-relative; the same resolver derives the
+            # root the hierarchy rebuild must strip, or every node's first
+            # segment would duplicate under a '<project>/dir' root.
+            route = await resolve_project_path_route(path, project=project, project_id=project_id)
+            root = f"/{route.path}" if route.stripped else path
+            listing = await mcp_find(
+                path,
+                name=name,
+                depth=depth,
+                page=page,
+                page_size=page_size,
+                project=project,
+                project_id=project_id,
             )
+            return listing, root
+
+        with force_routing(local=local, cloud=cloud):
+            result, root = run_with_cleanup(_routed_find())
         mode = _resolve_output_mode(json_output, plain)
         if mode == "json":
             _print_json(result)
         elif mode == "plain":
-            _plain_tree(result, path)
+            _plain_tree(result, path, root)
         else:
-            _display_tree(result, path)
+            _display_tree(result, path, root)
     except (ValueError, ToolError) as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
