@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Existing Streamable HTTP server mode.** Set `server_url` to connect the
+  provider to a running Basic Memory MCP endpoint (for example,
+  `http://127.0.0.1:8766/mcp`) without installing/spawning `bm` or creating a
+  local project. Existing tool, prefetch, capture, cleanup, reconnect, and
+  per-call project-routing behavior is retained. A reconnect retries only
+  read/idempotent operations; ambiguous note mutations are never replayed.
+
 ## [0.3.2] — 2026-05-23
 
 ### Fixed

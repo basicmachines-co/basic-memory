@@ -13,7 +13,7 @@ hermes plugins install basicmachines-co/basic-memory/integrations/hermes
 ```
 
 Hermes does not install a plugin's Python dependencies (it only prints them), so put the
-`mcp` package into the Hermes venv yourself:
+`mcp>=2,<3` package into the Hermes venv yourself:
 
 ```bash
 uv pip install --python ~/.hermes/hermes-agent/venv/bin/python "mcp>=2,<3"
@@ -28,7 +28,32 @@ memory:
 
 If you run the gateway, restart it (`hermes gateway restart`). Done.
 
-The plugin self-installs the `basic-memory` CLI on first init via `uv tool install basic-memory --prerelease=allow` (one-time ~10s pause if it isn't already present). The bm binary lands at `~/.local/bin/bm` — the same location a manual `uv tool install basic-memory` would produce, so a later manual install or upgrade is a no-op rather than a second install.
+In the default local/cloud modes, the plugin self-installs the `basic-memory` CLI on first init via `uv tool install basic-memory --prerelease=allow` (one-time ~10s pause if it isn't already present). The bm binary lands at `~/.local/bin/bm` — the same location a manual `uv tool install basic-memory` would produce, so a later manual install or upgrade is a no-op rather than a second install.
+
+### Use an existing Basic Memory MCP server
+
+If Basic Memory is already running as a shared MCP Streamable HTTP server, set
+`server_url` in `~/.hermes/basic-memory.json`. This mode connects directly to
+that endpoint and does not install or spawn `bm`, create a project, or modify
+Basic Memory's project registry. An explicit non-empty `project` is required
+in this mode (the provider fails closed with an actionable error if omitted),
+and is sent on each read/write call. Optional per-call `project` / `project_id`
+overrides continue to work.
+
+```json
+{
+  "server_url": "http://127.0.0.1:8766/mcp",
+  "project": "main",
+  "capture_per_turn": true,
+  "capture_session_end": true,
+  "capture_folder": "hermes-sessions"
+}
+```
+
+`server_url` takes precedence over `mode`; omit it to retain the existing
+local/cloud behavior and CLI bootstrap. If an HTTP session drops, the provider
+reconnects once and retries only read/idempotent operations; an ambiguous note
+write or mutation is not replayed, so its original failure is surfaced.
 
 ### Prerequisites
 
@@ -38,7 +63,7 @@ The plugin self-installs the `basic-memory` CLI on first init via `uv tool insta
   builds may lack repository-subdirectory plugin sources, and the `/bm-*` slash commands
   need Hermes ≥ v0.11.0
 - [`uv`](https://docs.astral.sh/uv/) on PATH (used for the bootstrap install)
-- The `mcp` Python package in the Hermes venv. Hermes never installs plugin Python
+- The `mcp>=2,<3` Python package in the Hermes venv. Hermes never installs plugin Python
   dependencies — it prints the ones declared in `plugin.yaml` — so run:
   ```bash
   uv pip install --python ~/.hermes/hermes-agent/venv/bin/python "mcp>=2,<3"
@@ -136,7 +161,8 @@ Defaults are reasonable for local use:
 | Key | Default | Notes |
 |---|---|---|
 | `mode` | `local` | `local` (in-process) or `cloud` (route through BM Cloud API) |
-| `project` | `hermes-memory` | BM project name |
+| `server_url` | empty | Existing Basic Memory MCP Streamable HTTP endpoint. When set, connects directly and skips CLI/project setup. |
+| `project` | `hermes-memory` (local/cloud); required with `server_url` | BM project name |
 | `project_path` | `~/hermes-memory/` | Local mode only — where session notes land |
 | `capture_folder` | `hermes-sessions` | Folder within the project for session notes |
 | `capture_per_turn` | `true` | Append every turn to a session transcript |
@@ -238,7 +264,7 @@ BM_INTEGRATION=1 uv run --with pytest --with mcp pytest tests/test_integration.p
 
 The unit suite stubs out Hermes-internal imports (`agent.memory_provider`, `tools.registry`) so it runs without a Hermes install. `mcp` is optional at unit-test time — its absence just makes `is_available()` return False, which the tests verify.
 
-Integration tests require `BM_INTEGRATION=1`, `bm` CLI on PATH, and `mcp` Python package importable. Each session creates a unique throwaway BM project (under `tempfile.mkdtemp`) and removes it on teardown, so they never touch your real BM projects.
+Integration tests require `BM_INTEGRATION=1`, `bm` CLI on PATH, and `mcp>=2,<3` importable. Each session creates a unique throwaway BM project (under `tempfile.mkdtemp`) and removes it on teardown, so they never touch your real BM projects.
 
 ## License
 

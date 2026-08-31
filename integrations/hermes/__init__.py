@@ -1,8 +1,9 @@
 """
 basic-memory — Hermes Memory Provider plugin
 
-Wraps the basic-memory MCP server (`bm mcp`) to provide knowledge-graph-backed
-memory for Hermes. Analog of openclaw-basic-memory.
+Wraps the basic-memory MCP server to provide knowledge-graph-backed memory for
+Hermes. By default the server is `bm mcp`; `server_url` can instead attach to
+an existing Streamable HTTP daemon. Analog of openclaw-basic-memory.
 
 Architecture:
 - `_BmMcpActor` owns a long-lived asyncio loop in a daemon thread that holds
@@ -30,14 +31,24 @@ import subprocess
 import threading
 import time
 from datetime import datetime, timezone
+from ipaddress import ip_address
 from pathlib import Path
 from shutil import which
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
 # Hermes ABC + helpers — these resolve because Hermes adds its tree to sys.path
 # when loading plugins (same pattern as plugins/memory/mem0/__init__.py:21).
 from agent.memory_provider import MemoryProvider
 from tools.registry import tool_error
+
+try:
+    # Hermes keeps profile/home resolution in this dependency-free module. It
+    # is optional here because the provider's unit tests intentionally load
+    # without a Hermes checkout on sys.path.
+    from hermes_constants import get_hermes_home  # type: ignore
+except Exception:  # pragma: no cover - exercised only outside Hermes
+    get_hermes_home = None  # type: ignore[assignment]
 
 __version__ = "0.23.2"
 
@@ -50,9 +61,20 @@ logger = logging.getLogger("hermes.memory.basic-memory")
 
 _MCP_AVAILABLE = False
 _MCP_IMPORT_ERROR: BaseException | None = None
+streamable_http_client: Any = None
 try:
     from mcp import ClientSession, StdioServerParameters  # type: ignore
     from mcp.client.stdio import stdio_client  # type: ignore
+
+    # Streamable HTTP was added after the original stdio-only provider. Keep
+    # this import soft so old MCP SDKs continue to support local/cloud mode.
+    # The released MCP 2.x API is ``streamable_http_client`` (with an
+    # underscore); its context manager yields the read/write streams used by
+    # ClientSession.
+    try:
+        from mcp.client.streamable_http import streamable_http_client  # type: ignore
+    except ImportError:
+        streamable_http_client = None
 
     _MCP_AVAILABLE = True
 except Exception as _e:  # pragma: no cover
@@ -78,6 +100,20 @@ _HERMES_TO_BM: dict[str, str] = {
     "bm_projects": "list_memory_projects",
     "bm_workspaces": "list_workspaces",
 }
+
+# Only these operations are safe to replay after an ambiguous transport
+# failure. Writes and note mutations may have reached the server before the
+# connection dropped, so they are deliberately never retried.
+_HTTP_RETRYABLE_TOOLS: frozenset[str] = frozenset(
+    {
+        "search_notes",
+        "read_note",
+        "build_context",
+        "recent_activity",
+        "list_memory_projects",
+        "list_workspaces",
+    }
+)
 
 # Discovery tools that operate across all projects/workspaces. They don't
 # accept project/project_id args (no per-call routing) and the user-facing
@@ -425,6 +461,59 @@ def _config_path(hermes_home: str) -> Path:
     return Path(hermes_home) / "basic-memory.json"
 
 
+def _active_hermes_home() -> Path:
+    """Resolve the active Hermes home/profile without assuming ``~/.hermes``."""
+    if get_hermes_home is not None:
+        try:
+            return Path(get_hermes_home()).expanduser()
+        except Exception as e:
+            logger.debug("basic-memory: Hermes home resolver unavailable: %s", e)
+    configured = os.environ.get("HERMES_HOME", "").strip()
+    return Path(configured or "~/.hermes").expanduser()
+
+
+def _validate_server_url(value: Any) -> str | None:
+    """Validate and normalize an MCP Streamable HTTP endpoint.
+
+    URL credentials, query strings, and fragments are intentionally rejected:
+    they are unnecessary for the daemon endpoint and could leak through status
+    or error output. Non-loopback HTTP is rejected so a remote endpoint uses
+    TLS; loopback HTTP is the intended local-daemon configuration.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("server_url must be an http:// or https:// URL")
+    url = value.strip()
+    if not url:
+        return None
+    try:
+        parsed = urlsplit(url)
+        hostname = parsed.hostname
+        # Accessing .port validates malformed port values (e.g. ':abc').
+        _ = parsed.port
+    except ValueError:
+        raise ValueError("server_url is malformed") from None
+    if parsed.scheme.lower() not in {"http", "https"}:
+        raise ValueError("server_url must use http:// or https://")
+    if not hostname:
+        raise ValueError("server_url must include a hostname")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("server_url must not contain username or password")
+    if parsed.query or parsed.fragment or "?" in url or "#" in url:
+        raise ValueError("server_url must not contain a query or fragment")
+    host = hostname.lower().rstrip(".")
+    is_loopback = host == "localhost" or host.endswith(".localhost")
+    if not is_loopback:
+        try:
+            is_loopback = ip_address(host).is_loopback
+        except ValueError:
+            pass
+    if parsed.scheme.lower() == "http" and not is_loopback:
+        raise ValueError("non-loopback server_url endpoints must use https://")
+    return url
+
+
 def _bm_config_path() -> Path:
     """Location of bm's own project registry."""
     return Path.home() / ".basic-memory" / "config.json"
@@ -593,8 +682,17 @@ class _BmMcpActor:
     daemon thread and ferry calls in via run_coroutine_threadsafe.
     """
 
-    def __init__(self, server_argv: list[str], env: dict[str, str] | None = None):
-        self._server_argv = list(server_argv)
+    def __init__(
+        self,
+        server_argv: list[str] | None = None,
+        env: dict[str, str] | None = None,
+        *,
+        server_url: str | None = None,
+    ):
+        if not server_argv and not server_url:
+            raise ValueError("either server_argv or server_url is required")
+        self._server_argv = list(server_argv or [])
+        self._server_url = server_url
         # Sanitized so `bm mcp` resolves imports against its own interpreter,
         # not Hermes's — see _clean_child_env.
         self._env = _clean_child_env(env)
@@ -648,41 +746,63 @@ class _BmMcpActor:
             logger.exception("basic-memory MCP actor terminated with error")
         finally:
             self._running = False
+            # A transport reconnect must never expose the prior MCP session
+            # object (and its server-assigned session ID) to a later call.
+            self._session = None
             self._main_task = None
             try:
                 loop.close()
             except Exception:
                 pass
 
+    async def _run_session(self, read: Any, write: Any) -> None:
+        """Run one ClientSession over either stdio or Streamable HTTP."""
+        async with ClientSession(read, write) as session:
+            await session.initialize()
+            self._session = session
+            self._stop_future = asyncio.get_running_loop().create_future()
+            try:
+                listing = await session.list_tools()
+                # Same unpinned-`mcp`-SDK reason as parse_result above:
+                # ListToolsResult / Tool field shapes vary across SDK versions,
+                # so read them defensively rather than by direct attribute access.
+                self._tools_cache = [
+                    {
+                        "name": getattr(t, "name", ""),
+                        "description": getattr(t, "description", "") or "",
+                    }
+                    for t in getattr(listing, "tools", []) or []
+                ]
+            except Exception as e:
+                logger.warning("list_tools failed: %s", e)
+                self._tools_cache = []
+            self._ready.set()
+            await self._stop_future  # blocks until shutdown
+
     async def _main(self) -> None:
-        params = StdioServerParameters(
-            command=self._server_argv[0],
-            args=self._server_argv[1:],
-            env=self._env,
-        )
         try:
-            async with stdio_client(params) as (read, write):
-                async with ClientSession(read, write) as session:
-                    await session.initialize()
-                    self._session = session
-                    self._stop_future = asyncio.get_running_loop().create_future()
-                    try:
-                        listing = await session.list_tools()
-                        # Same unpinned-`mcp`-SDK reason as parse_result above:
-                        # ListToolsResult / Tool field shapes vary across SDK versions,
-                        # so read them defensively rather than by direct attribute access.
-                        self._tools_cache = [
-                            {
-                                "name": getattr(t, "name", ""),
-                                "description": getattr(t, "description", "") or "",
-                            }
-                            for t in getattr(listing, "tools", []) or []
-                        ]
-                    except Exception as e:
-                        logger.warning("list_tools failed: %s", e)
-                        self._tools_cache = []
-                    self._ready.set()
-                    await self._stop_future  # blocks until shutdown
+            if self._server_url:
+                if streamable_http_client is None:
+                    raise RuntimeError(
+                        "MCP SDK does not provide streamable_http_client; "
+                        "install mcp>=1.24 or use local/cloud mode"
+                    )
+                # MCP 1.x yielded (read, write, get_session_id), while MCP
+                # 2.x yields (read, write). Only the first two are consumed.
+                async with streamable_http_client(self._server_url) as streams:
+                    if len(streams) < 2:
+                        raise RuntimeError(
+                            "streamable_http_client returned fewer than two streams"
+                        )
+                    await self._run_session(streams[0], streams[1])
+            else:
+                params = StdioServerParameters(
+                    command=self._server_argv[0],
+                    args=self._server_argv[1:],
+                    env=self._env,
+                )
+                async with stdio_client(params) as (read, write):
+                    await self._run_session(read, write)
         except BaseException as e:
             if self._init_error is None:
                 self._init_error = e
@@ -862,6 +982,7 @@ class BasicMemoryProvider(MemoryProvider):
         self._actor: _BmMcpActor | None = None
         self._project: str = _default_project()
         self._mode: str = "local"
+        self._server_url: str | None = None
         self._project_path: str = _default_project_path()
         self._capture_per_turn: bool = True
         self._capture_session_end: bool = True
@@ -879,6 +1000,10 @@ class BasicMemoryProvider(MemoryProvider):
         self._failure_pause_until: float = 0.0
         self._initialized: bool = False
         self._first_user_msg: str | None = None
+        # Serializes HTTP actor replacement when concurrent prefetch/capture
+        # threads observe the same dead transport. Normal calls do not hold
+        # this lock while waiting on MCP, so independent calls remain safe.
+        self._actor_lock = threading.RLock()
 
     # ---- Identity ----
     @property
@@ -887,10 +1012,18 @@ class BasicMemoryProvider(MemoryProvider):
 
     def is_available(self) -> bool:
         # Discovery hot path. NEVER make network calls or spawn subprocesses here.
+        # A configured Streamable HTTP endpoint needs neither the bm CLI nor uv.
         # We report available when either bm is present already OR uv is present
         # (we bootstrap-install bm via `uv tool install` at initialize() time).
         if not _MCP_AVAILABLE:
             return False
+        configured = _load_config(str(_active_hermes_home())).get("server_url")
+        if isinstance(configured, str) and configured.strip():
+            try:
+                _validate_server_url(configured)
+            except ValueError:
+                return False
+            return streamable_http_client is not None
         if _bm_binary_path():
             return True
         if _uv_binary_path():
@@ -900,10 +1033,34 @@ class BasicMemoryProvider(MemoryProvider):
     # ---- Lifecycle ----
     def initialize(self, session_id: str, **kwargs: Any) -> None:
         requested_session_id = session_id or ""
-        self._hermes_home = kwargs.get("hermes_home") or os.path.expanduser("~/.hermes")
+        self._hermes_home = kwargs.get("hermes_home") or str(_active_hermes_home())
         cfg = _load_config(self._hermes_home)
-        self._mode = cfg.get("mode") or "local"
-        self._project = cfg.get("project") or _default_project()
+        try:
+            self._server_url = _validate_server_url(cfg.get("server_url"))
+        except ValueError as e:
+            # Do not include the configured value: it may have contained
+            # credentials before validation rejected it.
+            self._server_url = None
+            self._stop_actor()
+            self._reset_session_state()
+            logger.error("basic-memory: invalid server_url: %s", e)
+            return
+        # server_url is an explicit transport mode. Keep mode local/cloud
+        # behavior exactly as it was when this key is absent.
+        self._mode = "server_url" if self._server_url else (cfg.get("mode") or "local")
+        configured_project = cfg.get("project")
+        if self._server_url:
+            if not isinstance(configured_project, str) or not configured_project.strip():
+                self._stop_actor()
+                self._reset_session_state()
+                logger.error(
+                    "basic-memory: server_url mode requires an explicit non-empty "
+                    "'project' (for example 'main'); provider will not initialize"
+                )
+                return
+            self._project = configured_project.strip()
+        else:
+            self._project = configured_project or _default_project()
         self._project_path = os.path.expanduser(cfg.get("project_path") or _default_project_path())
         self._capture_per_turn = bool(_coerce_bool(cfg.get("capture_per_turn", True)))
         self._capture_session_end = bool(_coerce_bool(cfg.get("capture_session_end", True)))
@@ -917,46 +1074,65 @@ class BasicMemoryProvider(MemoryProvider):
             )
             return
 
-        # Bootstrap-install bm via uv if it's not already on disk. One-time cost
-        # on a fresh machine; idempotent no-op once basic-memory is installed.
-        if not _bm_binary_path():
-            if _uv_binary_path() is None:
-                logger.error(
-                    "basic-memory: bm CLI not found and uv is not installed. "
-                    "Install uv (https://docs.astral.sh/uv/) or run "
-                    "`pip install basic-memory` manually. Provider will not initialize."
+        if not self._server_url:
+            # Bootstrap-install bm via uv if it's not already on disk. One-time
+            # cost on a fresh machine; idempotent no-op once installed.
+            if not _bm_binary_path():
+                if _uv_binary_path() is None:
+                    logger.error(
+                        "basic-memory: bm CLI not found and uv is not installed. "
+                        "Install uv (https://docs.astral.sh/uv/) or run "
+                        "`pip install basic-memory` manually. Provider will not initialize."
+                    )
+                    return
+                logger.info(
+                    "basic-memory: bm CLI not found — installing basic-memory via "
+                    "`uv tool install` (one-time bootstrap)"
                 )
+                if _install_bm_via_uv() is None:
+                    logger.error(
+                        "basic-memory: auto-install via uv failed. Run "
+                        "`uv tool install basic-memory --prerelease=allow` manually to debug. "
+                        "Provider will not initialize."
+                    )
+                    return
+
+            if self._mode == "local":
+                self._ensure_local_project()
+
+            if not self._verify_project_registered():
+                self._log_missing_project()
                 return
-            logger.info(
-                "basic-memory: bm CLI not found — installing basic-memory via "
-                "`uv tool install` (one-time bootstrap)"
+
+        if self._server_url and streamable_http_client is None:
+            self._stop_actor()
+            self._reset_session_state()
+            logger.error(
+                "basic-memory: server_url requires an MCP SDK with "
+                "streamable_http_client; provider will not initialize"
             )
-            if _install_bm_via_uv() is None:
-                logger.error(
-                    "basic-memory: auto-install via uv failed. Run "
-                    "`uv tool install basic-memory --prerelease=allow` manually to debug. "
-                    "Provider will not initialize."
-                )
-                return
-
-        if self._mode == "local":
-            self._ensure_local_project()
-
-        if not self._verify_project_registered():
-            self._log_missing_project()
             return
 
         # Trigger: initialize() called while a previous actor is still running
         # (Hermes re-initializes providers per session; _ensure_slash_ready's
         # lazy init can also precede a later session initialize).
-        # Why: every _BmMcpActor owns one `bm mcp` child process. Allocating a
-        # fresh actor without stopping the old one orphans that child — issue
-        # #1017 saw 18 idle `bm mcp` processes (~2.3 GB) accumulate this way.
-        # Outcome: a healthy actor is reused — its argv is always `bm mcp` and
-        # project routing happens per call, so the config re-read above never
-        # invalidates the connection. A dead actor is shut down first (joining
-        # its thread reaps the child) and then replaced below.
-        if self._actor is not None and self._actor.is_alive():
+        # Why: every _BmMcpActor owns one transport (and local actors own one
+        # `bm mcp` child process). Allocating a fresh actor without stopping the
+        # old one can orphan that child — issue #1017 saw 18 idle `bm mcp`
+        # processes (~2.3 GB) accumulate this way.
+        # Outcome: a healthy actor is reused when its transport is unchanged;
+        # project routing happens per call, so the config re-read above does
+        # not invalidate the connection. A dead actor (or one whose transport
+        # changed between modes) is shut down first and then replaced below.
+        actor_transport_matches = False
+        if self._actor is not None:
+            actor_url = getattr(self._actor, "_server_url", None)
+            actor_transport_matches = (
+                actor_url == self._server_url
+                if self._server_url
+                else actor_url is None
+            )
+        if self._actor is not None and self._actor.is_alive() and actor_transport_matches:
             self._mark_session_ready(requested_session_id)
             logger.info(
                 "basic-memory provider ready (reusing running MCP actor): mode=%s project=%s",
@@ -972,7 +1148,7 @@ class BasicMemoryProvider(MemoryProvider):
             self._actor = None
 
         try:
-            argv = self._server_argv()
+            argv = [] if self._server_url else self._server_argv()
         except Exception as e:
             logger.error("basic-memory: cannot determine server argv: %s", e)
             return
@@ -983,7 +1159,11 @@ class BasicMemoryProvider(MemoryProvider):
         # its freshly spawned `bm mcp` child if a signal lands mid-start.
         # Callers can't observe the half-started actor: every tool/capture
         # path gates on _initialized, which stays False until start() returns.
-        actor = _BmMcpActor(argv)
+        actor = (
+            _BmMcpActor(argv, server_url=self._server_url)
+            if self._server_url
+            else _BmMcpActor(argv)
+        )
         self._actor = actor
         try:
             actor.start(timeout=25.0)
@@ -1017,9 +1197,10 @@ class BasicMemoryProvider(MemoryProvider):
 
         self._mark_session_ready(requested_session_id)
         logger.info(
-            "basic-memory provider ready: mode=%s project=%s tools=%d",
+            "basic-memory provider ready: mode=%s project=%s%s tools=%d",
             self._mode,
             self._project,
+            f" server_url={self._server_url}" if self._server_url else "",
             len(tools),
         )
 
@@ -1091,21 +1272,118 @@ class BasicMemoryProvider(MemoryProvider):
         return [bm, "mcp"]
 
     def shutdown(self) -> None:
-        if self._actor is not None:
+        self._stop_actor()
+
+    def _reset_session_state(self) -> None:
+        """Discard capture identity after a fail-closed initialization."""
+        self._session_id = ""
+        self._session_note_id = None
+        self._first_user_msg = None
+        self._session_started_at = None
+        with self._prefetch_lock:
+            self._pending_prefetch = ""
+
+    def _stop_actor(self) -> None:
+        """Detach and close the current actor, tolerating shutdown failures."""
+        with self._actor_lock:
+            actor = self._actor
+            self._actor = None
+            self._initialized = False
+        if actor is not None:
             try:
-                self._actor.shutdown(timeout=5.0)
+                actor.shutdown(timeout=5.0)
             except Exception as e:
                 logger.debug("actor shutdown: %s", e)
+
+    def _reconnect_http_locked(self) -> _BmMcpActor:
+        """Replace a failed HTTP actor; caller must hold ``_actor_lock``."""
+        if not self._server_url:
+            raise RuntimeError("HTTP reconnect requested without server_url")
+        old = self._actor
         self._actor = None
-        self._initialized = False
+        if old is not None:
+            try:
+                old.shutdown(timeout=5.0)
+            except Exception as e:
+                logger.debug("basic-memory: failed HTTP actor shutdown: %s", e)
+
+        actor = _BmMcpActor([], server_url=self._server_url)
+        # Publish before start, matching initialize(), so process shutdown can
+        # clean up an actor while its handshake is still in progress.
+        self._actor = actor
+        try:
+            actor.start(timeout=25.0)
+        except Exception:
+            if self._actor is actor:
+                self._actor = None
+            try:
+                actor.shutdown(timeout=5.0)
+            except Exception as e:
+                logger.debug("basic-memory: failed HTTP actor cleanup: %s", e)
+            raise
+        if self._actor is not actor:
+            try:
+                actor.shutdown(timeout=5.0)
+            except Exception as e:
+                logger.debug("basic-memory: interrupted HTTP actor cleanup: %s", e)
+            raise RuntimeError("basic-memory HTTP actor was replaced during reconnect")
+        return actor
+
+    def _call_actor(
+        self, tool_name: str, arguments: dict[str, Any], timeout: float = 30.0
+    ) -> str:
+        """Call the active MCP actor, retrying once after an HTTP failure.
+
+        The first failure is never retried for legacy stdio/cloud mode. HTTP
+        retries create a fresh MCP transport and ClientSession, preventing a
+        stale server-assigned session from being reused after a disconnect.
+        """
+        with self._actor_lock:
+            actor = self._actor
+        if actor is None:
+            raise RuntimeError("basic-memory MCP actor not running")
+        try:
+            return actor.call(tool_name, arguments, timeout=timeout)
+        except Exception as original_failure:
+            if not self._server_url:
+                raise
+            try:
+                with self._actor_lock:
+                    # Another concurrent caller may already have replaced this
+                    # failed actor. Reuse that fresh actor instead of
+                    # reconnecting twice, but still bound this call to one
+                    # retry.
+                    if self._actor is actor:
+                        retry_actor = self._reconnect_http_locked()
+                    else:
+                        retry_actor = self._actor
+            except Exception as reconnect_error:
+                logger.warning("basic-memory: HTTP reconnect failed: %s", reconnect_error)
+                raise original_failure
+            if retry_actor is None:
+                raise original_failure
+            # Never replay a mutation after an ambiguous transport failure:
+            # the server may already have committed it. Reconnect above keeps
+            # the next call healthy, while this call reports its original
+            # failure to the caller.
+            if tool_name not in _HTTP_RETRYABLE_TOOLS:
+                raise original_failure
+            return retry_actor.call(tool_name, arguments, timeout=timeout)
 
     # ---- Tool surface ----
     def system_prompt_block(self) -> str:
         if not self._initialized:
             return ""
+        transport_note = (
+            f"Connected to the existing MCP server at `{self._server_url}`; "
+            "the provider does not install or run a local `bm` process.\n"
+            if self._server_url
+            else ""
+        )
         return (
             "## Basic Memory Knowledge Graph\n"
             f"Active project: `{self._project}` ({self._mode}).\n"
+            f"{transport_note}"
             "\n"
             "**Use the `bm_*` tools below directly — do not shell out to the `bm` CLI.** "
             "These tools route through a persistent MCP connection "
@@ -1165,7 +1443,7 @@ class BasicMemoryProvider(MemoryProvider):
         except KeyError as e:
             return tool_error(f"{tool_name}: missing required arg {e}")
         try:
-            return self._actor.call(bm_tool, bm_args, timeout=30.0)
+            return self._call_actor(bm_tool, bm_args, timeout=30.0)
         except Exception as e:
             self._record_failure(e)
             logger.exception("bm tool call failed: %s", tool_name)
@@ -1188,7 +1466,7 @@ class BasicMemoryProvider(MemoryProvider):
             # under cold-start or load. Prefetch is a recall hot path with a
             # 3s budget and the queries are usually keyword-like — FTS-only is
             # both faster and more deterministic.
-            raw = self._actor.call(
+            raw = self._call_actor(
                 "search_notes",
                 {
                     "project": self._project,
@@ -1215,7 +1493,7 @@ class BasicMemoryProvider(MemoryProvider):
                 # search_type="text" mirrors prefetch() — see note there. The
                 # background path can afford a longer timeout but the
                 # async-vector-indexing race still applies.
-                raw = self._actor.call(  # type: ignore[union-attr]
+                raw = self._call_actor(
                     "search_notes",
                     {
                         "project": self._project,
@@ -1310,7 +1588,7 @@ class BasicMemoryProvider(MemoryProvider):
                 "tags": ["hermes-session", _hostname()],
                 "output_format": "json",
             }
-            raw = self._actor.call("write_note", args, timeout=15.0)  # type: ignore[union-attr]
+            raw = self._call_actor("write_note", args, timeout=15.0)
             self._session_note_id = _extract_permalink(raw, fallback=title)
         else:
             args = {
@@ -1319,7 +1597,7 @@ class BasicMemoryProvider(MemoryProvider):
                 "operation": "append",
                 "content": "\n" + block,
             }
-            self._actor.call("edit_note", args, timeout=15.0)  # type: ignore[union-attr]
+            self._call_actor("edit_note", args, timeout=15.0)
 
     def _session_note_title(self) -> str:
         ts = (self._session_started_at or datetime.now(timezone.utc)).strftime("%Y-%m-%d %H%M")
@@ -1392,7 +1670,7 @@ class BasicMemoryProvider(MemoryProvider):
             "output_format": "json",
         }
         try:
-            self._actor.call("write_note", args, timeout=15.0)  # type: ignore[union-attr]
+            self._call_actor("write_note", args, timeout=15.0)
         except Exception as e:
             logger.warning("basic-memory: summary write failed: %s", e)
 
@@ -1406,8 +1684,19 @@ class BasicMemoryProvider(MemoryProvider):
                 "choices": ["local", "cloud"],
             },
             {
+                "key": "server_url",
+                "description": (
+                    "Existing Basic Memory MCP Streamable HTTP endpoint; when set, "
+                    "connect here instead of spawning/installing bm"
+                ),
+                "default": "",
+            },
+            {
                 "key": "project",
-                "description": "Basic Memory project name",
+                "description": (
+                    "Basic Memory project name (required when server_url is set; "
+                    "otherwise defaults to hermes-memory)"
+                ),
                 "default": _default_project(),
             },
             {
@@ -1568,7 +1857,7 @@ def _ensure_slash_ready(provider: "BasicMemoryProvider", cmd: str) -> str | None
         try:
             provider.initialize(
                 session_id=f"slash:{cmd}:{int(time.time())}",
-                hermes_home=os.path.expanduser("~/.hermes"),
+                hermes_home=str(_active_hermes_home()),
             )
         except Exception as e:
             logger.warning("basic-memory: slash init for /%s failed: %s", cmd, e)
@@ -1603,7 +1892,7 @@ def _build_slash_commands(
         if err := _ensure_slash_ready(provider, "bm-search"):
             return err
         try:
-            raw = provider._actor.call(
+            raw = provider._call_actor(
                 "search_notes",
                 {
                     "project": provider._project,
@@ -1630,7 +1919,7 @@ def _build_slash_commands(
         if err := _ensure_slash_ready(provider, "bm-read"):
             return err
         try:
-            raw = provider._actor.call(
+            raw = provider._call_actor(
                 "read_note",
                 {"project": provider._project, "identifier": args},
                 timeout=15.0,
@@ -1649,7 +1938,7 @@ def _build_slash_commands(
         if err := _ensure_slash_ready(provider, "bm-context"):
             return err
         try:
-            raw = provider._actor.call(
+            raw = provider._call_actor(
                 "build_context",
                 {"project": provider._project, "url": args, "depth": 1},
                 timeout=15.0,
@@ -1669,7 +1958,7 @@ def _build_slash_commands(
         if err := _ensure_slash_ready(provider, "bm-recent"):
             return err
         try:
-            raw = provider._actor.call(
+            raw = provider._call_actor(
                 "recent_activity",
                 {
                     "project": provider._project,
@@ -1709,10 +1998,13 @@ def _build_slash_commands(
             f"  Mode:        {provider._mode}",
             f"  Project:     {provider._project}",
         ]
-        if provider._mode == "local":
+        if provider._server_url:
+            lines.append(f"  Server URL:  {provider._server_url}")
+        elif provider._mode == "local":
             lines.append(f"  Path:        {provider._project_path}")
-        bm_bin = _bm_binary_path()
-        lines.append(f"  bm CLI:      {bm_bin or '(not found)'}")
+        bm_bin = _bm_binary_path() if not provider._server_url else None
+        cli_status = bm_bin or ("(not used)" if provider._server_url else "(not found)")
+        lines.append(f"  bm CLI:      {cli_status}")
         lines.append(f"  MCP module:  {'available' if _MCP_AVAILABLE else 'missing'}")
         lines.append(f"  Initialized: {'yes' if provider._initialized else 'no'}")
         lines.append(
@@ -1735,7 +2027,7 @@ def _build_slash_commands(
         title = _remember_title(text)
         folder = provider._remember_folder or "bm-remember"
         try:
-            raw = provider._actor.call(
+            raw = provider._call_actor(
                 "write_note",
                 {
                     "project": provider._project,
@@ -1758,7 +2050,7 @@ def _build_slash_commands(
         if err := _ensure_slash_ready(provider, "bm-project"):
             return err
         try:
-            raw = provider._actor.call(
+            raw = provider._call_actor(
                 "list_memory_projects",
                 {"output_format": "json"},
                 timeout=15.0,
@@ -1800,7 +2092,7 @@ def _build_slash_commands(
                 f"This plugin is in '{provider._mode}' mode — no workspaces to list."
             )
         try:
-            raw = provider._actor.call(
+            raw = provider._call_actor(
                 "list_workspaces",
                 {"output_format": "json"},
                 timeout=15.0,
