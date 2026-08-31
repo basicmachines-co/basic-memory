@@ -67,6 +67,21 @@ async def test_local_wiki_includes_long_markdown_suffix(config_home, session_mak
 
 
 @pytest.mark.asyncio
+async def test_local_wiki_rejects_ignored_reserved_destination(
+    config_home,
+    session_maker,
+    test_project,
+):
+    (config_home / ".gitignore").write_text("index.md\n", encoding="utf-8")
+    (config_home / "note.md").write_text("# Note\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="reserved paths are ignored.*index.md"):
+        await inspect_local_wiki_projection(test_project, session_maker=session_maker)
+
+    assert not (config_home / "index.md").exists()
+
+
+@pytest.mark.asyncio
 async def test_local_wiki_reports_outdated_after_source_metadata_changes(
     config_home,
     session_maker,
@@ -196,6 +211,22 @@ async def test_local_wiki_refuses_source_note_changed_after_planning(
     note.write_text("# First\n", encoding="utf-8")
     inspection = await inspect_local_wiki_projection(test_project, session_maker=session_maker)
     note.write_text("# Second\n", encoding="utf-8")
+
+    with pytest.raises(LocalWikiWriteConflict, match="source notes or journal changed"):
+        await apply_local_wiki_projection(inspection, session_maker=session_maker)
+
+    assert not (config_home / "index.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_local_wiki_refuses_ignore_rules_changed_after_planning(
+    config_home,
+    session_maker,
+    test_project,
+):
+    (config_home / "note.md").write_text("# Note\n", encoding="utf-8")
+    inspection = await inspect_local_wiki_projection(test_project, session_maker=session_maker)
+    (config_home / ".gitignore").write_text("index.md\n", encoding="utf-8")
 
     with pytest.raises(LocalWikiWriteConflict, match="source notes or journal changed"):
         await apply_local_wiki_projection(inspection, session_maker=session_maker)

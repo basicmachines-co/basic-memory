@@ -16,6 +16,7 @@ import yaml
 
 from basic_memory import db
 from basic_memory.file_utils import write_file_atomic_bytes
+from basic_memory.ignore_utils import load_gitignore_patterns, should_ignore_path
 from basic_memory.index.local_project import scan_local_project_index_files
 from basic_memory.indexing.wiki_projector import (
     RESERVED_WIKI_FILENAMES,
@@ -62,6 +63,7 @@ class LocalWikiSourceState:
     accepted_at: datetime
     notes: tuple[WikiSourceNote, ...]
     changes: tuple[WikiSourceChange, ...]
+    ignore_patterns: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,10 +101,12 @@ async def inspect_local_wiki_projection(
     if not configured_root.is_absolute():
         raise ValueError(f"Local Wiki project path must be absolute: {project.path}")
     project_root = configured_root.resolve()
+    ignore_patterns = load_gitignore_patterns(project_root)
     snapshot = await _load_local_wiki_snapshot(
         project,
         project_root=project_root,
         session_maker=session_maker,
+        ignore_patterns=ignore_patterns,
     )
     plan = plan_wiki_projection(
         WikiProjectionRequest(
@@ -113,6 +117,15 @@ async def inspect_local_wiki_projection(
         ),
         snapshot,
     )
+    ignored_destinations = tuple(
+        write.path
+        for write in plan.writes
+        if should_ignore_path(project_root / write.path, project_root, ignore_patterns)
+    )
+    if ignored_destinations:
+        raise ValueError(
+            "Wiki reserved paths are ignored by project rules: " + ", ".join(ignored_destinations)
+        )
     root_initialized = any(
         document.path.casefold() == "index.md" and document.projector_owned
         for document in snapshot.reserved_documents
@@ -132,7 +145,7 @@ async def inspect_local_wiki_projection(
         project_name=project.name,
         project_root=project_root,
         state=state,
-        source_state=_source_state(snapshot),
+        source_state=_source_state(snapshot, ignore_patterns=ignore_patterns),
         plan=plan,
     )
 
@@ -196,16 +209,25 @@ async def _assert_projection_sources_unchanged(
     if not current_root.is_absolute() or current_root.resolve() != inspection.project_root:
         raise LocalWikiWriteConflict("Wiki project root changed after planning")
 
+    current_ignore_patterns = load_gitignore_patterns(current_root)
     current_snapshot = await _load_local_wiki_snapshot(
         project,
         project_root=current_root.resolve(),
         session_maker=session_maker,
+        ignore_patterns=current_ignore_patterns,
     )
-    if _source_state(current_snapshot) != inspection.source_state:
+    if (
+        _source_state(current_snapshot, ignore_patterns=current_ignore_patterns)
+        != inspection.source_state
+    ):
         raise LocalWikiWriteConflict("Wiki source notes or journal changed after planning")
 
 
-def _source_state(snapshot: WikiProjectionSnapshot) -> LocalWikiSourceState:
+def _source_state(
+    snapshot: WikiProjectionSnapshot,
+    *,
+    ignore_patterns: set[str],
+) -> LocalWikiSourceState:
     """Return only the projection inputs that generated writes depend on."""
     return LocalWikiSourceState(
         project_external_id=snapshot.project_id,
@@ -214,6 +236,7 @@ def _source_state(snapshot: WikiProjectionSnapshot) -> LocalWikiSourceState:
         accepted_at=snapshot.source_accepted_at,
         notes=snapshot.notes,
         changes=snapshot.changes,
+        ignore_patterns=tuple(sorted(ignore_patterns)),
     )
 
 
@@ -222,6 +245,7 @@ async def _load_local_wiki_snapshot(
     *,
     project_root: Path,
     session_maker: async_sessionmaker[AsyncSession],
+    ignore_patterns: set[str],
 ) -> WikiProjectionSnapshot:
     if not project_root.is_dir():
         raise ValueError(f"Local project directory does not exist: {project_root}")
@@ -229,8 +253,10 @@ async def _load_local_wiki_snapshot(
     parser = EntityParser(project_root)
     source_notes: list[WikiSourceNote] = []
     reserved_documents: list[WikiReservedDocument] = []
-    source_modified_at: list[datetime] = []
-    scan = scan_local_project_index_files(project_root)
+    scan = scan_local_project_index_files(
+        project_root,
+        ignore_patterns=ignore_patterns,
+    )
     for relative_path in scan.file_paths:
         if not runtime_file_path_is_markdown_note(relative_path):
             continue
@@ -258,9 +284,6 @@ async def _load_local_wiki_snapshot(
                 checksum=sha256(content).hexdigest(),
             )
         )
-        if markdown.modified is not None:
-            source_modified_at.append(ensure_timezone_aware(markdown.modified))
-
     async with db.scoped_session(session_maker) as session:
         change_rows = (
             await session.execute(
@@ -288,9 +311,7 @@ async def _load_local_wiki_snapshot(
         )
 
     accepted_at = [change.accepted_at for change in changes]
-    source_accepted_at = max(
-        (*source_modified_at, *accepted_at, ensure_timezone_aware(project.created_at))
-    )
+    source_accepted_at = max((*accepted_at, ensure_timezone_aware(project.created_at)))
     return WikiProjectionSnapshot(
         project_id=project.external_id,
         project_name=project.name,
