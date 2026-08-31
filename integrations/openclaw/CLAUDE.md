@@ -198,7 +198,12 @@ read_note(identifier="decisions/auth-strategy", project="backend")
 ### `write_note`
 **Purpose**: Create new notes in the knowledge graph
 **When to use**: When users share important information, make decisions, or want to save insights for later
-**Best practices**: Use clear titles, organize in appropriate folders, structure with headings
+**Best practices**: Use clear titles, organize in appropriate folders, structure the Markdown body with headings, and pass frontmatter through the dedicated parameters instead of embedding YAML in `content`
+
+**Frontmatter parameters**:
+- `tags`: A string array or comma-separated string
+- `note_type`: The note type stored as `type`; defaults to `note`
+- `metadata`: Additional frontmatter fields, including nested objects
 
 **Examples**:
 ```
@@ -231,6 +236,12 @@ We chose JWT tokens with refresh token rotation.
 write_note(
   title="Client Meeting - February 8, 2024",
   folder="meetings",
+  tags=["client", "planning"],
+  note_type="Meeting",
+  metadata={
+    "status": "complete",
+    "attendees": ["John", "Sarah"],
+  },
   content="""
 # Client Meeting - February 8, 2024
 
@@ -256,6 +267,7 @@ write_note(
 **Purpose**: Modify existing notes incrementally
 **When to use**: To add updates, fix information, or organize existing content
 **Operations**: append, prepend, find_replace, replace_section
+**Frontmatter updates**: Pass `metadata` to merge custom frontmatter fields in the same call. Provided keys replace existing values, unrelated fields remain unchanged, and nested objects are supported.
 
 **Examples**:
 ```
@@ -276,6 +288,7 @@ edit_note(
   identifier="weekly-review",
   operation="replace_section",
   section="## This Week",
+  metadata={"status": "review", "progress": {"completed": 4, "total": 6}},
   content="""## This Week
 - Completed API authentication
 - Client meeting went well

@@ -161,8 +161,8 @@ All tools accept an optional `project` parameter for cross-project operations.
 | `memory_get` | Read a specific note by title or path |
 | `search_notes` | Search the knowledge graph directly |
 | `read_note` | Read a note by title, permalink, or `memory://` URL |
-| `write_note` | Create or update a note |
-| `edit_note` | Append, prepend, find/replace, or replace a section |
+| `write_note` | Create or overwrite a note with optional tags, note type, and custom frontmatter metadata |
+| `edit_note` | Append, prepend, replace content, and merge custom frontmatter metadata |
 | `delete_note` | Delete a note |
 | `move_note` | Move a note to a different folder |
 | `build_context` | Navigate the knowledge graph — follow relations and connections |
@@ -171,6 +171,22 @@ All tools accept an optional `project` parameter for cross-project operations.
 | `schema_validate` | Validate notes against Picoschema definitions |
 | `schema_infer` | Analyze notes and suggest a schema |
 | `schema_diff` | Detect drift between schema and actual usage |
+
+Use the dedicated frontmatter parameters when creating structured notes:
+
+```
+write_note(
+  title="auth-middleware-rollout",
+  folder="tasks",
+  note_type="Task",
+  tags=["auth", "rollout"],
+  metadata={"status": "active", "current_step": 2},
+  content="""## Context
+Rolling JWT middleware to all API routes."""
+)
+```
+
+`edit_note` accepts `metadata` alongside any edit operation, so content and frontmatter state can be updated in one call. Metadata keys supplied by the caller are merged into existing frontmatter; unrelated fields remain unchanged.
 
 ## Slash commands
 

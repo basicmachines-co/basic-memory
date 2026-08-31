@@ -104,14 +104,10 @@ This fallback behavior keeps tasks discoverable even if the graph index is stale
 write_note(
   title="migrate-auth-routes",
   folder="tasks",
-  content="""---
-title: migrate-auth-routes
-type: Task
-status: active
-current_step: 1
----
-
-## Context
+  note_type="Task",
+  tags=["auth", "migration"],
+  metadata={"status": "active", "current_step": 1},
+  content="""## Context
 Starting auth route migration.
 
 ## Plan
@@ -122,12 +118,35 @@ Starting auth route migration.
 
 ### Advance a task
 
-- Update plan checkboxes with `edit_note` + `replace_section`
-- Bump step with `edit_note` + `find_replace` (for `current_step`)
+Update the plan and its frontmatter state together:
+
+```
+edit_note(
+  identifier="tasks/migrate-auth-routes",
+  operation="replace_section",
+  section="## Plan",
+  metadata={"current_step": 2},
+  content="""## Plan
+- [x] Implement middleware
+- [ ] Add tests"""
+)
+```
 
 ### Complete a task
 
-Use `edit_note` (`find_replace`) to change `status: active` to `status: done`.
+Record the outcome while setting the structured status field:
+
+```
+edit_note(
+  identifier="tasks/migrate-auth-routes",
+  operation="append",
+  metadata={"status": "done"},
+  content="""
+
+## Outcome
+Migration completed and verified."""
+)
+```
 
 ## Operational Tips
 
