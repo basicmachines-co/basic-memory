@@ -151,6 +151,11 @@ watermark those records advance.
 - The journal is note-scoped and project-partitioned today. A fuller event envelope (causation,
   correlation, depth, workspace scope) grows this record; it does not introduce a second journal
   beside it.
+- Scope today: only DB-first accepted note mutations reach the journal
+  (`accepted_note_mutation_runner`). File-first reconciliation — observed file indexing and
+  external delete handling — converges derived state without journal evidence yet. Journaling
+  those reconciliation paths is the intended direction; until it lands, journal consumers see
+  DB-first mutations only, and file-first changes surface through reindex and reconciliation.
 
 ### Event Surfaces And Derivation
 
@@ -168,6 +173,9 @@ storage notifications / webhooks          ingress evidence
 ```
 
 - A projection may lag the journal and must be rebuildable from it plus canonical Markdown.
+- The ingress edge is the target shape, not the current one: reconciliation of external file
+  changes does not yet advance the journal (see the journal's scope bullet above), so today the
+  diagram's top edge holds only for DB-first accepted mutations.
 - Delivery events (webhook attempts, storage notifications, SSE publishes) prove delivery, not
   acceptance; they are never the canonical semantic log.
 - Run ledgers (projection runs, index runs) record operational work, and product telemetry
