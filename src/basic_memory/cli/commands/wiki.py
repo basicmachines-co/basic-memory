@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel, Field
@@ -256,6 +257,11 @@ async def _execute_wiki_command(
     reports: list[WikiProjectReport] = []
     for name in selected_names:
         project = projects_by_name[name]
+        _require_matching_project_root(
+            project_name=name,
+            configured_path=app_config.projects[name].path,
+            persisted_path=project.path,
+        )
         if command == "rebuild" and not dry_run:
             await recover_project_materializations(project, session_maker)
         inspection = await inspect_local_wiki_projection(
@@ -333,6 +339,24 @@ def _selected_local_project_names(
     if not app_config.is_locally_syncable(selected, entry.path):
         raise ValueError(f"Local project '{selected}' must have an absolute path")
     return [selected]
+
+
+def _require_matching_project_root(
+    *,
+    project_name: str,
+    configured_path: str,
+    persisted_path: str,
+) -> None:
+    configured_root = Path(configured_path).expanduser()
+    persisted_root = Path(persisted_path).expanduser()
+    if (
+        not configured_root.is_absolute()
+        or not persisted_root.is_absolute()
+        or configured_root.resolve() != persisted_root.resolve()
+    ):
+        raise ValueError(
+            f"Local project '{project_name}' path differs between config and the project database"
+        )
 
 
 def _project_report(

@@ -10,6 +10,7 @@ from basic_memory.cli.app import app
 from basic_memory.cli.commands.wiki import (
     WikiCommandReport,
     WikiProjectReport,
+    _require_matching_project_root,
     _selected_local_project_names,
 )
 from basic_memory.cli.main import app as cli_app
@@ -156,6 +157,15 @@ def test_wiki_all_rejects_relative_local_project_root(tmp_path):
             app_config,
             project_name=None,
             all_projects=True,
+        )
+
+
+def test_wiki_rejects_persisted_root_that_differs_from_config(tmp_path):
+    with pytest.raises(ValueError, match="differs between config and the project database"):
+        _require_matching_project_root(
+            project_name="main",
+            configured_path=str(tmp_path / "configured"),
+            persisted_path=str(tmp_path / "stale-database-root"),
         )
 
 

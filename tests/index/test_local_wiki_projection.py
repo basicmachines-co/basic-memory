@@ -12,6 +12,8 @@ from basic_memory.index.local_wiki_projection import (
     apply_local_wiki_projection,
     inspect_local_wiki_projection,
 )
+from basic_memory.index.local_project import LocalProjectIndexScan
+import basic_memory.index.local_wiki_projection as local_wiki_projection
 from basic_memory.models import AcceptedProjectNoteChange, Project
 
 
@@ -76,6 +78,29 @@ async def test_local_wiki_rejects_ignored_reserved_destination(
     (config_home / "note.md").write_text("# Note\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="reserved paths are ignored.*index.md"):
+        await inspect_local_wiki_projection(test_project, session_maker=session_maker)
+
+    assert not (config_home / "index.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_local_wiki_rejects_incomplete_filesystem_scan(
+    config_home,
+    session_maker,
+    test_project,
+    monkeypatch,
+):
+    (config_home / "note.md").write_text("# Note\n", encoding="utf-8")
+    monkeypatch.setattr(
+        local_wiki_projection,
+        "scan_local_project_index_files",
+        lambda *_args, **_kwargs: LocalProjectIndexScan(
+            file_paths=("note.md",),
+            unreadable_directories=("private",),
+        ),
+    )
+
+    with pytest.raises(OSError, match="scan is incomplete.*private"):
         await inspect_local_wiki_projection(test_project, session_maker=session_maker)
 
     assert not (config_home / "index.md").exists()
@@ -165,7 +190,7 @@ async def test_local_wiki_checks_every_reserved_path_before_writing(
     inspection = await inspect_local_wiki_projection(test_project, session_maker=session_maker)
     (config_home / "log.md").write_text("concurrent edit\n", encoding="utf-8")
 
-    with pytest.raises(LocalWikiWriteConflict, match="appeared after planning: log.md"):
+    with pytest.raises(LocalWikiWriteConflict, match="projection inputs changed"):
         await apply_local_wiki_projection(inspection, session_maker=session_maker)
 
     # The preflight sees the later log.md conflict before creating index.md.
@@ -174,16 +199,12 @@ async def test_local_wiki_checks_every_reserved_path_before_writing(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("concurrent_change", "message"),
-    [("changed", "changed"), ("missing", "disappeared")],
-)
+@pytest.mark.parametrize("concurrent_change", ["changed", "missing"])
 async def test_local_wiki_refuses_changed_existing_reserved_document(
     config_home,
     session_maker,
     test_project,
     concurrent_change,
-    message,
 ):
     note = config_home / "note.md"
     note.write_text("---\ntitle: First\n---\n\n# Note\n", encoding="utf-8")
@@ -197,8 +218,31 @@ async def test_local_wiki_refuses_changed_existing_reserved_document(
     else:
         index_path.unlink()
 
-    with pytest.raises(LocalWikiWriteConflict, match=f"{message} after planning"):
+    with pytest.raises(LocalWikiWriteConflict, match="projection inputs changed"):
         await apply_local_wiki_projection(update, session_maker=session_maker)
+
+
+@pytest.mark.asyncio
+async def test_local_wiki_preflights_unchanged_reserved_documents(
+    config_home,
+    session_maker,
+    test_project,
+):
+    note = config_home / "note.md"
+    note.write_text("---\ntitle: First\n---\n\n# Note\n", encoding="utf-8")
+    initial = await inspect_local_wiki_projection(test_project, session_maker=session_maker)
+    await apply_local_wiki_projection(initial, session_maker=session_maker)
+    original_index = (config_home / "index.md").read_bytes()
+
+    note.write_text("---\ntitle: Second\n---\n\n# Note\n", encoding="utf-8")
+    update = await inspect_local_wiki_projection(test_project, session_maker=session_maker)
+    assert [write.path for write in update.plan.writes] == ["index.md"]
+    (config_home / "log.md").write_text("concurrent edit\n", encoding="utf-8")
+
+    with pytest.raises(LocalWikiWriteConflict, match="projection inputs changed"):
+        await apply_local_wiki_projection(update, session_maker=session_maker)
+
+    assert (config_home / "index.md").read_bytes() == original_index
 
 
 @pytest.mark.asyncio
@@ -212,7 +256,7 @@ async def test_local_wiki_refuses_source_note_changed_after_planning(
     inspection = await inspect_local_wiki_projection(test_project, session_maker=session_maker)
     note.write_text("# Second\n", encoding="utf-8")
 
-    with pytest.raises(LocalWikiWriteConflict, match="source notes or journal changed"):
+    with pytest.raises(LocalWikiWriteConflict, match="projection inputs changed"):
         await apply_local_wiki_projection(inspection, session_maker=session_maker)
 
     assert not (config_home / "index.md").exists()
@@ -228,7 +272,7 @@ async def test_local_wiki_refuses_ignore_rules_changed_after_planning(
     inspection = await inspect_local_wiki_projection(test_project, session_maker=session_maker)
     (config_home / ".gitignore").write_text("index.md\n", encoding="utf-8")
 
-    with pytest.raises(LocalWikiWriteConflict, match="source notes or journal changed"):
+    with pytest.raises(LocalWikiWriteConflict, match="projection inputs changed"):
         await apply_local_wiki_projection(inspection, session_maker=session_maker)
 
     assert not (config_home / "index.md").exists()
@@ -263,7 +307,7 @@ async def test_local_wiki_refuses_journal_advanced_after_planning(
             )
         )
 
-    with pytest.raises(LocalWikiWriteConflict, match="source notes or journal changed"):
+    with pytest.raises(LocalWikiWriteConflict, match="projection inputs changed"):
         await apply_local_wiki_projection(inspection, session_maker=session_maker)
 
     assert not (config_home / "index.md").exists()

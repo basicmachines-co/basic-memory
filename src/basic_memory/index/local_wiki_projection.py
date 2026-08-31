@@ -63,6 +63,7 @@ class LocalWikiSourceState:
     accepted_at: datetime
     notes: tuple[WikiSourceNote, ...]
     changes: tuple[WikiSourceChange, ...]
+    reserved_documents: tuple[WikiReservedDocument, ...]
     ignore_patterns: tuple[str, ...]
 
 
@@ -220,7 +221,7 @@ async def _assert_projection_sources_unchanged(
         _source_state(current_snapshot, ignore_patterns=current_ignore_patterns)
         != inspection.source_state
     ):
-        raise LocalWikiWriteConflict("Wiki source notes or journal changed after planning")
+        raise LocalWikiWriteConflict("Wiki projection inputs changed after planning")
 
 
 def _source_state(
@@ -236,6 +237,7 @@ def _source_state(
         accepted_at=snapshot.source_accepted_at,
         notes=snapshot.notes,
         changes=snapshot.changes,
+        reserved_documents=snapshot.reserved_documents,
         ignore_patterns=tuple(sorted(ignore_patterns)),
     )
 
@@ -257,6 +259,11 @@ async def _load_local_wiki_snapshot(
         project_root,
         ignore_patterns=ignore_patterns,
     )
+    if scan.unreadable_directories:
+        raise OSError(
+            "Local Wiki scan is incomplete; unreadable directories: "
+            + ", ".join(scan.unreadable_directories)
+        )
     for relative_path in scan.file_paths:
         if not runtime_file_path_is_markdown_note(relative_path):
             continue
