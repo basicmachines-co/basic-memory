@@ -10,6 +10,8 @@ import json
 from pathlib import PurePosixPath, PureWindowsPath
 import unicodedata
 
+from basic_memory.runtime.project_partition import RuntimeProjectNoteOperation
+
 OKF_VERSION = "0.2"
 WIKI_PROFILE = "wiki/1"
 WIKI_PROJECTOR_VERSION = "wiki/1.0.0"
@@ -32,13 +34,9 @@ class WikiProjectionReason(StrEnum):
     manual_rebuild = "manual_rebuild"
 
 
-class WikiChangeOperation(StrEnum):
-    """Accepted note operation represented in generated Wiki logs."""
-
-    created = "created"
-    updated = "updated"
-    moved = "moved"
-    deleted = "deleted"
+# Wiki logs present the accepted-change journal, so they reuse its operation vocabulary
+# instead of maintaining a twin enum that can drift from the journal it renders.
+WikiChangeOperation = RuntimeProjectNoteOperation
 
 
 class WikiProjectionState(StrEnum):
