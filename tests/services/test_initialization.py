@@ -296,6 +296,7 @@ async def test_initialize_file_indexing_uses_project_index_runtime_for_initial_s
 
         _disable_test_env_short_circuit(monkeypatch)
         monkeypatch.setattr("basic_memory.index.watch_service.WatchService", _FakeWatchService)
+        monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", "Event Startup")
 
         original_create_task = asyncio.create_task
         created_coroutines = []

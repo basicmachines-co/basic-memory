@@ -34,6 +34,7 @@ from basic_memory.index.local_watch import (
 from basic_memory.index.storage_events import StorageEventIndexRuntime
 from basic_memory.models import Project
 from basic_memory.repository import ProjectRepository
+from basic_memory.utils import generate_permalink
 
 
 class WatchEvent(BaseModel):
@@ -175,7 +176,10 @@ class WatchService:
             projects = await self.project_repository.get_active_projects(session)
 
         if self.constrained_project:
-            projects = [project for project in projects if project.name == self.constrained_project]
+            constrained_permalink = generate_permalink(self.constrained_project)
+            projects = [
+                project for project in projects if project.permalink == constrained_permalink
+            ]
 
         skipped = [
             project.name

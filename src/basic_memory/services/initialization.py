@@ -19,6 +19,7 @@ from basic_memory.models import Project
 from basic_memory.repository import (
     ProjectRepository,
 )
+from basic_memory.utils import generate_permalink
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -285,7 +286,8 @@ async def initialize_file_indexing(
         active_projects = await project_repository.get_active_projects(session)
 
     if constrained_project:
-        active_projects = [p for p in active_projects if p.name == constrained_project]
+        constrained_permalink = generate_permalink(constrained_project)
+        active_projects = [p for p in active_projects if p.permalink == constrained_permalink]
         logger.info(f"Background indexing constrained to project: {constrained_project}")
 
     # Only index projects that are in config (source of truth) and have an
