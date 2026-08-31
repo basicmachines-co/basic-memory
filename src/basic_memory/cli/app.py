@@ -140,6 +140,7 @@ def app_callback(
         "prune",
         "update",
         "watch",
+        "wiki",
         "workspace",
         # POSIX read verbs (#1404): API-hitting commands that initialize via
         # deps.py, same as status/tool.

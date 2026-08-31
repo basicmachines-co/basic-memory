@@ -11,6 +11,7 @@ from pathlib import PurePosixPath, PureWindowsPath
 import unicodedata
 
 from basic_memory.runtime.project_partition import RuntimeProjectNoteOperation
+from basic_memory.runtime.storage import RUNTIME_MARKDOWN_FILE_SUFFIXES
 
 OKF_VERSION = "0.2"
 WIKI_PROFILE = "wiki/1"
@@ -655,7 +656,10 @@ def _is_projector_change(change: WikiSourceChange) -> bool:
 
 def _normalize_note_path(path: str) -> str:
     normalized = _normalize_relative_path(path)
-    if not normalized or PurePosixPath(normalized).suffix.lower() != ".md":
+    if (
+        not normalized
+        or PurePosixPath(normalized).suffix.lower() not in RUNTIME_MARKDOWN_FILE_SUFFIXES
+    ):
         raise ValueError(f"Wiki note path must be project-relative Markdown: {path}")
     if "::" in normalized or any(character in normalized for character in "\r\n[]|`<>"):
         raise ValueError(f"Wiki note path contains unsupported Markdown delimiters: {path}")
