@@ -13,7 +13,9 @@ compatibility with existing MCP tools.
 from __future__ import annotations
 
 import asyncio
+import os
 from contextlib import asynccontextmanager, nullcontext
+from dataclasses import dataclass
 from typing import (
     TYPE_CHECKING,
     AsyncIterator,
@@ -982,6 +984,180 @@ async def detect_project_from_identifier_prefix(
         return project_resolution.qualified_name
 
     return None
+
+
+# --- Project-qualified path routing (POSIX tools, #1415) ---
+# Projects are mount points: '<project>/path' inputs route to that project so
+# tool inputs accept exactly the prefixed identifiers tool outputs and stored
+# permalinks produce. One resolver serves the MCP posix tools and, through
+# them, the CLI verbs.
+
+
+@dataclass(frozen=True)
+class ProjectPathRoute:
+    """Effective routing for one posix call: project param + project-relative path.
+
+    ``stripped=False`` means the input carried no recognized project prefix:
+    ``path`` is the caller's input byte-for-byte and ``project`` is the
+    explicit value that was passed (or None, meaning the existing default
+    resolution chain applies — only reachable in single-project or empty-config
+    setups; multi-project configs refuse instead). ``stripped=True`` means a
+    first-segment project was recognized: ``project`` is the canonical config
+    name (or workspace-qualified name) and ``path`` is the remainder with no
+    leading slash, "" meaning the project root.
+    """
+
+    project: Optional[str]
+    path: str
+    stripped: bool
+
+
+class ProjectPrefixConflictError(ValueError):
+    """Explicit project param and the path's project prefix name different projects."""
+
+
+class UnqualifiedPathRefusedError(ValueError):
+    """Unqualified input in a multi-project config matched no active project."""
+
+
+def _active_project_prefixes(config: BasicMemoryConfig) -> str:
+    """Render the configured projects as copyable '<permalink>/' prefixes."""
+    permalinks = sorted(generate_permalink(name) for name in config.projects)
+    return ", ".join(f"{permalink}/" for permalink in permalinks)
+
+
+def _detected_route_remainder(candidate: str, detected: str) -> str:
+    """Return the project-relative path left after the detected route prefix.
+
+    A local project consumes one leading segment. A workspace-qualified route
+    ('<workspace>/<project>') consumes two only when the candidate spelled both
+    segments; a bare project prefix resolved into a workspace consumed one.
+    """
+    segments = candidate.split("/")
+    route_permalinks = generate_permalink(detected).split("/")
+    consumed = 1
+    if (
+        len(route_permalinks) == 2
+        and len(segments) >= 2
+        and [generate_permalink(segment) for segment in segments[:2]] == route_permalinks
+    ):
+        consumed = 2
+    return "/".join(segments[consumed:])
+
+
+def _project_routes_agree(detected: str, explicit: str) -> bool:
+    """True when a detected path prefix and an explicit project name the same project."""
+    if generate_permalink(detected) == generate_permalink(explicit):
+        return True
+    detected_workspace, detected_project = _split_qualified_project_identifier_impl(detected)
+    explicit_workspace, explicit_project = _split_qualified_project_identifier_impl(explicit)
+    # A workspace-qualified spelling agrees with the unqualified spelling of the
+    # same project; two fully qualified spellings must match exactly (above).
+    if (detected_workspace is None) == (explicit_workspace is None):
+        return False
+    return generate_permalink(detected_project) == generate_permalink(explicit_project)
+
+
+async def resolve_project_path_route(
+    path: str,
+    *,
+    project: Optional[str],
+    project_id: Optional[str],
+    context: Optional[Context] = None,
+) -> ProjectPathRoute:
+    """Resolve a posix tool's path/identifier into an effective project route.
+
+    First-segment project resolution (#1415), in order:
+
+    1. ``project_id`` (UUID) bypasses parsing entirely — comparing a path
+       prefix against a UUID would need an API round-trip.
+    2. An explicit project (the ``BASIC_MEMORY_MCP_PROJECT`` constraint, else
+       the ``project`` param) wins: an agreeing path prefix is stripped, a
+       disagreeing one raises ProjectPrefixConflictError — never silently
+       preferring either. Agreement keeps the more-qualified spelling: an
+       explicit '<workspace>/<project>' outlives a bare local prefix match.
+    3. Otherwise a first segment naming an active project routes there with
+       the remainder as the project-relative path.
+    4. Otherwise, with more than one configured project, raise
+       UnqualifiedPathRefusedError instead of silently defaulting; with at
+       most one configured project, keep today's default resolution.
+    """
+    if project_id is not None:
+        return ProjectPathRoute(project=project, path=path, stripped=False)
+
+    # The env constraint is ProjectResolver's priority 1, so it participates in
+    # agree/strip and conflict exactly like the param it outranks.
+    explicit = os.environ.get("BASIC_MEMORY_MCP_PROJECT") or project
+    config = ConfigManager().config
+    candidate = normalize_project_reference(_identifier_path(path)).strip("/")
+
+    detected: Optional[str] = None
+    remainder = ""
+    if "/" in candidate:
+        detected = await detect_project_from_identifier_prefix(candidate, config, context=context)
+        if detected is not None:
+            remainder = _detected_route_remainder(candidate, detected)
+    elif candidate:
+        # A single segment can name a project alone (ls "research" lists that
+        # project's root); split_project_prefix requires a slash, so match here.
+        candidate_permalink = generate_permalink(candidate)
+        detected = next(
+            (
+                configured_name
+                for configured_name in config.projects
+                if generate_permalink(configured_name) == candidate_permalink
+            ),
+            None,
+        )
+
+    if explicit is not None:
+        if detected is None:
+            return ProjectPathRoute(
+                project=_canonicalize_project_name(explicit, config), path=path, stripped=False
+            )
+        if _project_routes_agree(detected, explicit):
+            # Trigger: the explicit spelling is workspace-qualified while the
+            #   path prefix matched an unqualified local config name.
+            # Why: a local project can shadow a same-named project in another
+            #   workspace; dropping the explicitly named workspace would
+            #   silently reroute the call to the local shadow.
+            # Outcome: the more-qualified explicit spelling carries the route;
+            #   every other agreement keeps the detected (canonical) spelling.
+            detected_workspace, _ = _split_qualified_project_identifier_impl(detected)
+            explicit_workspace, _ = _split_qualified_project_identifier_impl(explicit)
+            routed = detected
+            if explicit_workspace is not None and detected_workspace is None:
+                routed = explicit
+            return ProjectPathRoute(
+                project=_canonicalize_project_name(routed, config),
+                path=remainder,
+                stripped=True,
+            )
+        raise ProjectPrefixConflictError(
+            f"path names project '{detected}' but project '{explicit}' was passed — "
+            f"use '{detected}/<path>' alone, or project='{explicit}' with a "
+            "project-relative path"
+        )
+
+    if detected is not None:
+        return ProjectPathRoute(
+            project=_canonicalize_project_name(detected, config), path=remainder, stripped=True
+        )
+
+    # Trigger: no explicit project, no recognized prefix, several projects configured.
+    # Why: the stateless server would otherwise fall back to the default project —
+    #   the measured multi-project failure (#1415) this refusal removes.
+    # Outcome: a self-teaching error listing every project in copyable prefix form.
+    if len(config.projects) > 1:
+        first_segment = candidate.split("/", 1)[0] if candidate else ""
+        subject = f"no project '{first_segment}'" if first_segment else "no project specified"
+        raise UnqualifiedPathRefusedError(
+            f"{subject} — active projects: {_active_project_prefixes(config)}"
+        )
+
+    # Single-project ergonomics unchanged; an empty config (cloud-only client)
+    # keeps API-side default resolution.
+    return ProjectPathRoute(project=None, path=path, stripped=False)
 
 
 @asynccontextmanager

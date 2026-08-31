@@ -11,8 +11,19 @@ import pytest
 from fastmcp.exceptions import ToolError
 
 import basic_memory.mcp.tools.posix_tools as posix_tools
+from basic_memory.mcp.project_context import (
+    ProjectPrefixConflictError,
+    UnqualifiedPathRefusedError,
+)
 from basic_memory.mcp.tools import cat, find, grep, ls, man, tail, write_note
 from basic_memory.schemas.search import SearchRetrievalMode
+
+
+@pytest.fixture
+def no_project_constraint(monkeypatch):
+    """Clear the env project constraint so unqualified routing paths are reachable."""
+    monkeypatch.delenv("BASIC_MEMORY_MCP_PROJECT", raising=False)
+
 
 # --- cat ---
 
@@ -392,6 +403,8 @@ async def test_grep_rejects_bad_arguments(kwargs, message):
 
 @pytest.mark.asyncio
 async def test_ls_root_listing(client, test_graph, test_project):
+    # New contract (#1415): with no project addressed, ls "/" lists projects as
+    # mount points — this test pins the project-scoped case via project=.
     result = await ls(project=test_project.name)
 
     assert result["total"] == 1
@@ -417,6 +430,7 @@ async def test_ls_directory_contents(client, test_graph, test_project):
 
 @pytest.mark.asyncio
 async def test_ls_empty_project(client, test_project):
+    # Project-scoped case (#1415): project= bypasses the mount-point view.
     result = await ls(project=test_project.name)
 
     assert result["total"] == 0
@@ -614,3 +628,303 @@ async def test_man_query_missing_manual_project_raises(client, test_project):
     # silently searching the wrong project.
     with pytest.raises(RuntimeError, match="no credentials found"):
         await man(query="anything")
+
+
+# --- project-qualified routing (#1415) ---
+# Projects are mount points: '<project>/path' inputs route to that project, an
+# explicit project must agree with a path prefix, and multi-project configs
+# refuse unqualified input with the active project list instead of defaulting.
+
+
+# -- ls "/" mount-point view --
+
+
+@pytest.mark.asyncio
+async def test_ls_root_lists_projects_as_mount_points(
+    client, test_project, second_project, no_project_constraint
+):
+    """ls "/" with no project addressed is the mount table, sorted by name."""
+    result = await ls()
+
+    assert result["total"] == 2
+    assert result["has_more"] is False
+    assert [node["name"] for node in result["nodes"]] == ["second-project", "test-project"]
+    for node in result["nodes"]:
+        assert node["type"] == "directory"
+        # directory_path is the copyable '/<project>' prefix form.
+        assert node["directory_path"] == f"/{node['permalink']}"
+
+
+@pytest.mark.asyncio
+async def test_ls_root_mount_view_in_single_project_config(
+    client, test_graph, test_project, no_project_constraint
+):
+    """The mount view is unconditional (#1415): even a single-project config
+    lists the mount table at "/" so in-band discovery is uniform."""
+    result = await ls()
+
+    assert result["total"] == 1
+    assert result["nodes"][0]["name"] == "test-project"
+    assert result["nodes"][0]["directory_path"] == "/test-project"
+    assert result["nodes"][0]["type"] == "directory"
+
+
+@pytest.mark.asyncio
+async def test_ls_mount_view_paginates_over_project_rows(
+    client, test_project, second_project, no_project_constraint
+):
+    first = await ls(page=1, page_size=1)
+    last = await ls(page=2, page_size=1)
+
+    assert first["total"] == 2
+    assert first["has_more"] is True
+    assert [node["name"] for node in first["nodes"]] == ["second-project"]
+    assert [node["name"] for node in last["nodes"]] == ["test-project"]
+    assert last["has_more"] is False
+
+
+# -- rule 1: first-segment routing per verb --
+
+
+@pytest.mark.asyncio
+async def test_ls_single_segment_project_name_lists_its_root(
+    client, test_project, second_project, no_project_constraint
+):
+    await write_note(
+        title="Second Root Note",
+        directory="notes",
+        content="# Second Root Note\n\nsecond project content",
+        project="second-project",
+    )
+
+    result = await ls("second-project")
+
+    names = {node["name"] for node in result["nodes"]}
+    assert names == {"notes"}
+
+
+@pytest.mark.asyncio
+async def test_ls_qualified_path_routes_into_project_directory(
+    client, test_project, second_project, no_project_constraint
+):
+    await write_note(
+        title="Second Dir Note",
+        directory="notes",
+        content="# Second Dir Note",
+        project="second-project",
+    )
+
+    result = await ls("/second-project/notes")
+
+    names = {node["name"] for node in result["nodes"]}
+    assert names == {"Second Dir Note.md"}
+
+
+@pytest.mark.asyncio
+async def test_find_qualified_path_routes_to_project(
+    client, test_project, second_project, no_project_constraint
+):
+    await write_note(
+        title="Second Find Note",
+        directory="notes",
+        content="# Second Find Note",
+        project="second-project",
+    )
+
+    result = await find("second-project", name="*.md")
+
+    names = {node["name"] for node in result["nodes"]}
+    assert names == {"Second Find Note.md"}
+
+
+@pytest.mark.asyncio
+async def test_cat_qualified_identifier_equals_explicit_project_read(
+    client, test_graph, test_project, second_project, no_project_constraint
+):
+    """'test-project/test/root' with no project param reads the same note as
+    project='test-project' + 'test/root' — inputs accept what outputs produce."""
+    qualified = await cat("test-project/test/root")
+    explicit = await cat("test/root", project=test_project.name)
+
+    assert qualified == explicit
+    assert qualified["title"] == "Root"
+
+
+@pytest.mark.asyncio
+async def test_tool_output_permalink_round_trips_into_cat(
+    client, test_project, second_project, no_project_constraint
+):
+    """Round trip: stored permalinks are already project-qualified, so tail's
+    output is a valid cat identifier with no project param anywhere — and the
+    mount view's prefix is that permalink's first segment."""
+    await write_note(
+        title="Round Trip",
+        directory="notes",
+        content="# Round Trip\n\nround trip body",
+        project="second-project",
+    )
+
+    rows = await tail(project="second-project")
+    permalink = next(row["permalink"] for row in rows if row["title"] == "Round Trip")
+    assert permalink == "second-project/notes/round-trip"
+
+    mounts = await ls()
+    mount_prefixes = {node["directory_path"] for node in mounts["nodes"]}
+    assert f"/{permalink.split('/', 1)[0]}" in mount_prefixes
+
+    result = await cat(permalink)
+
+    assert result["title"] == "Round Trip"
+    assert "round trip body" in result["content"]
+
+
+# -- rule 2: explicit project + prefix agree/conflict --
+
+
+@pytest.mark.asyncio
+async def test_explicit_project_with_agreeing_prefix_strips(
+    client, test_graph, test_project, second_project, no_project_constraint
+):
+    qualified = await ls("/test-project/test", project=test_project.name)
+    relative = await ls("/test", project=test_project.name)
+
+    assert qualified == relative
+    assert qualified["total"] == 5
+
+
+@pytest.mark.asyncio
+async def test_explicit_project_with_conflicting_prefix_refuses(
+    client, test_project, second_project, no_project_constraint
+):
+    """A disagreeing prefix is never silently resolved either way."""
+    with pytest.raises(
+        ProjectPrefixConflictError,
+        match="path names project 'second-project' but project 'test-project' was passed",
+    ):
+        await cat("second-project/notes/foo", project=test_project.name)
+
+
+# -- rule 4: multi-project unqualified refusal, self-teaching message --
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("verb", "kwargs", "subject"),
+    [
+        ("cat", {"identifier": "notes/foo"}, "no project 'notes'"),
+        ("ls", {"path": "/notes"}, "no project 'notes'"),
+        ("find", {"path": "/x"}, "no project 'x'"),
+        ("grep", {"pattern": "needle"}, "no project specified"),
+        ("tail", {}, "no project specified"),
+    ],
+)
+async def test_unqualified_input_refuses_in_multi_project_config(
+    client, test_project, second_project, no_project_constraint, verb, kwargs, subject
+):
+    """Each verb refuses rather than silently defaulting, listing every active
+    project in copyable prefix form."""
+    tool = {"cat": cat, "ls": ls, "find": find, "grep": grep, "tail": tail}[verb]
+
+    with pytest.raises(UnqualifiedPathRefusedError) as excinfo:
+        await tool(**kwargs)
+
+    assert str(excinfo.value) == (f"{subject} — active projects: second-project/, test-project/")
+
+
+@pytest.mark.asyncio
+async def test_grep_argument_validation_precedes_refusal(
+    client, test_project, second_project, no_project_constraint
+):
+    """Bad-argument errors keep firing before any routing decision."""
+    with pytest.raises(ValueError, match="pattern must not be empty"):
+        await grep("")
+
+
+# -- rule 5: single-project passthrough and near-collisions --
+
+
+@pytest.mark.asyncio
+async def test_single_project_unqualified_paths_pass_through(
+    client, test_graph, test_project, no_project_constraint
+):
+    """One configured project keeps today's ergonomics: unqualified paths route
+    to the default project, and 'test' is not falsely stripped as a prefix of
+    'test-project' (permalink comparison, not startswith)."""
+    listing = await ls("/test")
+    assert listing["total"] == 5
+
+    note = await cat("test/root")
+    assert note["title"] == "Root"
+
+    rows = await tail()
+    assert {row["title"] for row in rows} >= {"Root"}
+
+    found = await grep("Root", literal=True)
+    assert found["results"]
+
+
+@pytest.mark.asyncio
+async def test_project_named_folder_is_reachable_double_qualified(
+    client, test_project, second_project, no_project_constraint
+):
+    """Collision rule: the project wins the first segment, so a top-level folder
+    named like its own project is addressed by double-qualifying."""
+    await write_note(
+        title="Shadowed",
+        directory="second-project",
+        content="# Shadowed\n\nshadowed body",
+        project="second-project",
+    )
+
+    listing = await ls("second-project/second-project")
+    assert {node["name"] for node in listing["nodes"]} == {"Shadowed.md"}
+
+    result = await cat("second-project/second-project/shadowed")
+    assert result["title"] == "Shadowed"
+
+
+@pytest.mark.asyncio
+async def test_cat_bare_project_name_is_an_error(
+    client, test_project, second_project, no_project_constraint
+):
+    with pytest.raises(ValueError, match="names a project, not a note"):
+        await cat("second-project")
+
+
+# -- env constraint (BASIC_MEMORY_MCP_PROJECT) --
+
+
+@pytest.mark.asyncio
+async def test_env_constraint_counts_as_explicit_project(
+    client, test_graph, test_project, second_project, monkeypatch
+):
+    """The env constraint participates exactly like the project param: no
+    refusal, agreeing prefixes strip, disagreeing prefixes conflict, and
+    ls "/" lists the constrained project's root, not the mount table."""
+    monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", test_project.name)
+
+    rows = await tail()
+    assert {row["title"] for row in rows} >= {"Root"}
+
+    stripped = await ls("/test-project/test")
+    assert stripped["total"] == 5
+
+    constrained_root = await ls()
+    assert {node["name"] for node in constrained_root["nodes"]} == {"test"}
+
+    with pytest.raises(ProjectPrefixConflictError):
+        await cat("second-project/notes/foo")
+
+
+# -- project_id passthrough --
+
+
+@pytest.mark.asyncio
+async def test_project_id_routes_without_prefix_parsing(
+    client, test_graph, test_project, second_project, no_project_constraint
+):
+    """project_id routes by external UUID and bypasses prefix parsing entirely,
+    so a multi-project config needs no qualification."""
+    result = await cat("test/root", project_id=test_project.external_id)
+
+    assert result["title"] == "Root"
