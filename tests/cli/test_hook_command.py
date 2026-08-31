@@ -2225,3 +2225,21 @@ def test_remove_claude_hooks_from_config_dir(
 
     assert result.exit_code == 0
     assert _read_json(profile / "settings.json").get("hooks", {}) == {}
+
+
+def test_claude_config_dir_pointing_at_project_keeps_local_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "proj"
+    (project / ".claude").mkdir(parents=True)
+    _write_claude_settings(project, {"primaryProject": "profile-wide", "recallTimeframe": "9d"})
+    (project / ".claude" / "settings.local.json").write_text(
+        json.dumps({"basicMemory": {"primaryProject": "local-override"}}), encoding="utf-8"
+    )
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(project / ".claude"))
+
+    merged, found = hook_module.load_claude_settings(project)
+
+    assert found is True
+    assert merged["primaryProject"] == "local-override"
+    assert merged["recallTimeframe"] == "9d"
