@@ -269,13 +269,20 @@ def load_claude_settings(directory: Path) -> tuple[dict[str, Any], bool]:
     user_dir = _claude_user_dir()
     sources: list[Path] = [user_dir / "settings.json"]
     project = _claude_project_dir(directory)
-    project_dir = project / ".claude"
-    # Trigger: the ancestor walk reaches $HOME, or the active profile dir.
+    # Trigger: the ancestor walk reaches $HOME.
     # Why: ``~/.claude`` is user-level config, not a project mapping — and with
     # CLAUDE_CONFIG_DIR set it belongs to a different profile entirely.
     # Outcome: never re-enter it as a higher-precedence project source.
-    if project != Path.home() and project_dir != user_dir:
-        sources.extend((project_dir / "settings.json", project_dir / "settings.local.json"))
+    if project != Path.home():
+        project_dir = project / ".claude"
+        # A profile dir may *be* this project's .claude. Skip the file already
+        # read as the user-level source, but keep settings.local.json — it still
+        # outranks it.
+        seen = {path.resolve() for path in sources}
+        for name in ("settings.json", "settings.local.json"):
+            path = project_dir / name
+            if path.resolve() not in seen:
+                sources.append(path)
     for path in sources:
         block, present = _read_claude_block(path)
         if not present:
