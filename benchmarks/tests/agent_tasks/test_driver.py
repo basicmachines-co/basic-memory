@@ -196,9 +196,54 @@ def test_happy_path_writes_all_artifacts(tmp_path: Path, monkeypatch: pytest.Mon
     turn_rows = [json.loads(line) for line in (run_dir / "per-turn.jsonl").read_text().splitlines()]
     assert {row["kind"] for row in turn_rows} == {"model", "tool"}
 
-    # The scripted {project} placeholder was substituted before dispatch.
-    assert session.calls[0][1]["project"] == "at-test-run-curate-orphans"
+    # The scripted {project} placeholder was substituted before dispatch. No
+    # "at-" literal here: generated run ids already carry it (the first real
+    # run produced "at-at-..." project names).
+    assert session.calls[0][1]["project"] == "test-run-curate-orphans"
     assert session.stopped is True
+
+
+def test_state_graded_task_reindexes_before_grading(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # First real-model run: a correct, project-scoped edit_note left its new
+    # wikilink relation unresolved at grading time (rich curate-connect) —
+    # settle only watches file-sync work, while forward references resolve in
+    # a project-index pass. State-graded tasks must re-run that pass, then
+    # settle, before graders read the index.
+    commands, settles = _stub_bm_recording(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    agent = ScriptedToolAgent(
+        script={
+            "tasks": {
+                "Migrate CI to uv": [
+                    {
+                        "tool_calls": [
+                            {
+                                "name": "edit_note",
+                                "arguments": {"identifier": "x", "project": "{project}"},
+                            }
+                        ]
+                    },
+                    {"text": "done\n```json\n{}\n```"},
+                ]
+            }
+        }
+    )
+    run_agent_tasks(
+        _config(tmp_path, task_ids=["tasks-complete"]),
+        model_factory=lambda spec: agent,
+        session_factory=lambda runtime: FakeSession(RICH_SURFACE.tool_allowlist),
+    )
+
+    project = "test-run-tasks-complete"
+    reindexes = [cmd[cmd.index("reindex") + 1 :] for cmd in commands if "reindex" in cmd]
+    assert reindexes == [
+        ["-p", project, "--full", "--search"],  # seed indexing before the loop
+        ["-p", project, "--search"],  # post-loop: resolve the agent's writes
+    ]
+    # Settle follows BOTH passes: seed settle, then the pre-grading settle.
+    assert settles == [project, project]
 
 
 def test_headline_is_none_not_zero_when_nothing_completes(
@@ -586,7 +631,7 @@ def test_grouped_manifest_run_shares_projects_and_reports_groups(
     # snapshot_baseline (monkeypatched to raise) was never touched.
     adds = [cmd for cmd in commands if "project" in cmd and "add" in cmd]
     added_projects = sorted(cmd[cmd.index("add") + 1] for cmd in adds)
-    assert added_projects == ["at-xafs-run-xafs-dp001", "at-xafs-run-xafs-dp002"]
+    assert added_projects == ["xafs-run-xafs-dp001", "xafs-run-xafs-dp002"]
     assert sorted(settles) == added_projects
     assert len(settles) == 2
 
@@ -655,7 +700,7 @@ def test_grouped_manifest_run_shares_projects_and_reports_groups(
     assert "- rich: 60 tokens over 6 calls" in report
 
     # The scripted {project} placeholder resolved to the shared group project.
-    assert session.calls[0][1]["project"] == "at-xafs-run-xafs-dp001"
+    assert session.calls[0][1]["project"] == "xafs-run-xafs-dp001"
     assert len(judge.prompts) == 6
 
 

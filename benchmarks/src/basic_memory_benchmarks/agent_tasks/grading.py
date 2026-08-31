@@ -108,6 +108,17 @@ def normalize_answer_item(value: str) -> str:
     return value.strip().lstrip("/").removesuffix(".md").lower()
 
 
+def strip_own_project_prefix(item: str, project_name: str) -> str:
+    """Drop the task's OWN project-name prefix from a normalized answer item.
+
+    Agents quote permalinks exactly as tools return them — ``<project>/<permalink>``
+    — while gold values are project-relative. Only this task's project name is
+    stripped: an item carrying a DIFFERENT project's prefix is genuinely wrong
+    (cross-project leakage) and must keep failing.
+    """
+    return item.removeprefix(normalize_answer_item(project_name) + "/")
+
+
 # --- File helpers ---
 
 
@@ -193,7 +204,7 @@ def _eval_answer_set(grader: AnswerSetEquals, ctx: GradingContext) -> PredicateR
     raw = payload.get(grader.key)
     if not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
         return _result(grader, False, f"answer key '{grader.key}' is not a list of strings")
-    got = {normalize_answer_item(item) for item in raw}
+    got = {strip_own_project_prefix(normalize_answer_item(item), ctx.project_name) for item in raw}
     gold = {normalize_answer_item(item) for item in grader.gold}
     if got == gold:
         return _result(grader, True, f"{len(gold)} items match")

@@ -258,9 +258,11 @@ def _prepare_task_project(
     question is untenable, and grouped runs are read-only so reuse cannot leak
     state between tasks.
     """
+    # The CLI already prefixes generated run ids with "at-"; prepending another
+    # literal here produced "at-at-..." project names in the first real run.
     if task.group is None:
         project = TaskProject(
-            name=f"at-{run_id}-{task.id}", directory=surface_home / "projects" / task.id
+            name=f"{run_id}-{task.id}", directory=surface_home / "projects" / task.id
         )
         source_dir = corpus_dir
     else:
@@ -268,7 +270,7 @@ def _prepare_task_project(
         if cached is not None:
             return cached
         project = TaskProject(
-            name=f"at-{run_id}-{task.group}", directory=surface_home / "projects" / task.group
+            name=f"{run_id}-{task.group}", directory=surface_home / "projects" / task.group
         )
         source_dir = corpus_dir / task.group / "docs"
     copy_corpus(source_dir, project.directory)
@@ -327,6 +329,16 @@ def _run_one_task(
         budget=config.budget,
     )
     if needs_state:
+        # Trigger: the task is graded on project state (files, SQLite index).
+        # Why: a wikilink written mid-loop lands as an unresolved relation row;
+        # BM resolves forward references in a later index pass, and settle only
+        # watches file-sync work — grading straight after settle raced that
+        # pass (first real run: rich curate-connect failed RelationResolves
+        # despite a correct, project-scoped edit_note).
+        # Outcome: re-run the project index (its completion step resolves
+        # forward references — same pass _prepare_task_project relies on),
+        # then settle, so graders read converged state.
+        run_command(prefix + ["reindex", "-p", project.name, "--search"], env=env)
         settle_index(
             prefix=prefix,
             env=env,

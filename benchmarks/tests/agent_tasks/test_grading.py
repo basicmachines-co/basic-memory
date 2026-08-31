@@ -14,6 +14,7 @@ from basic_memory_benchmarks.agent_tasks.grading import (
     extract_final_json,
     grade_task,
     normalize_answer_item,
+    strip_own_project_prefix,
 )
 from basic_memory_benchmarks.agent_tasks.models import TurnRecord
 from basic_memory_benchmarks.agent_tasks.spec import (
@@ -101,6 +102,12 @@ class TestAnswerExtraction:
             "notes/redis-cache-tuning"
         )
 
+    def test_strip_own_project_prefix_only_at_the_boundary(self) -> None:
+        assert strip_own_project_prefix("proj/notes/a", "proj") == "notes/a"
+        # The bare project name and a merely prefix-similar project stay intact.
+        assert strip_own_project_prefix("proj", "proj") == "proj"
+        assert strip_own_project_prefix("projx/notes/a", "proj") == "projx/notes/a"
+
 
 class TestAnswerGraders:
     def test_answer_set_equals_pass_and_fail(self, tmp_path: Path) -> None:
@@ -113,6 +120,24 @@ class TestAnswerGraders:
         result = evaluate_grader(grader, bad)
         assert result.passed is False
         assert "missing" in result.detail
+
+    def test_answer_set_strips_the_tasks_own_project_prefix(self, tmp_path: Path) -> None:
+        # Agents quote permalinks exactly as tools return them — prefixed with
+        # the task's project name — while gold is project-relative. The first
+        # real-model run failed every AnswerSetEquals task on exactly this.
+        gold = frozenset({"notes/a", "notes/b"})
+        grader = AnswerSetEquals(key="permalinks", gold=gold)
+        ctx = _ctx(tmp_path, '```json\n{"permalinks": ["proj/notes/a", "/Proj/notes/b.md"]}\n```')
+        assert evaluate_grader(grader, ctx).passed is True
+
+    def test_answer_set_keeps_a_different_projects_prefix_failing(self, tmp_path: Path) -> None:
+        # Cross-project leakage: a permalink quoted from ANOTHER task's project
+        # is genuinely wrong even though its suffix matches gold.
+        grader = AnswerSetEquals(key="permalinks", gold=frozenset({"notes/a"}))
+        ctx = _ctx(tmp_path, '```json\n{"permalinks": ["other-proj/notes/a"]}\n```')
+        result = evaluate_grader(grader, ctx)
+        assert result.passed is False
+        assert "other-proj/notes/a" in result.detail
 
     def test_answer_set_without_json_fails_with_detail(self, tmp_path: Path) -> None:
         grader = AnswerSetEquals(key="permalinks", gold=frozenset({"a"}))
