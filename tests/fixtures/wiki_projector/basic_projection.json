@@ -3,9 +3,9 @@
   "project_id": "project-88",
   "through_partition_position": 3,
   "expected_sha256": {
-    "guides/index.md": "e0b43158cd8459fc441fb3d4f81100b0de8cf29b4ab324cc01a7b7c77e2c5b63",
-    "guides/log.md": "4f9a35fe972a1bcd7c38495e710b5bd9c712ec8e136033706f7436ecaee57031",
-    "index.md": "95771dff8c870604fdd4d4fce2d9a6dad8be1ea13f9ec56996f4b13218c378d2",
-    "log.md": "058f0f21ec2171d2e922c816ae97419cd2d942f3595db175d0b74a5b1cec9a97"
+    "guides/index.md": "f3ab73a5d89fe41fe8afddb15a4cff876ac7e37b18a3414f026f31bbd993c0c0",
+    "guides/log.md": "b035ec20f8f0f30d8cad072310b484f8eb2e2f8638cb840811a8d8b1f996a2d8",
+    "index.md": "feb74475e91fe6b037b24789d07365a94182e42a3c8ed7e6b1937130792ab87f",
+    "log.md": "7774b9f3cb6f9ee45dd765780ce7f0226ccb0f7dea48c9eaad8ee297fce1dd09"
   }
 }

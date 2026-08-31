@@ -172,7 +172,10 @@ def test_wiki_rejects_persisted_root_that_differs_from_config(tmp_path):
 def test_wiki_rebuild_builds_local_navigation(config_home, config_manager):
     note = config_home / "guides" / "start.md"
     note.parent.mkdir()
-    note.write_text("---\ntitle: Start Here\n---\n\n# Start\n", encoding="utf-8")
+    note.write_text(
+        "---\ntitle: Start Here\npermalink: guides/start\n---\n\n# Start\n",
+        encoding="utf-8",
+    )
 
     result = runner.invoke(
         cli_app,
@@ -187,3 +190,16 @@ def test_wiki_rebuild_builds_local_navigation(config_home, config_manager):
     assert (config_home / "index.md").is_file()
     assert (config_home / "guides" / "index.md").is_file()
     assert "[[guides/index|Guides]]" in (config_home / "index.md").read_text(encoding="utf-8")
+    initial_index = (config_home / "index.md").read_bytes()
+
+    status = runner.invoke(
+        cli_app,
+        ["wiki", "status", "--project", "test-project", "--json"],
+        env={"BASIC_MEMORY_NO_PROMOS": "1"},
+    )
+
+    assert status.exit_code == 0, status.stdout
+    status_report = json.loads(status.stdout)
+    assert status_report["projects"][0]["state"] == "current"
+    assert status_report["projects"][0]["writes"] == []
+    assert (config_home / "index.md").read_bytes() == initial_index

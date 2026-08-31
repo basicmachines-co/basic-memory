@@ -544,6 +544,7 @@ def _render_index(
     return _render_document(
         note_type="Index",
         title=title,
+        permalink=_reserved_path(scope, "index.md").removesuffix(".md"),
         source_watermark=source_watermark,
         generated_at=snapshot.source_accepted_at,
         body="\n".join(body),
@@ -590,6 +591,7 @@ def _render_log(
     return _render_document(
         note_type="Log",
         title=title,
+        permalink=_reserved_path(scope, "log.md").removesuffix(".md"),
         source_watermark=source_watermark,
         generated_at=snapshot.source_accepted_at,
         body="\n".join(body),
@@ -619,6 +621,7 @@ def _render_document(
     *,
     note_type: str,
     title: str,
+    permalink: str,
     source_watermark: int,
     generated_at: datetime,
     body: str,
@@ -628,6 +631,7 @@ def _render_document(
         "---",
         f"type: {note_type}",
         "bm_parse_semantics: false",
+        f"permalink: {json.dumps(permalink, ensure_ascii=False)}",
     ]
     if include_okf_version:
         frontmatter.append(f'okf_version: "{OKF_VERSION}"')
