@@ -15,6 +15,8 @@ longmemeval_dev_output_dir := "benchmarks/generated/longmemeval-s-dev"
 beam_root := "benchmarks/datasets/beam/upstream/chats"
 beam_100k_output_dir := "benchmarks/generated/beam-100k"
 beam_500k_output_dir := "benchmarks/generated/beam-500k"
+xafs_root := "benchmarks/datasets/xafs/upstream"
+xafs_output_dir := "benchmarks/generated/xafs"
 
 # --- Repo maintenance ---
 
@@ -105,6 +107,38 @@ bench-fetch-locomo-audit:
 
 bench-convert-locomo-corrected: bench-fetch-locomo bench-fetch-locomo-audit
     uv run bm-bench convert locomo --dataset-path {{locomo_dataset_path}} --output-dir benchmarks/generated/locomo-corrected --audit-corrections benchmarks/datasets/locomo-audit/corrections.json
+
+# xAFS data is never vendored: pinned hf download, persona-subset by default
+# (the full dataset is ~837MB). personas="" fetches everything.
+bench-fetch-xafs personas="dp_001,dp_002":
+    XAFS_PERSONAS="{{personas}}" bash benchmarks/datasets/xafs/download.sh
+
+# Cheap two-persona smoke by default; personas="all" converts every downloaded persona
+bench-convert-xafs personas="dp_001,dp_002":
+    uv run bm-bench convert xafs --dataset-root {{xafs_root}} --output-dir {{xafs_output_dir}} --personas "{{personas}}"
+
+bench-prepare-xafs: bench-fetch-xafs bench-convert-xafs
+
+# xAFS agent-task run: grouped per-persona corpora, read-only surfaces,
+# tokens-per-correct-answer headline judged semantically (docs/benchmarks.md 6d)
+bench-run-xafs-agent surfaces="rich,posix" model="openai-compat:qwen3@http://localhost:11434/v1" judge="claude:claude-sonnet-4-6":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -z "{{bm_local_path}}" ]]; then
+        echo "BM_LOCAL_PATH must point to the Basic Memory git checkout under test" >&2
+        exit 2
+    fi
+    uv run bm-bench run agent-tasks \
+      --task-manifest {{xafs_output_dir}}/tasks.json \
+      --corpus-dir {{xafs_output_dir}}/groups \
+      --surfaces "{{surfaces}}" \
+      --model "{{model}}" \
+      --judge "{{judge}}" \
+      --bm-local-path "{{bm_local_path}}"
+
+# Seeded question sample (+ gold answers + gold source files) for human audit
+bench-xafs-audit-sample n="20" seed="42":
+    uv run bm-bench sample xafs --dataset-root {{xafs_root}} --n {{n}} --seed {{seed}} --output benchmarks/generated/xafs-audit
 
 # Grouped retrieval over the LongMemEval-S dev slice (bm-local only)
 bench-run-longmemeval-dev:

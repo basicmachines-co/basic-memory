@@ -170,10 +170,39 @@ type Grader = (
 @dataclass(frozen=True)
 class AgentTaskSpec:
     id: str
-    # "memory-continue" | "memory-curate" | "memory-metadata-search" |
-    # "memory-tasks" | "manual"
+    # Shipped tasks: "memory-continue" | "memory-curate" |
+    # "memory-metadata-search" | "memory-tasks" | "manual".
+    # Dataset manifests reuse the field for the question family (e.g. xAFS
+    # "single_hop"), so the per-skill report is the per-family breakdown.
     skill: str
     # Attribution, e.g. "skills/memory-continue/SKILL.md" or "SPEC-47 manual chain".
     source: str
     prompt: str
     graders: tuple[Grader, ...]
+    # Corpus group / persona key for dataset-driven tasks (converter
+    # ``groups/<group>`` layout, one shared project per (surface, group)).
+    # None for the shipped per-task-fresh-corpus tasks.
+    group: str | None = None
+
+
+# Grader kinds that read only the final answer and tool trace — never the
+# settled project directory, baseline snapshot, or SQLite index.
+_STATE_FREE_GRADERS = (
+    AnswerSetEquals,
+    MarkerPresent,
+    MarkerAbsent,
+    AnswerContains,
+    AnswerMatches,
+    ToolCalled,
+    JudgeRubric,
+)
+
+
+def spec_needs_project_state(spec: AgentTaskSpec) -> bool:
+    """Whether grading this task reads project state (files, baseline, index).
+
+    A state-free task can skip the baseline snapshot and the post-loop settle
+    — load-bearing for grouped corpora, where one persona can be hundreds of
+    megabytes.
+    """
+    return any(not isinstance(grader, _STATE_FREE_GRADERS) for grader in spec.graders)

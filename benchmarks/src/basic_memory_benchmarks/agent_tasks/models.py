@@ -25,6 +25,9 @@ class AgentTasksConfig(BaseModel):
     run_id: str
     surfaces: list[str] = Field(default_factory=lambda: ["rich"])
     task_ids: list[str] = Field(default_factory=list)  # empty = all shipped tasks
+    # Converted-dataset tasks.json (e.g. convert xafs); None runs the shipped
+    # task set. Manifest runs are grouped and read-only (see driver).
+    task_manifest: str | None = None
     model_spec: str
     judge_spec: str | None = None
     corpus_dir: str = "benchmarks/datasets/agent-tasks/corpus"
@@ -65,6 +68,8 @@ class AgentTaskResult(BaseModel):
     surface: str
     task_id: str
     skill: str
+    # Corpus group (persona) for dataset-driven tasks; None for shipped tasks.
+    group: str | None = None
     passed: bool
     stopped_reason: StopReason | None = None
     turns: int = 0
@@ -109,6 +114,9 @@ class SurfaceSummary(BaseModel):
     mean_turns: float
     mean_wall_seconds: float
     per_skill: dict[str, SkillBreakdown] = Field(default_factory=dict)
+    # Per-group (persona) breakdown for dataset-driven runs — tokens/correct
+    # per persona is the corpus-scaling curve; empty for shipped-task runs.
+    per_group: dict[str, SkillBreakdown] = Field(default_factory=dict)
     judge_input_tokens: int = 0
     judge_output_tokens: int = 0
     judge_calls: int = 0
@@ -136,6 +144,11 @@ class AgentTasksManifest(BaseModel):
     budget: AgentBudget
     corpus_checksum: str
     corpus_file_count: int
+    # Pins the tasks.json a dataset-driven run executed. corpus_checksum alone
+    # cannot distinguish two runs differing only in --corrections (changed gold
+    # answers/rubrics, excluded questions) — exactly the pre/post-audit A/B.
+    # None for shipped-task runs.
+    task_manifest_sha256: str | None = None
     task_ids: list[str]
     surfaces: list[SurfaceEcho]
     runtime: RuntimeInfo

@@ -9,6 +9,7 @@ from basic_memory_benchmarks.agent_tasks.surfaces import (
     RICH_SURFACE,
     SURFACES,
     SurfaceUnavailableError,
+    read_only_view,
     surface_env,
     verify_surface_tools,
 )
@@ -32,6 +33,26 @@ def test_posix_allowlist_is_read_swap_plus_shared_write_verbs() -> None:
 
 def test_rich_surface_needs_no_config_overrides() -> None:
     assert RICH_SURFACE.config_overrides == {}
+
+
+def test_read_only_view_drops_shared_write_verbs_symmetrically() -> None:
+    # Dataset-manifest runs share one warm project per (surface, group), so
+    # the same four write verbs disappear from BOTH surfaces (fairness).
+    rich_view = read_only_view(RICH_SURFACE)
+    posix_view = read_only_view(POSIX_SURFACE)
+
+    assert rich_view.tool_allowlist == RICH_SURFACE.tool_allowlist[:6]
+    assert posix_view.tool_allowlist == POSIX_READ_TOOLS
+    for view in (rich_view, posix_view):
+        assert not set(SHARED_WRITE_TOOLS) & set(view.tool_allowlist)
+
+
+def test_read_only_view_preserves_identity_and_overrides() -> None:
+    posix_view = read_only_view(POSIX_SURFACE)
+
+    assert posix_view.name == "posix"
+    assert posix_view.config_overrides == POSIX_SURFACE.config_overrides
+    assert posix_view.requires == POSIX_SURFACE.requires
 
 
 def test_surface_env_maps_flag_to_basic_memory_env_var() -> None:

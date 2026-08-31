@@ -20,13 +20,25 @@ from basic_memory_benchmarks.agent_tasks.driver import (
 )
 from basic_memory_benchmarks.agent_tasks.loop import ToolOutcome
 from basic_memory_benchmarks.agent_tasks.models import AgentTaskResult, AgentTasksConfig
+from basic_memory_benchmarks.agent_tasks.spec import AgentTaskSpec, JudgeRubric
 from basic_memory_benchmarks.agent_tasks.surfaces import (
     RICH_SURFACE,
     SurfaceUnavailableError,
+    read_only_view,
 )
+from basic_memory_benchmarks.converters.xafs_to_corpus import convert_xafs_to_corpus
 from basic_memory_benchmarks.fairness import validate_surface_fairness
-from basic_memory_benchmarks.llm.runners import LLMRunnerError
+from basic_memory_benchmarks.llm.runners import LLMResult, LLMRunner, LLMRunnerError
 from basic_memory_benchmarks.llm.tool_agent import ScriptedToolAgent, ToolDef
+from basic_memory_benchmarks.utils import sha256_file
+from xafs_fixture import (
+    DP1_CROSS_FORMAT_ANSWER,
+    DP1_DUE_DATE,
+    DP1_INVOICE_AMOUNT,
+    DP1_REFERRER,
+    DP2_TRAINING_SUMMARY,
+    write_xafs_root,
+)
 
 CORPUS_DIR = Path(__file__).parents[2] / "benchmarks" / "datasets" / "agent-tasks" / "corpus"
 
@@ -162,6 +174,7 @@ def test_happy_path_writes_all_artifacts(tmp_path: Path, monkeypatch: pytest.Mon
     manifest = json.loads((run_dir / "manifest.json").read_text())
     assert manifest["bm_resolved_sha"] == "deadbeef"
     assert manifest["corpus_file_count"] > 20
+    assert manifest["task_manifest_sha256"] is None  # shipped-task run
     assert manifest["surfaces"][0]["name"] == "rich"
     assert manifest["surfaces"][0]["tool_allowlist"] == list(RICH_SURFACE.tool_allowlist)
     assert manifest["surfaces"][0]["observed_tools"] == sorted(RICH_SURFACE.tool_allowlist)
@@ -435,6 +448,267 @@ def test_build_surface_summary_excludes_errored_from_means() -> None:
     assert summary.tokens_per_completed_task == 200.0
     assert summary.mean_tool_calls == 2.0  # errored rows excluded from means
     assert summary.per_skill["memory-curate"].tokens_per_completed is None
+
+
+# --- Dataset-manifest (grouped) runs: the xAFS execution path ---
+
+
+MANIFEST_TASK_IDS = [
+    "xafs-dp001-q01",
+    "xafs-dp001-q02",
+    "xafs-dp001-q03",
+    "xafs-dp001-q04",
+    "xafs-dp002-q01",
+    "xafs-dp002-q02",
+]
+
+
+class _StubJudgeRunner(LLMRunner):
+    """Judge stub: CORRECT unless the judged final answer contains 'WRONG'."""
+
+    def __init__(self) -> None:
+        self.spec = "stub:judge"
+        self.prompts: list[str] = []
+
+    def complete(self, prompt: str) -> LLMResult:
+        self.prompts.append(prompt)
+        # Everything after the template's "Final answer:" is the agent's text;
+        # judging on it (not the rubric half) keeps the verdict answer-driven.
+        answer = prompt.split("Final answer:", 1)[1]
+        verdict = "INCORRECT - decoy answer" if "WRONG" in answer else "CORRECT - matches gold"
+        return LLMResult(
+            text=verdict, model="stub", input_tokens=7, output_tokens=3, latency_ms=0.0
+        )
+
+
+def _stub_bm_recording(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[list[list[str]], list[str]]:
+    """Like _stub_bm, but records every bm command and settle for assertions."""
+    commands: list[list[str]] = []
+    settles: list[str] = []
+    monkeypatch.setattr(driver, "resolve_clean_checkout_sha", lambda checkout: "deadbeef")
+
+    def record_command(command: list[str], **kwargs: Any) -> SimpleNamespace:
+        commands.append(list(command))
+        return SimpleNamespace(stdout="", stderr="")
+
+    monkeypatch.setattr(driver, "run_command", record_command)
+
+    def record_settle(
+        *, prefix: list[str], env: dict[str, str], project_name: str, timeout_seconds: float
+    ) -> tuple[float, str]:
+        settles.append(project_name)
+        return (0.0, "status-json")
+
+    monkeypatch.setattr(driver, "settle_index", record_settle)
+    return commands, settles
+
+
+def _forbid_baseline(project_dir: Path) -> dict[str, str]:
+    raise AssertionError("snapshot_baseline must not run for state-free manifest tasks")
+
+
+def _xafs_agent() -> ScriptedToolAgent:
+    """One scripted answer per fixture question, keyed by prompt substring.
+
+    format_spanning questions read the raw file resource (read_content);
+    single/multi-hop search notes. dp_002 q01 answers with a WRONG decoy the
+    stub judge marks INCORRECT, so pass/fail is judge-driven.
+    """
+
+    def turns(tool: str, arguments: dict[str, Any], answer: str) -> list[dict[str, Any]]:
+        return [
+            {"tool_calls": [{"name": tool, "arguments": {**arguments, "project": "{project}"}}]},
+            {"text": f"{answer}\n```json\n{{}}\n```"},
+        ]
+
+    return ScriptedToolAgent(
+        script={
+            "tasks": {
+                "amount of the Acme onboarding invoice": turns(
+                    "search_notes", {"query": "invoice"}, f"The invoice was {DP1_INVOICE_AMOUNT}."
+                ),
+                "referred the client": turns(
+                    "search_notes", {"query": "referral"}, f"{DP1_REFERRER} referred Acme."
+                ),
+                "when is payment due": turns(
+                    "read_content",
+                    {"path": "data/mail/2026-04-01_invoice.eml"},
+                    f"Payment is due {DP1_DUE_DATE}.",
+                ),
+                "revenue first exceed": turns(
+                    "read_content",
+                    {"path": "data/notes/metrics.csv.md"},
+                    f"In {DP1_CROSS_FORMAT_ANSWER}.",
+                ),
+                "goal pace": turns("search_notes", {"query": "pace"}, "WRONG: 9:30 per mile."),
+                "longest run": turns("search_notes", {"query": "race"}, f"{DP2_TRAINING_SUMMARY}."),
+            }
+        }
+    )
+
+
+def _manifest_config(tmp_path: Path) -> AgentTasksConfig:
+    root = write_xafs_root(tmp_path)
+    groups_dir, tasks_path, _, _ = convert_xafs_to_corpus(
+        dataset_root=root, output_dir=tmp_path / "generated"
+    )
+    return _config(
+        tmp_path,
+        run_id="xafs-run",
+        task_ids=[],
+        task_manifest=str(tasks_path),
+        corpus_dir=str(groups_dir),
+        judge_spec="stub:judge",
+    )
+
+
+def test_grouped_manifest_run_shares_projects_and_reports_groups(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _manifest_config(tmp_path)
+    commands, settles = _stub_bm_recording(monkeypatch)
+    monkeypatch.setattr(driver, "snapshot_baseline", _forbid_baseline)
+    monkeypatch.chdir(tmp_path)
+    session = FakeSession(RICH_SURFACE.tool_allowlist)
+    judge = _StubJudgeRunner()
+
+    run_dir = run_agent_tasks(
+        config,
+        model_factory=lambda spec: _xafs_agent(),
+        session_factory=lambda runtime: session,
+        judge_factory=lambda spec: judge,
+    )
+
+    # Ingest once per (surface, group): one `project add` and one settle per
+    # persona; NO post-loop settles (every manifest task is state-free), and
+    # snapshot_baseline (monkeypatched to raise) was never touched.
+    adds = [cmd for cmd in commands if "project" in cmd and "add" in cmd]
+    added_projects = sorted(cmd[cmd.index("add") + 1] for cmd in adds)
+    assert added_projects == ["at-xafs-run-xafs-dp001", "at-xafs-run-xafs-dp002"]
+    assert sorted(settles) == added_projects
+    assert len(settles) == 2
+
+    manifest = json.loads((run_dir / "manifest.json").read_text())
+    assert manifest["task_ids"] == MANIFEST_TASK_IDS  # (group, id) order
+    # tasks.json is pinned alongside the corpus: a corrections re-run changes
+    # gold answers/rubrics without touching the corpus checksum.
+    assert config.task_manifest is not None
+    assert manifest["task_manifest_sha256"] == sha256_file(Path(config.task_manifest))
+    # The read-only surface view is what actually ran, echoed for the
+    # fairness audit trail: no write verbs on a shared warm project.
+    echo = manifest["surfaces"][0]
+    assert echo["tool_allowlist"] == list(read_only_view(RICH_SURFACE).tool_allowlist)
+    assert "write_note" not in echo["tool_allowlist"]
+
+    rows = [
+        json.loads(line) for line in (run_dir / "per-task-agent.jsonl").read_text().splitlines()
+    ]
+    assert [row["task_id"] for row in rows] == MANIFEST_TASK_IDS
+    assert [row["group"] for row in rows] == ["xafs-dp001"] * 4 + ["xafs-dp002"] * 2
+    # skill = family: the per-skill report is the per-question-type breakdown.
+    assert {row["skill"] for row in rows} == {"single_hop", "multi_hop", "format_spanning"}
+
+    # Judge-driven pass/fail: the WRONG decoy fails as a graded task (never an
+    # error row); everything else passes.
+    (failed,) = [row for row in rows if not row["passed"]]
+    assert failed["task_id"] == "xafs-dp002-q01"
+    assert failed["error"] is None
+    assert failed["predicates"][0]["kind"] == "JudgeRubric"
+    assert failed["predicates"][0]["passed"] is False
+
+    summary = json.loads((run_dir / "agent-tasks-summary.json").read_text())
+    surface = summary["surfaces"][0]
+    assert surface["tasks_passed"] == 5
+    assert surface["tasks_errored"] == 0
+    # Headline excludes judge tokens: 6 tasks x 2 scripted model turns at
+    # 10 in / 5 out each; the judge's 7/3 per call lands only in judge_*.
+    assert surface["total_input_tokens"] == 120
+    assert surface["total_output_tokens"] == 60
+    assert surface["tokens_per_completed_task"] == 36.0
+    assert surface["judge_calls"] == 6
+    assert surface["judge_input_tokens"] == 42
+    assert surface["judge_output_tokens"] == 18
+    assert surface["per_skill"]["single_hop"] == {
+        "total": 2,
+        "passed": 1,
+        "tokens_per_completed": 60.0,
+    }
+    # tokens/correct per group (persona) is the corpus-scaling curve.
+    assert surface["per_group"]["xafs-dp001"] == {
+        "total": 4,
+        "passed": 4,
+        "tokens_per_completed": 30.0,
+    }
+    assert surface["per_group"]["xafs-dp002"] == {
+        "total": 2,
+        "passed": 1,
+        "tokens_per_completed": 60.0,
+    }
+
+    report = (run_dir / "summary.md").read_text()
+    assert "## Per group (persona)" in report
+    assert "| rich | xafs-dp001 | 4/4 | 30.0 |" in report
+    assert "| rich | xafs-dp002 | 1/2 | 60.0 |" in report
+    assert "## Judge usage (never part of the headline)" in report
+    assert "- rich: 60 tokens over 6 calls" in report
+
+    # The scripted {project} placeholder resolved to the shared group project.
+    assert session.calls[0][1]["project"] == "at-xafs-run-xafs-dp001"
+    assert len(judge.prompts) == 6
+
+
+def test_mixed_grouped_and_ungrouped_task_set_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_bm(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    mixed = [
+        AgentTaskSpec(
+            id="a",
+            skill="s",
+            source="src",
+            prompt="p",
+            graders=(JudgeRubric(rubric="r"),),
+            group="g1",
+        ),
+        AgentTaskSpec(
+            id="b", skill="s", source="src", prompt="p", graders=(JudgeRubric(rubric="r"),)
+        ),
+    ]
+    monkeypatch.setattr(driver, "load_task_manifest", lambda path, task_ids=None: mixed)
+    # The manifest file must exist: the driver fingerprints it before loading.
+    (tmp_path / "tasks.json").write_text("[]", encoding="utf-8")
+    config = _config(tmp_path, task_ids=[], task_manifest="tasks.json")
+
+    with pytest.raises(ValueError, match="mixes grouped and ungrouped"):
+        run_agent_tasks(
+            config,
+            model_factory=lambda spec: _orphan_agent(),
+            session_factory=lambda runtime: FakeSession(RICH_SURFACE.tool_allowlist),
+        )
+
+
+def test_grouped_run_requires_the_converter_groups_layout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _stub_bm(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    root = write_xafs_root(tmp_path)
+    _, tasks_path, _, _ = convert_xafs_to_corpus(
+        dataset_root=root, output_dir=tmp_path / "generated"
+    )
+    # corpus_dir left at the shipped flat corpus: the run must refuse rather
+    # than checksum one corpus and ingest another.
+    config = _config(tmp_path, task_ids=[], task_manifest=str(tasks_path))
+
+    with pytest.raises(ValueError, match="must point at the converter's groups/"):
+        run_agent_tasks(
+            config,
+            model_factory=lambda spec: _xafs_agent(),
+            session_factory=lambda runtime: FakeSession(RICH_SURFACE.tool_allowlist),
+        )
 
 
 class TestToolOutcomeFromResult:

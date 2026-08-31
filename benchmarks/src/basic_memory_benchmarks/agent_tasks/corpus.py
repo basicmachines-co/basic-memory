@@ -33,9 +33,15 @@ TIMESTAMPS: MappingProxyType[str, int] = MappingProxyType(
 
 
 def corpus_files(corpus_dir: Path) -> list[str]:
-    """Sorted relpaths of every markdown note in the corpus."""
+    """Sorted relpaths of every file in the corpus.
+
+    Every extension, not just ``.md``: dataset corpora (xAFS) carry
+    non-markdown resources (``.eml`` mails) that the checksum, copy, and
+    timestamp passes must all see. The shipped agent-tasks corpus is md-only,
+    so its behavior is unchanged.
+    """
     return sorted(
-        str(path.relative_to(corpus_dir)) for path in corpus_dir.rglob("*.md") if path.is_file()
+        str(path.relative_to(corpus_dir)) for path in corpus_dir.rglob("*") if path.is_file()
     )
 
 
@@ -68,8 +74,14 @@ def apply_timestamps(project_dir: Path, *, now: float | None = None) -> None:
 
 
 def snapshot_baseline(project_dir: Path) -> dict[str, str]:
-    """relpath -> file text for every markdown note (taken after seed settle)."""
+    """relpath -> file text for the markdown notes only (taken after seed settle).
+
+    Deliberately narrower than ``corpus_files``: state-tracking graders reason
+    about markdown notes only (``grading._markdown_relpaths``), and a corpus
+    with a binary resource would crash ``read_text`` here.
+    """
     return {
         relpath: (project_dir / relpath).read_text(encoding="utf-8")
         for relpath in corpus_files(project_dir)
+        if relpath.endswith(".md")
     }

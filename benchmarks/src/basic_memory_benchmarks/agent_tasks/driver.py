@@ -32,6 +32,7 @@ from basic_memory_benchmarks.agent_tasks.loop import (
     ToolOutcome,
     run_agent_loop,
 )
+from basic_memory_benchmarks.agent_tasks.manifest import load_task_manifest
 from basic_memory_benchmarks.agent_tasks.models import (
     AgentTaskResult,
     AgentTasksConfig,
@@ -40,11 +41,12 @@ from basic_memory_benchmarks.agent_tasks.models import (
     SurfaceEcho,
     SurfaceSummary,
 )
-from basic_memory_benchmarks.agent_tasks.spec import AgentTaskSpec
+from basic_memory_benchmarks.agent_tasks.spec import AgentTaskSpec, spec_needs_project_state
 from basic_memory_benchmarks.agent_tasks.surfaces import (
     SURFACES,
     SurfaceUnavailableError,
     ToolSurface,
+    read_only_view,
     surface_env,
     verify_surface_tools,
 )
@@ -68,7 +70,13 @@ from basic_memory_benchmarks.llm.tool_agent import (
     substitute_placeholders,
 )
 from basic_memory_benchmarks.models import ProviderStatus, RuntimeInfo
-from basic_memory_benchmarks.utils import git_sha, run_command, runtime_info, utc_now_iso
+from basic_memory_benchmarks.utils import (
+    git_sha,
+    run_command,
+    runtime_info,
+    sha256_file,
+    utc_now_iso,
+)
 
 console = Console()
 
@@ -198,12 +206,18 @@ def _errored_result(
     # under-report spent cost.
     if partial is None:
         return AgentTaskResult(
-            surface=surface, task_id=task.id, skill=task.skill, passed=False, error=error
+            surface=surface,
+            task_id=task.id,
+            skill=task.skill,
+            group=task.group,
+            passed=False,
+            error=error,
         )
     return AgentTaskResult(
         surface=surface,
         task_id=task.id,
         skill=task.skill,
+        group=task.group,
         passed=False,
         error=error,
         stopped_reason=partial.stopped_reason,
@@ -214,6 +228,60 @@ def _errored_result(
         wall_seconds=round(partial.wall_seconds, 2),
         turn_records=partial.turn_records,
     )
+
+
+@dataclass(frozen=True)
+class TaskProject:
+    """The BM project a task runs against: per-task fresh, or shared per group."""
+
+    name: str
+    directory: Path
+
+
+def _prepare_task_project(
+    *,
+    task: AgentTaskSpec,
+    run_id: str,
+    corpus_dir: Path,
+    surface_home: Path,
+    prefix: list[str],
+    env: dict[str, str],
+    settle_timeout_seconds: float,
+    prepared_groups: dict[str, TaskProject],
+) -> TaskProject:
+    """Copy, register, and settle the project this task runs against.
+
+    Ungrouped (shipped) tasks get a fresh corpus copy each — the fairness
+    contract's identical starting state for write-graded tasks. Grouped tasks
+    (dataset manifests) ingest ONCE per (surface, group) and every task in the
+    group reuses the warm project: copying a multi-hundred-MB persona per
+    question is untenable, and grouped runs are read-only so reuse cannot leak
+    state between tasks.
+    """
+    if task.group is None:
+        project = TaskProject(
+            name=f"at-{run_id}-{task.id}", directory=surface_home / "projects" / task.id
+        )
+        source_dir = corpus_dir
+    else:
+        cached = prepared_groups.get(task.group)
+        if cached is not None:
+            return cached
+        project = TaskProject(
+            name=f"at-{run_id}-{task.group}", directory=surface_home / "projects" / task.group
+        )
+        source_dir = corpus_dir / task.group / "docs"
+    copy_corpus(source_dir, project.directory)
+    run_command(prefix + ["project", "add", project.name, str(project.directory)], env=env)
+    settle_index(
+        prefix=prefix,
+        env=env,
+        project_name=project.name,
+        timeout_seconds=settle_timeout_seconds,
+    )
+    if task.group is not None:
+        prepared_groups[task.group] = project
+    return project
 
 
 def _run_one_task(
@@ -228,24 +296,21 @@ def _run_one_task(
     prefix: list[str],
     env: dict[str, str],
     surface_home: Path,
+    project: TaskProject,
 ) -> AgentTaskResult:
-    project_name = f"at-{config.run_id}-{task.id}"
-    project_dir = surface_home / "projects" / task.id
-    copy_corpus(Path(config.corpus_dir), project_dir)
-    run_command(prefix + ["project", "add", project_name, str(project_dir)], env=env)
-    settle_index(
-        prefix=prefix,
-        env=env,
-        project_name=project_name,
-        timeout_seconds=config.settle_timeout_seconds,
-    )
-    baseline = snapshot_baseline(project_dir)
-    prompt = TASK_PROMPT_TEMPLATE.format(project=project_name, task_prompt=task.prompt)
+    # Trigger: every grader reads only the final answer / tool trace.
+    # Why: the baseline snapshot loads the whole corpus into memory (a large
+    # xAFS persona is hundreds of MB) and the post-loop settle waits on an
+    # index no grader will read.
+    # Outcome: skip both; project-state graders keep the full flow.
+    needs_state = spec_needs_project_state(task)
+    baseline = snapshot_baseline(project.directory) if needs_state else {}
+    prompt = TASK_PROMPT_TEMPLATE.format(project=project.name, task_prompt=task.prompt)
 
     def dispatch(name: str, arguments: dict[str, Any]) -> ToolOutcome:
         # {project} placeholders come from the scripted transport, which cannot
         # know per-run project names; a no-op for real model output.
-        resolved = substitute_placeholders(arguments, {"project": project_name})
+        resolved = substitute_placeholders(arguments, {"project": project.name})
         return session.call_tool(name, resolved)
 
     loop_result = run_agent_loop(
@@ -255,18 +320,19 @@ def _run_one_task(
         prompt=prompt,
         budget=config.budget,
     )
-    settle_index(
-        prefix=prefix,
-        env=env,
-        project_name=project_name,
-        timeout_seconds=config.settle_timeout_seconds,
-    )
+    if needs_state:
+        settle_index(
+            prefix=prefix,
+            env=env,
+            project_name=project.name,
+            timeout_seconds=config.settle_timeout_seconds,
+        )
     ctx = GradingContext(
         final_answer=loop_result.final_answer,
-        project_dir=project_dir,
+        project_dir=project.directory,
         baseline=baseline,
         db_path=surface_home / "config" / "memory.db",
-        project_name=project_name,
+        project_name=project.name,
         turn_records=loop_result.turn_records,
         judge=judge,
     )
@@ -280,6 +346,7 @@ def _run_one_task(
         surface=surface.name,
         task_id=task.id,
         skill=task.skill,
+        group=task.group,
         passed=passed,
         stopped_reason=loop_result.stopped_reason,
         turns=loop_result.turns,
@@ -310,18 +377,25 @@ def build_surface_summary(
         if row.stopped_reason is not None and row.stopped_reason != "final"
     )
 
-    per_skill: dict[str, SkillBreakdown] = {}
-    for skill in sorted({row.skill for row in results}):
-        skill_rows = [row for row in results if row.skill == skill]
-        skill_passed = [row for row in skill_rows if row.error is None and row.passed]
-        skill_tokens = sum(row.total_input_tokens + row.total_output_tokens for row in skill_rows)
-        per_skill[skill] = SkillBreakdown(
-            total=len(skill_rows),
-            passed=len(skill_passed),
-            tokens_per_completed=round(skill_tokens / len(skill_passed), 1)
-            if skill_passed
-            else None,
+    def breakdown(rows: list[AgentTaskResult]) -> SkillBreakdown:
+        completed = [row for row in rows if row.error is None and row.passed]
+        tokens = sum(row.total_input_tokens + row.total_output_tokens for row in rows)
+        return SkillBreakdown(
+            total=len(rows),
+            passed=len(completed),
+            tokens_per_completed=round(tokens / len(completed), 1) if completed else None,
         )
+
+    per_skill = {
+        skill: breakdown([row for row in results if row.skill == skill])
+        for skill in sorted({row.skill for row in results})
+    }
+    # tokens/correct per group (persona) IS the corpus-scaling curve for
+    # dataset-driven runs; empty for shipped tasks (group is None everywhere).
+    per_group = {
+        group: breakdown([row for row in results if row.group == group])
+        for group in sorted({row.group for row in results if row.group is not None})
+    }
 
     return SurfaceSummary(
         surface=surface,
@@ -343,6 +417,7 @@ def build_surface_summary(
         mean_turns=round(mean(row.turns for row in graded), 2) if graded else 0.0,
         mean_wall_seconds=round(mean(row.wall_seconds for row in graded), 2) if graded else 0.0,
         per_skill=per_skill,
+        per_group=per_group,
         judge_input_tokens=sum(row.judge_input_tokens for row in results),
         judge_output_tokens=sum(row.judge_output_tokens for row in results),
         judge_calls=sum(row.judge_calls for row in results),
@@ -414,6 +489,21 @@ def build_agent_summary_markdown(
                 f" {_format_tokens_per_completed(breakdown.tokens_per_completed)} |"
             )
 
+    # Per-group = per-persona: tokens/correct against corpus size is the
+    # scaling read dataset-driven runs (xAFS) exist to produce.
+    if any(summary.per_group for summary in summaries):
+        lines += ["", "## Per group (persona)", ""]
+        lines += [
+            "| Surface | Group | Passed/total | Tokens/completed |",
+            "| --- | --- | --- | --- |",
+        ]
+        for summary in summaries:
+            for group, breakdown in summary.per_group.items():
+                lines.append(
+                    f"| {summary.surface} | {group} | {breakdown.passed}/{breakdown.total} |"
+                    f" {_format_tokens_per_completed(breakdown.tokens_per_completed)} |"
+                )
+
     stops = [(s.surface, s.budget_stops) for s in summaries if s.budget_stops]
     if stops:
         lines += ["", "## Budget stops", ""]
@@ -473,7 +563,38 @@ def run_agent_tasks(
     if not corpus_dir.is_dir():
         raise ValueError(f"Corpus dir not found: {corpus_dir}")
     checksum, corpus_file_count = corpus_checksum(corpus_dir)
-    tasks = select_tasks(config.task_ids)
+
+    # Task source: the shipped Python task set, or a converted dataset manifest
+    # (e.g. `convert xafs`) whose grouped, judge-graded rows run through the
+    # exact same loop, budgets, and reporting.
+    if config.task_manifest:
+        task_manifest_path = Path(config.task_manifest)
+        # corpus_checksum pins the haystack; this pins the questions. A
+        # corrections re-run changes gold answers/rubrics without touching the
+        # corpus, and that A/B must be visible in manifest.json.
+        task_manifest_sha256 = sha256_file(task_manifest_path)
+        tasks = load_task_manifest(task_manifest_path, task_ids=config.task_ids)
+    else:
+        task_manifest_sha256 = None
+        tasks = select_tasks(config.task_ids)
+
+    # Grouped tasks expect corpus_dir to be a converter groups/ dir (one
+    # subtree per group); ungrouped tasks expect a flat corpus. Mixing the two
+    # in one run would make corpus_dir mean both at once.
+    grouped_ids = sorted({task.group for task in tasks if task.group is not None})
+    ungrouped_ids = [task.id for task in tasks if task.group is None]
+    if grouped_ids and ungrouped_ids:
+        raise ValueError(
+            f"Task set mixes grouped and ungrouped tasks (grouped={grouped_ids[:3]},"
+            f" ungrouped={ungrouped_ids[:3]}); a run must be one or the other"
+        )
+    for group in grouped_ids:
+        group_docs = corpus_dir / group / "docs"
+        if not group_docs.is_dir():
+            raise ValueError(
+                f"Grouped corpus missing {group_docs}; --corpus-dir must point at the"
+                " converter's groups/ directory"
+            )
 
     # Model and judge parse before any on-disk state is created, so a bad spec
     # fails fast without leaving an empty benchmark home behind.
@@ -498,6 +619,13 @@ def run_agent_tasks(
 
     for surface_name in config.surfaces:
         surface = SURFACES[surface_name]
+        if config.task_manifest:
+            # Trigger: manifest-driven (grouped) run.
+            # Why: tasks in a group share one warm project, and a write_note
+            # from an earlier question would pollute later questions' haystack.
+            # Outcome: the shared write verbs are dropped from BOTH surfaces
+            # symmetrically (fairness preserved; echoed via SurfaceEcho).
+            surface = read_only_view(surface)
         surface_home = home / surface.name
         (surface_home / "default-home").mkdir(parents=True)
         env = surface_env(surface, isolated_bm_env(surface_home))
@@ -541,6 +669,7 @@ def run_agent_tasks(
             # Deterministic order: schemas reach the model in allowlist order.
             tool_defs = [by_name[name] for name in surface.tool_allowlist]
 
+            prepared_groups: dict[str, TaskProject] = {}
             session_error: str | None = None
             for task in tasks:
                 if session_error is not None:
@@ -552,6 +681,16 @@ def run_agent_tasks(
                     continue
                 console.print(f"  [{surface.name}] task [cyan]{task.id}[/cyan]...")
                 try:
+                    project = _prepare_task_project(
+                        task=task,
+                        run_id=config.run_id,
+                        corpus_dir=corpus_dir,
+                        surface_home=surface_home,
+                        prefix=prefix,
+                        env=env,
+                        settle_timeout_seconds=config.settle_timeout_seconds,
+                        prepared_groups=prepared_groups,
+                    )
                     result = _run_one_task(
                         surface=surface,
                         task=task,
@@ -563,6 +702,7 @@ def run_agent_tasks(
                         prefix=prefix,
                         env=env,
                         surface_home=surface_home,
+                        project=project,
                     )
                 except AgentLoopError as exc:
                     # The loop wraps every mid-task failure with the partial
@@ -615,6 +755,7 @@ def run_agent_tasks(
         budget=config.budget,
         corpus_checksum=checksum,
         corpus_file_count=corpus_file_count,
+        task_manifest_sha256=task_manifest_sha256,
         task_ids=[task.id for task in tasks],
         surfaces=echoes,
         runtime=RuntimeInfo(

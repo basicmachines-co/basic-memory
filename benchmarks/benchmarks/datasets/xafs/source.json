@@ -1,0 +1,6 @@
+{
+  "dataset_id": "xafs",
+  "source_url": "https://huggingface.co/datasets/supermemory/xAFS",
+  "citation": "xAFS (supermemory, 2026), revision 21142b2c01113cb881c80d6c99bcf0f412ed17f2",
+  "license_note": "CC-BY-4.0; vendor-authored (supermemory) — secondary dataset pending question-quality audit"
+}
