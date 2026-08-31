@@ -680,6 +680,7 @@ async def test_prepare_edit_entity_content_metadata_ignores_identity_fields(
     entity_service,
     file_service,
 ) -> None:
+    """title and permalink stay under their own resolvers, whatever `metadata` says."""
     created = await entity_service.create_entity(
         EntitySchema(
             title="Metadata Identity Guard",
@@ -697,7 +698,6 @@ async def test_prepare_edit_entity_content_metadata_ignores_identity_fields(
         content="",
         metadata={
             "title": "Hijacked Title",
-            "type": "hijacked",
             "permalink": "hijacked/permalink",
             "status": "resolved",
         },
@@ -709,6 +709,41 @@ async def test_prepare_edit_entity_content_metadata_ignores_identity_fields(
     assert prepared.entity_fields.permalink == created.permalink
     assert prepared_frontmatter["title"] == "Metadata Identity Guard"
     assert prepared_frontmatter["permalink"] == created.permalink
+    # An untouched note type is not collateral damage of the guard above.
+    assert prepared.entity_fields.note_type == "note"
+
+
+@pytest.mark.asyncio
+async def test_prepare_edit_entity_content_metadata_sets_note_type(
+    entity_service,
+    file_service,
+) -> None:
+    """`type` is a plain frontmatter field: the merge writes it and the read-back keeps it."""
+    created = await entity_service.create_entity(
+        EntitySchema(
+            title="Metadata Type Change",
+            directory="notes",
+            note_type="note",
+            content="Original body",
+        )
+    )
+
+    current_content = await file_service.read_file_content(created.file_path)
+    prepared = await entity_service.prepare_edit_entity_content(
+        created,
+        current_content,
+        operation="append",
+        content="",
+        metadata={"type": "decision"},
+    )
+
+    prepared_frontmatter = parse_frontmatter(prepared.markdown_content)
+    assert prepared_frontmatter["type"] == "decision"
+    assert prepared.entity_fields.note_type == "decision"
+    # Setting the type is not a license to move the note.
+    assert prepared.entity_fields.title == "Metadata Type Change"
+    assert prepared.entity_fields.permalink == created.permalink
+    assert "Original body" in remove_frontmatter(prepared.markdown_content)
 
 
 @pytest.mark.asyncio
@@ -826,8 +861,20 @@ async def test_prepare_edit_entity_content_metadata_rejects_null_values(
 def test_merge_metadata_into_markdown_identity_only_metadata_is_noop():
     """A merge holding only identity fields must leave the markdown byte-identical."""
     markdown = "---\nstatus: draft\n---\n\nBody  \n"
-    merged = _merge_metadata_into_markdown(markdown, {"title": "X", "type": "y", "permalink": "z"})
+    merged = _merge_metadata_into_markdown(markdown, {"title": "X", "permalink": "z"})
     assert merged == markdown
+
+
+def test_merge_metadata_into_markdown_writes_type():
+    """`type` is merged like any other field, while title and permalink are still dropped."""
+    markdown = "---\ntitle: Keep Me\ntype: note\npermalink: notes/keep-me\n---\n\nBody\n"
+    merged = _merge_metadata_into_markdown(
+        markdown, {"title": "X", "type": "decision", "permalink": "z"}
+    )
+    merged_frontmatter = parse_frontmatter(merged)
+    assert merged_frontmatter["type"] == "decision"
+    assert merged_frontmatter["title"] == "Keep Me"
+    assert merged_frontmatter["permalink"] == "notes/keep-me"
 
 
 def test_merge_metadata_into_markdown_preserves_crlf_body():

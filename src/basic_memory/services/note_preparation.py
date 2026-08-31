@@ -689,18 +689,20 @@ def apply_edit_operation(
     raise ValueError(f"Unsupported operation: {operation}")
 
 
-# title/type/permalink already have dedicated resolution paths in
-# prepare_edit_entity_content (H1 title reconciliation, permalink resolver). Letting a
-# metadata merge touch them would race with those paths and could be silently reverted.
-_METADATA_IDENTITY_FIELDS = frozenset({"title", "type", "permalink"})
+# title and permalink get reworked after the merge in prepare_edit_entity_content —
+# title by H1 reconciliation, permalink by the collision-suffixing resolver. Either can
+# hand back a value the caller did not ask for, so a metadata merge that set them would
+# be silently reverted. `type` has no such second opinion: prepare_edit_entity_content
+# just reads it back out of the frontmatter, so writing it there is how you set it.
+_METADATA_IDENTITY_FIELDS = frozenset({"title", "permalink"})
 
 
 def _merge_metadata_into_markdown(markdown_content: str, metadata: dict[str, Any]) -> str:
     """Merge caller-supplied fields into a markdown string's YAML frontmatter.
 
-    Identity fields (title/type/permalink) are dropped from the merge; every other key
-    overwrites the existing frontmatter value or is added new. The note body, and any
-    frontmatter keys not present in ``metadata``, are left untouched.
+    Identity fields (title/permalink) are dropped from the merge; every other key,
+    ``type`` included, overwrites the existing frontmatter value or is added new. The
+    note body, and any frontmatter keys not present in ``metadata``, are left untouched.
     """
     null_keys = sorted(key for key, value in metadata.items() if value is None)
     if null_keys:

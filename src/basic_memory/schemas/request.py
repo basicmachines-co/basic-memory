@@ -83,7 +83,7 @@ class EditEntityRequest(BaseModel):
     replace_subsections: bool = True
     # Frontmatter fields to merge, independent of `operation` (issue #1011). Set/overwrite
     # semantics: provided keys overwrite existing values, unrelated keys and the body are
-    # untouched. title/type/permalink are ignored — they have their own resolution paths.
+    # untouched. title/permalink are ignored — they have their own resolution paths.
     metadata: Optional[dict[str, Any]] = None
 
     @field_validator("section")

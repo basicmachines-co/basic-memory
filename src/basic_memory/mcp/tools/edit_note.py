@@ -437,9 +437,9 @@ async def edit_note(
         metadata: Optional dict of frontmatter fields to merge, independent of `operation`.
             Provided keys overwrite existing frontmatter values (or are added if new);
             unrelated frontmatter keys and the note body are left untouched. Can be
-            combined with any operation in the same call. `title`, `type`, and `permalink`
-            are ignored since those have their own dedicated handling. Key deletion is
-            not supported.
+            combined with any operation in the same call. `title` and `permalink` are
+            ignored since those have their own dedicated handling; `type` is applied like
+            any other frontmatter field. Key deletion is not supported.
         output_format: "text" returns the existing markdown summary. "json" returns
             machine-readable edit metadata.
         context: Optional FastMCP context for performance caching.
