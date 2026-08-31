@@ -146,6 +146,7 @@ class OpenAICompatToolAgent(ToolAgentModel):
         base_url: str,
         *,
         api_key: str | None = None,
+        extra_headers: dict[str, str] | None = None,
         timeout_seconds: float = 300.0,
         max_retries: int = 2,
     ) -> None:
@@ -153,6 +154,11 @@ class OpenAICompatToolAgent(ToolAgentModel):
         self.base_url = base_url.rstrip("/")
         self.spec = f"openai-compat:{model}@{self.base_url}"
         self._api_key = api_key
+        # Some endpoints require headers beyond auth — e.g. Anthropic's
+        # OpenAI-compat layer demands anthropic-workspace-id for
+        # identity-linked API keys. Values may be sensitive, so they are
+        # never recorded in run artifacts.
+        self._extra_headers = dict(extra_headers or {})
         self._timeout_seconds = timeout_seconds
         self._max_retries = max_retries
 
@@ -160,7 +166,9 @@ class OpenAICompatToolAgent(ToolAgentModel):
         headers = {"Content-Type": "application/json"}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
+        headers.update(self._extra_headers)
         last_error: Exception | None = None
+        error_body = ""
         for _ in range(self._max_retries + 1):
             try:
                 response = httpx.post(
@@ -176,9 +184,15 @@ class OpenAICompatToolAgent(ToolAgentModel):
                 return payload
             except (httpx.HTTPError, KeyError, json.JSONDecodeError) as exc:
                 last_error = exc
+                # A 4xx/5xx body names the actual rejection (bad model id,
+                # missing header, quota) — without it the operator sees only
+                # a bare status code.
+                if isinstance(exc, httpx.HTTPStatusError):
+                    error_body = exc.response.text[:300]
+        detail = f": {error_body}" if error_body else ""
         raise LLMRunnerError(
             f"openai-compat call to {self.base_url} failed after "
-            f"{self._max_retries + 1} attempts: {last_error}"
+            f"{self._max_retries + 1} attempts: {last_error}{detail}"
         )
 
     def propose(self, transcript: Sequence[TranscriptItem], tools: Sequence[ToolDef]) -> AgentTurn:
@@ -339,10 +353,17 @@ class ScriptedToolAgent(ToolAgentModel):
 # --- Spec parsing ---
 
 
-def create_tool_agent_model(spec: str, *, api_key: str | None = None) -> ToolAgentModel:
+def create_tool_agent_model(
+    spec: str,
+    *,
+    api_key: str | None = None,
+    extra_headers: dict[str, str] | None = None,
+) -> ToolAgentModel:
     """Build a tool-use agent from a spec string.
 
     Formats: ``openai-compat:<model>@<base_url>`` or ``scripted:<path.json>``.
+    ``extra_headers`` are sent on every openai-compat request (ignored for
+    scripted) and never recorded in run artifacts.
     """
     transport, _, remainder = spec.partition(":")
     if transport == "claude":
@@ -357,7 +378,12 @@ def create_tool_agent_model(spec: str, *, api_key: str | None = None) -> ToolAge
                 f"openai-compat spec must be 'openai-compat:<model>@<base_url>', got: {spec}"
             )
         resolved_api_key = api_key if api_key is not None else os.getenv("OPENAI_API_KEY")
-        return OpenAICompatToolAgent(model=model, base_url=base_url, api_key=resolved_api_key)
+        return OpenAICompatToolAgent(
+            model=model,
+            base_url=base_url,
+            api_key=resolved_api_key,
+            extra_headers=extra_headers,
+        )
     if transport == "scripted" and remainder:
         return ScriptedToolAgent.from_path(Path(remainder))
     raise ValueError(

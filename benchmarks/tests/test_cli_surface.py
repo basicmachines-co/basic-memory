@@ -1,4 +1,5 @@
 import json
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -319,3 +320,68 @@ def test_run_agent_tasks_dedupes_repeated_surfaces(
 
     assert result.exit_code == 0, result.output
     assert captured["surfaces"] == ["rich"]
+
+
+def test_run_agent_tasks_rejects_malformed_model_header(tmp_path: Path) -> None:
+    script = tmp_path / "script.json"
+    script.write_text('{"tasks": {}}', encoding="utf-8")
+    bm_checkout = tmp_path / "bm"
+    bm_checkout.mkdir()
+
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "agent-tasks",
+            "--model",
+            f"scripted:{script}",
+            "--bm-local-path",
+            str(bm_checkout),
+            "--model-header",
+            "missing-separator",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "Name=value" in result.output
+
+
+def test_run_agent_tasks_passes_model_headers_to_factory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Headers ride only in the model-factory closure — never in the config,
+    # so they can never leak into run artifacts.
+    captured: dict[str, object] = {}
+
+    def fake_run(config: AgentTasksConfig, **kwargs: object) -> Path:
+        captured["config"] = config
+        captured["model_factory"] = kwargs.get("model_factory")
+        return tmp_path / "run"
+
+    monkeypatch.setattr(cli, "run_agent_tasks", fake_run)
+    script = tmp_path / "script.json"
+    script.write_text('{"tasks": {}}', encoding="utf-8")
+    bm_checkout = tmp_path / "bm"
+    bm_checkout.mkdir()
+
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "agent-tasks",
+            "--model",
+            f"scripted:{script}",
+            "--bm-local-path",
+            str(bm_checkout),
+            "--model-header",
+            "anthropic-workspace-id=wrkspc_test",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    factory = captured["model_factory"]
+    assert isinstance(factory, partial)
+    assert factory.keywords == {"extra_headers": {"anthropic-workspace-id": "wrkspc_test"}}
+    config = captured["config"]
+    assert isinstance(config, AgentTasksConfig)
+    assert "wrkspc_test" not in config.model_dump_json()

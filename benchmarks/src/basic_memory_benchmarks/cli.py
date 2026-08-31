@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import uuid
+from functools import partial
 from pathlib import Path
 
 import typer
@@ -465,6 +466,13 @@ def run_agent_tasks_command(
         "--model",
         help="Agent under test: openai-compat:<model>@<base_url> | scripted:<path.json>",
     ),
+    model_header: list[str] | None = typer.Option(
+        None,
+        "--model-header",
+        help="Extra HTTP header for the agent endpoint as 'Name=value' (repeatable); "
+        "e.g. anthropic-workspace-id=wrkspc_... for identity-linked Anthropic keys. "
+        "Values are never recorded in run artifacts.",
+    ),
     judge: str | None = typer.Option(
         None,
         "--judge",
@@ -535,10 +543,20 @@ def run_agent_tasks_command(
     except (ValueError, FileNotFoundError) as exc:
         raise typer.BadParameter(str(exc)) from exc
 
+    # Extra endpoint headers stay out of AgentTasksConfig (and therefore out
+    # of run artifacts): values may be sensitive, so they ride only in the
+    # model factory closure below.
+    header_pairs: dict[str, str] = {}
+    for raw_header in model_header or []:
+        name, separator, value = raw_header.partition("=")
+        if not separator or not name.strip() or not value.strip():
+            raise typer.BadParameter(f"--model-header must be 'Name=value', got {raw_header!r}")
+        header_pairs[name.strip()] = value.strip()
+
     # Fail fast at parse time: a bad model spec (including claude:) and a
     # missing judge for judge-graded tasks must not survive to mid-run.
     try:
-        create_tool_agent_model(model)
+        create_tool_agent_model(model, extra_headers=header_pairs or None)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     judged = [
@@ -570,7 +588,13 @@ def run_agent_tasks_command(
         settle_timeout_seconds=settle_timeout,
         allow_surface_skip=allow_surface_skip,
     )
-    run_dir = run_agent_tasks(config)
+    if header_pairs:
+        run_dir = run_agent_tasks(
+            config,
+            model_factory=partial(create_tool_agent_model, extra_headers=header_pairs),
+        )
+    else:
+        run_dir = run_agent_tasks(config)
     console.print(f"Agent-task run complete: [green]{run_dir}[/green]")
     console.print(f"See [cyan]{run_dir / 'summary.md'}[/cyan]")
 
