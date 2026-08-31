@@ -606,6 +606,14 @@ class BasicMemoryConfig(BaseSettings):
         ),
     )
 
+    enable_posix_tools: bool = Field(
+        default=False,
+        description=(
+            "Register the POSIX-style read-only MCP tools (cat, grep, ls, find, tail, man). "
+            "Env: BASIC_MEMORY_ENABLE_POSIX_TOOLS"
+        ),
+    )
+
     cli_output_style: Literal["rich", "plain"] = Field(
         default="rich",
         description=(

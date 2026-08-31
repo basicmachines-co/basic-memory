@@ -982,9 +982,7 @@ async def test_sqlite_vector_sync_skips_unchanged_and_reembeds_changed_content(s
             entity_id=111,
             title="Auth and Schema Notes",
             permalink="specs/auth-and-schema",
-            content_stems=(
-                f"{_vector_chunk_section('Auth')}\n\n{_vector_chunk_section('Schema')}"
-            ),
+            content_stems=(f"{_vector_chunk_section('Auth')}\n\n{_vector_chunk_section('Schema')}"),
         )
     )
 

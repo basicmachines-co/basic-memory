@@ -682,9 +682,7 @@ async def test_postgres_vector_sync_skips_unchanged_and_reembeds_changed_content
             project_id=test_project.id,
             id=421,
             title="Auth and Schema Notes",
-            content_stems=(
-                f"{_vector_chunk_section('Auth')}\n\n{_vector_chunk_section('Schema')}"
-            ),
+            content_stems=(f"{_vector_chunk_section('Auth')}\n\n{_vector_chunk_section('Schema')}"),
             content_snippet=(
                 f"{_vector_chunk_section('Auth')}\n\n{_vector_chunk_section('Schema')}"
             ),

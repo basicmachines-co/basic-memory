@@ -91,7 +91,9 @@ def test_bundled_pages_are_well_formed_and_sorted() -> None:
 # The section-3 corpus and the tool registry are meant to match one to one. Both
 # lists change deliberately; this pins the known gaps so a new tool without a page
 # (or a page for a retired tool) shows up here instead of going unnoticed.
-TOOLS_WITHOUT_PAGES: set[str] = set()
+# The POSIX read-side tools (#1399) ship without section-3 pages for now; the
+# manual campaign adds them next. Their wire descriptions stay one-liners.
+TOOLS_WITHOUT_PAGES: set[str] = {"cat", "find", "grep", "ls", "man", "tail"}
 PAGES_WITHOUT_LOCAL_TOOLS = {"cloud_info"}  # hosted-only; see cloud-info(3)
 
 

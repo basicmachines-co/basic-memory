@@ -31,20 +31,28 @@ from basic_memory.mcp.tools.project_management import (
 # ChatGPT-compatible tools
 from basic_memory.mcp.tools.chatgpt_tools import search, fetch
 
+# POSIX-style read-side tools (hidden unless enable_posix_tools is set, #1399)
+from basic_memory.mcp.tools.posix_tools import cat, find, grep, ls, man, tail
+
 # Schema tools
 from basic_memory.mcp.tools.schema import schema_validate, schema_infer, schema_diff
 
 __all__ = [
     "basic_memory_diagnostics",
     "build_context",
+    "cat",
     "create_memory_project",
     "delete_note",
     "delete_project",
     "edit_note",
     "fetch",
+    "find",
+    "grep",
     "list_directory",
     "list_memory_projects",
     "list_workspaces",
+    "ls",
+    "man",
     "move_note",
     "read_content",
     "read_note",
@@ -56,6 +64,7 @@ __all__ = [
     "search",
     "search_notes",
     # "search_notes_ui",
+    "tail",
     "view_note",
     "write_note",
 ]

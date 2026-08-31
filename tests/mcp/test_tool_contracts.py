@@ -25,6 +25,16 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "max_related",
         "output_format",
     ],
+    "cat": [
+        "identifier",
+        "start_line",
+        "end_line",
+        "section",
+        "max_tokens",
+        "include_frontmatter",
+        "project",
+        "project_id",
+    ],
     "create_memory_project": [
         "project_name",
         "project_path",
@@ -49,6 +59,8 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "output_format",
     ],
     "fetch": ["id"],
+    "find": ["path", "name", "depth", "page", "page_size", "project", "project_id"],
+    "grep": ["pattern", "literal", "page", "page_size", "project", "project_id"],
     "list_directory": [
         "dir_name",
         "depth",
@@ -62,6 +74,8 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
     ],
     "list_memory_projects": ["output_format"],
     "list_workspaces": ["output_format"],
+    "ls": ["path", "page", "page_size", "project", "project_id"],
+    "man": ["page", "query", "project", "project_id"],
     "move_note": [
         "identifier",
         "destination_path",
@@ -113,6 +127,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "status",
         "min_similarity",
     ],
+    "tail": ["timeframe", "lines", "project", "project_id"],
     "view_note": ["identifier", "project", "project_id"],
     "write_note": [
         "title",
@@ -167,9 +182,18 @@ EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
 # The MCP-UI tools are disabled in tools/__init__.py but register onto the shared
 # server whenever tests import their module directly, so tolerate their presence
 # without requiring it — keeps this contract independent of test execution order.
+# The POSIX tools (#1399) are hidden unless enable_posix_tools is set, so they
+# normally don't appear in list_tools(); optional status keeps the contract
+# independent of whether a gate test has revealed them.
 OPTIONAL_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     "read_note_ui": {"readOnlyHint": True, "destructiveHint": False},
     "search_notes_ui": {"readOnlyHint": True, "destructiveHint": False},
+    "cat": {"readOnlyHint": True, "destructiveHint": False},
+    "find": {"readOnlyHint": True, "destructiveHint": False},
+    "grep": {"readOnlyHint": True, "destructiveHint": False},
+    "ls": {"readOnlyHint": True, "destructiveHint": False},
+    "man": {"readOnlyHint": True, "destructiveHint": False},
+    "tail": {"readOnlyHint": True, "destructiveHint": False},
 }
 
 EXPECTED_EDIT_NOTE_OPERATIONS = [
@@ -185,14 +209,19 @@ EXPECTED_EDIT_NOTE_OPERATIONS = [
 TOOL_FUNCTIONS: dict[str, object] = {
     "basic_memory_diagnostics": tools.basic_memory_diagnostics,
     "build_context": tools.build_context,
+    "cat": tools.cat,
     "create_memory_project": tools.create_memory_project,
     "delete_note": tools.delete_note,
     "delete_project": tools.delete_project,
     "edit_note": tools.edit_note,
     "fetch": tools.fetch,
+    "find": tools.find,
+    "grep": tools.grep,
     "list_directory": tools.list_directory,
     "list_memory_projects": tools.list_memory_projects,
     "list_workspaces": tools.list_workspaces,
+    "ls": tools.ls,
+    "man": tools.man,
     "move_note": tools.move_note,
     "read_content": tools.read_content,
     "read_note": tools.read_note,
@@ -202,6 +231,7 @@ TOOL_FUNCTIONS: dict[str, object] = {
     "schema_validate": tools.schema_validate,
     "search": tools.search,
     "search_notes": tools.search_notes,
+    "tail": tools.tail,
     "view_note": tools.view_note,
     "write_note": tools.write_note,
 }
