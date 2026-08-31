@@ -147,6 +147,7 @@ class OpenAICompatToolAgent(ToolAgentModel):
         *,
         api_key: str | None = None,
         extra_headers: dict[str, str] | None = None,
+        temperature: float | None = 0.0,
         timeout_seconds: float = 300.0,
         max_retries: int = 2,
     ) -> None:
@@ -159,6 +160,12 @@ class OpenAICompatToolAgent(ToolAgentModel):
         # identity-linked API keys. Values may be sensitive, so they are
         # never recorded in run artifacts.
         self._extra_headers = dict(extra_headers or {})
+        # temperature=None omits the parameter entirely: Claude 5 models
+        # reject any temperature value ("`temperature` is deprecated for this
+        # model"), while local openai-compat servers (Ollama) default to a
+        # nonzero sampling temperature unless pinned — so the default stays 0
+        # and omission is an explicit operator choice recorded in the config.
+        self._temperature = temperature
         self._timeout_seconds = timeout_seconds
         self._max_retries = max_retries
 
@@ -201,8 +208,9 @@ class OpenAICompatToolAgent(ToolAgentModel):
             "messages": _transcript_to_messages(transcript),
             "tools": _tools_to_functions(tools),
             "tool_choice": "auto",
-            "temperature": 0,
         }
+        if self._temperature is not None:
+            body["temperature"] = self._temperature
         started = time.perf_counter()
         payload = self._post(body)
         latency_ms = (time.perf_counter() - started) * 1000.0
@@ -358,6 +366,7 @@ def create_tool_agent_model(
     *,
     api_key: str | None = None,
     extra_headers: dict[str, str] | None = None,
+    temperature: float | None = 0.0,
 ) -> ToolAgentModel:
     """Build a tool-use agent from a spec string.
 
@@ -383,6 +392,7 @@ def create_tool_agent_model(
             base_url=base_url,
             api_key=resolved_api_key,
             extra_headers=extra_headers,
+            temperature=temperature,
         )
     if transport == "scripted" and remainder:
         return ScriptedToolAgent.from_path(Path(remainder))

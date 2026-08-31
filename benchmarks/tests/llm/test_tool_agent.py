@@ -95,6 +95,26 @@ def test_extra_headers_ride_every_request(monkeypatch: pytest.MonkeyPatch) -> No
     assert captured["headers"]["Authorization"] == "Bearer k"
 
 
+def test_temperature_none_omits_the_parameter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Claude 5 endpoints reject any temperature; None must drop the key entirely."""
+    captured: dict[str, Any] = {}
+
+    def fake_post(url: str, **kwargs: Any) -> httpx.Response:
+        captured["body"] = kwargs["json"]
+        return _response(
+            {
+                "choices": [{"message": {"content": "ok", "tool_calls": []}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            }
+        )
+
+    monkeypatch.setattr(tool_agent.httpx, "post", fake_post)
+    agent = OpenAICompatToolAgent("m", "http://localhost/v1", temperature=None)
+    agent.propose([UserMessage(text="hi")], [SEARCH_TOOL])
+
+    assert "temperature" not in captured["body"]
+
+
 def test_http_error_includes_response_body(monkeypatch: pytest.MonkeyPatch) -> None:
     """A 4xx body names the actual rejection instead of a bare status code."""
 

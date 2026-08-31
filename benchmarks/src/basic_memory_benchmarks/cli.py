@@ -473,6 +473,12 @@ def run_agent_tasks_command(
         "e.g. anthropic-workspace-id=wrkspc_... for identity-linked Anthropic keys. "
         "Values are never recorded in run artifacts.",
     ),
+    model_temperature: str = typer.Option(
+        "0",
+        "--model-temperature",
+        help="Sampling temperature for the agent endpoint, or 'omit' to send none "
+        "(Claude 5 models reject the parameter). Recorded in the run config.",
+    ),
     judge: str | None = typer.Option(
         None,
         "--judge",
@@ -553,10 +559,20 @@ def run_agent_tasks_command(
             raise typer.BadParameter(f"--model-header must be 'Name=value', got {raw_header!r}")
         header_pairs[name.strip()] = value.strip()
 
+    if model_temperature.strip().lower() in {"omit", "none"}:
+        temperature: float | None = None
+    else:
+        try:
+            temperature = float(model_temperature)
+        except ValueError:
+            raise typer.BadParameter(
+                f"--model-temperature must be a number or 'omit', got {model_temperature!r}"
+            ) from None
+
     # Fail fast at parse time: a bad model spec (including claude:) and a
     # missing judge for judge-graded tasks must not survive to mid-run.
     try:
-        create_tool_agent_model(model, extra_headers=header_pairs or None)
+        create_tool_agent_model(model, extra_headers=header_pairs or None, temperature=temperature)
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc
     judged = [
@@ -574,6 +590,7 @@ def run_agent_tasks_command(
         task_ids=task_ids,
         task_manifest=str(task_manifest) if task_manifest is not None else None,
         model_spec=model,
+        model_temperature=temperature,
         judge_spec=judge,
         corpus_dir=str(corpus_dir),
         output_root=str(output_root),
@@ -588,13 +605,14 @@ def run_agent_tasks_command(
         settle_timeout_seconds=settle_timeout,
         allow_surface_skip=allow_surface_skip,
     )
-    if header_pairs:
-        run_dir = run_agent_tasks(
-            config,
-            model_factory=partial(create_tool_agent_model, extra_headers=header_pairs),
-        )
-    else:
-        run_dir = run_agent_tasks(config)
+    run_dir = run_agent_tasks(
+        config,
+        model_factory=partial(
+            create_tool_agent_model,
+            extra_headers=header_pairs or None,
+            temperature=temperature,
+        ),
+    )
     console.print(f"Agent-task run complete: [green]{run_dir}[/green]")
     console.print(f"See [cyan]{run_dir / 'summary.md'}[/cyan]")
 
