@@ -143,8 +143,9 @@ watermark those records advance.
   checksum, actor, source, and acceptance time. It is recorded with the accepted mutation, not
   reconstructed later from derived state.
 - Consumers that need ordering, coalescing, or idempotency — projectors, routines, temporal
-  reads — consume the journal watermark. Human-facing feeds are presentations of the journal,
-  not the substrate.
+  reads — consume the journal watermark. Human-facing feeds are presentations, never the
+  ordering substrate; today's recent-activity feed still derives from search state rather than
+  journal reads (see Event Surfaces And Derivation).
 - Materialization settling records when durable storage caught up with an accepted position. A
   consumer that must not run ahead of durable files (the Wiki Projector, portable logs) holds
   behind unsettled positions instead of guessing.
@@ -173,9 +174,11 @@ storage notifications / webhooks          ingress evidence
 ```
 
 - A projection may lag the journal and must be rebuildable from it plus canonical Markdown.
-- The ingress edge is the target shape, not the current one: reconciliation of external file
-  changes does not yet advance the journal (see the journal's scope bullet above), so today the
-  diagram's top edge holds only for DB-first accepted mutations.
+- The diagram is the target architecture; two edges run ahead of the code today. Ingress:
+  reconciliation of external file changes does not yet advance the journal (see the journal's
+  scope bullet above), so the top edge holds only for DB-first accepted mutations. Activity:
+  the current recent-activity feed is built from search state (`ContextService.build_context`),
+  not from journal reads — its edge names where that feed converges, not what it reads today.
 - Delivery events (webhook attempts, storage notifications, SSE publishes) prove delivery, not
   acceptance; they are never the canonical semantic log.
 - Run ledgers (projection runs, index runs) record operational work, and product telemetry
