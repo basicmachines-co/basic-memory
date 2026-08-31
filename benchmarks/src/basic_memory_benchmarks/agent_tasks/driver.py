@@ -273,6 +273,12 @@ def _prepare_task_project(
         source_dir = corpus_dir / task.group / "docs"
     copy_corpus(source_dir, project.directory)
     run_command(prefix + ["project", "add", project.name, str(project.directory)], env=env)
+    # `project add` registers but does not index: without an explicit index
+    # pass the DB stays empty, `status` reports ready vacuously (zero pending
+    # work was ever queued), and every retrieval tool sees an empty project.
+    # The scripted smoke masked this — its canned answers never needed the
+    # index — so the first real-model run surfaced it as 24 empty projects.
+    run_command(prefix + ["reindex", "-p", project.name, "--full", "--search"], env=env)
     settle_index(
         prefix=prefix,
         env=env,
