@@ -41,9 +41,10 @@ class TestFilesystemGrep:
 
         hits = provider.search("Where does Joanna live in Austin?", 5, _config(tmp_path))
 
-        assert hits[0].source_doc_id == "doc-a"
-        assert hits[0].score > 0
-        assert "Joanna" in (hits[0].text or "")
+        top = hits[0]
+        assert top.source_doc_id == "doc-a"
+        assert top.score is not None and top.score > 0
+        assert "Joanna" in (top.text or "")
 
     def test_coverage_beats_repetition(self, tmp_path):
         corpus = tmp_path / "docs"

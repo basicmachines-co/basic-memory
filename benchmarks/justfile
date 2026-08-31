@@ -12,6 +12,9 @@ locomo_c1_output_dir := "benchmarks/generated/locomo-c1"
 longmemeval_dataset_path := "benchmarks/datasets/longmemeval/longmemeval_s.json"
 longmemeval_output_dir := "benchmarks/generated/longmemeval-s"
 longmemeval_dev_output_dir := "benchmarks/generated/longmemeval-s-dev"
+beam_root := "benchmarks/datasets/beam/upstream/chats"
+beam_100k_output_dir := "benchmarks/generated/beam-100k"
+beam_500k_output_dir := "benchmarks/generated/beam-500k"
 
 # --- Repo maintenance ---
 
@@ -69,6 +72,33 @@ bench-convert-convomem:
     uv run bm-bench convert convomem --sample-per-stratum 25 --seed 42
 
 bench-prepare-convomem: bench-fetch-convomem bench-convert-convomem
+
+# BEAM data is never vendored: sparse-clone the 100K/500K tiers locally
+bench-fetch-beam:
+    bash benchmarks/datasets/beam/download.sh
+
+bench-convert-beam-100k:
+    uv run bm-bench convert beam --dataset-root {{beam_root}} --tier 100K --output-dir {{beam_100k_output_dir}}
+
+bench-convert-beam-500k:
+    uv run bm-bench convert beam --dataset-root {{beam_root}} --tier 500K --output-dir {{beam_500k_output_dir}}
+
+bench-prepare-beam: bench-fetch-beam bench-convert-beam-100k
+
+# Grouped retrieval over BEAM 100K (one isolated corpus per conversation)
+bench-run-beam-100k:
+    uv run bm-bench run retrieval \
+      --dataset-id beam-100k \
+      --dataset-path {{beam_100k_output_dir}}/conversion.json \
+      --corpus-dir {{beam_100k_output_dir}}/groups \
+      --queries-path {{beam_100k_output_dir}}/queries.json \
+      --providers bm-local,mem0-local \
+      {{bm_local_path_flag}} \
+      --allow-provider-skip
+
+# BEAM nugget/ordering scoring over a run's stored QA answers
+bench-beam-score run_dir judge="claude:claude-sonnet-4-6":
+    uv run bm-bench run beam-score --run-dir "{{run_dir}}" --judge "{{judge}}"
 
 bench-fetch-locomo-audit:
     uv run bm-bench datasets fetch --dataset locomo-audit

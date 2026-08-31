@@ -14,8 +14,13 @@ from basic_memory_benchmarks.models import (
     SearchHit,
 )
 
-
 OFFICIAL_HEADLINE_CATEGORIES = {"single_hop", "multi_hop", "temporal", "open_domain"}
+
+# BEAM datasets split the other way around: every ability except abstention is
+# headline-worthy, and abstention breaks out. Abstention rows have empty
+# ground truth, so their recall is 0 by construction and would poison the
+# headline — the same reason LoCoMo excludes its adversarial category.
+BEAM_BREAKOUT_CATEGORIES = {"abstention"}
 
 
 def _basename(identifier: str) -> str:
@@ -132,7 +137,19 @@ def _aggregate_metrics(rows: list[PerQueryRetrievalResult]) -> RetrievalMetrics:
     )
 
 
-def summarize_provider(provider: str, rows: list[PerQueryRetrievalResult]) -> RetrievalSummary:
+def summarize_provider(
+    provider: str,
+    rows: list[PerQueryRetrievalResult],
+    dataset_id: str | None = None,
+) -> RetrievalSummary:
+    """Aggregate one provider's rows, with a dataset-keyed headline split.
+
+    ``RetrievalSummary.official_headline`` / ``adversarial_breakout`` are the
+    generic headline/breakout containers (names kept for artifact-schema
+    stability): LoCoMo puts categories 1-4 in the headline and adversarial in
+    the breakout; BEAM datasets put the nine answerable abilities in the
+    headline and abstention in the breakout.
+    """
     by_category: dict[str, list[PerQueryRetrievalResult]] = {}
     for row in rows:
         by_category.setdefault(row.category, []).append(row)
@@ -141,14 +158,18 @@ def summarize_provider(provider: str, rows: list[PerQueryRetrievalResult]) -> Re
         category: _aggregate_metrics(group) for category, group in by_category.items()
     }
 
-    official_rows = [
-        row
-        for row in rows
-        if row.category in OFFICIAL_HEADLINE_CATEGORIES or row.category_id in {1, 2, 3, 4}
-    ]
-    adversarial_rows = [
-        row for row in rows if row.category == "adversarial" or row.category_id == 5
-    ]
+    if dataset_id is not None and dataset_id.startswith("beam"):
+        official_rows = [row for row in rows if row.category not in BEAM_BREAKOUT_CATEGORIES]
+        adversarial_rows = [row for row in rows if row.category in BEAM_BREAKOUT_CATEGORIES]
+    else:
+        official_rows = [
+            row
+            for row in rows
+            if row.category in OFFICIAL_HEADLINE_CATEGORIES or row.category_id in {1, 2, 3, 4}
+        ]
+        adversarial_rows = [
+            row for row in rows if row.category == "adversarial" or row.category_id == 5
+        ]
 
     return RetrievalSummary(
         provider=provider,

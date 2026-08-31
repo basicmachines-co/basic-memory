@@ -105,7 +105,17 @@ def build_summary_markdown(
         )
     lines.append("")
 
-    lines.append("## Official Headline (LoCoMo Categories 1-4)")
+    # The headline/breakout containers are generic; the section labels follow
+    # the dataset (BEAM: answerable abilities vs abstention; default: the
+    # LoCoMo category split).
+    if manifest.config.dataset_id.startswith("beam"):
+        headline_label = "## Answerable Abilities (BEAM headline)"
+        breakout_label = "## Abstention Breakout"
+    else:
+        headline_label = "## Official Headline (LoCoMo Categories 1-4)"
+        breakout_label = "## Adversarial (Category 5)"
+
+    lines.append(headline_label)
     lines.append("")
     lines.append("| Provider | Recall@5 | Recall@10 | MRR |")
     lines.append("| --- | --- | --- | --- |")
@@ -116,7 +126,7 @@ def build_summary_markdown(
         )
     lines.append("")
 
-    lines.append("## Adversarial (Category 5)")
+    lines.append(breakout_label)
     lines.append("")
     lines.append("| Provider | Recall@5 | Recall@10 | MRR |")
     lines.append("| --- | --- | --- | --- |")

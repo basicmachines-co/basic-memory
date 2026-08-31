@@ -165,6 +165,7 @@ def assemble_context(hits: list[SearchHit], max_chars: int = CONTEXT_MAX_CHARS) 
 
 
 def _row_context(row: PerQueryRetrievalResult, max_context_chars: int) -> str:
+    """Assemble a row's answering context exactly as the QA stage does."""
     # Prefer assembling from stored hits (richer, budget-controlled); fall
     # back to the legacy pre-joined context for old artifacts without hits.
     if row.hits:
@@ -174,12 +175,13 @@ def _row_context(row: PerQueryRetrievalResult, max_context_chars: int) -> str:
     return row.retrieved_context
 
 
-def _question_display(row: PerQueryRetrievalResult) -> str:
+def question_display(row: PerQueryRetrievalResult) -> str:
     """Render the question with its ask-date when the dataset provides one.
 
     Temporal-reasoning questions ("how many weeks ago...") are unanswerable
     without the reference date, and both the answerer and the judge need the
-    same framing.
+    same framing. Public because BEAM nugget scoring re-renders stored
+    questions and must show its judge the framing the answerer saw.
     """
     question_date = row.metadata.get("question_date")
     if question_date:
@@ -194,7 +196,7 @@ def _score_case(
     judge: LLMRunner,
     max_context_chars: int = CONTEXT_MAX_CHARS,
 ) -> QACaseResult:
-    question = _question_display(row)
+    question = question_display(row)
     answer_prompt = build_answer_prompt(question, _row_context(row, max_context_chars))
     try:
         answer_result = answerer.complete(answer_prompt)

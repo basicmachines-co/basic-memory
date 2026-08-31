@@ -31,6 +31,11 @@ It covers:
 
 - Official headline: LoCoMo categories 1-4 (`official_headline` in summaries)
 - Adversarial breakout: LoCoMo category 5 (`adversarial_breakout`)
+- BEAM datasets reuse the same two containers with a dataset-keyed split:
+  the nine answerable abilities are the headline and abstention is the
+  breakout (abstention rows have empty ground truth, so their recall is 0 by
+  construction). The field names are kept for artifact-schema stability and
+  read as generic headline/breakout.
 
 ### Fairness contract
 
@@ -77,9 +82,12 @@ just bench-prepare-long
 - `bench-concurrent-write-load`
 - `bench-prepare-short`
 - `bench-prepare-long`
+- `bench-prepare-beam`
 - `bench-run-short`
 - `bench-run-long`
 - `bench-run-full`
+- `bench-run-beam-100k`
+- `bench-beam-score`
 - `bench-validate`
 - `bench-publish`
 - `bench-compare`
@@ -91,10 +99,12 @@ Top-level commands:
 
 - `datasets fetch`
 - `convert locomo`
+- `convert beam`
 - `run retrieval`
 - `run concurrent-write`
 - `run full`
 - `run qa`
+- `run beam-score`
 - `run rejudge`
 - `run review`
 - `compare`
@@ -199,6 +209,12 @@ Optional QA files:
 - `review.html`
 - `qa-diagnosis.json`
 
+Optional BEAM files (only on BEAM runs, after `run beam-score`):
+
+- `per-query-beam.jsonl`
+- `beam-summary.json`
+- `beam-summary.md`
+
 ### Key provenance fields
 
 From `manifest.json`:
@@ -229,6 +245,82 @@ Publish bundle:
 ```bash
 just bench-publish run_dir="$(just bench-latest-run)"
 ```
+
+## 6b) BEAM (arXiv 2510.27246)
+
+BEAM probes ten long-term-memory abilities (abstention, contradiction
+resolution, event ordering, information extraction, instruction following,
+knowledge update, multi-session reasoning, preference following,
+summarization, temporal reasoning) over synthetic multi-month conversations.
+Each conversation is an isolated haystack, so BEAM runs in grouped mode.
+
+### Workflow
+
+```bash
+just bench-fetch-beam            # sparse clone of chats/100K + chats/500K (never vendored)
+just bench-convert-beam-100k     # -> benchmarks/generated/beam-100k/{groups,queries.json,conversion.json}
+just bench-run-beam-100k         # grouped retrieval, unchanged runner/fairness surface
+just bench-qa benchmarks/runs/<run-id>          # answers via the shared fixed QA stage
+just bench-beam-score benchmarks/runs/<run-id>  # BEAM nugget/ordering scoring (post-hoc)
+```
+
+Runs pass `benchmarks/generated/beam-<tier>/conversion.json` as
+`--dataset-path`: the converter records per-file sha256 of every consumed
+chat/probing file there, so the run manifest's dataset checksum pins the exact
+converted inputs. Tiers 100K/500K/1M share a layout and are supported; the
+10M tier's combined plan-N layout is rejected in v1.
+
+### Scoring definition
+
+- Every probe's reference answer is pre-decomposed upstream into atomic
+  nuggets (`rubric`). The judge scores each nugget 0/0.5/1 against the stored
+  generated answer; the per-question nugget score is the mean.
+- Event Ordering: the answer's lines are aligned against the ordered
+  reference events with an LLM equivalence judge (greedy first-match, matched
+  lines replaced by the reference label), then scored with set P/R/F1 and
+  Kendall tau-b over union rank vectors; `tau_norm = (tau_b + 1) / 2` and
+  `final_score = tau_norm * f1` are both recorded.
+- Per-ability headline: mean `tau_norm` for event_ordering, mean nugget score
+  for the other nine — mirroring upstream `report_results.py`. Reports always
+  show all ten abilities plus per-answer token accounting; the macro average
+  is reported beside them, never instead of them.
+- Errored cases (answerer/judge failure, malformed verdict) are excluded from
+  means and counted explicitly — never silently zero-scored.
+
+### Runner provenance
+
+Adapted from `mohammadtavakoli78/BEAM` (MIT code / CC BY-SA 4.0 data):
+
+- `unified_llm_judge_base_prompt` (`src/prompts.py:11547`) →
+  `BEAM_NUGGET_JUDGE_PROMPT` in `scoring/beam.py`. Modification: the probing
+  question is injected as an explicit input — upstream's RESPONSIVENESS
+  section references "the QUESTION" without ever providing it.
+- `llm_equivalence` + `align_with_llm` + `event_ordering_score`
+  (`src/evaluation/compute_metrics.py`) → equivalence prompt merged to
+  single-prompt form for the package `LLMRunner`; the math (union ranks,
+  tie rank, tau-b, normalisation, `final = tau_norm * f1`) is replicated,
+  with one deviation: when the tie-corrected denominator is 0 (e.g. a
+  single-event probe), upstream propagates scipy's NaN into its means,
+  while this port maps undefined tau to `tau_norm = 0.0` so the case stays
+  countable. System list = the response split on newlines (the shipped
+  path; upstream's commented-out fact-extraction variant is not adopted),
+  with blank lines dropped. Caveat: the package's fixed answer prompt asks
+  for concise answers, which can yield single-line orderings that collapse
+  to one system item and deflate F1/tau for every provider alike; a
+  per-ability format hint would breach the fixed-prompt fairness contract,
+  so v1 accepts and discloses this instead.
+- Aggregation from `src/evaluation/report_results.py` as described above.
+- Not reused, and why: `scipy.stats.kendalltau` (pure-Python tau-b instead —
+  rank vectors are tiny); `json_repair` (silent repair conflicts with the
+  package's fail-fast rule; malformed verdicts become explicit per-case
+  errors); upstream's LangChain gpt-4.1-mini judge (replaced by the package
+  `LLMRunner` seam — the judge is an operator flag recorded in artifacts, so
+  published numbers must note the judge differs from the paper's); BEAM's
+  answering baselines and RAG prompt (answers go through this package's fixed
+  `ANSWER_PROMPT_TEMPLATE` + context budget so all providers face identical
+  conditions — absolute numbers are therefore not directly comparable to the
+  paper's tables); the HF materialization script and `chat.pickle` (the
+  repo's JSON layout is read directly); the 10M tier.
 
 ## 7) Commit-to-Commit Comparison (Current Manual Method)
 

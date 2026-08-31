@@ -32,12 +32,17 @@ CLI entrypoint: `uv run bm-bench ...`
 Dataset and conversion:
 - `uv run bm-bench datasets fetch --dataset locomo`
 - `uv run bm-bench convert locomo --dataset-path benchmarks/datasets/locomo/locomo10.json --output-dir benchmarks/generated/locomo`
+- `bash benchmarks/datasets/beam/download.sh` (BEAM data is never vendored; sparse clone)
+- `uv run bm-bench convert beam --tier 100K --output-dir benchmarks/generated/beam-100k`
 
 Run retrieval:
 - `uv run bm-bench run retrieval --providers bm-local,mem0-local --dataset-id locomo --dataset-path benchmarks/datasets/locomo/locomo10.json --corpus-dir benchmarks/generated/locomo/docs --queries-path benchmarks/generated/locomo/queries.json --output-root benchmarks/runs --allow-provider-skip`
 
 Run end-to-end QA scoring:
 - `uv run bm-bench run qa --run-dir benchmarks/runs/<run-id> --answerer claude:claude-haiku-4-5 --judge claude:claude-sonnet-4-6`
+
+BEAM nugget scoring (post-hoc, after `run qa` on a BEAM run):
+- `uv run bm-bench run beam-score --run-dir benchmarks/runs/<run-id> --judge claude:claude-sonnet-4-6`
 
 Validate and publish:
 - `uv run bm-bench validate-artifacts --run-dir benchmarks/runs/<run-id>`
@@ -49,6 +54,9 @@ Validate and publish:
 - `BM_LOCAL_PATH=.. just bench-concurrent-write-load`
 - `just bench-fetch-locomo`
 - `just bench-convert-locomo`
+- `just bench-prepare-beam`
+- `just bench-run-beam-100k`
+- `just bench-beam-score benchmarks/runs/<run-id>`
 - `just bench-run-bm-local`
 - `just bench-run-mem0-local`
 - `just bench-run-full`

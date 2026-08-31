@@ -169,6 +169,72 @@ class ProviderDiagnosis(BaseModel):
     by_category: dict[str, CategoryDiagnosis] = Field(default_factory=dict)
 
 
+class BeamNuggetVerdict(BaseModel):
+    """One judged rubric item (BEAM nugget methodology)."""
+
+    nugget: str
+    score: float  # 0.0 | 0.5 | 1.0
+    reason: str
+
+
+class BeamOrderingScore(BaseModel):
+    """Event-ordering metrics (BEAM compute_metrics.event_ordering_score)."""
+
+    precision: float
+    recall: float
+    f1: float
+    tau_norm: float  # (tau_b + 1) / 2, 0.0 when tau is undefined
+    final_score: float  # tau_norm * f1 (recorded; the ability headline is tau_norm)
+
+
+class BeamCaseScore(BaseModel):
+    provider: str
+    query_id: str
+    ability: str
+    question: str
+    generated_answer: str
+    nugget_verdicts: list[BeamNuggetVerdict] = Field(default_factory=list)
+    nugget_score: float = 0.0  # mean over rubric items
+    ordering: BeamOrderingScore | None = None  # event_ordering only
+    ability_score: float = 0.0  # tau_norm for event_ordering, nugget_score otherwise
+    # End-to-end token accounting per answer: answer-side numbers are copied
+    # from the joined QACaseResult; judge-side numbers sum the nugget and
+    # alignment calls this stage made.
+    answer_input_tokens: int
+    answer_output_tokens: int
+    answer_prompt_chars: int
+    answer_latency_ms: float
+    judge_input_tokens: int = 0
+    judge_output_tokens: int = 0
+    judge_calls: int = 0
+    judge_model: str
+    error: str | None = None
+
+
+class BeamAbilitySummary(BaseModel):
+    ability: str
+    question_count: int
+    error_count: int = 0
+    mean_score: float  # the per-ability headline (tau_norm for event_ordering)
+    mean_nugget_score: float  # also reported for event_ordering (upstream records both)
+    mean_f1: float | None = None  # event_ordering only
+    total_answer_input_tokens: int = 0
+    total_answer_output_tokens: int = 0
+    total_judge_input_tokens: int = 0
+    total_judge_output_tokens: int = 0
+    mean_answer_prompt_chars: float = 0.0
+
+
+class BeamSummary(BaseModel):
+    provider: str
+    judge_model: str
+    total_cases: int
+    error_count: int
+    by_ability: dict[str, BeamAbilitySummary]  # always all ten upstream ability keys
+    # Mean of ability means — reported beside, never instead of, per-ability.
+    macro_average: float
+
+
 class ProviderStatus(BaseModel):
     provider: str
     state: PROVIDER_STATE
