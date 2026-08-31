@@ -30,7 +30,11 @@ from basic_memory.markdown.entity_parser import (
 )
 from basic_memory.markdown.utils import schema_to_markdown
 from basic_memory.models import Entity
-from basic_memory.repository import AcceptedObservationWrite, AcceptedRelationWrite
+from basic_memory.repository import (
+    AcceptedObservationWrite,
+    AcceptedRelationWrite,
+    AcceptedSectionWrite,
+)
 from basic_memory.repository.entity_repository import EntityMetadata, EntityRepository
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.runtime.note_move import normalize_note_move_destination_path
@@ -40,6 +44,23 @@ from basic_memory.services.exceptions import EntityAlreadyExistsError
 from basic_memory.services.file_service import FileService
 from basic_memory.utils import build_canonical_permalink
 from basic_memory.workspace_context import workspace_slug_for_canonical_permalinks
+
+
+def accepted_section_writes(entity_markdown: EntityMarkdown) -> tuple[AcceptedSectionWrite, ...]:
+    """Flatten parsed section paths into generation-fenced persistence writes."""
+    return tuple(
+        AcceptedSectionWrite(
+            heading=section.heading,
+            level=section.level,
+            heading_path=section.heading_path,
+            duplicate_index=section.duplicate_index,
+            start_line=section.start_line,
+            end_line=section.end_line,
+            start_offset=section.start_offset,
+            end_offset=section.end_offset,
+        )
+        for section in entity_markdown.sections
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +110,10 @@ class PreparedEntityWrite:
             for relation in self.entity_markdown.relations
         ]
 
+    @property
+    def sections(self) -> tuple[AcceptedSectionWrite, ...]:
+        return accepted_section_writes(self.entity_markdown)
+
 
 @dataclass(frozen=True, slots=True)
 class PreparedEntityMove:
@@ -99,6 +124,7 @@ class PreparedEntityMove:
     search_content: str
     permalink: str | None
     observations: tuple[AcceptedObservationWrite, ...] = ()
+    sections: tuple[AcceptedSectionWrite, ...] = ()
     relations: tuple[AcceptedRelationWrite, ...] = ()
 
 
@@ -852,6 +878,7 @@ async def prepare_move_entity_content(
             )
             for observation in entity_markdown.observations
         ),
+        sections=accepted_section_writes(entity_markdown),
         relations=tuple(
             AcceptedRelationWrite(
                 relation_type=relation.type,

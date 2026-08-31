@@ -9,13 +9,33 @@ from basic_memory.markdown.schemas import (
     Observation,
     Relation,
 )
+from basic_memory.markdown.sections import (
+    LineRange,
+    MarkdownSection,
+    NoteSlice,
+    NoteSliceError,
+    SectionSelector,
+    parse_line_range,
+    parse_section_selector,
+    scan_sections,
+    slice_note_content,
+)
 
 __all__ = [
     "EntityMarkdown",
     "EntityFrontmatter",
     "EntityParser",
+    "LineRange",
     "MarkdownProcessor",
+    "MarkdownSection",
+    "NoteSlice",
+    "NoteSliceError",
     "Observation",
     "Relation",
     "ParseError",
+    "SectionSelector",
+    "parse_line_range",
+    "parse_section_selector",
+    "scan_sections",
+    "slice_note_content",
 ]

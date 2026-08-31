@@ -40,13 +40,16 @@ from basic_memory.markdown.schemas import (
     Observation as MarkdownObservation,
     Relation as MarkdownRelation,
 )
+from basic_memory.markdown.sections import MarkdownSection
 from basic_memory.models import Entity, NoteContent, Project
 from basic_memory.repository import (
     AcceptedNoteContentWrite,
     AcceptedObservationWrite,
     AcceptedRelationWrite,
+    AcceptedSectionWrite,
 )
 from basic_memory.repository.entity_repository import AcceptedPendingEntityWrite
+from basic_memory.repository.note_section_repository import SectionGenerationWriteResult
 from basic_memory.repository.observation_repository import ObservationGenerationWriteResult
 from basic_memory.repository.relation_repository import RelationGenerationWriteResult
 from basic_memory.runtime.note_content import RuntimeAcceptedNoteResponse
@@ -77,6 +80,7 @@ def _prepared_write(
     entity_fields: PreparedEntityFields,
     observations: Sequence[AcceptedObservationWrite] = (),
     relations: Sequence[AcceptedRelationWrite] = (),
+    sections: Sequence[MarkdownSection] = (),
 ) -> PreparedEntityWrite:
     entity_markdown = EntityMarkdown(
         frontmatter=EntityFrontmatter(
@@ -104,6 +108,7 @@ def _prepared_write(
             )
             for relation in relations
         ],
+        sections=list(sections),
     )
     return PreparedEntityWrite(
         file_path=Path(entity_fields.file_path),
@@ -534,6 +539,18 @@ class _ObservationRepository:
         )
 
 
+class _SectionRepository:
+    async def replace_sections_for_generation(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+        generation: int,
+        sections: Sequence[AcceptedSectionWrite],
+    ) -> SectionGenerationWriteResult:
+        raise AssertionError("section publication was not expected inside the accepted transaction")
+
+
 class _RelationRepository:
     def __init__(self) -> None:
         self.calls: list[tuple[int, Sequence[AcceptedRelationWrite]]] = []
@@ -577,6 +594,7 @@ class _MutationWriteRepositories:
     note_content_accept_repository_result: _NoteContentAcceptRepository
     search_repository_result: _SearchRepository
     observation_repository_result: _ObservationRepository
+    section_repository_result: _SectionRepository
     relation_repository_result: _RelationRepository
 
     def pending_entity_repository(self, project_id: int) -> _PendingEntityRepository:
@@ -594,6 +612,10 @@ class _MutationWriteRepositories:
     def observation_repository(self, project_id: int) -> _ObservationRepository:
         _ = project_id
         return self.observation_repository_result
+
+    def section_repository(self, project_id: int) -> _SectionRepository:
+        _ = project_id
+        return self.section_repository_result
 
     def relation_repository(self, project_id: int) -> _RelationRepository:
         _ = project_id
@@ -657,6 +679,18 @@ def _prepared_move() -> PreparedEntityMove:
         markdown_content="# Moved\n",
         search_content="Moved",
         permalink="archive/accepted",
+        sections=(
+            AcceptedSectionWrite(
+                heading="Moved",
+                level=1,
+                heading_path="Moved",
+                duplicate_index=0,
+                start_line=1,
+                end_line=1,
+                start_offset=0,
+                end_offset=8,
+            ),
+        ),
     )
 
 
@@ -728,6 +762,7 @@ def _dependencies(
             note_content_accept_repository_result=note_content_accept_repository,
             search_repository_result=search_repository,
             observation_repository_result=observation_repository or _ObservationRepository(),
+            section_repository_result=_SectionRepository(),
             relation_repository_result=relation_repository or _RelationRepository(),
         ),
         move_policy=move_policy
@@ -1773,6 +1808,8 @@ async def test_run_accepted_note_move_carries_previous_path_and_materialized_cle
     assert persistence_calls[1].await_count == 1
     assert result.relation_publication is not None
     assert result.relation_publication.generation == note_content.db_version
+    # The move republishes the freshly parsed section index for the moved body.
+    assert [section.heading_path for section in result.relation_publication.sections] == ["Moved"]
 
 
 @pytest.mark.asyncio
@@ -2205,10 +2242,23 @@ async def test_run_accepted_note_delete_stays_idempotent_after_concurrent_delete
     assert search_repository.deleted_vector_entity_ids == []
 
 
+_ACCEPTED_SECTION = MarkdownSection(
+    heading="Accepted",
+    level=1,
+    path=("Accepted",),
+    duplicate_index=0,
+    start_line=1,
+    end_line=1,
+    start_offset=0,
+    end_offset=11,
+)
+
+
 def _prepared_with_graph(
     *,
     observations: Sequence[AcceptedObservationWrite],
     relations: Sequence[AcceptedRelationWrite],
+    sections: Sequence[MarkdownSection] = (),
 ) -> PreparedEntityWrite:
     """A prepared accepted write carrying a parsed observation/relation graph."""
     return _prepared_write(
@@ -2226,6 +2276,7 @@ def _prepared_with_graph(
         ),
         observations=observations,
         relations=relations,
+        sections=sections,
     )
 
 
@@ -2242,7 +2293,11 @@ async def test_run_accepted_note_create_returns_graph_publication() -> None:
     relations = [
         AcceptedRelationWrite(relation_type="works_at", target_name="XSYS Target", context=None)
     ]
-    prepared = _prepared_with_graph(observations=observations, relations=relations)
+    prepared = _prepared_with_graph(
+        observations=observations,
+        relations=relations,
+        sections=[_ACCEPTED_SECTION],
+    )
     entity = _entity()
     note_content = _note_content(entity)
     preparer_factory = _PreparerFactory(_CreatePreparer(prepared))
@@ -2280,6 +2335,10 @@ async def test_run_accepted_note_create_returns_graph_publication() -> None:
         "Engineer",
     ]
     assert result.relation_publication.relations[0].target_name == "XSYS Target"
+    (published_section,) = result.relation_publication.sections
+    assert published_section.heading_path == "Accepted"
+    assert (published_section.start_line, published_section.end_line) == (1, 1)
+    assert (published_section.start_offset, published_section.end_offset) == (0, 11)
 
 
 @pytest.mark.asyncio
@@ -2302,6 +2361,7 @@ async def test_run_accepted_note_create_can_suppress_derived_graph_facts() -> No
                 context=None,
             )
         ],
+        sections=[_ACCEPTED_SECTION],
     )
     entity = _entity()
     note_content = _note_content(entity)
@@ -2331,6 +2391,11 @@ async def test_run_accepted_note_create_can_suppress_derived_graph_facts() -> No
     assert result.relation_publication is not None
     assert result.relation_publication.observations == ()
     assert result.relation_publication.relations == ()
+    # Sections are structural, not semantic: the graph-silent policy blanks only
+    # observations and relations, so the section index still publishes.
+    assert [section.heading_path for section in result.relation_publication.sections] == [
+        "Accepted"
+    ]
 
 
 @pytest.mark.asyncio
@@ -2401,7 +2466,11 @@ async def test_run_accepted_note_update_returns_replacement_graph() -> None:
     relations = [
         AcceptedRelationWrite(relation_type="relates_to", target_name="Other", context=None)
     ]
-    prepared = _prepared_with_graph(observations=observations, relations=relations)
+    prepared = _prepared_with_graph(
+        observations=observations,
+        relations=relations,
+        sections=[_ACCEPTED_SECTION],
+    )
     entity = _entity(file_path="notes/accepted.md")
     note_content = _note_content(entity)
     observation_repository = _ObservationRepository()
@@ -2435,6 +2504,9 @@ async def test_run_accepted_note_update_returns_replacement_graph() -> None:
     assert result.relation_publication is not None
     assert result.relation_publication.observations[0].content == "Replaced"
     assert result.relation_publication.relations[0].target_name == "Other"
+    assert [section.heading_path for section in result.relation_publication.sections] == [
+        "Accepted"
+    ]
 
 
 @pytest.mark.asyncio

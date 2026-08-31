@@ -112,19 +112,40 @@ class KnowledgeClient:
             )
         return EntityResponse.model_validate(response.json())
 
-    async def get_entity(self, entity_id: str) -> EntityResponseV2:
-        """Get an entity by ID.
+    async def get_entity(
+        self,
+        entity_id: str,
+        *,
+        section: str | None = None,
+        lines: str | None = None,
+        max_tokens: int | None = None,
+    ) -> EntityResponseV2:
+        """Get an entity by ID, optionally sliced server-side.
 
         Args:
             entity_id: Entity external_id (UUID)
+            section: Optional heading selector ("Decisions", "Auth/Decisions",
+                "Heading[1]") returning one section slice
+            lines: Optional document-absolute line range ("N-M", "N-", or "N")
+            max_tokens: Optional token budget truncating the returned content
 
         Returns:
-            EntityResponseV2 with accepted note content and entity metadata
+            EntityResponseV2 with accepted note content and entity metadata;
+            sliced responses carry the content_* slice coordinates
 
         Raises:
-            ToolError: If the entity is not found or request fails
+            ToolError: If the entity or requested section is not found or the
+                request fails
         """
         from basic_memory.mcp.tools.utils import call_get
+
+        params: dict[str, str | int] = {}
+        if section is not None:
+            params["section"] = section
+        if lines is not None:
+            params["lines"] = lines
+        if max_tokens is not None:
+            params["max_tokens"] = max_tokens
 
         with logfire.span(
             "mcp.client.knowledge.get_entity",
@@ -137,6 +158,7 @@ class KnowledgeClient:
                 client_name="knowledge",
                 operation="get_entity",
                 path_template="/v2/projects/{project_id}/knowledge/entities/{entity_id}",
+                params=params or None,
             )
         return EntityResponseV2.model_validate(response.json())
 

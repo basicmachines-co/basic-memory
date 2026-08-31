@@ -522,6 +522,7 @@ async def test_note_content_mutation_service_publishes_graph_after_commit(monkey
             return RecordingSession()
 
     observation_repository = object()
+    section_repository = object()
     relation_repository = object()
 
     class WriteRepositories:
@@ -529,6 +530,11 @@ async def test_note_content_mutation_service_publishes_graph_after_commit(monkey
             assert project_id == publication.project_id
             events.append("observation_repository")
             return observation_repository
+
+        def section_repository(self, project_id: int) -> object:
+            assert project_id == publication.project_id
+            events.append("section_repository")
+            return section_repository
 
         def relation_repository(self, project_id: int) -> object:
             assert project_id == publication.project_id
@@ -558,10 +564,12 @@ async def test_note_content_mutation_service_publishes_graph_after_commit(monkey
             self,
             *,
             observation_repository: object,
+            section_repository: object,
             relation_repository: object,
             session_maker: object,
         ) -> None:
             assert observation_repository is not None
+            assert section_repository is not None
             assert relation_repository is not None
             assert session_maker is not None
 
@@ -571,11 +579,13 @@ async def test_note_content_mutation_service_publishes_graph_after_commit(monkey
             entity_id: int,
             generation: int,
             observations: object,
+            sections: object,
             relations: object,
         ) -> bool:
             assert entity_id == publication.entity_id
             assert generation == publication.generation
             assert observations == publication.observations
+            assert sections == publication.sections
             assert relations == publication.relations
             events.append("publish")
             return True
@@ -604,6 +614,7 @@ async def test_note_content_mutation_service_publishes_graph_after_commit(monkey
         "session_exit",
         "relation_repository",
         "observation_repository",
+        "section_repository",
         "publish",
     ]
 
@@ -623,6 +634,10 @@ async def test_note_content_mutation_service_continues_after_graph_publication_f
 
     class WriteRepositories:
         def observation_repository(self, project_id: int) -> object:
+            assert project_id == publication.project_id
+            return object()
+
+        def section_repository(self, project_id: int) -> object:
             assert project_id == publication.project_id
             return object()
 
@@ -647,10 +662,12 @@ async def test_note_content_mutation_service_continues_after_graph_publication_f
             self,
             *,
             observation_repository: object,
+            section_repository: object,
             relation_repository: object,
             session_maker: object,
         ) -> None:
             assert observation_repository is not None
+            assert section_repository is not None
             assert relation_repository is not None
             assert session_maker is not None
 

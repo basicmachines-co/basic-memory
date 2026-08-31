@@ -2292,3 +2292,361 @@ async def test_index_file_rejects_non_markdown(
     )
     assert response.status_code == 400
     assert "Only markdown files" in response.json()["detail"]
+
+
+# --- Note read slicing: section=, lines=, max_tokens= (SPEC-47 / #1403) ---
+
+_SLICEABLE_DOC = (
+    "---\ntitle: Sliceable\n---\n\n# Auth\nline a\n## Decisions\nd1\nd2\n## Ops\no1\n# Tail\nz"
+)
+
+
+async def _seed_sliceable_note(
+    client: AsyncClient,
+    v2_project_url: str,
+    test_project: Project,
+    session_maker,
+    *,
+    title: str,
+    content: str,
+) -> str:
+    """Create a note and pin its accepted content to an exact known document."""
+    create_response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": title, "directory": "test", "content": "placeholder"},
+    )
+    assert create_response.status_code == 202
+    created = EntityResponseV2.model_validate(create_response.json())
+
+    repository = NoteContentRepository(project_id=test_project.id)
+    async with db.scoped_session(session_maker) as session:
+        await repository.upsert(
+            session,
+            {
+                "entity_id": created.id,
+                "markdown_content": content,
+                "db_version": 42,
+                "db_checksum": "sliceable-checksum",
+                "file_write_status": "pending",
+                "last_source": "test",
+            },
+        )
+    assert created.external_id is not None
+    return created.external_id
+
+
+@pytest.mark.asyncio
+async def test_get_entity_section_slice_returns_span_and_coordinates(
+    client: AsyncClient, test_project: Project, v2_project_url, session_maker
+):
+    external_id = await _seed_sliceable_note(
+        client,
+        v2_project_url,
+        test_project,
+        session_maker,
+        title="SectionSlice",
+        content=_SLICEABLE_DOC,
+    )
+
+    response = await client.get(
+        f"{v2_project_url}/knowledge/entities/{external_id}",
+        params={"section": "Decisions"},
+    )
+
+    assert response.status_code == 200
+    entity = EntityResponseV2.model_validate(response.json())
+    assert entity.content == "## Decisions\nd1\nd2"
+    assert entity.section == "Auth/Decisions"
+    assert entity.content_start_line == 7
+    assert entity.content_end_line == 9
+    assert entity.content_total_lines == 13
+    assert entity.content_truncated is False
+    assert entity.content_continue_line is None
+    # The returned coordinates address the same lines in the full document.
+    assert "\n".join(_SLICEABLE_DOC.split("\n")[6:9]) == entity.content
+
+
+@pytest.mark.asyncio
+async def test_get_entity_section_slice_path_and_bracket_forms(
+    client: AsyncClient, test_project: Project, v2_project_url, session_maker
+):
+    external_id = await _seed_sliceable_note(
+        client,
+        v2_project_url,
+        test_project,
+        session_maker,
+        title="SectionForms",
+        content="# Spec\n## Auth\nfirst\n## Auth\nsecond",
+    )
+
+    path_response = await client.get(
+        f"{v2_project_url}/knowledge/entities/{external_id}",
+        params={"section": "Spec/Auth"},
+    )
+    assert path_response.status_code == 200
+    first = EntityResponseV2.model_validate(path_response.json())
+    assert first.content == "## Auth\nfirst"
+    assert first.section == "Spec/Auth[0]"
+
+    bracket_response = await client.get(
+        f"{v2_project_url}/knowledge/entities/{external_id}",
+        params={"section": "Auth[1]"},
+    )
+    assert bracket_response.status_code == 200
+    second = EntityResponseV2.model_validate(bracket_response.json())
+    assert second.content == "## Auth\nsecond"
+    assert second.section == "Spec/Auth[1]"
+    assert (second.content_start_line, second.content_end_line) == (4, 5)
+
+
+@pytest.mark.asyncio
+async def test_get_entity_unknown_section_404_lists_available_headings(
+    client: AsyncClient, test_project: Project, v2_project_url, session_maker
+):
+    external_id = await _seed_sliceable_note(
+        client,
+        v2_project_url,
+        test_project,
+        session_maker,
+        title="SectionMissing",
+        content=_SLICEABLE_DOC,
+    )
+
+    response = await client.get(
+        f"{v2_project_url}/knowledge/entities/{external_id}",
+        params={"section": "Nope"},
+    )
+
+    assert response.status_code == 404
+    detail = response.json()["detail"]
+    assert "'Nope' not found" in detail
+    assert "Available sections: Auth, Auth/Decisions, Auth/Ops, Tail" in detail
+
+
+@pytest.mark.asyncio
+async def test_get_entity_ambiguous_section_404_lists_qualified_paths(
+    client: AsyncClient, test_project: Project, v2_project_url, session_maker
+):
+    external_id = await _seed_sliceable_note(
+        client,
+        v2_project_url,
+        test_project,
+        session_maker,
+        title="SectionAmbiguous",
+        content="# Auth\n## Decisions\na\n# Ops\n## Decisions\nb",
+    )
+
+    response = await client.get(
+        f"{v2_project_url}/knowledge/entities/{external_id}",
+        params={"section": "Decisions"},
+    )
+
+    assert response.status_code == 404
+    detail = response.json()["detail"]
+    assert "is ambiguous" in detail
+    assert "Auth/Decisions, Ops/Decisions" in detail
+
+
+@pytest.mark.asyncio
+async def test_get_entity_lines_slice_forms(
+    client: AsyncClient, test_project: Project, v2_project_url, session_maker
+):
+    external_id = await _seed_sliceable_note(
+        client,
+        v2_project_url,
+        test_project,
+        session_maker,
+        title="LineSlices",
+        content=_SLICEABLE_DOC,
+    )
+    url = f"{v2_project_url}/knowledge/entities/{external_id}"
+
+    ranged = EntityResponseV2.model_validate(
+        (await client.get(url, params={"lines": "5-6"})).json()
+    )
+    assert ranged.content == "# Auth\nline a"
+    assert (ranged.content_start_line, ranged.content_end_line) == (5, 6)
+    assert ranged.content_total_lines == 13
+    assert ranged.section is None
+
+    open_ended = EntityResponseV2.model_validate(
+        (await client.get(url, params={"lines": "12-"})).json()
+    )
+    assert open_ended.content == "# Tail\nz"
+    assert (open_ended.content_start_line, open_ended.content_end_line) == (12, 13)
+
+    single = EntityResponseV2.model_validate((await client.get(url, params={"lines": "5"})).json())
+    assert single.content == "# Auth"
+    assert (single.content_start_line, single.content_end_line) == (5, 5)
+
+    clamped = EntityResponseV2.model_validate(
+        (await client.get(url, params={"lines": "13-999"})).json()
+    )
+    assert clamped.content == "z"
+    assert (clamped.content_start_line, clamped.content_end_line) == (13, 13)
+
+
+@pytest.mark.asyncio
+async def test_get_entity_slice_param_validation_422(
+    client: AsyncClient, test_project: Project, v2_project_url, session_maker
+):
+    external_id = await _seed_sliceable_note(
+        client,
+        v2_project_url,
+        test_project,
+        session_maker,
+        title="SliceValidation",
+        content=_SLICEABLE_DOC,
+    )
+    url = f"{v2_project_url}/knowledge/entities/{external_id}"
+
+    both = await client.get(url, params={"section": "Auth", "lines": "1-3"})
+    assert both.status_code == 422
+    assert "mutually exclusive" in both.json()["detail"]
+
+    bad_lines = await client.get(url, params={"lines": "3-1"})
+    assert bad_lines.status_code == 422
+    assert "Invalid lines range" in bad_lines.json()["detail"]
+
+    bad_selector = await client.get(url, params={"section": "A//B"})
+    assert bad_selector.status_code == 422
+    assert "Invalid section selector" in bad_selector.json()["detail"]
+
+    bad_budget = await client.get(url, params={"max_tokens": 0})
+    assert bad_budget.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_get_entity_max_tokens_truncates_with_marker(
+    client: AsyncClient, test_project: Project, v2_project_url, session_maker
+):
+    content = "# One\n" + "a" * 40 + "\n# Two\n" + "b" * 400
+    external_id = await _seed_sliceable_note(
+        client,
+        v2_project_url,
+        test_project,
+        session_maker,
+        title="TokenBudget",
+        content=content,
+    )
+
+    response = await client.get(
+        f"{v2_project_url}/knowledge/entities/{external_id}",
+        params={"max_tokens": 20},
+    )
+
+    assert response.status_code == 200
+    entity = EntityResponseV2.model_validate(response.json())
+    assert entity.content is not None
+    kept_lines = entity.content.split("\n")
+    assert kept_lines[:-1] == ["# One", "a" * 40]
+    assert kept_lines[-1] == "… [truncated at max_tokens=20; continue with lines=3-]"
+    assert entity.content_truncated is True
+    assert entity.content_continue_line == 3
+    assert (entity.content_start_line, entity.content_end_line) == (1, 2)
+    assert entity.content_total_lines == 4
+
+
+@pytest.mark.asyncio
+async def test_get_entity_without_slice_params_has_no_slice_metadata(
+    client: AsyncClient, test_project: Project, v2_project_url, session_maker
+):
+    external_id = await _seed_sliceable_note(
+        client,
+        v2_project_url,
+        test_project,
+        session_maker,
+        title="NoSliceMeta",
+        content=_SLICEABLE_DOC,
+    )
+
+    response = await client.get(f"{v2_project_url}/knowledge/entities/{external_id}")
+
+    assert response.status_code == 200
+    entity = EntityResponseV2.model_validate(response.json())
+    assert entity.content == _SLICEABLE_DOC
+    assert entity.section is None
+    assert entity.content_start_line is None
+    assert entity.content_end_line is None
+    assert entity.content_total_lines is None
+    assert entity.content_truncated is None
+    assert entity.content_continue_line is None
+
+
+@pytest.mark.asyncio
+async def test_get_entity_slices_apply_after_cache_retrieval(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url,
+    session_maker,
+    fake_read_cache,
+):
+    """The read cache stores the pristine full note; every slice is per-request."""
+    external_id = await _seed_sliceable_note(
+        client,
+        v2_project_url,
+        test_project,
+        session_maker,
+        title="SliceCache",
+        content=_SLICEABLE_DOC,
+    )
+    url = f"{v2_project_url}/knowledge/entities/{external_id}"
+
+    # Warm the cache with a full read, then request two different slices: both
+    # are computed from the one stored full-note entry (slice params are not in
+    # the cache digest).
+    full_first = EntityResponseV2.model_validate((await client.get(url)).json())
+    assert full_first.content == _SLICEABLE_DOC
+    assert len(fake_read_cache.payloads) == 1
+    (stored_payload,) = fake_read_cache.payloads.values()
+
+    section_slice = EntityResponseV2.model_validate(
+        (await client.get(url, params={"section": "Ops"})).json()
+    )
+    assert section_slice.content == "## Ops\no1"
+
+    line_slice = EntityResponseV2.model_validate(
+        (await client.get(url, params={"lines": "8-9"})).json()
+    )
+    assert line_slice.content == "d1\nd2"
+
+    # The sliced reads shared the warm entry: no new key, and the stored value
+    # is still the pristine full note.
+    assert list(fake_read_cache.payloads.values()) == [stored_payload]
+    cached_entity = EntityResponseV2.model_validate_json(stored_payload)
+    assert cached_entity.content == _SLICEABLE_DOC
+
+    # A later full read still serves the complete document, not a cached slice.
+    full_after = EntityResponseV2.model_validate((await client.get(url)).json())
+    assert full_after.content == _SLICEABLE_DOC
+    assert full_after.section is None
+
+
+@pytest.mark.asyncio
+async def test_get_entity_slice_without_content_404(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url,
+    entity_repository,
+    session_maker,
+):
+    """A content-less legacy entity cannot be sliced."""
+    entity = EntityModel(
+        title="legacy.txt",
+        note_type="file",
+        content_type="text/plain",
+        file_path="legacy/legacy.txt",
+        checksum="seeded",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    async with db.scoped_session(session_maker) as session:
+        entity = await entity_repository.add(session, entity)
+
+    response = await client.get(
+        f"{v2_project_url}/knowledge/entities/{entity.external_id}",
+        params={"section": "Anything"},
+    )
+
+    assert response.status_code == 404
+    assert "no markdown content to slice" in response.json()["detail"]

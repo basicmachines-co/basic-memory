@@ -58,31 +58,71 @@ async def cat(
     project_id: Optional[str] = None,
     context: Context | None = None,
 ) -> dict[str, Any]:
-    """Print a note's full content, optionally sliced to a 1-indexed line range.
+    """Print a note's content, optionally sliced by line range, section, or token budget.
 
     Args:
         identifier: Note title, permalink, or memory:// URL (resolved exactly).
         start_line: First line to include (1-indexed, inclusive).
         end_line: Last line to include (inclusive). Defaults to the last line.
-        section: Reserved; not yet supported.
-        max_tokens: Reserved; not yet supported.
+        section: Heading to slice to: "Decisions", path form "Auth/Decisions"
+            to disambiguate by parent, or bracket form "Heading[1]" for the
+            second duplicate heading. Cannot combine with start_line/end_line;
+            the response's start_line/end_line support follow-up range reads.
+        max_tokens: Approximate token budget. Longer content is truncated at a
+            section or paragraph boundary with an explicit ellipsis marker; the
+            response carries truncated/continue_line for resuming.
         include_frontmatter: Include the YAML frontmatter block in `content`.
+            Ignored for section/max_tokens reads — those slices never carry a
+            frontmatter block. A start_line/end_line range combined with
+            max_tokens addresses the full document (frontmatter included) and
+            therefore requires include_frontmatter=True.
         project: Project name. Optional - the server resolves the default.
         project_id: Project external_id (UUID); takes precedence over `project`.
         context: Optional FastMCP context.
 
     Returns:
         The read_note JSON payload (title, permalink, file_path, content,
-        frontmatter), plus start_line/end_line/total_lines when a range applied.
+        frontmatter), plus start_line/end_line/total_lines when a slice applied,
+        `section` for section reads, and truncated/continue_line when max_tokens
+        cut the content.
     """
-    if section is not None:
-        raise ValueError("cat: 'section' is not yet supported; use start_line/end_line")
-    if max_tokens is not None:
-        raise ValueError("cat: 'max_tokens' is not yet supported; use start_line/end_line")
+    if section is not None and (start_line is not None or end_line is not None):
+        raise ValueError(
+            "cat: 'section' cannot be combined with start_line/end_line; use the "
+            "returned start_line/end_line for follow-up range reads"
+        )
+    if max_tokens is not None and max_tokens < 1:
+        raise ValueError(f"max_tokens must be >= 1, got {max_tokens}")
     if start_line is not None and start_line < 1:
         raise ValueError(f"start_line must be >= 1, got {start_line}")
     if end_line is not None and end_line < (start_line or 1):
         raise ValueError(f"end_line must be >= start_line, got {end_line}")
+    # Trigger: a line range rides along with max_tokens while frontmatter is opted out.
+    # Why: server-side line ranges are document-absolute (frontmatter included), but
+    #      include_frontmatter=False range reads slice the frontmatter-stripped body —
+    #      the same numbers would address different lines, and the served range could
+    #      carry frontmatter text despite the explicit opt-out.
+    # Outcome: the combination is rejected so every read keeps one coordinate system.
+    if (
+        max_tokens is not None
+        and not include_frontmatter
+        and (start_line is not None or end_line is not None)
+    ):
+        raise ValueError(
+            "cat: max_tokens with start_line/end_line requires include_frontmatter=True — "
+            "those ranges address the full document (frontmatter included); drop max_tokens "
+            "for a body-relative range, or keep include_frontmatter=True"
+        )
+
+    # Trigger: section or max_tokens is set.
+    # Why: those slices need the server-side section scan and token budgeting;
+    #      plain line ranges keep their original client-side slicing untouched.
+    # Outcome: the read carries the slice params (line bounds ride along as a
+    #          lines= range) and the server-supplied payload returns as-is.
+    server_side_slice = section is not None or max_tokens is not None
+    lines_param: Optional[str] = None
+    if server_side_slice and (start_line is not None or end_line is not None):
+        lines_param = f"{start_line or 1}-{'' if end_line is None else end_line}"
 
     async with get_project_client(project, context=context, project_id=project_id) as (
         client,
@@ -99,10 +139,13 @@ async def cat(
                 resource_client=ResourceClient(client, active_project.external_id),
                 entity_external_id=entity_id,
                 include_frontmatter=include_frontmatter,
+                section=section,
+                lines=lines_param,
+                max_tokens=max_tokens,
             )
         )
 
-    if start_line is None and end_line is None:
+    if server_side_slice or (start_line is None and end_line is None):
         return payload
 
     lines = str(payload["content"]).splitlines()

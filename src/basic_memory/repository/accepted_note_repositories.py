@@ -3,7 +3,12 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from basic_memory.repository import NoteContentRepository, ObservationRepository, RelationRepository
+from basic_memory.repository import (
+    NoteContentRepository,
+    NoteSectionRepository,
+    ObservationRepository,
+    RelationRepository,
+)
 from basic_memory.repository.accepted_note_search_repository import AcceptedNoteSearchRepository
 from basic_memory.repository.accepted_note_vector_cleanup import (
     ProjectIndexExternalVectorCleaner,
@@ -42,6 +47,9 @@ class AcceptedNoteRepositories:
 
     def observation_repository(self, project_id: ProjectId) -> ObservationRepository:
         return ObservationRepository(project_id=project_id)
+
+    def section_repository(self, project_id: ProjectId) -> NoteSectionRepository:
+        return NoteSectionRepository(project_id=project_id)
 
     def relation_repository(self, project_id: ProjectId) -> RelationRepository:
         return RelationRepository(project_id=project_id)

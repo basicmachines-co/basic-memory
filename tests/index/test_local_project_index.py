@@ -61,7 +61,7 @@ from basic_memory.indexing.relation_resolution import (
 )
 from basic_memory.indexing.relation_persistence import RelationGenerationPublisher
 from basic_memory.models import Entity, Project, Relation
-from basic_memory.repository import EntityRepository
+from basic_memory.repository import EntityRepository, NoteSectionRepository
 from basic_memory.repository.note_content_repository import (
     AcceptedNoteContentWrite,
     NoteContentRepository,
@@ -1802,6 +1802,7 @@ async def test_local_relation_resolution_refreshes_pending_source_without_markdo
     generation_is_current = await RelationGenerationPublisher(
         observation_repository=observation_repository,
         relation_repository=relation_repository,
+        section_repository=NoteSectionRepository(project_id=observation_repository.project_id),
         session_maker=session_maker,
     ).publish(
         entity_id=source_id,

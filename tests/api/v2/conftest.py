@@ -85,3 +85,51 @@ def v2_project_url(test_project: Project) -> str:
 def v2_projects_url() -> str:
     """Base URL for v2 project management endpoints."""
     return "/v2/projects"
+
+
+@pytest.fixture
+def fake_read_cache(app: FastAPI):
+    """Install an in-memory ReadCache backend so cached-read branches execute.
+
+    The real backend is Redis and absent in tests (get_read_cache returns None,
+    disabling read-through). Tests that pin cache semantics — a cached full note
+    sliced per request, a cached resource sliced by Range — opt in with this
+    fixture and can inspect the stored payloads.
+    """
+    from basic_memory.deps import get_read_cache
+    from basic_memory.read_cache import (
+        ReadCacheInvalidationStatus,
+        ReadCacheKey,
+        ReadCacheLookup,
+        ReadCacheStoreStatus,
+    )
+
+    class InMemoryReadCache:
+        def __init__(self) -> None:
+            self.payloads: dict[ReadCacheKey, bytes] = {}
+            self.invalidated_projects: list[str] = []
+
+        async def lookup(self, key: ReadCacheKey) -> ReadCacheLookup:
+            return ReadCacheLookup(generation="test-generation", payload=self.payloads.get(key))
+
+        async def store(
+            self,
+            key: ReadCacheKey,
+            lookup: ReadCacheLookup,
+            payload: bytes,
+            *,
+            ttl_seconds: int,
+        ) -> ReadCacheStoreStatus:
+            del lookup, ttl_seconds
+            self.payloads[key] = payload
+            return ReadCacheStoreStatus.stored
+
+        async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
+            self.invalidated_projects.append(project_id)
+            self.payloads.clear()
+            return ReadCacheInvalidationStatus.invalidated
+
+    cache = InMemoryReadCache()
+    app.dependency_overrides[get_read_cache] = lambda: cache
+    yield cache
+    app.dependency_overrides.pop(get_read_cache, None)

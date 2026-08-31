@@ -216,6 +216,32 @@ class EntityResponseV2(BaseModel):
     )
     sync_error: Optional[str] = Field(None, description="Current note sync error")
 
+    # Slice metadata (SPEC-47 / #1403). Set only when the request asked for a
+    # section=, lines=, or max_tokens= slice, in which case `content` is the
+    # slice and line numbers count over the full stored document, frontmatter
+    # included. All None on unsliced responses, so every other producer of this
+    # model is untouched.
+    section: Optional[str] = Field(
+        None,
+        description="Canonical heading path of the returned section slice "
+        "(bracket-suffixed when a duplicate heading was addressed)",
+    )
+    content_start_line: Optional[int] = Field(
+        None, description="Document-absolute 1-indexed first line of the returned content"
+    )
+    content_end_line: Optional[int] = Field(
+        None, description="Document-absolute 1-indexed last line of the returned content"
+    )
+    content_total_lines: Optional[int] = Field(
+        None, description="Total line count of the full stored document"
+    )
+    content_truncated: Optional[bool] = Field(
+        None, description="Whether max_tokens truncated the returned content"
+    )
+    content_continue_line: Optional[int] = Field(
+        None, description="First line omitted by truncation; resume line reads here"
+    )
+
     # V2-specific metadata
     api_version: Literal["v2"] = Field(
         default="v2", description="API version (always 'v2' for this response)"

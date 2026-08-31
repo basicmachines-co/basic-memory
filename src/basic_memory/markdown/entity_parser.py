@@ -21,6 +21,7 @@ from basic_memory.markdown.schemas import (
     Observation,
     Relation,
 )
+from basic_memory.markdown.sections import scan_sections
 from basic_memory.utils import parse_tags
 
 
@@ -334,6 +335,9 @@ class EntityParser:
         entity_content = (
             parse(post.content) if parse_semantics else EntityContent(content=post.content)
         )
+        # Sections are structural, not semantic: they index the body for range reads,
+        # so the bm_parse_semantics opt-out above must not suppress them.
+        sections = scan_sections(post.content)
 
         # Canonical frontmatter timestamps describe note semantics. File times are
         # only compatibility fallbacks for notes that do not declare them.
@@ -360,6 +364,7 @@ class EntityParser:
             content=post.content,
             observations=entity_content.observations,
             relations=entity_content.relations,
+            sections=list(sections),
             created=created,
             modified=modified,
         )

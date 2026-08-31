@@ -15,17 +15,19 @@ from basic_memory.indexing.accepted_note_search import build_accepted_note_searc
 from basic_memory.indexing.external_file_delete_runner import (
     relation_cleanup_sources_for_deleted_entity,
 )
-from basic_memory.indexing.models import IndexedObservation, IndexedRelation
+from basic_memory.indexing.models import IndexedObservation, IndexedRelation, IndexedSection
 from basic_memory.indexing.relation_persistence import (
     ObservationGenerationStore,
     RelationGenerationPublication,
     RelationGenerationStore,
+    SectionGenerationStore,
 )
 from basic_memory.models import Entity, NoteContent
 from basic_memory.repository import (
     AcceptedNoteContentWrite,
     AcceptedObservationWrite,
     AcceptedRelationWrite,
+    AcceptedSectionWrite,
 )
 from basic_memory.repository.accepted_note_search_row import AcceptedNoteSearchRow
 from basic_memory.repository.entity_repository import AcceptedPendingEntityWrite
@@ -183,6 +185,10 @@ class AcceptedNoteObservationRepository(ObservationGenerationStore, Protocol):
     """Generation-fenced observation persistence for accepted note writes."""
 
 
+class AcceptedNoteSectionRepository(SectionGenerationStore, Protocol):
+    """Generation-fenced section persistence for accepted note writes."""
+
+
 class AcceptedNoteRelationRepository(RelationGenerationStore, Protocol):
     """Generation-fenced relation persistence for accepted note writes."""
 
@@ -210,6 +216,11 @@ class AcceptedNoteWriteRepositories(Protocol):
         project_id: ProjectId,
     ) -> AcceptedNoteObservationRepository: ...
 
+    def section_repository(
+        self,
+        project_id: ProjectId,
+    ) -> AcceptedNoteSectionRepository: ...
+
     def relation_repository(
         self,
         project_id: ProjectId,
@@ -234,6 +245,7 @@ class AcceptedPreparedNoteMove:
     permalink: str | None
     db_checksum: RuntimeNoteContentChecksum
     observations: tuple[AcceptedObservationWrite, ...]
+    sections: tuple[AcceptedSectionWrite, ...]
     relations: tuple[AcceptedRelationWrite, ...]
 
 
@@ -364,6 +376,7 @@ async def prepare_accepted_note_move(
         permalink=prepared.permalink,
         db_checksum=await file_utils.compute_checksum(prepared.markdown_content),
         observations=prepared.observations,
+        sections=prepared.sections,
         relations=prepared.relations,
     )
     entity.file_path = result.file_path
@@ -588,6 +601,7 @@ async def accepted_relation_generation_publication(
     entity: Entity,
     note_content: NoteContent,
     observations: Sequence[AcceptedObservationWrite],
+    sections: Sequence[AcceptedSectionWrite],
     relations: Sequence[AcceptedRelationWrite],
     self_relation_resolver: AcceptedNoteSelfRelationResolver,
 ) -> RelationGenerationPublication:
@@ -600,6 +614,19 @@ async def accepted_relation_generation_publication(
             tags=observation.tags,
         )
         for observation in observations
+    )
+    indexed_sections = tuple(
+        IndexedSection(
+            heading=section.heading,
+            level=section.level,
+            heading_path=section.heading_path,
+            duplicate_index=section.duplicate_index,
+            start_line=section.start_line,
+            end_line=section.end_line,
+            start_offset=section.start_offset,
+            end_offset=section.end_offset,
+        )
+        for section in sections
     )
     indexed_relations: list[IndexedRelation] = []
     for relation in relations:
@@ -628,6 +655,7 @@ async def accepted_relation_generation_publication(
         generation=note_content.db_version,
         relations=tuple(indexed_relations),
         observations=indexed_observations,
+        sections=indexed_sections,
     )
 
 
@@ -669,6 +697,7 @@ async def persist_accepted_note_snapshot(
             entity=entity,
             note_content=persisted.note_content,
             observations=prepared.observations,
+            sections=prepared.sections,
             relations=prepared.relations,
             self_relation_resolver=self_relation_resolver,
         ),
@@ -711,6 +740,7 @@ async def persist_accepted_note_move(
             entity=entity,
             note_content=persisted.note_content,
             observations=prepared.observations,
+            sections=prepared.sections,
             relations=prepared.relations,
             self_relation_resolver=self_relation_resolver,
         ),
