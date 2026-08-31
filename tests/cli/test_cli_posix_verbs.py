@@ -359,6 +359,10 @@ def test_cat_plain_slice_footer_goes_to_stderr(mock_cat):
     assert result.exit_code == 0, result.output
     assert result.stdout == CAT_SLICE_RESULT["content"]
     assert "lines 5-7 of 7" in result.stderr
+    # The slice content carries no trailing newline, so the footer must open
+    # with one on stderr — otherwise it visually concatenates onto the last
+    # content line in a terminal while stdout stays byte-exact for pipes.
+    assert result.stderr.startswith("\n")
 
 
 @patch("basic_memory.mcp.tools.cat", new_callable=AsyncMock, return_value=CAT_TRUNCATED_RESULT)
