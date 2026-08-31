@@ -17,6 +17,8 @@ It covers:
 | `just` retrieval and QA workflows (`bench-full`, `bench-qa`) | Implemented |
 | Artifact generation and publish/compare commands | Implemented |
 | Manual BM revision comparison via worktrees + `--bm-local-path` | Implemented workflow, manual orchestration |
+| xAFS agent-path eval (`convert xafs`, `run agent-tasks --task-manifest`) | Implemented (secondary dataset; see 6d) |
+| xAFS retrieval diagnostic (`queries.json` for single/multi-hop) | Planned — blocked on the provider doc-id seam (see 6d) |
 | `bm-bench run revision-matrix` | Planned, not implemented yet |
 
 ## 1) Purpose and Scope
@@ -83,11 +85,18 @@ just bench-prepare-long
 - `bench-prepare-short`
 - `bench-prepare-long`
 - `bench-prepare-beam`
+- `bench-fetch-xafs`
+- `bench-convert-xafs`
+- `bench-prepare-xafs`
+- `bench-run-xafs-agent`
+- `bench-xafs-audit-sample`
 - `bench-run-short`
 - `bench-run-long`
 - `bench-run-full`
 - `bench-run-beam-100k`
 - `bench-beam-score`
+- `bench-agent-smoke`
+- `bench-agent-tasks`
 - `bench-validate`
 - `bench-publish`
 - `bench-compare`
@@ -100,13 +109,16 @@ Top-level commands:
 - `datasets fetch`
 - `convert locomo`
 - `convert beam`
+- `convert xafs`
 - `run retrieval`
 - `run concurrent-write`
+- `run agent-tasks`
 - `run full`
 - `run qa`
 - `run beam-score`
 - `run rejudge`
 - `run review`
+- `sample xafs`
 - `compare`
 - `validate-artifacts`
 - `publish`
@@ -424,13 +436,143 @@ quality.
 ### Artifacts
 
 `benchmarks/runs/<run-id>/`: `manifest.json` (BM SHA/version, model + judge
-specs, budget, corpus checksum + file count, full surface echoes),
+specs, budget, corpus checksum + file count, the `tasks.json` checksum for
+dataset-driven runs — a corrections re-run changes gold answers without
+touching the corpus — full surface echoes),
 `surface-status.json` (ok/skipped/error per surface, explicit reasons),
 `per-turn.jsonl` (per model turn and tool dispatch: tokens, tool name,
 latency, result size), `per-task-agent.jsonl`, `agent-tasks-summary.json`,
 `summary.md` (which repeats any skipped surface so the report cannot be
 misread as a completed A/B). `validate-artifacts` remains retrieval-only for now (as for
 concurrent-write); a kind-aware variant is a follow-up.
+
+## 6d) xAFS (supermemory, HF `supermemory/xAFS` @ 21142b2c)
+
+**Provenance caveat first: xAFS is authored by supermemory, a memory-product
+vendor. Numbers from it are reported as a SECONDARY dataset, never the
+headline, pending a ~20-question quality audit (tooling:
+`bm-bench sample xafs`; verdicts feed the corrections hook below).**
+
+xAFS ("Agentic File System") probes agentic retrieval over persona file
+trees: 13 synthetic personas whose corpora scale from 5 to ~10K files (~19K
+files / ~837MB total), questioned in three families — single-hop, multi-hop,
+and format-spanning (questions whose sources include non-markdown files, e.g.
+`.eml` mails). The headline is tokens spent per correct answer, judged
+semantically — exactly the agent-task harness's framing (6c), which is where
+xAFS runs.
+
+Count note: the upstream README advertises 110 questions (35/50/25 per
+family); the shipped `question.json` files at the pinned revision sum to
+33/51/26. The loader trusts the JSON and asserts nothing about totals.
+
+### Fetch (never vendored)
+
+```bash
+XAFS_PERSONAS=dp_001,dp_002 bash benchmarks/datasets/xafs/download.sh
+# just bench-fetch-xafs — same subset default; personas="" fetches all 837MB
+```
+
+The download is a pinned `hf download supermemory/xAFS --repo-type dataset
+--revision 21142b2c...` into `benchmarks/datasets/xafs/upstream/`
+(gitignored). Persona subsetting via `--include 'dp_NNN/*'` patterns is the
+normal mode — full ingestion is ~837MB, and the loader accepts partial
+snapshots (unknown *requested* personas fail fast listing what is on disk).
+
+### Workflow
+
+```bash
+just bench-fetch-xafs                       # pinned snapshot (subset default)
+just bench-convert-xafs                     # -> benchmarks/generated/xafs/{groups,tasks.json,conversion.json}
+BM_LOCAL_PATH=.. just bench-run-xafs-agent  # agent-task run over the manifest
+just bench-xafs-audit-sample                # seeded human-review sample
+```
+
+Conversion copies each persona's `data/` tree byte-for-byte (relpaths
+preserved, no frontmatter render — questions cite exact file content) into
+`groups/xafs-dpNNN/docs/`. BM's sync ingests `.md` files as notes and
+non-markdown files as file resources reachable via `read_content` (rich) or
+`cat`/`grep` (posix) — nothing is skipped, and `conversion.json` records
+per-extension counts plus a `skipped` list that must stay empty (a file the
+copy policy cannot place aborts the conversion). Gold answers and prompts
+exist only in `tasks.json`; an answer-key/scenario filename appearing inside
+`data/` aborts conversion (anti-leakage).
+
+### Execution split per question family
+
+| Family | Path | Rationale |
+| --- | --- | --- |
+| format_spanning (26) | Agent harness only | Verbatim file reading (`read_content` / `cat`+`grep`) is the point; the retrieval path only searches notes |
+| single_hop (33), multi_hop (51) | Agent harness (headline) | Tokens-per-correct-answer is literally the harness headline; a retrieval+QA diagnostic is deferred (below) |
+
+The retrieval diagnostic for single/multi-hop is deliberately NOT emitted in
+v1: the `bm-local` provider normalizes result doc ids to the basename sans
+`.md`, which is unique for rendered corpora but collides across xAFS's
+persona-shaped trees (repeated `notes.md`-style basenames), so recall against
+`gold_file_ids` would be silently wrong. It is planned behind widening the
+provider doc-id seam to full relpaths; at that point a converter
+`--emit-queries` flag plus a dataset-keyed breakout in `scoring/retrieval.py`
+(the BEAM precedent) keeps xAFS's `single_hop`/`multi_hop` labels out of the
+LoCoMo `official_headline` container despite the name collision.
+
+Manifest runs are grouped and read-only: each persona is ingested ONCE per
+(surface, group) as project `at-<run-id>-xafs-dpNNN` and every question in
+the group reuses that warm project (copying 837MB per question is untenable).
+To keep reuse safe AND fair, the shared write verbs (`write_note`,
+`edit_note`, `move_note`, `delete_note`) are dropped from BOTH surfaces
+symmetrically — rich becomes `search_notes, read_note, read_content,
+list_directory, recent_activity, build_context`; posix becomes `cat, grep,
+ls, find, tail, man` — matching upstream's read-only reference agent
+(grep/find/cat). The reduced allowlists are echoed into `manifest.json` via
+`SurfaceEcho`. State-free tasks (all xAFS tasks: judge-graded answers) skip
+the per-task baseline snapshot and post-loop settle. The per-group table in
+`summary.md` (tokens/correct per persona) is the corpus-scaling curve —
+xAFS's central claim — read alongside per-family (skill) accuracy.
+
+### Scoring definition
+
+- Headline: `(total agent tokens over ALL attempted tasks) / (judge-CORRECT
+  tasks)` per surface — the 6c headline, unchanged. Accuracy, tool calls,
+  turns, and wall time always appear in the same table.
+- The judge is the package judge seam (`JudgeRubric` →
+  `AGENT_JUDGE_PROMPT_TEMPLATE`, one CORRECT/INCORRECT line); judge tokens
+  are accounted separately and never enter the headline.
+- Errored tasks are excluded from means and never zero-scored (6c rules
+  inherited unchanged).
+
+### Runner provenance (divergences from supermemory's published setup)
+
+1. Judge model is operator-chosen (`--judge`; the just target defaults to
+   `claude:claude-sonnet-4-6`), not Gemini 3.1 Pro Preview — the dataset card
+   itself allows an equivalently-capable judge; `judge_spec` is pinned in
+   `manifest.json`.
+2. Upstream ships no judge prompt; ours is the fixed package template with a
+   rubric built deterministically from the upstream prompt + gold answer,
+   mirroring the card's semantic-equivalence criteria (paraphrase/format
+   tolerant; exact values, named entities, and multi-part coverage required).
+3. We judge the agent's full final message (including its fenced-JSON close),
+   not an extracted answer string.
+4. The harness adds the fixed `TASK_PROMPT_TEMPLATE` preamble and fenced-JSON
+   finalization (upstream is bring-your-own-runner).
+5. Correct-answer denominator = judge-CORRECT tasks; token numerator = agent
+   loop in+out over ALL attempted tasks; judge tokens excluded (upstream
+   unspecified); errored tasks excluded from means, never zero-scored.
+6. Family counts follow the shipped JSON (33/51/26), not the README
+   (35/50/25).
+7. Secondary-dataset caveat: vendor-authored; reported as secondary, never
+   the headline, pending the question-quality audit.
+
+### Audit sampling and corrections
+
+`bm-bench sample xafs --n 20 --seed 42` writes a seeded, family-stratified
+sample to `benchmarks/generated/xafs-audit/`: `audit-sample.json`,
+human-readable `sample.md`, and verbatim copies of every gold source file
+under `sources/<persona>-<qid>/`. The post-merge audit's verdicts land in
+`benchmarks/datasets/xafs/corrections.json` — records keyed
+`"<persona>/<qid>"` carrying the upstream `prompt` (cross-checked; drift
+fails the conversion loudly) plus either a corrected `gold_answer` or
+`"excluded": true` with a `reason`. `convert xafs --corrections` applies
+them; exclusions are dropped from `tasks.json` and counted in
+`conversion.json`.
 
 ## 7) Commit-to-Commit Comparison (Current Manual Method)
 

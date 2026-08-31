@@ -11,6 +11,7 @@ import typer
 from rich.console import Console
 
 from basic_memory_benchmarks.agent_tasks.driver import run_agent_tasks
+from basic_memory_benchmarks.agent_tasks.manifest import load_task_manifest
 from basic_memory_benchmarks.agent_tasks.models import AgentBudget, AgentTasksConfig
 from basic_memory_benchmarks.agent_tasks.spec import JudgeRubric
 from basic_memory_benchmarks.agent_tasks.surfaces import SURFACES
@@ -23,6 +24,10 @@ from basic_memory_benchmarks.converters.beam_to_corpus import convert_beam_to_co
 from basic_memory_benchmarks.converters.convomem_to_corpus import convert_convomem_to_corpus
 from basic_memory_benchmarks.converters.locomo_to_corpus import convert_locomo_to_corpus
 from basic_memory_benchmarks.converters.longmemeval_to_corpus import convert_longmemeval_to_corpus
+from basic_memory_benchmarks.converters.xafs_to_corpus import (
+    convert_xafs_to_corpus,
+    sample_xafs_audit,
+)
 from basic_memory_benchmarks.datasets.convomem import fetch_convomem_batches
 from basic_memory_benchmarks.datasets.locomo import LOCOMO_URL, fetch_locomo_dataset
 from basic_memory_benchmarks.datasets.locomo_audit import fetch_locomo_audit_corrections
@@ -52,10 +57,12 @@ console = Console()
 datasets_app = typer.Typer(help="Dataset management commands")
 convert_app = typer.Typer(help="Dataset conversion commands")
 run_app = typer.Typer(help="Benchmark execution commands")
+sample_app = typer.Typer(help="Audit sampling commands (human question-quality review)")
 
 app.add_typer(datasets_app, name="datasets")
 app.add_typer(convert_app, name="convert")
 app.add_typer(run_app, name="run")
+app.add_typer(sample_app, name="sample")
 
 
 @datasets_app.command("fetch")
@@ -245,6 +252,87 @@ def convert_convomem(
     console.print(f"Sampling manifest: [cyan]{output_dir / 'sampling.json'}[/cyan]")
 
 
+def _parse_personas(personas: str) -> list[str] | None:
+    """Comma-separated persona ids; empty (or 'all') selects every one on disk."""
+    if personas.strip().lower() in ("", "all"):
+        return None
+    return [item.strip() for item in personas.split(",") if item.strip()]
+
+
+@convert_app.command("xafs")
+def convert_xafs(
+    dataset_root: Path = typer.Option(
+        Path("benchmarks/datasets/xafs/upstream"),
+        "--dataset-root",
+        help="Local xAFS snapshot (see benchmarks/datasets/xafs/download.sh; never vendored)",
+    ),
+    output_dir: Path = typer.Option(Path("benchmarks/generated/xafs"), "--output-dir"),
+    personas: str = typer.Option(
+        "",
+        "--personas",
+        help="Comma-separated persona ids (dp_001,...); empty/'all' converts every "
+        "downloaded persona (full ingestion is ~837MB)",
+    ),
+    corrections: Path | None = typer.Option(
+        None,
+        "--corrections",
+        help="Audit corrections JSON keyed '<persona>/<qid>'; overrides gold answers "
+        "or excludes questions (prompt cross-check fails loudly on drift)",
+    ),
+) -> None:
+    """Convert xAFS personas into grouped corpora + an agent-task manifest.
+
+    The dataset is never vendored; fetch it first with
+    `benchmarks/datasets/xafs/download.sh`. Run the result with
+    `run agent-tasks --task-manifest <output>/tasks.json`.
+    """
+    try:
+        groups_dir, tasks_path, file_count, task_count = convert_xafs_to_corpus(
+            dataset_root=dataset_root,
+            output_dir=output_dir,
+            personas=_parse_personas(personas),
+            corrections_path=corrections,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    console.print(f"Groups: [cyan]{groups_dir}[/cyan] ({file_count} files)")
+    console.print(f"Tasks: [cyan]{tasks_path}[/cyan] ({task_count})")
+    console.print(f"Conversion manifest: [cyan]{output_dir / 'conversion.json'}[/cyan]")
+
+
+@sample_app.command("xafs")
+def sample_xafs(
+    dataset_root: Path = typer.Option(
+        Path("benchmarks/datasets/xafs/upstream"),
+        "--dataset-root",
+        help="Local xAFS snapshot (see benchmarks/datasets/xafs/download.sh)",
+    ),
+    personas: str = typer.Option(
+        "", "--personas", help="Comma-separated persona ids; empty/'all' samples across all"
+    ),
+    n: int = typer.Option(20, "--n", help="Sample size (stratified across the three families)"),
+    seed: int = typer.Option(42, "--seed"),
+    output: Path = typer.Option(Path("benchmarks/generated/xafs-audit"), "--output"),
+) -> None:
+    """Extract a seeded question sample (with gold answers + source files) for human review.
+
+    Ships the tooling for the xAFS question-quality audit; verdicts land in
+    benchmarks/datasets/xafs/corrections.json and feed `convert xafs --corrections`.
+    """
+    try:
+        sample_path, sampled = sample_xafs_audit(
+            dataset_root=dataset_root,
+            output_dir=output,
+            personas=_parse_personas(personas),
+            sample_size=n,
+            seed=seed,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    console.print(f"Audit sample: [cyan]{sample_path}[/cyan] ({sampled} questions)")
+    console.print(f"Readable form + gold files: [cyan]{output / 'sample.md'}[/cyan]")
+
+
 @run_app.command("retrieval")
 def run_retrieval_command(
     providers: str = typer.Option("bm-local,mem0-local", "--providers"),
@@ -386,6 +474,14 @@ def run_agent_tasks_command(
     tasks: str = typer.Option(
         "", "--tasks", help="Comma-separated task ids; empty runs all shipped tasks"
     ),
+    task_manifest: Path | None = typer.Option(
+        None,
+        "--task-manifest",
+        help="Converted dataset tasks.json (e.g. `convert xafs`); replaces the shipped "
+        "task set with grouped, judge-graded questions run on read-only surfaces. "
+        "When set and --corpus-dir is left at its default, the corpus dir becomes "
+        "<manifest dir>/groups",
+    ),
     corpus_dir: Path = typer.Option(Path("benchmarks/datasets/agent-tasks/corpus"), "--corpus-dir"),
     output_root: Path = typer.Option(Path("benchmarks/runs"), "--output-root"),
     run_id: str | None = typer.Option(None, "--run-id"),
@@ -426,9 +522,17 @@ def run_agent_tasks_command(
         raise typer.BadParameter(f"Unknown surfaces: {unknown_surfaces}. Known: {sorted(SURFACES)}")
 
     task_ids = [item.strip() for item in tasks.split(",") if item.strip()]
+    # Manifest runs almost always want the converter's sibling groups/ dir; the
+    # shipped-corpus default would checksum the wrong corpus and then fail on
+    # missing group subtrees, so derive it unless --corpus-dir was set.
+    if task_manifest is not None and corpus_dir == Path("benchmarks/datasets/agent-tasks/corpus"):
+        corpus_dir = task_manifest.parent / "groups"
     try:
-        selected = select_tasks(task_ids)
-    except ValueError as exc:
+        if task_manifest is not None:
+            selected = load_task_manifest(task_manifest, task_ids=task_ids)
+        else:
+            selected = select_tasks(task_ids)
+    except (ValueError, FileNotFoundError) as exc:
         raise typer.BadParameter(str(exc)) from exc
 
     # Fail fast at parse time: a bad model spec (including claude:) and a
@@ -450,6 +554,7 @@ def run_agent_tasks_command(
         run_id=resolved_run_id,
         surfaces=surface_list,
         task_ids=task_ids,
+        task_manifest=str(task_manifest) if task_manifest is not None else None,
         model_spec=model,
         judge_spec=judge,
         corpus_dir=str(corpus_dir),

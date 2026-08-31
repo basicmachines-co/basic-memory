@@ -14,6 +14,7 @@ from basic_memory_benchmarks.agent_tasks.loop import (
     ToolOutcome,
     run_agent_loop,
 )
+from basic_memory_benchmarks.agent_tasks.manifest import load_task_manifest
 from basic_memory_benchmarks.agent_tasks.models import (
     AgentBudget,
     AgentTaskResult,
@@ -21,11 +22,16 @@ from basic_memory_benchmarks.agent_tasks.models import (
     AgentTasksManifest,
     SurfaceSummary,
 )
-from basic_memory_benchmarks.agent_tasks.spec import AgentTaskSpec, Grader
+from basic_memory_benchmarks.agent_tasks.spec import (
+    AgentTaskSpec,
+    Grader,
+    spec_needs_project_state,
+)
 from basic_memory_benchmarks.agent_tasks.surfaces import (
     SURFACES,
     SurfaceUnavailableError,
     ToolSurface,
+    read_only_view,
     surface_env,
     verify_surface_tools,
 )
@@ -52,9 +58,12 @@ __all__ = [
     "ToolDispatch",
     "ToolOutcome",
     "ToolSurface",
+    "load_task_manifest",
+    "read_only_view",
     "run_agent_loop",
     "run_agent_tasks",
     "select_tasks",
+    "spec_needs_project_state",
     "surface_env",
     "verify_surface_tools",
 ]

@@ -71,6 +71,27 @@ POSIX_SURFACE = ToolSurface(
 
 SURFACES: dict[str, ToolSurface] = {"rich": RICH_SURFACE, "posix": POSIX_SURFACE}
 
+# The write verbs both surfaces share (posix v1 is read-side only, see above).
+SHARED_WRITE_TOOLS = ("write_note", "edit_note", "move_note", "delete_note")
+
+
+def read_only_view(surface: ToolSurface) -> ToolSurface:
+    """The surface with the shared write verbs dropped — symmetrically.
+
+    Dataset-manifest runs reuse one warm project per (surface, group); a write
+    from an earlier question would pollute later questions' haystack. Dropping
+    the same four verbs from BOTH surfaces preserves the fairness contract and
+    matches xAFS's read-only reference agent (grep/find/cat).
+    """
+    return ToolSurface(
+        name=surface.name,
+        config_overrides=surface.config_overrides,
+        tool_allowlist=tuple(
+            name for name in surface.tool_allowlist if name not in SHARED_WRITE_TOOLS
+        ),
+        requires=surface.requires,
+    )
+
 
 def surface_env(surface: ToolSurface, base_env: dict[str, str]) -> dict[str, str]:
     """Apply the surface's config overrides on top of an isolated BM env."""
