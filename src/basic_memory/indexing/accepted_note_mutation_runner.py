@@ -355,9 +355,7 @@ async def record_accepted_project_note_change(
 ) -> RuntimeAcceptedProjectNoteChange:
     """Claim and describe one accepted change in the project's strict partition."""
     if entity.permalink is None:
-        raise RuntimeError(
-            f"Accepted note is missing permalink for entity_id={entity.id}"
-        )
+        raise RuntimeError(f"Accepted note is missing permalink for entity_id={entity.id}")
     position = await dependencies.project_repository.advance_partition_position(
         session,
         project.id,
