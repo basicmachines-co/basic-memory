@@ -876,7 +876,7 @@ async def test_edit_note_metadata_merges_frontmatter(mcp_server, app, test_proje
 
 @pytest.mark.asyncio
 async def test_edit_note_metadata_ignores_identity_fields(mcp_server, app, test_project):
-    """title/type/permalink in `metadata` are ignored rather than hijacking the note's identity."""
+    """title/permalink in `metadata` are ignored rather than hijacking the note's identity."""
 
     async with Client(mcp_server) as client:
         await client.call_tool(
@@ -898,7 +898,6 @@ async def test_edit_note_metadata_ignores_identity_fields(mcp_server, app, test_
                 "content": "",
                 "metadata": {
                     "title": "Hijacked Title",
-                    "type": "hijacked",
                     "permalink": "hijacked/permalink",
                     "status": "resolved",
                 },
@@ -920,6 +919,52 @@ async def test_edit_note_metadata_ignores_identity_fields(mcp_server, app, test_
         assert frontmatter["permalink"].endswith("tickets/identity-guard-note")
         assert frontmatter["type"] == "note"
         assert "status: draft" not in content
+
+
+@pytest.mark.asyncio
+async def test_edit_note_metadata_sets_note_type(mcp_server, app, test_project):
+    """`type` in `metadata` reaches both the file's frontmatter and the indexed entity."""
+
+    async with Client(mcp_server) as client:
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Type Change Note",
+                "directory": "tickets",
+                "content": "# Type Change Note\n\nBody.",
+            },
+        )
+
+        await client.call_tool(
+            "edit_note",
+            {
+                "project": test_project.name,
+                "identifier": "tickets/type-change-note",
+                "operation": "append",
+                "content": "",
+                "metadata": {"type": "decision"},
+            },
+        )
+
+        read_result = await client.call_tool(
+            "read_note",
+            {"project": test_project.name, "identifier": "tickets/type-change-note"},
+        )
+        content = read_result.content[0].text
+        assert parse_frontmatter(content)["type"] == "decision"
+        assert "Body." in content
+
+        # The index has to agree with the file, otherwise the note reverts on the next sync.
+        search_result = await client.call_tool(
+            "search_notes",
+            {
+                "project": test_project.name,
+                "query": "Type Change Note",
+                "note_types": ["decision"],
+            },
+        )
+        assert "tickets/type-change-note" in search_result.content[0].text
 
 
 @pytest.mark.asyncio
