@@ -114,6 +114,8 @@ class TestTranscriptRendering:
         assert "- **User:** My dentist appointment is on March 29." in corpus_text
         # The non-numeric "->-> 2,N/A" variant is stripped too.
         assert "- **Assistant:** Noted: the dentist appointment is March 29." in corpus_text
+        # The multi-id "->-> 2,22, 24" variant (space after a comma) as well.
+        assert "- **User:** Update: my salary is now $75,000." in corpus_text
 
     def test_surviving_marker_variant_fails_fast(self, tmp_path: Path) -> None:
         # A non-trailing marker escapes the strip pattern; conversion must

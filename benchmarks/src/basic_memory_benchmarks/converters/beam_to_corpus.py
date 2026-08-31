@@ -42,11 +42,15 @@ BEAM_SOURCE_URL = "https://github.com/mohammadtavakoli78/BEAM"
 BEAM_CITATION = "BEAM: Beyond a Million Tokens (ICLR 2026, arXiv 2510.27246)"
 BEAM_LICENSE_NOTE = "Code MIT; benchmark data CC BY-SA 4.0"
 
-# Trailing probe-index marker in message content (e.g. "... ->-> 1,2"). The
-# second field is not always numeric — upstream 100K/1/chat.json ends one
-# message with "->-> 2,N/A" — so both fields match any non-space token. It
-# links transcript text back to probe indices, so it must never be ingested.
-_INDEX_MARKER_PATTERN = re.compile(r"\s*->->\s*\S+,\S+\s*$")
+# Trailing probe-index marker in message content: "->->" followed by a
+# comma-separated id list. Live-tier variants observed so far: "->-> 1,2",
+# "->-> 2,N/A" (100K/1), and "->-> 2,22, 24" (three ids, space after a
+# comma). The first id is always an int; later ids are ints or N/A, with
+# optional spaces around commas. Kept this narrow deliberately — anything
+# else containing "->->" trips the fail-fast below instead of silently
+# stripping content. The marker links transcript text back to probe
+# indices, so it must never be ingested.
+_INDEX_MARKER_PATTERN = re.compile(r"\s*->->\s*\d+(?:\s*,\s*(?:\d+|N/A))*\s*$")
 
 
 @dataclass(frozen=True)

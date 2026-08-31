@@ -103,7 +103,8 @@ def conversation_one_chat() -> list[dict[str, Any]]:
     Message ids are global and interleaved (0..5). Message 2 carries the
     trailing ``->-> 1,2`` probe-index marker the converter must strip;
     message 3 carries the non-numeric ``->-> 2,N/A`` variant observed in
-    upstream 100K/1/chat.json.
+    upstream 100K/1/chat.json; message 4 carries the multi-id
+    ``->-> 2,22, 24`` variant (space after a comma) observed in 100K.
     """
     return [
         {
@@ -138,7 +139,7 @@ def conversation_one_chat() -> list[dict[str, Any]]:
                     message(
                         "user",
                         4,
-                        "Update: my salary is now $75,000.",
+                        "Update: my salary is now $75,000. ->-> 2,22, 24",
                         time_anchor="April-02-2024",
                     ),
                     message("assistant", 5, "Got it, salary updated."),
