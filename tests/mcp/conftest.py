@@ -9,8 +9,12 @@ from fastapi import FastAPI
 from fastmcp import FastMCP
 from httpx import AsyncClient, ASGITransport
 
+from basic_memory import db
 from basic_memory.api.app import app as fastapi_app
+from basic_memory.config_models import ProjectEntry
 from basic_memory.deps import get_engine_factory, get_app_config
+from basic_memory.models.project import Project
+from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.services.search_service import SearchService
 from basic_memory.mcp.server import mcp as mcp_server
 
@@ -90,3 +94,33 @@ def test_entity_data():
 async def init_search_index(search_service: SearchService):
     """Initialize search index. Request this fixture explicitly in tests that need it."""
     await search_service.init_search_index()
+
+
+@pytest_asyncio.fixture
+async def second_project(config_manager, engine_factory, tmp_path_factory) -> Project:
+    """A second active project (DB row + config entry) for multi-project routing tests.
+
+    Both halves matter: the API resolves projects from the database, while the
+    MCP client layer routes by the local config — a project absent from config
+    routes CLOUD by default and dies without credentials. The path lives outside
+    config_home because test-project's path IS config_home; nesting one project
+    inside another would make its files ambiguous between the two.
+    """
+    project_path = tmp_path_factory.mktemp("second-project-home")
+    _, session_maker = engine_factory
+    async with db.scoped_session(session_maker) as session:
+        project = await ProjectRepository().create(
+            session,
+            {
+                "name": "second-project",
+                "description": "Second project for multi-project routing tests",
+                "path": str(project_path),
+                "is_active": True,
+                "is_default": False,
+            },
+        )
+
+    config = config_manager.load_config()
+    config.projects["second-project"] = ProjectEntry(path=str(project_path))
+    config_manager.save_config(config)
+    return project

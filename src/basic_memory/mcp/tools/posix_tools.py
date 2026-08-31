@@ -6,8 +6,22 @@ tagged ``POSIX_TOOLS_TAG`` and hidden by default: the composition root in
 ``basic_memory.mcp.server`` flips their visibility from the
 ``enable_posix_tools`` config flag at lifespan startup, so no tool body ever
 checks config itself.
+
+Projects are mount points (#1415): when no ``project``/``project_id`` param is
+given, a path or identifier whose first segment names an active project routes
+there, with the remainder as the project-relative path — inputs accept exactly
+the '<project>/path' identifiers tool outputs produce. An explicit project
+param plus an agreeing prefix strips the prefix; a disagreeing one refuses
+naming both. In multi-project configs an unrecognized first segment refuses
+with the active project list rather than silently defaulting. Collision rule:
+the project always wins over a same-named top-level folder in the default
+project, so that folder is only reachable unqualified in single-project
+configs (where there is no ambiguity); the qualified '<project>/folder/...'
+form always reaches it. ``man`` is excluded — its ``project`` param names the
+manual project, not a data project.
 """
 
+import os
 from typing import Any, Optional
 
 from fastmcp import Context
@@ -17,11 +31,13 @@ from basic_memory.config import ConfigManager
 from basic_memory.man import bundled_pages, find_page, parse_page_ref, render_index
 from basic_memory.mcp.container import get_container
 from basic_memory.mcp.note_reads import read_note_json_by_external_id
-from basic_memory.mcp.project_context import get_project_client
+from basic_memory.mcp.project_context import get_project_client, resolve_project_path_route
 from basic_memory.mcp.server import POSIX_TOOLS_TAG, mcp, set_posix_tools_visibility
 from basic_memory.schemas.directory import (
     DEFAULT_DIRECTORY_PAGE_SIZE,
     MAX_DIRECTORY_PAGE_SIZE,
+    DirectoryListResponse,
+    DirectoryNode,
 )
 from basic_memory.schemas.search import SearchItemType, SearchQuery, SearchRetrievalMode
 
@@ -38,7 +54,7 @@ _MAX_TAIL_LINES = 100
 
 @mcp.tool(
     title="Cat",
-    description="Print a note's content.",
+    description="Print a note's content. Accepts '<project>/path' identifiers.",
     tags={POSIX_TOOLS_TAG, "notes"},
     annotations={
         "title": "Cat",
@@ -61,7 +77,8 @@ async def cat(
     """Print a note's content, optionally sliced by line range, section, or token budget.
 
     Args:
-        identifier: Note title, permalink, or memory:// URL (resolved exactly).
+        identifier: Note title, permalink, memory:// URL, or '<project>/path'
+            identifier (resolved exactly).
         start_line: First line to include (1-indexed, inclusive).
         end_line: Last line to include (inclusive). Defaults to the last line.
         section: Heading to slice to: "Decisions", path form "Auth/Decisions"
@@ -124,7 +141,15 @@ async def cat(
     if server_side_slice and (start_line is not None or end_line is not None):
         lines_param = f"{start_line or 1}-{'' if end_line is None else end_line}"
 
-    async with get_project_client(project, context=context, project_id=project_id) as (
+    # '<project>/path' identifiers route to their project; route.path is the
+    # identifier unchanged when no prefix was recognized.
+    route = await resolve_project_path_route(
+        identifier, project=project, project_id=project_id, context=context
+    )
+    if route.stripped and not route.path:
+        raise ValueError(f"cat: '{identifier}' names a project, not a note")
+
+    async with get_project_client(route.project, context=context, project_id=project_id) as (
         client,
         active_project,
     ):
@@ -132,7 +157,7 @@ async def cat(
         from basic_memory.mcp.clients import KnowledgeClient, ResourceClient
 
         knowledge_client = KnowledgeClient(client, active_project.external_id)
-        entity_id = await knowledge_client.resolve_entity(identifier, strict=True)
+        entity_id = await knowledge_client.resolve_entity(route.path, strict=True)
         payload: dict[str, Any] = dict(
             await read_note_json_by_external_id(
                 knowledge_client=knowledge_client,
@@ -173,7 +198,7 @@ def _grep_retrieval_mode(literal: bool) -> SearchRetrievalMode:
 
 @mcp.tool(
     title="Grep",
-    description="Search note content for a pattern.",
+    description="Search note content for a pattern. Multi-project configs require 'project'.",
     tags={POSIX_TOOLS_TAG, "search"},
     annotations={
         "title": "Grep",
@@ -198,7 +223,7 @@ async def grep(
         literal: Force literal full-text matching instead of semantic search.
         page: Page number (1-indexed).
         page_size: Results per page.
-        project: Project name. Optional - the server resolves the default.
+        project: Project name. Required when more than one project is configured.
         project_id: Project external_id (UUID); takes precedence over `project`.
         context: Optional FastMCP context.
 
@@ -212,12 +237,19 @@ async def grep(
     if page_size < 1:
         raise ValueError(f"page_size must be >= 1, got {page_size}")
 
+    # grep's pattern is never parsed as a path — search text like "error/timeout"
+    # must not be mistaken for a mount. Routing participates for the refusal rule
+    # only: unqualified multi-project calls fail loudly instead of defaulting.
+    route = await resolve_project_path_route(
+        "", project=project, project_id=project_id, context=context
+    )
+
     query = SearchQuery(
         text=pattern,
         retrieval_mode=_grep_retrieval_mode(literal),
         entity_types=[SearchItemType.ENTITY],
     )
-    async with get_project_client(project, context=context, project_id=project_id) as (
+    async with get_project_client(route.project, context=context, project_id=project_id) as (
         client,
         active_project,
     ):
@@ -229,9 +261,46 @@ async def grep(
         return response.model_dump(mode="json", exclude_none=True)
 
 
+async def _project_mount_listing(*, page: int, page_size: int) -> dict[str, Any]:
+    """Render the active projects as directory entries (the mount-point view).
+
+    Reuses list_memory_projects' stdio enumeration path: in-process ASGI
+    locally, the same call over HTTP in global cloud mode. Each row's
+    ``directory_path`` is the copyable '/<project>' prefix form.
+    """
+    # Import here to avoid circular import
+    from basic_memory.mcp.async_client import get_client
+    from basic_memory.mcp.clients import ProjectClient
+
+    async with get_client() as client:
+        project_list = await ProjectClient(client).list_projects()
+
+    rows = sorted(
+        (
+            DirectoryNode(
+                name=item.name,
+                directory_path=f"/{item.permalink}",
+                permalink=item.permalink,
+                type="directory",
+            )
+            for item in project_list.projects
+        ),
+        key=lambda node: node.name,
+    )
+    start = (page - 1) * page_size
+    listing = DirectoryListResponse(
+        nodes=rows[start : start + page_size],
+        page=page,
+        page_size=page_size,
+        total=len(rows),
+        has_more=start + page_size < len(rows),
+    )
+    return listing.model_dump(mode="json")
+
+
 @mcp.tool(
     title="Ls",
-    description="List one directory level.",
+    description="List one directory level. '/' lists projects; paths accept '<project>/path'.",
     tags={POSIX_TOOLS_TAG, "navigation"},
     annotations={
         "title": "Ls",
@@ -251,10 +320,13 @@ async def ls(
     """List the immediate contents of one directory.
 
     Args:
-        path: Directory path to list (default: project root).
+        path: Directory path to list. '/' (the default) with no project param
+            lists the active projects as mount points; '<project>/path' routes
+            into that project.
         page: Page number (1-indexed).
         page_size: Nodes per page.
-        project: Project name. Optional - the server resolves the default.
+        project: Project name. Optional - '/' lists projects; qualified paths
+            route themselves; multi-project configs refuse other unqualified paths.
         project_id: Project external_id (UUID); takes precedence over `project`.
         context: Optional FastMCP context.
 
@@ -268,7 +340,24 @@ async def ls(
     if page_size > MAX_DIRECTORY_PAGE_SIZE:
         raise ValueError(f"page_size must be <= {MAX_DIRECTORY_PAGE_SIZE}, got {page_size}")
 
-    async with get_project_client(project, context=context, project_id=project_id) as (
+    # Trigger: bare root with no project addressed (param, UUID, or env constraint).
+    # Why: the mount-point view puts project discovery in-band — ls "/" shows the
+    #      mount table, ls "<project>" shows that project's root (#1415).
+    # Outcome: list the active projects as directory entries; no project client.
+    if (
+        project is None
+        and project_id is None
+        and not os.environ.get("BASIC_MEMORY_MCP_PROJECT")
+        and not path.strip().strip("/")
+    ):
+        return await _project_mount_listing(page=page, page_size=page_size)
+
+    route = await resolve_project_path_route(
+        path, project=project, project_id=project_id, context=context
+    )
+    list_path = f"/{route.path}" if route.stripped else path
+
+    async with get_project_client(route.project, context=context, project_id=project_id) as (
         client,
         active_project,
     ):
@@ -276,13 +365,13 @@ async def ls(
         from basic_memory.mcp.clients import DirectoryClient
 
         directory_client = DirectoryClient(client, active_project.external_id)
-        listing = await directory_client.list(path, depth=1, page=page, page_size=page_size)
+        listing = await directory_client.list(list_path, depth=1, page=page, page_size=page_size)
         return listing.model_dump(mode="json")
 
 
 @mcp.tool(
     title="Find",
-    description="Recursively list files matching a name glob.",
+    description="Recursively list files matching a name glob. Paths accept '<project>/path'.",
     tags={POSIX_TOOLS_TAG, "navigation"},
     annotations={
         "title": "Find",
@@ -304,12 +393,14 @@ async def find(
     """Recursively list files under a directory, optionally filtered by name glob.
 
     Args:
-        path: Directory to start from (default: project root).
+        path: Directory to start from (default: project root). '<project>/path'
+            routes into that project.
         name: File-name glob to match, e.g. "*.md". None matches everything.
         depth: How many levels to recurse (1-10, default: 10).
         page: Page number (1-indexed).
         page_size: Nodes per page.
-        project: Project name. Optional - the server resolves the default.
+        project: Project name. Optional - qualified paths route themselves;
+            multi-project configs refuse unqualified paths.
         project_id: Project external_id (UUID); takes precedence over `project`.
         context: Optional FastMCP context.
 
@@ -325,7 +416,15 @@ async def find(
     if page_size > MAX_DIRECTORY_PAGE_SIZE:
         raise ValueError(f"page_size must be <= {MAX_DIRECTORY_PAGE_SIZE}, got {page_size}")
 
-    async with get_project_client(project, context=context, project_id=project_id) as (
+    # The directory API is project-scoped, so cross-project find does not exist:
+    # find "/" with no project in a multi-project config refuses, teaching the
+    # per-project '<project>/path' form instead.
+    route = await resolve_project_path_route(
+        path, project=project, project_id=project_id, context=context
+    )
+    list_path = f"/{route.path}" if route.stripped else path
+
+    async with get_project_client(route.project, context=context, project_id=project_id) as (
         client,
         active_project,
     ):
@@ -334,7 +433,7 @@ async def find(
 
         directory_client = DirectoryClient(client, active_project.external_id)
         listing = await directory_client.list(
-            path,
+            list_path,
             depth=depth,
             file_name_glob=name,
             page=page,
@@ -345,7 +444,7 @@ async def find(
 
 @mcp.tool(
     title="Tail",
-    description="Show recently changed notes.",
+    description="Show recently changed notes. Multi-project configs require 'project'.",
     tags={POSIX_TOOLS_TAG, "navigation", "notes"},
     annotations={
         "title": "Tail",
@@ -366,7 +465,7 @@ async def tail(
     Args:
         timeframe: Time window, e.g. "7d", "yesterday", "2 days ago".
         lines: Maximum number of rows to return (1-100).
-        project: Project name. Optional - the server resolves the default.
+        project: Project name. Required when more than one project is configured.
         project_id: Project external_id (UUID); takes precedence over `project`.
         context: Optional FastMCP context.
 
@@ -378,7 +477,13 @@ async def tail(
     if lines > _MAX_TAIL_LINES:
         raise ValueError(f"lines must be <= {_MAX_TAIL_LINES}, got {lines}")
 
-    async with get_project_client(project, context=context, project_id=project_id) as (
+    # tail has no path to carry a project prefix, so routing participates for
+    # the refusal rule only: unqualified multi-project calls fail loudly.
+    route = await resolve_project_path_route(
+        "", project=project, project_id=project_id, context=context
+    )
+
+    async with get_project_client(route.project, context=context, project_id=project_id) as (
         client,
         active_project,
     ):
