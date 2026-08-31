@@ -6,6 +6,7 @@ import time
 from contextlib import asynccontextmanager
 
 from fastmcp import FastMCP
+from fastmcp.server.transforms import Visibility
 from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
@@ -23,6 +24,19 @@ from basic_memory.read_cache.lifecycle import open_redis_read_cache
 from basic_memory.repository import ProjectRepository
 from basic_memory.services.initialization import initialize_app
 import logfire
+
+# Tools carrying this tag register at import time like every other tool but stay
+# hidden until the composition root enables them from config (#1399).
+POSIX_TOOLS_TAG = "posix"
+
+
+def set_posix_tools_visibility(server: FastMCP, enabled: bool) -> None:
+    """Mark the POSIX tool group visible or hidden.
+
+    Visibility transforms stack; the mark appended last wins, so this is safe to
+    call repeatedly (each lifespan start, and both directions in tests).
+    """
+    server.add_transform(Visibility(enabled, tags={POSIX_TOOLS_TAG}))
 
 
 async def _log_embedding_status(session_maker: async_sessionmaker[AsyncSession]) -> None:
@@ -93,6 +107,13 @@ async def lifespan(app: FastMCP):
     # Create container and read config (single point of config access)
     container = McpContainer.create()
     config = container.config
+
+    # Trigger: the enable_posix_tools config flag.
+    # Why: tools register at import time; the composition root is the one place
+    #      config decides what clients see (no if-checks inside tool bodies).
+    # Outcome: flag off (default) keeps the tool listing identical to today.
+    set_posix_tools_visibility(app, config.enable_posix_tools)
+
     standalone_redis_url = None if container.mode.is_cloud else config.redis_url
 
     async with open_redis_read_cache(
