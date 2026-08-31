@@ -68,7 +68,8 @@ permalink, or memory:// URL — there is no fuzzy fallback for edits.
   heading of any level and preserves subsections
 - **metadata** — dict of frontmatter fields merged in alongside any operation;
   given keys overwrite or add, other keys and the body are untouched.
-  `title`, `type`, and `permalink` are ignored; keys cannot be deleted
+  `title` and `permalink` are ignored; `type` is applied like any other
+  frontmatter field; keys cannot be deleted
 - **project** / **project_id** / **workspace** — routing; same semantics as
   [[write-note(3)]]
 
