@@ -29,6 +29,10 @@ class AgentTasksConfig(BaseModel):
     # task set. Manifest runs are grouped and read-only (see driver).
     task_manifest: str | None = None
     model_spec: str
+    # None = the temperature parameter is omitted from requests entirely
+    # (Claude 5 endpoints reject it). Provenance: the value the model factory
+    # used for this run.
+    model_temperature: float | None = 0.0
     judge_spec: str | None = None
     corpus_dir: str = "benchmarks/datasets/agent-tasks/corpus"
     output_root: str = "benchmarks/runs"

@@ -163,7 +163,7 @@ def test_task_manifest_derives_groups_corpus_dir(
 ) -> None:
     captured: dict[str, AgentTasksConfig] = {}
 
-    def fake_run(config: AgentTasksConfig) -> Path:
+    def fake_run(config: AgentTasksConfig, **kwargs: object) -> Path:
         captured["config"] = config
         return tmp_path / "run"
 
@@ -201,7 +201,7 @@ def test_task_manifest_respects_explicit_corpus_dir(
 ) -> None:
     captured: dict[str, AgentTasksConfig] = {}
 
-    def fake_run(config: AgentTasksConfig) -> Path:
+    def fake_run(config: AgentTasksConfig, **kwargs: object) -> Path:
         captured["config"] = config
         return tmp_path / "run"
 
@@ -294,7 +294,7 @@ def test_run_agent_tasks_dedupes_repeated_surfaces(
     # mid-run creating the second identical surface home.
     captured: dict[str, list[str]] = {}
 
-    def fake_run(config: AgentTasksConfig) -> Path:
+    def fake_run(config: AgentTasksConfig, **kwargs: object) -> Path:
         captured["surfaces"] = config.surfaces
         return tmp_path / "run"
 
@@ -381,7 +381,48 @@ def test_run_agent_tasks_passes_model_headers_to_factory(
     assert result.exit_code == 0, result.output
     factory = captured["model_factory"]
     assert isinstance(factory, partial)
-    assert factory.keywords == {"extra_headers": {"anthropic-workspace-id": "wrkspc_test"}}
+    assert factory.keywords["extra_headers"] == {"anthropic-workspace-id": "wrkspc_test"}
     config = captured["config"]
     assert isinstance(config, AgentTasksConfig)
     assert "wrkspc_test" not in config.model_dump_json()
+
+
+def test_run_agent_tasks_model_temperature_omit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Claude 5 endpoints reject the temperature parameter entirely; 'omit'
+    # drops it from requests and the choice is recorded in the run config.
+    captured: dict[str, object] = {}
+
+    def fake_run(config: AgentTasksConfig, **kwargs: object) -> Path:
+        captured["config"] = config
+        captured["model_factory"] = kwargs.get("model_factory")
+        return tmp_path / "run"
+
+    monkeypatch.setattr(cli, "run_agent_tasks", fake_run)
+    script = tmp_path / "script.json"
+    script.write_text('{"tasks": {}}', encoding="utf-8")
+    bm_checkout = tmp_path / "bm"
+    bm_checkout.mkdir()
+
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "agent-tasks",
+            "--model",
+            f"scripted:{script}",
+            "--bm-local-path",
+            str(bm_checkout),
+            "--model-temperature",
+            "omit",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    factory = captured["model_factory"]
+    assert isinstance(factory, partial)
+    assert factory.keywords["temperature"] is None
+    config = captured["config"]
+    assert isinstance(config, AgentTasksConfig)
+    assert config.model_temperature is None
