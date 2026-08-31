@@ -177,7 +177,9 @@ def conversation_one_probes() -> dict[str, list[dict[str, Any]]]:
             "List the events we discussed in the order they happened.",
             rubric=["Adopted Biscuit", "Dentist appointment", "Salary update"],
             reference_answer="Adopted Biscuit -> Dentist appointment -> Salary update",
-            source_chat_ids=[0, 2, 4],
+            # Mixed int / int-list shape from the live 100K tier: one event's
+            # evidence can span chats ([2, 4]); the loader flattens the union.
+            source_chat_ids=[0, [2, 4]],
             difficulty="hard",
             ordering_type="full",
         )
