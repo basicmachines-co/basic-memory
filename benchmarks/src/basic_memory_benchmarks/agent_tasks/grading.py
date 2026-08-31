@@ -282,21 +282,31 @@ def _eval_relation_resolves(grader: RelationResolves, ctx: GradingContext) -> Pr
         if row is None:
             raise RuntimeError(f"Project '{ctx.project_name}' not found in {ctx.db_path}")
         project_id = int(row[0])
+        # Stored permalinks are project-prefixed (verified against a live run
+        # DB: 'at-<run>-<task>/notes/redis-cache-tuning'), while task specs
+        # use project-relative gold — match either form, same policy as
+        # strip_own_project_prefix for answer-set graders.
         query = (
             "SELECT target.permalink, r.relation_type"
             " FROM relation r"
             " JOIN entity source ON r.from_id = source.id"
             " JOIN entity target ON r.to_id = target.id"
-            " WHERE source.project_id = ? AND source.permalink = ?"
+            " WHERE source.project_id = ? AND source.permalink IN (?, ?)"
             " AND r.to_id IS NOT NULL"
         )
-        rows = connection.execute(query, (project_id, grader.source_permalink)).fetchall()
+        prefixed_source = f"{ctx.project_name}/{grader.source_permalink}"
+        rows = connection.execute(
+            query, (project_id, grader.source_permalink, prefixed_source)
+        ).fetchall()
     finally:
         connection.close()
 
     targets = {normalize_answer_item(item) for item in grader.targets}
     for target_permalink, relation_type in rows:
-        if normalize_answer_item(str(target_permalink)) not in targets:
+        resolved = strip_own_project_prefix(
+            normalize_answer_item(str(target_permalink)), ctx.project_name
+        )
+        if resolved not in targets:
             continue
         if grader.relation_type is not None and relation_type != grader.relation_type:
             continue
