@@ -37,6 +37,27 @@ export function registerWriteTool(
               "Set to true to replace an existing note. Defaults to false.",
           }),
         ),
+        metadata: Type.Optional(
+          Type.Object(
+            {},
+            {
+              additionalProperties: true,
+              description:
+                "Extra frontmatter fields to merge into the note. Nested objects are supported.",
+            },
+          ),
+        ),
+        tags: Type.Optional(
+          Type.Union([Type.Array(Type.String()), Type.String()], {
+            description:
+              "Tags for the note, as an array or comma-separated string.",
+          }),
+        ),
+        note_type: Type.Optional(
+          Type.String({
+            description: 'Note type stored in frontmatter. Defaults to "note".',
+          }),
+        ),
       }),
       async execute(
         _toolCallId: string,
@@ -46,9 +67,23 @@ export function registerWriteTool(
           folder: string
           project?: string
           overwrite?: boolean
+          metadata?: Record<string, unknown>
+          tags?: string[] | string
+          note_type?: string
         },
       ) {
         log.debug(`write_note: title=${params.title} folder=${params.folder}`)
+
+        const options =
+          params.metadata !== undefined ||
+          params.tags !== undefined ||
+          params.note_type !== undefined
+            ? {
+                metadata: params.metadata,
+                tags: params.tags,
+                noteType: params.note_type,
+              }
+            : undefined
 
         try {
           const note = await client.writeNote(
@@ -57,6 +92,7 @@ export function registerWriteTool(
             params.folder,
             params.project,
             params.overwrite,
+            options,
           )
 
           const msg = `Note saved: ${note.title} (${note.permalink})`
