@@ -50,6 +50,14 @@ describe("write tool", () => {
               overwrite: expect.objectContaining({
                 type: "boolean",
               }),
+              metadata: expect.objectContaining({
+                type: "object",
+                additionalProperties: true,
+              }),
+              tags: expect.any(Object),
+              note_type: expect.objectContaining({
+                type: "string",
+              }),
             }),
           }),
           execute: expect.any(Function),
@@ -105,6 +113,7 @@ describe("write tool", () => {
         "notes",
         undefined,
         undefined,
+        undefined,
       )
 
       expect(result).toEqual({
@@ -146,6 +155,7 @@ describe("write tool", () => {
         "",
         undefined,
         undefined,
+        undefined,
       )
     })
 
@@ -171,6 +181,7 @@ describe("write tool", () => {
         "Nested Note",
         "Nested folder note",
         "projects/subfolder",
+        undefined,
         undefined,
         undefined,
       )
@@ -217,6 +228,7 @@ const code = "example";
         "notes",
         undefined,
         undefined,
+        undefined,
       )
     })
 
@@ -243,6 +255,7 @@ const code = "example";
         specialTitle,
         "Content",
         "notes",
+        undefined,
         undefined,
         undefined,
       )
@@ -275,6 +288,7 @@ const code = "example";
         "notes",
         undefined,
         undefined,
+        undefined,
       )
     })
 
@@ -301,6 +315,7 @@ const code = "example";
         "Long Note",
         longContent,
         "notes",
+        undefined,
         undefined,
         undefined,
       )
@@ -330,6 +345,7 @@ const code = "example";
         "notes",
         undefined,
         undefined,
+        undefined,
       )
     })
 
@@ -353,6 +369,7 @@ const code = "example";
         "content",
         "notes",
         "other-project",
+        undefined,
         undefined,
       )
     })
@@ -379,9 +396,47 @@ const code = "example";
         "notes",
         undefined,
         true,
+        undefined,
       )
 
       expect(result.content[0].text).toContain("Note saved: Note")
+    })
+
+    it("passes metadata, tags, and note_type to client.writeNote", async () => {
+      ;(mockClient.writeNote as jest.MockedFunction<any>).mockResolvedValue({
+        title: "Task Note",
+        permalink: "tasks/task-note",
+        content: "content",
+        file_path: "tasks/task-note.md",
+      })
+
+      await executeFunction("tool-call-id", {
+        title: "Task Note",
+        content: "content",
+        folder: "tasks",
+        metadata: {
+          status: "active",
+          scheduling: { due: "2026-09-02" },
+        },
+        tags: ["work", "priority"],
+        note_type: "Task",
+      })
+
+      expect(mockClient.writeNote).toHaveBeenCalledWith(
+        "Task Note",
+        "content",
+        "tasks",
+        undefined,
+        undefined,
+        {
+          metadata: {
+            status: "active",
+            scheduling: { due: "2026-09-02" },
+          },
+          tags: ["work", "priority"],
+          noteType: "Task",
+        },
+      )
     })
 
     it("should return helpful hint when note already exists", async () => {
@@ -462,6 +517,7 @@ Normal line
         "notes",
         undefined,
         undefined,
+        undefined,
       )
     })
 
@@ -488,6 +544,7 @@ Normal line
         multilineTitle,
         "Content",
         "notes",
+        undefined,
         undefined,
         undefined,
       )
