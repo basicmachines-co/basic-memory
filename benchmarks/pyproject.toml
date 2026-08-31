@@ -47,6 +47,12 @@ markers = [
 line-length = 100
 target-version = "py312"
 
+# Same explicit selection as the root pyproject: pin the rule set the package
+# was written against so ruff default-select drift across versions (e.g. the
+# 0.16 default expansion) cannot change lint results between environments.
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
 [tool.pyright]
 include = ["src", "tests", "test-int"]
 pythonVersion = "3.12"

@@ -249,7 +249,9 @@ def test_resolve_clean_checkout_sha_rejects_dirty_target(
     monkeypatch.setattr(
         concurrent_write,
         "run_command",
-        lambda *_args, **_kwargs: SimpleNamespace(stdout=" M src/basic_memory/app.py\n?? local.py\n"),
+        lambda *_args, **_kwargs: SimpleNamespace(
+            stdout=" M src/basic_memory/app.py\n?? local.py\n"
+        ),
     )
 
     with pytest.raises(ValueError, match="bm_resolved_sha.*dirty paths"):

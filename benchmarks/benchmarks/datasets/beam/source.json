@@ -1,0 +1,6 @@
+{
+  "dataset_id": "beam",
+  "source_url": "https://github.com/mohammadtavakoli78/BEAM",
+  "citation": "BEAM: Beyond a Million Tokens (ICLR 2026, arXiv 2510.27246)",
+  "license_note": "Code MIT; benchmark data CC BY-SA 4.0"
+}

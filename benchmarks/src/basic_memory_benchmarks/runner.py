@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from basic_memory_benchmarks.exceptions import ProviderSkippedError
 from basic_memory_benchmarks.fairness import validate_fairness
@@ -224,7 +224,9 @@ def run_retrieval(
                     run_config=run_config,
                 )
 
-            summary = summarize_provider(provider_name, provider_rows)
+            summary = summarize_provider(
+                provider_name, provider_rows, dataset_id=run_config.dataset_id
+            )
             summaries.append(summary)
             retrieval_rows.extend(provider_rows)
             rows_by_provider[provider_name] = provider_rows
@@ -426,6 +428,72 @@ def run_diagnose_stage(
         encoding="utf-8",
     )
     return out_path
+
+
+def run_beam_score_stage(
+    *,
+    run_dir: Path,
+    judge_spec: str,
+    source: str = "auto",
+    max_workers: int = 4,
+) -> Path:
+    """Apply BEAM nugget/ordering scoring to a run's stored QA answers.
+
+    Joins per-query-qa[-rejudge].jsonl (the generated answers) with
+    per-query-retrieval.jsonl (rubric + ability in metadata) and writes
+    per-query-beam.jsonl, beam-summary.json, and beam-summary.md into the run
+    directory. ``source``: 'qa' | 'rejudge' | 'auto' (prefers re-judged), so a
+    re-generated answer set can be beam-scored too.
+    """
+    from basic_memory_benchmarks.llm.runners import create_runner
+    from basic_memory_benchmarks.scoring.beam import (
+        build_beam_summary_markdown,
+        score_beam_cases,
+    )
+
+    qa_cases, chosen = _load_qa_cases(run_dir, source)
+    retrieval_rows = _load_retrieval_rows(run_dir)
+
+    # Trigger: no retrieval row carries a rubric list.
+    # Why: only BEAM conversions put the nugget rubric in query metadata;
+    # scoring a non-BEAM run would just error case-by-case much later.
+    # Outcome: fail fast with a diagnosis instead of judging anything.
+    has_rubric = any(
+        isinstance(row.metadata.get("rubric"), list) and row.metadata["rubric"]
+        for row in retrieval_rows
+    )
+    if not has_rubric:
+        raise ValueError(
+            f"Run {run_dir} does not look like a BEAM run: no retrieval row "
+            "carries 'rubric' metadata (convert with `bm-bench convert beam`)"
+        )
+
+    judge = create_runner(judge_spec)
+    case_scores, summaries = score_beam_cases(
+        qa_cases, retrieval_rows, judge=judge, max_workers=max_workers
+    )
+
+    beam_jsonl = run_dir / "per-query-beam.jsonl"
+    with beam_jsonl.open("w", encoding="utf-8") as file:
+        for case in case_scores:
+            file.write(json.dumps(case.model_dump(mode="json"), sort_keys=True) + "\n")
+
+    (run_dir / "beam-summary.json").write_text(
+        json.dumps(
+            {
+                "judge": judge_spec,
+                "source": chosen.name,
+                "providers": [summary.model_dump(mode="json") for summary in summaries],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "beam-summary.md").write_text(
+        build_beam_summary_markdown(summaries, run_id=run_dir.name, source=chosen.name),
+        encoding="utf-8",
+    )
+    return run_dir
 
 
 def run_rejudge_stage(

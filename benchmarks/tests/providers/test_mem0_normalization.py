@@ -1,3 +1,5 @@
+from typing import Any, cast
+
 import pytest
 
 from basic_memory_benchmarks.providers.mem0_local import Mem0LocalProvider
@@ -112,7 +114,9 @@ class TestTelemetryLockAvoidance:
 
         provider = Mem0LocalProvider()
         memory = FakeMemory()
-        provider._memory = memory
+        # The provider only needs the duck-typed cleanup surface; cast keeps
+        # the test double out of the provider's Memory | None annotation.
+        provider._memory = cast(Any, memory)
 
         from basic_memory_benchmarks.models import RunConfig
 

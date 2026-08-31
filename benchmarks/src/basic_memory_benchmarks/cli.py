@@ -13,11 +13,12 @@ from basic_memory_benchmarks.concurrent_write import (
     ConcurrentWriteConfig,
     run_concurrent_write,
 )
+from basic_memory_benchmarks.converters.beam_to_corpus import convert_beam_to_corpus
+from basic_memory_benchmarks.converters.convomem_to_corpus import convert_convomem_to_corpus
 from basic_memory_benchmarks.converters.locomo_to_corpus import convert_locomo_to_corpus
 from basic_memory_benchmarks.converters.longmemeval_to_corpus import convert_longmemeval_to_corpus
-from basic_memory_benchmarks.datasets.locomo import LOCOMO_URL, fetch_locomo_dataset
-from basic_memory_benchmarks.converters.convomem_to_corpus import convert_convomem_to_corpus
 from basic_memory_benchmarks.datasets.convomem import fetch_convomem_batches
+from basic_memory_benchmarks.datasets.locomo import LOCOMO_URL, fetch_locomo_dataset
 from basic_memory_benchmarks.datasets.locomo_audit import fetch_locomo_audit_corrections
 from basic_memory_benchmarks.datasets.longmemeval import (
     LONGMEMEVAL_S_URL,
@@ -29,11 +30,12 @@ from basic_memory_benchmarks.reporting.compare import (
     load_retrieval_summary,
 )
 from basic_memory_benchmarks.runner import (
+    run_beam_score_stage,
     run_diagnose_stage,
     run_qa_stage,
     run_rejudge_stage,
-    run_review_stage,
     run_retrieval,
+    run_review_stage,
 )
 from basic_memory_benchmarks.utils import sha256_file
 
@@ -185,6 +187,34 @@ def convert_longmemeval(
     )
     console.print(f"Groups: [cyan]{groups_dir}[/cyan] ({query_count} groups, {doc_count} docs)")
     console.print(f"Queries: [cyan]{queries_path}[/cyan] ({query_count})")
+
+
+@convert_app.command("beam")
+def convert_beam(
+    dataset_root: Path = typer.Option(
+        Path("benchmarks/datasets/beam/upstream/chats"),
+        "--dataset-root",
+        help="The chats/ directory of a local BEAM checkout (see datasets/beam/download.sh)",
+    ),
+    output_dir: Path = typer.Option(Path("benchmarks/generated/beam-100k"), "--output-dir"),
+    tier: str = typer.Option("100K", "--tier", help="100K | 500K | 1M"),
+    max_conversations: int | None = typer.Option(None, "--max-conversations"),
+) -> None:
+    """Convert a BEAM tier into grouped corpora + query manifest.
+
+    The dataset is never vendored; fetch it first with
+    `benchmarks/datasets/beam/download.sh`. Runs then pass the written
+    `conversion.json` as --dataset-path so provenance pins the exact inputs.
+    """
+    groups_dir, queries_path, doc_count, query_count = convert_beam_to_corpus(
+        dataset_root=dataset_root,
+        output_dir=output_dir,
+        tier=tier,
+        max_conversations=max_conversations,
+    )
+    console.print(f"Groups: [cyan]{groups_dir}[/cyan] ({doc_count} docs)")
+    console.print(f"Queries: [cyan]{queries_path}[/cyan] ({query_count})")
+    console.print(f"Conversion manifest: [cyan]{output_dir / 'conversion.json'}[/cyan]")
 
 
 @convert_app.command("convomem")
@@ -415,6 +445,30 @@ def run_diagnose_command(
         )
     console.print(table)
     console.print(f"Wrote [green]{out}[/green]")
+
+
+@run_app.command("beam-score")
+def run_beam_score_command(
+    run_dir: Path = typer.Option(..., "--run-dir"),
+    judge: str = typer.Option(
+        "claude:claude-sonnet-4-6",
+        "--judge",
+        help="Runner spec: claude:<model> or openai-compat:<model>@<base_url>",
+    ),
+    source: str = typer.Option("auto", "--source", help="qa | rejudge | auto"),
+    max_workers: int = typer.Option(4, "--max-workers"),
+) -> None:
+    """Score a BEAM run's stored QA answers with the nugget methodology.
+
+    Requires a completed `run qa` on a corpus converted via `convert beam`.
+    Writes per-query-beam.jsonl, beam-summary.json, and beam-summary.md with
+    per-ability scores (never just an overall average).
+    """
+    out = run_beam_score_stage(
+        run_dir=run_dir, judge_spec=judge, source=source, max_workers=max_workers
+    )
+    console.print(f"BEAM scoring complete: [green]{out}[/green]")
+    console.print(f"See [cyan]{out / 'beam-summary.md'}[/cyan]")
 
 
 @run_app.command("rejudge")

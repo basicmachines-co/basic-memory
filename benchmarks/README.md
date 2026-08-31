@@ -21,6 +21,7 @@ dependencies remain isolated from the product environment.
 - Datasets:
   - LoCoMo (primary)
   - LongMemEval scaffold (placeholder)
+  - BEAM (grouped, 100K/500K/1M tiers; never vendored)
   - Built-in synthetic smoke corpus
 
 ## Installation
@@ -155,6 +156,41 @@ multiple questions each, all sharing one ingested group corpus.
 Anti-leakage: raw conversations carry `containsEvidence`/`model_name` fields;
 rendered docs include neither and conversation ids are remapped to neutral
 positional ids.
+
+## BEAM
+
+BEAM ("Beyond a Million Tokens", arXiv 2510.27246, ICLR 2026;
+mohammadtavakoli78/BEAM, code MIT / data CC BY-SA 4.0) probes ten memory
+abilities — abstention, contradiction resolution, event ordering, information
+extraction, instruction following, knowledge update, multi-session ("multi-hop")
+reasoning, preference following, summarization, temporal reasoning — over
+synthetic multi-month conversations. Each conversation is its own haystack, so
+it runs in **grouped mode** like LongMemEval. The data is **never vendored**;
+fetch it with the documented sparse clone (see
+`benchmarks/datasets/beam/README.md`).
+
+```bash
+just bench-prepare-beam        # sparse-clone 100K/500K tiers + convert 100K
+just bench-convert-beam-500k   # or the 500K tier
+just bench-run-beam-100k       # grouped retrieval (bm-local + mem0-local)
+just bench-qa benchmarks/runs/<run-id>            # answers via the shared QA stage
+just bench-beam-score benchmarks/runs/<run-id>    # BEAM nugget/ordering scoring
+```
+
+Answering uses the package's fixed answer prompt and context budget for every
+provider (the fairness contract), so absolute numbers are not directly
+comparable to the paper's tables. Scoring follows BEAM's nugget methodology:
+the probe rubric's atomic nuggets are judged 0/0.5/1 each, Event Ordering is
+scored with Kendall tau-b over an LLM-aligned event sequence, and
+`beam-summary.md` reports per-ability scores plus per-answer token accounting
+— never just an overall average. Runs pass the converter's `conversion.json`
+as `--dataset-path`, which pins per-file sha256s of the exact BEAM inputs.
+
+Anti-leakage: upstream message content ends with a `->-> <batch>,<question>`
+marker (the question field is sometimes non-numeric, e.g. `N/A`) linking
+transcript text to probe indices; the converter strips it and fails fast if a
+marker variant survives, and rubrics/reference answers live only in
+`queries.json`, never in ingested docs.
 
 ## Concurrent-write benchmark (basic-memory#1248)
 
