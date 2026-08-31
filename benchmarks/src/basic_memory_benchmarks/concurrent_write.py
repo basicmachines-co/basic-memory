@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import random
 import re
 import sqlite3
@@ -45,8 +44,9 @@ from rich.console import Console
 
 from basic_memory_benchmarks.bm_runtime import (
     WarmMcpClient,
+    isolated_bm_env,
     resolve_bm_command_prefix,
-    status_json_is_ready,
+    settle_index,
 )
 from basic_memory_benchmarks.models import RuntimeInfo
 from basic_memory_benchmarks.utils import git_sha, run_command, runtime_info, utc_now_iso
@@ -56,7 +56,6 @@ console = Console()
 OpType = Literal["create_hub", "create", "edit_hub", "edit_own"]
 
 MARKER_PATTERN = re.compile(r"bmk-[a-z0-9-]+")
-FALLBACK_SETTLE_SECONDS = 10.0
 
 # --- Configuration and artifact models ---
 
@@ -837,65 +836,12 @@ def write_concurrent_artifacts(
 # --- Orchestration ---
 
 
-def _isolated_env(home: Path) -> dict[str, str]:
-    """Benchmark-owned env: fresh config dir AND fresh default-project home.
-
-    BASIC_MEMORY_HOME points inside the sandbox so the auto-created default
-    project indexes an empty directory instead of the operator's personal
-    notes (which would add noise to settle timing and DB contents).
-    """
-    env = dict(os.environ)
-    env.pop("BASIC_MEMORY_CLOUD_MODE", None)
-    env["BASIC_MEMORY_CONFIG_DIR"] = str(home / "config")
-    env["BASIC_MEMORY_HOME"] = str(home / "default-home")
-    return env
-
-
 def _bm_version(prefix: list[str], env: dict[str, str]) -> str | None:
     try:
         result = run_command(prefix + ["--version"], env=env)
     except Exception:
         return None
     return result.stdout.strip() or None
-
-
-def _settle_index(
-    *,
-    prefix: list[str],
-    env: dict[str, str],
-    project_name: str,
-    timeout_seconds: float,
-) -> tuple[float, Literal["status-json", "fixed-delay"]]:
-    """Wait until the index reports no pending work; returns (seconds, mode)."""
-    start = time.monotonic()
-    probe = run_command(prefix + ["status", "--json", "--local"], check=False, env=env)
-    merged = ((probe.stdout or "") + "\n" + (probe.stderr or "")).lower()
-    if "no such option: --json" in merged:
-        # Old BM without --json: no readiness signal exists; give the watcher a
-        # fixed grace period and record the mode so the artifact is explicit.
-        time.sleep(FALLBACK_SETTLE_SECONDS)
-        return time.monotonic() - start, "fixed-delay"
-
-    deadline = start + timeout_seconds
-    delay = 0.25
-    while True:
-        completed = run_command(
-            prefix + ["status", "--project", project_name, "--json", "--local"], env=env
-        )
-        payload = json.loads(completed.stdout.strip() or "{}")
-        if isinstance(payload, dict):
-            readiness = status_json_is_ready(payload)
-            if readiness is None:
-                time.sleep(FALLBACK_SETTLE_SECONDS)
-                return time.monotonic() - start, "fixed-delay"
-            if readiness:
-                return time.monotonic() - start, "status-json"
-        if time.monotonic() >= deadline:
-            raise TimeoutError(
-                f"Index did not settle within {timeout_seconds}s for project '{project_name}'"
-            )
-        time.sleep(delay)
-        delay = min(delay * 2, 2.0)
 
 
 def run_concurrent_write(config: ConcurrentWriteConfig) -> Path:
@@ -911,7 +857,7 @@ def run_concurrent_write(config: ConcurrentWriteConfig) -> Path:
     project_dir = home / "project"
     project_dir.mkdir(parents=True)
     (home / "default-home").mkdir()
-    env = _isolated_env(home)
+    env = isolated_bm_env(home)
 
     console.print(f"[bold]concurrent-write[/bold] run_id={config.run_id} home={home}")
     run_command(prefix + ["project", "add", config.project_name, str(project_dir)], env=env)
@@ -1002,7 +948,7 @@ def run_concurrent_write(config: ConcurrentWriteConfig) -> Path:
             client.stop()
 
     console.print("Waiting for index to settle...")
-    settle_seconds, settle_mode = _settle_index(
+    settle_seconds, settle_mode = settle_index(
         prefix=prefix,
         env=env,
         project_name=config.project_name,

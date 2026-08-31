@@ -9,16 +9,23 @@ same code runs unchanged against any BM version under comparison (installed
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import threading
+import time
 from concurrent.futures import Future
 from dataclasses import dataclass
 from pathlib import Path
 from queue import Empty, Queue
-from typing import Any
+from typing import Any, Literal
 
 from mcp.client.session import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
-from mcp.types import CallToolResult
+from mcp.types import CallToolResult, Tool
+
+from basic_memory_benchmarks.utils import run_command
+
+FALLBACK_SETTLE_SECONDS = 10.0
 
 
 @dataclass
@@ -60,6 +67,7 @@ class WarmMcpClient:
         self._state_lock = threading.Lock()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._serve_task: asyncio.Task[None] | None = None
+        self._tools: list[Tool] = []
 
     async def _serve(self) -> None:
         loop = asyncio.get_running_loop()
@@ -79,6 +87,9 @@ class WarmMcpClient:
                 if self._required_tool not in tool_names:
                     raise RuntimeError(f"bm mcp server does not expose '{self._required_tool}'")
 
+                # Captured before _ready so tools() is populated as soon as
+                # start() returns; consumers use it for surface verification.
+                self._tools = list(tools.tools)
                 self._ready.set()
 
                 while True:
@@ -142,6 +153,12 @@ class WarmMcpClient:
             startup_error = self._startup_error
             self.stop()
             raise RuntimeError("Failed to start bm mcp session") from startup_error
+
+    def tools(self) -> list[Tool]:
+        """Tool definitions the server advertised at session start."""
+        if self._thread is None or not self._thread.is_alive():
+            raise RuntimeError("bm mcp session is not running")
+        return list(self._tools)
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
         if self._thread is None or not self._thread.is_alive():
@@ -232,3 +249,56 @@ def status_json_is_ready(payload: dict[str, Any]) -> bool | None:
                 return False
 
     return True if recognized_signal else None
+
+
+def isolated_bm_env(home: Path) -> dict[str, str]:
+    """Benchmark-owned env: fresh config dir AND fresh default-project home.
+
+    BASIC_MEMORY_HOME points inside the sandbox so the auto-created default
+    project indexes an empty directory instead of the operator's personal
+    notes (which would add noise to settle timing and DB contents).
+    """
+    env = dict(os.environ)
+    env.pop("BASIC_MEMORY_CLOUD_MODE", None)
+    env["BASIC_MEMORY_CONFIG_DIR"] = str(home / "config")
+    env["BASIC_MEMORY_HOME"] = str(home / "default-home")
+    return env
+
+
+def settle_index(
+    *,
+    prefix: list[str],
+    env: dict[str, str],
+    project_name: str,
+    timeout_seconds: float,
+) -> tuple[float, Literal["status-json", "fixed-delay"]]:
+    """Wait until the index reports no pending work; returns (seconds, mode)."""
+    start = time.monotonic()
+    probe = run_command(prefix + ["status", "--json", "--local"], check=False, env=env)
+    merged = ((probe.stdout or "") + "\n" + (probe.stderr or "")).lower()
+    if "no such option: --json" in merged:
+        # Old BM without --json: no readiness signal exists; give the watcher a
+        # fixed grace period and record the mode so the artifact is explicit.
+        time.sleep(FALLBACK_SETTLE_SECONDS)
+        return time.monotonic() - start, "fixed-delay"
+
+    deadline = start + timeout_seconds
+    delay = 0.25
+    while True:
+        completed = run_command(
+            prefix + ["status", "--project", project_name, "--json", "--local"], env=env
+        )
+        payload = json.loads(completed.stdout.strip() or "{}")
+        if isinstance(payload, dict):
+            readiness = status_json_is_ready(payload)
+            if readiness is None:
+                time.sleep(FALLBACK_SETTLE_SECONDS)
+                return time.monotonic() - start, "fixed-delay"
+            if readiness:
+                return time.monotonic() - start, "status-json"
+        if time.monotonic() >= deadline:
+            raise TimeoutError(
+                f"Index did not settle within {timeout_seconds}s for project '{project_name}'"
+            )
+        time.sleep(delay)
+        delay = min(delay * 2, 2.0)

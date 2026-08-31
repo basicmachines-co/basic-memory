@@ -224,14 +224,14 @@ def test_unknown_status_schema_uses_fixed_settle_delay(
 ) -> None:
     status = json.dumps({"total_files": 2, "observed_files": [{"path": "note.md"}]})
     monkeypatch.setattr(
-        concurrent_write,
+        bm_runtime,
         "run_command",
         lambda *_args, **_kwargs: SimpleNamespace(stdout=status, stderr=""),
     )
     delays: list[float] = []
-    monkeypatch.setattr(concurrent_write.time, "sleep", delays.append)
+    monkeypatch.setattr(bm_runtime.time, "sleep", delays.append)
 
-    _seconds, mode = concurrent_write._settle_index(
+    _seconds, mode = bm_runtime.settle_index(
         prefix=["bm"],
         env={},
         project_name="project",
@@ -239,7 +239,7 @@ def test_unknown_status_schema_uses_fixed_settle_delay(
     )
 
     assert mode == "fixed-delay"
-    assert delays == [concurrent_write.FALLBACK_SETTLE_SECONDS]
+    assert delays == [bm_runtime.FALLBACK_SETTLE_SECONDS]
 
 
 def test_resolve_clean_checkout_sha_rejects_dirty_target(
