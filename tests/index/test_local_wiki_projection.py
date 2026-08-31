@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 from hashlib import sha256
+import sys
 
 import pytest
 
@@ -104,6 +105,47 @@ async def test_local_wiki_rejects_incomplete_filesystem_scan(
         await inspect_local_wiki_projection(test_project, session_maker=session_maker)
 
     assert not (config_home / "index.md").exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Symlink setup requires extra privileges")
+@pytest.mark.asyncio
+async def test_local_wiki_refuses_symlinked_projection_parent(
+    config_home,
+    session_maker,
+    test_project,
+    tmp_path,
+):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (config_home / "linked").symlink_to(outside, target_is_directory=True)
+    accepted_at = datetime.now(UTC)
+    async with db.scoped_session(session_maker) as session:
+        project = await session.get(Project, test_project.id)
+        assert project is not None
+        project.partition_position = 1
+        session.add(
+            AcceptedProjectNoteChange(
+                project_id=test_project.id,
+                project_external_id=test_project.external_id,
+                partition_position=1,
+                entity_id=1,
+                note_external_id="deleted-note",
+                permalink="linked/note",
+                title="Deleted note",
+                operation="deleted",
+                file_path="linked/note.md",
+                accepted_at=accepted_at,
+                materialized_at=accepted_at,
+                source="delete_note",
+            )
+        )
+
+    inspection = await inspect_local_wiki_projection(test_project, session_maker=session_maker)
+
+    with pytest.raises(LocalWikiWriteConflict, match="crosses a symlink.*linked/index.md"):
+        await apply_local_wiki_projection(inspection, session_maker=session_maker)
+
+    assert list(outside.iterdir()) == []
 
 
 @pytest.mark.asyncio

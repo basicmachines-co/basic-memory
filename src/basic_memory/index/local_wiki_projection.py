@@ -175,6 +175,11 @@ async def apply_local_wiki_projection(
     # therefore fails the rebuild without publishing a knowingly mixed projection.
     for write in plan.writes:
         target = inspection.project_root / write.path
+        _require_safe_projection_destination(
+            project_root=inspection.project_root,
+            target=target,
+            relative_path=write.path,
+        )
         if write.expected_checksum is None:
             if target.exists():
                 raise LocalWikiWriteConflict(
@@ -194,6 +199,24 @@ async def apply_local_wiki_projection(
         target.parent.mkdir(parents=True, exist_ok=True)
         await write_file_atomic_bytes(target, write.content)
     return AppliedLocalWikiProjection(paths=tuple(write.path for write in plan.writes))
+
+
+def _require_safe_projection_destination(
+    *,
+    project_root: Path,
+    target: Path,
+    relative_path: str,
+) -> None:
+    """Keep every generated write inside the real project directory tree."""
+    current = project_root
+    for component in target.relative_to(project_root).parts:
+        current /= component
+        if current.is_symlink():
+            raise LocalWikiWriteConflict(f"Wiki reserved path crosses a symlink: {relative_path}")
+    if not target.resolve(strict=False).is_relative_to(project_root):
+        raise LocalWikiWriteConflict(
+            f"Wiki reserved path escapes the project root: {relative_path}"
+        )
 
 
 async def _assert_projection_sources_unchanged(

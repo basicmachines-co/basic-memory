@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import re
+import tempfile
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
 import aiofiles
@@ -111,9 +112,10 @@ async def write_file_atomic(path: FilePath, content: str) -> None:
     """
     # Convert string to Path if needed
     path_obj = Path(path) if isinstance(path, str) else path
-    temp_path = path_obj.with_suffix(".tmp")
+    temp_path: Path | None = None
 
     try:
+        temp_path = _create_atomic_temp_path(path_obj)
         # Trigger: callers hand us normalized Python text, but the final bytes are allowed
         #          to use the host platform's native newline convention during the write.
         # Why: preserving CRLF on Windows keeps local files aligned with editors like
@@ -128,7 +130,8 @@ async def write_file_atomic(path: FilePath, content: str) -> None:
         temp_path.replace(path_obj)
         logger.debug("Wrote file atomically", path=str(path_obj), content_length=len(content))
     except Exception as e:  # pragma: no cover
-        temp_path.unlink(missing_ok=True)
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
         logger.error("Failed to write file", path=str(path_obj), error=str(e))
         raise FileWriteError(f"Failed to write file {path}: {e}")
 
@@ -136,18 +139,31 @@ async def write_file_atomic(path: FilePath, content: str) -> None:
 async def write_file_atomic_bytes(path: FilePath, content: bytes) -> None:
     """Write bytes atomically without text newline translation."""
     path_obj = Path(path) if isinstance(path, str) else path
-    temp_path = path_obj.with_suffix(".tmp")
+    temp_path: Path | None = None
 
     try:
+        temp_path = _create_atomic_temp_path(path_obj)
         async with aiofiles.open(temp_path, mode="wb") as f:
             await f.write(content)
 
         temp_path.replace(path_obj)
         logger.debug("Wrote file atomically", path=str(path_obj), content_length=len(content))
     except Exception as e:  # pragma: no cover
-        temp_path.unlink(missing_ok=True)
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
         logger.error("Failed to write file", path=str(path_obj), error=str(e))
         raise FileWriteError(f"Failed to write file {path}: {e}")
+
+
+def _create_atomic_temp_path(target: Path) -> Path:
+    """Reserve a collision-free staging file beside an atomic-write target."""
+    with tempfile.NamedTemporaryFile(
+        dir=target.parent,
+        prefix=f".{target.name}.",
+        suffix=".tmp",
+        delete=False,
+    ) as staging_file:
+        return Path(staging_file.name)
 
 
 async def format_markdown_builtin(path: Path) -> Optional[str]:

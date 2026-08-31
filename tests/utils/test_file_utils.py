@@ -22,6 +22,7 @@ from basic_memory.file_utils import (
     sanitize_for_filename,
     sanitize_for_directory,
     write_file_atomic,
+    write_file_atomic_bytes,
 )
 
 # Skip marker for tests that use Unix-specific commands (cat, sh, sleep, /dev/null)
@@ -71,6 +72,24 @@ async def test_write_file_atomic(tmp_path: Path):
 
     # Temp file should be cleaned up
     assert not test_file.with_suffix(".tmp").exists()
+
+
+@pytest.mark.asyncio
+async def test_atomic_writes_preserve_legacy_staging_names(tmp_path: Path):
+    text_target = tmp_path / "note.md"
+    bytes_target = tmp_path / "index.md"
+    text_staging_name = tmp_path / "note.tmp"
+    bytes_staging_name = tmp_path / "index.tmp"
+    text_staging_name.write_text("user text\n", encoding="utf-8")
+    bytes_staging_name.write_bytes(b"user bytes\n")
+
+    await write_file_atomic(text_target, "new text\n")
+    await write_file_atomic_bytes(bytes_target, b"new bytes\n")
+
+    assert text_target.read_text(encoding="utf-8") == "new text\n"
+    assert bytes_target.read_bytes() == b"new bytes\n"
+    assert text_staging_name.read_text(encoding="utf-8") == "user text\n"
+    assert bytes_staging_name.read_bytes() == b"user bytes\n"
 
 
 @pytest.mark.asyncio
