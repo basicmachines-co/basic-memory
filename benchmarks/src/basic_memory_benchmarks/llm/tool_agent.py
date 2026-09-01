@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
@@ -98,6 +99,12 @@ class ToolAgentModel(ABC):
 
 REDACTION_MARKER = "[redacted]"
 
+# Substituted for the whole body when masking provably failed to remove a
+# secret. Dropping the diagnostic is the intended trade: the operator still
+# gets the HTTP status and URL from the underlying exception, which is what
+# names the rejection, while the credential never reaches an artifact.
+WITHHELD_BODY_MARKER = "[body withheld: a secret survived masking in an unrecognized encoding]"
+
 # A gateway quotes the offending value into its JSON error body once; a proxy
 # that wraps an upstream JSON body in a string field quotes it twice. Nothing
 # an OpenAI-compatible endpoint emits nests deeper than that, and each level is
@@ -127,8 +134,46 @@ def _encoded_forms(secret: str) -> list[str]:
     return forms
 
 
+# JSON lets an encoder spell any character either literally or as a backslash
+# escape, and encoders disagree about which: Go's html-safe default emits
+# \u003c for "<", PHP emits \/ for "/". Enumerating those spellings is
+# unwinnable — any encoder may \u-escape any character — so detection runs
+# against an unescaped view of the text instead of a longer form list.
+_ESCAPE_SEQUENCE = re.compile(r"\\u[0-9a-fA-F]{4}|\\.", re.DOTALL)
+
+_CONTROL_ESCAPES = {"b": "\b", "f": "\f", "n": "\n", "r": "\r", "t": "\t"}
+
+
+def _unescape_once(text: str) -> str:
+    """Resolve one layer of backslash escapes. Parses nothing, raises nothing.
+
+    ``json.loads`` is deliberately not used here: an error body is truncated to
+    300 characters downstream, arrives cut mid-string when the gateway itself
+    truncates, and is often not JSON at all — a parse failure inside a leak
+    backstop would trade a leak for a crash.
+
+    Every alternative the pattern matches is longer than its replacement, so
+    each pass strictly shortens the text. That is what bounds the fixpoint loop
+    in ``redact_secrets``.
+    """
+
+    def resolve(match: re.Match[str]) -> str:
+        sequence = match.group()
+        # ``\uXXXX`` is the only alternative longer than two characters, so
+        # length alone identifies it — no re-inspection of the payload needed.
+        if len(sequence) == 6:
+            return chr(int(sequence[2:], 16))
+        escaped = sequence[1]
+        # ``\"``, ``\\`` and ``\/`` spell themselves. Anything else is invalid
+        # JSON escape syntax, and dropping the backslash is the wider reading:
+        # a detector that over-matches costs a diagnostic, not a credential.
+        return _CONTROL_ESCAPES.get(escaped, escaped)
+
+    return _ESCAPE_SEQUENCE.sub(resolve, text)
+
+
 def redact_secrets(text: str, secrets: Sequence[str]) -> str:
-    """Mask known secret values in text that is headed for run artifacts.
+    """Return text that is safe to persist, masking or withholding secrets.
 
     Gateways quote the offending request back at you: an OpenAI-compatible 401
     can echo the rejected key, and proxies name the header they refused. That
@@ -140,7 +185,19 @@ def redact_secrets(text: str, secrets: Sequence[str]) -> str:
     values we were handed is deterministic and cannot be defeated by an
     unfamiliar credential format. Each value is masked in every spelling
     ``_encoded_forms`` derives, because the body that leaks it is usually JSON.
+
+    Masking alone cannot be complete, because any JSON encoder may spell any
+    character as ``\\uXXXX``. So the masked text is checked once more against
+    an unescaped view of itself, and a body that still yields a secret there is
+    dropped whole. The result therefore contains no secret in any spelling
+    reachable by backslash escapes, at any nesting depth.
     """
+    # Distinguished from "no secret present": with nothing configured there is
+    # nothing to mask and nothing for the safety net to search for, so the body
+    # passes through without paying for either pass.
+    if not secrets:
+        return text
+
     forms = {form for secret in secrets for form in _encoded_forms(secret)}
     # Longest first: when one form contains another — a bare key and the same
     # key inside a longer header value, or a plaintext value inside its own
@@ -149,6 +206,22 @@ def redact_secrets(text: str, secrets: Sequence[str]) -> str:
     # of equal-length secrets still redacts identically on every run.
     for form in sorted(forms, key=lambda form: (-len(form), form)):
         text = text.replace(form, REDACTION_MARKER)
+
+    # Safety net for the spellings the form set cannot enumerate. ``forms``
+    # always includes the plaintext and ``replace`` removes every occurrence,
+    # so the masked text provably holds no literal secret; only an *escaped*
+    # one can remain, and unescaping is what exposes it.
+    #
+    # Repeated to a fixpoint because a secret escaped once by an upstream
+    # encoder and again by the proxy that wrapped its body needs two passes to
+    # surface. The check runs after every pass rather than only at the end: a
+    # secret containing a backslash can be revealed by one pass and then
+    # consumed as an escape prefix by the next.
+    view = text
+    while (unescaped := _unescape_once(view)) != view:
+        view = unescaped
+        if any(secret in view for secret in secrets):
+            return WITHHELD_BODY_MARKER
     return text
 
 
