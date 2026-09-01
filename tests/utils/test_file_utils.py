@@ -100,18 +100,30 @@ async def test_atomic_writes_preserve_existing_modes_and_umask_defaults(tmp_path
     bytes_target = tmp_path / "index.md"
     text_target.write_text("old text\n", encoding="utf-8")
     bytes_target.write_bytes(b"old bytes\n")
+    readonly_text_target = tmp_path / "readonly-note.md"
+    readonly_bytes_target = tmp_path / "readonly-index.md"
+    readonly_text_target.write_text("old readonly text\n", encoding="utf-8")
+    readonly_bytes_target.write_bytes(b"old readonly bytes\n")
     text_target.chmod(0o664)
     bytes_target.chmod(0o640)
+    readonly_text_target.chmod(0o444)
+    readonly_bytes_target.chmod(0o444)
     reference = tmp_path / "reference.md"
     reference.touch()
     new_target = tmp_path / "new.md"
 
     await write_file_atomic(text_target, "new text\n")
     await write_file_atomic_bytes(bytes_target, b"new bytes\n")
+    await write_file_atomic(readonly_text_target, "new readonly text\n")
+    await write_file_atomic_bytes(readonly_bytes_target, b"new readonly bytes\n")
     await write_file_atomic_bytes(new_target, b"new file\n")
 
     assert stat.S_IMODE(text_target.stat().st_mode) == 0o664
     assert stat.S_IMODE(bytes_target.stat().st_mode) == 0o640
+    assert readonly_text_target.read_text(encoding="utf-8") == "new readonly text\n"
+    assert readonly_bytes_target.read_bytes() == b"new readonly bytes\n"
+    assert stat.S_IMODE(readonly_text_target.stat().st_mode) == 0o444
+    assert stat.S_IMODE(readonly_bytes_target.stat().st_mode) == 0o444
     assert stat.S_IMODE(new_target.stat().st_mode) == stat.S_IMODE(reference.stat().st_mode)
 
 

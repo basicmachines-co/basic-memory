@@ -66,7 +66,26 @@ async def test_local_wiki_includes_long_markdown_suffix(config_home, session_mak
     inspection = await inspect_local_wiki_projection(test_project, session_maker=session_maker)
 
     root_index = next(write for write in inspection.plan.writes if write.path == "index.md")
-    assert "[[reference|Reference]]" in root_index.content.decode("utf-8")
+    assert "[[test-project/reference|Reference]]" in root_index.content.decode("utf-8")
+
+
+@pytest.mark.asyncio
+async def test_local_wiki_uses_configured_canonical_fallback_permalink(
+    config_home,
+    session_maker,
+    test_project,
+):
+    note = config_home / "reference.md"
+    note.write_text("---\ntitle: Reference\n---\n\n# Reference\n", encoding="utf-8")
+
+    inspection = await inspect_local_wiki_projection(
+        test_project,
+        session_maker=session_maker,
+        include_project_permalinks=True,
+    )
+
+    root_index = next(write for write in inspection.plan.writes if write.path == "index.md")
+    assert f"[[{test_project.permalink}/reference|Reference]]" in root_index.content.decode("utf-8")
 
 
 @pytest.mark.asyncio

@@ -36,7 +36,7 @@ from basic_memory.indexing.wiki_projector import (
 from basic_memory.markdown import EntityParser
 from basic_memory.models import AcceptedProjectNoteChange, Project
 from basic_memory.runtime.storage import runtime_file_path_is_markdown_note
-from basic_memory.utils import ensure_timezone_aware, generate_permalink
+from basic_memory.utils import build_canonical_permalink, ensure_timezone_aware
 
 
 class LocalWikiState(StrEnum):
@@ -59,6 +59,7 @@ class LocalWikiSourceState:
 
     project_external_id: str
     project_name: str
+    include_project_permalinks: bool
     partition_position: int
     accepted_at: datetime
     notes: tuple[WikiSourceNote, ...]
@@ -90,6 +91,7 @@ async def inspect_local_wiki_projection(
     project: Project,
     *,
     session_maker: async_sessionmaker[AsyncSession],
+    include_project_permalinks: bool = True,
 ) -> LocalWikiInspection:
     """Plan a full local Wiki rebuild without modifying canonical files."""
     async with db.scoped_session(session_maker) as session:
@@ -108,6 +110,7 @@ async def inspect_local_wiki_projection(
         project_root=project_root,
         session_maker=session_maker,
         ignore_patterns=ignore_patterns,
+        include_project_permalinks=include_project_permalinks,
     )
     plan = plan_wiki_projection(
         WikiProjectionRequest(
@@ -146,7 +149,11 @@ async def inspect_local_wiki_projection(
         project_name=project.name,
         project_root=project_root,
         state=state,
-        source_state=_source_state(snapshot, ignore_patterns=ignore_patterns),
+        source_state=_source_state(
+            snapshot,
+            ignore_patterns=ignore_patterns,
+            include_project_permalinks=include_project_permalinks,
+        ),
         plan=plan,
     )
 
@@ -239,9 +246,14 @@ async def _assert_projection_sources_unchanged(
         project_root=current_root.resolve(),
         session_maker=session_maker,
         ignore_patterns=current_ignore_patterns,
+        include_project_permalinks=inspection.source_state.include_project_permalinks,
     )
     if (
-        _source_state(current_snapshot, ignore_patterns=current_ignore_patterns)
+        _source_state(
+            current_snapshot,
+            ignore_patterns=current_ignore_patterns,
+            include_project_permalinks=inspection.source_state.include_project_permalinks,
+        )
         != inspection.source_state
     ):
         raise LocalWikiWriteConflict("Wiki projection inputs changed after planning")
@@ -251,11 +263,13 @@ def _source_state(
     snapshot: WikiProjectionSnapshot,
     *,
     ignore_patterns: set[str],
+    include_project_permalinks: bool,
 ) -> LocalWikiSourceState:
     """Return only the projection inputs that generated writes depend on."""
     return LocalWikiSourceState(
         project_external_id=snapshot.project_id,
         project_name=snapshot.project_name,
+        include_project_permalinks=include_project_permalinks,
         partition_position=snapshot.source_partition_position,
         accepted_at=snapshot.source_accepted_at,
         notes=snapshot.notes,
@@ -271,6 +285,7 @@ async def _load_local_wiki_snapshot(
     project_root: Path,
     session_maker: async_sessionmaker[AsyncSession],
     ignore_patterns: set[str],
+    include_project_permalinks: bool,
 ) -> WikiProjectionSnapshot:
     if not project_root.is_dir():
         raise ValueError(f"Local project directory does not exist: {project_root}")
@@ -304,7 +319,11 @@ async def _load_local_wiki_snapshot(
             continue
 
         markdown = await parser.parse_file(path)
-        permalink = markdown.frontmatter.permalink or generate_permalink(relative_path)
+        permalink = markdown.frontmatter.permalink or build_canonical_permalink(
+            project.permalink,
+            relative_path,
+            include_project=include_project_permalinks,
+        )
         source_notes.append(
             WikiSourceNote(
                 path=relative_path,

@@ -268,6 +268,7 @@ async def _execute_wiki_command(
         inspection = await inspect_local_wiki_projection(
             project,
             session_maker=session_maker,
+            include_project_permalinks=app_config.permalinks_include_project,
         )
         state = inspection.state
         if (
