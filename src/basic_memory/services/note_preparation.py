@@ -95,6 +95,7 @@ class PreparedEntityWrite:
                 category=observation.category,
                 context=observation.context,
                 tags=observation.tags,
+                temporal=tuple(observation.temporal),
             )
             for observation in self.entity_markdown.observations
         ]
@@ -875,6 +876,7 @@ async def prepare_move_entity_content(
                 category=observation.category,
                 context=observation.context,
                 tags=observation.tags,
+                temporal=tuple(observation.temporal),
             )
             for observation in entity_markdown.observations
         ),

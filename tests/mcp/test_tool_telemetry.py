@@ -174,6 +174,7 @@ async def test_search_notes_emits_root_operation_and_project_context(
             "has_filters": True,
             "has_tags_filter": True,
             "has_status_filter": False,
+            "has_temporal_filter": False,
         },
     )
     span_names = [name for name, _ in spans]

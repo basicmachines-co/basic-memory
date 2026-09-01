@@ -51,6 +51,8 @@ from basic_memory.deps.repositories import (
     ObservationRepositoryV2ExternalDep,
     get_relation_repository_v2_external,
     RelationRepositoryV2ExternalDep,
+    get_memory_time_index_repository_v2_external,
+    MemoryTimeIndexRepositoryV2ExternalDep,
     get_search_repository_v2_external,
     SearchRepositoryV2ExternalDep,
 )
@@ -140,6 +142,8 @@ __all__ = [
     "ObservationRepositoryV2ExternalDep",
     "get_relation_repository_v2_external",
     "RelationRepositoryV2ExternalDep",
+    "get_memory_time_index_repository_v2_external",
+    "MemoryTimeIndexRepositoryV2ExternalDep",
     "get_search_repository_v2_external",
     "SearchRepositoryV2ExternalDep",
     # Services

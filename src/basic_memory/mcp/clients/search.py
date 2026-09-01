@@ -14,6 +14,10 @@ import logfire
 # so each method defers the import to call time instead (#886).
 from basic_memory.schemas.search import SearchResponse, SearchRetrievalMode
 
+# The valid-time fields SearchQuery carries. Named here so the skew check below stays
+# in step with the schema without importing the model's internals.
+_TEMPORAL_QUERY_FIELDS = ("valid_at", "valid_overlaps", "time_role")
+
 
 class SearchClient:
     """Typed client for search operations.
@@ -59,6 +63,7 @@ class SearchClient:
 
         Raises:
             ToolError: If the request fails
+            ValueError: If a requested valid-time filter was not applied by the server
         """
         from basic_memory.mcp.tools.utils import call_query
 
@@ -86,5 +91,22 @@ class SearchClient:
         if "total_is_exact" not in payload:
             retrieval_mode = query.get("retrieval_mode", SearchRetrievalMode.FTS)
             payload["total_is_exact"] = retrieval_mode == SearchRetrievalMode.FTS
+
+        # Trigger: this request carried a valid-time filter but the response does not
+        #   confirm the server ran it.
+        # Why: SearchQuery ignores unknown fields, so a server predating SPEC-82 accepts
+        #   the request and returns results that look filtered. A valid-time query
+        #   excludes undated sources; unfiltered results include them, and the caller
+        #   would have no way to tell.
+        # Outcome: fail loudly instead of returning a wrong answer that reads as right.
+        if any(query.get(field) for field in _TEMPORAL_QUERY_FIELDS) and (
+            payload.get("temporal_applied") is not True
+        ):
+            raise ValueError(
+                "The search API did not apply the requested valid-time filter "
+                "(no temporal_applied confirmation in the response). The server is "
+                "likely older than this client; upgrade it or drop valid_at / "
+                "valid_overlaps / time_role from the query."
+            )
 
         return SearchResponse.model_validate(payload)

@@ -16,6 +16,7 @@ from basic_memory.repository.search_repository_base import SearchRepositoryBase
 from basic_memory.repository.search_trace import SearchTraceCollector
 from basic_memory.repository.semantic_chunking import VectorChunkRecord
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
+from basic_memory.temporal import TemporalFilter
 
 
 class _TestRepository(SearchRepositoryBase):
@@ -57,6 +58,7 @@ class _TestRepository(SearchRepositoryBase):
         categories: list[str] | None = None,
         metadata_filters: dict[str, Any] | None = None,
         file_path_prefix: str | None = None,
+        temporal: TemporalFilter | None = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: float | None = None,
         limit: int = 10,

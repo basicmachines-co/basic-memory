@@ -45,6 +45,10 @@ from basic_memory.repository import (
     AcceptedRelationWrite,
     AcceptedSectionWrite,
 )
+from basic_memory.repository.memory_time_index_repository import (
+    AcceptedTemporalAssertion,
+    TemporalGenerationWriteResult,
+)
 from basic_memory.repository.note_section_repository import SectionGenerationWriteResult
 from basic_memory.repository.observation_repository import ObservationGenerationWriteResult
 from basic_memory.repository.relation_repository import RelationGenerationWriteResult
@@ -166,6 +170,22 @@ class _SectionRepository:
         return SectionGenerationWriteResult(generation_is_current=True)
 
 
+class _TemporalRepository:
+    def __init__(self) -> None:
+        self.calls: list[tuple[int, Sequence[AcceptedTemporalAssertion]]] = []
+
+    async def replace_assertions_for_generation(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+        generation: int,
+        assertions: Sequence[AcceptedTemporalAssertion],
+    ) -> TemporalGenerationWriteResult:
+        self.calls.append((entity_id, assertions))
+        return TemporalGenerationWriteResult(generation_is_current=True)
+
+
 class _RelationRepository:
     def __init__(self) -> None:
         self.calls: list[tuple[int, Sequence[AcceptedRelationWrite]]] = []
@@ -227,6 +247,10 @@ def test_accepted_note_write_repositories_name_persistence_behavior() -> None:
             assert project_id == 7
             return _SectionRepository()
 
+        def temporal_repository(self, project_id: int) -> _TemporalRepository:
+            assert project_id == 7
+            return _TemporalRepository()
+
         def relation_repository(self, project_id: int) -> _RelationRepository:
             assert project_id == 7
             return _RelationRepository()
@@ -238,6 +262,7 @@ def test_accepted_note_write_repositories_name_persistence_behavior() -> None:
     assert isinstance(repositories.search_repository(7), _SearchRepository)
     assert isinstance(repositories.observation_repository(7), _ObservationRepository)
     assert isinstance(repositories.section_repository(7), _SectionRepository)
+    assert isinstance(repositories.temporal_repository(7), _TemporalRepository)
     assert isinstance(repositories.relation_repository(7), _RelationRepository)
 
 
@@ -434,6 +459,10 @@ def _unexpected_section_repository(_project_id: int) -> _SectionRepository:
     raise AssertionError("section repository was not expected")
 
 
+def _unexpected_temporal_repository(_project_id: int) -> _TemporalRepository:
+    raise AssertionError("temporal repository was not expected")
+
+
 @dataclass(frozen=True, slots=True)
 class _RepositoryProvider:
     pending_entity_repository_result: _PendingEntityRepository | None = None
@@ -441,6 +470,7 @@ class _RepositoryProvider:
     search_repository_result: _SearchRepository | None = None
     observation_repository_result: _ObservationRepository | None = None
     section_repository_result: _SectionRepository | None = None
+    temporal_repository_result: _TemporalRepository | None = None
     relation_repository_result: _RelationRepository | None = None
 
     def pending_entity_repository(self, project_id: int) -> _PendingEntityRepository:
@@ -468,6 +498,11 @@ class _RepositoryProvider:
             return _unexpected_section_repository(project_id)
         return self.section_repository_result
 
+    def temporal_repository(self, project_id: int) -> _TemporalRepository:
+        if self.temporal_repository_result is None:
+            return _unexpected_temporal_repository(project_id)
+        return self.temporal_repository_result
+
     def relation_repository(self, project_id: int) -> _RelationRepository:
         if self.relation_repository_result is None:
             return _unexpected_relation_repository(project_id)
@@ -481,6 +516,7 @@ def _repository_provider(
     search_repository: _SearchRepository | None = None,
     observation_repository: _ObservationRepository | None = None,
     section_repository: _SectionRepository | None = None,
+    temporal_repository: _TemporalRepository | None = None,
     relation_repository: _RelationRepository | None = None,
 ) -> AcceptedNoteWriteRepositories:
     """Build a fail-fast fake repository provider for one focused test."""
@@ -488,6 +524,7 @@ def _repository_provider(
         pending_entity_repository_result=pending_entity_repository,
         observation_repository_result=observation_repository,
         section_repository_result=section_repository,
+        temporal_repository_result=temporal_repository,
         relation_repository_result=relation_repository,
         note_content_repository_result=note_content_repository,
         search_repository_result=search_repository,

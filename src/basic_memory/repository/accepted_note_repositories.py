@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from basic_memory.repository import (
+    MemoryTimeIndexRepository,
     NoteContentRepository,
     NoteSectionRepository,
     ObservationRepository,
@@ -50,6 +51,9 @@ class AcceptedNoteRepositories:
 
     def section_repository(self, project_id: ProjectId) -> NoteSectionRepository:
         return NoteSectionRepository(project_id=project_id)
+
+    def temporal_repository(self, project_id: ProjectId) -> MemoryTimeIndexRepository:
+        return MemoryTimeIndexRepository(project_id=project_id)
 
     def relation_repository(self, project_id: ProjectId) -> RelationRepository:
         return RelationRepository(project_id=project_id)

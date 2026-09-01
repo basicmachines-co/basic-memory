@@ -9,7 +9,7 @@ The search system supports three primary modes:
 from typing import Optional, List, Union, Any
 from datetime import datetime
 from enum import Enum
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from basic_memory.schemas.base import Permalink, normalize_note_type
 
@@ -77,6 +77,12 @@ class SearchQuery(BaseModel):
     - file_path_prefix: Limit to one directory subtree of the project
     - tags: Convenience frontmatter tag filter
     - status: Convenience frontmatter status filter
+    - valid_at / valid_overlaps / time_role: Authored valid-time filters (SPEC-82)
+
+    Valid time is what a note *says about the world*, written as a qualifier on an
+    observation (``- [decision] @effective[2026-06-10,2026-07-27) ...``). It is a
+    different axis from ``after_date``, which filters on when a row was last indexed
+    and is deliberately left untouched by these fields.
 
     Boolean search examples:
     - "python AND flask" - Find items with both terms
@@ -106,6 +112,22 @@ class SearchQuery(BaseModel):
     retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS
     min_similarity: Optional[float] = None  # Per-query override for semantic_min_similarity
 
+    # Authored valid-time filters. Kept as strings at the boundary so HTTP clients and
+    # MCP callers can pass one flat value; the service parses them into the portable
+    # domain values and rejects anything malformed with a visible diagnostic.
+    valid_at: Optional[str] = None  # Date or RFC 3339 instant the range must contain
+    valid_overlaps: Optional[str] = None  # Range literal, e.g. "[2026-06-10,2026-07-27)"
+    time_role: Optional[str] = None  # effective | valid | occurred | due | mentioned
+
+    @model_validator(mode="after")
+    def validate_temporal_filter(self) -> "SearchQuery":
+        """Refuse a query that asks two different valid-time questions at once."""
+        if self.valid_at is not None and self.valid_overlaps is not None:
+            raise ValueError(
+                "Use either valid_at (containment) or valid_overlaps (overlap), not both."
+            )
+        return self
+
     @field_validator("after_date")
     @classmethod
     def validate_date(cls, v: Optional[Union[datetime, str]]) -> Optional[str]:
@@ -133,6 +155,15 @@ class SearchQuery(BaseModel):
         """
         return normalize_file_path_prefix(value)
 
+    def has_temporal_filter(self) -> bool:
+        """Whether this query asks a valid-time question at all.
+
+        A role on its own is a legal filter: it asks for sources carrying any
+        assertion on that axis. Callers use this to decide whether valid time was
+        requested without parsing the values, which is why it never raises.
+        """
+        return bool(self.valid_at or self.valid_overlaps or self.time_role)
+
     def no_criteria(self) -> bool:
         text_is_empty = self.text is None or (isinstance(self.text, str) and not self.text.strip())
         metadata_is_empty = not self.metadata_filters
@@ -155,6 +186,7 @@ class SearchQuery(BaseModel):
             and self.file_path_prefix is None
             and tags_is_empty
             and status_is_empty
+            and not self.has_temporal_filter()
         )
 
     def has_boolean_operators(self) -> bool:
@@ -167,6 +199,37 @@ class SearchQuery(BaseModel):
         boolean_patterns = [" AND ", " OR ", " NOT ", "(", ")"]
         text = f" {self.text} "  # Add spaces to ensure we match word boundaries
         return any(pattern in text for pattern in boolean_patterns)
+
+
+class TemporalRangeValue(BaseModel):
+    """One authored interval, as a caller sees it.
+
+    This is the single logical `valid_during` value the API and MCP boundary expose.
+    How the projection stores it -- which table, which columns, which indexes -- is
+    deliberately absent: `literal` is the canonical PostgreSQL range literal and the
+    decomposed bounds are the same interval, spelled out so a caller can compare
+    endpoints without parsing.
+    """
+
+    kind: str  # "date" (calendar dates) or "instant" (UTC timestamps)
+    literal: str  # e.g. "[2026-06-10,2026-07-27)", "(,2026-07-27]", "empty"
+    lower: Optional[str] = None  # None means unbounded on that side
+    upper: Optional[str] = None
+    lower_inclusive: bool = False
+    upper_inclusive: bool = False
+    is_empty: bool = False
+
+
+class TemporalResultMetadata(BaseModel):
+    """One authored valid-time assertion carried by a search result.
+
+    Present so an agent can say *why* a source matched a valid-time query -- which
+    axis it was asserted on, over what interval, and in the author's own words.
+    """
+
+    role: str  # effective | valid | occurred | due | mentioned
+    valid_during: TemporalRangeValue
+    source_text: str  # the qualifier exactly as authored, e.g. "@effective[2026-06-10,)"
 
 
 class SearchResult(BaseModel):
@@ -199,6 +262,11 @@ class SearchResult(BaseModel):
     to_entity: Optional[Permalink] = None  # For relations
     relation_type: Optional[str] = None  # For relations
 
+    # Authored valid-time assertions carried by this row. Collection-shaped from day
+    # one: the MVP parser reads one qualifier per observation, but multiple assertions
+    # on multiple axes must not be a schema break later.
+    temporal: Optional[List[TemporalResultMetadata]] = None
+
 
 class SearchResponse(BaseModel):
     """Wrapper for search results."""
@@ -215,3 +283,17 @@ class SearchResponse(BaseModel):
         description="Whether total is an exact count that clients can use for pagination",
     )
     has_more: bool = False
+    # Version-skew guard. SearchQuery ignores unknown fields, so a client that sends a
+    # valid-time filter to a server predating SPEC-82 would receive unfiltered results
+    # that look filtered -- silently including the undated sources the filter excludes.
+    #
+    # Three states, all meaningful: True (asked and executed), None (never asked, so
+    # nothing to confirm), and -- only from a server that does not know this field --
+    # missing, which parses as None while True was expected. Staying None rather than
+    # False when no filter was asked keeps every ordinary search payload byte-identical
+    # to what it was before valid time existed.
+    temporal_applied: Optional[bool] = Field(
+        default=None,
+        description="True when the server executed a requested valid-time filter; "
+        "absent when the request carried none",
+    )

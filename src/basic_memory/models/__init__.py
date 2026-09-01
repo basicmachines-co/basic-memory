@@ -4,6 +4,7 @@ import basic_memory
 from basic_memory.models.base import Base
 from basic_memory.models.knowledge import (
     Entity,
+    MemoryTimeIndex,
     NoteContent,
     NoteFileVacate,
     NoteSection,
@@ -17,6 +18,7 @@ __all__ = [
     "Base",
     "AcceptedProjectNoteChange",
     "Entity",
+    "MemoryTimeIndex",
     "NoteContent",
     "NoteFileVacate",
     "NoteSection",

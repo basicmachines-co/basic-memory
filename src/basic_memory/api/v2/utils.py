@@ -1,7 +1,10 @@
+from collections import defaultdict
+from collections.abc import Mapping
 from typing import Any, Protocol, Optional, List, Sequence
 
 import logfire
 from sqlalchemy.ext.asyncio import AsyncSession
+from basic_memory.models import MemoryTimeIndex
 from basic_memory.repository.search_repository import SearchIndexRow
 from basic_memory.schemas.memory import (
     EntitySummary,
@@ -11,11 +14,17 @@ from basic_memory.schemas.memory import (
     GraphContext,
     ContextResult,
 )
-from basic_memory.schemas.search import SearchItemType, SearchResult
+from basic_memory.schemas.search import (
+    SearchItemType,
+    SearchResult,
+    TemporalRangeValue,
+    TemporalResultMetadata,
+)
 from basic_memory.services.context_service import (
     ContextResultRow,
     ContextResult as ServiceContextResult,
 )
+from basic_memory.temporal import TemporalRange, TemporalRangeKind
 
 
 class EntityBatchLookup(Protocol):
@@ -30,6 +39,19 @@ class EntityBatchLookup(Protocol):
 
 class EntityServiceBatchLookup(Protocol):
     async def get_entities_by_id(self, ids: List[int]) -> Sequence[Any]: ...
+
+
+class TemporalAssertionLookup(Protocol):
+    async def find_for_sources(
+        self,
+        session: AsyncSession,
+        sources: Sequence[tuple[str, int]],
+    ) -> Sequence[MemoryTimeIndex]: ...
+
+
+# One page of hits, keyed by the (search row type, search row id) pair the projection
+# addresses. Empty means "no valid-time metadata was loaded", never "none exists".
+type TemporalMetadataBySource = Mapping[tuple[str, int], list[TemporalResultMetadata]]
 
 
 async def get_entities_by_id_lookup(
@@ -217,8 +239,71 @@ async def to_graph_context(
         )
 
 
+def _temporal_result_metadata(row: MemoryTimeIndex) -> TemporalResultMetadata:
+    """Shape one projected assertion into the value a caller sees.
+
+    Rebuilding the domain range from the stored scalars re-runs its invariants, so a
+    row that somehow violated them surfaces here instead of being rendered as a
+    plausible-looking interval.
+    """
+    valid_during = TemporalRange(
+        kind=TemporalRangeKind(row.range_kind),
+        lower=row.lower_value,
+        upper=row.upper_value,
+        lower_inclusive=row.lower_inclusive,
+        upper_inclusive=row.upper_inclusive,
+        is_empty=row.is_empty,
+    )
+    return TemporalResultMetadata(
+        role=row.time_role,
+        valid_during=TemporalRangeValue(
+            kind=valid_during.kind.value,
+            literal=str(valid_during),
+            lower=valid_during.lower,
+            upper=valid_during.upper,
+            lower_inclusive=valid_during.lower_inclusive,
+            upper_inclusive=valid_during.upper_inclusive,
+            is_empty=valid_during.is_empty,
+        ),
+        source_text=row.source_text,
+    )
+
+
+async def load_temporal_metadata(
+    temporal_repository: TemporalAssertionLookup,
+    session: AsyncSession,
+    results: Sequence[SearchIndexRow],
+) -> dict[tuple[str, int], list[TemporalResultMetadata]]:
+    """Load the authored valid-time assertions behind one page of search hits.
+
+    Keyed on the search row's own ``(type, id)`` pair, which is exactly the address
+    the projection stores -- so an observation hit resolves to the assertions written
+    on that observation, not to its note's other assertions.
+    """
+    sources = [(result.type, result.id) for result in results]
+    if not sources:
+        return {}
+
+    with logfire.span(
+        "search.hydrate_results.fetch_temporal",
+        domain="search",
+        action="search",
+        phase="fetch_temporal",
+        result_count=len(sources),
+    ):
+        rows = await temporal_repository.find_for_sources(session, sources)
+
+    by_source: defaultdict[tuple[str, int], list[TemporalResultMetadata]] = defaultdict(list)
+    for row in rows:
+        by_source[(row.source_type, row.source_id)].append(_temporal_result_metadata(row))
+    return dict(by_source)
+
+
 async def to_search_results(
-    entity_service: EntityServiceBatchLookup, results: List[SearchIndexRow]
+    entity_service: EntityServiceBatchLookup,
+    results: List[SearchIndexRow],
+    *,
+    temporal_by_source: TemporalMetadataBySource | None = None,
 ) -> list[SearchResult]:
     with logfire.span(
         "search.hydrate_results",
@@ -299,6 +384,11 @@ async def to_search_results(
                         from_entity=from_entity.permalink if from_entity else None,
                         to_entity=to_entity.permalink if to_entity else None,
                         relation_type=result.relation_type,
+                        temporal=(
+                            temporal_by_source.get((result.type, result.id))
+                            if temporal_by_source
+                            else None
+                        ),
                     )
                 )
         return search_results

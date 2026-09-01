@@ -3,8 +3,10 @@
 from datetime import UTC, datetime
 from pathlib import Path
 from textwrap import dedent
+from typing import Any
 
 import pytest
+from loguru import logger
 
 from basic_memory.markdown.schemas import EntityMarkdown, EntityFrontmatter, Relation
 from basic_memory.markdown.entity_parser import parse
@@ -426,6 +428,36 @@ async def test_graph_silent_note_still_gets_sections(entity_parser):
     assert entity.observations == []
     assert entity.relations == []
     assert [section.heading for section in entity.sections] == ["Extracted"]
+
+
+@pytest.mark.asyncio
+async def test_malformed_qualifier_logs_diagnostic_with_file_path(entity_parser):
+    """A refused temporal qualifier warns with the path, so the author can fix the line.
+
+    The typed `temporal_error` field carries the same message to programmatic callers;
+    this layer is the only one that knows which file the observation came from.
+    """
+    records: list[Any] = []
+    sink_id = logger.add(lambda message: records.append(message.record), level="WARNING")
+    try:
+        entity = await entity_parser.parse_markdown_content(
+            Path("decisions/cache-layer.md"),
+            "# Cache\n- [decision] @asserted[2026-06-10,) The cache layer will use Redis.\n",
+        )
+    finally:
+        logger.remove(sink_id)
+
+    [observation] = entity.observations
+    assert observation.temporal == []
+    assert "unknown temporal role 'asserted'" in (observation.temporal_error or "")
+    # The qualifier is never dropped from the content, only from the projection.
+    assert observation.content.startswith("@asserted[2026-06-10,)")
+
+    messages = [record["message"] for record in records]
+    assert any(
+        "decisions/cache-layer.md" in message and "Temporal qualifier ignored" in message
+        for message in messages
+    ), messages
 
 
 # @pytest.mark.asyncio

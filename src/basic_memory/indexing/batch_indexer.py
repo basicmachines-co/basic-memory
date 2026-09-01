@@ -44,6 +44,7 @@ from basic_memory.indexing.relation_persistence import RelationGenerationPublish
 from basic_memory.models import Entity, NoteContent, Relation, RelationSearchRefresh
 from basic_memory.repository import EntityRepository, ObservationRepository, RelationRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
+from basic_memory.repository.memory_time_index_repository import MemoryTimeIndexRepository
 from basic_memory.repository.note_section_repository import NoteSectionRepository
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.relation_repository import lock_note_content_before_entity_mutation
@@ -163,6 +164,7 @@ class BatchIndexer:
         self.relation_repository = relation_repository
         self.note_content_repository = NoteContentRepository(project_id=project_id)
         self.section_repository = NoteSectionRepository(project_id=project_id)
+        self.temporal_repository = MemoryTimeIndexRepository(project_id=project_id)
         self.search_service = search_service
         self.file_writer = file_writer
         self.session_maker = session_maker
@@ -170,6 +172,7 @@ class BatchIndexer:
             relation_repository=relation_repository,
             observation_repository=observation_repository,
             section_repository=self.section_repository,
+            temporal_repository=self.temporal_repository,
             session_maker=session_maker,
         )
         self.relation_resolution = RepositoryRelationResolutionRuntime(
@@ -773,6 +776,10 @@ class BatchIndexer:
             relation.to_entity = None
 
         await self.observation_repository.delete_by_fields(session, entity_id=entity.id)
+        # Valid time is asserted by observations, so it retires with them: a resource
+        # that is no longer Markdown asserts nothing, and no later pass would repair
+        # rows left addressing observations that have just been deleted.
+        await self.temporal_repository.delete_by_fields(session, entity_id=entity.id)
         await self.section_repository.delete_by_fields(session, entity_id=entity.id)
         await self.relation_repository.delete_by_fields(session, from_id=entity.id)
         await self.note_content_repository.delete_by_entity_id(session, entity.id)
@@ -1092,6 +1099,7 @@ class BatchIndexer:
                 category=observation.category,
                 context=observation.context,
                 tags=observation.tags,
+                temporal=tuple(observation.temporal),
             )
             for observation in prepared.markdown.observations
         )

@@ -32,6 +32,13 @@ from basic_memory.runtime.vector_sync import (
     VectorSyncBatchResult,
 )
 from basic_memory.services import FileService
+from basic_memory.temporal import (
+    TemporalFilter,
+    TemporalQualifierError,
+    TimeRole,
+    parse_point,
+    parse_range_literal,
+)
 
 # Maximum size for content_stems field to stay under Postgres's 8KB index row limit.
 # We use 6000 characters to leave headroom for other indexed columns and overhead.
@@ -52,6 +59,7 @@ class PreparedSearchQuery:
     after_date: datetime | None
     metadata_filters: dict[str, Any] | None
     file_path_prefix: str | None
+    temporal: TemporalFilter | None
     retrieval_mode: SearchRetrievalMode
     min_similarity: float | None
 
@@ -84,6 +92,50 @@ def entity_embeddings_enabled(entity: Entity) -> bool:
     return True
 
 
+def build_temporal_filter(query: SearchQuery) -> TemporalFilter | None:
+    """Parse the flat valid-time fields into one portable filter value.
+
+    The boundary carries strings so HTTP and MCP callers can pass a single flat value
+    per axis. Every rejection here is deliberate and loud: an unknown role, a malformed
+    range literal, a range mixing calendar dates with instants, or an impossible range
+    raises rather than degrading into a filter that quietly matches something else.
+    Callers above map the error to a 400. A timestamp written without an offset is not
+    a rejection -- like every other naive datetime in the codebase, it is read as UTC.
+    """
+    if not query.has_temporal_filter():
+        return None
+
+    role: TimeRole | None = None
+    if query.time_role:
+        try:
+            role = TimeRole(query.time_role)
+        except ValueError as exc:
+            raise TemporalQualifierError(
+                f"unknown time_role {query.time_role!r}; expected one of "
+                f"{', '.join(item.value for item in TimeRole)}"
+            ) from exc
+
+    return TemporalFilter(
+        role=role,
+        at=parse_point(query.valid_at) if query.valid_at else None,
+        overlaps=parse_range_literal(query.valid_overlaps) if query.valid_overlaps else None,
+    )
+
+
+def _describe_temporal_criteria(temporal: TemporalFilter | None) -> str | None:
+    """Render the valid-time question that actually ran, for search traces."""
+    if temporal is None:
+        return None
+    parts = []
+    if temporal.role is not None:
+        parts.append(f"role={temporal.role.value}")
+    if temporal.at is not None:
+        parts.append(f"valid_at={temporal.at.value}")
+    elif temporal.overlaps is not None:
+        parts.append(f"valid_overlaps={temporal.overlaps}")
+    return ",".join(parts)
+
+
 def describe_search_criteria(prepared: PreparedSearchQuery) -> str:
     """Render the criteria the repository actually executed.
 
@@ -111,6 +163,7 @@ def describe_search_criteria(prepared: PreparedSearchQuery) -> str:
         "categories": list(prepared.categories) if prepared.categories else None,
         "metadata_filters": dict(prepared.metadata_filters) if prepared.metadata_filters else None,
         "file_path_prefix": quoted(prepared.file_path_prefix),
+        "temporal": _describe_temporal_criteria(prepared.temporal),
     }
     return " ".join(f"{name}={value}" for name, value in criteria.items() if value is not None)
 
@@ -227,6 +280,7 @@ class SearchService:
             after_date=after_date,
             metadata_filters=metadata_filters,
             file_path_prefix=query.file_path_prefix,
+            temporal=build_temporal_filter(query),
             retrieval_mode=query.retrieval_mode or SearchRetrievalMode.FTS,
             min_similarity=query.min_similarity,
         )
@@ -243,6 +297,7 @@ class SearchService:
             or prepared.metadata_filters
             # Normalized by SearchQuery, so only a real subtree reaches here.
             or prepared.file_path_prefix
+            or prepared.temporal
         )
         if not has_criteria:
             logger.debug("no criteria passed to query")
@@ -258,6 +313,7 @@ class SearchService:
             or prepared.categories
             or prepared.after_date
             or prepared.file_path_prefix
+            or prepared.temporal
         )
 
     async def _include_legacy_note_type_spellings(
@@ -312,6 +368,7 @@ class SearchService:
                 after_date=prepared.after_date,
                 metadata_filters=prepared.metadata_filters,
                 file_path_prefix=prepared.file_path_prefix,
+                temporal=prepared.temporal,
                 retrieval_mode=prepared.retrieval_mode,
                 min_similarity=prepared.min_similarity,
                 limit=limit,
@@ -330,6 +387,7 @@ class SearchService:
             after_date=prepared.after_date,
             metadata_filters=prepared.metadata_filters,
             file_path_prefix=prepared.file_path_prefix,
+            temporal=prepared.temporal,
             retrieval_mode=prepared.retrieval_mode,
             min_similarity=prepared.min_similarity,
             limit=limit,
@@ -357,6 +415,7 @@ class SearchService:
             after_date=prepared.after_date,
             metadata_filters=prepared.metadata_filters,
             file_path_prefix=prepared.file_path_prefix,
+            temporal=prepared.temporal,
             retrieval_mode=prepared.retrieval_mode,
             min_similarity=prepared.min_similarity,
             allow_relaxed=allow_relaxed,

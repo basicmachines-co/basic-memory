@@ -21,6 +21,7 @@ from basic_memory.indexing.relation_persistence import (
     RelationGenerationPublication,
     RelationGenerationStore,
     SectionGenerationStore,
+    TemporalGenerationStore,
 )
 from basic_memory.models import Entity, NoteContent
 from basic_memory.repository import (
@@ -189,6 +190,10 @@ class AcceptedNoteSectionRepository(SectionGenerationStore, Protocol):
     """Generation-fenced section persistence for accepted note writes."""
 
 
+class AcceptedNoteTemporalRepository(TemporalGenerationStore, Protocol):
+    """Generation-fenced valid-time persistence for accepted note writes."""
+
+
 class AcceptedNoteRelationRepository(RelationGenerationStore, Protocol):
     """Generation-fenced relation persistence for accepted note writes."""
 
@@ -220,6 +225,11 @@ class AcceptedNoteWriteRepositories(Protocol):
         self,
         project_id: ProjectId,
     ) -> AcceptedNoteSectionRepository: ...
+
+    def temporal_repository(
+        self,
+        project_id: ProjectId,
+    ) -> AcceptedNoteTemporalRepository: ...
 
     def relation_repository(
         self,
@@ -612,6 +622,7 @@ async def accepted_relation_generation_publication(
             category=observation.category,
             context=observation.context,
             tags=observation.tags,
+            temporal=observation.temporal,
         )
         for observation in observations
     )

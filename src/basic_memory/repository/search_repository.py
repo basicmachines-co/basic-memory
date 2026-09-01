@@ -27,6 +27,7 @@ from basic_memory.repository.semantic_vector_index_factory import (
 from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
+from basic_memory.temporal import TemporalFilter
 
 
 class SearchRepository(Protocol):
@@ -80,6 +81,7 @@ class SearchRepository(Protocol):
         categories: Optional[List[str]] = None,
         metadata_filters: Optional[dict[str, Any]] = None,
         file_path_prefix: Optional[str] = None,
+        temporal: Optional[TemporalFilter] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
         limit: int = 10,
@@ -104,6 +106,7 @@ class SearchRepository(Protocol):
         categories: Optional[List[str]] = None,
         metadata_filters: Optional[dict[str, Any]] = None,
         file_path_prefix: Optional[str] = None,
+        temporal: Optional[TemporalFilter] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
         allow_relaxed: bool = False,

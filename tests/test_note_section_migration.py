@@ -4,7 +4,15 @@ import sqlite3
 
 from alembic import command
 
+from basic_memory.alembic.versions import (  # type: ignore[attr-defined]
+    t3n4o5t6e7s8_add_note_section_table as migration,
+)
 from tests.test_note_content_migration import sqlite_alembic_config
+
+# Pin the downgrade target to this migration's own parent. A relative "-1" would
+# instead undo whichever migration currently sits at head, so the test would break
+# every time a later revision lands.
+DOWN_REVISION: str = str(migration.down_revision)
 
 
 def test_alembic_upgrade_creates_note_section_table(tmp_path, monkeypatch):
@@ -70,14 +78,14 @@ def test_alembic_upgrade_creates_note_section_table(tmp_path, monkeypatch):
 
 
 def test_alembic_downgrade_drops_note_section_table(tmp_path, monkeypatch):
-    """Downgrading one revision removes the table and its indexes."""
+    """Downgrading past this revision removes the table and its indexes."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("BASIC_MEMORY_HOME", str(tmp_path / "basic-memory"))
 
     database_path = tmp_path / "note-section-downgrade.db"
     config = sqlite_alembic_config(database_path)
     command.upgrade(config, "head")
-    command.downgrade(config, "-1")
+    command.downgrade(config, DOWN_REVISION)
 
     connection = sqlite3.connect(database_path)
     try:

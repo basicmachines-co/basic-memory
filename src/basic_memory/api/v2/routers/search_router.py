@@ -12,13 +12,16 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Path, Response
 
 import logfire
-from basic_memory.api.v2.utils import to_search_results
+from basic_memory import db
+from basic_memory.api.v2.utils import load_temporal_metadata, to_search_results
 from basic_memory.deps import (
     EntityServiceV2ExternalDep,
+    MemoryTimeIndexRepositoryV2ExternalDep,
     ProjectExternalIdPathDep,
     ReadCacheDep,
     SearchReindexSchedulerDep,
     SearchServiceV2ExternalDep,
+    SessionMakerDep,
     create_model_read_cache,
 )
 from basic_memory.read_cache import (
@@ -83,6 +86,8 @@ async def search(
     query: SearchQuery,
     search_service: SearchServiceV2ExternalDep,
     entity_service: EntityServiceV2ExternalDep,
+    temporal_repository: MemoryTimeIndexRepositoryV2ExternalDep,
+    session_maker: SessionMakerDep,
     read_cache: SearchReadCacheDep,
     response: Response,
     project_id: str = Path(..., description="Project external UUID"),
@@ -98,6 +103,8 @@ async def search(
         query: Search query parameters (text, filters, etc.)
         search_service: Search service scoped to project
         entity_service: Entity service scoped to project
+        temporal_repository: Valid-time projection, read to explain temporal matches
+        session_maker: Session factory for the temporal hydration read
         page: Page number for pagination
         page_size: Number of results per page
 
@@ -105,6 +112,10 @@ async def search(
         SearchResponse with paginated search results
     """
     response.headers["Accept-Query"] = "application/json"
+    # Read from the request rather than from the parsed filter: this is a plain field
+    # check that cannot raise, and reaching the hydration step below already proves
+    # the service accepted and executed the filter.
+    temporal_requested = query.has_temporal_filter()
     with logfire.span(
         "api.request.search",
         entrypoint="api",
@@ -125,7 +136,9 @@ async def search(
             or query.categories
             or query.metadata_filters
             or query.file_path_prefix
+            or temporal_requested
         ),
+        has_temporal_filter=temporal_requested,
     ):
         cache_key = ReadCacheKey(
             project_id=project_id,
@@ -202,7 +215,20 @@ async def search(
                 phase="hydrate_results",
                 result_count=len(results),
             ):
-                search_results = await to_search_results(entity_service, results)
+                # Trigger: the caller asked a valid-time question.
+                # Why: the assertions explain *why* each hit matched, but loading them
+                #   costs a query, and a search with no temporal filter has nothing to
+                #   explain -- so ordinary searches stay exactly as expensive as before.
+                # Outcome: temporal metadata rides along only on temporal searches.
+                temporal_by_source = {}
+                if temporal_requested:
+                    async with db.scoped_session(session_maker) as session:
+                        temporal_by_source = await load_temporal_metadata(
+                            temporal_repository, session, results
+                        )
+                search_results = await to_search_results(
+                    entity_service, results, temporal_by_source=temporal_by_source
+                )
             with logfire.span(
                 "api.search.search.build_response",
                 domain="search",
@@ -217,6 +243,9 @@ async def search(
                     total=total,
                     total_is_exact=exact_count_available,
                     has_more=has_more,
+                    # None, not False, when nothing was asked: an ordinary search
+                    # payload stays exactly what it was before valid time existed.
+                    temporal_applied=True if temporal_requested else None,
                 )
                 cached.value = result
                 return result

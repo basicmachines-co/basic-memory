@@ -30,6 +30,7 @@ from basic_memory.models import Entity as EntityModel
 from basic_memory.repository import ObservationRepository, RelationRepository
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
+from basic_memory.repository.memory_time_index_repository import MemoryTimeIndexRepository
 from basic_memory.repository.note_section_repository import NoteSectionRepository
 from basic_memory.read_cache import ReadCache, invalidate_cache
 from basic_memory.runtime.note_move import normalize_note_move_destination_path
@@ -233,6 +234,7 @@ class EntityService(BaseService[EntityModel]):
                 category=observation.category,
                 context=observation.context,
                 tags=observation.tags,
+                temporal=tuple(observation.temporal),
             )
             for observation in markdown.observations
         )
@@ -252,6 +254,7 @@ class EntityService(BaseService[EntityModel]):
             relation_repository=self.relation_repository,
             observation_repository=self.observation_repository,
             section_repository=NoteSectionRepository(project_id=self.repository.project_id),
+            temporal_repository=MemoryTimeIndexRepository(project_id=self.repository.project_id),
             session_maker=self.session_maker,
         )
         published = await publisher.publish(

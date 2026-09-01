@@ -1,4 +1,8 @@
 from .entity_repository import EntityRepository
+from .memory_time_index_repository import (
+    AcceptedTemporalAssertion,
+    MemoryTimeIndexRepository,
+)
 from .note_content_repository import (
     AcceptedNoteContentWrite,
     NoteContentRepository,
@@ -11,6 +15,8 @@ from .relation_repository import AcceptedRelationWrite, RelationRepository
 
 __all__ = [
     "EntityRepository",
+    "AcceptedTemporalAssertion",
+    "MemoryTimeIndexRepository",
     "AcceptedNoteContentWrite",
     "NoteContentRepository",
     "NoteContentVersionConflict",

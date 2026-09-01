@@ -3,6 +3,7 @@
 import re
 from typing import List, Any, Dict
 
+from basic_memory.markdown.temporal_qualifier import parse_temporal_qualifier
 from basic_memory.utils import normalize_project_reference
 from markdown_it import MarkdownIt
 from markdown_it.rules_inline.backticks import backtick
@@ -100,6 +101,14 @@ def parse_observation(token: Token) -> Dict[str, Any]:
         if empty_match:
             content = empty_match.group(1).strip()
 
+    # Parse the temporal qualifier before the (context) rule below. An authored
+    # `@effective(2026-06-10,2026-07-27)` at end of line ends in ")", so the context
+    # rule would otherwise claim it and leave `@effective` as the whole observation.
+    # A qualifier that was not accepted is never peeled, so that line keeps its exact
+    # text (SPEC-82).
+    temporal = parse_temporal_qualifier(content)
+    content = temporal.content
+
     # Parse (context)
     context = None
     if content.endswith(")"):
@@ -124,6 +133,8 @@ def parse_observation(token: Token) -> Dict[str, Any]:
         "content": content,
         "tags": tags if tags else None,
         "context": context,
+        "temporal": list(temporal.assertions),
+        "temporal_error": temporal.error,
     }
 
 

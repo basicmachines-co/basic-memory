@@ -8,6 +8,7 @@ from typing import Any, override, Optional
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     Integer,
     String,
@@ -18,6 +19,7 @@ from sqlalchemy import (
     Index,
     JSON,
     Float,
+    false,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
@@ -132,6 +134,9 @@ class Entity(Base):
         uselist=False,
     )
     sections = relationship("NoteSection", back_populates="entity", cascade="all, delete-orphan")
+    time_assertions = relationship(
+        "MemoryTimeIndex", back_populates="entity", cascade="all, delete-orphan"
+    )
 
     @validates("created_at", "updated_at")
     def _normalize_semantic_timestamp(self, attribute_name: str, value: datetime) -> datetime:
@@ -388,6 +393,112 @@ class Observation(Base):
     @override
     def __repr__(self) -> str:  # pragma: no cover
         return f"Observation(id={self.id}, entity_id={self.entity_id}, content='{self.content}')"
+
+
+class MemoryTimeIndex(Base):
+    """One authored temporal assertion, projected into queryable scalar columns.
+
+    A note can say *when a statement is true of the world*, not merely when the file
+    was edited::
+
+        - [decision] @effective[2026-06-10,2026-07-27) The cache layer will use Redis.
+
+    That qualifier is canonical markdown. This table is its derived projection,
+    rebuilt under the note_content generation fence on every (re)index and removed
+    with the entity, exactly like observations and sections (SPEC-82). It is never a
+    second source of temporal truth: reindexing from the markdown reproduces it.
+
+    The table is generic on purpose. ``source_type``/``source_id`` address whatever
+    carries the assertion -- observations in this MVP -- and match the ``(type, id)``
+    pair of the corresponding search row, which is what lets a valid-time filter narrow
+    search results to the individual observation that was in force. ``source_id``
+    deliberately carries no foreign key: it points into a different table per
+    ``source_type``. Lifecycle is carried instead by ``entity_id``'s cascade plus the
+    fenced replace, the same two mechanisms note_section relies on.
+
+    Bounds are stored as canonical fixed-width text rather than DATE/TIMESTAMP columns:
+
+    * A date bound is a calendar date and must never acquire a time of day or a
+      timezone. SQLAlchemy's SQLite ``DateTime`` silently discards an offset, storing
+      the wrong instant -- exactly the false precision the spec forbids.
+    * ``basic_memory.temporal`` canonicalizes every bound to a fixed-width form
+      (``YYYY-MM-DD``; ``YYYY-MM-DDTHH:MM:SS.ffffffZ`` in UTC), so byte-lexicographic
+      order *is* chronological order and one identical SQL predicate serves both
+      dialects.
+
+    Native PostgreSQL ``daterange``/``tstzrange`` columns stay available as a later
+    addition: they would be generated from these columns, which remain the portable
+    source of truth.
+    """
+
+    __tablename__ = "memory_time_index"
+    __table_args__ = (
+        # The valid-time predicate selects (source_type, source_id) after filtering on
+        # project, role, and axis, so this index both drives the scan and covers its
+        # projection. project_id leads it, which is why the column carries no separate
+        # index of its own the way sibling projection tables do.
+        Index(
+            "ix_memory_time_index_lookup",
+            "project_id",
+            "time_role",
+            "range_kind",
+            "source_type",
+            "source_id",
+        ),
+        # Fenced replace deletes by entity_id, and the cascade follows the same column.
+        Index("ix_memory_time_index_entity_id", "entity_id"),
+        CheckConstraint(
+            "range_kind IN ('date', 'instant')",
+            name="ck_memory_time_index_range_kind",
+        ),
+        # The empty range has no endpoints at all; representing it with bounds would
+        # make two rows describe the same interval two different ways.
+        CheckConstraint(
+            "NOT is_empty OR (lower_value IS NULL AND upper_value IS NULL)",
+            name="ck_memory_time_index_empty_has_no_bounds",
+        ),
+        # PostgreSQL's rule: an unbounded side cannot be inclusive, because there is no
+        # endpoint to include. Enforcing it here keeps the query predicates from having
+        # to defend against a bound state the domain value cannot produce.
+        CheckConstraint(
+            "(lower_value IS NOT NULL OR NOT lower_inclusive) "
+            "AND (upper_value IS NOT NULL OR NOT upper_inclusive)",
+            name="ck_memory_time_index_unbounded_is_exclusive",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)  # pyright: ignore [reportIncompatibleVariableOverride]
+    project_id: Mapped[int] = mapped_column(Integer, ForeignKey("project.id"))
+    entity_id: Mapped[int] = mapped_column(Integer, ForeignKey("entity.id", ondelete="CASCADE"))
+    # Addresses the row that carried the qualifier, and equals the search row's
+    # (type, id) pair. No FK: the target table varies with source_type.
+    source_type: Mapped[str] = mapped_column(String(32))
+    source_id: Mapped[int] = mapped_column(Integer)
+    time_role: Mapped[str] = mapped_column(String(32))
+    range_kind: Mapped[str] = mapped_column(String(16))
+    # Canonical lexical bounds; NULL means unbounded on that side.
+    lower_value: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    upper_value: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    lower_inclusive: Mapped[bool] = mapped_column(Boolean)
+    upper_inclusive: Mapped[bool] = mapped_column(Boolean)
+    is_empty: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    extractor: Mapped[str] = mapped_column(String(32))
+    # The qualifier exactly as authored, so a result can explain itself in the
+    # author's own precision rather than in the canonical form.
+    source_text: Mapped[str] = mapped_column(Text)
+    # `metadata` is reserved on the declarative base, so the column follows
+    # Entity.entity_metadata's naming convention for the same reason.
+    assertion_metadata: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
+
+    entity = relationship("Entity", back_populates="time_assertions")
+
+    @override
+    def __repr__(self) -> str:  # pragma: no cover
+        return (
+            f"MemoryTimeIndex(id={self.id}, entity_id={self.entity_id}, "
+            f"source={self.source_type}:{self.source_id}, role='{self.time_role}', "
+            f"range='{self.source_text}')"
+        )
 
 
 class Relation(Base):
