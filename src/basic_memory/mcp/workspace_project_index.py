@@ -270,19 +270,38 @@ async def resolve_workspace_project_from_index(
 
     from basic_memory.mcp.project_context_identifiers import split_qualified_project_identifier
 
-    # Try the whole identifier as a project permalink before reading its first
-    # segment as a workspace. A project name may contain '/', so 'Research/2026'
-    # and 'acme/docs' are the same shape and only the index can tell them apart;
-    # without this, a slash-bearing project name was unroutable, failing with
-    # "Workspace 'Research' was not found". The v2 project router resolves
-    # exact-first for the same reason.
+    # '<workspace>/<project>' and a project literally named 'acme/docs' are the
+    # same shape, and only the index can tell them apart — so try both readings,
+    # qualified first. Qualified wins because it is the spelling this module's
+    # own disambiguation errors teach, and because it names a workspace
+    # explicitly: reading it as some other workspace's whole permalink runs the
+    # call against a tenant the caller did not name. The whole-permalink reading
+    # is the fallback, which is what makes a slash-bearing project name routable
+    # at all rather than failing with "Workspace 'Research' was not found".
+    workspace_identifier, project_identifier = split_qualified_project_identifier(project)
     whole_permalink = generate_permalink(project)
-    if whole_permalink in index.entries_by_permalink:
+    qualified_workspace = (
+        next(
+            (
+                workspace
+                for workspace in index.workspaces
+                if workspace.slug.casefold() == workspace_identifier.casefold()
+                or workspace.tenant_id == workspace_identifier
+                or workspace.name.casefold() == workspace_identifier.casefold()
+            ),
+            None,
+        )
+        if workspace_identifier
+        else None
+    )
+    qualified_hit = qualified_workspace is not None and any(
+        entry.workspace.tenant_id == qualified_workspace.tenant_id
+        for entry in index.entries_by_permalink.get(generate_permalink(project_identifier), ())
+    )
+    if not qualified_hit and whole_permalink in index.entries_by_permalink:
         workspace_identifier, project_identifier = None, project
-        project_permalink = whole_permalink
-    else:
-        workspace_identifier, project_identifier = split_qualified_project_identifier(project)
-        project_permalink = generate_permalink(project_identifier)
+
+    project_permalink = generate_permalink(project_identifier)
 
     if workspace_identifier:
         workspace = match_workspace_identifier(index.workspaces, workspace_identifier)

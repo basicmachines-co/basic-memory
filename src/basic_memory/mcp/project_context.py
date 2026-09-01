@@ -1220,11 +1220,12 @@ async def _detect_workspace_qualified_route(
     candidate: str,
     config: BasicMemoryConfig,
     context: Optional[Context] = None,
-) -> tuple[str, str] | None:
+) -> tuple[str, str, str] | None:
     """Resolve an explicitly qualified '<workspace>/<project>[/<path>]' candidate.
 
-    Returns the qualified project identifier and the project-relative remainder,
-    or None when the candidate does not spell a reachable workspace route.
+    Returns the qualified project identifier, the project-relative remainder,
+    and the resolved project's external_id, or None when the candidate does not
+    spell a reachable workspace route.
 
     Both segments must match — the first an accessible workspace slug, the
     second a project inside *that* workspace — so this never reaches a project
@@ -1264,9 +1265,13 @@ async def _detect_workspace_qualified_route(
     # Unlike the memory-URL caller, the pathless form is kept: a project root is
     # a legitimate thing to list. The remainder comes from the same match that
     # chose the project, so the route and the path it leaves behind can never
-    # disagree about how many segments were consumed.
+    # disagree about how many segments were consumed. The external_id rides
+    # along for the same reason the mount table's does: this parse already knows
+    # the exact entry, and handing on only the qualified *name* would let it be
+    # re-resolved against a different workspace that happens to hold a project
+    # literally named '<workspace>/<project>'.
     resolution, remainder = resolved
-    return resolution.project_identifier, remainder
+    return resolution.project_identifier, remainder, resolution.entry.project.external_id
 
 
 def _workspace_qualifies(qualified: str, bare: str) -> bool:
@@ -1401,7 +1406,7 @@ async def resolve_project_path_route(
     ):
         qualified = await _detect_workspace_qualified_route(candidate, config, context=context)
         if qualified is not None:
-            detected, remainder = qualified
+            detected, remainder, mount_project_id = qualified
 
     if explicit is not None:
         if detected is None:
