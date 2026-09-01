@@ -579,20 +579,23 @@ For the sequence gap — the failure that a count alone cannot catch — take th
 `--json`, which carries `total`, `total_is_exact`, and `has_more`:
 
 ```bash
-expected=138; page=1; nums='[]'
+expected=138; page=1; rows='[]'
 while :; do
   resp=$(bm find --meta 'note_type=chapter' --fields chapter_number \
            --page-size 200 --page $page --project <work> --json)
-  nums=$(jq -n --argjson acc "$nums" --argjson r "$resp" \
-           '$acc + [$r.results[].fields.chapter_number | tonumber]')
+  rows=$(jq -n --argjson acc "$rows" --argjson r "$resp" \
+           '$acc + [$r.results[] | {title, n: .fields.chapter_number}]')
   [ "$(jq -r '.has_more' <<<"$resp")" = "true" ] || break
   page=$((page + 1))
 done
-jq -n --argjson n "$nums" --argjson expected "$expected" '
-  { total:        ($n | length),
-    missing:      ([range(1; $expected + 1)] - $n),
-    duplicates:   ($n | group_by(.) | map(select(length > 1) | .[0])),
-    out_of_range: ($n | map(select(. < 1 or . > $expected)) | unique) }'
+jq -n --argjson rows "$rows" --argjson expected "$expected" '
+  ([$rows[] | select(.n != null and (.n | tostring | test("^[0-9]+$"))) | .n | tonumber]) as $n
+  | { total:        ($rows | length),
+      unnumbered:   [$rows[] | select(.n == null or (.n | tostring | test("^[0-9]+$") | not))
+                             | .title],
+      missing:      ([range(1; $expected + 1)] - $n),
+      duplicates:   ($n | group_by(.) | map(select(length > 1) | .[0])),
+      out_of_range: ($n | map(select(. < 1 or . > $expected)) | unique) }'
 ```
 
 The loop is not ceremony. `--page-size` caps at 200, so a single call cannot inventory a work
@@ -604,7 +607,13 @@ Pass the work's **actual** chapter count as `$expected` — deriving the range f
 number found lets an incomplete graph pass. With 138 rows numbered 1..137 plus one duplicate,
 a max-derived check reports `missing: []` while a chapter is genuinely absent: the duplicate
 keeps the count right and the missing tail moves the goalpost. The check passes on
-`missing: []`, `duplicates: []`, **and** `out_of_range: []` together, over the combined pages.
+`unnumbered: []`, `missing: []`, `duplicates: []`, **and** `out_of_range: []` together, over
+the combined pages.
+
+`unnumbered` is not decoration either. A `chapter` note that never got a `chapter_number` comes
+back as `null`, and feeding that straight to `tonumber` aborts the whole pipeline with `null
+cannot be parsed as a number` — so the check *crashes on exactly the malformed inventory it
+exists to find*. Partitioning first turns that into a named row.
 
 `out_of_range` is not hypothetical: a prologue or epilogue typed as `chapter` lands at 0 or at
 `$expected + 1`, and without that key the report reads clean — every expected number present,
