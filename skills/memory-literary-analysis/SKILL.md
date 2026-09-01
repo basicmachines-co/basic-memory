@@ -1,11 +1,11 @@
 ---
 name: memory-literary-analysis
-description: "Analyze a complete literary work into a structured Basic Memory knowledge graph. Covers schema design, entity seeding, chapter-by-chapter processing, cross-referencing, validation, and visualization."
+description: "Analyze a complete literary work into a structured Basic Memory knowledge graph. Covers schema design, entity seeding, chapter-by-chapter processing, cross-referencing, validation, and graph exploration."
 ---
 
 # Memory Literary Analysis
 
-Transform a complete literary work into a structured knowledge graph. Characters, themes, chapters, locations, symbols, and literary devices become interconnected notes — searchable, validatable, and visualizable.
+Transform a complete literary work into a structured knowledge graph. Characters, themes, chapters, locations, symbols, and literary devices become interconnected notes — searchable, validatable, and traversable.
 
 ## When to Use
 
@@ -23,8 +23,35 @@ Phase 1: Seed          → stub notes for known major entities
 Phase 2: Process       → chapter-by-chapter notes in batches
 Phase 3: Cross-ref     → enrich arcs, add parallels, write analysis
 Phase 4: Validate      → schema checks, drift detection, consistency
-Phase 5: Visualize     → Obsidian canvas files for character webs, timelines
+Phase 5: Explore       → traverse the graph, write synthesis notes
 ```
+
+## Tools
+
+Writing always goes through `write_note` and `edit_note`. For *reading* — which is most of
+the work in a long analysis — prefer the POSIX read verbs where they are available
+(`enable_posix_tools` for the MCP tools; the `bm` CLI verbs are always available):
+
+| Need | Use | Instead of |
+|------|-----|-----------|
+| A section of a long note | `cat <note> --section EXAMPLES` | reading the whole note |
+| A line range of the source text | `cat <file> --lines 4200-4890` | loading the whole book |
+| Notes matching frontmatter | `find --meta status=active` | reading notes to check fields |
+| Fields across many notes | `find --meta ... --fields pov,setting` | one read per note |
+| Where something lives | `ls`, `tree`, `find --name '*.md'` | listing everything |
+
+The two rules that matter across a 100+ chapter run:
+
+- **Never read a note to check a field.** That is what `--meta` predicates and `--fields`
+  projection are for — one call answers what a read-per-note loop would cost.
+- **Never read a whole file to reach one part of it.** Sections and line ranges exist so a
+  long chapter or a full source text costs what the relevant part costs.
+
+These compound. In measured runs, predicate queries replaced 28-call scans with a single
+call; across 138 chapters that difference is the run.
+
+If the POSIX verbs are unavailable, every step below still works with `search_notes`,
+`read_note`, and `list_directory` — it just costs more.
 
 ## Phase 0: Setup
 
@@ -271,6 +298,19 @@ Stubs don't need to be complete — they give `[[wiki-link]]` targets and will b
 
 Obtain the full text and identify chapter/section boundaries. For public domain works, Project Gutenberg is a good source. For copyrighted works, work from a physical or licensed digital copy.
 
+**Build a chapter offset map once, before processing.** Scan the text for chapter headings
+and record the line range of each chapter, then read chapters by range rather than reloading
+the book:
+
+```bash
+grep -n '^CHAPTER ' moby-dick.txt        # or the work's heading pattern
+bm cat moby-dick.txt --lines 4200-4890   # one chapter, not the whole text
+```
+
+Store the map in the project (a note or a small JSON file) so later batches — and a resumed
+run after context compaction — do not have to rediscover it. On a long work this is the
+single largest read saving in the pipeline.
+
 ### Batching Strategy
 
 Process ~10 chapters per batch to balance depth with progress. Group by narrative arc or thematic focus:
@@ -289,7 +329,9 @@ Adjust batch size based on chapter length and density. Short, action-heavy chapt
 
 For each chapter:
 
-**1. Read the chapter carefully.** If working from a source text file, read the relevant section.
+**1. Read the chapter carefully.** Read the chapter's line range from the offset map
+(`cat <source> --lines <start>-<end>`), not the whole file. Read the actual text — never
+work from memory or a summary; textual evidence is the entire point.
 
 **2. Create the chapter note:**
 
@@ -377,6 +419,19 @@ The prose adds the interpretive texture that structured observations alone canno
 
 After all chapters are processed:
 
+### Find What Needs Enriching
+
+Do not re-read every note to decide what is thin. Query for it:
+
+```bash
+bm find --meta 'note_type=chapter' --fields chapter_number,pov,setting   # coverage at a glance
+bm find --meta 'note_type=character' --fields role,status                # who is still a stub
+bm find --meta 'chapter_number>100' --fields pov                         # late-book POV drift
+```
+
+Rows with null fields are the work queue. This turns "audit the graph" from a read of every
+note into one call per question.
+
 ### Character Arcs
 For each major character, write a full `[arc]` summary observation covering their trajectory across the work.
 
@@ -446,26 +501,46 @@ Fix issues found — common fixes:
 - Enum values outside allowed set → correct metadata
 - Fields in notes but not schema → add as optional to schema if legitimate
 
+### Coverage Checks
+
+Schema validation proves notes match their shape. These prove the graph is *complete*:
+
+```bash
+bm find --meta 'note_type=chapter' --fields chapter_number      # every chapter present?
+bm find --meta 'note_type=chapter' --fields pov,setting         # any missing required context?
+bm find --name '*.md' --meta 'note_type=character'              # entity inventory vs. seed list
+```
+
+Compare the chapter count against the work's actual chapter count, and check for gaps in the
+sequence — a missing chapter in the middle of a batch is the most common processing failure
+and the easiest to miss by eye.
+
 ### Relation Consistency
 Spot-check bidirectional relations: if Chapter X `features [[Character]]`, does Character have observations referencing Chapter X? Fix gaps.
 
-## Phase 5: Visualization
+Orphans are the other half of this check — a note with no inbound or outbound relations is
+either genuinely isolated or was never linked back into the graph:
 
-Write [JSON Canvas](https://jsoncanvas.org/) files (`.canvas`) into the project directory for visual exploration in Obsidian. Query the graph first (`search_notes`, `build_context`), then lay out the results as canvas nodes and edges:
-
-```json
-{
-  "nodes": [
-    {"id": "ahab", "type": "file", "file": "characters/captain-ahab.md", "x": 0, "y": 0, "width": 400, "height": 300},
-    {"id": "ishmael", "type": "file", "file": "characters/ishmael.md", "x": 500, "y": 0, "width": 400, "height": 300}
-  ],
-  "edges": [
-    {"id": "e1", "fromNode": "ishmael", "toNode": "ahab", "label": "narrates"}
-  ]
-}
+```bash
+bm orphans          # entities with no relations in the graph
 ```
 
-Useful canvases: character relationship web (protagonist/antagonist/supporting), theme connections, chapter timeline with key events.
+Graph quality is relation *density*, not note count. A pass that adds notes while leaving
+orphans behind has made the graph worse.
+
+## Phase 5: Explore the Graph
+
+With the graph complete, traverse it to find what the chapter-by-chapter pass could not see:
+
+```bash
+bm tool build-context --url 'memory://characters/major/*' --depth 2   # the character web
+bm find --meta 'note_type=theme' --fields prevalence                  # thematic weight
+bm grep "doubloon" --project <work>                                   # a symbol across the work
+```
+
+Traversal is where second-order questions get answered — which characters share the most
+chapters, which themes converge in the final act, where a symbol's meaning shifts. Capture
+what you find as `analysis/` notes; those syntheses are the payoff of having built the graph.
 
 ## Adapting to Other Genres
 
@@ -504,6 +579,8 @@ This pipeline works for any literary text. Adjust schemas for genre:
 - **Seed before processing.** Create entity stubs first so wiki-links resolve immediately during chapter processing.
 - **Batch for sanity.** Processing ~10 chapters at a time balances depth with momentum. Track progress with a Task note.
 - **Read the source text.** Don't rely on memory or summaries. Read (or re-read) the actual text for each batch before creating notes. Textual evidence is everything.
+- **Read narrowly.** Build the chapter offset map once, then read chapters by line range and notes by section. On a long work, whole-file reads are the largest avoidable cost in the pipeline.
+- **Query, don't scan.** When you need to know which notes have a field, ask with `--meta` predicates and `--fields` projection. Reading notes to check frontmatter is the mistake this pipeline makes at scale.
 - **Observations are your index.** The knowledge graph's value comes from categorized observations. Be generous with categories and specific with content.
 - **Relations are your web.** Every chapter should link to characters, themes, locations, and devices. Every entity should link back to chapters where it appears.
 - **Enrich iteratively.** Entity notes grow richer with each chapter. Don't try to write the perfect character note upfront — append as you go.
