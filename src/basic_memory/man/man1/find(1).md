@@ -20,7 +20,7 @@ bm find [PATH] [--name GLOB] [--depth N] [--page N] [--page-size N]
         [--json | --plain] [--project NAME | --project-id UUID]
         [--local | --cloud]
 
-bm find [PATH] --meta PREDICATE [--meta PREDICATE ...] [--fields LIST]
+bm find [PROJECT] --meta PREDICATE [--meta PREDICATE ...] [--fields LIST]
         [--page N] [--page-size N] [--json | --plain]
         [--project NAME | --project-id UUID] [--local | --cloud]
 ```
@@ -36,23 +36,28 @@ prints one path per line, find(1) style; `--json` (or piped output) emits the
 listing with pagination and totals.
 
 With `--meta`, find queries notes by their frontmatter instead: every
-predicate must hold, and `PATH` still scopes the results — server-side, by
-permalink prefix, so the totals are exact and every page is reachable. The
-payload becomes the search response shape (the same one `bm grep` returns),
-not the directory listing. Non-markdown files carry no frontmatter and are
-never metadata hits.
+predicate must hold, across the whole project. The payload becomes the search
+response shape (the same one `bm grep` returns), not the directory listing.
+Totals are exact and every page is reachable. Non-markdown files carry no
+frontmatter and are never metadata hits.
 
 `--fields` is the SELECT to the predicates' WHERE: it adds a `fields` object
 to each hit carrying the named frontmatter values, so a filtered set can be
 tabulated without reading every note. A field a hit does not carry renders as
 null; the row is never dropped.
 
-`--name` and `--depth` are refused alongside `--meta`. The metadata query
-matches slugified permalinks, where a filename glob has no faithful
-translation, and its subtree scope is all-or-nothing, where a depth bound is
-not expressible — refusing beats silently ignoring either and misreporting
-the match set. Scope with `PATH` instead. `--fields` without `--meta` is
-refused for the same honesty: without predicates there is nothing to project.
+`--name`, `--depth`, and a `PATH` below the project root are all refused
+alongside `--meta`, because the search API expresses none of them: no
+filename glob, no depth bound, and no file-path filter. Its one path-shaped
+predicate is a permalink prefix, and a permalink is not a file path — a note
+that pins `permalink:` in its frontmatter, or that was moved while
+`update_permalinks_on_move` is off (the default), keeps a permalink that no
+longer says where the file lives. Scoping by it would drop notes that really
+are under the named directory, admit notes that are not, and still report the
+count as exact. Refusing beats misreporting the match set. `PATH` may still
+name a project (`bm find myproject --meta ...`) — that is a routing prefix,
+not a subtree. `--fields` without `--meta` is refused for the same honesty:
+without predicates there is nothing to project.
 
 ## PREDICATE GRAMMAR
 
@@ -76,14 +81,18 @@ comma inside a list element: `label in "a,b",c` matches `a,b` or `c`.
 Keys accept dot-paths into nested frontmatter (`review.approved`), and
 `note_type` is accepted as a spelling of the frontmatter `type` key, matching
 `search-notes(3)`. Any other operator (`!=` among them — the search API has
-no not-equals) fails fast, naming the supported set.
+no not-equals) fails fast, naming the supported set. That includes a
+mis-spelled multi-character operator: `status==active`, `status=>active` and
+`count>>3` are refused rather than read as the values `=active`, `>active`
+and `>3`. An unquoted value may therefore not begin with `=`, `<` or `>`;
+quote one that genuinely does, as in `range=">=5"`.
 
 ## OPTIONS
 
 - **--name** — file-name glob, e.g. `"*.md"`; omitted matches everything.
   Cannot combine with `--meta`
 - **--depth** — recursion depth, 1-10 (default 10). A non-default depth
-  cannot combine with `--meta`
+  cannot combine with `--meta`. Nor can a `PATH` below the project root
 - **--meta** — frontmatter predicate, repeatable; see PREDICATE GRAMMAR.
   Switches the payload to the search response shape
 - **--fields** — comma-separated frontmatter fields to show per hit, e.g.
@@ -97,7 +106,8 @@ bm find --name "*.md"
 bm find /specs --depth 3
 bm find /notes --name "auth*" --plain
 bm find --meta "status=active"
-bm find /specs --meta "status=active" --meta "confidence>0.6"
+bm find --meta "status=active" --meta "confidence>0.6"
+bm find myproject --meta "status=active"
 bm find --meta "tags has security,oauth" --fields title,priority
 bm find --meta "status=active" --fields title --plain
 ```

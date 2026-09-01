@@ -8,6 +8,7 @@ assert on the JSON shapes the canonical `output_format="json"` paths produce.
 import asyncio
 import re
 from pathlib import Path
+from textwrap import dedent
 from types import SimpleNamespace
 
 import pytest
@@ -530,6 +531,13 @@ PREDICATE_GRAMMAR = [
     ('label in "a,b",c', {"label": {"$in": ["a,b", "c"]}}),
     ('tags has "red, green"', {"tags": ["red, green"]}),
     ('name in "quoted"', {"name": {"$in": ["quoted"]}}),
+    # An unquoted value may not start with an operator character (a mis-spelled
+    # operator is the far likelier reading), so quoting is how a value that
+    # genuinely does start with one is expressed — scalars and list elements alike.
+    ('range=">=5"', {"range": ">=5"}),
+    ('range>"<=5"', {"range": {"$gt": "<=5"}}),
+    ('bound in ">=5","<=9"', {"bound": {"$in": [">=5", "<=9"]}}),
+    ('marks has "<a>","=b"', {"marks": ["<a>", "=b"]}),
     # Dot-paths address nested frontmatter and pass through verbatim.
     ("review.approved=true", {"review.approved": True}),
     # The one alias search_notes carries, so both surfaces accept one spelling.
@@ -621,6 +629,48 @@ def test_duplicate_key_refusal_points_at_between():
 
 
 @pytest.mark.parametrize(
+    "predicate",
+    [
+        # Symbol operators: the regex matches the longest SUPPORTED spelling,
+        # so the second operator character used to land at the head of the value.
+        "status==active",
+        "status=>active",
+        "status=<active",
+        "count>>3",
+        "count>=>3",
+        "count<<1",
+        "count<=<1",
+        # Word operators fold the same way — everything after them is the value.
+        "priority in >high",
+        "tags has =security",
+        "score between >0.3,0.8",
+        "score between 0.3,<0.8",
+    ],
+)
+def test_malformed_operators_refuse_instead_of_folding_into_the_value(predicate):
+    """REGRESSION: a mis-spelled multi-character operator is a refusal, not a value.
+
+    'status==active' used to parse as {"status": "=active"} and 'count>>3' as
+    {"count": {"$gt": ">3"}} — filters for text no note carries, so the caller
+    got an empty (or worse, a non-empty but wrong) result set where the grammar
+    documents an unsupported-operator error.
+    """
+    with pytest.raises(ValueError, match="unsupported predicate operator"):
+        posix_tools._parse_meta_predicates([predicate])
+
+
+def test_malformed_operator_refusal_teaches_the_grammar_and_the_escape():
+    """The refusal names the supported set and the quoting escape, in one message."""
+    with pytest.raises(ValueError) as excinfo:
+        posix_tools._parse_meta_predicates(["status==active"])
+
+    message = str(excinfo.value)
+    assert "unsupported predicate operator in 'status==active'" in message
+    assert "supported: = > >= < <= in has between" in message
+    assert 'quote the value as "=active"' in message
+
+
+@pytest.mark.parametrize(
     ("entity_metadata", "fields", "expected"),
     [
         ({"title": "Alpha"}, ["title"], {"title": "Alpha"}),
@@ -682,6 +732,43 @@ async def meta_notes(client, test_project):
     )
 
 
+@pytest_asyncio.fixture
+async def diverged_permalink_notes(client, test_project):
+    """Seed two notes whose permalinks do not mirror their file paths.
+
+    An explicit frontmatter `permalink:` is honored verbatim (#93), which is the
+    honest construction here: the shared test config sets
+    update_permalinks_on_move=True, so a move would NOT reproduce the split the
+    product's own default (False) produces in the field.
+    """
+    await write_note(
+        title="Housed In Specs",
+        directory="specs",
+        content=dedent("""
+            ---
+            permalink: archive/housed-in-specs
+            status: active
+            ---
+
+            # Housed In Specs
+        """).strip(),
+        project=test_project.name,
+    )
+    await write_note(
+        title="Housed In Archive",
+        directory="archive",
+        content=dedent("""
+            ---
+            permalink: specs/housed-in-archive
+            status: active
+            ---
+
+            # Housed In Archive
+        """).strip(),
+        project=test_project.name,
+    )
+
+
 @pytest.mark.asyncio
 async def test_find_meta_returns_the_search_response_shape(client, test_project, meta_notes):
     result = await find(meta=["status=active"], project=test_project.name)
@@ -729,23 +816,59 @@ async def test_find_meta_operators_select_the_right_notes(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("path", "expected_titles"),
-    [
-        ("/", {"Alpha Spec", "Gamma Note"}),
-        ("specs", {"Alpha Spec"}),
-        ("/specs", {"Alpha Spec"}),
-        # A spaced directory scopes by its slug, the same transform used at index time.
-        ("My Notes", {"Gamma Note"}),
-        ("nonexistent", set()),
-    ],
-)
-async def test_find_meta_scopes_by_path_subtree(
-    client, test_project, meta_notes, path, expected_titles
-):
+@pytest.mark.parametrize("path", ["/", ""])
+async def test_find_meta_answers_at_the_project_root(client, test_project, meta_notes, path):
+    """Both root spellings reach the metadata search; the predicates are the whole WHERE."""
     result = await find(path, meta=["status=active"], project=test_project.name)
 
-    assert {row["title"] for row in result["results"]} == expected_titles
+    assert {row["title"] for row in result["results"]} == {"Alpha Spec", "Gamma Note"}
+    assert result["total_is_exact"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["specs", "/specs", "My Notes", "nonexistent"])
+async def test_find_meta_refuses_a_subtree_scope(client, test_project, meta_notes, path):
+    """CONTRACT (changed): `meta` answers only at a project root.
+
+    This used to scope by permalink prefix and report the resulting count as
+    exact. The search API has no file-path filter — permalink_match is its only
+    path-shaped predicate — and a permalink is not a file path, so that scope
+    both dropped and admitted the wrong notes silently. Refuse instead of
+    answering a different question under an exact-looking total.
+    """
+    with pytest.raises(ValueError) as excinfo:
+        await find(path, meta=["status=active"], project=test_project.name)
+
+    message = str(excinfo.value)
+    assert f"find: 'meta' cannot be scoped to '{path}'" in message
+    assert "permalink, not by file path" in message
+
+
+@pytest.mark.asyncio
+async def test_permalink_prefix_scope_would_have_answered_wrongly(
+    client, test_project, diverged_permalink_notes
+):
+    """EVIDENCE for the refusal above: a permalink does not track its file path.
+
+    An explicit frontmatter `permalink:` is honored verbatim (#93) — the same
+    divergence a move produces under the default update_permalinks_on_move=False.
+    Here one note lives under specs/ but permalinks under archive/, and the other
+    is its mirror image, so a `find /specs --meta` scoped by permalink prefix
+    would have dropped the first, admitted the second, and called that total
+    exact. The root query sees both, and the rows show the split directly.
+    """
+    result = await find(meta=["status=active"], project=test_project.name)
+
+    rows = {row["title"]: row for row in result["results"]}
+    assert result["total_is_exact"] is True
+    assert set(rows) == {"Housed In Specs", "Housed In Archive"}
+    assert rows["Housed In Specs"]["file_path"] == "specs/Housed In Specs.md"
+    assert rows["Housed In Specs"]["permalink"].endswith("archive/housed-in-specs")
+    assert rows["Housed In Archive"]["file_path"] == "archive/Housed In Archive.md"
+    assert rows["Housed In Archive"]["permalink"].endswith("specs/housed-in-archive")
+
+    with pytest.raises(ValueError, match="permalink, not by file path"):
+        await find("specs", meta=["status=active"], project=test_project.name)
 
 
 @pytest.mark.asyncio
@@ -853,6 +976,30 @@ async def test_find_meta_quoted_list_element_keeps_its_comma(client, test_projec
     result = await find(meta=['label in "a,b",c'], project=test_project.name)
 
     assert {row["title"] for row in result["results"]} == {"Comma Note"}
+
+
+@pytest.mark.asyncio
+async def test_find_meta_quoting_reaches_operator_prefixed_values(client, test_project):
+    """Quoting is the escape for a value that starts with an operator character.
+
+    Unquoted, 'range=>=5' reads as a malformed operator and is refused; quoted,
+    the same value is matched literally — proved against the real stack so the
+    documented escape hatch is not just a parser property.
+    """
+    await write_note(
+        title="Range Note",
+        directory="notes",
+        content="# Range Note",
+        project=test_project.name,
+        metadata={"range": ">=5"},
+    )
+
+    with pytest.raises(ValueError, match="unsupported predicate operator"):
+        await find(meta=["range=>=5"], project=test_project.name)
+
+    result = await find(meta=['range=">=5"'], project=test_project.name)
+
+    assert {row["title"] for row in result["results"]} == {"Range Note"}
 
 
 @pytest.mark.asyncio
@@ -1225,8 +1372,13 @@ async def test_find_qualified_path_routes_to_project(
 async def test_find_meta_qualified_path_routes_to_project(
     client, test_project, second_project, no_project_constraint
 ):
-    """The meta arm shares find's route resolution, so '<project>/dir' scopes to
-    that project's subtree and nothing from the other project leaks in."""
+    """The meta arm shares find's route resolution, so a bare '<project>' routes
+    to that project's root and nothing from the other project leaks in.
+
+    A project prefix is a mount point, not a subtree, so it survives the
+    subtree-scope refusal: 'second-project' strips to the empty project-relative
+    path. 'second-project/notes' does not, and is refused.
+    """
     await write_note(
         title="Second Meta Note",
         directory="notes",
@@ -1242,9 +1394,12 @@ async def test_find_meta_qualified_path_routes_to_project(
         metadata={"status": "active"},
     )
 
-    result = await find("second-project/notes", meta=["status=active"])
+    result = await find("second-project", meta=["status=active"])
 
     assert {row["title"] for row in result["results"]} == {"Second Meta Note"}
+
+    with pytest.raises(ValueError, match="permalink, not by file path"):
+        await find("second-project/notes", meta=["status=active"])
 
 
 @pytest.mark.asyncio
