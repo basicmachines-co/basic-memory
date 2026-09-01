@@ -406,6 +406,41 @@ async def test_v2_search_endpoints_use_project_id_not_name(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("key", ["review..approved", ".owner", "owner."])
+async def test_search_router_returns_400_for_malformed_metadata_key(
+    client: AsyncClient, v2_project_url, key: str
+):
+    """A key outside the dot-path grammar is a client error, not a server fault.
+
+    parse_metadata_filters refuses these deep in the repository, and the
+    router's ValueError arm is what keeps the refusal a 400 carrying the
+    offending key — an unhandled ValueError here would read as a 500, blaming
+    the server for a caller's typo. Runs against the real search service so
+    the whole request path is what is being pinned.
+    """
+    response = await client.post(
+        f"{v2_project_url}/search/",
+        json={"text": "test", "metadata_filters": {key: "x"}},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == f"Unsupported metadata filter key: {key}"
+
+
+@pytest.mark.asyncio
+async def test_search_router_accepts_a_well_formed_nested_metadata_key(
+    client: AsyncClient, v2_project_url
+):
+    """The nested dot path the malformed spellings are typos of still works."""
+    response = await client.post(
+        f"{v2_project_url}/search/",
+        json={"text": "test", "metadata_filters": {"review.approved": "True"}},
+    )
+
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_search_router_returns_400_for_semantic_disabled(
     client: AsyncClient, app, v2_project_url
 ):

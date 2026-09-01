@@ -25,7 +25,11 @@ from basic_memory.mcp.project_context import (
 )
 from basic_memory.mcp.tools import cat, find, grep, ls, man, search_notes, tail, write_note
 from basic_memory.models import Entity
-from basic_memory.repository.metadata_filters import ParsedMetadataFilter, parse_metadata_filters
+from basic_memory.repository.metadata_filters import (
+    METADATA_KEY_RE,
+    ParsedMetadataFilter,
+    parse_metadata_filters,
+)
 from basic_memory.schemas.search import SearchRetrievalMode
 
 
@@ -689,6 +693,69 @@ def test_malformed_operator_refusal_teaches_the_grammar_and_the_escape():
 @pytest.mark.parametrize(
     "predicate",
     [
+        # Symbol operators: a doubled, leading or trailing dot is not a dot path.
+        "review..approved=true",
+        ".owner=null",
+        "owner.=x",
+        "a..b>1",
+        ".score>=0.5",
+        "trailing.<9",
+        # Word operators capture the key the same way, so they fold identically.
+        "review..approved in a,b",
+        ".tags has security",
+        "owner. between 1,2",
+    ],
+)
+def test_malformed_predicate_keys_refuse_before_transport(predicate):
+    """REGRESSION: a key that is not a dot path is refused here, not by the API.
+
+    The key capture class admits '.' anywhere, so 'review..approved', '.owner'
+    and 'owner.' each parsed cleanly and travelled to the search API — which
+    refuses them, spending a request to answer "Unsupported metadata filter
+    key" in wording that names neither find nor the shape a key must have.
+    """
+    with pytest.raises(ValueError, match="malformed predicate key"):
+        posix_tools._parse_meta_predicates([predicate])
+
+
+def test_malformed_key_refusal_names_the_key_and_the_grammar():
+    """The refusal names the offending key and the shape a valid one has."""
+    with pytest.raises(ValueError) as excinfo:
+        posix_tools._parse_meta_predicates(["review..approved=true"])
+
+    message = str(excinfo.value)
+    assert "malformed predicate key 'review..approved' in 'review..approved=true'" in message
+    assert "dot-separated names of letters, digits, '_' or '-'" in message
+    assert "review.approved" in message
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["review..approved", ".owner", "owner.", "review.approved", "status", "note-1_a.b"],
+)
+def test_predicate_key_grammar_is_the_api_key_grammar(key):
+    """find accepts exactly the keys the search API accepts, from one pattern.
+
+    METADATA_KEY_RE is the API parser's own key grammar, and find validates
+    against it rather than a second copy — so the two surfaces cannot drift
+    into a state where find builds a filter the repository will then reject at
+    request time.
+    """
+    api_accepts = METADATA_KEY_RE.match(key) is not None
+
+    if api_accepts:
+        assert posix_tools._parse_meta_predicates([f"{key}=x"]) == {key: "x"}
+        assert parse_metadata_filters({key: "x"})
+    else:
+        with pytest.raises(ValueError, match="malformed predicate key"):
+            posix_tools._parse_meta_predicates([f"{key}=x"])
+        with pytest.raises(ValueError, match="Unsupported metadata filter key"):
+            parse_metadata_filters({key: "x"})
+
+
+@pytest.mark.parametrize(
+    "predicate",
+    [
         # Python's JSON reader accepts these three spellings as an extension...
         "score=NaN",
         "score=Infinity",
@@ -1317,9 +1384,17 @@ async def test_find_meta_fields_cancels_sibling_reads_when_one_fails(
 
 
 @pytest.mark.asyncio
-async def test_find_meta_unsupported_key_surfaces_the_api_error(client, test_project, meta_notes):
-    """The server owns key validation; its refusal reaches the caller intact."""
-    with pytest.raises(ToolError, match="metadata filter key"):
+async def test_find_meta_malformed_key_refuses_before_transport(client, test_project, meta_notes):
+    """A malformed key is refused in find's words, before a request is built.
+
+    The API parser stays the authority on what a key may look like — find
+    validates against METADATA_KEY_RE, its grammar, so the two cannot
+    disagree — but spending a search request to be told "Unsupported metadata
+    filter key" told the caller neither which predicate was wrong nor what a
+    key must look like. Every other predicate mistake refuses here; this one
+    now does too.
+    """
+    with pytest.raises(ValueError, match=re.escape("malformed predicate key 'status.'")):
         await find(meta=["status.=active"], project=test_project.name)
 
 

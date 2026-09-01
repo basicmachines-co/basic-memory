@@ -8,7 +8,13 @@ import re
 from typing import Any, Iterable, List, cast
 
 
-_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$")
+# The one definition of a well-formed metadata key: dot-separated name segments
+# of letters, digits, '_' or '-', so a doubled, leading or trailing dot is not a
+# path. Public because callers that build filters — the POSIX find predicate
+# grammar — refuse a malformed key against this same pattern before spending a
+# request; a private copy there would be free to drift from what this parser
+# actually accepts.
+METADATA_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$")
 _NUMERIC_RE = re.compile(r"^-?\d+(\.\d+)?$")
 _COMPARISON_OPERATORS = {
     "$gt": "gt",
@@ -95,7 +101,7 @@ def parse_metadata_filters(filters: dict[str, Any]) -> List[ParsedMetadataFilter
         if not isinstance(raw_key, str) or not raw_key.strip():
             raise ValueError("metadata filter keys must be non-empty strings")
         key = raw_key.strip()
-        if not _KEY_RE.match(key):
+        if not METADATA_KEY_RE.match(key):
             raise ValueError(f"Unsupported metadata filter key: {raw_key}")
 
         path_parts = key.split(".")

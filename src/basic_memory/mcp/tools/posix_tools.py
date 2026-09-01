@@ -50,6 +50,7 @@ from basic_memory.mcp.project_context import (
     resolve_project_path_route,
 )
 from basic_memory.mcp.server import POSIX_TOOLS_TAG, mcp, set_posix_tools_visibility
+from basic_memory.repository.metadata_filters import METADATA_KEY_RE
 from basic_memory.schemas.directory import (
     DEFAULT_DIRECTORY_PAGE_SIZE,
     MAX_DIRECTORY_PAGE_SIZE,
@@ -546,6 +547,11 @@ async def find_listing(
 # them and symbol ops exclude the key character class, so exactly one regex can
 # match any given predicate. Two-char symbols sit first in the alternation so
 # ">=" never parses as ">" plus a value starting with "=".
+# The key capture admits '.' anywhere on purpose — it is looser than a dot path.
+# METADATA_KEY_RE, the search API's own key grammar, is what decides a
+# well-formed one, checked in _parse_meta_predicates once the predicate has
+# split. Tightening the capture instead would make '.owner=null' match no regex
+# at all and be reported as a missing operator rather than as the bad key it is.
 _PREDICATE_WORD_RE = re.compile(r"^([A-Za-z0-9_.-]+)\s+(in|has|between)\s+(.+)$")
 _PREDICATE_SYMBOL_RE = re.compile(r"^([A-Za-z0-9_.-]+)\s*(>=|<=|=|>|<)\s*(.*)$")
 _SYMBOL_OPERATORS = {">": "$gt", ">=": "$gte", "<": "$lt", "<=": "$lte"}
@@ -701,7 +707,8 @@ def _parse_meta_predicates(predicates: list[str]) -> dict[str, Any]:
     One predicate per string; predicates AND together. Exactly one predicate
     per key — the API admits one operator per key, so a repeated key fails fast
     instead of last-wins. Raises ValueError (surfaced to MCP callers as
-    ToolError) on any operator outside the supported set.
+    ToolError) on any operator outside the supported set, and on any key outside
+    the search API's dot-path grammar.
     """
     filters: dict[str, Any] = {}
     for predicate in predicates:
@@ -715,6 +722,21 @@ def _parse_meta_predicates(predicates: list[str]) -> dict[str, Any]:
             )
         raw_key, op, raw_value = match.groups()
         key = _METADATA_KEY_ALIASES.get(raw_key, raw_key)
+        # Trigger: the key capture accepted something that is not a dot path —
+        #          a doubled, leading or trailing dot ('review..approved',
+        #          '.owner', 'owner.').
+        # Why: the search API refuses these keys, so the query was never going
+        #      to run. Letting it travel spends a request to come back with
+        #      "Unsupported metadata filter key", which names neither find nor
+        #      the shape a key must have — every other predicate mistake is
+        #      refused here, before transport, in find's own words.
+        # Outcome: refuse locally, naming the offending key and the grammar.
+        if not METADATA_KEY_RE.match(key):
+            raise ValueError(
+                f"find: malformed predicate key '{key}' in '{predicate}'; keys are "
+                "dot-separated names of letters, digits, '_' or '-' "
+                "(e.g. 'status' or 'review.approved')"
+            )
         if key in filters:
             raise ValueError(
                 f"find: duplicate predicate key '{key}' in '{predicate}'; "
