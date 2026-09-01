@@ -537,10 +537,16 @@ def _date_data_parser(date_order: DateOrder) -> "DateDataParser":
 
 # The ISO calendar components a point opens with, when it opens with any: `YYYY-MM`
 # optionally followed by `-DD`. Not a bound grammar -- it deliberately matches a *prefix*
-# and leaves whatever follows (a time, an offset, nothing) to the reader below. The
-# lookahead is what keeps it to ISO shapes: `2026-06-100` and `2026-06-1` are not ones,
-# so they are none of this guard's business.
-_ISO_CALENDAR_PREFIX = re.compile(r"^(\d{4})-(\d{2})(?:-(\d{2}))?(?![\d-])")
+# and leaves whatever follows (a time, an offset, nothing) to the reader below.
+#
+# Each component is `\d+` rather than `\d{2}` so that an over-long run is *captured and
+# judged* rather than failing to match and slipping past the guard entirely. Bounding the
+# run instead would reopen the hole it closes: against `\d{2}`, `2026-01-0100` matched
+# nothing -- the day `01` left a trailing `00` that the lookahead refused -- so the token
+# reached dateparser and came back as the whole month of January. The lookahead still ends
+# the run at the first character that cannot continue a calendar date, so a date carrying a
+# time (`2026-06-10T14:00`, `2026-06-10 10:00 AM`) is matched on its date part alone.
+_ISO_CALENDAR_PREFIX = re.compile(r"^(\d{4})-(\d+)(?:-(\d+))?(?![\d-])")
 
 
 def _names_a_real_calendar_date(year: str, month: str, day: str | None) -> bool:
@@ -550,6 +556,13 @@ def _names_a_real_calendar_date(year: str, month: str, day: str | None) -> bool:
     author did not write, not one to guess at. `date` is the authority rather than a range
     check because it already owns leap years and month lengths.
     """
+    # A month or a day is written with one or two digits, and that width is what separates
+    # an author's shorthand from an author's typo: `2026-1-5` is a legitimate unpadded
+    # spelling of a real date, while the `0100` in `2026-01-0100` is no day at all. Judged
+    # before `date`, which takes a C long and raises OverflowError -- not the ValueError
+    # below -- once a run of digits grows past it.
+    if len(month) > 2 or (day is not None and len(day) > 2):
+        return False
     try:
         date(int(year), int(month), 1 if day is None else int(day))
     except ValueError:
@@ -652,10 +665,12 @@ def parse_authored_point(
         #   minute-precision `2026-13-01T10:00`. It reads the impossible month as a day
         #   and then fills the month it never got from *today*, so `2026-13` projects a
         #   different date on every reindex day: the same note yields different data
-        #   depending on when it was indexed. Only the leading calendar components are
-        #   judged here -- an impossible *time* already reads as no date at all -- so
-        #   every non-ISO spelling and every ISO date that does exist still reach the
-        #   flexible reader below.
+        #   depending on when it was indexed. A mistyped *width* is read just as freely --
+        #   `2026-01-0100` comes back as the whole month of January -- so a slipped
+        #   keystroke silently widens one day into a range nobody wrote. Only the leading
+        #   calendar components are judged here -- an impossible *time* already reads as no
+        #   date at all -- so every non-ISO spelling and every ISO date that does exist
+        #   still reach the flexible reader below.
         # Outcome: refused, and the token stays ordinary observation content.
         return None
 

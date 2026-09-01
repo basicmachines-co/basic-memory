@@ -437,6 +437,42 @@ def test_iso_shaped_points_with_impossible_components_are_unread(written: str):
     assert parse_authored_point(written) is None
 
 
+@pytest.mark.parametrize(
+    "written",
+    [
+        # The reported shape: a mistyped ISO date whose day ran on into a fourth digit.
+        # dateparser chopped it back to a bare year-month and filed the whole of January,
+        # so one slipped keystroke widened a single day into a month-long range.
+        "2026-01-0100",
+        # The same slip one component earlier, which filed the whole *year* 2026.
+        "2026-0100",
+        # Shorter over-long runs. dateparser already declined to read these, but they are
+        # the same malformed shape and the guard now owns them rather than trusting it to.
+        "2026-013",
+        "2026-06-100",
+        "2026-01-011",
+        # An unpadded component is a legitimate spelling, so width alone cannot decide:
+        # these are refused for their values, exactly as their zero-padded twins are.
+        "2026-1-99",
+        "2026-0-5",
+        # A run long enough to overflow the C long `date` converts to. Refused on width
+        # before conversion, so the guard reads it as no date rather than raising.
+        "2026-" + "9" * 40,
+    ],
+)
+def test_iso_shaped_points_with_malformed_calendar_runs_are_unread(written: str):
+    """A mistyped ISO point must stay content, not round off into a plausible range.
+
+    The guard's first cut matched calendar components at a fixed width, so a run of the
+    wrong width matched *nothing* and fell through to dateparser untouched -- the one
+    outcome the guard exists to prevent. `2026-01-0100` came back as
+    `[2026-01-01,2026-02-01)`: a whole month, indistinguishable in the index from a range
+    the author meant to write. A silently wrong date is worse than an unread token, so a
+    component too wide to be a month or a day now fails the guard on that basis.
+    """
+    assert parse_authored_point(written) is None
+
+
 @pytest.mark.parametrize("today", ["2026-03-07", "2026-09-01"])
 def test_an_impossible_iso_month_is_not_completed_from_the_indexing_date(today: str):
     """The worst shape of all: a date whose meaning depended on when the reindex ran.
