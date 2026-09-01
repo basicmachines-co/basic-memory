@@ -22,6 +22,11 @@ env:
   # to main run the full suite with --testmon-noselect to refresh the baseline.
   BASIC_MEMORY_TESTMON_FLAGS: ${{ github.ref_name == 'main' && '--testmon-noselect' || '--testmon --testmon-forceselect' }}
 
+# Every job that builds a uv environment sets UV_PYTHON. Without it, `uv run`
+# — which every `just` recipe shells out to — resolves its interpreter from
+# .python-version (3.14) rather than the matrix version, and DELETES a .venv
+# that disagrees, taking the pip-installed extras with it. That is why the
+# 3.12/3.13 matrix rows silently tested 3.14 and why typecheck lost pymilvus.
 jobs:
   changes:
     # Docs/workflow-only changes skip the entire test matrix while the workflow
@@ -56,6 +61,10 @@ jobs:
     name: Static Checks (Python 3.12)
     timeout-minutes: 20
     runs-on: ubuntu-latest
+
+    # Pin every uv call, including `uv run` inside just recipes. See top of file.
+    env:
+      UV_PYTHON: "3.12"
 
     steps:
       - uses: actions/checkout@v6
@@ -110,6 +119,10 @@ jobs:
           - os: windows-latest
             python-version: "3.12"
     runs-on: ${{ matrix.os }}
+
+    # Pin every uv call, including `uv run` inside just recipes. See top of file.
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
 
     steps:
       - uses: actions/checkout@v6
@@ -171,6 +184,10 @@ jobs:
           - os: windows-latest
             python-version: "3.12"
     runs-on: ${{ matrix.os }}
+
+    # Pin every uv call, including `uv run` inside just recipes. See top of file.
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
 
     steps:
       - uses: actions/checkout@v6
@@ -245,6 +262,8 @@ jobs:
           --health-retries 5
     env:
       BASIC_MEMORY_TEST_POSTGRES_URL: postgresql://basic_memory_user:dev_password@127.0.0.1:5432/basic_memory_test
+      # Pin every uv call, including `uv run` inside just recipes. See top of file.
+      UV_PYTHON: ${{ matrix.python-version }}
 
     steps:
       - uses: actions/checkout@v6
@@ -317,6 +336,8 @@ jobs:
           --health-retries 5
     env:
       BASIC_MEMORY_TEST_POSTGRES_URL: postgresql://basic_memory_user:dev_password@127.0.0.1:5432/basic_memory_test
+      # Pin every uv call, including `uv run` inside just recipes. See top of file.
+      UV_PYTHON: ${{ matrix.python-version }}
 
     steps:
       - uses: actions/checkout@v6
@@ -366,6 +387,10 @@ jobs:
     name: Test Semantic (Python 3.12)
     timeout-minutes: 45
     runs-on: ubuntu-latest
+
+    # Pin every uv call, including `uv run` inside just recipes. See top of file.
+    env:
+      UV_PYTHON: "3.12"
 
     steps:
       - uses: actions/checkout@v6
@@ -425,6 +450,10 @@ jobs:
           - os: windows-latest
             python-version: "3.12"
     runs-on: ${{ matrix.os }}
+
+    # Pin every uv call, including `uv run` inside just recipes. See top of file.
+    env:
+      UV_PYTHON: ${{ matrix.python-version }}
 
     steps:
       - uses: actions/checkout@v6
