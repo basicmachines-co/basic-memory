@@ -27,6 +27,7 @@ from basic_memory.repository.search_repository_base import (
     SearchRepositoryBase,
     VectorChunkState,
     file_path_prefix_condition,
+    metadata_filter_content_type_condition,
 )
 from basic_memory.repository.search_trace import (
     SearchTraceCollector,
@@ -1193,6 +1194,10 @@ class PostgresSearchRepository(SearchRepositoryBase):
         if metadata_filters:
             parsed_filters = parse_metadata_filters(metadata_filters)
             from_clause = f"{from_clause} JOIN entity ON search_index.entity_id = entity.id"
+            # Frontmatter filters answer for notes only; see
+            # metadata_filter_content_type_condition for why every regular file
+            # would otherwise satisfy a null predicate.
+            conditions.append(metadata_filter_content_type_condition(params))
             metadata_expr = "entity.entity_metadata::jsonb"
 
             for idx, filt in enumerate(parsed_filters):

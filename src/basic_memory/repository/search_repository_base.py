@@ -76,6 +76,7 @@ from basic_memory.repository.semantic_vector_sync import (
     StagedVectorDeletion as _StagedVectorDeletion,
     VectorChunkState,
 )
+from basic_memory.runtime.storage import RUNTIME_MARKDOWN_CONTENT_TYPE
 from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.schemas.search import (
     SearchItemType,
@@ -183,6 +184,26 @@ def file_path_prefix_condition(
     params["file_path_prefix"] = prefix
     params["file_path_prefix_length"] = len(prefix)
     return "SUBSTR(search_index.file_path, 1, :file_path_prefix_length) = :file_path_prefix"
+
+
+def metadata_filter_content_type_condition(params: Dict[str, Any]) -> str:
+    """Build the SQL restricting a metadata-filtered query to Markdown notes.
+
+    Frontmatter is a Markdown-only construct, but every indexed file — PDF,
+    image, binary — gets its own ENTITY row whose ``entity_metadata`` carries no
+    keys at all. A positive predicate can never match one, so this constraint
+    was invisible until ``{"key": None}`` arrived: ``IS NULL`` is satisfied by
+    the *absence* of a key, which is exactly the state every regular file is in,
+    and the whole non-note half of a project counted into an exact total.
+
+    Applied to any metadata filter, not just the null one, so the
+    frontmatter-only contract is a property of the clause rather than of which
+    operator happened to be used. Shared by both backends for the same reason
+    the subtree scope is: a filter that admits different rows per dialect would
+    report an exact total for a match set the other never produces.
+    """
+    params["metadata_filter_content_type"] = RUNTIME_MARKDOWN_CONTENT_TYPE
+    return "entity.content_type = :metadata_filter_content_type"
 
 
 async def purge_stale_search_index_rows(

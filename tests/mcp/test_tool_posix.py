@@ -7,6 +7,7 @@ assert on the JSON shapes the canonical `output_format="json"` paths produce.
 
 import asyncio
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from textwrap import dedent
 from types import SimpleNamespace
@@ -17,11 +18,13 @@ import yaml
 from fastmcp.exceptions import ToolError
 
 import basic_memory.mcp.tools.posix_tools as posix_tools
+from basic_memory import db
 from basic_memory.mcp.project_context import (
     ProjectPrefixConflictError,
     UnqualifiedPathRefusedError,
 )
 from basic_memory.mcp.tools import cat, find, grep, ls, man, search_notes, tail, write_note
+from basic_memory.models import Entity
 from basic_memory.repository.metadata_filters import ParsedMetadataFilter, parse_metadata_filters
 from basic_memory.schemas.search import SearchRetrievalMode
 
@@ -969,6 +972,45 @@ async def test_find_meta_null_finds_the_notes_carrying_no_value(client, test_pro
 
 
 @pytest.mark.asyncio
+async def test_find_meta_never_returns_a_non_markdown_file(
+    client, test_project, meta_notes, entity_repository, search_service, session_maker
+):
+    """REGRESSION: `find --meta` is frontmatter-only, so a PDF is never a hit.
+
+    An indexed regular file gets an ENTITY row like any note, and it carries no
+    frontmatter keys at all — which is precisely what `key=null` asks for. So
+    the null predicate returned every PDF, image and binary in the project and
+    counted them into the exact total, while positive predicates hid the hole
+    because nothing a regular file carries could satisfy one. Both shapes are
+    asserted here so the constraint cannot regress to a null-only special case.
+    """
+    now = datetime.now(timezone.utc)
+    async with db.scoped_session(session_maker) as session:
+        scan = await entity_repository.add(
+            session,
+            Entity(
+                project_id=test_project.id,
+                title="Scanned Contract",
+                note_type="file",
+                content_type="application/pdf",
+                file_path="specs/Scanned Contract.pdf",
+                permalink="specs/scanned-contract",
+                created_at=now,
+                updated_at=now,
+            ),
+        )
+    await search_service.index_entity_data(scan)
+
+    absent = await find(meta=["review.approved=null"], project=test_project.name)
+    present = await find(meta=["status=active"], project=test_project.name)
+
+    assert {row["title"] for row in absent["results"]} == {"Beta Spec", "Gamma Note"}
+    assert absent["total"] == 2
+    assert absent["total_is_exact"] is True
+    assert {row["title"] for row in present["results"]} == {"Alpha Spec", "Gamma Note"}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("path", ["/", ""])
 async def test_find_meta_answers_at_the_project_root(client, test_project, meta_notes, path):
     """Both root spellings reach the metadata search; the predicates are the whole WHERE."""
@@ -984,6 +1026,10 @@ async def test_find_meta_answers_at_the_project_root(client, test_project, meta_
     [
         ("specs", {"Alpha Spec", "Beta Spec"}),
         ("/specs", {"Alpha Spec", "Beta Spec"}),
+        # "./" is relative notation, the same way the directory listing reads
+        # it; without that, the SQL prefix "./specs/" matched nothing at all.
+        ("./specs", {"Alpha Spec", "Beta Spec"}),
+        ("./specs/", {"Alpha Spec", "Beta Spec"}),
         # A spaced directory name is a file path, not a slug: it scopes verbatim.
         ("My Notes", {"Gamma Note"}),
         ("nonexistent", set()),
@@ -1228,6 +1274,46 @@ async def test_find_meta_fields_hydrates_hits_concurrently(
         "Alpha Spec": "Alpha Spec",
         "Gamma Note": "Gamma Note",
     }
+
+
+@pytest.mark.asyncio
+async def test_find_meta_fields_cancels_sibling_reads_when_one_fails(
+    client, test_project, meta_notes, monkeypatch
+):
+    """REGRESSION: no projection read outlives the client it was issued on.
+
+    gather raises the first failure and leaves the rest running, so find used to
+    unwind out of get_project_client — closing the shared client — while sibling
+    GETs were still on the wire or still queued behind the semaphore. Those then
+    raised against a closed client into tasks nobody awaits: background work
+    past the resource's lifetime, and secondary errors burying the real one.
+    """
+    # Import here to mirror the tool's own deferred client import.
+    from basic_memory.mcp.clients import KnowledgeClient
+
+    reads: list[asyncio.Task[dict[str, object] | None]] = []
+
+    async def racing_get_entity(self, entity_id, **kwargs):
+        current = asyncio.current_task()
+        assert current is not None
+        reads.append(current)
+        if len(reads) == 1:
+            # Yield first so the sibling is genuinely in flight when this fails.
+            await asyncio.sleep(0)
+            raise ToolError("hit deleted between search and hydration")
+        # Stands in for a request still awaiting its response.
+        await asyncio.sleep(60)
+        raise AssertionError("sibling read outlived the client that issued it")
+
+    monkeypatch.setattr(KnowledgeClient, "get_entity", racing_get_entity)
+
+    with pytest.raises(ToolError, match="hit deleted between search and hydration"):
+        await find(meta=["status=active"], fields=["title"], project=test_project.name)
+
+    assert len(reads) == 2
+    sibling = reads[1]
+    assert sibling.done()
+    assert sibling.cancelled()
 
 
 @pytest.mark.asyncio

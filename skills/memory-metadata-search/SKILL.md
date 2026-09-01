@@ -92,6 +92,8 @@ against the value and a comparison with null is never true.
 - `$in` and array-contains require non-empty lists
 - `$between` requires exactly `[min, max]`
 - `null` is an is-null match and only valid as a plain equality value
+- Metadata filters match Markdown notes only — indexed PDFs, images and other
+  regular files carry no frontmatter and are never hits, not even for `null`
 
 > **Warning:** Operators MUST include the `$` prefix — write `$gte`, not `gte`. Without the prefix the filter is treated as an exact-match key and will silently return no results. Correct: `{"confidence": {"$gte": 0.7}}`. Wrong: `{"confidence": {"gte": 0.7}}`.
 

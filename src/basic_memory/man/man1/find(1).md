@@ -50,6 +50,10 @@ named directory and admit notes that are not. The prefix matches on a
 directory boundary and case-sensitively, identically on SQLite and Postgres:
 `/specs` admits `specs/api.md`, never `specs-archive/api.md` or `Specs/api.md`,
 and a `_` or `%` in a directory name is an ordinary character, not a wildcard.
+Only the surrounding separators and a leading `./` are notation — the plain
+listing reads them the same way, so one `PATH` names one subtree with or
+without `--meta`. Everything else belongs to the path, including whitespace: a
+directory named `" specs "` is addressed by that exact spelling.
 `PATH` may also name a project (`bm find myproject --meta ...`) — that is a
 routing prefix, a mount point rather than a subtree, and scopes to that
 project's root.

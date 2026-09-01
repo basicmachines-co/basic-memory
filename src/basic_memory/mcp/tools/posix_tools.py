@@ -912,10 +912,12 @@ async def find(
         return await _find_by_metadata(
             route_project=route.project,
             # route.path is the caller's input verbatim when no project prefix
-            # was recognized, so one strip covers both routed and raw spellings.
-            # A bare '<project>' strips to "", the project root — a mount point,
-            # not a subtree.
-            scope=route.path.strip("/"),
+            # was recognized, so one value covers both routed and raw spellings.
+            # SearchQuery.file_path_prefix is the boundary parser for it: it
+            # reads "./specs" the way the directory listing does, and collapses
+            # every root spelling — including the "" a bare '<project>' routes
+            # to, a mount point rather than a subtree — onto "no scope".
+            scope=route.path,
             metadata_filters=metadata_filters,
             fields=fields,
             page=page,
@@ -971,8 +973,9 @@ async def _find_by_metadata(
         from basic_memory.mcp.clients import KnowledgeClient, SearchClient
 
         query = SearchQuery(
-            # "" is the project root: the predicates are then the whole WHERE.
-            file_path_prefix=scope or None,
+            # Normalized by the field validator, which maps every root spelling
+            # onto None: the predicates are then the whole WHERE.
+            file_path_prefix=scope,
             metadata_filters=metadata_filters,
             entity_types=[SearchItemType.ENTITY],
         )
@@ -1007,7 +1010,24 @@ async def _find_by_metadata(
                 entity = await knowledge_client.get_entity(entity_external_id)
             return entity.entity_metadata
 
-        hydrated = await asyncio.gather(*(entity_metadata(hit_id) for hit_id in hit_ids))
+        # Trigger: any one projection read fails — a hit deleted between the
+        #          search and its hydration, or a cloud-routed GET erroring.
+        # Why: gather raises the first failure but leaves its siblings running,
+        #      and this function then unwinds out of get_project_client, which
+        #      closes the client underneath them. Every read still queued behind
+        #      the semaphore would fire against a closed client and raise into a
+        #      task nobody awaits — background work outliving the resource that
+        #      owns it, and a log full of secondary errors hiding the real one.
+        # Outcome: the siblings are cancelled and drained inside the client's
+        #          lifetime; the first failure is still what reaches the caller.
+        #          On success the cancels are no-ops on already-finished tasks.
+        reads = [asyncio.create_task(entity_metadata(hit_id)) for hit_id in hit_ids]
+        try:
+            hydrated = await asyncio.gather(*reads)
+        finally:
+            for read in reads:
+                read.cancel()
+            await asyncio.gather(*reads, return_exceptions=True)
         # Injected post-dump so null field values survive exclude_none.
         for row, metadata in zip(payload["results"], hydrated, strict=True):
             row["fields"] = _project_metadata_fields(metadata, fields)

@@ -26,7 +26,8 @@ from basic_memory.schemas.search import (
 
 # file_path -> (title, status). Every decoy here is a real way a naive predicate
 # leaks: a sibling directory sharing the scope's name as a prefix, a "_" or "%"
-# read as a LIKE wildcard, and a case variant that only one dialect's LIKE folds.
+# read as a LIKE wildcard, a case variant that only one dialect's LIKE folds,
+# and a name whose own leading/trailing spaces a normalizer could eat.
 SEEDED_NOTES: dict[str, tuple[str, str]] = {
     "specs/alpha.md": ("Alpha", "active"),
     "specs/nested/beta.md": ("Beta", "draft"),
@@ -36,6 +37,7 @@ SEEDED_NOTES: dict[str, tuple[str, str]] = {
     "my-notes/zeta.md": ("Zeta", "active"),
     "100%/eta.md": ("Eta", "active"),
     "100pct/theta.md": ("Theta", "active"),
+    " specs /iota.md": ("Iota", "active"),
 }
 
 
@@ -160,14 +162,32 @@ async def test_prefix_is_case_sensitive_on_both_backends(search_repository, seed
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("scope", ["specs", "/specs", "specs/", "/specs/", "  specs  "])
+@pytest.mark.parametrize("scope", ["specs", "/specs", "specs/", "/specs/", "./specs", "./specs/"])
 async def test_scope_spellings_normalize_to_one_query(search_repository, seeded_paths, scope):
-    """Leading, trailing, and surrounding whitespace/slashes name one subtree."""
+    """Separators and the "./" relative prefix are notation, so all name one subtree.
+
+    "./specs" is the spelling the plain directory listing already accepts —
+    `DirectoryService` strips that prefix — so the two `find` arms must not
+    disagree about which subtree one `path` argument names.
+    """
     assert await _titles(search_repository, file_path_prefix=scope) == {"Alpha", "Beta"}
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("scope", [None, "", "/", "   "])
+async def test_whitespace_in_a_directory_name_belongs_to_the_path(search_repository, seeded_paths):
+    """REGRESSION: " specs " is its own directory, not a padded "specs".
+
+    Stripping the surrounding whitespace silently repointed the scope at a
+    different subtree and reported that subtree's rows under the same exact
+    total the named one would have carried. Both directions are asserted so a
+    reintroduced strip fails here rather than merging the two scopes unnoticed.
+    """
+    assert await _titles(search_repository, file_path_prefix=" specs ") == {"Iota"}
+    assert await _titles(search_repository, file_path_prefix="specs") == {"Alpha", "Beta"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", [None, "", "/", "   ", "./"])
 async def test_root_spellings_apply_no_scope(search_repository, seeded_paths, scope):
     """The root is the absence of a subtree predicate, not a prefix of "/"."""
     titles = await _titles(
@@ -328,7 +348,7 @@ def test_condition_is_one_shared_predicate_for_both_dialects():
     assert params == {"file_path_prefix": "specs/", "file_path_prefix_length": len("specs/")}
 
 
-@pytest.mark.parametrize("scope", [None, "", "/", "  /  "])
+@pytest.mark.parametrize("scope", [None, "", "/", "  /  ", "./"])
 def test_condition_declines_a_root_scope(scope):
     """No predicate at all, so the root query is not silently narrowed."""
     params: dict[str, object] = {}
@@ -344,10 +364,20 @@ def test_condition_declines_a_root_scope(scope):
         ("", None),
         ("/", None),
         ("   ", None),
+        ("  /  ", None),
+        # "./" is the relative spelling of the root, as it is for `ls`.
+        ("./", None),
         ("specs", "specs"),
         ("/specs/", "specs"),
-        ("  /specs/nested/  ", "specs/nested"),
+        ("/specs/nested/", "specs/nested"),
+        ("./specs/", "specs"),
+        # Only one "./" is notation; a second is a directory literally named ".".
+        ("././specs", "./specs"),
+        # Whitespace inside a scope that carries a path is part of the path.
+        (" specs ", " specs "),
+        ("/ specs /", " specs "),
+        ("My Notes/drafts", "My Notes/drafts"),
     ],
 )
-def test_normalize_collapses_root_spellings(value, expected):
+def test_normalize_keeps_the_path_and_drops_only_the_notation(value, expected):
     assert normalize_file_path_prefix(value) == expected
