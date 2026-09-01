@@ -793,6 +793,7 @@ async def test_hybrid_search_keeps_deep_tail_stable_as_candidate_window_grows(mo
             search_item_types=None,
             categories=None,
             metadata_filters=None,
+            file_path_prefix=None,
             limit=1,
             offset=offset,
         )

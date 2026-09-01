@@ -77,7 +77,11 @@ from basic_memory.repository.semantic_vector_sync import (
     VectorChunkState,
 )
 from basic_memory.runtime.vector_sync import VectorSyncBatchResult
-from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
+from basic_memory.schemas.search import (
+    SearchItemType,
+    SearchRetrievalMode,
+    normalize_file_path_prefix,
+)
 from basic_memory.utils import ensure_timezone_aware
 
 # --- Semantic search constants ---
@@ -148,6 +152,37 @@ class ChunkManifestRow:
         if isinstance(updated_at, str):
             updated_at = datetime.fromisoformat(updated_at)
         object.__setattr__(self, "updated_at", ensure_timezone_aware(updated_at))
+
+
+def file_path_prefix_condition(
+    file_path_prefix: Optional[str],
+    params: Dict[str, Any],
+) -> Optional[str]:
+    """Build the SQL scoping search rows to one directory subtree of the project.
+
+    One implementation, shared verbatim by both backends: a subtree scope that
+    means different things on SQLite and Postgres would report an exact total
+    for a match set the other dialect never produces.
+
+    Boundary: the compared prefix carries its trailing separator, so "specs"
+    admits "specs/api.md" and never "specs-archive/api.md".
+
+    Why an explicit-length comparison rather than ``file_path LIKE 'specs/%'``:
+    LIKE reads "_" and "%" as wildcards and both are ordinary characters in a
+    directory name, so "my_notes" would silently also admit "my-notes"; and
+    LIKE case-folds differently per backend — SQLite's is ASCII-case-insensitive
+    while Postgres's is case-sensitive — so one filter would answer two
+    different questions. SUBSTR equality has no pattern language to escape and
+    compares under each backend's deterministic default text collation, which is
+    byte equality on both, so the dialects match exactly the same rows.
+    """
+    normalized = normalize_file_path_prefix(file_path_prefix)
+    if normalized is None:
+        return None
+    prefix = f"{normalized}/"
+    params["file_path_prefix"] = prefix
+    params["file_path_prefix_length"] = len(prefix)
+    return "SUBSTR(search_index.file_path, 1, :file_path_prefix_length) = :file_path_prefix"
 
 
 async def purge_stale_search_index_rows(
@@ -308,6 +343,7 @@ class SearchRepositoryBase(ABC):
         search_item_types: Optional[List[SearchItemType]] = None,
         categories: Optional[List[str]] = None,
         metadata_filters: Optional[Dict[str, Any]] = None,
+        file_path_prefix: Optional[str] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
         limit: int = 10,
@@ -328,6 +364,7 @@ class SearchRepositoryBase(ABC):
             search_item_types: Filter by SearchItemType (ENTITY, OBSERVATION, RELATION)
             categories: Filter observations by exact category (e.g. "requirement")
             metadata_filters: Structured frontmatter metadata filters
+            file_path_prefix: Directory subtree scope, matched against file_path
             limit: Maximum results to return
             offset: Number of results to skip
 
@@ -351,6 +388,7 @@ class SearchRepositoryBase(ABC):
         search_item_types: Optional[List[SearchItemType]] = None,
         categories: Optional[List[str]] = None,
         metadata_filters: Optional[Dict[str, Any]] = None,
+        file_path_prefix: Optional[str] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
         allow_relaxed: bool = False,
@@ -1903,6 +1941,7 @@ class SearchRepositoryBase(ABC):
         search_item_types: Optional[List[SearchItemType]],
         categories: Optional[List[str]],
         metadata_filters: Optional[dict[str, Any]],
+        file_path_prefix: Optional[str],
         retrieval_mode: SearchRetrievalMode,
         min_similarity: Optional[float] = None,
         limit: int,
@@ -1938,6 +1977,7 @@ class SearchRepositoryBase(ABC):
                 search_item_types=search_item_types,
                 categories=categories,
                 metadata_filters=metadata_filters,
+                file_path_prefix=file_path_prefix,
                 min_similarity=min_similarity,
                 limit=limit,
                 offset=offset,
@@ -1959,6 +1999,7 @@ class SearchRepositoryBase(ABC):
                 search_item_types=search_item_types,
                 categories=categories,
                 metadata_filters=metadata_filters,
+                file_path_prefix=file_path_prefix,
                 min_similarity=min_similarity,
                 limit=limit,
                 offset=offset,
@@ -2137,6 +2178,7 @@ class SearchRepositoryBase(ABC):
         search_item_types: Optional[List[SearchItemType]],
         categories: Optional[List[str]],
         metadata_filters: Optional[dict[str, Any]],
+        file_path_prefix: Optional[str],
         min_similarity: Optional[float] = None,
         limit: int,
         offset: int,
@@ -2324,6 +2366,7 @@ class SearchRepositoryBase(ABC):
                 search_item_types,
                 categories,
                 metadata_filters,
+                file_path_prefix,
             ]
         )
 
@@ -2338,6 +2381,7 @@ class SearchRepositoryBase(ABC):
                 search_item_types=search_item_types,
                 categories=categories,
                 metadata_filters=metadata_filters,
+                file_path_prefix=file_path_prefix,
                 retrieval_mode=SearchRetrievalMode.FTS,
                 limit=VECTOR_FILTER_SCAN_LIMIT,
                 offset=0,
@@ -2401,6 +2445,7 @@ class SearchRepositoryBase(ABC):
                         search_item_types=search_item_types,
                         categories=categories,
                         metadata_filters=metadata_filters,
+                        file_path_prefix=file_path_prefix,
                         min_similarity=min_similarity,
                         limit=stable_candidate_limit,
                         offset=0,
@@ -2473,6 +2518,7 @@ class SearchRepositoryBase(ABC):
         search_item_types: Optional[List[SearchItemType]],
         categories: Optional[List[str]],
         metadata_filters: Optional[dict[str, Any]],
+        file_path_prefix: Optional[str],
         min_similarity: Optional[float] = None,
         limit: int,
         offset: int,
@@ -2511,6 +2557,7 @@ class SearchRepositoryBase(ABC):
             search_item_types=search_item_types,
             categories=categories,
             metadata_filters=metadata_filters,
+            file_path_prefix=file_path_prefix,
             retrieval_mode=SearchRetrievalMode.FTS,
             limit=candidate_limit,
             offset=0,
@@ -2529,6 +2576,7 @@ class SearchRepositoryBase(ABC):
             search_item_types=search_item_types,
             categories=categories,
             metadata_filters=metadata_filters,
+            file_path_prefix=file_path_prefix,
             min_similarity=min_similarity,
             limit=candidate_limit,
             offset=0,
@@ -2679,6 +2727,7 @@ class SearchRepositoryBase(ABC):
                     search_item_types=search_item_types,
                     categories=categories,
                     metadata_filters=metadata_filters,
+                    file_path_prefix=file_path_prefix,
                     min_similarity=min_similarity,
                     limit=stable_candidate_limit,
                     offset=0,

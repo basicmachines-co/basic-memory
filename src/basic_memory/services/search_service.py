@@ -51,6 +51,7 @@ class PreparedSearchQuery:
     categories: list[str] | None
     after_date: datetime | None
     metadata_filters: dict[str, Any] | None
+    file_path_prefix: str | None
     retrieval_mode: SearchRetrievalMode
     min_similarity: float | None
 
@@ -109,6 +110,7 @@ def describe_search_criteria(prepared: PreparedSearchQuery) -> str:
         "after_date": prepared.after_date,
         "categories": list(prepared.categories) if prepared.categories else None,
         "metadata_filters": dict(prepared.metadata_filters) if prepared.metadata_filters else None,
+        "file_path_prefix": quoted(prepared.file_path_prefix),
     }
     return " ".join(f"{name}={value}" for name, value in criteria.items() if value is not None)
 
@@ -224,6 +226,7 @@ class SearchService:
             categories=query.categories,
             after_date=after_date,
             metadata_filters=metadata_filters,
+            file_path_prefix=query.file_path_prefix,
             retrieval_mode=query.retrieval_mode or SearchRetrievalMode.FTS,
             min_similarity=query.min_similarity,
         )
@@ -238,6 +241,8 @@ class SearchService:
             or prepared.categories
             or prepared.after_date
             or prepared.metadata_filters
+            # Normalized by SearchQuery, so only a real subtree reaches here.
+            or prepared.file_path_prefix
         )
         if not has_criteria:
             logger.debug("no criteria passed to query")
@@ -252,6 +257,7 @@ class SearchService:
             or prepared.search_item_types
             or prepared.categories
             or prepared.after_date
+            or prepared.file_path_prefix
         )
 
     async def _include_legacy_note_type_spellings(
@@ -305,6 +311,7 @@ class SearchService:
                 categories=prepared.categories,
                 after_date=prepared.after_date,
                 metadata_filters=prepared.metadata_filters,
+                file_path_prefix=prepared.file_path_prefix,
                 retrieval_mode=prepared.retrieval_mode,
                 min_similarity=prepared.min_similarity,
                 limit=limit,
@@ -322,6 +329,7 @@ class SearchService:
             categories=prepared.categories,
             after_date=prepared.after_date,
             metadata_filters=prepared.metadata_filters,
+            file_path_prefix=prepared.file_path_prefix,
             retrieval_mode=prepared.retrieval_mode,
             min_similarity=prepared.min_similarity,
             limit=limit,
@@ -348,6 +356,7 @@ class SearchService:
             categories=prepared.categories,
             after_date=prepared.after_date,
             metadata_filters=prepared.metadata_filters,
+            file_path_prefix=prepared.file_path_prefix,
             retrieval_mode=prepared.retrieval_mode,
             min_similarity=prepared.min_similarity,
             allow_relaxed=allow_relaxed,
