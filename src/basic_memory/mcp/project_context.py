@@ -991,6 +991,11 @@ async def detect_project_from_identifier_prefix(
 # tool inputs accept exactly the prefixed identifiers tool outputs and stored
 # permalinks produce. One resolver serves the MCP posix tools and, through
 # them, the CLI verbs.
+#
+# The mount table and the routing table are one set (addressable_projects), so
+# every mount `ls /` advertises is reachable by name and an unqualified
+# reference in a many-project workspace refuses instead of picking a default
+# (#1421).
 
 
 @dataclass(frozen=True)
@@ -1000,11 +1005,11 @@ class ProjectPathRoute:
     ``stripped=False`` means the input carried no recognized project prefix:
     ``path`` is the caller's input byte-for-byte and ``project`` is the
     explicit value that was passed (or None, meaning the existing default
-    resolution chain applies — only reachable in single-project or empty-config
-    setups; multi-project configs refuse instead). ``stripped=True`` means a
-    first-segment project was recognized: ``project`` is the canonical config
-    name (or workspace-qualified name) and ``path`` is the remainder with no
-    leading slash, "" meaning the project root.
+    resolution chain applies — only reachable when the session addresses at
+    most one project; several addressable projects refuse instead).
+    ``stripped=True`` means a first-segment project was recognized: ``project``
+    is the canonical config name (or workspace-qualified name) and ``path`` is
+    the remainder with no leading slash, "" meaning the project root.
     """
 
     project: Optional[str]
@@ -1017,13 +1022,98 @@ class ProjectPrefixConflictError(ValueError):
 
 
 class UnqualifiedPathRefusedError(ValueError):
-    """Unqualified input in a multi-project config matched no active project."""
+    """Unqualified input matched no project in a workspace that addresses several."""
 
 
-def _active_project_prefixes(config: BasicMemoryConfig) -> str:
-    """Render the configured projects as copyable '<permalink>/' prefixes."""
-    permalinks = sorted(generate_permalink(name) for name in config.projects)
-    return ", ".join(f"{permalink}/" for permalink in permalinks)
+@dataclass(frozen=True)
+class AddressableProject:
+    """One project this session can both advertise and route to.
+
+    ``name`` is the routing identifier handed to ``get_project_client``;
+    ``permalink`` is the first path segment agents copy out of tool output.
+    """
+
+    name: str
+    permalink: str
+
+
+# The session's own project listing, memoized for one MCP request: routing and
+# the mount view ask the same question, so a request pays for it at most once.
+_SESSION_PROJECT_LIST_STATE_KEY = "session_project_list"
+
+
+def _session_routes_to_cloud() -> bool:
+    """Return True when this session's project-less client is a tenant route.
+
+    Mirrors ``get_client()``'s own decision for a call that names no project:
+    factory injection first (the hosted MCP server), then an explicit --cloud
+    flag. Everything else is the local ASGI app, whose mount table is the local
+    config. The distinction matters because BasicMemoryConfig always
+    materializes a placeholder 'main' project, so a non-empty ``config.projects``
+    proves nothing about a cloud session's real projects.
+    """
+    from basic_memory.mcp.async_client import (
+        _explicit_routing,
+        _force_local_mode,
+        is_factory_mode,
+    )
+
+    return is_factory_mode() or (_explicit_routing() and not _force_local_mode())
+
+
+async def _session_project_list(context: Optional[Context] = None) -> ProjectList:
+    """List the projects reachable through this session's own route."""
+    if context:
+        cached_raw = await context.get_state(_SESSION_PROJECT_LIST_STATE_KEY)
+        if isinstance(cached_raw, dict):
+            return ProjectList.model_validate(cached_raw)
+
+    # Deferred imports to avoid circular dependency with the client modules.
+    from basic_memory.mcp.async_client import get_client
+    from basic_memory.mcp.clients import ProjectClient
+
+    async with get_client() as client:
+        project_list = await ProjectClient(client).list_projects()
+
+    if context:
+        await context.set_state(_SESSION_PROJECT_LIST_STATE_KEY, project_list.model_dump())
+    return project_list
+
+
+async def addressable_projects(
+    context: Optional[Context] = None,
+) -> tuple[AddressableProject, ...]:
+    """Return every project this session can address, sorted by name.
+
+    One source answers two questions that must never disagree: which mounts
+    ``ls /`` advertises, and which first path segment names a project. When
+    they came from different sources, a cloud session could advertise
+    ``/research`` at the root and then fail to recognize ``research/notes/x``,
+    silently routing it to a default project instead (#1421).
+
+    A locally routed session's config IS its mount table, so it answers with no
+    network call. A cloud session's projects live in the tenant database and
+    its local config holds only the placeholder 'main' entry, so the session's
+    own project listing answers instead — the same call the mount view has
+    always made to render the root.
+    """
+    if _session_routes_to_cloud():
+        project_list = await _session_project_list(context=context)
+        projects = (
+            AddressableProject(name=item.name, permalink=item.permalink)
+            for item in project_list.projects
+        )
+    else:
+        projects = (
+            AddressableProject(name=name, permalink=generate_permalink(name))
+            for name in ConfigManager().config.projects
+        )
+    return tuple(sorted(projects, key=lambda project: project.name))
+
+
+def _addressable_project_prefixes(projects: tuple[AddressableProject, ...]) -> str:
+    """Render addressable projects as copyable '<permalink>/' prefixes."""
+    return ", ".join(f"{permalink}/" for permalink in sorted(item.permalink for item in projects))
 
 
 def _detected_route_remainder(candidate: str, detected: str) -> str:
@@ -1076,11 +1166,15 @@ async def resolve_project_path_route(
        disagreeing one raises ProjectPrefixConflictError — never silently
        preferring either. Agreement keeps the more-qualified spelling: an
        explicit '<workspace>/<project>' outlives a bare local prefix match.
-    3. Otherwise a first segment naming an active project routes there with
-       the remainder as the project-relative path.
-    4. Otherwise, with more than one configured project, raise
-       UnqualifiedPathRefusedError instead of silently defaulting; with at
-       most one configured project, keep today's default resolution.
+    3. Otherwise a first segment naming an addressable project routes there
+       with the remainder as the project-relative path.
+    4. Otherwise, when the session addresses more than one project, raise
+       UnqualifiedPathRefusedError instead of silently defaulting; a session
+       that addresses at most one project keeps today's default resolution.
+
+    Rules 3 and 4 read the set from ``addressable_projects`` — the same set
+    ``ls /`` advertises — so a project can never be listed at the root and then
+    go unrecognized as a path prefix (#1421).
     """
     if project_id is not None:
         return ProjectPathRoute(project=project, path=path, stripped=False)
@@ -1093,22 +1187,32 @@ async def resolve_project_path_route(
 
     detected: Optional[str] = None
     remainder = ""
+    addressable: tuple[AddressableProject, ...] | None = None
     if "/" in candidate:
         detected = await detect_project_from_identifier_prefix(candidate, config, context=context)
         if detected is not None:
             remainder = _detected_route_remainder(candidate, detected)
-    elif candidate:
-        # A single segment can name a project alone (ls "research" lists that
-        # project's root); split_project_prefix requires a slash, so match here.
-        candidate_permalink = generate_permalink(candidate)
-        detected = next(
-            (
-                configured_name
-                for configured_name in config.projects
-                if generate_permalink(configured_name) == candidate_permalink
-            ),
+
+    # Trigger: no workspace-qualified route resolved and the input still has a
+    #   leading segment — a bare mount name ('ls research'), or a cloud session
+    #   whose local config holds only the placeholder 'main' entry.
+    # Why: split_project_prefix needs a slash, and the detection above reads the
+    #   local config and the workspace index; neither can name a project that
+    #   only this session's own listing knows about (#1421). Advertising a mount
+    #   at '/' that a path prefix cannot name is the bug being closed.
+    # Outcome: a first segment matching an addressable project routes there,
+    #   with the remainder as the project-relative path.
+    if detected is None and candidate:
+        addressable = await addressable_projects(context=context)
+        first_segment, _, remaining_segments = candidate.partition("/")
+        first_permalink = generate_permalink(first_segment)
+        mount = next(
+            (item for item in addressable if item.permalink == first_permalink),
             None,
         )
+        if mount is not None:
+            detected = mount.name
+            remainder = remaining_segments
 
     if explicit is not None:
         if detected is None:
@@ -1144,19 +1248,24 @@ async def resolve_project_path_route(
             project=_canonicalize_project_name(detected, config), path=remainder, stripped=True
         )
 
-    # Trigger: no explicit project, no recognized prefix, several projects configured.
-    # Why: the stateless server would otherwise fall back to the default project —
-    #   the measured multi-project failure (#1415) this refusal removes.
+    # Trigger: no explicit project, no recognized prefix, several addressable projects.
+    # Why: the stateless server would otherwise fall back to a default project —
+    #   the measured multi-project failure (#1415) this refusal removes. In a
+    #   team workspace that default is one shared mutable is_default flag, so a
+    #   teammate flipping it silently redirects this call, writes included; the
+    #   refusal is what keeps unqualified references from depending on it (#1421).
     # Outcome: a self-teaching error listing every project in copyable prefix form.
-    if len(config.projects) > 1:
+    if addressable is None:
+        addressable = await addressable_projects(context=context)
+    if len(addressable) > 1:
         first_segment = candidate.split("/", 1)[0] if candidate else ""
         subject = f"no project '{first_segment}'" if first_segment else "no project specified"
         raise UnqualifiedPathRefusedError(
-            f"{subject} — active projects: {_active_project_prefixes(config)}"
+            f"{subject} — active projects: {_addressable_project_prefixes(addressable)}"
         )
 
-    # Single-project ergonomics unchanged; an empty config (cloud-only client)
-    # keeps API-side default resolution.
+    # A session that addresses at most one project has no ambiguity to protect
+    # against, so unqualified input keeps today's default resolution.
     return ProjectPathRoute(project=None, path=path, stripped=False)
 
 
