@@ -567,7 +567,7 @@ def _write_jsonl(path: Path, rows: list[dict]) -> None:
 def run_agent_tasks(
     config: AgentTasksConfig,
     *,
-    model_factory: Callable[[str], ToolAgentModel] = create_tool_agent_model,
+    model_factory: Callable[[str], ToolAgentModel] | None = None,
     session_factory: Callable[[SurfaceRuntime], AgentSession] | None = None,
     judge_factory: Callable[[str], LLMRunner] = create_runner,
 ) -> Path:
@@ -616,7 +616,19 @@ def run_agent_tasks(
 
     # Model and judge parse before any on-disk state is created, so a bad spec
     # fails fast without leaving an empty benchmark home behind.
-    model = model_factory(config.model_spec)
+    # Trigger: a programmatic caller builds AgentTasksConfig and calls this
+    #   directly, rather than through the CLI, which pre-binds temperature.
+    # Why: manifest.json records config.model_temperature, so constructing the
+    #   model without it would run at the factory default while the artifact
+    #   claimed the configured value — a silent provenance lie.
+    # Outcome: the default path carries the recorded temperature; an injected
+    #   factory owns its own configuration and is called unchanged. The default
+    #   is a None sentinel rather than the function itself so the branch reads
+    #   the module attribute at call time, which is also what makes it testable.
+    if model_factory is None:
+        model = create_tool_agent_model(config.model_spec, temperature=config.model_temperature)
+    else:
+        model = model_factory(config.model_spec)
     judge = judge_factory(config.judge_spec) if config.judge_spec else None
     build_session = session_factory or (lambda runtime: McpAgentSession(runtime))
 

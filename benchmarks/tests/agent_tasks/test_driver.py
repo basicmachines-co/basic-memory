@@ -151,6 +151,40 @@ def _run(
     )
 
 
+def test_default_factory_receives_the_recorded_temperature(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The temperature manifest.json records is the one the model is built with.
+
+    A programmatic caller bypasses the CLI, which pre-binds temperature into its
+    factory. Without this the default path would construct at the factory default
+    while the artifact claimed the configured value.
+    """
+    import basic_memory_benchmarks.agent_tasks.driver as driver_module
+
+    captured: dict[str, object] = {}
+
+    def fake_create(spec: str, **kwargs: object):
+        captured["spec"] = spec
+        captured["temperature"] = kwargs.get("temperature", "NOT PASSED")
+        raise RuntimeError("stop after model construction")
+
+    # Patching the module attribute is what the None-sentinel default reads at
+    # call time; a default bound to the function itself would not see this.
+    monkeypatch.setattr(driver_module, "create_tool_agent_model", fake_create)
+    _stub_bm(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+
+    config = _config(tmp_path, surfaces=["rich"], task_ids=["curate-orphans"])
+    config = config.model_copy(update={"model_temperature": None})
+
+    with pytest.raises(RuntimeError, match="stop after model construction"):
+        run_agent_tasks(config)
+
+    assert captured["spec"] == config.model_spec
+    assert captured["temperature"] is None
+
+
 def test_happy_path_writes_all_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     session = FakeSession(RICH_SURFACE.tool_allowlist)
     run_dir = _run(
