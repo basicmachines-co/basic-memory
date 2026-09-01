@@ -1540,10 +1540,19 @@ class BasicMemoryProvider(MemoryProvider):
             lines.append(f"- **{title}** (`{permalink}`) — {preview}")
         return "\n".join(lines)
 
+    # ---- Cron exclusion ----
+    # Hermes cron runs (session ids prefixed "cron_") are not conversations:
+    # a 2-hourly watch that answers [SILENT] wrote two vault notes per tick,
+    # and Basic Memory 0.23.2 dropped the first of the near-simultaneous pair
+    # (index row, no file) every time. Interactive sessions are still captured.
+    def _is_cron_session(self, session_id: str = "") -> bool:
+        return (session_id or self._session_id or "").startswith("cron_")
+
     # ---- Per-turn capture (extract step) ----
     def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "") -> None:
         if (
             not self._capture_per_turn
+            or self._is_cron_session(session_id)
             or not self._initialized
             or self._actor is None
             or self._is_circuit_open()
@@ -1612,7 +1621,12 @@ class BasicMemoryProvider(MemoryProvider):
 
     # ---- Session-end summary ----
     def on_session_end(self, messages: list[dict[str, Any]]) -> None:
-        if not self._capture_session_end or not self._initialized or self._actor is None:
+        if (
+            not self._capture_session_end
+            or self._is_cron_session()
+            or not self._initialized
+            or self._actor is None
+        ):
             return
         try:
             self._write_summary(messages)
