@@ -713,6 +713,19 @@ def test_an_unknown_kind_with_an_unreadable_payload_is_left_alone():
         ("- [decision] @effective:9999-12-31T23:59:59-05:00 Use Redis.", "@effective:"),
         # Trailing junk: one broken token, not a qualifier plus content.
         ("- [decision] @effective[2026-06-10,2026-07-27)x Use Redis.", "@effective["),
+        # The same rule for the point form. A calendar date carrying an instant marker
+        # with no instant behind it used to be peeled off the line and filed as a bare
+        # date, so the author reached for a moment and the index recorded an open-ended
+        # day -- and reproduced it on every reindex.
+        ("- [decision] @occurred:2026-01-01T Use Redis.", "@occurred:2026-01-01T"),
+        ("- [decision] @occurred:2026-01-01Z Use Redis.", "@occurred:2026-01-01Z"),
+        (
+            "- [decision] @occurred:2026-01-01+14:00 Use Redis.",
+            "@occurred:2026-01-01+14:00",
+        ),
+        # A stray keystroke that moved the date itself: June 10 was peeled off the line
+        # and filed as October 6.
+        ("- [decision] @occurred:2026-06-10x Use Redis.", "@occurred:2026-06-10x"),
     ],
 )
 def test_a_payload_that_does_not_read_as_time_stays_content(line: str, kept: str):
