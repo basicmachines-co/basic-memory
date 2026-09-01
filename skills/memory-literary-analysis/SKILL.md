@@ -579,20 +579,32 @@ For the sequence gap — the failure that a count alone cannot catch — take th
 `--json`, which carries `total`, `total_is_exact`, and `has_more`:
 
 ```bash
-bm find --meta 'note_type=chapter' --fields chapter_number --page-size 200 --json \
-  | jq --argjson expected 138 '
-      [.results[].fields.chapter_number | tonumber] as $n
-      | { total, has_more,
-          missing:      ([range(1; $expected + 1)] - $n),
-          duplicates:   ($n | group_by(.) | map(select(length > 1) | .[0])),
-          out_of_range: ($n | map(select(. < 1 or . > $expected)) | unique) }'
+expected=138; page=1; nums='[]'
+while :; do
+  resp=$(bm find --meta 'note_type=chapter' --fields chapter_number \
+           --page-size 200 --page $page --project <work> --json)
+  nums=$(jq -n --argjson acc "$nums" --argjson r "$resp" \
+           '$acc + [$r.results[].fields.chapter_number | tonumber]')
+  [ "$(jq -r '.has_more' <<<"$resp")" = "true" ] || break
+  page=$((page + 1))
+done
+jq -n --argjson n "$nums" --argjson expected "$expected" '
+  { total:        ($n | length),
+    missing:      ([range(1; $expected + 1)] - $n),
+    duplicates:   ($n | group_by(.) | map(select(length > 1) | .[0])),
+    out_of_range: ($n | map(select(. < 1 or . > $expected)) | unique) }'
 ```
+
+The loop is not ceremony. `--page-size` caps at 200, so a single call cannot inventory a work
+with more than 200 chapters — and rerunning it with `--page 2` *replaces* the numbers rather
+than accumulating them, which reports chapters 1-200 as missing on a corpus that is complete.
+Walk until `has_more` is false and check the union.
 
 Pass the work's **actual** chapter count as `$expected` — deriving the range from the highest
 number found lets an incomplete graph pass. With 138 rows numbered 1..137 plus one duplicate,
 a max-derived check reports `missing: []` while a chapter is genuinely absent: the duplicate
 keeps the count right and the missing tail moves the goalpost. The check passes on
-`has_more: false`, `missing: []`, `duplicates: []`, **and** `out_of_range: []` together.
+`missing: []`, `duplicates: []`, **and** `out_of_range: []` together, over the combined pages.
 
 `out_of_range` is not hypothetical: a prologue or epilogue typed as `chapter` lands at 0 or at
 `$expected + 1`, and without that key the report reads clean — every expected number present,
