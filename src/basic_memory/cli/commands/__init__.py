@@ -14,6 +14,7 @@ from . import (
     format,
     schema,
     update,
+    wiki,
     workspace,
 )
 
@@ -37,6 +38,7 @@ __all__ = [
     "format",
     "schema",
     "update",
+    "wiki",
     "workspace",
     "man",
 ]

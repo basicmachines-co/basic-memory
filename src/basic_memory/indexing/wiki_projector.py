@@ -11,6 +11,7 @@ from pathlib import PurePosixPath, PureWindowsPath
 import unicodedata
 
 from basic_memory.runtime.project_partition import RuntimeProjectNoteOperation
+from basic_memory.runtime.storage import RUNTIME_MARKDOWN_FILE_SUFFIXES
 
 OKF_VERSION = "0.2"
 WIKI_PROFILE = "wiki/1"
@@ -543,6 +544,7 @@ def _render_index(
     return _render_document(
         note_type="Index",
         title=title,
+        permalink=_reserved_path(scope, "index.md").removesuffix(".md"),
         source_watermark=source_watermark,
         generated_at=snapshot.source_accepted_at,
         body="\n".join(body),
@@ -589,6 +591,7 @@ def _render_log(
     return _render_document(
         note_type="Log",
         title=title,
+        permalink=_reserved_path(scope, "log.md").removesuffix(".md"),
         source_watermark=source_watermark,
         generated_at=snapshot.source_accepted_at,
         body="\n".join(body),
@@ -618,6 +621,7 @@ def _render_document(
     *,
     note_type: str,
     title: str,
+    permalink: str,
     source_watermark: int,
     generated_at: datetime,
     body: str,
@@ -627,6 +631,7 @@ def _render_document(
         "---",
         f"type: {note_type}",
         "bm_parse_semantics: false",
+        f"permalink: {json.dumps(permalink, ensure_ascii=False)}",
     ]
     if include_okf_version:
         frontmatter.append(f'okf_version: "{OKF_VERSION}"')
@@ -655,7 +660,10 @@ def _is_projector_change(change: WikiSourceChange) -> bool:
 
 def _normalize_note_path(path: str) -> str:
     normalized = _normalize_relative_path(path)
-    if not normalized or PurePosixPath(normalized).suffix.lower() != ".md":
+    if (
+        not normalized
+        or PurePosixPath(normalized).suffix.lower() not in RUNTIME_MARKDOWN_FILE_SUFFIXES
+    ):
         raise ValueError(f"Wiki note path must be project-relative Markdown: {path}")
     if "::" in normalized or any(character in normalized for character in "\r\n[]|`<>"):
         raise ValueError(f"Wiki note path contains unsupported Markdown delimiters: {path}")

@@ -390,6 +390,8 @@ def test_projection_renders_root_and_affected_directory_indexes_and_logs() -> No
     assert "Updated [[guides/setup|Setup]]" in rendered["guides/log.md"]
     assert "bm_parse_semantics: false" in rendered["index.md"]
     assert "bm_parse_semantics: false" in rendered["log.md"]
+    assert 'permalink: "index"' in rendered["index.md"]
+    assert 'permalink: "guides/log"' in rendered["guides/log.md"]
     assert plan.result.source_watermark == 3
     assert plan.result.output_watermark == 3
     assert plan.result.created == 4

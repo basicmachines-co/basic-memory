@@ -2,11 +2,14 @@
 
 import asyncio
 import hashlib
+import os
 import shlex
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 import re
+import secrets
+import stat
 from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 
 import aiofiles
@@ -111,9 +114,10 @@ async def write_file_atomic(path: FilePath, content: str) -> None:
     """
     # Convert string to Path if needed
     path_obj = Path(path) if isinstance(path, str) else path
-    temp_path = path_obj.with_suffix(".tmp")
+    temp_path: Path | None = None
 
     try:
+        temp_path, target_mode = _create_atomic_temp_path(path_obj)
         # Trigger: callers hand us normalized Python text, but the final bytes are allowed
         #          to use the host platform's native newline convention during the write.
         # Why: preserving CRLF on Windows keeps local files aligned with editors like
@@ -124,11 +128,14 @@ async def write_file_atomic(path: FilePath, content: str) -> None:
         async with aiofiles.open(temp_path, mode="w", encoding="utf-8") as f:
             await f.write(content)
 
+        if target_mode is not None:
+            temp_path.chmod(target_mode)
         # Atomic rename (this is fast, doesn't need async)
         temp_path.replace(path_obj)
         logger.debug("Wrote file atomically", path=str(path_obj), content_length=len(content))
     except Exception as e:  # pragma: no cover
-        temp_path.unlink(missing_ok=True)
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
         logger.error("Failed to write file", path=str(path_obj), error=str(e))
         raise FileWriteError(f"Failed to write file {path}: {e}")
 
@@ -136,18 +143,46 @@ async def write_file_atomic(path: FilePath, content: str) -> None:
 async def write_file_atomic_bytes(path: FilePath, content: bytes) -> None:
     """Write bytes atomically without text newline translation."""
     path_obj = Path(path) if isinstance(path, str) else path
-    temp_path = path_obj.with_suffix(".tmp")
+    temp_path: Path | None = None
 
     try:
+        temp_path, target_mode = _create_atomic_temp_path(path_obj)
         async with aiofiles.open(temp_path, mode="wb") as f:
             await f.write(content)
 
+        if target_mode is not None:
+            temp_path.chmod(target_mode)
         temp_path.replace(path_obj)
         logger.debug("Wrote file atomically", path=str(path_obj), content_length=len(content))
     except Exception as e:  # pragma: no cover
-        temp_path.unlink(missing_ok=True)
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
         logger.error("Failed to write file", path=str(path_obj), error=str(e))
         raise FileWriteError(f"Failed to write file {path}: {e}")
+
+
+def _create_atomic_temp_path(target: Path) -> tuple[Path, int | None]:
+    """Reserve a collision-free staging file beside an atomic-write target."""
+    for _attempt in range(10):
+        staging_path = target.parent / f".{target.name}.{secrets.token_hex(8)}.tmp"
+        try:
+            descriptor = os.open(
+                staging_path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o666,
+            )
+        except FileExistsError:  # pragma: no cover - random collision defense
+            continue
+        os.close(descriptor)
+        try:
+            target_mode = stat.S_IMODE(target.stat().st_mode)
+        except FileNotFoundError:
+            target_mode = None
+        except Exception:
+            staging_path.unlink(missing_ok=True)
+            raise
+        return staging_path, target_mode
+    raise FileWriteError(f"Failed to reserve atomic staging file for {target}")
 
 
 async def format_markdown_builtin(path: Path) -> Optional[str]:
