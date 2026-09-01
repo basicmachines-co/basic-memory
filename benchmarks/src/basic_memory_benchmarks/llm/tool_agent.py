@@ -96,6 +96,29 @@ class ToolAgentModel(ABC):
 
 # --- OpenAI-compatible transport ---
 
+REDACTION_MARKER = "[redacted]"
+
+
+def redact_secrets(text: str, secrets: Sequence[str]) -> str:
+    """Mask known secret values in text that is headed for run artifacts.
+
+    Gateways quote the offending request back at you: an OpenAI-compatible 401
+    can echo the rejected key, and proxies name the header they refused. That
+    body then rides an ``LLMRunnerError`` into ``per-task-agent.jsonl`` and
+    ``summary.md``, which ``publish`` copies into the public results bundle —
+    so it is not safe to persist raw.
+
+    Redaction is value-based rather than pattern-based: masking exactly the
+    values we were handed is deterministic and cannot be defeated by an
+    unfamiliar credential format.
+    """
+    # Longest first: when one secret contains another (a bare key and the same
+    # key inside a longer header value), masking the short one first would
+    # leave the remainder of the longer value exposed.
+    for secret in sorted(secrets, key=len, reverse=True):
+        text = text.replace(secret, REDACTION_MARKER)
+    return text
+
 
 def _transcript_to_messages(transcript: Sequence[TranscriptItem]) -> list[dict[str, Any]]:
     messages: list[dict[str, Any]] = []
@@ -160,6 +183,12 @@ class OpenAICompatToolAgent(ToolAgentModel):
         # identity-linked API keys. Values may be sensitive, so they are
         # never recorded in run artifacts.
         self._extra_headers = dict(extra_headers or {})
+        # The exact values that must never reach a run artifact: the bearer
+        # token and every operator-supplied header value. Error bodies are
+        # redacted against this set before they escape _post.
+        self._secret_values: tuple[str, ...] = tuple(
+            value for value in (api_key, *self._extra_headers.values()) if value
+        )
         # temperature=None omits the parameter entirely: Claude 5 models
         # reject any temperature value ("`temperature` is deprecated for this
         # model"), while local openai-compat servers (Ollama) default to a
@@ -194,8 +223,10 @@ class OpenAICompatToolAgent(ToolAgentModel):
                 # A 4xx/5xx body names the actual rejection (bad model id,
                 # missing header, quota) — without it the operator sees only
                 # a bare status code.
+                # Redact before truncating: a secret straddling the 300-char
+                # cut would otherwise survive as an unmatched prefix.
                 if isinstance(exc, httpx.HTTPStatusError):
-                    error_body = exc.response.text[:300]
+                    error_body = redact_secrets(exc.response.text, self._secret_values)[:300]
         detail = f": {error_body}" if error_body else ""
         raise LLMRunnerError(
             f"openai-compat call to {self.base_url} failed after "
