@@ -371,6 +371,44 @@ def test_impossible_iso_dates_are_unread_rather_than_re_interpreted(written: str
 
 @pytest.mark.parametrize(
     "written",
+    [
+        "2026-13-01T10:00:00",  # RFC 3339-shaped, but there is no 13th month
+        "2026-02-30T10:00:00Z",  # RFC 3339-shaped, but February has no 30th
+        "2026-06-10T25:00:00+02:00",  # RFC 3339-shaped, but there is no 25th hour
+    ],
+)
+def test_impossible_iso_timestamps_are_unread_rather_than_re_interpreted(written: str):
+    """dateparser reads `2026-13-01T10:00:00` as 10:00 on the 13th of January.
+
+    The canonical timestamp shape takes the same strict path the canonical date shape
+    does, and for the same reason: an instant nobody wrote would be re-projected by every
+    reindex, while an unread token merely stays observation content.
+    """
+    assert parse_authored_point(written) is None
+
+
+@pytest.mark.parametrize(
+    ("written", "lower"),
+    [
+        ("2026-06-10T14:00", "2026-06-10T14:00:00.000000Z"),  # no seconds
+        ("2026-06-10 10:00 AM", "2026-06-10T10:00:00.000000Z"),  # written the human way
+    ],
+)
+def test_flexible_timestamp_spellings_still_reach_the_lenient_reader(written: str, lower: str):
+    """Only the *canonical* timestamp shape is held to the strict parser.
+
+    The strict branch above is a shape test, not a ban on clock readings: a spelling the
+    canonical form does not cover is still the convenient form, and dateparser reads it.
+    """
+    span = parse_authored_point(written)
+
+    assert span is not None
+    assert span.axis is INSTANT
+    assert span.lower == lower
+
+
+@pytest.mark.parametrize(
+    "written",
     ["paul", "basicmemory.com", "ops@example.com", "someone(2026)", "Redis.", "Q3"],
 )
 def test_text_that_names_no_date_reads_as_nothing(written: str):
@@ -423,13 +461,23 @@ def test_a_year_beyond_the_calendar_is_unread():
     assert parse_authored_point("10000") is None
 
 
-def test_an_authored_instant_that_leaves_the_calendar_in_utc_is_unread():
+@pytest.mark.parametrize(
+    "written",
+    [
+        # The canonical shape, refused by the strict timestamp branch...
+        "9999-12-31T23:59:59-05:00",
+        # ...and the same moment spelled loosely, refused after dateparser reads it.
+        "9999-12-31 23:59:59 -05:00",
+    ],
+)
+def test_an_authored_instant_that_leaves_the_calendar_in_utc_is_unread(written: str):
     """The flexible reader has no bound to refuse, so it reads no date at all.
 
     Its contract is None-for-unreadable, not an exception: `parse_temporal_qualifier`
-    does not guard this call, so anything raised here fails the note.
+    does not guard this call, so anything raised here fails the note. Both spellings are
+    pinned because they take different routes to the same refusal.
     """
-    assert parse_authored_point("9999-12-31T23:59:59-05:00") is None
+    assert parse_authored_point(written) is None
 
 
 # --- TemporalRange normalization ---

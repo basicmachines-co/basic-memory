@@ -311,6 +311,42 @@ async def test_valid_at_and_valid_overlaps_together_are_refused(client, test_pro
 
 
 @pytest.mark.asyncio
+async def test_a_malformed_valid_time_filter_is_refused_rather_than_searched(client, test_project):
+    """A typo in a valid-time filter is an error, not a search that finds nothing."""
+    await _write_cache_layer_note(test_project.name)
+
+    with pytest.raises(ValueError, match="2026-13-01"):
+        await search_notes(
+            project=test_project.name,
+            query="cache layer",
+            valid_at="2026-13-01",
+            output_format="json",
+        )
+
+
+@pytest.mark.asyncio
+async def test_all_projects_search_refuses_a_malformed_filter_instead_of_reporting_nothing(
+    client, test_project
+):
+    """The same typo across every project must not come back as "no matches found".
+
+    Through the real API each per-project leg 400s on the bad bound and returns a
+    `# Search Failed` string, which the fan-out logs and skips as an unavailable project.
+    Skipping every project leaves an empty response that still claims the filter ran --
+    an invalid query wearing the shape of a successful one.
+    """
+    await _write_cache_layer_note(test_project.name)
+
+    with pytest.raises(ValueError, match="2026-13-01"):
+        await search_notes(
+            query="cache layer",
+            search_all_projects=True,
+            valid_at="2026-13-01",
+            output_format="json",
+        )
+
+
+@pytest.mark.asyncio
 async def test_time_kind_alone_is_enough_search_criteria(client, test_project):
     """A valid-time filter is real criteria, so it must not trip the empty-query guard."""
     await _write_cache_layer_note(test_project.name)

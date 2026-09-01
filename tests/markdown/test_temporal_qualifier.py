@@ -697,6 +697,9 @@ def test_an_unknown_kind_with_an_unreadable_payload_is_left_alone():
         # A date that the calendar does not have.
         ("- [decision] @effective[2026-02-30,) Use Redis.", "@effective[2026-02-30,)"),
         ("- [decision] @2026-02-30 Use Redis.", "@2026-02-30"),
+        # A timestamp the calendar does not have. Read leniently it would file 10:00 on
+        # the 13th of January, and every reindex would project that same wrong instant.
+        ("- [decision] @occurred:2026-13-01T10:00:00 Use Redis.", "@occurred:2026-13-01"),
         # A moment that leaves the calendar once it is shifted to UTC.
         ("- [decision] @effective[9999-12-31T23:59:59-05:00,) Use Redis.", "@effective["),
         ("- [decision] @effective:9999-12-31T23:59:59-05:00 Use Redis.", "@effective:"),
