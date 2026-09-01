@@ -63,10 +63,10 @@ from basic_memory.mcp.project_context_identifiers import (
     identifier_path as _identifier_path,
     project_matches_identifier as _project_matches_identifier,
     split_project_prefix as _split_project_prefix,
+    is_workspace_route_shaped as _is_workspace_route_shaped,
+    split_project_permalink_prefix as _split_project_permalink_prefix,
     split_qualified_project_identifier as _split_qualified_project_identifier_impl,
-    split_workspace_identifier_segments as _split_workspace_identifier_segments,
-    split_workspace_memory_url_segments as _split_workspace_memory_url_segments,
-    split_workspace_route_segments as _split_workspace_route_segments,
+    split_workspace_slug_prefix as _split_workspace_slug_prefix,
     unqualified_project_identifier as _unqualified_project_identifier,
 )
 from basic_memory.mcp.workspace_project_index import (
@@ -250,10 +250,7 @@ def _workspace_identifier_discovery_available(
     if _explicit_routing() and _force_local_mode():
         return False
 
-    return (
-        has_cloud_credentials(config)
-        and _split_workspace_identifier_segments(identifier) is not None
-    )
+    return has_cloud_credentials(config) and _is_workspace_route_shaped(identifier)
 
 
 async def resolve_workspace_qualified_memory_url(
@@ -261,32 +258,48 @@ async def resolve_workspace_qualified_memory_url(
     context: Optional[Context] = None,
 ) -> WorkspaceMemoryUrlResolution | None:
     """Resolve a workspace-qualified memory URL against accessible workspaces."""
-    segments = _split_workspace_memory_url_segments(identifier)
-    if segments is None:
+    if not identifier.strip().startswith("memory://"):
         return None
-
-    return await _resolve_workspace_segments(identifier, segments, context=context)
+    return await resolve_workspace_qualified_identifier(identifier, context=context)
 
 
 async def resolve_workspace_qualified_identifier(
     identifier: str,
     context: Optional[Context] = None,
 ) -> WorkspaceMemoryUrlResolution | None:
-    """Resolve a workspace-qualified permalink or memory URL against accessible workspaces."""
-    segments = _split_workspace_identifier_segments(identifier)
-    if segments is None:
+    """Resolve a workspace-qualified permalink or memory URL against accessible workspaces.
+
+    A path is required after the project. That is what keeps
+    'memory://main/notes' readable as project 'main' with note 'notes': a
+    workspace route has to name something *inside* the project, or the same
+    string would have two readings and the project-prefix resolver would lose
+    the ones it has always owned. The posix resolver takes the pathless form
+    (a project root is a legitimate thing to list) and says so at its own call
+    site.
+    """
+    resolved = await _resolve_workspace_route(identifier, context=context)
+    if resolved is None or not resolved[1]:
         return None
+    return resolved[0]
 
-    return await _resolve_workspace_segments(identifier, segments, context=context)
 
-
-async def _resolve_workspace_segments(
+async def _resolve_workspace_route(
     identifier: str,
-    segments: tuple[str, str, str],
     context: Optional[Context] = None,
-) -> WorkspaceMemoryUrlResolution | None:
-    """Resolve parsed workspace/project/path segments against accessible workspaces."""
-    workspace_slug, project_identifier, remainder = segments
+) -> tuple[WorkspaceMemoryUrlResolution, str] | None:
+    """Resolve '<workspace>/<project>[/<path>]' to its project and remaining path.
+
+    The project half is matched by ``split_project_permalink_prefix`` against
+    the projects of *that* workspace, so a project whose permalink spans
+    several segments ('Research/2026') is reachable and the remainder always
+    comes from the same match that chose the project — the two can never
+    disagree about how many segments were consumed.
+    """
+    slug_split = _split_workspace_slug_prefix(identifier)
+    if slug_split is None:
+        return None
+    workspace_slug, rest = slug_split
+
     index = await _ensure_workspace_project_index(context=context)
     workspace = next(
         (item for item in index.workspaces if item.slug.casefold() == workspace_slug.casefold()),
@@ -295,13 +308,23 @@ async def _resolve_workspace_segments(
     if workspace is None:
         return None
 
-    project_permalink = generate_permalink(project_identifier)
-    matches = [
-        entry
-        for entry in index.entries_by_permalink.get(project_permalink, ())
-        if entry.workspace.tenant_id == workspace.tenant_id
-    ]
-    if not matches:
+    entries_by_permalink: dict[str, WorkspaceProjectEntry] = {}
+    for entry in index.entries:
+        if entry.workspace.tenant_id != workspace.tenant_id:
+            continue
+        collision = entries_by_permalink.setdefault(entry.project.permalink, entry)
+        if collision is not entry:
+            details = ", ".join(
+                f"{item.qualified_name} ({item.project.external_id})" for item in (collision, entry)
+            )
+            raise ValueError(
+                f"Project '{entry.project.permalink}' matched multiple projects in workspace "
+                f"'{workspace.name}' ({workspace.slug}). Project permalinks must be unique. "
+                f"Matches: {details}"
+            )
+
+    claimed = _split_project_permalink_prefix(rest, entries_by_permalink)
+    if claimed is None:
         if any(
             failed_workspace.tenant_id == workspace.tenant_id
             for failed_workspace in index.failed_workspaces
@@ -311,32 +334,24 @@ async def _resolve_workspace_segments(
                 "could not be loaded. Retry after workspace discovery recovers."
             )
 
-        # Trigger: first segment matches a workspace slug but the second does not
-        #   match a project in that workspace.
-        # Why: workspace-qualified URLs require both route segments to match; otherwise
+        # Trigger: first segment matches a workspace slug but nothing after it
+        #   matches a project in that workspace.
+        # Why: workspace-qualified routes require both halves to match; otherwise
         #   existing project-prefixed URLs like `memory://main/notes/foo` can collide
         #   with a workspace slug named `main`.
         # Outcome: treat this as not workspace-qualified and let the caller use
         #   the existing project-prefix/default-project resolver.
         return None
-    if len(matches) > 1:
-        details = ", ".join(
-            f"{entry.qualified_name} ({entry.project.external_id})" for entry in matches
-        )
-        raise ValueError(
-            f"Project '{project_identifier}' matched multiple projects in workspace "
-            f"'{workspace.name}' ({workspace.slug}). Project permalinks must be unique. "
-            f"Matches: {details}"
-        )
 
-    entry = matches[0]
+    project_permalink, remainder = claimed
+    entry = entries_by_permalink[project_permalink]
     canonical_path = _canonical_memory_path_for_workspace(
         workspace_slug=entry.workspace.slug,
         workspace_type=entry.workspace.workspace_type,
         project_permalink=entry.project.permalink,
         remainder=remainder,
     )
-    return WorkspaceMemoryUrlResolution(entry=entry, canonical_path=canonical_path)
+    return WorkspaceMemoryUrlResolution(entry=entry, canonical_path=canonical_path), remainder
 
 
 async def get_available_workspaces(context: Optional[Context] = None) -> list[WorkspaceInfo]:
@@ -1164,25 +1179,16 @@ def _claim_mount_prefix(
 ) -> tuple[AddressableProject, str] | None:
     """Return the mount whose permalink claims the candidate's leading segments.
 
-    A project name may itself contain '/', and generate_permalink keeps that
-    separator, so a project named 'Research/2026' advertises the two-segment
-    mount '/research/2026'. Comparing only the first segment would leave that
-    mount listed at the root and impossible to enter, so the whole permalink has
-    to match; the longest match wins, which is also the only reading that can be
-    right when one mount's permalink prefixes another's.
+    The mount table is one candidate set among several, so the matching itself
+    lives in ``split_project_permalink_prefix``; this only maps the winning
+    permalink back to the project that owns it.
     """
-    segments = candidate.split("/")
-    claimed: tuple[AddressableProject, str] | None = None
-    claimed_depth = 0
-    for project in projects:
-        depth = project.permalink.count("/") + 1
-        if depth > len(segments) or depth <= claimed_depth:
-            continue
-        if generate_permalink("/".join(segments[:depth])) != project.permalink:
-            continue
-        claimed = (project, "/".join(segments[depth:]))
-        claimed_depth = depth
-    return claimed
+    by_permalink = {project.permalink: project for project in projects}
+    claimed = _split_project_permalink_prefix(candidate, by_permalink)
+    if claimed is None:
+        return None
+    permalink, remainder = claimed
+    return by_permalink[permalink], remainder
 
 
 async def _detect_workspace_qualified_route(
@@ -1211,29 +1217,31 @@ async def _detect_workspace_qualified_route(
     that project's root — without which 'ls acme/docs/notes' resolved while
     'ls acme/docs' (that same project's root) had no spelling at all.
     """
-    segments = _split_workspace_route_segments(candidate)
-    if segments is None:
+    if _split_workspace_slug_prefix(candidate) is None:
         return None
     # One guard covers both shapes. For the three-segment form it matches the
     # identifier detector this replaced: a local session holding cloud
     # credentials may consult discovery for an unmistakable workspace route. A
-    # two-segment identifier never splits into three, so for the pathless root
-    # form the same call narrows to cloud-routed sessions, as it did before.
+    # two-segment identifier is not route-shaped, so for the pathless root form
+    # the same call narrows to cloud-routed sessions, as it did before.
     if not _workspace_identifier_discovery_available(candidate, config):
         return None
 
     try:
-        resolution = await _resolve_workspace_segments(candidate, segments, context=context)
+        resolved = await _resolve_workspace_route(candidate, context=context)
     except ValueError as exc:
         if any(error in str(exc).lower() for error in _WORKSPACE_DISCOVERY_FALLBACK_ERRORS):
             return None
         raise
 
-    if resolution is None:
+    if resolved is None:
         return None
-    # The remainder comes straight from the parse, so the route and the path it
-    # leaves behind can never disagree about how many segments were consumed.
-    return resolution.project_identifier, segments[2]
+    # Unlike the memory-URL caller, the pathless form is kept: a project root is
+    # a legitimate thing to list. The remainder comes from the same match that
+    # chose the project, so the route and the path it leaves behind can never
+    # disagree about how many segments were consumed.
+    resolution, remainder = resolved
+    return resolution.project_identifier, remainder
 
 
 def _project_routes_agree(detected: str, explicit: str) -> bool:

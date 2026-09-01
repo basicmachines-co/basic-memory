@@ -27,9 +27,11 @@ from basic_memory.mcp.project_context import (
     _project_routes_agree,
     resolve_project_path_route,
     resolve_workspace_project_identifier,
+    resolve_workspace_qualified_identifier,
+    resolve_workspace_qualified_memory_url,
 )
 from basic_memory.mcp.project_context_identifiers import (
-    split_workspace_route_segments,
+    split_project_permalink_prefix,
     unqualified_project_identifier,
 )
 from basic_memory.mcp.tools import grep, ls
@@ -216,14 +218,34 @@ async def test_conflicting_prefix_raises_naming_both(multi_project_config):
 # matched the route, so the qualified-path tests below pin it end to end.
 
 
-def test_split_workspace_route_segments_needs_two_named_segments():
-    """The path form makes the trailing path optional, but both route segments
-    still have to be there: one segment names no project, and an empty one (a
-    '//' in the input) names nothing at all."""
-    assert split_workspace_route_segments("acme") is None
-    assert split_workspace_route_segments("acme//docs") is None
-    assert split_workspace_route_segments("acme/docs") == ("acme", "docs", "")
-    assert split_workspace_route_segments("acme/docs/notes/x") == ("acme", "docs", "notes/x")
+def test_split_project_permalink_prefix_matches_whole_permalinks_longest_first():
+    """The one place a path becomes (project, project-relative path). It takes
+    the candidate set precisely because how many segments a project consumes is
+    a fact about the known projects, not about the string."""
+    permalinks = ["research", "research/2026"]
+
+    assert split_project_permalink_prefix("research/2026/notes", permalinks) == (
+        "research/2026",
+        "notes",
+    )
+    assert split_project_permalink_prefix("research/notes", permalinks) == ("research", "notes")
+    assert split_project_permalink_prefix("research/2026", permalinks) == ("research/2026", "")
+    assert split_project_permalink_prefix("engineering/notes", permalinks) is None
+    # Spelling is normalized per segment, so display names match their permalink.
+    assert split_project_permalink_prefix("My Research/notes", ["my-research"]) == (
+        "my-research",
+        "notes",
+    )
+
+
+@pytest.mark.asyncio
+async def test_workspace_resolvers_reject_non_routes_without_discovery():
+    """Both entry points refuse shapes that cannot be a workspace route before
+    touching discovery — no workspace index is built for a plain memory URL or a
+    single-segment identifier, which is what keeps read_note and search off the
+    cloud round trip."""
+    assert await resolve_workspace_qualified_memory_url("second-project/notes/x") is None
+    assert await resolve_workspace_qualified_identifier("single-segment") is None
 
 
 def test_project_routes_agree_across_mixed_qualification():
@@ -504,6 +526,27 @@ async def test_cloud_workspace_qualified_project_root_routes(cloud_session):
     route = await resolve_project_path_route("team/research", project=None, project_id=None)
 
     assert route == ProjectPathRoute(project="team/research", path="", stripped=True)
+
+
+@pytest.mark.asyncio
+async def test_cloud_workspace_route_matches_multi_segment_project_permalink(cloud_session):
+    """A workspace route splits project from path by matching that workspace's
+    project permalinks, not by taking one segment. The mount table learned this
+    first; the workspace parser rediscovered the same wrong assumption, so both
+    now go through split_project_permalink_prefix and neither can drift."""
+    cloud_session("Research/2026", "research")
+
+    nested = await resolve_project_path_route(
+        "team/research/2026/notes", project=None, project_id=None
+    )
+    assert nested == ProjectPathRoute(project="team/research/2026", path="notes", stripped=True)
+
+    root = await resolve_project_path_route("team/research/2026", project=None, project_id=None)
+    assert root == ProjectPathRoute(project="team/research/2026", path="", stripped=True)
+
+    # The shorter sibling still claims its own paths — longest match, not first.
+    sibling = await resolve_project_path_route("team/research/notes", project=None, project_id=None)
+    assert sibling == ProjectPathRoute(project="team/research", path="notes", stripped=True)
 
 
 @pytest.mark.asyncio
