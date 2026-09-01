@@ -13,6 +13,7 @@ both search dialects. Two properties carry the whole design and are pinned here:
 from datetime import datetime, timedelta
 
 import pytest
+from freezegun import freeze_time
 
 from basic_memory.temporal import (
     DEFAULT_DATE_ORDER,
@@ -405,6 +406,86 @@ def test_flexible_timestamp_spellings_still_reach_the_lenient_reader(written: st
     assert span is not None
     assert span.axis is INSTANT
     assert span.lower == lower
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        # A month that does not exist, with nothing after it. The two strict branches
+        # above match only a token that is *exactly* a canonical date or timestamp, so
+        # this shape used to reach dateparser untouched.
+        "2026-13",
+        "2026-00",
+        # ...the same, carrying a time the canonical shape does not cover: separated by
+        # a space rather than `T`, or written to minute precision.
+        "2026-13-01 10:00:00",
+        "2026-13-01 10:00",
+        "2026-13-01T10:00",
+        "2026-02-30 10:00:00",
+        "2026-13-01 10:00:00Z",
+        "2026-06-31T09:30",
+    ],
+)
+def test_iso_shaped_points_with_impossible_components_are_unread(written: str):
+    """An ISO-shaped point must mean its components literally, whatever trails it.
+
+    dateparser reads month 13 as *day* 13 and then supplies the month from today, so
+    these all used to file a date nobody wrote. Guarding only the two canonical shapes
+    left every other ISO spelling -- a bare year-month, a space-separated timestamp, a
+    minute-precision one -- on the lenient path.
+    """
+    assert parse_authored_point(written) is None
+
+
+@pytest.mark.parametrize("today", ["2026-03-07", "2026-09-01"])
+def test_an_impossible_iso_month_is_not_completed_from_the_indexing_date(today: str):
+    """The worst shape of all: a date whose meaning depended on when the reindex ran.
+
+    `2026-13` gave dateparser a year and a day but no month, and it filled the gap from
+    the current date -- `[2026-03-13,)` in March, `[2026-09-13,)` in September. The same
+    note projected different valid time on different days, so a query that matched it
+    last week could stop matching it today with nothing having been edited.
+    """
+    with freeze_time(today):
+        assert parse_authored_point("2026-13") is None
+
+
+@pytest.mark.parametrize(
+    ("written", "literal", "axis"),
+    [
+        # A real year-month, which is still read as the month it delimits.
+        ("2026-06", "[2026-06-01,2026-07-01)", DATE),
+        ("9999-12", "[9999-12-01,)", DATE),
+        # A real date carrying a time the canonical `T` shape does not cover. These are
+        # the spellings the guard above is closest to, so they are pinned explicitly.
+        ("2026-06-10 14:00:00", "[2026-06-10T14:00:00.000000Z,)", INSTANT),
+        ("2026-06-10 14:00:00Z", "[2026-06-10T14:00:00.000000Z,)", INSTANT),
+        ("2026-06-10 14:00:00+02:00", "[2026-06-10T12:00:00.000000Z,)", INSTANT),
+        ("2026-06-10 10:00", "[2026-06-10T10:00:00.000000Z,)", INSTANT),
+        ("2026-06-10T14:00", "[2026-06-10T14:00:00.000000Z,)", INSTANT),
+        ("2026-06-10 10:00 AM", "[2026-06-10T10:00:00.000000Z,)", INSTANT),
+        # Not ISO-shaped at all: single-digit components, slashes, words, relative
+        # phrases. The guard must not so much as look at these.
+        ("2026-1-5", "[2026-01-05,)", DATE),
+        ("2026/03/04", "[2026-03-04,)", DATE),
+        ("June 10, 2026", "[2026-06-10,)", DATE),
+    ],
+)
+def test_the_iso_guard_leaves_every_readable_spelling_to_the_lenient_reader(
+    written: str, literal: str, axis
+):
+    """The guard is a validity test on ISO components, not a ban on flexible spellings.
+
+    Refusing an impossible ISO date must cost nothing that already reads. Anything whose
+    leading components name a real date -- and anything not ISO-shaped at all -- goes on
+    reaching dateparser exactly as before, so a future tightening cannot quietly take
+    these spellings without failing here.
+    """
+    span = parse_authored_point(written)
+
+    assert span is not None
+    assert str(span) == literal
+    assert span.axis is axis
 
 
 @pytest.mark.parametrize(

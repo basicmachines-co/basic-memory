@@ -535,6 +535,28 @@ def _date_data_parser(date_order: DateOrder) -> "DateDataParser":
     )
 
 
+# The ISO calendar components a point opens with, when it opens with any: `YYYY-MM`
+# optionally followed by `-DD`. Not a bound grammar -- it deliberately matches a *prefix*
+# and leaves whatever follows (a time, an offset, nothing) to the reader below. The
+# lookahead is what keeps it to ISO shapes: `2026-06-100` and `2026-06-1` are not ones,
+# so they are none of this guard's business.
+_ISO_CALENDAR_PREFIX = re.compile(r"^(\d{4})-(\d{2})(?:-(\d{2}))?(?![\d-])")
+
+
+def _names_a_real_calendar_date(year: str, month: str, day: str | None) -> bool:
+    """Whether ISO-shaped calendar components name a date that exists.
+
+    A month-only prefix is judged on the first of that month: the day is a component the
+    author did not write, not one to guess at. `date` is the authority rather than a range
+    check because it already owns leap years and month lengths.
+    """
+    try:
+        date(int(year), int(month), 1 if day is None else int(day))
+    except ValueError:
+        return False
+    return True
+
+
 def _next_month_start(year: int, month: int) -> date | None:
     """The first day of the month after `year`-`month`, or None past the calendar's end.
 
@@ -620,6 +642,22 @@ def parse_authored_point(
             lower=instant,
             lower_inclusive=True,
         )
+
+    iso_calendar = _ISO_CALENDAR_PREFIX.match(point)
+    if iso_calendar is not None and not _names_a_real_calendar_date(*iso_calendar.groups()):
+        # Trigger: the text opens with ISO calendar components that name no real date.
+        # Why: the two branches above only match a token that is *exactly* a canonical
+        #   date or timestamp, so every other ISO-shaped spelling still reached
+        #   dateparser -- a bare `2026-13`, a space-separated `2026-13-01 10:00:00`, a
+        #   minute-precision `2026-13-01T10:00`. It reads the impossible month as a day
+        #   and then fills the month it never got from *today*, so `2026-13` projects a
+        #   different date on every reindex day: the same note yields different data
+        #   depending on when it was indexed. Only the leading calendar components are
+        #   judged here -- an impossible *time* already reads as no date at all -- so
+        #   every non-ISO spelling and every ISO date that does exist still reach the
+        #   flexible reader below.
+        # Outcome: refused, and the token stays ordinary observation content.
+        return None
 
     date_data = _date_data_parser(date_order).get_date_data(point)
     moment = date_data.date_obj
