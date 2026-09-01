@@ -19,6 +19,7 @@ from basic_memory.indexing.wiki_projector import (
     WikiReservedDocument,
     WikiSourceChange,
     WikiSourceNote,
+    WIKI_LOG_ENTRY_LIMIT,
     affected_wiki_scopes,
     plan_wiki_projection,
 )
@@ -754,6 +755,39 @@ def test_created_and_moved_changes_render_in_the_log() -> None:
 
     assert "Created [[created|Created]]" in log
     assert "Moved `old.md` to [[moved|Moved]]" in log
+
+
+def test_log_keeps_only_the_25_most_recent_changes() -> None:
+    changes = tuple(
+        WikiSourceChange(
+            partition_position=position,
+            operation=WikiChangeOperation.updated,
+            path="note.md",
+            permalink="note",
+            title=f"Revision {position}",
+            accepted_at=ACCEPTED_AT,
+            materialized=True,
+            source="web",
+        )
+        for position in range(1, WIKI_LOG_ENTRY_LIMIT + 2)
+    )
+    snapshot = WikiProjectionSnapshot(
+        project_id="project-88",
+        project_name="Project 88",
+        source_partition_position=len(changes),
+        current_output_watermark=0,
+        source_accepted_at=ACCEPTED_AT,
+        notes=(),
+        changes=changes,
+    )
+
+    plan = plan_wiki_projection(_request(position=len(changes), scopes=()), snapshot)
+    log = next(write.content.decode() for write in plan.writes if write.path == "log.md")
+
+    assert log.count("\n- ") == WIKI_LOG_ENTRY_LIMIT
+    assert f"Updated [[note|Revision {WIKI_LOG_ENTRY_LIMIT + 1}]]" in log
+    assert "Updated [[note|Revision 2]]" in log
+    assert "Updated [[note|Revision 1]]" not in log
 
 
 def test_log_preserves_ampersands_in_code_formatted_paths() -> None:

@@ -18,6 +18,7 @@ WIKI_PROFILE = "wiki/1"
 WIKI_PROJECTOR_VERSION = "wiki/1.0.0"
 WIKI_PROJECTOR_NAME = "Basic Memory Wiki Projector"
 WIKI_PROJECTOR_SOURCE = "wiki_projector"
+WIKI_LOG_ENTRY_LIMIT = 25
 RESERVED_WIKI_FILENAMES = frozenset({"index.md", "log.md"})
 WINDOWS_RESERVED_NAMES = frozenset(
     {"CON", "PRN", "AUX", "NUL"}
@@ -575,7 +576,7 @@ def _render_log(
             ),
             key=lambda change: change.partition_position,
             reverse=True,
-        )
+        )[:WIKI_LOG_ENTRY_LIMIT]
     )
     title = (
         f"{snapshot.project_name} log"
