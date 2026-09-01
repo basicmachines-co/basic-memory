@@ -131,6 +131,86 @@ def test_http_error_includes_response_body(monkeypatch: pytest.MonkeyPatch) -> N
         agent.propose([UserMessage(text="hi")], [SEARCH_TOOL])
 
 
+SECRET_KEY = "sk-live-0123456789abcdef"
+SECRET_HEADER_VALUE = "wrkspc_sensitive_9999"
+
+
+def _echoing_401(url: str, **kwargs: Any) -> httpx.Response:
+    """A gateway that quotes the offending request headers back in its body."""
+    return httpx.Response(
+        status_code=401,
+        json={
+            "error": {
+                "message": "invalid api key",
+                "request_headers": {
+                    "Authorization": f"Bearer {SECRET_KEY}",
+                    "anthropic-workspace-id": SECRET_HEADER_VALUE,
+                },
+            }
+        },
+        request=httpx.Request("POST", url),
+    )
+
+
+def _secretive_agent(**kwargs: Any) -> OpenAICompatToolAgent:
+    return OpenAICompatToolAgent(
+        "m",
+        "http://localhost/v1",
+        api_key=SECRET_KEY,
+        extra_headers={"anthropic-workspace-id": SECRET_HEADER_VALUE},
+        max_retries=0,
+        **kwargs,
+    )
+
+
+def test_error_body_redacts_secrets_but_keeps_the_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An echoed key/header must not ride the error into run artifacts."""
+    monkeypatch.setattr(tool_agent.httpx, "post", _echoing_401)
+
+    with pytest.raises(LLMRunnerError) as caught:
+        _secretive_agent().propose([UserMessage(text="hi")], [SEARCH_TOOL])
+
+    message = str(caught.value)
+    assert SECRET_KEY not in message
+    assert SECRET_HEADER_VALUE not in message
+    assert tool_agent.REDACTION_MARKER in message
+    # The diagnostic the body was included for must survive redaction.
+    assert "invalid api key" in message
+
+
+def test_redaction_precedes_body_truncation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A secret straddling the 300-char cut must not survive as a prefix."""
+
+    # 290 padding + a 20-char key: a naive text[:300] keeps the first 10
+    # characters of the key, which is what this test must catch.
+    def padded_401(url: str, **kwargs: Any) -> httpx.Response:
+        return httpx.Response(
+            status_code=401,
+            text=("x" * 290) + SECRET_KEY,
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr(tool_agent.httpx, "post", padded_401)
+
+    with pytest.raises(LLMRunnerError) as caught:
+        _secretive_agent().propose([UserMessage(text="hi")], [SEARCH_TOOL])
+
+    assert SECRET_KEY[:10] not in str(caught.value)
+
+
+def test_redact_secrets_masks_longest_match_first() -> None:
+    # A short secret contained in a longer one must not be masked first, or
+    # the remainder of the longer value would stay in the text.
+    masked = tool_agent.redact_secrets("token=abc123-suffix", ["abc123", "abc123-suffix"])
+    assert masked == f"token={tool_agent.REDACTION_MARKER}"
+
+
+def test_redact_secrets_without_secrets_is_identity() -> None:
+    assert tool_agent.redact_secrets("nothing to hide", []) == "nothing to hide"
+
+
 class TestOpenAICompatToolAgent:
     def _agent(self) -> OpenAICompatToolAgent:
         return OpenAICompatToolAgent("qwen3", "http://localhost:11434/v1", max_retries=0)

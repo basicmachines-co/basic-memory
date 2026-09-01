@@ -7,10 +7,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 from mcp.types import CallToolResult, TextContent
 
 import basic_memory_benchmarks.agent_tasks.driver as driver
+import basic_memory_benchmarks.llm.tool_agent as tool_agent
 from basic_memory_benchmarks.agent_tasks.driver import (
     SessionTerminatedError,
     SurfaceRuntime,
@@ -29,7 +31,12 @@ from basic_memory_benchmarks.agent_tasks.surfaces import (
 from basic_memory_benchmarks.converters.xafs_to_corpus import convert_xafs_to_corpus
 from basic_memory_benchmarks.fairness import validate_surface_fairness
 from basic_memory_benchmarks.llm.runners import LLMResult, LLMRunner, LLMRunnerError
-from basic_memory_benchmarks.llm.tool_agent import ScriptedToolAgent, ToolDef
+from basic_memory_benchmarks.llm.tool_agent import (
+    OpenAICompatToolAgent,
+    ScriptedToolAgent,
+    ToolDef,
+    UserMessage,
+)
 from basic_memory_benchmarks.utils import sha256_file
 from xafs_fixture import (
     DP1_CROSS_FORMAT_ANSWER,
@@ -818,3 +825,52 @@ class TestToolOutcomeFromResult:
         outcome = tool_outcome_from_result(result)
         assert outcome.is_error is False
         assert "title" in outcome.text
+
+
+def test_endpoint_secrets_never_reach_the_saved_error_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end leak proof for the path a 401 body takes into run artifacts.
+
+    A gateway that echoes the rejected credentials would otherwise carry the
+    --model-header value and the bearer token through LLMRunnerError into
+    per-task-agent.jsonl, which `publish` copies into the public bundle.
+    """
+    secret_key = "sk-live-0123456789abcdef"
+    secret_header = "wrkspc_sensitive_9999"
+
+    def echoing_401(url: str, **kwargs: Any) -> httpx.Response:
+        return httpx.Response(
+            status_code=401,
+            json={
+                "error": {
+                    "message": "invalid api key",
+                    "seen": {"authorization": secret_key, "workspace": secret_header},
+                }
+            },
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr(tool_agent.httpx, "post", echoing_401)
+    agent = OpenAICompatToolAgent(
+        "m",
+        "http://localhost/v1",
+        api_key=secret_key,
+        extra_headers={"anthropic-workspace-id": secret_header},
+        max_retries=0,
+    )
+    task = AgentTaskSpec(id="t1", skill="s", source="src", prompt="p", graders=())
+
+    with pytest.raises(LLMRunnerError) as caught:
+        agent.propose([UserMessage(text="hi")], [ToolDef("search", "d", {})])
+
+    # Exactly what run_agent_tasks does with an LLMRunnerError cause.
+    row = driver._errored_result("bm-rich", task, str(caught.value))
+    artifact = tmp_path / "per-task-agent.jsonl"
+    driver._write_jsonl(artifact, [row.model_dump(mode="json", exclude={"turn_records"})])
+
+    saved = artifact.read_text(encoding="utf-8")
+    assert secret_key not in saved
+    assert secret_header not in saved
+    # The operator still learns why the call was rejected.
+    assert "invalid api key" in saved
