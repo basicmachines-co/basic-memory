@@ -34,8 +34,8 @@ the work in a long analysis — prefer the POSIX read verbs where they are avail
 
 | Need | Use | Instead of |
 |------|-----|-----------|
-| A section of a long note | `cat <note> --section EXAMPLES` | reading the whole note |
-| A line range of the source text | `cat <file> --lines 4200-4890` | loading the whole book |
+| A section of a long note | `cat <note> --section Observations` | reading the whole note |
+| A line range of the source text | `cat <source>.txt --lines 4200-4890` | loading the whole book |
 | Notes matching frontmatter | `find --meta status=active` | reading notes to check fields |
 | Fields across many notes | `find --meta ... --fields pov,setting` | one read per note |
 | Where something lives | `ls`, `tree`, `find --name '*.md'` | listing everything |
@@ -49,6 +49,23 @@ The two rules that matter across a 100+ chapter run:
 
 These compound. In measured runs, predicate queries replaced 28-call scans with a single
 call; across 138 chapters that difference is the run.
+
+Three sharp edges to know before you write a query. The first two fail *quietly* — a wrong
+answer, exit 0, no warning — so learn them here rather than from a graph you thought you had
+audited:
+
+- **`--meta` reads frontmatter, and matches case-sensitively.** `note_type` is an alias for
+  the frontmatter `type:` key, compared with SQL `=`. A note written with
+  `note_type="Chapter"` matches `--meta 'note_type=Chapter'` and **not**
+  `--meta 'note_type=chapter'` — the lowercase form returns zero rows and exit 0. Confusingly,
+  a result row *displays* the snake-cased index projection (`"note_type": "chapter"`,
+  `"literary_device"`); that is not the value to query with. Query with the casing your
+  schemas authored.
+- **`find` pages, and the default page is 10.** Any query whose answer is "all N chapters"
+  needs `--page-size 200` (the maximum) — see [Coverage Checks](#coverage-checks).
+- **`--name` cannot combine with `--meta`.** The metadata search matches slugified permalinks,
+  not filenames. Scope a `--meta` query with the positional path instead: `find /characters
+  --meta 'note_type=Character'`.
 
 If the POSIX verbs are unavailable, every step below still works with `search_notes`,
 `read_note`, and `list_directory` — it just costs more.
@@ -239,6 +256,7 @@ Schema for literary technique and device notes.
 
 ```
 <project>/
+  <work>.txt         # the source text, verbatim (see Phase 2)
   schema/            # 6 schema definitions
   chapters/          # one note per chapter/section + prologue/epilogue
   characters/
@@ -298,14 +316,41 @@ Stubs don't need to be complete — they give `[[wiki-link]]` targets and will b
 
 Obtain the full text and identify chapter/section boundaries. For public domain works, Project Gutenberg is a good source. For copyrighted works, work from a physical or licensed digital copy.
 
-**Build a chapter offset map once, before processing.** Scan the text for chapter headings
-and record the line range of each chapter, then read chapters by range rather than reloading
-the book:
+**Put the source text inside the project directory, as `.txt`, and index it once.** `bm cat`
+resolves a *note identifier*, not a filesystem path — it can only reach a file the project
+index has observed. A one-time index pass gives the raw text an entity row, after which the
+line-range slice works against it:
 
 ```bash
-grep -n '^CHAPTER ' moby-dick.txt        # or the work's heading pattern
-bm cat moby-dick.txt --lines 4200-4890   # one chapter, not the whole text
+cp ~/Downloads/moby-dick.txt ~/basic-memory/moby-dick/moby-dick.txt
+bm reindex --search -p moby-dick          # one pass; the .txt becomes readable
 ```
+
+Two constraints that make this the right shape, both worth respecting:
+
+- **Keep it `.txt`, do not convert it to `.md`.** Basic Memory injects frontmatter into
+  markdown notes, which shifts every line number by the height of that block — an offset map
+  built from the original file would then be silently wrong. A `.txt` is stored verbatim, so
+  its line numbers stay 1:1 with the file on disk.
+- **Keep it inside the project.** A source text elsewhere on disk is not an entity, and
+  `bm cat` answers `Error: Entity not found`. If you must leave it outside, drop the BM verbs
+  for the source and use plain shell (`sed -n '4200,4890p' <path>`) — the notes still get the
+  BM verbs, only the raw source falls back to the shell.
+
+**Then build a chapter offset map once, before processing.** Scan the text for chapter
+headings and record the line range of each chapter, then read chapters by range rather than
+reloading the book:
+
+```bash
+grep -n '^CHAPTER ' ~/basic-memory/moby-dick/moby-dick.txt   # heading -> line number
+bm cat moby-dick.txt --lines 4200-4890 --plain               # one chapter, not the whole text
+```
+
+`grep -n` here is the shell's grep on a filesystem path (this is the map-building step, and
+it needs the file). `bm cat` then takes the *note identifier* — `moby-dick.txt`, the file's
+path within the project — and returns exactly that slice plus a `lines 4200-4890 of N`
+footer. `bm head moby-dick.txt -n 40` is the cheap way to eyeball the heading format before
+writing the grep pattern.
 
 Store the map in the project (a note or a small JSON file) so later batches — and a resumed
 run after context compaction — do not have to rediscover it. On a long work this is the
@@ -330,8 +375,8 @@ Adjust batch size based on chapter length and density. Short, action-heavy chapt
 For each chapter:
 
 **1. Read the chapter carefully.** Read the chapter's line range from the offset map
-(`cat <source> --lines <start>-<end>`), not the whole file. Read the actual text — never
-work from memory or a summary; textual evidence is the entire point.
+(`bm cat <source>.txt --lines <start>-<end>`), not the whole file. Read the actual text —
+never work from memory or a summary; textual evidence is the entire point.
 
 **2. Create the chapter note:**
 
@@ -424,13 +469,18 @@ After all chapters are processed:
 Do not re-read every note to decide what is thin. Query for it:
 
 ```bash
-bm find --meta 'note_type=chapter' --fields chapter_number,pov,setting   # coverage at a glance
-bm find --meta 'note_type=character' --fields role,status                # who is still a stub
-bm find --meta 'chapter_number>100' --fields pov                         # late-book POV drift
+bm find --meta 'note_type=Chapter' --fields chapter_number,pov,setting --page-size 200
+bm find --meta 'note_type=Character' --fields role,status --page-size 200   # who is still a stub
+bm find --meta 'chapter_number>100' --fields pov --page-size 200           # late-book POV drift
 ```
 
-Rows with null fields are the work queue. This turns "audit the graph" from a read of every
-note into one call per question.
+A field a note never set comes back as a blank cell (`null` under `--json`), so rows with
+blanks are the work queue. This turns "audit the graph" from a read of every note into one
+call per question.
+
+Note the capitalized `Chapter`/`Character` — they must match the `note_type` your Phase 0
+schemas authored, exactly. And `--page-size 200` is not decoration: without it these return
+the first 10 rows and the work queue looks ten items long.
 
 ### Character Arcs
 For each major character, write a full `[arc]` summary observation covering their trajectory across the work.
@@ -506,13 +556,33 @@ Fix issues found — common fixes:
 Schema validation proves notes match their shape. These prove the graph is *complete*:
 
 ```bash
-bm find --meta 'note_type=chapter' --fields chapter_number      # every chapter present?
-bm find --meta 'note_type=chapter' --fields pov,setting         # any missing required context?
-bm find --name '*.md' --meta 'note_type=character'              # entity inventory vs. seed list
+bm find --meta 'note_type=Chapter' --fields chapter_number --page-size 200   # every chapter present?
+bm find --meta 'note_type=Chapter' --fields pov,setting --page-size 200      # missing context?
+bm find /characters --meta 'note_type=Character' --fields role --page-size 200  # inventory vs. seed list
 ```
 
-Compare the chapter count against the work's actual chapter count, and check for gaps in the
-sequence — a missing chapter in the middle of a batch is the most common processing failure
+**A coverage check that pages is not a coverage check.** `bm find` defaults to
+`--page-size 10`, so the un-sized form of the first query "proves" a 138-chapter work has 10
+chapters. 200 is the maximum page size; past that, iterate with `--page 2`, `--page 3`, … .
+Scope a `--meta` query with the positional path (`/characters`), never `--name` — the two
+options are mutually exclusive, because metadata search matches slugified permalinks rather
+than filenames.
+
+Read the count off the footer, not off the rows you can see. Every `find` result reports
+`page 1 • total 138`, and appends `• more available (--page)` when the page truncated the
+answer — that suffix appearing is the check *failing*, whatever the visible rows say.
+
+For the sequence gap — the failure that a count alone cannot catch — take the numbers from
+`--json`, which carries `total`, `total_is_exact`, and `has_more`:
+
+```bash
+bm find --meta 'note_type=Chapter' --fields chapter_number --page-size 200 --json \
+  | jq '{total, has_more, missing: ([.results[].fields.chapter_number | tonumber] | sort
+         | (([range(1; (max + 1))]) - .))}'
+```
+
+`has_more: false` with `missing: []` is the check passing. Compare `total` against the work's
+actual chapter count — a gap in the middle of a batch is the most common processing failure
 and the easiest to miss by eye.
 
 ### Relation Consistency
@@ -533,10 +603,12 @@ orphans behind has made the graph worse.
 With the graph complete, traverse it to find what the chapter-by-chapter pass could not see:
 
 ```bash
-bm tool build-context --url 'memory://characters/major/*' --depth 2   # the character web
-bm find --meta 'note_type=theme' --fields prevalence                  # thematic weight
+bm tool build-context 'memory://characters/major/*' --depth 2         # the character web
+bm find --meta 'note_type=Theme' --fields prevalence --page-size 200  # thematic weight
 bm grep "doubloon" --project <work>                                   # a symbol across the work
 ```
+
+`build-context` takes its URL as a positional argument — there is no `--url` option.
 
 Traversal is where second-order questions get answered — which characters share the most
 chapters, which themes converge in the final act, where a symbol's meaning shifts. Capture
@@ -579,8 +651,8 @@ This pipeline works for any literary text. Adjust schemas for genre:
 - **Seed before processing.** Create entity stubs first so wiki-links resolve immediately during chapter processing.
 - **Batch for sanity.** Processing ~10 chapters at a time balances depth with momentum. Track progress with a Task note.
 - **Read the source text.** Don't rely on memory or summaries. Read (or re-read) the actual text for each batch before creating notes. Textual evidence is everything.
-- **Read narrowly.** Build the chapter offset map once, then read chapters by line range and notes by section. On a long work, whole-file reads are the largest avoidable cost in the pipeline.
-- **Query, don't scan.** When you need to know which notes have a field, ask with `--meta` predicates and `--fields` projection. Reading notes to check frontmatter is the mistake this pipeline makes at scale.
+- **Read narrowly.** Keep the source text in the project as `.txt`, index it once, build the chapter offset map once, then read chapters by line range and notes by section. On a long work, whole-file reads are the largest avoidable cost in the pipeline.
+- **Query, don't scan.** When you need to know which notes have a field, ask with `--meta` predicates and `--fields` projection. Reading notes to check frontmatter is the mistake this pipeline makes at scale. Two ways these queries lie quietly: `--meta` is case-sensitive against the frontmatter `type:` your schemas authored, and `find` returns 10 rows unless you pass `--page-size`.
 - **Observations are your index.** The knowledge graph's value comes from categorized observations. Be generous with categories and specific with content.
 - **Relations are your web.** Every chapter should link to characters, themes, locations, and devices. Every entity should link back to chapters where it appears.
 - **Enrich iteratively.** Entity notes grow richer with each chapter. Don't try to write the perfect character note upfront — append as you go.
