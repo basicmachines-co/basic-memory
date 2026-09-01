@@ -577,13 +577,21 @@ For the sequence gap — the failure that a count alone cannot catch — take th
 
 ```bash
 bm find --meta 'note_type=Chapter' --fields chapter_number --page-size 200 --json \
-  | jq '{total, has_more, missing: ([.results[].fields.chapter_number | tonumber] | sort
-         | (([range(1; (max + 1))]) - .))}'
+  | jq --argjson expected 138 '
+      [.results[].fields.chapter_number | tonumber] as $n
+      | { total, has_more,
+          missing:    ([range(1; $expected + 1)] - $n),
+          duplicates: ($n | group_by(.) | map(select(length > 1) | .[0])) }'
 ```
 
-`has_more: false` with `missing: []` is the check passing. Compare `total` against the work's
-actual chapter count — a gap in the middle of a batch is the most common processing failure
-and the easiest to miss by eye.
+Pass the work's **actual** chapter count as `$expected` — deriving the range from the highest
+number found lets an incomplete graph pass. With 138 rows numbered 1..137 plus one duplicate,
+a max-derived check reports `missing: []` while a chapter is genuinely absent: the duplicate
+keeps the count right and the missing tail moves the goalpost. The check passes on
+`has_more: false`, `missing: []`, **and** `duplicates: []` together.
+
+A gap in the middle of a batch is the most common processing failure and the easiest to miss
+by eye; a duplicated chapter number is the second, and it hides the first.
 
 ### Relation Consistency
 Spot-check bidirectional relations: if Chapter X `features [[Character]]`, does Character have observations referencing Chapter X? Fix gaps.
