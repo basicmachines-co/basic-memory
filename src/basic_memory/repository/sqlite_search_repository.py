@@ -31,6 +31,7 @@ from basic_memory.repository.search_query import relaxed_query_words
 from basic_memory.repository.search_repository_base import (
     SearchRepositoryBase,
     file_path_prefix_condition,
+    metadata_contains_like_condition,
     metadata_filter_content_type_condition,
 )
 from basic_memory.repository.script_ngrams import analyze_script_query
@@ -986,10 +987,14 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                     for j, val in enumerate(filt.value):
                         value_param = f"meta_val_{idx}_{j}"
                         params[value_param] = val
-                        like_param = f"{value_param}_like"
-                        params[like_param] = f'%"{val}"%'
-                        like_param_single = f"{value_param}_like_single"
-                        params[like_param_single] = f"%'{val}'%"
+                        # The exact JSON-membership test is the primary path; the
+                        # substring patterns only reach values stored as array text.
+                        like_condition = metadata_contains_like_condition(
+                            extract_expr,
+                            val,
+                            param_prefix=value_param,
+                            params=params,
+                        )
                         json_each_expr = (
                             "json_each(entity.tags_json)"
                             if use_tags_column
@@ -998,8 +1003,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                         tag_conditions.append(
                             "("
                             f"EXISTS (SELECT 1 FROM {json_each_expr} WHERE value = :{value_param}) "
-                            f"OR {extract_expr} LIKE :{like_param} "
-                            f"OR {extract_expr} LIKE :{like_param_single}"
+                            f"OR {like_condition}"
                             ")"
                         )
                     conditions.append(" AND ".join(tag_conditions))
