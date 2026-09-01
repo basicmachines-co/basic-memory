@@ -1056,6 +1056,70 @@ async def test_detect_project_from_identifier_prefix_resolves_workspace_with_loc
 
 
 @pytest.mark.asyncio
+async def test_detect_project_from_identifier_prefix_falls_back_to_bare_project_name(
+    monkeypatch,
+):
+    """An identifier that is not workspace-qualified still resolves its first
+    segment by searching every accessible workspace for a project of that name.
+
+    This is the legacy detector read_note and search share. The posix path
+    resolver deliberately does NOT use it: a bare first segment that names no
+    addressable mount must refuse rather than reach another workspace's
+    same-named project (#1421), so its rule 4 parses only fully qualified
+    '<workspace>/<project>[/<path>]' routes. Pinned here so the behavior these
+    two tools still depend on is exercised on its own terms.
+    """
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.config import BasicMemoryConfig
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        _build_workspace_project_index,
+        detect_project_from_identifier_prefix,
+    )
+
+    personal = _workspace(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    index = _build_workspace_project_index(
+        (personal,),
+        (
+            WorkspaceProjectEntry(
+                workspace=personal,
+                project=_project("notes", id=1, external_id="personal-notes-id"),
+            ),
+        ),
+    )
+
+    async def fake_index(context=None, force_refresh=False):
+        return index
+
+    monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
+    # A hosted (factory) session is what makes workspace discovery available to
+    # an identifier that is not itself workspace-qualified.
+    monkeypatch.setattr("basic_memory.mcp.async_client.is_factory_mode", lambda: True)
+
+    # BasicMemoryConfig always materializes a placeholder 'main' entry, so the
+    # local-prefix check ahead of the fallback sees a config that names no 'notes'.
+    config = BasicMemoryConfig(projects={}, cloud_api_key="bmc_test123")
+
+    # 'notes/...' names no workspace, so the qualified parse declines and the
+    # bare first segment is resolved across workspaces instead.
+    assert (
+        await detect_project_from_identifier_prefix("notes/to-do-list", config) == "personal/notes"
+    )
+
+    # A first segment that names no project anywhere is an ordinary path, not a
+    # route: the lookup miss stays best-effort and leaves the identifier unrouted
+    # rather than becoming the caller's error.
+    assert await detect_project_from_identifier_prefix("absent/to-do-list", config) is None
+
+
+@pytest.mark.asyncio
 async def test_resolve_workspace_qualified_memory_url_ignores_workspace_project_miss(
     monkeypatch,
 ):
