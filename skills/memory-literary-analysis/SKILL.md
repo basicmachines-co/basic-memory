@@ -583,15 +583,21 @@ bm find --meta 'note_type=chapter' --fields chapter_number --page-size 200 --jso
   | jq --argjson expected 138 '
       [.results[].fields.chapter_number | tonumber] as $n
       | { total, has_more,
-          missing:    ([range(1; $expected + 1)] - $n),
-          duplicates: ($n | group_by(.) | map(select(length > 1) | .[0])) }'
+          missing:      ([range(1; $expected + 1)] - $n),
+          duplicates:   ($n | group_by(.) | map(select(length > 1) | .[0])),
+          out_of_range: ($n | map(select(. < 1 or . > $expected)) | unique) }'
 ```
 
 Pass the work's **actual** chapter count as `$expected` — deriving the range from the highest
 number found lets an incomplete graph pass. With 138 rows numbered 1..137 plus one duplicate,
 a max-derived check reports `missing: []` while a chapter is genuinely absent: the duplicate
 keeps the count right and the missing tail moves the goalpost. The check passes on
-`has_more: false`, `missing: []`, **and** `duplicates: []` together.
+`has_more: false`, `missing: []`, `duplicates: []`, **and** `out_of_range: []` together.
+
+`out_of_range` is not hypothetical: a prologue or epilogue typed as `chapter` lands at 0 or at
+`$expected + 1`, and without that key the report reads clean — every expected number present,
+none repeated — while the inventory holds a note the numbering does not account for. Type
+front and back matter as its own note type, or widen `$expected` deliberately.
 
 A gap in the middle of a batch is the most common processing failure and the easiest to miss
 by eye; a duplicated chapter number is the second, and it hides the first.
@@ -625,6 +631,11 @@ bm grep -F "doubloon" --page-size 100 --project <work>                # every me
 quietly truncates "where does this appear?" — a symbol in 40 chapters comes back as 10. For
 symbol tracing, pass `-F` for literal matching and raise `--page-size`; the meaning shifts you
 are hunting are usually in the later occurrences, which the default would have dropped.
+
+`--page-size` raises the ceiling, it does not remove it. A symbol in a long work can exceed
+even 100, so check whether the last page was full and walk `--page 2`, `--page 3` until it is
+not. A truncated symbol search fails the same silent way as an unpaginated `find`: a plausible
+answer, exit 0, and no sign that the tail is missing.
 
 Traversal is where second-order questions get answered — which characters share the most
 chapters, which themes converge in the final act, where a symbol's meaning shifts. Capture
