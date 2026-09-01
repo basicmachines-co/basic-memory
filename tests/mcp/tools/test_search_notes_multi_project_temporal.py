@@ -90,7 +90,7 @@ async def test_all_projects_search_forwards_the_valid_time_filter(monkeypatch, c
     result = await search_mod.search_notes(
         query="cache layer",
         search_all_projects=True,
-        time_role="effective",
+        time_kind="effective",
         valid_at="2026-07-28",
         output_format="json",
     )
@@ -99,7 +99,7 @@ async def test_all_projects_search_forwards_the_valid_time_filter(monkeypatch, c
     assert len(payloads) == len(PROJECT_REFS)
     for payload in payloads:
         assert payload["valid_at"] == "2026-07-28"
-        assert payload["time_role"] == "effective"
+        assert payload["time_kind"] == "effective"
         assert payload["valid_overlaps"] is None
     # Every leg confirmed it ran the filter, so the merged answer confirms it too.
     assert result["temporal_applied"] is True

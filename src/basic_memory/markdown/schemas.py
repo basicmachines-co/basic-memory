@@ -19,10 +19,11 @@ class Observation(BaseModel):
     # Collection-shaped from day one: the MVP parses at most one qualifier per
     # observation, but carrying several later must not be a schema break (SPEC-82).
     temporal: List[TemporalAssertion] = []
-    # Set for the one reported case: a qualifier that reads as time but names an
-    # unknown role. Its text stays in `content`, so nothing is dropped -- only the
-    # derived temporal projection is withheld until the author fixes the line. Text
-    # that simply is not a date sets nothing here; it is ordinary content.
+    # Set for the three reported cases: an unknown kind, an unterminated quote, and an
+    # unquoted point the one-token rule truncated. Its text stays in `content`, so
+    # nothing is dropped -- only the derived temporal projection is withheld until the
+    # author fixes the line. Text that simply is not a date sets nothing here; it is
+    # ordinary content.
     temporal_error: Optional[str] = None
 
     @override

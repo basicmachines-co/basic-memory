@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from basic_memory.temporal import TemporalFilter, TimeRole, parse_point
+from basic_memory.temporal import TemporalFilter, TimeKind, parse_point
 from tests.repository.test_hybrid_fusion import (
     HYBRID_KWARGS,
     ConcreteSearchRepo as HybridSearchRepo,
@@ -30,7 +30,7 @@ from tests.repository.test_vector_threshold import (
     fake_scoped_session,
 )
 
-TEMPORAL = TemporalFilter(role=TimeRole.EFFECTIVE, at=parse_point("2026-07-28"))
+TEMPORAL = TemporalFilter(kind=TimeKind.EFFECTIVE, at=parse_point("2026-07-28"))
 
 
 def _vector_kwargs(**overrides: Any) -> dict[str, Any]:

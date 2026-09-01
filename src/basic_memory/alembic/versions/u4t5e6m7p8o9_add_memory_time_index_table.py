@@ -43,7 +43,7 @@ def upgrade() -> None:
     are deliberately unindexed, and this table is *not* always driven by a full-text
     candidate set: a valid-time filter counts as criteria on its own
     (``SearchQuery.no_criteria``), so a temporal-only search scans the bound columns
-    for every row matching project + role + kind. That is an acceptable scan at
+    for every row matching project + kind + axis. That is an acceptable scan at
     expected sizes -- one row per authored qualifier, so thousands, not millions. If
     temporal-only queries ever become a hot path, the answer is a native PostgreSQL
     range column with a GiST index, not a btree over these text bounds.
@@ -55,8 +55,8 @@ def upgrade() -> None:
         sa.Column("entity_id", sa.Integer(), nullable=False),
         sa.Column("source_type", sa.String(length=32), nullable=False),
         sa.Column("source_id", sa.Integer(), nullable=False),
-        sa.Column("time_role", sa.String(length=32), nullable=False),
-        sa.Column("range_kind", sa.String(length=16), nullable=False),
+        sa.Column("time_kind", sa.String(length=32), nullable=False),
+        sa.Column("range_axis", sa.String(length=16), nullable=False),
         sa.Column("lower_value", sa.String(length=32), nullable=True),
         sa.Column("upper_value", sa.String(length=32), nullable=True),
         sa.Column("lower_inclusive", sa.Boolean(), nullable=False),
@@ -69,8 +69,8 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["entity_id"], ["entity.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.CheckConstraint(
-            "range_kind IN ('date', 'instant')",
-            name="ck_memory_time_index_range_kind",
+            "range_axis IN ('date', 'instant')",
+            name="ck_memory_time_index_range_axis",
         ),
         sa.CheckConstraint(
             "NOT is_empty OR (lower_value IS NULL AND upper_value IS NULL)",
@@ -85,7 +85,7 @@ def upgrade() -> None:
     op.create_index(
         "ix_memory_time_index_lookup",
         "memory_time_index",
-        ["project_id", "time_role", "range_kind", "source_type", "source_id"],
+        ["project_id", "time_kind", "range_axis", "source_type", "source_id"],
         unique=False,
     )
     op.create_index(

@@ -37,7 +37,7 @@ def _stub_call_query(monkeypatch, payload: dict[str, Any]) -> None:
     monkeypatch.setattr("basic_memory.mcp.tools.utils.call_query", mock_call_query)
 
 
-@pytest.mark.parametrize("field", ["valid_at", "valid_overlaps", "time_role"])
+@pytest.mark.parametrize("field", ["valid_at", "valid_overlaps", "time_kind"])
 @pytest.mark.asyncio
 async def test_unconfirmed_valid_time_filter_is_refused(monkeypatch, field: str):
     """Every valid-time field triggers the check; none of them may pass unconfirmed."""
@@ -89,7 +89,7 @@ async def test_empty_valid_time_values_do_not_trigger_the_guard(monkeypatch):
     client = SearchClient(MagicMock(), "proj-123")
 
     response = await client.search(
-        {"text": "cache", "valid_at": None, "valid_overlaps": None, "time_role": None},
+        {"text": "cache", "valid_at": None, "valid_overlaps": None, "time_kind": None},
         page=1,
         page_size=10,
     )

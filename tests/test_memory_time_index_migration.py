@@ -35,8 +35,8 @@ EXPECTED_COLUMNS = {
     "entity_id",
     "source_type",
     "source_id",
-    "time_role",
-    "range_kind",
+    "time_kind",
+    "range_axis",
     "lower_value",
     "upper_value",
     "lower_inclusive",
@@ -65,7 +65,7 @@ VALID_ROW = (
 )
 INSERT_SQL = """
     INSERT INTO memory_time_index (
-        project_id, entity_id, source_type, source_id, time_role, range_kind,
+        project_id, entity_id, source_type, source_id, time_kind, range_axis,
         lower_value, upper_value, lower_inclusive, upper_inclusive, is_empty,
         extractor, source_text
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -89,8 +89,8 @@ def _row_with(**overrides: Any) -> tuple[Any, ...]:
         "entity_id",
         "source_type",
         "source_id",
-        "time_role",
-        "range_kind",
+        "time_kind",
+        "range_axis",
         "lower_value",
         "upper_value",
         "lower_inclusive",
@@ -152,12 +152,12 @@ def test_alembic_upgrade_creates_memory_time_index_table(tmp_path, monkeypatch):
                 "PRAGMA index_info(ix_memory_time_index_lookup)"
             ).fetchall()
         ]
-        # The predicate filters on project/role/axis and projects (source_type, source_id),
+        # The predicate filters on project/kind/axis and projects (source_type, source_id),
         # so this one index both drives the scan and covers its output.
         assert lookup_columns == [
             "project_id",
-            "time_role",
-            "range_kind",
+            "time_kind",
+            "range_axis",
             "source_type",
             "source_id",
         ]
@@ -203,7 +203,7 @@ def test_upgraded_table_accepts_a_well_formed_assertion(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     ("overrides", "constraint"),
     [
-        ({"range_kind": "week"}, "ck_memory_time_index_range_kind"),
+        ({"range_axis": "week"}, "ck_memory_time_index_range_axis"),
         # An empty range with endpoints would describe the same interval two ways.
         ({"is_empty": 1}, "ck_memory_time_index_empty_has_no_bounds"),
         # PostgreSQL's rule: there is no endpoint to include on an unbounded side.
@@ -269,12 +269,12 @@ def test_postgres_render_carries_the_same_definition(monkeypatch):
     sql = buffer.getvalue()
     assert "CREATE TABLE memory_time_index" in sql
     assert "FOREIGN KEY(entity_id) REFERENCES entity (id) ON DELETE CASCADE" in sql
-    assert "ck_memory_time_index_range_kind" in sql
+    assert "ck_memory_time_index_range_axis" in sql
     assert "ck_memory_time_index_empty_has_no_bounds" in sql
     assert "ck_memory_time_index_unbounded_is_exclusive" in sql
     assert (
         "CREATE INDEX ix_memory_time_index_lookup ON memory_time_index "
-        "(project_id, time_role, range_kind, source_type, source_id)" in sql
+        "(project_id, time_kind, range_axis, source_type, source_id)" in sql
     )
     # Bounds stay portable text on both backends; a native range column would be a
     # later, generated addition rather than a change to this definition.

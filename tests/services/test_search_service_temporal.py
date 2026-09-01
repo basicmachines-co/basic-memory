@@ -17,7 +17,7 @@ from basic_memory.services.search_service import (
     build_temporal_filter,
     describe_search_criteria,
 )
-from basic_memory.temporal import TemporalQualifierError, TimeRole
+from basic_memory.temporal import TemporalQualifierError, TimeKind
 
 # The entity is created "now"; the qualifier claims June-July 2026. Keeping the two
 # ranges disjoint is what makes acceptance case 11 testable at all.
@@ -106,7 +106,7 @@ async def test_valid_time_filter_narrows_to_the_asserting_observation(
     await _index_cache_layer_note(entity_service, search_service)
 
     results = await search_service.search(
-        SearchQuery(text="cache layer", time_role="effective", valid_at=EFFECTIVE_WINDOW_START)
+        SearchQuery(text="cache layer", time_kind="effective", valid_at=EFFECTIVE_WINDOW_START)
     )
 
     assert [result.type for result in results] == ["observation"]
@@ -137,9 +137,9 @@ async def test_undated_note_is_excluded_by_a_valid_time_filter(entity_service, s
 # --- Diagnostics: the boundary refuses every malformed filter ---
 
 
-def test_unknown_time_role_is_refused_with_the_known_roles():
-    with pytest.raises(TemporalQualifierError, match="unknown time_role 'asserted'") as exc_info:
-        build_temporal_filter(SearchQuery(text="cache", time_role="asserted"))
+def test_unknown_time_kind_is_refused_with_the_known_kinds():
+    with pytest.raises(TemporalQualifierError, match="unknown time_kind 'asserted'") as exc_info:
+        build_temporal_filter(SearchQuery(text="cache", time_kind="asserted"))
 
     assert "effective" in str(exc_info.value)
 
@@ -175,11 +175,11 @@ def test_query_without_valid_time_fields_builds_no_filter():
     assert build_temporal_filter(SearchQuery(text="cache")) is None
 
 
-def test_role_only_query_builds_a_role_filter():
-    temporal = build_temporal_filter(SearchQuery(text="cache", time_role="effective"))
+def test_kind_only_query_builds_a_kind_filter():
+    temporal = build_temporal_filter(SearchQuery(text="cache", time_kind="effective"))
 
     assert temporal is not None
-    assert temporal.role is TimeRole.EFFECTIVE
+    assert temporal.kind is TimeKind.EFFECTIVE
     assert temporal.at is None and temporal.overlaps is None
 
 
@@ -195,7 +195,7 @@ def test_valid_at_and_valid_overlaps_are_mutually_exclusive_at_the_schema():
 def test_a_valid_time_filter_alone_is_enough_criteria():
     """A temporal filter is real criteria; the empty-query guard must not swallow it."""
     assert SearchQuery(valid_at="2026-07-28").no_criteria() is False
-    assert SearchQuery(time_role="effective").no_criteria() is False
+    assert SearchQuery(time_kind="effective").no_criteria() is False
     assert SearchQuery(valid_overlaps="[2026-06-10,)").no_criteria() is False
     assert SearchQuery().no_criteria() is True
 
@@ -203,12 +203,12 @@ def test_a_valid_time_filter_alone_is_enough_criteria():
 @pytest.mark.asyncio
 async def test_prepared_query_carries_the_parsed_filter(search_service):
     prepared = search_service.prepare_query(
-        SearchQuery(text="cache", time_role="effective", valid_at="2026-07-28")
+        SearchQuery(text="cache", time_kind="effective", valid_at="2026-07-28")
     )
 
     assert prepared is not None
     assert prepared.temporal is not None
-    assert prepared.temporal.role is TimeRole.EFFECTIVE
+    assert prepared.temporal.kind is TimeKind.EFFECTIVE
     assert prepared.temporal.at is not None
     assert prepared.temporal.at.value == "2026-07-28"
 
@@ -217,7 +217,7 @@ async def test_prepared_query_carries_the_parsed_filter(search_service):
 async def test_search_trace_describes_the_valid_time_question(search_service):
     """A trace must show the question that actually ran, valid time included."""
     containment = search_service.prepare_query(
-        SearchQuery(text="cache", time_role="effective", valid_at="2026-07-28")
+        SearchQuery(text="cache", time_kind="effective", valid_at="2026-07-28")
     )
     overlap = search_service.prepare_query(
         SearchQuery(text="cache", valid_overlaps="[2026-06-10,2026-07-27)")
@@ -225,6 +225,6 @@ async def test_search_trace_describes_the_valid_time_question(search_service):
     plain = search_service.prepare_query(SearchQuery(text="cache"))
 
     assert containment is not None and overlap is not None and plain is not None
-    assert "temporal=role=effective,valid_at=2026-07-28" in describe_search_criteria(containment)
+    assert "temporal=kind=effective,valid_at=2026-07-28" in describe_search_criteria(containment)
     assert "temporal=valid_overlaps=[2026-06-10,2026-07-27)" in describe_search_criteria(overlap)
     assert "temporal=" not in describe_search_criteria(plain)

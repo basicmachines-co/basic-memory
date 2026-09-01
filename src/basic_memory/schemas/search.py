@@ -77,7 +77,7 @@ class SearchQuery(BaseModel):
     - file_path_prefix: Limit to one directory subtree of the project
     - tags: Convenience frontmatter tag filter
     - status: Convenience frontmatter status filter
-    - valid_at / valid_overlaps / time_role: Authored valid-time filters (SPEC-82)
+    - valid_at / valid_overlaps / time_kind: Authored valid-time filters (SPEC-82)
 
     Valid time is what a note *says about the world*, written as a qualifier on an
     observation (``- [decision] @effective[2026-06-10,2026-07-27) ...``). It is a
@@ -117,7 +117,7 @@ class SearchQuery(BaseModel):
     # domain values and rejects anything malformed with a visible diagnostic.
     valid_at: Optional[str] = None  # Date or RFC 3339 instant the range must contain
     valid_overlaps: Optional[str] = None  # Range literal, e.g. "[2026-06-10,2026-07-27)"
-    time_role: Optional[str] = None  # effective | valid | occurred | due | mentioned
+    time_kind: Optional[str] = None  # effective | valid | occurred | due | mentioned
 
     @model_validator(mode="after")
     def validate_temporal_filter(self) -> "SearchQuery":
@@ -158,11 +158,11 @@ class SearchQuery(BaseModel):
     def has_temporal_filter(self) -> bool:
         """Whether this query asks a valid-time question at all.
 
-        A role on its own is a legal filter: it asks for sources carrying any
-        assertion on that axis. Callers use this to decide whether valid time was
+        A kind on its own is a legal filter: it asks for sources carrying any
+        assertion of that kind. Callers use this to decide whether valid time was
         requested without parsing the values, which is why it never raises.
         """
-        return bool(self.valid_at or self.valid_overlaps or self.time_role)
+        return bool(self.valid_at or self.valid_overlaps or self.time_kind)
 
     def no_criteria(self) -> bool:
         text_is_empty = self.text is None or (isinstance(self.text, str) and not self.text.strip())
@@ -215,7 +215,7 @@ class TemporalRangeValue(BaseModel):
     enclosing `TemporalResultMetadata` is where the author's own spelling survives.
     """
 
-    kind: str  # "date" (calendar dates) or "instant" (UTC timestamps)
+    axis: str  # "date" (calendar dates) or "instant" (UTC timestamps)
     literal: str  # e.g. "[2026-06-10,2026-07-28)", "(,2026-07-27)", "empty"
     lower: Optional[str] = None  # None means unbounded on that side
     upper: Optional[str] = None
@@ -228,10 +228,10 @@ class TemporalResultMetadata(BaseModel):
     """One authored valid-time assertion carried by a search result.
 
     Present so an agent can say *why* a source matched a valid-time query -- which
-    axis it was asserted on, over what interval, and in the author's own words.
+    kind of time it asserts, over what interval, and in the author's own words.
     """
 
-    role: str  # effective | valid | occurred | due | mentioned
+    kind: str  # effective | valid | occurred | due | mentioned
     valid_during: TemporalRangeValue
     source_text: str  # the qualifier exactly as authored, e.g. "@effective[2026-06-10,)"
 
@@ -268,7 +268,7 @@ class SearchResult(BaseModel):
 
     # Authored valid-time assertions carried by this row. Collection-shaped from day
     # one: the MVP parser reads one qualifier per observation, but multiple assertions
-    # on multiple axes must not be a schema break later.
+    # of multiple kinds must not be a schema break later.
     temporal: Optional[List[TemporalResultMetadata]] = None
 
 

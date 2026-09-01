@@ -8,7 +8,7 @@ discipline -- it falls out of two decisions made upstream:
   typed date bind is needed on either side.
 * Inclusivity on the query side is known while the SQL is being built, and
   inclusivity on the stored side is a boolean column, so both fold into the SQL text.
-  The only bound parameters are the two bound values, the role, and the axis -- each
+  The only bound parameters are the two bound values, the kind, and the axis -- each
   compared directly against a column, so PostgreSQL always infers their type and
   asyncpg never sees a bare untyped parameter.
 
@@ -107,17 +107,17 @@ def build_temporal_predicate(temporal: TemporalFilter, params: dict[str, Any]) -
 
     conditions = [f"{TEMPORAL_INDEX_TABLE}.project_id = :project_id"]
 
-    if temporal.role is not None:
-        params["tq_role"] = temporal.role.value
-        conditions.append(f"{TEMPORAL_INDEX_TABLE}.time_role = :tq_role")
+    if temporal.kind is not None:
+        params["tq_kind"] = temporal.kind.value
+        conditions.append(f"{TEMPORAL_INDEX_TABLE}.time_kind = :tq_kind")
 
     if window is not None:
         # Trigger: the caller asked about a specific date or a specific instant.
         # Why: calendar dates and instants are different axes; converting between
         #   them would invent a timezone or a time of day the author never wrote.
         # Outcome: a date query can never match an instant range, or the reverse.
-        params["tq_kind"] = window.kind.value
-        conditions.append(f"{TEMPORAL_INDEX_TABLE}.range_kind = :tq_kind")
+        params["tq_axis"] = window.axis.value
+        conditions.append(f"{TEMPORAL_INDEX_TABLE}.range_axis = :tq_axis")
         # The empty stored range contains no points, so it overlaps nothing.
         conditions.append(f"NOT {TEMPORAL_INDEX_TABLE}.is_empty")
 

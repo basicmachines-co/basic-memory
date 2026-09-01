@@ -35,7 +35,7 @@ from basic_memory.services import FileService
 from basic_memory.temporal import (
     TemporalFilter,
     TemporalQualifierError,
-    TimeRole,
+    TimeKind,
     parse_point,
     parse_range_literal,
 )
@@ -96,7 +96,7 @@ def build_temporal_filter(query: SearchQuery) -> TemporalFilter | None:
     """Parse the flat valid-time fields into one portable filter value.
 
     The boundary carries strings so HTTP and MCP callers can pass a single flat value
-    per axis. Every rejection here is deliberate and loud: an unknown role, a malformed
+    per field. Every rejection here is deliberate and loud: an unknown kind, a malformed
     range literal, a range mixing calendar dates with instants, or an impossible range
     raises rather than degrading into a filter that quietly matches something else.
     Callers above map the error to a 400. A timestamp written without an offset is not
@@ -105,18 +105,18 @@ def build_temporal_filter(query: SearchQuery) -> TemporalFilter | None:
     if not query.has_temporal_filter():
         return None
 
-    role: TimeRole | None = None
-    if query.time_role:
+    kind: TimeKind | None = None
+    if query.time_kind:
         try:
-            role = TimeRole(query.time_role)
+            kind = TimeKind(query.time_kind)
         except ValueError as exc:
             raise TemporalQualifierError(
-                f"unknown time_role {query.time_role!r}; expected one of "
-                f"{', '.join(item.value for item in TimeRole)}"
+                f"unknown time_kind {query.time_kind!r}; expected one of "
+                f"{', '.join(item.value for item in TimeKind)}"
             ) from exc
 
     return TemporalFilter(
-        role=role,
+        kind=kind,
         at=parse_point(query.valid_at) if query.valid_at else None,
         overlaps=parse_range_literal(query.valid_overlaps) if query.valid_overlaps else None,
     )
@@ -127,8 +127,8 @@ def _describe_temporal_criteria(temporal: TemporalFilter | None) -> str | None:
     if temporal is None:
         return None
     parts = []
-    if temporal.role is not None:
-        parts.append(f"role={temporal.role.value}")
+    if temporal.kind is not None:
+        parts.append(f"kind={temporal.kind.value}")
     if temporal.at is not None:
         parts.append(f"valid_at={temporal.at.value}")
     elif temporal.overlaps is not None:

@@ -36,14 +36,14 @@ from basic_memory.temporal import (
     TemporalFilter,
     TemporalPoint,
     TemporalRange,
-    TemporalRangeKind,
-    TimeRole,
+    TemporalRangeAxis,
+    TimeKind,
     parse_point,
     parse_range_literal,
 )
 
-DATE = TemporalRangeKind.DATE
-INSTANT = TemporalRangeKind.INSTANT
+DATE = TemporalRangeAxis.DATE
+INSTANT = TemporalRangeAxis.INSTANT
 
 # Every observation shares this word so one FTS query returns the whole population and
 # the temporal predicate is the only thing that narrows it. That also proves the
@@ -57,15 +57,15 @@ class StoredAssertion:
 
     label: str
     valid_during: TemporalRange
-    role: TimeRole = TimeRole.EFFECTIVE
+    kind: TimeKind = TimeKind.EFFECTIVE
 
 
 def _date_range(literal: str) -> TemporalRange:
-    return parse_range_literal(literal, kind=DATE)
+    return parse_range_literal(literal, axis=DATE)
 
 
 def _instant_range(literal: str) -> TemporalRange:
-    return parse_range_literal(literal, kind=INSTANT)
+    return parse_range_literal(literal, axis=INSTANT)
 
 
 # The population under test. Labels are the vocabulary of every expectation below.
@@ -76,7 +76,7 @@ STORED_ASSERTIONS: tuple[StoredAssertion, ...] = (
     StoredAssertion("open_open", _date_range("(2026-06-10,2026-07-27)")),
     StoredAssertion("from_cutover", _date_range("[2026-07-27,)")),
     StoredAssertion("before_june", _date_range("(,2026-06-10)")),
-    StoredAssertion("always", TemporalRange(kind=DATE)),
+    StoredAssertion("always", TemporalRange(axis=DATE)),
     StoredAssertion("empty", TemporalRange.empty(DATE)),
     StoredAssertion(
         "instant_window",
@@ -87,46 +87,46 @@ STORED_ASSERTIONS: tuple[StoredAssertion, ...] = (
         # Authored in +02:00; normalization must make it the UTC window [14:00,15:00).
         _instant_range("[2026-07-27T16:00:00+02:00,2026-07-27T17:00:00+02:00)"),
     ),
-    StoredAssertion("due_window", _date_range("[2026-06-10,2026-07-27)"), role=TimeRole.DUE),
+    StoredAssertion("due_window", _date_range("[2026-06-10,2026-07-27)"), kind=TimeKind.DUE),
     # --- The discrete population ---
     #
-    # Filed on the `occurred` axis and dated in March so it never widens an expectation
+    # Filed as `occurred` time and dated in March so it never widens an expectation
     # above, and so no bound collides with the January bookkeeping timestamps that
     # `test_projection_rows_carry_only_authored_bounds` watches for.
     #
     # Only March 2, and only March 3: adjacent as authored bounds, disjoint as days.
     # This is the pair the half-open canonical form exists to tell apart.
-    StoredAssertion("only_mar_02", _date_range("(2026-03-01,2026-03-03)"), role=TimeRole.OCCURRED),
-    StoredAssertion("only_mar_03", _date_range("(2026-03-02,2026-03-04)"), role=TimeRole.OCCURRED),
+    StoredAssertion("only_mar_02", _date_range("(2026-03-01,2026-03-03)"), kind=TimeKind.OCCURRED),
+    StoredAssertion("only_mar_03", _date_range("(2026-03-02,2026-03-04)"), kind=TimeKind.OCCURRED),
     # Back-to-back half-open periods, the shape a sequence of effective windows takes.
     StoredAssertion(
-        "half_open_first", _date_range("[2026-03-10,2026-03-12)"), role=TimeRole.OCCURRED
+        "half_open_first", _date_range("[2026-03-10,2026-03-12)"), kind=TimeKind.OCCURRED
     ),
     StoredAssertion(
-        "half_open_second", _date_range("[2026-03-12,2026-03-14)"), role=TimeRole.OCCURRED
+        "half_open_second", _date_range("[2026-03-12,2026-03-14)"), kind=TimeKind.OCCURRED
     ),
     # Closed periods written by an author who means "through the 22nd": they share it.
-    StoredAssertion("closed_first", _date_range("[2026-03-20,2026-03-22]"), role=TimeRole.OCCURRED),
+    StoredAssertion("closed_first", _date_range("[2026-03-20,2026-03-22]"), kind=TimeKind.OCCURRED),
     StoredAssertion(
-        "closed_second", _date_range("[2026-03-22,2026-03-24]"), role=TimeRole.OCCURRED
+        "closed_second", _date_range("[2026-03-22,2026-03-24]"), kind=TimeKind.OCCURRED
     ),
-    StoredAssertion("one_day", _date_range("[2026-03-30,2026-03-30]"), role=TimeRole.OCCURRED),
+    StoredAssertion("one_day", _date_range("[2026-03-30,2026-03-30]"), kind=TimeKind.OCCURRED),
     # After the 5th and before the 6th there is no day, so this authored range is the
     # empty range -- something only the discrete reading can see.
-    StoredAssertion("no_such_day", _date_range("(2026-03-05,2026-03-06)"), role=TimeRole.OCCURRED),
+    StoredAssertion("no_such_day", _date_range("(2026-03-05,2026-03-06)"), kind=TimeKind.OCCURRED),
     # An instant range with a closed upper end, so the date rewrite is proven to stop
     # at the date axis rather than pushing this endpoint forward by a day.
     StoredAssertion(
         "instant_closed",
         _instant_range("[2026-07-27T20:00:00Z,2026-07-27T21:00:00Z]"),
-        role=TimeRole.OCCURRED,
+        kind=TimeKind.OCCURRED,
     ),
 )
 
 DATE_LABELS = frozenset(
     stored.label
     for stored in STORED_ASSERTIONS
-    if stored.valid_during.kind is DATE and stored.role is TimeRole.EFFECTIVE
+    if stored.valid_during.axis is DATE and stored.kind is TimeKind.EFFECTIVE
 )
 NON_EMPTY_DATE_LABELS = DATE_LABELS - {"empty"}
 
@@ -177,8 +177,8 @@ async def temporal_population(
                     entity_id=entity_id,
                     source_type=SearchItemType.OBSERVATION.value,
                     source_id=observation.id,
-                    time_role=stored.role.value,
-                    range_kind=stored.valid_during.kind.value,
+                    time_kind=stored.kind.value,
+                    range_axis=stored.valid_during.axis.value,
                     lower_value=stored.valid_during.lower,
                     upper_value=stored.valid_during.upper,
                     lower_inclusive=stored.valid_during.lower_inclusive,
@@ -253,7 +253,7 @@ async def test_containment_contract(search_repository, temporal_population, at, 
     matched = await _matching_labels(
         search_repository,
         temporal_population,
-        TemporalFilter(role=TimeRole.EFFECTIVE, at=parse_point(at)),
+        TemporalFilter(kind=TimeKind.EFFECTIVE, at=parse_point(at)),
     )
 
     assert matched == expected
@@ -296,7 +296,7 @@ async def test_overlap_contract(search_repository, temporal_population, literal,
     matched = await _matching_labels(
         search_repository,
         temporal_population,
-        TemporalFilter(role=TimeRole.EFFECTIVE, overlaps=_date_range(literal)),
+        TemporalFilter(kind=TimeKind.EFFECTIVE, overlaps=_date_range(literal)),
     )
 
     assert matched == expected
@@ -310,7 +310,7 @@ async def test_overlap_with_fully_unbounded_window_matches_every_non_empty_range
     matched = await _matching_labels(
         search_repository,
         temporal_population,
-        TemporalFilter(role=TimeRole.EFFECTIVE, overlaps=TemporalRange(kind=DATE)),
+        TemporalFilter(kind=TimeKind.EFFECTIVE, overlaps=TemporalRange(axis=DATE)),
     )
 
     assert matched == NON_EMPTY_DATE_LABELS
@@ -322,7 +322,7 @@ async def test_overlap_with_empty_window_matches_nothing(search_repository, temp
     matched = await _matching_labels(
         search_repository,
         temporal_population,
-        TemporalFilter(role=TimeRole.EFFECTIVE, overlaps=TemporalRange.empty(DATE)),
+        TemporalFilter(kind=TimeKind.EFFECTIVE, overlaps=TemporalRange.empty(DATE)),
     )
 
     assert matched == set()
@@ -335,7 +335,7 @@ async def test_stored_empty_range_matches_no_query(search_repository, temporal_p
         matched = await _matching_labels(
             search_repository,
             temporal_population,
-            TemporalFilter(role=TimeRole.EFFECTIVE, at=parse_point(at)),
+            TemporalFilter(kind=TimeKind.EFFECTIVE, at=parse_point(at)),
         )
         assert "empty" not in matched, at
 
@@ -352,7 +352,7 @@ async def _occurred_overlaps(search_repository, labels_by_id, literal: str) -> s
     return await _matching_labels(
         search_repository,
         labels_by_id,
-        TemporalFilter(role=TimeRole.OCCURRED, overlaps=_date_range(literal)),
+        TemporalFilter(kind=TimeKind.OCCURRED, overlaps=_date_range(literal)),
     )
 
 
@@ -360,7 +360,7 @@ async def _occurred_at(search_repository, labels_by_id, at: str) -> set[str]:
     return await _matching_labels(
         search_repository,
         labels_by_id,
-        TemporalFilter(role=TimeRole.OCCURRED, at=parse_point(at)),
+        TemporalFilter(kind=TimeKind.OCCURRED, at=parse_point(at)),
     )
 
 
@@ -493,7 +493,7 @@ async def test_instant_ranges_are_untouched_by_the_date_canonicalization(
     at_upper = await _matching_labels(
         search_repository,
         temporal_population,
-        TemporalFilter(role=TimeRole.OCCURRED, at=parse_point("2026-07-27T21:00:00Z")),
+        TemporalFilter(kind=TimeKind.OCCURRED, at=parse_point("2026-07-27T21:00:00Z")),
     )
     assert at_upper == {"instant_closed"}
 
@@ -501,7 +501,7 @@ async def test_instant_ranges_are_untouched_by_the_date_canonicalization(
         missed = await _matching_labels(
             search_repository,
             temporal_population,
-            TemporalFilter(role=TimeRole.OCCURRED, at=parse_point(outside)),
+            TemporalFilter(kind=TimeKind.OCCURRED, at=parse_point(outside)),
         )
         assert missed == set(), outside
 
@@ -563,7 +563,7 @@ async def test_date_query_does_not_match_instant_range(search_repository, tempor
     matched = await _matching_labels(
         search_repository,
         temporal_population,
-        TemporalFilter(role=TimeRole.EFFECTIVE, at=parse_point("2026-07-27")),
+        TemporalFilter(kind=TimeKind.EFFECTIVE, at=parse_point("2026-07-27")),
     )
 
     assert "instant_window" not in matched
@@ -577,7 +577,7 @@ async def test_instant_query_does_not_match_date_range(search_repository, tempor
         search_repository,
         temporal_population,
         TemporalFilter(
-            role=TimeRole.EFFECTIVE,
+            kind=TimeKind.EFFECTIVE,
             at=parse_point("2026-07-27T17:00:00Z"),
         ),
     )
@@ -599,7 +599,7 @@ async def test_instant_ranges_compare_as_instants_across_offsets(
     inside = await _matching_labels(
         search_repository,
         temporal_population,
-        TemporalFilter(role=TimeRole.EFFECTIVE, at=parse_point("2026-07-27T14:30:00Z")),
+        TemporalFilter(kind=TimeKind.EFFECTIVE, at=parse_point("2026-07-27T14:30:00Z")),
     )
     assert inside == {"instant_offset"}
 
@@ -607,7 +607,7 @@ async def test_instant_ranges_compare_as_instants_across_offsets(
     outside = await _matching_labels(
         search_repository,
         temporal_population,
-        TemporalFilter(role=TimeRole.EFFECTIVE, at=parse_point("2026-07-27T16:30:00Z")),
+        TemporalFilter(kind=TimeKind.EFFECTIVE, at=parse_point("2026-07-27T16:30:00Z")),
     )
     assert outside == {"instant_window"}
 
@@ -618,36 +618,36 @@ async def test_instant_endpoints_respect_inclusivity(search_repository, temporal
     at_lower = await _matching_labels(
         search_repository,
         temporal_population,
-        TemporalFilter(role=TimeRole.EFFECTIVE, at=parse_point("2026-07-27T16:00:00Z")),
+        TemporalFilter(kind=TimeKind.EFFECTIVE, at=parse_point("2026-07-27T16:00:00Z")),
     )
     assert at_lower == {"instant_window"}
 
     at_upper = await _matching_labels(
         search_repository,
         temporal_population,
-        TemporalFilter(role=TimeRole.EFFECTIVE, at=parse_point("2026-07-27T18:00:00Z")),
+        TemporalFilter(kind=TimeKind.EFFECTIVE, at=parse_point("2026-07-27T18:00:00Z")),
     )
     assert at_upper == set()
 
 
-# --- Role narrowing ---
+# --- Kind narrowing ---
 
 
 @pytest.mark.asyncio
-async def test_role_filter_narrows_to_one_axis(search_repository, temporal_population):
-    """Two roles can assert the same interval; a role filter separates them."""
+async def test_kind_filter_narrows_to_one_kind(search_repository, temporal_population):
+    """Two kinds can assert the same interval; a kind filter separates them."""
     due = await _matching_labels(
         search_repository,
         temporal_population,
-        TemporalFilter(role=TimeRole.DUE, at=parse_point("2026-07-01")),
+        TemporalFilter(kind=TimeKind.DUE, at=parse_point("2026-07-01")),
     )
 
     assert due == {"due_window"}
 
 
 @pytest.mark.asyncio
-async def test_filter_without_role_spans_every_axis(search_repository, temporal_population):
-    """Omitting the role asks the question of every axis at once."""
+async def test_filter_without_a_kind_spans_every_kind(search_repository, temporal_population):
+    """Omitting the kind asks the question of every kind at once."""
     matched = await _matching_labels(
         search_repository,
         temporal_population,
@@ -665,19 +665,19 @@ async def test_filter_without_role_spans_every_axis(search_repository, temporal_
 
 
 @pytest.mark.asyncio
-async def test_role_only_filter_selects_every_source_on_that_axis(
+async def test_kind_only_filter_selects_every_source_of_that_kind(
     search_repository, temporal_population
 ):
-    """A role with no window is a legal question, and the empty range still answers it.
+    """A kind with no window is a legal question, and the empty range still answers it.
 
     Without a window there is no axis to compare on and no interval to intersect, so
-    the filter asks only "does this source assert anything on this role" -- which the
+    the filter asks only "does this source assert anything on this kind" -- which the
     empty range does.
     """
     matched = await _matching_labels(
         search_repository,
         temporal_population,
-        TemporalFilter(role=TimeRole.EFFECTIVE),
+        TemporalFilter(kind=TimeKind.EFFECTIVE),
     )
 
     assert matched == DATE_LABELS | {"instant_window", "instant_offset"}
@@ -795,7 +795,7 @@ async def test_temporal_filter_count_matches_search(search_repository, temporal_
     The router gathers the two concurrently and derives `has_more` from the count, so a
     count that ignored the filter would report pages that do not exist.
     """
-    temporal = TemporalFilter(role=TimeRole.EFFECTIVE, at=parse_point("2026-07-01"))
+    temporal = TemporalFilter(kind=TimeKind.EFFECTIVE, at=parse_point("2026-07-01"))
     results = await search_repository.search(
         search_text=SHARED_TERM,
         search_item_types=[SearchItemType.OBSERVATION],
@@ -817,7 +817,7 @@ async def test_temporal_filter_applies_without_search_text(search_repository, te
     matched = await _matching_labels(
         search_repository,
         temporal_population,
-        TemporalFilter(role=TimeRole.EFFECTIVE, at=parse_point("2026-08-01")),
+        TemporalFilter(kind=TimeKind.EFFECTIVE, at=parse_point("2026-08-01")),
         search_text=None,
     )
 
@@ -850,7 +850,7 @@ async def test_temporal_filter_is_scoped_to_its_project(
     results = await other_repository.search(
         search_text=SHARED_TERM,
         search_item_types=[SearchItemType.OBSERVATION],
-        temporal=TemporalFilter(role=TimeRole.EFFECTIVE, at=parse_point("2026-07-01")),
+        temporal=TemporalFilter(kind=TimeKind.EFFECTIVE, at=parse_point("2026-07-01")),
         limit=50,
     )
 
@@ -862,11 +862,11 @@ async def test_temporal_point_and_range_agree_on_containment(
     search_repository, temporal_population
 ):
     """A point question is the degenerate closed range, so the two cannot disagree."""
-    point = TemporalFilter(role=TimeRole.EFFECTIVE, at=TemporalPoint(kind=DATE, value="2026-07-27"))
+    point = TemporalFilter(kind=TimeKind.EFFECTIVE, at=TemporalPoint(axis=DATE, value="2026-07-27"))
     window = TemporalFilter(
-        role=TimeRole.EFFECTIVE,
+        kind=TimeKind.EFFECTIVE,
         overlaps=TemporalRange(
-            kind=DATE,
+            axis=DATE,
             lower="2026-07-27",
             upper="2026-07-27",
             lower_inclusive=True,

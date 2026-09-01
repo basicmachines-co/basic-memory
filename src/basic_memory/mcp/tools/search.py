@@ -395,13 +395,13 @@ def _format_search_markdown(
         parts.append(f"- score: {r.score:.4f}")
         if r.matched_chunk:
             parts.append(f"- match: {r.matched_chunk[:200]}")
-        # Name the axis and the units. A bare "2026-06-10" here would read as an edit
+        # Name the kind and the units. A bare "2026-06-10" here would read as an edit
         # date; "effective valid time ... (date)" says which time this is and that it
         # is a calendar date carrying no timezone.
         for assertion in r.temporal or []:
             parts.append(
-                f"- {assertion.role} valid time: {assertion.valid_during.literal} "
-                f"({assertion.valid_during.kind})"
+                f"- {assertion.kind} valid time: {assertion.valid_during.literal} "
+                f"({assertion.valid_during.axis})"
             )
         parts.append("")
 
@@ -585,7 +585,7 @@ async def _search_all_projects(
     min_similarity: float | None,
     valid_at: str | None,
     valid_overlaps: str | None,
-    time_role: str | None,
+    time_kind: str | None,
     context: Context | None,
 ) -> dict[str, Any] | str:
     """Search every accessible project when the caller explicitly opts in."""
@@ -595,7 +595,7 @@ async def _search_all_projects(
     # response that does not confirm the filter ran. So a project either honored the
     # valid-time filter or was dropped with a warning below; the merged answer never
     # silently mixes filtered and unfiltered rows.
-    temporal_requested = bool(valid_at or valid_overlaps or time_role)
+    temporal_requested = bool(valid_at or valid_overlaps or time_kind)
     project_refs = await _load_search_project_refs(context=context)
     if not project_refs:
         response = SearchResponse(
@@ -655,7 +655,7 @@ async def _search_all_projects(
                 min_similarity=min_similarity,
                 valid_at=valid_at,
                 valid_overlaps=valid_overlaps,
-                time_role=time_role,
+                time_kind=time_kind,
                 search_all_projects=False,
                 context=context,
             )
@@ -835,15 +835,15 @@ async def search_notes(
         "written PostgreSQL-style: '[2026-06-10,2026-07-27)', '(,2026-07-27]', "
         "'[2026-06-10,)'. Mutually exclusive with valid_at.",
     ] = None,
-    time_role: Annotated[
+    time_kind: Annotated[
         Optional[str],
         Field(
             default=None,
-            validation_alias=AliasChoices("time_role", "role", "time_axis"),
+            validation_alias=AliasChoices("time_kind", "kind"),
         ),
-        "Narrow valid-time matching to one authored axis: 'effective', 'valid', "
-        "'occurred', 'due', or 'mentioned'. Usable on its own to find every source "
-        "carrying an assertion on that axis.",
+        "Narrow valid-time matching to one authored kind of time: 'effective', "
+        "'valid', 'occurred', 'due', or 'mentioned'. Usable on its own to find every "
+        "source carrying an assertion of that kind.",
     ] = None,
     context: Context | None = None,
 ) -> dict[str, Any] | str:
@@ -928,25 +928,34 @@ async def search_notes(
         - [decision] @effective[2026-06-10,2026-07-27) The cache layer will use Redis.
         - [decision] @effective:2026-07-27 The cache layer will use Memcached.
 
-    The bracket form is an explicit range; the `@role:date` form is a point, meaning
+    The bracket form is an explicit range; the `@kind:date` form is a point, meaning
     the span its precision covers — `@2026` that year, `@2026-06` that month, and
-    `@2026-06-10` from that date onward. The role may be omitted (`@2026-07-27`),
-    which files the assertion on the `valid` axis; a role-less point has to start
+    `@2026-06-10` from that date onward. The kind may be omitted (`@2026-07-27`),
+    which files the assertion as `valid` time; a point with no kind has to start
     with a digit and be at least as wide as a year, so `@v2` and `@may` stay prose.
 
-    A point is **one whitespace-delimited token**. Slash dates (`@occurred:03/04/2026`,
-    read by the `date_order` setting) and single-word relative dates
-    (`@occurred:yesterday`) work; multi-word dates like `@occurred:June 10, 2026` do
-    not, because nothing can tell where such a date ends — write `@occurred:2026-06-10`
-    instead. An unreadable token is left as ordinary content, never half-read.
+    An unquoted point is **one whitespace-delimited token**, because nothing can tell
+    where a multi-word date ends. Slash dates (`@occurred:03/04/2026`, read by the
+    `date_order` setting) and single-word relative dates (`@occurred:yesterday`) work
+    as they are; anything longer goes in double quotes, which move the token boundary
+    to the closing quote:
+
+        - [decision] @occurred:"June 10, 2026" The cutover ran.
+        - [decision] @occurred:"2 days ago" The cutover ran.
+        - [decision] @occurred:"June 2026" The cutover ran.
+        - [decision] @"June 10, 2026" The cutover ran.
+
+    Whatever is inside the quotes is read as the date, month-only and relative forms
+    included, and whatever follows the closing quote is ordinary content. An unreadable
+    token is left as content, never half-read.
 
     These filters query that authored time, which is a different axis from `after_date`
     (last-indexed time) — `after_date` is never reinterpreted as valid time.
-    - `search_notes("cache layer", role="effective", valid_at="2026-07-28")`
+    - `search_notes("cache layer", kind="effective", valid_at="2026-07-28")`
       - Returns the Memcached decision; the Redis decision expired at the cutover.
-    - `search_notes("cache layer", role="effective", valid_at="2026-07-01")`
+    - `search_notes("cache layer", kind="effective", valid_at="2026-07-01")`
       - Returns the Redis decision; Memcached is not yet effective.
-    - `search_notes("cache layer", role="effective", valid_overlaps="[2026-06-01,2026-08-01)")`
+    - `search_notes("cache layer", kind="effective", valid_overlaps="[2026-06-01,2026-08-01)")`
       - Returns both, since each overlaps that window.
     - `search_notes("cache layer")` with no valid-time filter
       - Both compete under ordinary relevance, exactly as before.
@@ -1012,8 +1021,8 @@ async def search_notes(
         valid_overlaps: Optional PostgreSQL-style range literal ("[2026-06-10,2026-07-27)",
                  "(,2026-07-27]", "[2026-06-10,)"). Returns sources whose authored valid range
                  overlaps it. Mutually exclusive with valid_at; also excludes undated sources.
-        time_role: Optional valid-time axis to narrow to: "effective", "valid", "occurred",
-                 "due", or "mentioned". Valid on its own.
+        time_kind: Optional kind of valid time to narrow to: "effective", "valid",
+                 "occurred", "due", or "mentioned". Valid on its own.
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -1183,7 +1192,7 @@ async def search_notes(
             min_similarity=min_similarity,
             valid_at=valid_at,
             valid_overlaps=valid_overlaps,
-            time_role=time_role,
+            time_kind=time_kind,
             context=context,
         )
         return all_projects_result
@@ -1213,11 +1222,11 @@ async def search_notes(
             or after_date
             or valid_at
             or valid_overlaps
-            or time_role
+            or time_kind
         ),
         has_tags_filter=bool(tags),
         has_status_filter=bool(status),
-        has_temporal_filter=bool(valid_at or valid_overlaps or time_role),
+        has_temporal_filter=bool(valid_at or valid_overlaps or time_kind),
     ):
         async with get_project_client(project, context=context, project_id=project_id) as (
             client,
@@ -1302,8 +1311,8 @@ async def search_notes(
                     search_query.valid_at = valid_at
                 if valid_overlaps:
                     search_query.valid_overlaps = valid_overlaps
-                if time_role:
-                    search_query.time_role = time_role
+                if time_kind:
+                    search_query.time_kind = time_kind
 
                 # Reject searches with no criteria at all
                 if search_query.no_criteria():
@@ -1311,7 +1320,7 @@ async def search_notes(
                         "# No Search Criteria\n\n"
                         "Please provide at least one of: `query`, `metadata_filters`, "
                         "`tags`, `status`, `note_types`, `entity_types`, `categories`, "
-                        "`after_date`, `valid_at`, `valid_overlaps`, or `time_role`."
+                        "`after_date`, `valid_at`, `valid_overlaps`, or `time_kind`."
                     )
 
                 # Default to entity-level results to avoid returning individual

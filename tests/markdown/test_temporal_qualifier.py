@@ -2,14 +2,15 @@
 
 Three rules shape every test here:
 
-* **One grammar.** `@[role]<range-literal>` for a precise interval,
-  `@[role:]<date>` for a point. The role is optional in both; a role-less point must
-  begin with a digit.
+* **One grammar.** `@[kind]<range-literal>` for a precise interval, `@[kind:]<date>`
+  for an unquoted point, and `@[kind:]"<date>"` for a quoted one. The kind is optional
+  in all three; an unquoted point that omits it must begin with a digit.
 * **Silent when it is not time.** If the payload does not read as a date, the token is
   ordinary content and nothing is reported. Prose is full of `@`, and diagnosing every
   one of them would be noise.
-* **One diagnostic.** A payload that *does* read as time but names an unknown role is
-  reported, because a short list of valid roles makes that actionable.
+* **Diagnostics only where the author plainly meant a qualifier.** An unknown kind, an
+  unterminated quote, and an unquoted date the one-token rule truncated are each
+  reported, because each one has a fix the message can name.
 
 And in every case a qualifier that was not accepted is **never dropped**: its text
 stays in the observation content, so the line indexes and round-trips exactly as it did
@@ -25,7 +26,7 @@ from basic_memory.config import ConfigManager
 from basic_memory.markdown.entity_parser import parse
 from basic_memory.markdown.schemas import Observation
 from basic_memory.markdown.temporal_qualifier import parse_temporal_qualifier
-from basic_memory.temporal import DateOrder, TemporalRangeKind, TimeRole
+from basic_memory.temporal import DateOrder, TemporalRangeAxis, TimeKind
 
 
 @pytest.fixture(autouse=True)
@@ -48,6 +49,14 @@ def _observation(line: str) -> Observation:
     return observation
 
 
+def _refusal(line: str) -> Observation:
+    """Parse a line whose qualifier must be refused, and assert the shared contract."""
+    observation = _observation(line)
+    assert observation.temporal == []
+    assert observation.temporal_error is not None
+    return observation
+
+
 # --- Acceptance 1: undated notes are untouched ---
 
 
@@ -64,7 +73,7 @@ def test_observation_without_qualifier_parses_byte_identically():
     assert str(observation) == "- [decision] The cache layer will use Redis. #infra (agreed)"
 
 
-# --- Acceptance 2: round trip preserves role and bounds ---
+# --- Acceptance 2: round trip preserves kind and bounds ---
 
 
 @pytest.mark.parametrize(
@@ -82,7 +91,7 @@ def test_observation_without_qualifier_parses_byte_identically():
         "@due[2026-07-27T18:42:00+02:00,)",
         "@mentioned[2026-07-27T18:42:00.123456Z,2026-07-28T00:00:00Z)",
         "@[2026-06-10,2026-07-27)",
-        # The point: the convenient form, with and without a role.
+        # The point: the convenient form, with and without a kind.
         "@effective:2026-07-27",
         "@occurred:2026-07-27T18:42:00Z",
         "@due:2026-07",
@@ -111,15 +120,15 @@ def test_qualifier_round_trips_verbatim(qualifier: str):
     assert str(observation) == line
 
 
-def test_qualifier_carries_its_role_and_bounds():
-    """The parsed assertion is the interval the author wrote, on the axis they named."""
+def test_qualifier_carries_its_kind_and_bounds():
+    """The parsed assertion is the interval the author wrote, of the kind they named."""
     observation = _observation(
         "- [decision] @effective[2026-06-10,2026-07-27) The cache layer will use Redis."
     )
 
     [assertion] = observation.temporal
-    assert assertion.time_role is TimeRole.EFFECTIVE
-    assert assertion.valid_during.kind is TemporalRangeKind.DATE
+    assert assertion.time_kind is TimeKind.EFFECTIVE
+    assert assertion.valid_during.axis is TemporalRangeAxis.DATE
     assert assertion.valid_during.lower == "2026-06-10"
     assert assertion.valid_during.upper == "2026-07-27"
     assert assertion.valid_during.lower_inclusive is True
@@ -179,79 +188,79 @@ def test_qualifier_alone_on_the_line_still_parses():
 
 
 @pytest.mark.parametrize(
-    ("qualifier", "literal", "kind"),
+    ("qualifier", "literal", "axis"),
     [
         # A year and a month are periods the author delimited by writing them.
-        ("@2026", "[2026-01-01,2027-01-01)", TemporalRangeKind.DATE),
-        ("@2026-06", "[2026-06-01,2026-07-01)", TemporalRangeKind.DATE),
+        ("@2026", "[2026-01-01,2027-01-01)", TemporalRangeAxis.DATE),
+        ("@2026-06", "[2026-06-01,2026-07-01)", TemporalRangeAxis.DATE),
         # A date says when something started and leaves it open.
-        ("@2026-06-10", "[2026-06-10,)", TemporalRangeKind.DATE),
+        ("@2026-06-10", "[2026-06-10,)", TemporalRangeAxis.DATE),
         # So does a moment, on the instant axis.
         (
             "@2026-06-10T14:00:00",
             "[2026-06-10T14:00:00.000000Z,)",
-            TemporalRangeKind.INSTANT,
+            TemporalRangeAxis.INSTANT,
         ),
         (
             "@2026-06-10T14:00:00Z",
             "[2026-06-10T14:00:00.000000Z,)",
-            TemporalRangeKind.INSTANT,
+            TemporalRangeAxis.INSTANT,
         ),
         (
             "@2026-06-10T14:00:00+02:00",
             "[2026-06-10T12:00:00.000000Z,)",
-            TemporalRangeKind.INSTANT,
+            TemporalRangeAxis.INSTANT,
         ),
     ],
 )
 def test_point_qualifier_canonicalizes_to_the_span_its_precision_covers(
-    qualifier: str, literal: str, kind: TemporalRangeKind
+    qualifier: str, literal: str, axis: TemporalRangeAxis
 ):
     observation = _observation(f"- [decision] {qualifier} The cutover ran.")
 
     [assertion] = observation.temporal
     assert str(assertion.valid_during) == literal
-    assert assertion.valid_during.kind is kind
+    assert assertion.valid_during.axis is axis
 
 
-def test_role_less_point_is_filed_on_the_valid_axis():
+def test_a_point_with_no_kind_is_filed_as_valid_time():
     """`@2026-06-10` says when the statement holds, without narrowing how."""
     observation = _observation("- [decision] @2026-06-10 The cache layer will use Redis.")
 
     [assertion] = observation.temporal
-    assert assertion.time_role is TimeRole.VALID
+    assert assertion.time_kind is TimeKind.VALID
 
 
-def test_role_less_range_literal_is_filed_on_the_valid_axis():
-    """The role is optional in both forms, and defaults the same way in both."""
+def test_a_range_literal_with_no_kind_is_filed_as_valid_time():
+    """The kind is optional in both forms, and defaults the same way in both."""
     observation = _observation("- [decision] @[2026-06-10,2026-07-27) Use Redis.")
 
     [assertion] = observation.temporal
-    assert assertion.time_role is TimeRole.VALID
+    assert assertion.time_kind is TimeKind.VALID
     assert str(assertion.valid_during) == "[2026-06-10,2026-07-27)"
 
 
 @pytest.mark.parametrize(
-    ("qualifier", "role"),
+    ("qualifier", "kind"),
     [
-        ("@effective:2026-06-10", TimeRole.EFFECTIVE),
-        ("@occurred:2026-06-10", TimeRole.OCCURRED),
-        ("@due:2026-06-10", TimeRole.DUE),
-        ("@mentioned:2026-06-10", TimeRole.MENTIONED),
-        ("@valid:2026-06-10", TimeRole.VALID),
+        ("@effective:2026-06-10", TimeKind.EFFECTIVE),
+        ("@occurred:2026-06-10", TimeKind.OCCURRED),
+        ("@due:2026-06-10", TimeKind.DUE),
+        ("@mentioned:2026-06-10", TimeKind.MENTIONED),
+        ("@valid:2026-06-10", TimeKind.VALID),
     ],
 )
-def test_point_qualifier_names_its_axis_with_a_colon(qualifier: str, role: TimeRole):
-    """`:` separates role from date; a date can start with a letter, so it is needed."""
+def test_point_qualifier_names_its_kind_with_a_colon(qualifier: str, kind: TimeKind):
+    """`:` separates kind from date; a date can start with a letter, so it is needed."""
     observation = _observation(f"- [decision] {qualifier} The cutover ran.")
 
     [assertion] = observation.temporal
-    assert assertion.time_role is role
+    assert assertion.time_kind is kind
     assert str(assertion.valid_during) == "[2026-06-10,)"
 
 
-def test_a_roled_point_accepts_a_relative_date():
-    """With a role the author has said what they mean, so any readable date is taken.
+def test_a_point_with_a_kind_accepts_a_relative_date():
+    """With a kind the author has said what they mean, so any readable date is taken.
 
     Relative wording resolves at parse time and is re-resolved on every index pass.
     That is documented behavior, not a mistake to warn about.
@@ -280,11 +289,11 @@ def test_a_roled_point_accepts_a_relative_date():
         "@5-3",
     ],
 )
-def test_a_role_less_point_must_be_digit_led_and_year_wide(qualifier: str):
+def test_a_point_with_no_kind_must_be_digit_led_and_year_wide(qualifier: str):
     """A bare `@token` that short is a mention, a version, or a list marker.
 
     Accepting what dateparser makes of these would silently file wrong valid time on
-    ordinary prose. An author who really means one writes the role: `@occurred:may`.
+    ordinary prose. An author who really means one writes the kind: `@occurred:may`.
     """
     observation = _observation(f"- [decision] {qualifier} shipped the cutover.")
 
@@ -294,7 +303,7 @@ def test_a_role_less_point_must_be_digit_led_and_year_wide(qualifier: str):
 
 
 def test_a_word_point_is_read_only_when_it_names_a_specific_day():
-    """A role opens the form to words, but not to words that name only a period.
+    """A kind opens the form to words, but not to words that name only a period.
 
     `yesterday` resolves to one day and is taken. `may` resolves to a whole month, and
     a bare month name at the head of a line is either prose or -- worse -- the first
@@ -303,7 +312,7 @@ def test_a_word_point_is_read_only_when_it_names_a_specific_day():
     """
     day = _observation("- [decision] @occurred:yesterday The cutover ran.")
     [assertion] = day.temporal
-    assert assertion.time_role is TimeRole.OCCURRED
+    assert assertion.time_kind is TimeKind.OCCURRED
     assert day.content == "The cutover ran."
 
     period = _observation("- [decision] @occurred:may The cutover ran.")
@@ -322,58 +331,60 @@ def test_a_word_point_is_read_only_when_it_names_a_specific_day():
 
 
 @pytest.mark.parametrize(
-    ("qualifier", "literal", "kind"),
+    ("qualifier", "literal", "axis"),
     [
-        # Single-token absolute dates, with a role and without.
-        ("@occurred:2026-06-10", "[2026-06-10,)", TemporalRangeKind.DATE),
-        ("@occurred:03/04/2026", "[2026-04-03,)", TemporalRangeKind.DATE),
+        # Single-token absolute dates, with a kind and without.
+        ("@occurred:2026-06-10", "[2026-06-10,)", TemporalRangeAxis.DATE),
+        ("@occurred:03/04/2026", "[2026-04-03,)", TemporalRangeAxis.DATE),
         (
             "@occurred:2026-06-10T10:00:00",
             "[2026-06-10T10:00:00.000000Z,)",
-            TemporalRangeKind.INSTANT,
+            TemporalRangeAxis.INSTANT,
         ),
-        # A role admits a word, as long as it names one day.
-        ("@occurred:today", None, TemporalRangeKind.DATE),
-        ("@occurred:yesterday", None, TemporalRangeKind.DATE),
+        # A kind admits a word, as long as it names one day.
+        ("@occurred:today", None, TemporalRangeAxis.DATE),
+        ("@occurred:yesterday", None, TemporalRangeAxis.DATE),
     ],
 )
-def test_single_token_points_are_accepted(qualifier: str, literal: str | None, kind):
+def test_single_token_points_are_accepted(qualifier: str, literal: str | None, axis):
     observation = _observation(f"- [decision] {qualifier} The cutover ran.")
 
     [assertion] = observation.temporal
     assert observation.content == "The cutover ran."
-    assert assertion.valid_during.kind is kind
+    assert assertion.valid_during.axis is axis
     if literal is not None:
         assert str(assertion.valid_during) == literal
 
 
 @pytest.mark.parametrize(
-    "qualifier",
+    ("qualifier", "reported"),
     [
         # Multi-word dates: only the first token reaches the reader, and each of these
         # first tokens is refused, so the whole line stays content rather than being
-        # half-read. `@occurred:2026-06-10` says the same thing in one token.
-        "@occurred:June 10, 2026",
-        "@occurred:10 June 2026",
-        "@occurred:Jan 15, 2024",
-        "@occurred:2 days ago",
-        "@occurred:last week",
+        # half-read. `@occurred:"June 10, 2026"` says it in one delimited token.
+        ("@occurred:June 10, 2026", True),
+        ("@occurred:Jan 15, 2024", True),
+        ("@occurred:10 June 2026", False),
+        ("@occurred:2 days ago", False),
+        ("@occurred:last week", False),
     ],
 )
-def test_multi_word_dates_stay_content_whole(qualifier: str):
-    """The reader understands these; the grammar cannot delimit them.
+def test_multi_word_dates_stay_content_whole(qualifier: str, reported: bool):
+    """The reader understands these; the unquoted grammar cannot delimit them.
 
     What matters is that an undelimitable date is left *entirely* alone: no coarse
-    assertion filed from its first token, and no words eaten out of the content.
+    assertion filed from its first token, and no words eaten out of the content. Whether
+    the author additionally *hears* about it is the digit-follows signal's business,
+    pinned below -- the line itself is untouched either way.
     """
     line = f"- [decision] {qualifier} The cutover ran."
 
     observation = _observation(line)
 
     assert observation.temporal == []
-    assert observation.temporal_error is None
     assert observation.content == f"{qualifier} The cutover ran."
     assert str(observation) == line
+    assert (observation.temporal_error is not None) is reported
 
 
 def test_a_multi_word_date_is_read_up_to_its_first_token_when_that_token_stands_alone():
@@ -387,15 +398,214 @@ def test_a_multi_word_date_is_read_up_to_its_first_token_when_that_token_stands_
 
     [assertion] = observation.temporal
     assert str(assertion.valid_during) == "[2026-06-10,)"
-    assert assertion.valid_during.kind is TemporalRangeKind.DATE
+    assert assertion.valid_during.axis is TemporalRangeAxis.DATE
     assert observation.content == "10:00 AM The cutover ran."
+
+
+# --- The quoted point: a date the author delimited ---
+#
+# Quotes are how a multi-word date is written. They move the token boundary from the
+# next space to the closing quote, which is the whole reason the one-token guards do not
+# apply inside them: the author said where the date ends, so nothing can be truncated.
+
+
+@pytest.mark.parametrize(
+    ("qualifier", "literal", "kind"),
+    [
+        ('@occurred:"June 10, 2026"', "[2026-06-10,)", TimeKind.OCCURRED),
+        ('@effective:"10 June 2026"', "[2026-06-10,)", TimeKind.EFFECTIVE),
+        # Month-only and year-only: coarse on purpose, and delimited, so they are read.
+        ('@occurred:"June 2026"', "[2026-06-01,2026-07-01)", TimeKind.OCCURRED),
+        # With no kind, exactly like the bare point form -- filed as valid time.
+        ('@"June 10, 2026"', "[2026-06-10,)", TimeKind.VALID),
+    ],
+)
+def test_quoted_point_reads_a_multi_word_date(qualifier: str, literal: str, kind: TimeKind):
+    """The quoted form's payload goes to the date reader whole, spaces and all."""
+    line = f"- [decision] {qualifier} The cutover ran."
+
+    observation = _observation(line)
+
+    [assertion] = observation.temporal
+    assert observation.temporal_error is None
+    assert assertion.time_kind is kind
+    assert str(assertion.valid_during) == literal
+    assert assertion.valid_during.axis is TemporalRangeAxis.DATE
+    assert observation.content == "The cutover ran."
+    # Quotes are part of the qualifier, so they round-trip with it.
+    assert assertion.source_text == qualifier
+    assert str(observation) == line
+
+
+def test_a_quoted_relative_date_is_read_where_its_unquoted_form_is_not():
+    """`2 days ago` always read fine; only the token rule kept it out."""
+    quoted = _observation('- [decision] @occurred:"2 days ago" The cutover ran.')
+
+    [assertion] = quoted.temporal
+    two_days_ago = datetime.now().date() - timedelta(days=2)
+    assert assertion.valid_during.lower == two_days_ago.isoformat()
+    assert quoted.content == "The cutover ran."
+
+    unquoted = _observation("- [decision] @occurred:2 days ago The cutover ran.")
+    assert unquoted.temporal == []
+
+
+def test_a_quoted_month_is_filed_where_the_specific_day_guard_refuses_it():
+    """The guard exists to catch truncation, and a delimited value cannot be truncated.
+
+    Unquoted, `June` is refused because it may be the head of `June 2026`. Quoted, the
+    author has already said the date is exactly that month.
+    """
+    quoted = _observation('- [decision] @occurred:"June 2026" The cutover ran.')
+
+    [assertion] = quoted.temporal
+    assert str(assertion.valid_during) == "[2026-06-01,2026-07-01)"
+    assert quoted.content == "The cutover ran."
+
+    unquoted = _observation("- [decision] @occurred:June 2026 The cutover ran.")
+    assert unquoted.temporal == []
+
+
+def test_a_quoted_clock_reading_is_read_whole_where_the_token_rule_truncates_it():
+    """The one partial read the token rule allows, undone by delimiting the value.
+
+    Unquoted, `@occurred:2026-06-10 10:00 AM` files a calendar date and leaves the clock
+    reading in the content (pinned above). Quoted, the same text files the instant the
+    author meant, and nothing is left behind.
+    """
+    observation = _observation('- [decision] @occurred:"2026-06-10 10:00 AM" The cutover ran.')
+
+    [assertion] = observation.temporal
+    assert str(assertion.valid_during) == "[2026-06-10T10:00:00.000000Z,)"
+    assert assertion.valid_during.axis is TemporalRangeAxis.INSTANT
+    assert observation.content == "The cutover ran."
+
+
+def test_the_closing_quote_ends_the_token_and_the_rest_stays_content():
+    """Content after the closing quote is ordinary content, quotes and digits included.
+
+    Whitespace no longer delimits the token, so the peel has to stop at the quote and
+    hand back everything after it exactly as written -- including text that would have
+    been read as more date had the scan kept going.
+    """
+    line = (
+        '- [decision] @occurred:"June 10, 2026" She said "go", then 10, 2026 '
+        "shipped #infra (agreed)"
+    )
+
+    observation = _observation(line)
+
+    [assertion] = observation.temporal
+    assert assertion.source_text == '@occurred:"June 10, 2026"'
+    assert observation.content == 'She said "go", then 10, 2026 shipped #infra'
+    assert observation.tags == ["infra"]
+    assert observation.context == "agreed"
+    assert str(observation) == line
+
+
+def test_content_may_follow_the_closing_quote_with_no_space():
+    """The quote is the boundary, so nothing else has to mark it."""
+    observation = _observation('- [decision] @occurred:"June 10, 2026"The cutover ran.')
+
+    [assertion] = observation.temporal
+    assert assertion.source_text == '@occurred:"June 10, 2026"'
+    assert observation.content == "The cutover ran."
+
+
+@pytest.mark.parametrize(
+    "qualifier",
+    ['@occurred:""', '@occurred:"not a date"', '@"the cutover week"'],
+)
+def test_a_quoted_payload_that_is_not_a_date_stays_content_silently(qualifier: str):
+    """Quoting says where the value ends, not that the value is a date."""
+    observation = _observation(f"- [decision] {qualifier} The cutover ran.")
+
+    assert observation.temporal == []
+    assert observation.temporal_error is None
+    assert observation.content == f"{qualifier} The cutover ran."
+
+
+def test_a_quoted_point_still_reports_an_unknown_kind():
+    """The quoted form is a spelling of the point, so it keeps the point's diagnostic."""
+    observation = _refusal('- [decision] @asserted:"June 10, 2026" The cutover ran.')
+
+    assert "unknown temporal kind 'asserted'" in (observation.temporal_error or "")
+    assert observation.content.startswith('@asserted:"June 10, 2026"')
+
+
+def test_an_unterminated_quote_is_reported_instead_of_swallowing_the_line():
+    """Reading on would hand the author's prose to the date reader; refusing keeps it."""
+    line = '- [decision] @occurred:"June 10, 2026 The cutover ran.'
+
+    observation = _refusal(line)
+
+    assert "unterminated quote" in (observation.temporal_error or "")
+    # The fix is shown, not described.
+    assert '@occurred:"June 10, 2026"' in (observation.temporal_error or "")
+    assert observation.content == '@occurred:"June 10, 2026 The cutover ran.'
+    assert str(observation) == line
+
+
+def test_an_escaped_quote_belongs_to_the_value_and_cannot_close_it():
+    r"""`\"` is part of the date text, which is why this line has no closing quote left."""
+    observation = _refusal('- [decision] @occurred:"June 10, 2026\\" The cutover ran.')
+
+    assert "unterminated quote" in (observation.temporal_error or "")
+    assert observation.content == '@occurred:"June 10, 2026\\" The cutover ran.'
+
+
+# --- The truncation diagnostic: when the one-token rule costs a date ---
+
+
+def test_a_truncated_date_names_the_quoted_form_as_the_fix():
+    """`@occurred:June 10, 2026` is the shape quoting exists for, so say so once."""
+    observation = _refusal("- [decision] @occurred:June 10, 2026 The cutover ran.")
+
+    error = observation.temporal_error or ""
+    assert "'@occurred:June'" in error
+    assert "names only a month or a year" in error
+    assert '@occurred:"June 10, 2026"' in error
+    # Reported, never half-read: the line is still exactly what the author wrote.
+    assert observation.content == "@occurred:June 10, 2026 The cutover ran."
+
+
+def test_a_too_short_number_followed_by_a_digit_names_the_quoted_form_too():
+    """The other guard gets the same treatment, with its own reason and the same fix."""
+    observation = _refusal("- [note] @12 2026 was the year of the cutover.")
+
+    error = observation.temporal_error or ""
+    assert "'@12'" in error
+    assert "is narrower than a year" in error
+    # A point with no kind is fixed by the quoted form with no kind.
+    assert '@"June 10, 2026"' in error
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        # Prose follows, so nothing suggests a date was cut short.
+        "- [decision] @occurred:June the cat sat on the mat",
+        "- [decision] @occurred:may The cutover ran.",
+        "- [decision] @1 shipped the cutover.",
+        # Nothing follows at all.
+        "- [decision] @occurred:June",
+        # A digit follows, but `@vol:` is an ordinary `@word:` marker, not a kind.
+        "- [note] @vol:2 3 pages of notes",
+    ],
+)
+def test_a_refused_point_stays_silent_when_the_line_did_not_continue_the_date(line: str):
+    """Today's behavior, kept: the diagnostic fires on one signal, not on every refusal."""
+    observation = _observation(line)
+
+    assert observation.temporal == []
+    assert observation.temporal_error is None
 
 
 @pytest.mark.parametrize(
     ("date_order", "expected_lower"),
     [("YMD", "2026-04-03"), ("DMY", "2026-04-03"), ("MDY", "2026-03-04")],
 )
-def test_a_roled_slash_date_follows_the_configured_order(
+def test_a_slash_date_with_a_kind_follows_the_configured_order(
     date_order: DateOrder, expected_lower: str
 ):
     """`@occurred:03/04/2026` resolves by preference, through the real parse path."""
@@ -437,37 +647,29 @@ def test_configured_date_order_never_reinterprets_an_iso_date(monkeypatch):
     assert assertion.valid_during.lower == "2026-07-10"
 
 
-# --- The one diagnostic: an unknown role ---
+# --- The unknown-kind diagnostic ---
 
 
-def _refusal(line: str) -> Observation:
-    """Parse a line whose qualifier must be refused, and assert the shared contract."""
-    observation = _observation(line)
-    assert observation.temporal == []
-    assert observation.temporal_error is not None
-    return observation
-
-
-def test_unknown_role_in_a_range_literal_reports_diagnostic_and_keeps_text():
-    """`@asserted` is well-formed but names no axis this system understands."""
+def test_unknown_kind_in_a_range_literal_reports_diagnostic_and_keeps_text():
+    """`@asserted` is well-formed but names no kind this system understands."""
     observation = _refusal("- [decision] @asserted[2026-06-10,) The cache layer will use Redis.")
 
-    assert "unknown temporal role 'asserted'" in (observation.temporal_error or "")
-    # The diagnostic names the roles that would have worked.
+    assert "unknown temporal kind 'asserted'" in (observation.temporal_error or "")
+    # The diagnostic names the kinds that would have worked.
     assert "effective" in (observation.temporal_error or "")
     # Never silently dropped: the text is still searchable content.
     assert observation.content.startswith("@asserted[2026-06-10,)")
 
 
-def test_unknown_role_in_a_point_reports_diagnostic_and_keeps_text():
-    """The payload reads as a date, so the author is plainly naming an axis."""
+def test_unknown_kind_in_a_point_reports_diagnostic_and_keeps_text():
+    """The payload reads as a date, so the author is plainly naming a kind."""
     observation = _refusal("- [decision] @asserted:2026-06-10 The cache layer will use Redis.")
 
-    assert "unknown temporal role 'asserted'" in (observation.temporal_error or "")
+    assert "unknown temporal kind 'asserted'" in (observation.temporal_error or "")
     assert observation.content.startswith("@asserted:2026-06-10")
 
 
-def test_an_unknown_role_with_an_unreadable_payload_is_left_alone():
+def test_an_unknown_kind_with_an_unreadable_payload_is_left_alone():
     """`@todo:fix the thing` is prose, not a broken qualifier.
 
     The diagnostic is reserved for a payload that actually reads as time; without that,
@@ -486,7 +688,7 @@ def test_an_unknown_role_with_an_unreadable_payload_is_left_alone():
 @pytest.mark.parametrize(
     ("line", "kept"),
     [
-        # A known role glued to something that is not a range literal.
+        # A known kind glued to something that is not a range literal.
         ("- [decision] @effective[2026-06-10 Use Redis.", "@effective[2026-06-10"),
         # A range mixing the two axes.
         ("- [decision] @effective[2026-06-10,2026-07-27T00:00:00Z) Use Redis.", "@effective["),
@@ -545,7 +747,7 @@ def test_date_only_bounds_never_acquire_time_or_zone():
     observation = _observation("- [decision] @effective[2026-06-10,2026-07-27) Use Redis.")
 
     [assertion] = observation.temporal
-    assert assertion.valid_during.kind is TemporalRangeKind.DATE
+    assert assertion.valid_during.axis is TemporalRangeAxis.DATE
     assert assertion.valid_during.lower == "2026-06-10"
     assert assertion.valid_during.upper == "2026-07-27"
     assert "T" not in (assertion.valid_during.lower or "")
@@ -561,7 +763,7 @@ def test_a_date_point_never_becomes_midnight_utc():
     observation = _observation("- [decision] @effective:2026-06-10 Use Redis.")
 
     [assertion] = observation.temporal
-    assert assertion.valid_during.kind is TemporalRangeKind.DATE
+    assert assertion.valid_during.axis is TemporalRangeAxis.DATE
     assert assertion.valid_during.lower == "2026-06-10"
     assert "T00:00" not in str(assertion.valid_during)
 

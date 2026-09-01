@@ -24,7 +24,7 @@ from basic_memory.services.context_service import (
     ContextResultRow,
     ContextResult as ServiceContextResult,
 )
-from basic_memory.temporal import TemporalRange, TemporalRangeKind
+from basic_memory.temporal import TemporalRange, TemporalRangeAxis
 
 
 class EntityBatchLookup(Protocol):
@@ -247,7 +247,7 @@ def _temporal_result_metadata(row: MemoryTimeIndex) -> TemporalResultMetadata:
     plausible-looking interval.
     """
     valid_during = TemporalRange(
-        kind=TemporalRangeKind(row.range_kind),
+        axis=TemporalRangeAxis(row.range_axis),
         lower=row.lower_value,
         upper=row.upper_value,
         lower_inclusive=row.lower_inclusive,
@@ -255,9 +255,9 @@ def _temporal_result_metadata(row: MemoryTimeIndex) -> TemporalResultMetadata:
         is_empty=row.is_empty,
     )
     return TemporalResultMetadata(
-        role=row.time_role,
+        kind=row.time_kind,
         valid_during=TemporalRangeValue(
-            kind=valid_during.kind.value,
+            axis=valid_during.axis.value,
             literal=str(valid_during),
             lower=valid_during.lower,
             upper=valid_during.upper,
