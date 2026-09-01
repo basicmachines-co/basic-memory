@@ -697,6 +697,9 @@ def test_an_unknown_kind_with_an_unreadable_payload_is_left_alone():
         # A date that the calendar does not have.
         ("- [decision] @effective[2026-02-30,) Use Redis.", "@effective[2026-02-30,)"),
         ("- [decision] @2026-02-30 Use Redis.", "@2026-02-30"),
+        # A moment that leaves the calendar once it is shifted to UTC.
+        ("- [decision] @effective[9999-12-31T23:59:59-05:00,) Use Redis.", "@effective["),
+        ("- [decision] @effective:9999-12-31T23:59:59-05:00 Use Redis.", "@effective:"),
         # Trailing junk: one broken token, not a qualifier plus content.
         ("- [decision] @effective[2026-06-10,2026-07-27)x Use Redis.", "@effective["),
     ],
@@ -708,6 +711,50 @@ def test_a_payload_that_does_not_read_as_time_stays_content(line: str, kept: str
     assert observation.temporal == []
     assert observation.temporal_error is None
     assert observation.content.startswith(kept)
+
+
+# --- One qualifier never costs the note its index ---
+
+
+def test_a_qualifier_at_the_end_of_the_calendar_does_not_fail_the_note():
+    """Whatever a qualifier says, the rest of the note still parses.
+
+    `@effective:9999-12` used to build `date(10000, 1, 1)`; the `ValueError` escaped
+    `parse_authored_point` and `parse_temporal_qualifier` -- neither of which guards that
+    call -- into the markdown parser, so *the whole document* failed over one qualifier:
+    every other observation and relation on the page went with it. December 9999 is
+    representable as `[9999-12-01,)`, so it files like any other period, and the
+    instant beside it, which is not representable at all, is simply left as content.
+    """
+    content = "\n".join(
+        [
+            "## Observations",
+            "- [decision] @effective:9999-12 The cache layer will use Redis.",
+            "- [decision] @effective:9999 The contract holds all year.",
+            "- [decision] @effective[9999-12-31T23:59:59-05:00,) An unstorable moment.",
+            "- [note] An ordinary observation that must still index.",
+            "",
+            "## Relations",
+            "- relates_to [[Cache Layer]]",
+        ]
+    )
+
+    parsed = parse(content)
+
+    month, year, unstorable, ordinary = parsed.observations
+    [month_assertion] = month.temporal
+    [year_assertion] = year.temporal
+    assert str(month_assertion.valid_during) == "[9999-12-01,)"
+    assert str(year_assertion.valid_during) == "[9999-01-01,)"
+    assert month.content == "The cache layer will use Redis."
+    assert year.content == "The contract holds all year."
+    # Unreadable, so never peeled: the line keeps its exact text and reports nothing.
+    assert unstorable.temporal == []
+    assert unstorable.temporal_error is None
+    assert unstorable.content == "@effective[9999-12-31T23:59:59-05:00,) An unstorable moment."
+    # The rest of the note is what the crash used to take with it.
+    assert ordinary.content == "An ordinary observation that must still index."
+    assert [relation.target for relation in parsed.relations] == ["Cache Layer"]
 
 
 def test_qualifier_with_nothing_to_qualify_stays_content():

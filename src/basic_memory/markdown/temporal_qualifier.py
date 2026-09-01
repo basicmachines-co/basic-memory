@@ -248,7 +248,9 @@ def _truncation_reason(point: str, valid_during: TemporalRange) -> str | None:
 
     A bounded span is how a coarse point announces itself: `parse_authored_point` closes
     a year or a month at its successor and leaves a day or a moment open, so
-    `upper is None` *is* "this names a specific day".
+    `upper is None` *is* "this names a specific day". The one period with no successor
+    to close at -- December 9999 -- is left open too, and so reads here as a day; no word
+    resolves to it, so the guard never sees that shape.
     """
     if point[0].isdigit():
         return None if len(point) >= _MIN_NUMERIC_POINT_WIDTH else "is narrower than a year"
