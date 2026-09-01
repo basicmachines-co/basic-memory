@@ -67,7 +67,6 @@ from basic_memory.mcp.project_context_identifiers import (
     split_project_permalink_prefix as _split_project_permalink_prefix,
     split_qualified_project_identifier as _split_qualified_project_identifier_impl,
     split_workspace_slug_prefix as _split_workspace_slug_prefix,
-    unqualified_project_identifier as _unqualified_project_identifier,
 )
 from basic_memory.mcp.workspace_project_index import (
     WORKSPACE_PROJECT_INDEX_STATE_KEY as _WORKSPACE_PROJECT_INDEX_STATE_KEY,
@@ -818,7 +817,11 @@ async def resolve_project_and_path(
         workspace_context = current_workspace_permalink_context()
         if workspace_context and project:
             workspace_prefix = generate_permalink(workspace_context.workspace_slug)
-            project_permalink = generate_permalink(_unqualified_project_identifier(project))
+            # Strip only this workspace's own slug. Guessing that the first
+            # segment of `project` is a workspace mangles a project whose name
+            # contains '/' ('Research/2026' -> '2026'), and the workspace here
+            # is known, so nothing has to be inferred.
+            project_permalink = generate_permalink(project).removeprefix(f"{workspace_prefix}/")
             qualified_prefix = f"{workspace_prefix}/{project_permalink}"
             if normalized_path == qualified_prefix or normalized_path.startswith(
                 f"{qualified_prefix}/"
@@ -1244,17 +1247,40 @@ async def _detect_workspace_qualified_route(
     return resolution.project_identifier, remainder
 
 
-def _project_routes_agree(detected: str, explicit: str) -> bool:
-    """True when a detected path prefix and an explicit project name the same project."""
+def _workspace_qualifies(qualified: str, bare: str) -> bool:
+    """True when ``qualified`` is ``bare`` with exactly one workspace slug in front.
+
+    Asking "is this identifier workspace-qualified?" of a single string is not
+    answerable — a project name may contain '/', so 'Research/2026' and
+    'acme/docs' have the same shape. Comparing two spellings of the *same*
+    project is answerable without any candidate set, because a workspace slug is
+    exactly one segment: the qualified spelling is the bare one plus exactly one
+    leading segment. That is the whole rule, and it is why 'acme/Research/2026'
+    qualifies 'Research/2026' while it does not qualify a project named '2026'.
+    """
+    qualified_permalink = generate_permalink(qualified)
+    bare_permalink = generate_permalink(bare)
+    return qualified_permalink.endswith(f"/{bare_permalink}") and (
+        qualified_permalink.count("/") - bare_permalink.count("/") == 1
+    )
+
+
+def _agreed_route_project(detected: str, explicit: str) -> str | None:
+    """The project both spellings name, or None when they name different projects.
+
+    Returns the more-qualified spelling, so an explicit '<workspace>/<project>'
+    outlives a bare prefix match: a local project can shadow a same-named
+    project in another workspace, and dropping the explicitly named workspace
+    would silently reroute the call to the local shadow. Agreement and which
+    spelling wins come from one comparison, so they cannot disagree.
+    """
     if generate_permalink(detected) == generate_permalink(explicit):
-        return True
-    detected_workspace, detected_project = _split_qualified_project_identifier_impl(detected)
-    explicit_workspace, explicit_project = _split_qualified_project_identifier_impl(explicit)
-    # A workspace-qualified spelling agrees with the unqualified spelling of the
-    # same project; two fully qualified spellings must match exactly (above).
-    if (detected_workspace is None) == (explicit_workspace is None):
-        return False
-    return generate_permalink(detected_project) == generate_permalink(explicit_project)
+        return detected
+    if _workspace_qualifies(explicit, detected):
+        return explicit
+    if _workspace_qualifies(detected, explicit):
+        return detected
+    return None
 
 
 async def resolve_project_path_route(
@@ -1349,23 +1375,19 @@ async def resolve_project_path_route(
             return ProjectPathRoute(
                 project=_canonicalize_project_name(explicit, config), path=path, stripped=False
             )
-        if _project_routes_agree(detected, explicit):
+        routed = _agreed_route_project(detected, explicit)
+        if routed is not None:
             # Trigger: the explicit spelling is workspace-qualified while the
             #   path prefix matched an unqualified local config name.
-            # Why: a local project can shadow a same-named project in another
-            #   workspace; dropping the explicitly named workspace would
-            #   silently reroute the call to the local shadow.
-            # Outcome: the more-qualified explicit spelling carries the route,
-            #   and drops the mount id that names this session's workspace with
-            #   it; every other agreement keeps the detected (canonical)
-            #   spelling and stays bound to the mount that matched.
-            detected_workspace, _ = _split_qualified_project_identifier_impl(detected)
-            explicit_workspace, _ = _split_qualified_project_identifier_impl(explicit)
-            prefer_explicit = explicit_workspace is not None and detected_workspace is None
+            # Why: the explicitly named workspace must survive, or the call
+            #   silently reroutes to a same-named local shadow.
+            # Outcome: when the explicit spelling wins it also drops the mount
+            #   id that names this session's own workspace; every other
+            #   agreement keeps the detected (canonical) spelling and stays
+            #   bound to the mount that matched.
+            prefer_explicit = routed is explicit
             return ProjectPathRoute(
-                project=_canonicalize_project_name(
-                    explicit if prefer_explicit else detected, config
-                ),
+                project=_canonicalize_project_name(routed, config),
                 path=remainder,
                 stripped=True,
                 project_id=None if prefer_explicit else mount_project_id,
@@ -1565,10 +1587,13 @@ async def get_project_client(
         active_ws: WorkspaceInfo | None = None
         resolved_entry: WorkspaceProjectEntry | None = None
         workspace_id: str
-        project_for_api = _unqualified_project_identifier(resolved_project)
 
         if project_entry and project_entry.workspace_id:
-            # Per-project config stores the cloud tenant id directly
+            # Per-project config stores the cloud tenant id directly. The
+            # identifier came out of config.projects, so it is the project name
+            # verbatim — splitting a workspace off it would mangle a name that
+            # legitimately contains '/'.
+            project_for_api = resolved_project
             workspace_id = project_entry.workspace_id
             active_ws = await _workspace_metadata_by_tenant_id(workspace_id, context=context)
         else:

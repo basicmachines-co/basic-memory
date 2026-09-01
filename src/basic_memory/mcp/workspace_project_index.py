@@ -270,8 +270,19 @@ async def resolve_workspace_project_from_index(
 
     from basic_memory.mcp.project_context_identifiers import split_qualified_project_identifier
 
-    workspace_identifier, project_identifier = split_qualified_project_identifier(project)
-    project_permalink = generate_permalink(project_identifier)
+    # Try the whole identifier as a project permalink before reading its first
+    # segment as a workspace. A project name may contain '/', so 'Research/2026'
+    # and 'acme/docs' are the same shape and only the index can tell them apart;
+    # without this, a slash-bearing project name was unroutable, failing with
+    # "Workspace 'Research' was not found". The v2 project router resolves
+    # exact-first for the same reason.
+    whole_permalink = generate_permalink(project)
+    if whole_permalink in index.entries_by_permalink:
+        workspace_identifier, project_identifier = None, project
+        project_permalink = whole_permalink
+    else:
+        workspace_identifier, project_identifier = split_qualified_project_identifier(project)
+        project_permalink = generate_permalink(project_identifier)
 
     if workspace_identifier:
         workspace = match_workspace_identifier(index.workspaces, workspace_identifier)

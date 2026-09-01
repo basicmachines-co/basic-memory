@@ -5,9 +5,11 @@ use, so these tests run the real ASGI stack via the shared `client` fixture and
 assert on the JSON shapes the canonical `output_format="json"` paths produce.
 """
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import yaml
 from fastmcp.exceptions import ToolError
 
 import basic_memory.mcp.tools.posix_tools as posix_tools
@@ -1034,3 +1036,39 @@ async def test_unrouted_listings_keep_project_relative_paths(
 
     assert all(not node["file_path"].startswith("test-project/") for node in listing["nodes"])
     assert (await ls("/test", project=test_project.name))["total"] == listing["total"]
+
+
+@pytest.mark.asyncio
+async def test_routed_cat_never_rewrites_note_frontmatter(
+    client, test_project, second_project, no_project_constraint
+):
+    """Re-qualification touches transport metadata, never note content.
+
+    Frontmatter is the author's own YAML and may legitimately carry keys spelled
+    like transport fields. Rewriting by key name anywhere in the payload turned
+    `file_path: imports/source.md` into `second-project/imports/source.md`, so a
+    routed read returned frontmatter that disagreed with both its own `content`
+    and the file on disk. Position, not spelling, separates the two.
+    """
+    await write_note(
+        title="Imported Note",
+        directory="notes",
+        content="# Imported Note\n\nbody",
+        project="second-project",
+        metadata={"file_path": "imports/source.md", "directory_path": "/imports"},
+    )
+
+    payload = await cat("second-project/notes/imported-note")
+
+    # The stored file is the authority: parse its frontmatter block and require
+    # the response to reproduce it exactly.
+    stored = (Path(second_project.path) / "notes" / "Imported Note.md").read_text()
+    _, _, rest = stored.partition("---\n")
+    block, _, _ = rest.partition("\n---")
+    assert yaml.safe_load(block) == payload["frontmatter"]
+    assert payload["frontmatter"]["file_path"] == "imports/source.md"
+    assert payload["frontmatter"]["directory_path"] == "/imports"
+
+    # The transport path is still qualified, so the round trip holds.
+    assert payload["file_path"] == "second-project/notes/Imported Note.md"
+    assert (await cat(payload["file_path"]))["title"] == "Imported Note"
