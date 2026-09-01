@@ -10,6 +10,7 @@ from functools import partial
 from pathlib import Path
 
 import typer
+from pydantic import ValidationError
 from rich.console import Console
 
 from basic_memory_benchmarks.agent_tasks.driver import run_agent_tasks
@@ -593,27 +594,33 @@ def run_agent_tasks_command(
         raise typer.BadParameter(f"Tasks {judged} use judge_rubric graders; pass --judge")
 
     resolved_run_id = run_id or f"at-{uuid.uuid4().hex[:12]}"
-    config = AgentTasksConfig(
-        run_id=resolved_run_id,
-        surfaces=surface_list,
-        task_ids=task_ids,
-        task_manifest=str(task_manifest) if task_manifest is not None else None,
-        model_spec=model,
-        model_temperature=temperature,
-        judge_spec=judge,
-        corpus_dir=str(corpus_dir),
-        output_root=str(output_root),
-        bm_source=bm_source,
-        bm_local_path=str(bm_local_path),
-        budget=AgentBudget(
-            max_turns=max_turns,
-            max_total_tokens=max_total_tokens,
-            max_task_seconds=task_timeout,
-        ),
-        tool_timeout_seconds=tool_timeout,
-        settle_timeout_seconds=settle_timeout,
-        allow_surface_skip=allow_surface_skip,
-    )
+    # AgentTasksConfig owns the field rules (finite temperature, argv/path-safe
+    # run_id) so the direct run_agent_tasks(config) path is guarded too. Render
+    # its rejection as a CLI parameter error instead of a Pydantic traceback.
+    try:
+        config = AgentTasksConfig(
+            run_id=resolved_run_id,
+            surfaces=surface_list,
+            task_ids=task_ids,
+            task_manifest=str(task_manifest) if task_manifest is not None else None,
+            model_spec=model,
+            model_temperature=temperature,
+            judge_spec=judge,
+            corpus_dir=str(corpus_dir),
+            output_root=str(output_root),
+            bm_source=bm_source,
+            bm_local_path=str(bm_local_path),
+            budget=AgentBudget(
+                max_turns=max_turns,
+                max_total_tokens=max_total_tokens,
+                max_task_seconds=task_timeout,
+            ),
+            tool_timeout_seconds=tool_timeout,
+            settle_timeout_seconds=settle_timeout,
+            allow_surface_skip=allow_surface_skip,
+        )
+    except ValidationError as exc:
+        raise typer.BadParameter(str(exc)) from exc
     run_dir = run_agent_tasks(
         config,
         model_factory=partial(
