@@ -106,8 +106,11 @@ text.
 
 Keys accept dot-paths into nested frontmatter (`review.approved`), and
 `note_type` is accepted as a spelling of the frontmatter `type` key, matching
-`search-notes(3)`. Any other operator (`!=` among them — the search API has
-no not-equals) fails fast, naming the supported set. That includes a
+`search-notes(3)`. A key is dot-separated names of letters, digits, `_` or
+`-`, so a doubled, leading or trailing dot (`review..approved`, `.owner`,
+`owner.`) is refused by the grammar rather than spent as a request the
+search API will reject. Any other operator (`!=` among them — the search
+API has no not-equals) fails fast, naming the supported set. That includes a
 mis-spelled multi-character operator: `status==active`, `status=>active` and
 `count>>3` are refused rather than read as the values `=active`, `>active`
 and `>3`. An unquoted value may therefore not begin with `=`, `<` or `>`;
