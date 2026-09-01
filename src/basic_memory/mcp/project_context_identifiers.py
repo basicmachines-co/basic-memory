@@ -69,7 +69,16 @@ def project_matches_identifier(project_item: ProjectItem, identifier: Optional[s
 
 
 def split_qualified_project_identifier(identifier: str) -> tuple[str | None, str]:
-    """Split ``<workspace-slug>/<project>`` identifiers for cloud routing."""
+    """Split ``<workspace-slug>/<project>`` identifiers for cloud routing.
+
+    This guesses: a project name may contain '/', so 'acme/docs' and
+    'Research/2026' are the same shape and no string can say which is which.
+    Call it only after an exact whole-identifier lookup has already missed, so
+    the guess is a fallback rather than the first reading — see
+    ``resolve_workspace_project_from_index`` and the v2 project router, which
+    both resolve exact-first for that reason. To compare two spellings of the
+    same project, use ``_workspace_qualifies`` instead, which needs no guess.
+    """
     cleaned = identifier.strip()
     if "/" not in cleaned:
         return None, cleaned
@@ -77,12 +86,6 @@ def split_qualified_project_identifier(identifier: str) -> tuple[str | None, str
     if not workspace_slug or not project_identifier:
         return None, cleaned
     return workspace_slug, project_identifier
-
-
-def unqualified_project_identifier(identifier: str) -> str:
-    """Return the project segment from an optional qualified identifier."""
-    _, project_identifier = split_qualified_project_identifier(identifier)
-    return project_identifier
 
 
 def identifier_path(identifier: str) -> str:

@@ -24,7 +24,7 @@ from basic_memory.mcp.project_context import (
     ProjectPathRoute,
     ProjectPrefixConflictError,
     UnqualifiedPathRefusedError,
-    _project_routes_agree,
+    _agreed_route_project,
     resolve_project_path_route,
     resolve_workspace_project_identifier,
     resolve_workspace_qualified_identifier,
@@ -32,7 +32,6 @@ from basic_memory.mcp.project_context import (
 )
 from basic_memory.mcp.project_context_identifiers import (
     split_project_permalink_prefix,
-    unqualified_project_identifier,
 )
 from basic_memory.mcp.tools import grep, ls
 from basic_memory.schemas.cloud import WorkspaceInfo
@@ -168,6 +167,33 @@ async def test_multi_segment_project_permalink_routes(config_manager, tmp_path_f
 
 
 @pytest.mark.asyncio
+async def test_multi_segment_mount_agrees_with_explicit_workspace_spelling(
+    config_manager, tmp_path_factory
+):
+    """The explicit-workspace escape hatch has to survive slash-bearing names.
+
+    With mount 'Research/2026' detected and project='acme/Research/2026' passed,
+    inferring qualification from the first slash read the detected mount as
+    workspace 'Research' plus project '2026', so two agreeing spellings were
+    rejected as a conflict. Segment count settles it without guessing.
+    """
+    config = config_manager.load_config()
+    config.projects["Research/2026"] = ProjectEntry(
+        path=str(tmp_path_factory.mktemp("research-2026-agree"))
+    )
+    config_manager.save_config(config)
+
+    route = await resolve_project_path_route(
+        "research/2026/notes/x", project="acme/Research/2026", project_id=None
+    )
+
+    # The explicitly named workspace survives, and the mount id goes with it.
+    assert route == ProjectPathRoute(
+        project="acme/Research/2026", path="notes/x", stripped=True, project_id=None
+    )
+
+
+@pytest.mark.asyncio
 async def test_glob_first_segment_never_routes(multi_project_config):
     """split_project_prefix's '*' guard: a glob first segment is search input,
     not a mount — it falls through to the multi-project refusal."""
@@ -248,12 +274,27 @@ async def test_workspace_resolvers_reject_non_routes_without_discovery():
     assert await resolve_workspace_qualified_identifier("single-segment") is None
 
 
-def test_project_routes_agree_across_mixed_qualification():
+def test_agreed_route_project_across_mixed_qualification():
     """A workspace-qualified spelling agrees with the unqualified spelling of
-    the same project, in either direction; different projects never agree."""
-    assert _project_routes_agree("research", "other/research")
-    assert _project_routes_agree("other/research", "research")
-    assert not _project_routes_agree("second-project", "other/research")
+    the same project, in either direction, and the more-qualified one carries
+    the route; different projects never agree.
+
+    Agreement is decided by segment count, not by looking for a slash: a
+    workspace slug is exactly one segment, so 'acme/Research/2026' qualifies the
+    project 'Research/2026' while it does not qualify a project named '2026'.
+    Asking "is this identifier workspace-qualified?" of one string is not
+    answerable at all once project names may contain '/'.
+    """
+    assert _agreed_route_project("research", "other/research") == "other/research"
+    assert _agreed_route_project("other/research", "research") == "other/research"
+    assert _agreed_route_project("second-project", "other/research") is None
+
+    # Slash-bearing project names: the escape hatch has to keep working.
+    assert _agreed_route_project("Research/2026", "acme/Research/2026") == "acme/Research/2026"
+    # ...without agreeing with a different project that merely shares a tail.
+    assert _agreed_route_project("2026", "acme/Research/2026") is None
+    # A mount named after a workspace still conflicts with that workspace route.
+    assert _agreed_route_project("team", "team/docs") is None
 
 
 @pytest.mark.asyncio
@@ -373,14 +414,18 @@ class _CloudSession:
     listings: list[ProjectList]
 
 
-def _routed_project_permalink(route: ProjectPathRoute) -> str:
-    """The project a route landed on, as its bare permalink.
+def _routes_to_project(route: ProjectPathRoute, permalink: str) -> bool:
+    """True when a route landed on the project the mount view advertises.
 
-    Cloud routes come back workspace-qualified ('team/research'), so compare on
-    the project segment the mount view advertises.
+    Cloud routes may come back workspace-qualified ('team/research'), so accept
+    either the bare permalink or that permalink behind exactly one workspace
+    segment — the same rule the resolver uses to compare two spellings.
     """
     assert route.project is not None
-    return generate_permalink(unqualified_project_identifier(route.project))
+    routed = generate_permalink(route.project)
+    return routed == permalink or (
+        routed.endswith(f"/{permalink}") and routed.count("/") - permalink.count("/") == 1
+    )
 
 
 @pytest.fixture
@@ -498,7 +543,7 @@ async def test_cloud_qualified_path_routes_to_that_project(cloud_session):
         stripped=True,
         project_id="research-external-id",
     )
-    assert unqualified_project_identifier(route.project or "") == "research"
+    assert _routes_to_project(route, "research")
 
 
 @pytest.mark.asyncio
@@ -568,6 +613,29 @@ async def test_cloud_workspace_project_root_falls_through_without_workspaces(
         await resolve_project_path_route("acme/docs", project=None, project_id=None)
 
     assert str(excinfo.value) == "no project 'acme' — active projects: engineering/, research/"
+
+
+@pytest.mark.asyncio
+async def test_cloud_slash_bearing_project_resolves_by_its_own_name(cloud_session):
+    """Resolving a project identifier tries the whole name before reading its
+    first segment as a workspace.
+
+    'Research/2026' and 'acme/docs' are the same shape, so a slash-bearing
+    project name used to be unroutable — the lookup took 'Research' for a
+    workspace and failed with "Workspace 'Research' was not found". The v2
+    project router already resolved exact-first for this reason; the index now
+    matches it.
+    """
+    cloud_session("Research/2026", "engineering")
+
+    entry = await resolve_workspace_project_identifier("Research/2026")
+
+    assert entry.project.name == "Research/2026"
+    assert entry.qualified_name == "team/research/2026"
+
+    # The workspace-qualified spelling still resolves through the split.
+    qualified = await resolve_workspace_project_identifier("team/Research/2026")
+    assert qualified.project.name == "Research/2026"
 
 
 @pytest.mark.asyncio
@@ -655,14 +723,14 @@ async def test_cloud_every_advertised_mount_is_addressable(cloud_session):
         root_route = await resolve_project_path_route(permalink, project=None, project_id=None)
         assert root_route.stripped is True
         assert root_route.path == ""
-        assert _routed_project_permalink(root_route) == permalink
+        assert _routes_to_project(root_route, permalink)
 
         path_route = await resolve_project_path_route(
             f"{permalink}/notes/x", project=None, project_id=None
         )
         assert path_route.stripped is True
         assert path_route.path == "notes/x"
-        assert _routed_project_permalink(path_route) == permalink
+        assert _routes_to_project(path_route, permalink)
 
 
 @pytest.mark.asyncio
@@ -695,7 +763,7 @@ async def test_cloud_refusal_does_not_consult_the_default_flag(cloud_session):
     # where the caller said, not to whatever carries the flag.
     route = await resolve_project_path_route("beta/notes/x", project=None, project_id=None)
 
-    assert _routed_project_permalink(route) == "beta"
+    assert _routes_to_project(route, "beta")
 
 
 @pytest.mark.asyncio

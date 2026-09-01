@@ -63,13 +63,27 @@ from basic_memory.utils import generate_permalink
 # unqualified, or worse, opens a *different* project that happens to be mounted
 # as 'notes'.
 #
-# So every verb that can strip a prefix re-attaches it to the paths it returns,
-# through this one function. Only addressing fields are re-qualified:
-# `directory_path` and `file_path` are what a caller feeds back to `ls`, `find`,
-# and `cat`. `permalink` is deliberately left alone — it is an identity with its
-# own canonical form (permalinks_include_project, workspace qualification), and
-# re-prefixing it here would mint a second, competing spelling of it.
-_ROUTED_PATH_FIELDS = frozenset({"directory_path", "file_path"})
+# One rule decides *whether* and *with what* (_route_prefix); each response
+# schema says *where*. That split is deliberate. Rewriting by key name anywhere
+# in the payload also rewrote a note's own frontmatter when the author happened
+# to use a `file_path:` key, so a routed `cat` returned frontmatter that
+# disagreed with both its own `content` and the stored file. Transport metadata
+# and note content are different things that can spell a key the same way, and
+# only position tells them apart.
+
+
+def _route_prefix(route: ProjectPathRoute) -> str | None:
+    """The prefix a routed response must re-attach, or None if nothing was stripped.
+
+    None means the caller addressed the project some other way (an explicit
+    param, or a single-project session), so the project-relative paths it gets
+    back are already the ones it can feed back.
+    """
+    if not route.stripped or route.project is None:
+        return None
+    # The permalink form is the spelling `ls "/"` advertises and the resolver
+    # normalizes to, so it round-trips for display names too ('My Research').
+    return generate_permalink(route.project)
 
 
 def _requalified_path(value: str, prefix: str) -> str:
@@ -79,32 +93,45 @@ def _requalified_path(value: str, prefix: str) -> str:
     return f"{prefix}/{value}" if value else prefix
 
 
-def _requalify(payload: Any, prefix: str) -> Any:
-    """Rewrite addressing fields anywhere in a response payload."""
-    if isinstance(payload, dict):
-        return {
-            key: _requalified_path(value, prefix)
-            if key in _ROUTED_PATH_FIELDS and isinstance(value, str)
-            else _requalify(value, prefix)
-            for key, value in payload.items()
-        }
-    if isinstance(payload, list):
-        return [_requalify(item, prefix) for item in payload]
-    return payload
+def qualify_note_paths(payload: dict[str, Any], route: ProjectPathRoute) -> dict[str, Any]:
+    """Re-qualify a note payload's transport path.
 
-
-def qualify_routed_paths(payload: Any, route: ProjectPathRoute) -> Any:
-    """Return ``payload`` with the project prefix ``route`` stripped put back.
-
-    A no-op when the route stripped nothing — then the caller addressed the
-    project some other way (an explicit param, or a single-project session) and
-    the project-relative paths it gets back are the ones it can feed back.
+    ``file_path`` is the note's address and is re-qualified. ``frontmatter`` is
+    the note's own YAML — canonical content that must come back byte for byte,
+    even when it carries keys named like transport fields — and ``permalink`` is
+    an identity with its own canonical form; neither is touched.
     """
-    if not route.stripped or route.project is None:
+    prefix = _route_prefix(route)
+    if prefix is None:
         return payload
-    # The permalink form is the spelling `ls "/"` advertises and the resolver
-    # normalizes to, so it round-trips for display names too ('My Research').
-    return _requalify(payload, generate_permalink(route.project))
+    return {**payload, "file_path": _requalified_path(payload["file_path"], prefix)}
+
+
+def _requalified_directory_node(node: dict[str, Any], prefix: str) -> dict[str, Any]:
+    """Re-qualify one DirectoryNode's addressing fields, and its children."""
+    requalified = dict(node)
+    directory_path = node.get("directory_path")
+    if isinstance(directory_path, str):
+        requalified["directory_path"] = _requalified_path(directory_path, prefix)
+    # file_path is Optional on DirectoryNode: directory rows carry no file.
+    file_path = node.get("file_path")
+    if isinstance(file_path, str):
+        requalified["file_path"] = _requalified_path(file_path, prefix)
+    children = node.get("children")
+    if children:
+        requalified["children"] = [_requalified_directory_node(child, prefix) for child in children]
+    return requalified
+
+
+def qualify_listing_paths(payload: dict[str, Any], route: ProjectPathRoute) -> dict[str, Any]:
+    """Re-qualify a directory listing's node addressing fields."""
+    prefix = _route_prefix(route)
+    if prefix is None:
+        return payload
+    return {
+        **payload,
+        "nodes": [_requalified_directory_node(node, prefix) for node in payload["nodes"]],
+    }
 
 
 # The manual project holds the non-bundled manual pages as ordinary notes;
@@ -237,7 +264,7 @@ async def cat(
         )
 
     if server_side_slice or (start_line is None and end_line is None):
-        return qualify_routed_paths(payload, route)
+        return qualify_note_paths(payload, route)
 
     lines = str(payload["content"]).splitlines()
     total_lines = len(lines)
@@ -247,7 +274,7 @@ async def cat(
     payload["start_line"] = first
     payload["end_line"] = last
     payload["total_lines"] = total_lines
-    return qualify_routed_paths(payload, route)
+    return qualify_note_paths(payload, route)
 
 
 def _grep_retrieval_mode(literal: bool) -> SearchRetrievalMode:
@@ -426,7 +453,7 @@ async def ls(
 
         directory_client = DirectoryClient(client, active_project.external_id)
         listing = await directory_client.list(list_path, depth=1, page=page, page_size=page_size)
-        return qualify_routed_paths(listing.model_dump(mode="json"), route)
+        return qualify_listing_paths(listing.model_dump(mode="json"), route)
 
 
 def routed_listing_root(path: str, route: ProjectPathRoute) -> str:
@@ -493,7 +520,7 @@ async def find_listing(
             page=page,
             page_size=page_size,
         )
-        payload = qualify_routed_paths(listing.model_dump(mode="json"), route)
+        payload = qualify_listing_paths(listing.model_dump(mode="json"), route)
 
     return payload, routed_listing_root(path, route)
 
