@@ -422,17 +422,88 @@ async def test_cloud_workspace_refuses_pathless_call_through_the_tool(cloud_sess
 
 @pytest.mark.asyncio
 async def test_cloud_qualified_path_routes_to_that_project(cloud_session):
-    """A qualified '<project>/notes/x' routes to that exact project — the
-    workspace-qualified spelling keeps the tenant explicit — and the remainder
-    becomes the project-relative path."""
+    """A qualified '<project>/notes/x' routes to that exact project by the mount
+    name the root advertises, with the remainder as the project-relative path.
+
+    The mount table is already scoped to this session's own route, so it is the
+    authority on that first segment; `ls "research"` has always routed by the
+    bare name, and the path form now agrees with it instead of qualifying the
+    tenant only when a slash happened to be present.
+    """
     cloud_session("research", "engineering", "personal-notes")
 
     route = await resolve_project_path_route("research/notes/x", project=None, project_id=None)
 
-    assert route.stripped is True
-    assert route.path == "notes/x"
-    assert route.project == "team/research"
-    assert unqualified_project_identifier(route.project) == "research"
+    assert route == ProjectPathRoute(project="research", path="notes/x", stripped=True)
+    assert unqualified_project_identifier(route.project or "") == "research"
+
+
+@pytest.mark.asyncio
+async def test_cloud_workspace_qualified_path_without_mount_collision_still_routes(cloud_session):
+    """No project is named 'team', so the workspace slug is free to claim the
+    first segment: '<workspace>/<project>/<path>' resolves through workspace
+    discovery, qualified name and all. Mount precedence takes nothing away from
+    the spellings that address other workspaces."""
+    cloud_session("research", "engineering")
+
+    route = await resolve_project_path_route("team/research/notes/x", project=None, project_id=None)
+
+    assert route == ProjectPathRoute(project="team/research", path="notes/x", stripped=True)
+
+
+@pytest.mark.asyncio
+async def test_cloud_mount_wins_over_colliding_workspace_slug(cloud_session):
+    """The collision: 'team' is both an advertised mount and this workspace's
+    slug, and that workspace also holds a project 'docs'. The mount wins the
+    first segment, so 'team/docs/x' is project 'team', path 'docs/x' — never
+    project 'docs' in workspace 'team'. Attempting workspace-qualified parsing
+    first served another project's data under an advertised name."""
+    cloud_session("team", "docs")
+
+    route = await resolve_project_path_route("team/docs/x", project=None, project_id=None)
+
+    assert route == ProjectPathRoute(project="team", path="docs/x", stripped=True)
+
+
+@pytest.mark.asyncio
+async def test_cloud_slug_collision_shadowed_project_stays_addressable(cloud_session):
+    """The documented cost of mount-wins, pinned: while a mount named 'team'
+    exists, project 'docs' in workspace 'team' loses its qualified *path*
+    spelling. It stays addressable through the project param — project-relative,
+    or with an agreeing prefix — and the shadowed spelling conflicts loudly
+    rather than resolving either way."""
+    cloud_session("team", "docs")
+
+    relative = await resolve_project_path_route("x", project="team/docs", project_id=None)
+    assert relative == ProjectPathRoute(project="team/docs", path="x", stripped=False)
+
+    agreeing = await resolve_project_path_route("docs/x", project="team/docs", project_id=None)
+    assert agreeing == ProjectPathRoute(project="team/docs", path="x", stripped=True)
+
+    with pytest.raises(ProjectPrefixConflictError, match="path names project 'team'"):
+        await resolve_project_path_route("team/docs/x", project="team/docs", project_id=None)
+
+
+@pytest.mark.asyncio
+async def test_cloud_every_advertised_mount_is_addressable_under_slug_collision(cloud_session):
+    """The round-trip invariant survives the collision, which is the point of
+    mount precedence: a mount named after the workspace slug still routes to
+    itself, and so does every other mount beside it."""
+    cloud_session("team", "docs")
+
+    mounts = await ls()
+
+    assert [node["name"] for node in mounts["nodes"]] == ["docs", "team"]
+    for node in mounts["nodes"]:
+        permalink = node["permalink"]
+
+        root_route = await resolve_project_path_route(permalink, project=None, project_id=None)
+        assert root_route == ProjectPathRoute(project=node["name"], path="", stripped=True)
+
+        path_route = await resolve_project_path_route(
+            f"{permalink}/notes/x", project=None, project_id=None
+        )
+        assert path_route == ProjectPathRoute(project=node["name"], path="notes/x", stripped=True)
 
 
 @pytest.mark.asyncio
