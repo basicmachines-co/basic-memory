@@ -874,3 +874,48 @@ def test_endpoint_secrets_never_reach_the_saved_error_artifact(
     assert secret_header not in saved
     # The operator still learns why the call was rejected.
     assert "invalid api key" in saved
+
+
+def test_json_escaping_header_secret_never_reaches_the_saved_error_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Leak proof for a --model-header value containing JSON-escaping characters.
+
+    HTTP allows any visible ASCII character in a header value, so `"` and `\\`
+    are legal in an operator-supplied secret. A gateway echoing one into a JSON
+    error body writes the *escaped* spelling, which a plaintext-only search
+    never matches. Scanning the raw file text for the plaintext passes
+    vacuously here, so this asserts on the decoded row: the credential must not
+    be recoverable from what `publish` copies into the public bundle.
+    """
+    secret_header = 'wrk"space\\9999'
+    escaped = json.dumps(secret_header)[1:-1]
+
+    def echoing_401(url: str, **kwargs: Any) -> httpx.Response:
+        return httpx.Response(
+            status_code=401,
+            json={"error": {"message": "invalid api key", "seen": {"workspace": secret_header}}},
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr(tool_agent.httpx, "post", echoing_401)
+    agent = OpenAICompatToolAgent(
+        "m",
+        "http://localhost/v1",
+        extra_headers={"anthropic-workspace-id": secret_header},
+        max_retries=0,
+    )
+    task = AgentTaskSpec(id="t1", skill="s", source="src", prompt="p", graders=())
+
+    with pytest.raises(LLMRunnerError) as caught:
+        agent.propose([UserMessage(text="hi")], [ToolDef("search", "d", {})])
+
+    row = driver._errored_result("bm-rich", task, str(caught.value))
+    artifact = tmp_path / "per-task-agent.jsonl"
+    driver._write_jsonl(artifact, [row.model_dump(mode="json", exclude={"turn_records"})])
+
+    saved_error = json.loads(artifact.read_text(encoding="utf-8"))["error"]
+    assert secret_header not in saved_error
+    assert escaped not in saved_error
+    # The operator still learns why the call was rejected.
+    assert "invalid api key" in saved_error

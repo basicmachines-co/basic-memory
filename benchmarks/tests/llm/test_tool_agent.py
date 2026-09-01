@@ -211,6 +211,68 @@ def test_redact_secrets_without_secrets_is_identity() -> None:
     assert tool_agent.redact_secrets("nothing to hide", []) == "nothing to hide"
 
 
+# HTTP allows any visible ASCII character in a header value, so " (0x22) and
+# \ (0x5C) are both legal in a --model-header secret — and both are escaped
+# when a gateway echoes the value inside a JSON error body.
+ESCAPING_SECRET = 'wrk"space\\9999'
+
+
+def test_redact_secrets_masks_the_json_escaped_spelling() -> None:
+    """A secret echoed into a JSON body appears escaped, not plaintext."""
+    body = json.dumps({"error": {"message": "invalid api key", "seen": ESCAPING_SECRET}})
+    escaped = json.dumps(ESCAPING_SECRET)[1:-1]
+    # Precondition: the plaintext genuinely is absent, so a plaintext-only
+    # search has nothing to match and would leave the body untouched.
+    assert ESCAPING_SECRET not in body
+    assert escaped in body
+
+    masked = tool_agent.redact_secrets(body, [ESCAPING_SECRET])
+
+    assert escaped not in masked
+    assert tool_agent.REDACTION_MARKER in masked
+    assert "invalid api key" in masked
+
+
+def test_redact_secrets_masks_a_secret_nested_two_json_levels_deep() -> None:
+    """A proxy that wraps an upstream JSON body in a string escapes it twice."""
+    upstream = json.dumps({"error": {"seen": ESCAPING_SECRET}})
+    body = json.dumps({"error": {"message": "upstream rejected", "upstream": upstream}})
+    double_escaped = json.dumps(json.dumps(ESCAPING_SECRET)[1:-1])[1:-1]
+    assert double_escaped in body
+
+    masked = tool_agent.redact_secrets(body, [ESCAPING_SECRET])
+
+    assert double_escaped not in masked
+    assert "upstream rejected" in masked
+
+
+def test_error_body_redacts_a_json_escaping_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    """End-to-end at the seam: the escaped spelling must not reach the error."""
+
+    def echoing_401(url: str, **kwargs: Any) -> httpx.Response:
+        return httpx.Response(
+            status_code=401,
+            json={"error": {"message": "invalid api key", "seen": ESCAPING_SECRET}},
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr(tool_agent.httpx, "post", echoing_401)
+    agent = OpenAICompatToolAgent(
+        "m",
+        "http://localhost/v1",
+        extra_headers={"anthropic-workspace-id": ESCAPING_SECRET},
+        max_retries=0,
+    )
+
+    with pytest.raises(LLMRunnerError) as caught:
+        agent.propose([UserMessage(text="hi")], [SEARCH_TOOL])
+
+    message = str(caught.value)
+    assert ESCAPING_SECRET not in message
+    assert json.dumps(ESCAPING_SECRET)[1:-1] not in message
+    assert "invalid api key" in message
+
+
 class TestOpenAICompatToolAgent:
     def _agent(self) -> OpenAICompatToolAgent:
         return OpenAICompatToolAgent("qwen3", "http://localhost:11434/v1", max_retries=0)
