@@ -27,8 +27,12 @@ from basic_memory.mcp.project_context import (
     _detected_route_remainder,
     _project_routes_agree,
     resolve_project_path_route,
+    resolve_workspace_project_identifier,
 )
-from basic_memory.mcp.project_context_identifiers import unqualified_project_identifier
+from basic_memory.mcp.project_context_identifiers import (
+    split_workspace_route_segments,
+    unqualified_project_identifier,
+)
 from basic_memory.mcp.tools import grep, ls
 from basic_memory.schemas.cloud import WorkspaceInfo
 from basic_memory.schemas.project_info import ProjectItem, ProjectList
@@ -71,7 +75,8 @@ def empty_project_config(config_manager):
 @pytest.mark.asyncio
 async def test_project_id_bypasses_prefix_parsing(multi_project_config):
     """project_id routes by external UUID, so even a conflicting-looking prefix
-    is never examined — documented limitation, mirroring read_note."""
+    is never examined — documented limitation, mirroring read_note. The route
+    echoes the caller's id so tool call sites can pass the route alone."""
     route = await resolve_project_path_route(
         "second-project/notes/foo",
         project="test-project",
@@ -79,7 +84,10 @@ async def test_project_id_bypasses_prefix_parsing(multi_project_config):
     )
 
     assert route == ProjectPathRoute(
-        project="test-project", path="second-project/notes/foo", stripped=False
+        project="test-project",
+        path="second-project/notes/foo",
+        stripped=False,
+        project_id="11111111-1111-1111-1111-111111111111",
     )
 
 
@@ -129,6 +137,33 @@ async def test_display_name_matches_by_permalink(multi_project_config):
     route = await resolve_project_path_route("my-research/notes/foo", project=None, project_id=None)
 
     assert route == ProjectPathRoute(project="My Research", path="notes/foo", stripped=True)
+
+
+@pytest.mark.asyncio
+async def test_multi_segment_project_permalink_routes(config_manager, tmp_path_factory):
+    """Project names may contain '/', and generate_permalink keeps it, so a
+    mount's permalink can span several segments. Comparing only the first
+    segment advertised '/research/2026' at the root and then could not enter it;
+    the longest matching permalink wins, so the nested name beats its own
+    prefix."""
+    config = config_manager.load_config()
+    config.projects["Research"] = ProjectEntry(path=str(tmp_path_factory.mktemp("research")))
+    config.projects["Research/2026"] = ProjectEntry(
+        path=str(tmp_path_factory.mktemp("research-2026"))
+    )
+    config_manager.save_config(config)
+
+    root = await resolve_project_path_route("research/2026", project=None, project_id=None)
+    assert root == ProjectPathRoute(project="Research/2026", path="", stripped=True)
+
+    nested = await resolve_project_path_route(
+        "research/2026/notes/x", project=None, project_id=None
+    )
+    assert nested == ProjectPathRoute(project="Research/2026", path="notes/x", stripped=True)
+
+    # The one-segment mount still claims paths its longer sibling does not.
+    shallow = await resolve_project_path_route("research/notes/x", project=None, project_id=None)
+    assert shallow == ProjectPathRoute(project="Research", path="notes/x", stripped=True)
 
 
 @pytest.mark.asyncio
@@ -188,6 +223,16 @@ def test_detected_route_remainder_spelled_workspace_route_consumes_two_segments(
 def test_detected_route_remainder_bare_prefix_resolved_into_workspace_consumes_one():
     """A bare project prefix that resolved into a workspace consumed one segment."""
     assert _detected_route_remainder("research/notes/foo", "other/research") == "notes/foo"
+
+
+def test_split_workspace_route_segments_needs_two_named_segments():
+    """The path form makes the trailing path optional, but both route segments
+    still have to be there: one segment names no project, and an empty one (a
+    '//' in the input) names nothing at all."""
+    assert split_workspace_route_segments("acme") is None
+    assert split_workspace_route_segments("acme//docs") is None
+    assert split_workspace_route_segments("acme/docs") == ("acme", "docs", "")
+    assert split_workspace_route_segments("acme/docs/notes/x") == ("acme", "docs", "notes/x")
 
 
 def test_project_routes_agree_across_mixed_qualification():
@@ -434,7 +479,12 @@ async def test_cloud_qualified_path_routes_to_that_project(cloud_session):
 
     route = await resolve_project_path_route("research/notes/x", project=None, project_id=None)
 
-    assert route == ProjectPathRoute(project="research", path="notes/x", stripped=True)
+    assert route == ProjectPathRoute(
+        project="research",
+        path="notes/x",
+        stripped=True,
+        project_id="research-external-id",
+    )
     assert unqualified_project_identifier(route.project or "") == "research"
 
 
@@ -452,6 +502,41 @@ async def test_cloud_workspace_qualified_path_without_mount_collision_still_rout
 
 
 @pytest.mark.asyncio
+async def test_cloud_workspace_qualified_project_root_routes(cloud_session):
+    """'<workspace>/<project>' with no path names that project's root, exactly as
+    a bare mount name does. Only the three-segment form used to resolve, so a
+    cross-workspace project could be listed into ('acme/docs/notes') but its own
+    root ('acme/docs') had no spelling at all — it fell through to the
+    multi-project refusal."""
+    cloud_session("research", "engineering")
+
+    route = await resolve_project_path_route("team/research", project=None, project_id=None)
+
+    assert route == ProjectPathRoute(project="team/research", path="", stripped=True)
+
+
+@pytest.mark.asyncio
+async def test_cloud_workspace_project_root_falls_through_without_workspaces(
+    cloud_session, monkeypatch
+):
+    """Workspace discovery stays best-effort for prefix detection: with no
+    reachable workspace, '<workspace>/<project>' is simply not a route and lands
+    on the ordinary refusal. Input that shaped like a workspace route may never
+    have meant one, so a discovery failure must not become the caller's error."""
+    cloud_session("research", "engineering")
+
+    async def no_workspaces(context=None) -> list[WorkspaceInfo]:
+        return []
+
+    monkeypatch.setattr(project_context, "get_available_workspaces", no_workspaces)
+
+    with pytest.raises(UnqualifiedPathRefusedError) as excinfo:
+        await resolve_project_path_route("acme/docs", project=None, project_id=None)
+
+    assert str(excinfo.value) == "no project 'acme' — active projects: engineering/, research/"
+
+
+@pytest.mark.asyncio
 async def test_cloud_mount_wins_over_colliding_workspace_slug(cloud_session):
     """The collision: 'team' is both an advertised mount and this workspace's
     slug, and that workspace also holds a project 'docs'. The mount wins the
@@ -462,7 +547,9 @@ async def test_cloud_mount_wins_over_colliding_workspace_slug(cloud_session):
 
     route = await resolve_project_path_route("team/docs/x", project=None, project_id=None)
 
-    assert route == ProjectPathRoute(project="team", path="docs/x", stripped=True)
+    assert route == ProjectPathRoute(
+        project="team", path="docs/x", stripped=True, project_id="team-external-id"
+    )
 
 
 @pytest.mark.asyncio
@@ -497,13 +584,19 @@ async def test_cloud_every_advertised_mount_is_addressable_under_slug_collision(
     for node in mounts["nodes"]:
         permalink = node["permalink"]
 
+        external_id = f"{permalink}-external-id"
+
         root_route = await resolve_project_path_route(permalink, project=None, project_id=None)
-        assert root_route == ProjectPathRoute(project=node["name"], path="", stripped=True)
+        assert root_route == ProjectPathRoute(
+            project=node["name"], path="", stripped=True, project_id=external_id
+        )
 
         path_route = await resolve_project_path_route(
             f"{permalink}/notes/x", project=None, project_id=None
         )
-        assert path_route == ProjectPathRoute(project=node["name"], path="notes/x", stripped=True)
+        assert path_route == ProjectPathRoute(
+            project=node["name"], path="notes/x", stripped=True, project_id=external_id
+        )
 
 
 @pytest.mark.asyncio
@@ -592,3 +685,156 @@ async def test_cloud_project_listing_is_fetched_once_per_request(cloud_session):
 
     assert second.stripped is True
     assert session.listings == []
+
+
+# --- mounts stay bound to the workspace that advertised them (#1421) ---
+# A hosted session's own route is one tenant, but workspace discovery reaches
+# every workspace the account can see, and project names are unique only inside
+# one of them. These tests stand up that shape: two accessible workspaces, the
+# session bound to the non-default one, and the same project permalink in both.
+
+_SESSION_DOCS_ID = "11111111-1111-1111-1111-111111111111"
+_DEFAULT_DOCS_ID = "22222222-2222-2222-2222-222222222222"
+
+
+@dataclass
+class _FakeHttpClient:
+    """Stands in for the routed client, carrying only the workspace selector."""
+
+    workspace: Optional[str]
+
+
+@pytest.fixture
+def cross_workspace_session(monkeypatch, config_manager):
+    """Build a factory session on a non-default workspace beside the default one.
+
+    ``get_client()`` with no selector is the session's own tenant — what the
+    hosted server hands a call that names no workspace, and therefore what the
+    mount view lists. ``get_client(workspace=...)`` is how the workspace index
+    reaches each accessible tenant, so the two answer with different projects.
+    """
+
+    def build(*, failed_tenant: Optional[str] = None) -> tuple[WorkspaceInfo, WorkspaceInfo]:
+        config = config_manager.load_config()
+        config.projects = {}
+        config.default_project = None
+        config_manager.save_config(config)
+
+        session_workspace = WorkspaceInfo(
+            tenant_id="session-tenant",
+            workspace_type="organization",
+            slug="beta",
+            name="Beta",
+            role="editor",
+            is_default=False,
+        )
+        default_workspace = WorkspaceInfo(
+            tenant_id="default-tenant",
+            workspace_type="personal",
+            slug="acme",
+            name="Acme",
+            role="owner",
+            is_default=True,
+        )
+        listings = {
+            "session-tenant": ProjectList(
+                projects=[
+                    ProjectItem(
+                        id=1,
+                        external_id=_SESSION_DOCS_ID,
+                        name="docs",
+                        path="/app/data/docs",
+                        is_default=True,
+                    )
+                ],
+                default_project="docs",
+            ),
+            "default-tenant": ProjectList(
+                projects=[
+                    ProjectItem(
+                        id=1,
+                        external_id=_DEFAULT_DOCS_ID,
+                        name="docs",
+                        path="/app/data/docs",
+                        is_default=True,
+                    )
+                ],
+                default_project="docs",
+            ),
+        }
+
+        @asynccontextmanager
+        async def fake_get_client(*args, **kwargs) -> AsyncIterator[object]:
+            yield _FakeHttpClient(workspace=kwargs.get("workspace"))
+
+        async def fake_list_projects(self) -> ProjectList:
+            tenant = self.http_client.workspace or session_workspace.tenant_id
+            if tenant == failed_tenant:
+                raise RuntimeError(f"tenant {tenant} is unavailable")
+            return listings[tenant]
+
+        async def fake_get_available_workspaces(context=None) -> list[WorkspaceInfo]:
+            return [session_workspace, default_workspace]
+
+        monkeypatch.setattr(async_client, "is_factory_mode", lambda: True)
+        monkeypatch.setattr(async_client, "get_client", fake_get_client)
+        monkeypatch.setattr(
+            "basic_memory.mcp.clients.project.ProjectClient.list_projects",
+            fake_list_projects,
+        )
+        monkeypatch.setattr(
+            project_context,
+            "get_available_workspaces",
+            fake_get_available_workspaces,
+        )
+        return session_workspace, default_workspace
+
+    return build
+
+
+@pytest.mark.asyncio
+async def test_cloud_mount_routes_by_the_id_that_names_its_workspace(cross_workspace_session):
+    """The mount view lists this session's own tenant, so a mount it advertises
+    has to route there. Carrying only the bare name let the cross-workspace
+    index re-resolve 'docs' by the is_default flag: on a first call — before any
+    workspace is cached — `cat("docs/x")` read the default workspace's 'docs'
+    under a name the session workspace advertised."""
+    session_workspace, default_workspace = cross_workspace_session()
+
+    route = await resolve_project_path_route("docs/x", project=None, project_id=None)
+
+    assert route == ProjectPathRoute(
+        project="docs", path="x", stripped=True, project_id=_SESSION_DOCS_ID
+    )
+
+    # The id is what the shared index consumes, and it is the half that decides:
+    # by id the route lands in the session's workspace, while the bare name
+    # still falls through to whichever workspace carries the default flag.
+    by_id = await resolve_workspace_project_identifier(route.project_id or "")
+    by_name = await resolve_workspace_project_identifier("docs")
+
+    assert by_id.workspace.tenant_id == session_workspace.tenant_id
+    assert by_name.workspace.tenant_id == default_workspace.tenant_id
+
+
+@pytest.mark.asyncio
+async def test_cloud_explicit_qualified_project_drops_the_mount_id(cross_workspace_session):
+    """The escape hatch keeps working: an explicit '<workspace>/<project>' names
+    a workspace of its own, so it must not inherit the mount's id and be routed
+    back to this session's tenant."""
+    cross_workspace_session()
+
+    route = await resolve_project_path_route("docs/x", project="acme/docs", project_id=None)
+
+    assert route == ProjectPathRoute(project="acme/docs", path="x", stripped=True, project_id=None)
+
+
+@pytest.mark.asyncio
+async def test_cloud_workspace_project_root_surfaces_a_failed_workspace(cross_workspace_session):
+    """A '<workspace>/<project>' root whose workspace could not be listed is a
+    real failure, not an unrecognized path: it must say so rather than fall
+    through to a refusal that claims the project does not exist."""
+    cross_workspace_session(failed_tenant="default-tenant")
+
+    with pytest.raises(ValueError, match="could not be loaded"):
+        await resolve_project_path_route("acme/docs", project=None, project_id=None)

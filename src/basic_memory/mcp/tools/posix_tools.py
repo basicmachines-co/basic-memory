@@ -16,7 +16,10 @@ refuses naming both. Where more than one project is addressable — several loca
 projects, or a cloud workspace holding several — an unrecognized first segment
 refuses with the project list rather than silently defaulting (#1421); the
 mount view and the resolver read one list, so anything ``ls "/"`` advertises is
-addressable by name.
+addressable by name. The resolver answers with both routing fields — the project
+and its external_id — and every tool hands that pair to ``get_project_client``
+verbatim, which is what keeps a cloud mount bound to the workspace whose listing
+advertised it.
 
 Collision rule: the project always wins over a same-named top-level folder in
 the default project, so that folder is only reachable unqualified when a single
@@ -157,7 +160,7 @@ async def cat(
     if route.stripped and not route.path:
         raise ValueError(f"cat: '{identifier}' names a project, not a note")
 
-    async with get_project_client(route.project, context=context, project_id=project_id) as (
+    async with get_project_client(route.project, context=context, project_id=route.project_id) as (
         client,
         active_project,
     ):
@@ -257,7 +260,7 @@ async def grep(
         retrieval_mode=_grep_retrieval_mode(literal),
         entity_types=[SearchItemType.ENTITY],
     )
-    async with get_project_client(route.project, context=context, project_id=project_id) as (
+    async with get_project_client(route.project, context=context, project_id=route.project_id) as (
         client,
         active_project,
     ):
@@ -359,7 +362,7 @@ async def ls(
     )
     list_path = f"/{route.path}" if route.stripped else path
 
-    async with get_project_client(route.project, context=context, project_id=project_id) as (
+    async with get_project_client(route.project, context=context, project_id=route.project_id) as (
         client,
         active_project,
     ):
@@ -426,7 +429,7 @@ async def find(
     )
     list_path = f"/{route.path}" if route.stripped else path
 
-    async with get_project_client(route.project, context=context, project_id=project_id) as (
+    async with get_project_client(route.project, context=context, project_id=route.project_id) as (
         client,
         active_project,
     ):
@@ -485,7 +488,7 @@ async def tail(
         "", project=project, project_id=project_id, context=context
     )
 
-    async with get_project_client(route.project, context=context, project_id=project_id) as (
+    async with get_project_client(route.project, context=context, project_id=route.project_id) as (
         client,
         active_project,
     ):

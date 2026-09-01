@@ -66,6 +66,7 @@ from basic_memory.mcp.project_context_identifiers import (
     split_qualified_project_identifier as _split_qualified_project_identifier_impl,
     split_workspace_identifier_segments as _split_workspace_identifier_segments,
     split_workspace_memory_url_segments as _split_workspace_memory_url_segments,
+    split_workspace_route_segments as _split_workspace_route_segments,
     unqualified_project_identifier as _unqualified_project_identifier,
 )
 from basic_memory.mcp.workspace_project_index import (
@@ -928,6 +929,17 @@ async def detect_project_from_memory_url_prefix(
     return await detect_project_from_identifier_prefix(identifier, config, context=context)
 
 
+# Workspace discovery is best-effort for prefix detection: an identifier that
+# names no reachable workspace/project simply stays unrouted, because it may not
+# have meant a workspace at all. Anything outside this set is a real failure and
+# propagates.
+_WORKSPACE_DISCOVERY_FALLBACK_ERRORS = (
+    "not found",
+    "no accessible workspaces",
+    "unable to discover",
+)
+
+
 async def detect_project_from_identifier_prefix(
     identifier: str,
     config: BasicMemoryConfig,
@@ -947,11 +959,6 @@ async def detect_project_from_identifier_prefix(
         return None
 
     if _workspace_identifier_discovery_available(identifier, config):
-        workspace_discovery_fallback_errors = (
-            "not found",
-            "no accessible workspaces",
-            "unable to discover",
-        )
         try:
             workspace_resolution = await resolve_workspace_qualified_identifier(
                 identifier,
@@ -959,7 +966,7 @@ async def detect_project_from_identifier_prefix(
             )
         except ValueError as exc:
             message = str(exc).lower()
-            if any(error in message for error in workspace_discovery_fallback_errors):
+            if any(error in message for error in _WORKSPACE_DISCOVERY_FALLBACK_ERRORS):
                 return None
             raise
 
@@ -977,7 +984,7 @@ async def detect_project_from_identifier_prefix(
             )
         except ValueError as exc:
             message = str(exc).lower()
-            if any(error in message for error in workspace_discovery_fallback_errors):
+            if any(error in message for error in _WORKSPACE_DISCOVERY_FALLBACK_ERRORS):
                 return None
             raise
 
@@ -997,12 +1004,13 @@ async def detect_project_from_identifier_prefix(
 # reference in a many-project workspace refuses instead of picking a default
 # (#1421).
 #
-# Precedence: the mount table wins the first path segment, ahead of
+# Precedence: the mount table wins the leading path segments, ahead of
 # workspace-qualified '<workspace>/<project>/<path>' parsing. A project permalink
 # can also be an accessible workspace's slug, and only one reading of '<name>/...'
 # can win. Mount-wins is what the advertised list promises — a name `ls /` shows
 # must address that mount, or we advertise a name that resolves somewhere else,
-# which is worse than not advertising it at all.
+# which is worse than not advertising it at all. "Segments", plural: a project
+# name may contain '/', so its advertised permalink can span more than one.
 #
 # The cost of that choice, stated plainly: when a project's permalink equals an
 # accessible workspace's slug, that workspace's OTHER projects lose their
@@ -1016,21 +1024,29 @@ async def detect_project_from_identifier_prefix(
 
 @dataclass(frozen=True)
 class ProjectPathRoute:
-    """Effective routing for one posix call: project param + project-relative path.
+    """Effective routing for one posix call: project params + project-relative path.
 
     ``stripped=False`` means the input carried no recognized project prefix:
     ``path`` is the caller's input byte-for-byte and ``project`` is the
     explicit value that was passed (or None, meaning the existing default
     resolution chain applies — only reachable when the session addresses at
     most one project; several addressable projects refuse instead).
-    ``stripped=True`` means a first-segment project was recognized: ``project``
+    ``stripped=True`` means a project prefix was recognized: ``project``
     is the canonical config name (or workspace-qualified name) and ``path`` is
     the remainder with no leading slash, "" meaning the project root.
+
+    ``project_id`` is the effective external_id for the call — the caller's own
+    when they passed one, otherwise the id of the advertised mount that claimed
+    the prefix. Callers pass both fields to ``get_project_client`` verbatim; the
+    id is what keeps a mount bound to the workspace that advertised it, since a
+    bare project name can name a different project in another accessible
+    workspace (#1421).
     """
 
     project: Optional[str]
     path: str
     stripped: bool
+    project_id: Optional[str] = None
 
 
 class ProjectPrefixConflictError(ValueError):
@@ -1045,12 +1061,18 @@ class UnqualifiedPathRefusedError(ValueError):
 class AddressableProject:
     """One project this session can both advertise and route to.
 
-    ``name`` is the routing identifier handed to ``get_project_client``;
-    ``permalink`` is the first path segment agents copy out of tool output.
+    ``name`` is the routing identifier handed to ``get_project_client`` and
+    ``permalink`` is the path prefix agents copy out of tool output. A cloud
+    session also carries ``external_id``: project names are unique only inside
+    one workspace, so the UUID is the only identifier that pins a mount to the
+    workspace whose listing advertised it. A locally routed session reads its
+    mounts from config, which holds no UUIDs, and has no second workspace to be
+    confused with, so ``external_id`` is None there.
     """
 
     name: str
     permalink: str
+    external_id: Optional[str] = None
 
 
 # The session's own project listing, memoized for one MCP request: routing and
@@ -1116,7 +1138,11 @@ async def addressable_projects(
     if _session_routes_to_cloud():
         project_list = await _session_project_list(context=context)
         projects = (
-            AddressableProject(name=item.name, permalink=item.permalink)
+            AddressableProject(
+                name=item.name,
+                permalink=item.permalink,
+                external_id=item.external_id,
+            )
             for item in project_list.projects
         )
     else:
@@ -1130,6 +1156,63 @@ async def addressable_projects(
 def _addressable_project_prefixes(projects: tuple[AddressableProject, ...]) -> str:
     """Render addressable projects as copyable '<permalink>/' prefixes."""
     return ", ".join(f"{permalink}/" for permalink in sorted(item.permalink for item in projects))
+
+
+def _claim_mount_prefix(
+    candidate: str,
+    projects: tuple[AddressableProject, ...],
+) -> tuple[AddressableProject, str] | None:
+    """Return the mount whose permalink claims the candidate's leading segments.
+
+    A project name may itself contain '/', and generate_permalink keeps that
+    separator, so a project named 'Research/2026' advertises the two-segment
+    mount '/research/2026'. Comparing only the first segment would leave that
+    mount listed at the root and impossible to enter, so the whole permalink has
+    to match; the longest match wins, which is also the only reading that can be
+    right when one mount's permalink prefixes another's.
+    """
+    segments = candidate.split("/")
+    claimed: tuple[AddressableProject, str] | None = None
+    claimed_depth = 0
+    for project in projects:
+        depth = project.permalink.count("/") + 1
+        if depth > len(segments) or depth <= claimed_depth:
+            continue
+        if generate_permalink("/".join(segments[:depth])) != project.permalink:
+            continue
+        claimed = (project, "/".join(segments[depth:]))
+        claimed_depth = depth
+    return claimed
+
+
+async def _detect_workspace_project_root(
+    candidate: str,
+    config: BasicMemoryConfig,
+    context: Optional[Context] = None,
+) -> Optional[str]:
+    """Resolve a bare '<workspace>/<project>' candidate to that project's root.
+
+    Workspace-qualified memory URLs require three segments so that
+    'memory://main/notes' stays readable as project 'main'. A posix path only
+    reaches here after the mount table declined its first segment, so nothing
+    addressable can be meant by it and the two-segment form is unambiguous —
+    without this, 'ls acme/docs/notes' resolved while 'ls acme/docs' (that same
+    project's root) had no spelling at all.
+    """
+    segments = _split_workspace_route_segments(candidate)
+    if segments is None or segments[2]:
+        return None
+    if not _cloud_workspace_discovery_available(config):
+        return None
+
+    try:
+        resolution = await _resolve_workspace_segments(candidate, segments, context=context)
+    except ValueError as exc:
+        if any(error in str(exc).lower() for error in _WORKSPACE_DISCOVERY_FALLBACK_ERRORS):
+            return None
+        raise
+
+    return resolution.project_identifier if resolution is not None else None
 
 
 def _detected_route_remainder(candidate: str, detected: str) -> str:
@@ -1182,12 +1265,13 @@ async def resolve_project_path_route(
        disagreeing one raises ProjectPrefixConflictError — never silently
        preferring either. Agreement keeps the more-qualified spelling: an
        explicit '<workspace>/<project>' outlives a bare local prefix match.
-    3. Otherwise a first segment naming an addressable project routes there
+    3. Otherwise leading segments naming an addressable project route there
        with the remainder as the project-relative path.
-    4. Otherwise a workspace-qualified '<workspace>/<project>/<path>' spelling
+    4. Otherwise a workspace-qualified '<workspace>/<project>[/<path>]' spelling
        routes to that project in that workspace — those projects belong to
        workspaces this session's own route does not list, so they never appear
-       in the mount table rule 3 reads.
+       in the mount table rule 3 reads. With no path it names that project's
+       root, the same way a bare mount name does.
     5. Otherwise, when the session addresses more than one project, raise
        UnqualifiedPathRefusedError instead of silently defaulting; a session
        that addresses at most one project keeps today's default resolution.
@@ -1199,7 +1283,7 @@ async def resolve_project_path_route(
     ordering resolves and the spelling it costs.
     """
     if project_id is not None:
-        return ProjectPathRoute(project=project, path=path, stripped=False)
+        return ProjectPathRoute(project=project, path=path, stripped=False, project_id=project_id)
 
     # The env constraint is ProjectResolver's priority 1, so it participates in
     # agree/strip and conflict exactly like the param it outranks.
@@ -1209,9 +1293,10 @@ async def resolve_project_path_route(
 
     detected: Optional[str] = None
     remainder = ""
+    mount_project_id: Optional[str] = None
     addressable: tuple[AddressableProject, ...] | None = None
 
-    # --- Rule 3: the advertised mount table claims the first segment ---
+    # --- Rule 3: the advertised mount table claims the leading segments ---
     # Trigger: the input carries a leading segment at all — a bare mount name
     #   ('ls research') or a path under one.
     # Why: this set is what `ls /` advertises, and an advertised name that
@@ -1220,24 +1305,20 @@ async def resolve_project_path_route(
     #   permalink is also an accessible workspace slug would hand 'team/docs/x'
     #   to project 'docs' in workspace 'team' instead of the mount named 'team'
     #   — reading another project's data under an advertised name.
-    # Outcome: a first segment matching an addressable project routes there with
-    #   the remainder as the project-relative path, and workspace discovery is
-    #   never consulted for it. A local session pays nothing (its config is its
-    #   mount table); a cloud session pays one per-request memoized listing.
+    # Outcome: a leading segment matching an addressable project routes there
+    #   with the remainder as the project-relative path, and workspace discovery
+    #   is never consulted for it. A local session pays nothing (its config is
+    #   its mount table); a cloud session pays one per-request memoized listing.
     if candidate:
         addressable = await addressable_projects(context=context)
-        first_segment, _, remaining_segments = candidate.partition("/")
-        first_permalink = generate_permalink(first_segment)
-        mount = next(
-            (item for item in addressable if item.permalink == first_permalink),
-            None,
-        )
-        if mount is not None:
+        claimed = _claim_mount_prefix(candidate, addressable)
+        if claimed is not None:
+            mount, remainder = claimed
             detected = mount.name
-            remainder = remaining_segments
+            mount_project_id = mount.external_id
 
     # --- Rule 4: workspace-qualified spellings for everything else ---
-    # Trigger: no advertised mount claimed the first segment and the input still
+    # Trigger: no advertised mount claimed the leading segments and the input still
     #   has more than one segment to parse.
     # Why: '<workspace>/<project>/<path>' addresses projects in workspaces this
     #   session's own route does not list, so they are absent from the mount
@@ -1252,6 +1333,10 @@ async def resolve_project_path_route(
         detected = await detect_project_from_identifier_prefix(candidate, config, context=context)
         if detected is not None:
             remainder = _detected_route_remainder(candidate, detected)
+        else:
+            # A bare '<workspace>/<project>' names that project's root, so the
+            # remainder stays empty — see _detect_workspace_project_root.
+            detected = await _detect_workspace_project_root(candidate, config, context=context)
 
     if explicit is not None:
         if detected is None:
@@ -1264,17 +1349,20 @@ async def resolve_project_path_route(
             # Why: a local project can shadow a same-named project in another
             #   workspace; dropping the explicitly named workspace would
             #   silently reroute the call to the local shadow.
-            # Outcome: the more-qualified explicit spelling carries the route;
-            #   every other agreement keeps the detected (canonical) spelling.
+            # Outcome: the more-qualified explicit spelling carries the route,
+            #   and drops the mount id that names this session's workspace with
+            #   it; every other agreement keeps the detected (canonical)
+            #   spelling and stays bound to the mount that matched.
             detected_workspace, _ = _split_qualified_project_identifier_impl(detected)
             explicit_workspace, _ = _split_qualified_project_identifier_impl(explicit)
-            routed = detected
-            if explicit_workspace is not None and detected_workspace is None:
-                routed = explicit
+            prefer_explicit = explicit_workspace is not None and detected_workspace is None
             return ProjectPathRoute(
-                project=_canonicalize_project_name(routed, config),
+                project=_canonicalize_project_name(
+                    explicit if prefer_explicit else detected, config
+                ),
                 path=remainder,
                 stripped=True,
+                project_id=None if prefer_explicit else mount_project_id,
             )
         raise ProjectPrefixConflictError(
             f"path names project '{detected}' but project '{explicit}' was passed — "
@@ -1284,7 +1372,10 @@ async def resolve_project_path_route(
 
     if detected is not None:
         return ProjectPathRoute(
-            project=_canonicalize_project_name(detected, config), path=remainder, stripped=True
+            project=_canonicalize_project_name(detected, config),
+            path=remainder,
+            stripped=True,
+            project_id=mount_project_id,
         )
 
     # Trigger: no explicit project, no recognized prefix, several addressable projects.

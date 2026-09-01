@@ -103,6 +103,26 @@ def split_workspace_identifier_segments(identifier: str) -> tuple[str, str, str]
     return workspace_slug, project_identifier, remainder
 
 
+def split_workspace_route_segments(identifier: str) -> tuple[str, str, str] | None:
+    """Split ``<workspace>/<project>[/<path>]`` where the trailing path may be empty.
+
+    The strict three-segment parse above is what memory URLs need: there,
+    ``memory://main/notes`` has to stay readable as project ``main``. A posix
+    path only reaches this looser parse after the advertised mount table has
+    declined its first segment, so no addressable project can be meant by it and
+    the bare ``<workspace>/<project>`` form unambiguously names that project's
+    root.
+    """
+    normalized = normalize_project_reference(identifier_path(identifier)).strip("/")
+    parts = normalized.split("/", 2)
+    if len(parts) < 2:
+        return None
+    workspace_slug, project_identifier = parts[0], parts[1]
+    if not workspace_slug or not project_identifier:
+        return None
+    return workspace_slug, project_identifier, parts[2] if len(parts) == 3 else ""
+
+
 def split_workspace_memory_url_segments(identifier: str) -> tuple[str, str, str] | None:
     """Split ``memory://<workspace>/<project>/<path>`` into route segments."""
     if not identifier.strip().startswith("memory://"):
