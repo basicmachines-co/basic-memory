@@ -26,9 +26,10 @@ from basic_memory.mcp.project_context import (
 from basic_memory.mcp.tools import cat, find, grep, ls, man, search_notes, tail, write_note
 from basic_memory.models import Entity
 from basic_memory.repository.metadata_filters import (
-    METADATA_KEY_RE,
+    MetadataPath,
     ParsedMetadataFilter,
     parse_metadata_filters,
+    parse_metadata_path,
 )
 from basic_memory.schemas.search import SearchRetrievalMode
 
@@ -733,17 +734,16 @@ def test_malformed_key_refusal_names_the_key_and_the_grammar():
     "key",
     ["review..approved", ".owner", "owner.", "review.approved", "status", "note-1_a.b"],
 )
-def test_predicate_key_grammar_is_the_api_key_grammar(key):
-    """find accepts exactly the keys the search API accepts, from one pattern.
+def test_one_path_grammar_governs_predicates_and_filters(key):
+    """find's predicates and the search API accept exactly the same paths.
 
-    METADATA_KEY_RE is the API parser's own key grammar, and find validates
-    against it rather than a second copy — so the two surfaces cannot drift
-    into a state where find builds a filter the repository will then reject at
-    request time.
+    parse_metadata_path owns the grammar, and both surfaces call it rather than
+    keeping a copy — so they cannot drift into a state where find builds a
+    filter the repository will then reject at request time.
     """
-    api_accepts = METADATA_KEY_RE.match(key) is not None
+    well_formed = parse_metadata_path(key) is not None
 
-    if api_accepts:
+    if well_formed:
         assert posix_tools._parse_meta_predicates([f"{key}=x"]) == {key: "x"}
         assert parse_metadata_filters({key: "x"})
     else:
@@ -751,6 +751,33 @@ def test_predicate_key_grammar_is_the_api_key_grammar(key):
             posix_tools._parse_meta_predicates([f"{key}=x"])
         with pytest.raises(ValueError, match="Unsupported metadata filter key"):
             parse_metadata_filters({key: "x"})
+
+
+@pytest.mark.parametrize(
+    ("key", "expected_parts"),
+    [
+        ("status", ("status",)),
+        ("review.approved", ("review", "approved")),
+        ("a.b.c", ("a", "b", "c")),
+        ("note-1_a.b", ("note-1_a", "b")),
+        ("  padded.key  ", ("padded", "key")),
+    ],
+)
+def test_parse_metadata_path_yields_the_segments(key, expected_parts):
+    """The parse is what produces the segments a path walk consumes."""
+    path = parse_metadata_path(key)
+
+    assert path is not None
+    assert path.parts == expected_parts
+    assert path.key == key.strip()
+
+
+@pytest.mark.parametrize(
+    "key", ["review..approved", ".owner", "owner.", "", "   ", "..", "a..b.c", "bad key"]
+)
+def test_parse_metadata_path_refuses_everything_that_is_not_a_path(key):
+    """No segments come back for a non-path, so nothing can walk one."""
+    assert parse_metadata_path(key) is None
 
 
 @pytest.mark.parametrize(
@@ -882,7 +909,17 @@ def test_null_equality_reaches_the_api_as_an_is_null_clause():
     ],
 )
 def test_project_metadata_fields(entity_metadata, fields, expected):
-    assert posix_tools._project_metadata_fields(entity_metadata, fields) == expected
+    # Projection takes parsed paths, not strings: the fixtures go through the
+    # same parse find does, which is what makes an unwalkable path unreachable
+    # here rather than a null that looks like data.
+    assert posix_tools._project_metadata_fields(entity_metadata, _paths(fields)) == expected
+
+
+def _paths(keys: list[str]) -> list[MetadataPath]:
+    """Parse well-formed test paths, asserting the fixtures really are paths."""
+    parsed = [parse_metadata_path(key) for key in keys]
+    assert all(path is not None for path in parsed), keys
+    return [path for path in parsed if path is not None]
 
 
 # --- find --meta: metadata search arm ---
@@ -1203,6 +1240,49 @@ async def test_find_meta_projects_requested_fields(client, test_project, meta_no
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["review..approved", ".owner", "owner."])
+async def test_find_meta_malformed_field_path_refuses_without_reading_anything(
+    client, test_project, meta_notes, monkeypatch, field
+):
+    """REGRESSION: a malformed field path returned null data at full cost.
+
+    `.owner` walked an empty first segment and reported null for every hit even
+    though the notes carry `owner`, byte-identical to the null a genuinely
+    absent field produces — a typo the caller could not see, paid for with the
+    search plus one entity GET per hit. Nothing is read now.
+    """
+    # Import here to mirror the tool's own deferred client import.
+    from basic_memory.mcp.clients import KnowledgeClient
+
+    reads = 0
+    original = KnowledgeClient.get_entity
+
+    async def counting_get(self, external_id, *args, **kwargs):
+        nonlocal reads
+        reads += 1
+        return await original(self, external_id, *args, **kwargs)
+
+    monkeypatch.setattr(KnowledgeClient, "get_entity", counting_get)
+
+    with pytest.raises(ValueError, match=re.escape(f"malformed field path '{field}'")):
+        await find(meta=["status=active"], fields=[field], project=test_project.name)
+
+    assert reads == 0
+
+
+@pytest.mark.asyncio
+async def test_find_meta_nested_field_path_still_projects(client, test_project, meta_notes):
+    """The well-formed nested path the malformed spellings are typos of works."""
+    result = await find(
+        meta=["status=active"], fields=["review.approved"], project=test_project.name
+    )
+
+    projected = {row["title"]: row["fields"] for row in result["results"]}
+    assert projected["Alpha Spec"] == {"review.approved": "True"}
+    assert projected["Gamma Note"] == {"review.approved": None}
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [
@@ -1214,6 +1294,14 @@ async def test_find_meta_projects_requested_fields(client, test_project, meta_no
         ({"fields": ["title"]}, "'fields' requires 'meta' predicates"),
         ({"meta": ["status=active"], "fields": []}, "must be non-empty"),
         ({"meta": ["status=active"], "fields": ["  "]}, "must be non-empty"),
+        # A malformed field path walked an empty segment to null for every hit,
+        # which reads exactly like a field the notes do not carry — a typo
+        # answered with uniform, plausible, wrong data. Refuse it like a
+        # predicate key, through the same parse.
+        ({"meta": ["status=active"], "fields": ["review..approved"]}, "malformed field path"),
+        ({"meta": ["status=active"], "fields": [".owner"]}, "malformed field path"),
+        ({"meta": ["status=active"], "fields": ["owner."]}, "malformed field path"),
+        ({"meta": ["status=active"], "fields": ["title", "a..b"]}, "malformed field path"),
         # An empty predicate list is not "no filter": it would parse to {} and
         # run the metadata search with no WHERE at all, matching every note in
         # the project where the caller asked for a filtered set.
