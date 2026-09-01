@@ -8,7 +8,10 @@ lexical grammar for the range literals authors write.
 PostgreSQL's range conventions are the language contract: `[lower,upper)` with explicit
 inclusivity per side, unbounded ends, and a distinguished empty range. That is a
 vocabulary choice, not a storage requirement -- these values reduce to portable scalars
-so SQLite and Postgres can share one logical model.
+so SQLite and Postgres can share one logical model. Its *discrete* canonicalization is
+part of the contract too: a date range is stored as `[lower,upper)`, for the reason
+`TemporalRange` documents. The author's own spelling is not lost -- it is kept verbatim
+on `TemporalAssertion.source_text`.
 
 Two canonical lexical forms carry every bound:
 
@@ -38,7 +41,7 @@ opposite directions:
 
 import re
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Literal, override
@@ -165,6 +168,19 @@ def _require_canonical(value: str, kind: TemporalRangeKind) -> None:
         raise TemporalQualifierError(f"{kind.value} bound is not canonical: {value!r}")
 
 
+def _next_calendar_day(bound: str) -> str | None:
+    """The canonical date after `bound`, or None when the calendar has none.
+
+    Only `9999-12-31` has no successor. Reporting that as None rather than raising lets
+    each side of a range decide what running off the end of the calendar means for it:
+    an upper end there covers every remaining day, a lower end past it covers none.
+    """
+    day = date.fromisoformat(bound)
+    if day == date.max:
+        return None
+    return (day + timedelta(days=1)).isoformat()
+
+
 # --- Values ---
 
 
@@ -188,14 +204,28 @@ class TemporalRange:
     """One authored interval on a single time axis.
 
     Bounds are canonical lexical strings; `None` means unbounded on that side.
-    Construction normalizes two PostgreSQL rules so no caller has to remember them:
-    an unbounded side is always exclusive, and a degenerate interval (`[a,a)`,
-    `(a,a]`, `(a,a)`) *is* the empty range.
+    Construction normalizes three PostgreSQL rules so no caller has to remember them:
+    an unbounded side is always exclusive, an interval containing no points *is* the
+    empty range, and -- exactly as `daterange` does -- a **date** range is rewritten
+    into the half-open `[lower,upper)` form.
 
-    Unlike PostgreSQL's `daterange`, a discrete date range is not rewritten into the
-    canonical `[)` form -- `[a,b]` keeps the inclusivity the author wrote. Evaluating
-    the authored flags directly is set-equivalent for containment and overlap and needs
-    no date arithmetic; only the rendered literal differs.
+    That last rule is what makes the scalar SQL predicate correct rather than merely
+    tidy. Calendar dates are a *discrete* domain, so `[a,b]` and `[a,b+1)` denote the
+    same set of days, but only the half-open spelling lets endpoint comparisons decide
+    membership. Left as authored, `(2026-01-01,2026-01-03)` holds only January 2 and
+    `(2026-01-02,2026-01-04)` holds only January 3 -- disjoint sets -- yet each raw
+    endpoint lies inside the other's bounds, so a comparison of raw endpoints reports
+    an overlap that does not exist. Canonicalized to `[2026-01-02,2026-01-03)` and
+    `[2026-01-03,2026-01-04)`, the same comparison is right.
+
+    Instants are a continuous domain -- no moment is "the next one" -- so an instant
+    range keeps the inclusivity the author wrote and is never rewritten this way.
+
+    Canonicalization changes the *stored* spelling, never the set of times: `[a,a]`
+    becomes `[a,a+1)`, the one day `a`. What the author typed is not lost; it is kept
+    verbatim on `TemporalAssertion.source_text`, which is what serialization replays
+    and what a search result quotes back. `__str__` renders the canonical form, and
+    re-parsing that rendering yields this same value.
     """
 
     kind: TemporalRangeKind
@@ -223,6 +253,8 @@ class TemporalRange:
                 _require_canonical(bound, self.kind)
 
         # Canonical bounds are fixed width, so string order is chronological order.
+        # Judged on the bounds as authored: an interval written backwards is an author
+        # error to report, not an empty range to accept silently.
         if self.lower is not None and self.upper is not None and self.lower > self.upper:
             raise TemporalQualifierError(
                 f"range lower bound {self.lower} is after upper bound {self.upper}"
@@ -234,18 +266,44 @@ class TemporalRange:
         if self.upper is None:
             object.__setattr__(self, "upper_inclusive", False)
 
-        # PostgreSQL: an interval whose endpoints coincide without including both of
-        # them contains no points, and is therefore the empty range.
-        if (
-            self.lower is not None
-            and self.lower == self.upper
-            and not (self.lower_inclusive and self.upper_inclusive)
-        ):
-            object.__setattr__(self, "lower", None)
-            object.__setattr__(self, "upper", None)
-            object.__setattr__(self, "lower_inclusive", False)
-            object.__setattr__(self, "upper_inclusive", False)
-            object.__setattr__(self, "is_empty", True)
+        # --- Discrete canonical form ---
+        #
+        # Rewrite a date range to `[lower,upper)`. See the class docstring for why the
+        # scalar overlap predicate needs this and why instants must not get it.
+        if self.kind is TemporalRangeKind.DATE:
+            if self.lower is not None and not self.lower_inclusive:
+                after_lower = _next_calendar_day(self.lower)
+                if after_lower is None:
+                    # Nothing follows 9999-12-31, so a range starting strictly after it
+                    # admits no date at all.
+                    self._become_empty()
+                    return
+                object.__setattr__(self, "lower", after_lower)
+                object.__setattr__(self, "lower_inclusive", True)
+            if self.upper is not None and self.upper_inclusive:
+                # None here loses no days: 9999-12-31 is the last date there is, so
+                # "through 9999-12-31 inclusive" and "unbounded above" hold the same
+                # set, and only the latter is representable in the canonical form.
+                object.__setattr__(self, "upper", _next_calendar_day(self.upper))
+                object.__setattr__(self, "upper_inclusive", False)
+
+        # PostgreSQL: an interval that admits no point at all *is* the empty range. The
+        # endpoints coincide without both being owned (`[a,a)`), or -- only reachable
+        # after the rewrite above, from `(a,a)` -- the lower end has overshot the upper.
+        if self.lower is not None and self.upper is not None:
+            admits_no_date = self.lower > self.upper or (
+                self.lower == self.upper and not (self.lower_inclusive and self.upper_inclusive)
+            )
+            if admits_no_date:
+                self._become_empty()
+
+    def _become_empty(self) -> None:
+        """Collapse to the one empty representation, whatever bounds were written."""
+        object.__setattr__(self, "lower", None)
+        object.__setattr__(self, "upper", None)
+        object.__setattr__(self, "lower_inclusive", False)
+        object.__setattr__(self, "upper_inclusive", False)
+        object.__setattr__(self, "is_empty", True)
 
     @classmethod
     def empty(cls, kind: TemporalRangeKind) -> "TemporalRange":
@@ -254,7 +312,12 @@ class TemporalRange:
 
     @override
     def __str__(self) -> str:
-        """Render the canonical PostgreSQL range literal."""
+        """Render the canonical PostgreSQL range literal.
+
+        This is the normalized interval, not the author's text -- a date range always
+        renders half-open. Feeding the result back to `parse_range_literal` reproduces
+        this same value, so the rendering is a fixed point rather than a lossy view.
+        """
         if self.is_empty:
             return EMPTY_RANGE_LITERAL
         lower = "" if self.lower is None else self.lower
@@ -291,10 +354,12 @@ class TemporalFilter:
     def window(self) -> TemporalRange | None:
         """The interval this filter tests against, or None for a role-only filter.
 
-        Containment of a point is overlap with the degenerate closed range `[p,p]`:
-        both ask whether the stored interval and the queried interval share at least
-        one point. Collapsing them here lets one predicate answer both questions,
-        which is also why the two can never disagree about inclusivity or bounds.
+        Containment of a point is overlap with the closed range `[p,p]`: both ask
+        whether the stored interval and the queried interval share at least one point.
+        Collapsing them here lets one predicate answer both questions, which is also
+        why the two can never disagree about inclusivity or bounds. On the date axis
+        `TemporalRange` canonicalizes that window to `[p,p+1)` -- still the single day
+        `p`, now in the half-open form the predicate compares correctly.
         """
         if self.at is not None:
             return TemporalRange(

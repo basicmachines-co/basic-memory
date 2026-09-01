@@ -209,10 +209,14 @@ class TemporalRangeValue(BaseModel):
     deliberately absent: `literal` is the canonical PostgreSQL range literal and the
     decomposed bounds are the same interval, spelled out so a caller can compare
     endpoints without parsing.
+
+    Canonical means canonical: a *date* range always reads half-open, whatever brackets
+    the author typed, because calendar dates are discrete. `source_text` on the
+    enclosing `TemporalResultMetadata` is where the author's own spelling survives.
     """
 
     kind: str  # "date" (calendar dates) or "instant" (UTC timestamps)
-    literal: str  # e.g. "[2026-06-10,2026-07-27)", "(,2026-07-27]", "empty"
+    literal: str  # e.g. "[2026-06-10,2026-07-28)", "(,2026-07-27)", "empty"
     lower: Optional[str] = None  # None means unbounded on that side
     upper: Optional[str] = None
     lower_inclusive: bool = False

@@ -10,16 +10,29 @@ content. Two authored forms exist, and the role is optional in both:
 The bracket form carries a range literal and needs no separator, because no role name
 can begin with `[` or `(`. The point form needs the `:` because a date can begin with a
 letter (`yesterday`), so nothing else would tell `@occurred:yesterday` from a handle.
-A role-less point must begin with a digit and be at least as wide as a year: a bare
-`@word` is overwhelmingly a mention, a version, or a handle, and dateparser reads many
-short tokens as dates (`@may` as May, `@v2` as February, `@1` as January). With a role
-the author has said what they mean, so any text dateparser can read is accepted there,
-relative dates included.
 
-One rule decides everything else: **if the payload reads as time, the token becomes a
-qualifier; if it does not, the token stays ordinary observation content, silently.**
-Prose is full of `@` -- email addresses, handles, `@todo:` markers -- and warning about
-each one that is not a date would be noise, not help.
+**A point is one whitespace-delimited token**, in both forms. dateparser reads far more
+than one token -- `June 10, 2026`, `2 days ago`, `2026-06-10 10:00 AM` all resolve, and
+`parse_authored_point` accepts them -- but nothing here can tell where such a date ends:
+dateparser also reads `June 10, 2026 The` and `2026-06-10 The`, so growing the token
+until parsing fails would swallow the author's prose. A multi-word date therefore stays
+content; `@occurred:2026-06-10` says the same thing in one token.
+
+That token boundary is also why two shapes that *do* parse are refused, so a truncated
+read never becomes a plausible-looking assertion:
+
+* **A short number.** dateparser reads `1` as January and `3.5` as March 5, but at the
+  head of a line those are list markers and version numbers. A numeric point must be at
+  least as wide as a year.
+* **A word naming only a month or a year** (`June`, `may`, `v2`). Alone it is usually
+  prose; as the first token of `June 10, 2026` reading it would file June 2026 and leave
+  `10, 2026` in the content. A word is taken only when it names a specific day
+  (`yesterday`, `today`), in whatever language dateparser resolves it.
+
+Beyond those, one rule decides everything: **if the payload reads as time, the token
+becomes a qualifier; if it does not, the token stays ordinary observation content,
+silently.** Prose is full of `@` -- email addresses, handles, `@todo:` markers -- and
+warning about each one that is not a date would be noise, not help.
 
 The single exception is an **unknown role**. `@asserted:2026-06-10` parses as time and
 names an axis, so the author is plainly reaching for this feature and a short list of
@@ -56,13 +69,15 @@ _ROLE_PATTERN = r"[A-Za-z][A-Za-z0-9_]*"
 # `paul@basicmemory.com` and mid-sentence `@handles` out entirely.
 _RANGE_QUALIFIER = re.compile(rf"^@({_ROLE_PATTERN})?([\[(][^\[\]()]*,[^\[\]()]*[\])])(?=\s|$)")
 
-# `@role:<anything up to whitespace>`.
+# `@role:<one token>`.
 _ROLE_POINT_QUALIFIER = re.compile(rf"^@({_ROLE_PATTERN}):(\S+)")
 
-# `@<digit-led text up to whitespace>` -- the role-less point. At least four characters
-# wide, the width of a year: dateparser reads `1` as January and `3.5` as March 5, and
-# a token that short at the head of a line is a list marker or a version, not a date.
-_BARE_POINT_QUALIFIER = re.compile(r"^@(\d\S{3,})")
+# `@<one digit-led token>` -- the role-less point. Without a role there is nothing to
+# distinguish a word from a handle, so only digits open the form at all.
+_BARE_POINT_QUALIFIER = re.compile(r"^@(\d\S*)")
+
+# The width of a year, and the shortest numeric token worth reading as one.
+_MIN_NUMERIC_POINT_WIDTH = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,6 +129,21 @@ def _read_range_qualifier(content: str) -> _ReadQualifier | None:
     return _ReadQualifier(match.group(0), match.end(), match.group(1), valid_during)
 
 
+def _names_a_deliberate_date(point: str, valid_during: TemporalRange) -> bool:
+    """Whether a one-token point is specific enough to be an assertion rather than prose.
+
+    The two shapes refused here both parse, which is exactly why they need refusing --
+    see the module docstring for what each one costs if it is read.
+
+    A bounded span is how a coarse point announces itself: `parse_authored_point` closes
+    a year or a month at its successor and leaves a day or a moment open, so
+    `upper is None` *is* "this names a specific day".
+    """
+    if point[0].isdigit():
+        return len(point) >= _MIN_NUMERIC_POINT_WIDTH
+    return valid_during.upper is None
+
+
 def _read_point_qualifier(content: str, date_order: DateOrder | None) -> _ReadQualifier | None:
     """Match either point form and read its date, or report no usable qualifier."""
     roled = _ROLE_POINT_QUALIFIER.match(content)
@@ -132,7 +162,7 @@ def _read_point_qualifier(content: str, date_order: DateOrder | None) -> _ReadQu
     order = date_order if date_order is not None else ConfigManager().config.date_order
     point = match.group(2) if roled is not None else match.group(1)
     valid_during = parse_authored_point(point, date_order=order)
-    if valid_during is None:
+    if valid_during is None or not _names_a_deliberate_date(point, valid_during):
         return None
     role_name = match.group(1) if roled is not None else None
     return _ReadQualifier(match.group(0), match.end(), role_name, valid_during)

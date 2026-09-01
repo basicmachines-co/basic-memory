@@ -934,6 +934,12 @@ async def search_notes(
     which files the assertion on the `valid` axis; a role-less point has to start
     with a digit and be at least as wide as a year, so `@v2` and `@may` stay prose.
 
+    A point is **one whitespace-delimited token**. Slash dates (`@occurred:03/04/2026`,
+    read by the `date_order` setting) and single-word relative dates
+    (`@occurred:yesterday`) work; multi-word dates like `@occurred:June 10, 2026` do
+    not, because nothing can tell where such a date ends — write `@occurred:2026-06-10`
+    instead. An unreadable token is left as ordinary content, never half-read.
+
     These filters query that authored time, which is a different axis from `after_date`
     (last-indexed time) — `after_date` is never reinterpreted as valid time.
     - `search_notes("cache layer", role="effective", valid_at="2026-07-28")`

@@ -25,7 +25,7 @@ from basic_memory.config import ConfigManager
 from basic_memory.markdown.entity_parser import parse
 from basic_memory.markdown.schemas import Observation
 from basic_memory.markdown.temporal_qualifier import parse_temporal_qualifier
-from basic_memory.temporal import TemporalRangeKind, TimeRole
+from basic_memory.temporal import DateOrder, TemporalRangeKind, TimeRole
 
 
 @pytest.fixture(autouse=True)
@@ -125,6 +125,25 @@ def test_qualifier_carries_its_role_and_bounds():
     assert assertion.valid_during.lower_inclusive is True
     assert assertion.valid_during.upper_inclusive is False
     assert str(assertion.valid_during) == "[2026-06-10,2026-07-27)"
+
+
+def test_a_closed_qualifier_is_stored_half_open_without_rewriting_the_line():
+    """The two forms coexist: canonical bounds for the index, the author's text on disk.
+
+    `[2026-06-10,2026-07-27]` means "through July 27", which the discrete canonical form
+    spells `[2026-06-10,2026-07-28)`. That normalization is the projection's business --
+    `source_text` keeps the author's words, so serializing the note writes the file back
+    exactly as they wrote it.
+    """
+    line = "- [decision] @effective[2026-06-10,2026-07-27] The cache layer will use Redis."
+
+    observation = _observation(line)
+
+    [assertion] = observation.temporal
+    assert assertion.source_text == "@effective[2026-06-10,2026-07-27]"
+    assert str(assertion.valid_during) == "[2026-06-10,2026-07-28)"
+    assert assertion.valid_during.upper_inclusive is False
+    assert str(observation) == line
 
 
 def test_qualifier_is_peeled_before_context_and_tags():
@@ -274,12 +293,118 @@ def test_a_role_less_point_must_be_digit_led_and_year_wide(qualifier: str):
     assert observation.content.startswith(qualifier)
 
 
-def test_a_short_point_is_still_accepted_when_the_role_is_named():
-    """The width rule guards the *bare* form only; a role removes the ambiguity."""
-    observation = _observation("- [decision] @occurred:may The cutover ran.")
+def test_a_word_point_is_read_only_when_it_names_a_specific_day():
+    """A role opens the form to words, but not to words that name only a period.
+
+    `yesterday` resolves to one day and is taken. `may` resolves to a whole month, and
+    a bare month name at the head of a line is either prose or -- worse -- the first
+    token of `May 10, 2026`, where reading it would file May 2026 and leave `10, 2026`
+    behind as content.
+    """
+    day = _observation("- [decision] @occurred:yesterday The cutover ran.")
+    [assertion] = day.temporal
+    assert assertion.time_role is TimeRole.OCCURRED
+    assert day.content == "The cutover ran."
+
+    period = _observation("- [decision] @occurred:may The cutover ran.")
+    assert period.temporal == []
+    assert period.temporal_error is None
+    assert period.content.startswith("@occurred:may")
+
+
+# --- The flexible vocabulary, as the qualifier grammar sees it ---
+#
+# `parse_authored_point` reads far more spellings than these (tests/test_temporal.py
+# pins that vocabulary). The grammar is narrower on purpose, and this section is the
+# boundary between the two: a qualifier is one whitespace-delimited token, because
+# dateparser also reads `June 10, 2026 The` and `2026-06-10 The`, so there is no way to
+# tell where a multi-word date stops without swallowing the author's prose.
+
+
+@pytest.mark.parametrize(
+    ("qualifier", "literal", "kind"),
+    [
+        # Single-token absolute dates, with a role and without.
+        ("@occurred:2026-06-10", "[2026-06-10,)", TemporalRangeKind.DATE),
+        ("@occurred:03/04/2026", "[2026-04-03,)", TemporalRangeKind.DATE),
+        (
+            "@occurred:2026-06-10T10:00:00",
+            "[2026-06-10T10:00:00.000000Z,)",
+            TemporalRangeKind.INSTANT,
+        ),
+        # A role admits a word, as long as it names one day.
+        ("@occurred:today", None, TemporalRangeKind.DATE),
+        ("@occurred:yesterday", None, TemporalRangeKind.DATE),
+    ],
+)
+def test_single_token_points_are_accepted(qualifier: str, literal: str | None, kind):
+    observation = _observation(f"- [decision] {qualifier} The cutover ran.")
 
     [assertion] = observation.temporal
-    assert assertion.time_role is TimeRole.OCCURRED
+    assert observation.content == "The cutover ran."
+    assert assertion.valid_during.kind is kind
+    if literal is not None:
+        assert str(assertion.valid_during) == literal
+
+
+@pytest.mark.parametrize(
+    "qualifier",
+    [
+        # Multi-word dates: only the first token reaches the reader, and each of these
+        # first tokens is refused, so the whole line stays content rather than being
+        # half-read. `@occurred:2026-06-10` says the same thing in one token.
+        "@occurred:June 10, 2026",
+        "@occurred:10 June 2026",
+        "@occurred:Jan 15, 2024",
+        "@occurred:2 days ago",
+        "@occurred:last week",
+    ],
+)
+def test_multi_word_dates_stay_content_whole(qualifier: str):
+    """The reader understands these; the grammar cannot delimit them.
+
+    What matters is that an undelimitable date is left *entirely* alone: no coarse
+    assertion filed from its first token, and no words eaten out of the content.
+    """
+    line = f"- [decision] {qualifier} The cutover ran."
+
+    observation = _observation(line)
+
+    assert observation.temporal == []
+    assert observation.temporal_error is None
+    assert observation.content == f"{qualifier} The cutover ran."
+    assert str(observation) == line
+
+
+def test_a_multi_word_date_is_read_up_to_its_first_token_when_that_token_stands_alone():
+    """The one partial read the token rule allows, pinned so it is a known boundary.
+
+    `2026-06-10` is a complete date by itself, so the qualifier claims it and the clock
+    reading stays in the content. The assertion is coarser than the author meant -- a
+    date, not an instant -- but it is not wrong, and nothing is lost from the line.
+    """
+    observation = _observation("- [decision] @occurred:2026-06-10 10:00 AM The cutover ran.")
+
+    [assertion] = observation.temporal
+    assert str(assertion.valid_during) == "[2026-06-10,)"
+    assert assertion.valid_during.kind is TemporalRangeKind.DATE
+    assert observation.content == "10:00 AM The cutover ran."
+
+
+@pytest.mark.parametrize(
+    ("date_order", "expected_lower"),
+    [("YMD", "2026-04-03"), ("DMY", "2026-04-03"), ("MDY", "2026-03-04")],
+)
+def test_a_roled_slash_date_follows_the_configured_order(
+    date_order: DateOrder, expected_lower: str
+):
+    """`@occurred:03/04/2026` resolves by preference, through the real parse path."""
+    observation = parse_temporal_qualifier(
+        "@occurred:03/04/2026 The cutover ran.", date_order=date_order
+    )
+
+    [assertion] = observation.assertions
+    assert assertion.valid_during.lower == expected_lower
     assert observation.content == "The cutover ran."
 
 

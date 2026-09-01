@@ -12,6 +12,13 @@ discipline -- it falls out of two decisions made upstream:
   compared directly against a column, so PostgreSQL always infers their type and
   asyncpg never sees a bare untyped parameter.
 
+Comparing endpoint *values* like this is only equivalent to comparing the sets of times
+they delimit because `TemporalRange` has already canonicalized every date range to the
+half-open `[lower,upper)` form. Calendar dates are discrete, so two date ranges can hold
+each other's raw endpoints while sharing no actual day; the canonical form is what rules
+that out. The inclusivity branches below therefore only ever fire on the instant axis in
+practice, and they stay because instants are continuous and keep the authored form.
+
 The predicate is a *non-correlated* subquery, and that shape is load-bearing rather
 than stylistic. SQLite's default word search emits an OR of per-column `MATCH`
 predicates; adding a correlated `EXISTS` to that WHERE clause makes SQLite refuse the

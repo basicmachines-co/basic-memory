@@ -436,6 +436,11 @@ async def test_malformed_qualifier_logs_diagnostic_with_file_path(entity_parser)
 
     The typed `temporal_error` field carries the same message to programmatic callers;
     this layer is the only one that knows which file the observation came from.
+
+    The path is asserted in its forward-slash form on every platform. That is not a
+    convenience for the test: it is the same spelling `entity.file_path`, permalinks,
+    and search rows use, so the name in the warning is one the author can search for.
+    A `WindowsPath` interpolated directly would print `decisions\\cache-layer.md`.
     """
     records: list[Any] = []
     sink_id = logger.add(lambda message: records.append(message.record), level="WARNING")
