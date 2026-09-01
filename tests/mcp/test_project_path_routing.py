@@ -34,6 +34,12 @@ from basic_memory.mcp.project_context_identifiers import (
     split_project_permalink_prefix,
 )
 from basic_memory.mcp.tools import grep, ls
+from basic_memory.mcp.workspace_project_index import (
+    WorkspaceProjectEntry,
+    WorkspaceProjectIndex,
+    build_workspace_project_index,
+    resolve_workspace_project_from_index,
+)
 from basic_memory.schemas.cloud import WorkspaceInfo
 from basic_memory.schemas.project_info import ProjectItem, ProjectList
 from basic_memory.utils import generate_permalink
@@ -556,7 +562,14 @@ async def test_cloud_workspace_qualified_path_without_mount_collision_still_rout
 
     route = await resolve_project_path_route("team/research/notes/x", project=None, project_id=None)
 
-    assert route == ProjectPathRoute(project="team/research", path="notes/x", stripped=True)
+    # The route carries the resolved entry's id, so nothing re-resolves the
+    # qualified name against a workspace that did not answer it.
+    assert route == ProjectPathRoute(
+        project="team/research",
+        path="notes/x",
+        stripped=True,
+        project_id="research-external-id",
+    )
 
 
 @pytest.mark.asyncio
@@ -570,7 +583,9 @@ async def test_cloud_workspace_qualified_project_root_routes(cloud_session):
 
     route = await resolve_project_path_route("team/research", project=None, project_id=None)
 
-    assert route == ProjectPathRoute(project="team/research", path="", stripped=True)
+    assert route == ProjectPathRoute(
+        project="team/research", path="", stripped=True, project_id="research-external-id"
+    )
 
 
 @pytest.mark.asyncio
@@ -584,14 +599,29 @@ async def test_cloud_workspace_route_matches_multi_segment_project_permalink(clo
     nested = await resolve_project_path_route(
         "team/research/2026/notes", project=None, project_id=None
     )
-    assert nested == ProjectPathRoute(project="team/research/2026", path="notes", stripped=True)
+    assert nested == ProjectPathRoute(
+        project="team/research/2026",
+        path="notes",
+        stripped=True,
+        project_id="research/2026-external-id",
+    )
 
     root = await resolve_project_path_route("team/research/2026", project=None, project_id=None)
-    assert root == ProjectPathRoute(project="team/research/2026", path="", stripped=True)
+    assert root == ProjectPathRoute(
+        project="team/research/2026",
+        path="",
+        stripped=True,
+        project_id="research/2026-external-id",
+    )
 
     # The shorter sibling still claims its own paths — longest match, not first.
     sibling = await resolve_project_path_route("team/research/notes", project=None, project_id=None)
-    assert sibling == ProjectPathRoute(project="team/research", path="notes", stripped=True)
+    assert sibling == ProjectPathRoute(
+        project="team/research",
+        path="notes",
+        stripped=True,
+        project_id="research-external-id",
+    )
 
 
 @pytest.mark.asyncio
@@ -980,7 +1010,9 @@ async def test_workspace_route_still_wins_when_the_path_could_not_resolve(
 
     route = await resolve_project_path_route("acme/docs/foo", project=None, project_id=None)
 
-    assert route == ProjectPathRoute(project="acme/docs", path="foo", stripped=True)
+    assert route == ProjectPathRoute(
+        project="acme/docs", path="foo", stripped=True, project_id=_DEFAULT_DOCS_ID
+    )
 
     # And an unaddressable name still refuses rather than defaulting.
     with pytest.raises(UnqualifiedPathRefusedError):
@@ -1090,10 +1122,88 @@ async def test_cloud_other_workspace_stays_reachable_when_qualified(cross_worksp
     qualified_path = await resolve_project_path_route(
         "acme/notes/foo", project=None, project_id=None
     )
-    assert qualified_path == ProjectPathRoute(project="acme/notes", path="foo", stripped=True)
+    assert qualified_path == ProjectPathRoute(
+        project="acme/notes", path="foo", stripped=True, project_id=_DEFAULT_NOTES_ID
+    )
 
     root = await resolve_project_path_route("acme/notes", project=None, project_id=None)
-    assert root == ProjectPathRoute(project="acme/notes", path="", stripped=True)
+    assert root == ProjectPathRoute(
+        project="acme/notes", path="", stripped=True, project_id=_DEFAULT_NOTES_ID
+    )
 
     explicit = await resolve_project_path_route("foo", project="acme/notes", project_id=None)
     assert explicit == ProjectPathRoute(project="acme/notes", path="foo", stripped=False)
+
+
+# --- a qualified name must reach the workspace it names (#1421) ---
+
+
+def _index_with(*entries: tuple[WorkspaceInfo, str, str]) -> WorkspaceProjectIndex:
+    """Build a workspace index from (workspace, project name, external_id) rows."""
+    by_tenant: dict[str, WorkspaceInfo] = {}
+    for workspace, _, _ in entries:
+        by_tenant.setdefault(workspace.tenant_id, workspace)
+    workspaces = tuple(by_tenant.values())
+    return build_workspace_project_index(
+        workspaces,
+        tuple(
+            WorkspaceProjectEntry(
+                workspace=workspace,
+                project=ProjectItem(
+                    id=index + 1,
+                    external_id=external_id,
+                    name=name,
+                    path=f"/app/data/{generate_permalink(name)}",
+                ),
+            )
+            for index, (workspace, name, external_id) in enumerate(entries)
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_qualified_name_beats_a_colliding_whole_permalink():
+    """'<workspace>/<project>' and a project literally named 'acme/docs' are the
+    same shape, so the index tries both readings — qualified first.
+
+    Preferring the whole permalink sent a route that explicitly named workspace
+    'acme' to a *different* tenant that happened to hold a project called
+    'acme/docs'. The fallback still exists: it is what makes a slash-bearing
+    name routable when its first segment names no workspace at all.
+    """
+    acme = WorkspaceInfo(
+        tenant_id="acme-tenant",
+        workspace_type="organization",
+        slug="acme",
+        name="Acme",
+        role="editor",
+        is_default=True,
+    )
+    beta = WorkspaceInfo(
+        tenant_id="beta-tenant",
+        workspace_type="organization",
+        slug="beta",
+        name="Beta",
+        role="editor",
+        is_default=False,
+    )
+    index = _index_with(
+        (acme, "docs", "11111111-1111-1111-1111-111111111111"),
+        (beta, "acme/docs", "22222222-2222-2222-2222-222222222222"),
+        (beta, "Research/2026", "33333333-3333-3333-3333-333333333333"),
+    )
+
+    qualified = await resolve_workspace_project_from_index(index, "acme/docs")
+    assert qualified.workspace.slug == "acme"
+    assert qualified.project.name == "docs"
+
+    # The fallback: no workspace is named 'Research', so the whole permalink wins.
+    slash_bearing = await resolve_workspace_project_from_index(index, "Research/2026")
+    assert slash_bearing.workspace.slug == "beta"
+    assert slash_bearing.project.name == "Research/2026"
+
+    # And the collided project is still reachable by the id that names it exactly.
+    by_id = await resolve_workspace_project_from_index(
+        index, "22222222-2222-2222-2222-222222222222"
+    )
+    assert by_id.project.name == "acme/docs"
