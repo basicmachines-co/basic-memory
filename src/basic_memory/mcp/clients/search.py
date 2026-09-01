@@ -16,7 +16,7 @@ from basic_memory.schemas.search import SearchResponse, SearchRetrievalMode
 
 # The valid-time fields SearchQuery carries. Named here so the skew check below stays
 # in step with the schema without importing the model's internals.
-_TEMPORAL_QUERY_FIELDS = ("valid_at", "valid_overlaps", "time_role")
+_TEMPORAL_QUERY_FIELDS = ("valid_at", "valid_overlaps", "time_kind")
 
 
 class SearchClient:
@@ -106,7 +106,7 @@ class SearchClient:
                 "The search API did not apply the requested valid-time filter "
                 "(no temporal_applied confirmation in the response). The server is "
                 "likely older than this client; upgrade it or drop valid_at / "
-                "valid_overlaps / time_role from the query."
+                "valid_overlaps / time_kind from the query."
             )
 
         return SearchResponse.model_validate(payload)

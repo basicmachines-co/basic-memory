@@ -138,7 +138,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "min_similarity",
         "valid_at",
         "valid_overlaps",
-        "time_role",
+        "time_kind",
     ],
     "tail": ["timeframe", "lines", "project", "project_id"],
     "view_note": ["identifier", "project", "project_id"],

@@ -21,16 +21,16 @@ from basic_memory.temporal import (
     TemporalPoint,
     TemporalQualifierError,
     TemporalRange,
-    TemporalRangeKind,
-    TimeRole,
+    TemporalRangeAxis,
+    TimeKind,
     canonical_bound,
     parse_authored_point,
     parse_point,
     parse_range_literal,
 )
 
-DATE = TemporalRangeKind.DATE
-INSTANT = TemporalRangeKind.INSTANT
+DATE = TemporalRangeAxis.DATE
+INSTANT = TemporalRangeAxis.INSTANT
 
 
 # --- Canonical bounds ---
@@ -144,17 +144,17 @@ def test_timestamp_shaped_bound_on_a_date_that_does_not_exist_is_refused():
 def test_point_rejects_a_non_canonical_value():
     """A value that skipped canonicalization must not enter the domain."""
     with pytest.raises(TemporalQualifierError, match="not canonical"):
-        TemporalPoint(kind=INSTANT, value="2026-07-27T18:42:00Z")
+        TemporalPoint(axis=INSTANT, value="2026-07-27T18:42:00Z")
 
 
 def test_point_renders_its_canonical_value():
-    assert str(TemporalPoint(kind=DATE, value="2026-07-27")) == "2026-07-27"
+    assert str(TemporalPoint(axis=DATE, value="2026-07-27")) == "2026-07-27"
 
 
 def test_parse_point_infers_the_axis_from_what_was_written():
-    assert parse_point("2026-07-27") == TemporalPoint(kind=DATE, value="2026-07-27")
+    assert parse_point("2026-07-27") == TemporalPoint(axis=DATE, value="2026-07-27")
     assert parse_point(" 2026-07-27T18:42:00+02:00 ") == TemporalPoint(
-        kind=INSTANT, value="2026-07-27T16:42:00.000000Z"
+        axis=INSTANT, value="2026-07-27T16:42:00.000000Z"
     )
 
 
@@ -166,7 +166,7 @@ def test_parse_point_refuses_an_empty_string():
 def test_parse_point_reads_a_naive_timestamp_as_utc():
     """The search boundary follows the same naive-is-UTC rule as authored bounds."""
     assert parse_point("2026-07-27T18:42:00") == TemporalPoint(
-        kind=INSTANT, value="2026-07-27T18:42:00.000000Z"
+        axis=INSTANT, value="2026-07-27T18:42:00.000000Z"
     )
 
 
@@ -178,7 +178,7 @@ def test_parse_point_reads_a_naive_timestamp_as_utc():
 
 
 @pytest.mark.parametrize(
-    ("written", "literal", "kind"),
+    ("written", "literal", "axis"),
     [
         # A year and a month are periods the author delimited by writing them.
         ("2026", "[2026-01-01,2027-01-01)", DATE),
@@ -194,12 +194,12 @@ def test_parse_point_reads_a_naive_timestamp_as_utc():
         ("  2026-06-10  ", "[2026-06-10,)", DATE),
     ],
 )
-def test_authored_point_denotes_the_span_its_precision_covers(written, literal, kind):
+def test_authored_point_denotes_the_span_its_precision_covers(written, literal, axis):
     span = parse_authored_point(written)
 
     assert span is not None
     assert str(span) == literal
-    assert span.kind is kind
+    assert span.axis is axis
     assert span.lower_inclusive is True
 
 
@@ -212,7 +212,7 @@ def test_authored_date_never_acquires_a_time_of_day():
     span = parse_authored_point("2026-06-10")
 
     assert span is not None
-    assert span.kind is DATE
+    assert span.axis is DATE
     assert span.lower == "2026-06-10"
     assert "T" not in span.lower and "Z" not in span.lower
 
@@ -224,7 +224,7 @@ def test_authored_naive_timestamp_is_read_as_utc_not_local_time():
 
     assert naive is not None and explicit is not None
     assert naive == explicit
-    assert naive.kind is INSTANT
+    assert naive.axis is INSTANT
     assert naive.lower == "2026-06-10T14:00:00.000000Z"
 
 
@@ -237,7 +237,7 @@ def test_authored_relative_dates_resolve_at_parse_time():
     span = parse_authored_point("yesterday")
 
     assert span is not None
-    assert span.kind is DATE
+    assert span.axis is DATE
     yesterday = datetime.now().date() - timedelta(days=1)
     assert span.lower == yesterday.isoformat()
 
@@ -248,7 +248,7 @@ def test_authored_relative_dates_resolve_at_parse_time():
 
 
 @pytest.mark.parametrize(
-    ("written", "literal", "kind"),
+    ("written", "literal", "axis"),
     [
         # Month names, in the orders English writes them.
         ("June 10, 2026", "[2026-06-10,)", DATE),
@@ -261,7 +261,7 @@ def test_authored_relative_dates_resolve_at_parse_time():
         ("2026-06-10 10:00 AM", "[2026-06-10T10:00:00.000000Z,)", INSTANT),
     ],
 )
-def test_written_dates_read_on_the_axis_their_precision_names(written, literal, kind):
+def test_written_dates_read_on_the_axis_their_precision_names(written, literal, axis):
     """A written date stays a date; adding a clock reading is what makes it an instant.
 
     `June 10, 2026` must never acquire a time of day -- midnight in which zone is a
@@ -272,7 +272,7 @@ def test_written_dates_read_on_the_axis_their_precision_names(written, literal, 
 
     assert span is not None
     assert str(span) == literal
-    assert span.kind is kind
+    assert span.axis is axis
 
 
 def test_written_relative_dates_resolve_against_now():
@@ -280,7 +280,7 @@ def test_written_relative_dates_resolve_against_now():
     span = parse_authored_point("2 days ago")
 
     assert span is not None
-    assert span.kind is DATE
+    assert span.axis is DATE
     assert span.lower == (datetime.now().date() - timedelta(days=2)).isoformat()
 
 
@@ -304,7 +304,7 @@ def test_slash_dates_resolve_by_the_configured_order(written, date_order, expect
 
     assert span is not None
     assert span.lower == expected_lower
-    assert span.kind is DATE
+    assert span.axis is DATE
 
 
 @pytest.mark.parametrize(
@@ -364,7 +364,7 @@ def test_a_year_with_no_successor_is_unread():
     assert parse_authored_point("9999") is None
     # The year before it still resolves, so the guard is the calendar edge, not 4 digits.
     assert parse_authored_point("9998") == TemporalRange(
-        kind=DATE,
+        axis=DATE,
         lower=date(9998, 1, 1).isoformat(),
         upper=date(9999, 1, 1).isoformat(),
         lower_inclusive=True,
@@ -382,7 +382,7 @@ def test_unbounded_sides_are_forced_exclusive():
     tests below.
     """
     span = TemporalRange(
-        kind=INSTANT,
+        axis=INSTANT,
         lower=None,
         upper="2026-07-27T00:00:00.000000Z",
         lower_inclusive=True,
@@ -395,7 +395,7 @@ def test_unbounded_sides_are_forced_exclusive():
 
 
 def test_fully_unbounded_range_is_exclusive_on_both_sides():
-    span = TemporalRange(kind=DATE, lower_inclusive=True, upper_inclusive=True)
+    span = TemporalRange(axis=DATE, lower_inclusive=True, upper_inclusive=True)
 
     assert (span.lower_inclusive, span.upper_inclusive) == (False, False)
     assert str(span) == "(,)"
@@ -408,7 +408,7 @@ def test_fully_unbounded_range_is_exclusive_on_both_sides():
 def test_degenerate_range_collapses_to_empty(lower_inclusive: bool, upper_inclusive: bool):
     """`[a,a)`, `(a,a]`, and `(a,a)` contain no points, so they *are* the empty range."""
     span = TemporalRange(
-        kind=DATE,
+        axis=DATE,
         lower="2026-07-27",
         upper="2026-07-27",
         lower_inclusive=lower_inclusive,
@@ -427,7 +427,7 @@ def test_closed_single_point_range_is_not_empty():
     closing at the following day rather than by owning both endpoints.
     """
     span = TemporalRange(
-        kind=DATE,
+        axis=DATE,
         lower="2026-07-27",
         upper="2026-07-27",
         lower_inclusive=True,
@@ -440,26 +440,26 @@ def test_closed_single_point_range_is_not_empty():
 
 def test_inverted_range_is_refused():
     with pytest.raises(TemporalQualifierError, match="after upper bound"):
-        TemporalRange(kind=DATE, lower="2026-08-01", upper="2026-06-10")
+        TemporalRange(axis=DATE, lower="2026-08-01", upper="2026-06-10")
 
 
 def test_empty_range_cannot_carry_bounds():
     """Two representations of the same interval would make equality lie."""
     with pytest.raises(TemporalQualifierError, match="carries no bounds"):
-        TemporalRange(kind=DATE, lower="2026-07-27", is_empty=True)
+        TemporalRange(axis=DATE, lower="2026-07-27", is_empty=True)
     with pytest.raises(TemporalQualifierError, match="carries no bounds"):
-        TemporalRange(kind=DATE, is_empty=True, upper_inclusive=True)
+        TemporalRange(axis=DATE, is_empty=True, upper_inclusive=True)
 
 
 def test_range_rejects_non_canonical_bounds():
     with pytest.raises(TemporalQualifierError, match="not canonical"):
-        TemporalRange(kind=INSTANT, lower="2026-07-27T18:42:00Z")
+        TemporalRange(axis=INSTANT, lower="2026-07-27T18:42:00Z")
 
 
 def test_empty_constructor_builds_the_empty_range_on_one_axis():
     span = TemporalRange.empty(INSTANT)
 
-    assert (span.kind, span.is_empty, span.lower, span.upper) == (INSTANT, True, None, None)
+    assert (span.axis, span.is_empty, span.lower, span.upper) == (INSTANT, True, None, None)
 
 
 # --- The discrete canonical form ---
@@ -492,7 +492,7 @@ def test_empty_constructor_builds_the_empty_range_on_one_axis():
 )
 def test_date_ranges_are_stored_half_open(authored: str, canonical: str):
     """Whatever the author wrote, the stored date range is `[lower,upper)`."""
-    span = parse_range_literal(authored, kind=DATE)
+    span = parse_range_literal(authored, axis=DATE)
 
     assert str(span) == canonical
     # A bounded lower end is always owned, a bounded upper end never is.
@@ -503,9 +503,9 @@ def test_date_ranges_are_stored_half_open(authored: str, canonical: str):
 def test_the_canonical_date_rendering_is_a_fixed_point():
     """Re-parsing what `__str__` produced yields this same value, not a third form."""
     for authored in ("(2026-06-10,2026-07-27]", "[2026-07-27,2026-07-27]", "(,2026-07-27]"):
-        span = parse_range_literal(authored, kind=DATE)
+        span = parse_range_literal(authored, axis=DATE)
 
-        assert parse_range_literal(str(span), kind=DATE) == span, authored
+        assert parse_range_literal(str(span), axis=DATE) == span, authored
 
 
 @pytest.mark.parametrize(
@@ -521,7 +521,7 @@ def test_the_canonical_date_rendering_is_a_fixed_point():
     ],
 )
 def test_date_ranges_that_admit_no_day_are_the_empty_range(literal: str):
-    span = parse_range_literal(literal, kind=DATE)
+    span = parse_range_literal(literal, axis=DATE)
 
     assert span.is_empty is True
     assert str(span) == "empty"
@@ -530,7 +530,7 @@ def test_date_ranges_that_admit_no_day_are_the_empty_range(literal: str):
 def test_an_inclusive_upper_end_on_the_last_date_becomes_unbounded():
     """`9999-12-31` has no successor to close against, and no later day to exclude."""
     span = TemporalRange(
-        kind=DATE,
+        axis=DATE,
         lower="2026-06-10",
         upper="9999-12-31",
         lower_inclusive=True,
@@ -544,7 +544,7 @@ def test_an_inclusive_upper_end_on_the_last_date_becomes_unbounded():
 def test_the_last_date_alone_is_still_one_day_not_the_empty_range():
     """`[9999-12-31,9999-12-31]` survives the rewrite that drops its upper end."""
     span = TemporalRange(
-        kind=DATE,
+        axis=DATE,
         lower="9999-12-31",
         upper="9999-12-31",
         lower_inclusive=True,
@@ -557,7 +557,7 @@ def test_the_last_date_alone_is_still_one_day_not_the_empty_range():
 
 def test_an_exclusive_lower_end_on_the_last_date_is_empty():
     """A range beginning strictly after the last date admits no date at all."""
-    span = TemporalRange(kind=DATE, lower="9999-12-31")
+    span = TemporalRange(axis=DATE, lower="9999-12-31")
 
     assert span.is_empty is True
     assert str(span) == "empty"
@@ -583,14 +583,14 @@ def test_instant_ranges_keep_the_inclusivity_they_were_written_with(literal, exp
     Adding a microsecond would be an invented precision, and rewriting an instant the
     way a date is rewritten would move the endpoint to a moment nobody wrote.
     """
-    span = parse_range_literal(literal, kind=INSTANT)
+    span = parse_range_literal(literal, axis=INSTANT)
 
     assert (span.lower_inclusive, span.upper_inclusive, span.lower, span.upper) == expected
 
 
 def test_an_instant_range_over_one_day_is_not_widened_by_a_day():
     """The date rewrite must not reach the instant axis: `+1 day` there is a bug."""
-    span = parse_range_literal("[2026-07-27T00:00:00Z,2026-07-27T23:59:59Z]", kind=INSTANT)
+    span = parse_range_literal("[2026-07-27T00:00:00Z,2026-07-27T23:59:59Z]", axis=INSTANT)
 
     assert span.upper == "2026-07-27T23:59:59.000000Z"
     assert span.upper_inclusive is True
@@ -598,7 +598,7 @@ def test_an_instant_range_over_one_day_is_not_widened_by_a_day():
 
 def test_a_degenerate_instant_range_still_holds_exactly_one_moment():
     """`[t,t]` on a continuous axis stays `[t,t]`; there is no successor to close at."""
-    span = parse_range_literal("[2026-07-27T18:42:00Z,2026-07-27T18:42:00Z]", kind=INSTANT)
+    span = parse_range_literal("[2026-07-27T18:42:00Z,2026-07-27T18:42:00Z]", axis=INSTANT)
 
     assert span.is_empty is False
     assert str(span) == "[2026-07-27T18:42:00.000000Z,2026-07-27T18:42:00.000000Z]"
@@ -645,13 +645,13 @@ def test_range_literal_tolerates_surrounding_whitespace():
 
 def test_empty_literal_requires_an_explicit_axis():
     """`empty` carries no bounds to classify, so the caller must name the axis."""
-    assert parse_range_literal("empty", kind=DATE).is_empty is True
-    with pytest.raises(TemporalQualifierError, match="kind must be given"):
+    assert parse_range_literal("empty", axis=DATE).is_empty is True
+    with pytest.raises(TemporalQualifierError, match="axis must be given"):
         parse_range_literal("empty")
 
 
 def test_fully_unbounded_literal_requires_an_explicit_axis():
-    assert parse_range_literal("(,)", kind=INSTANT).kind is INSTANT
+    assert parse_range_literal("(,)", axis=INSTANT).axis is INSTANT
     with pytest.raises(TemporalQualifierError, match="no bounds to classify"):
         parse_range_literal("(,)")
 
@@ -663,7 +663,7 @@ def test_range_literal_refuses_mixed_axes():
 
 def test_range_literal_refuses_an_axis_it_was_not_asked_for():
     with pytest.raises(TemporalQualifierError, match="expected instant bounds"):
-        parse_range_literal("[2026-06-10,2026-07-27)", kind=INSTANT)
+        parse_range_literal("[2026-06-10,2026-07-27)", axis=INSTANT)
 
 
 @pytest.mark.parametrize(
@@ -693,8 +693,8 @@ def test_filter_refuses_asking_two_questions_at_once():
 
 
 def test_filter_refuses_asking_nothing_at_all():
-    """A filter that names no role, point, or range would match everything silently."""
-    with pytest.raises(TemporalQualifierError, match="must name a role"):
+    """A filter that names no kind, point, or range would match everything silently."""
+    with pytest.raises(TemporalQualifierError, match="must name a kind"):
         TemporalFilter()
 
 
@@ -703,7 +703,7 @@ def test_point_filter_window_is_the_degenerate_closed_range():
     window = TemporalFilter(at=parse_point("2026-07-27")).window
 
     assert window == TemporalRange(
-        kind=DATE,
+        axis=DATE,
         lower="2026-07-27",
         upper="2026-07-27",
         lower_inclusive=True,
@@ -727,9 +727,9 @@ def test_overlap_filter_window_is_the_range_itself():
     assert TemporalFilter(overlaps=span).window == span
 
 
-def test_role_only_filter_has_no_window():
+def test_kind_only_filter_has_no_window():
     """Nothing to intersect: the question is only "does this axis carry an assertion"."""
-    assert TemporalFilter(role=TimeRole.EFFECTIVE).window is None
+    assert TemporalFilter(kind=TimeKind.EFFECTIVE).window is None
 
 
 # --- TemporalAssertion ---
@@ -737,7 +737,7 @@ def test_role_only_filter_has_no_window():
 
 def test_assertion_defaults_to_the_observation_extractor():
     assertion = TemporalAssertion(
-        time_role=TimeRole.EFFECTIVE,
+        time_kind=TimeKind.EFFECTIVE,
         valid_during=parse_range_literal("[2026-06-10,2026-07-27)"),
         source_text="@effective[2026-06-10,2026-07-27)",
     )
@@ -746,10 +746,10 @@ def test_assertion_defaults_to_the_observation_extractor():
     assert assertion.metadata is None
 
 
-def test_recorded_time_is_not_an_authorable_role():
-    """Recorded time is never written in markdown, so no role names it."""
-    assert "recorded" not in {role.value for role in TimeRole}
-    assert {role.value for role in TimeRole} == {
+def test_recorded_time_is_not_an_authorable_kind():
+    """Recorded time is never written in markdown, so no kind names it."""
+    assert "recorded" not in {kind.value for kind in TimeKind}
+    assert {kind.value for kind in TimeKind} == {
         "effective",
         "valid",
         "occurred",

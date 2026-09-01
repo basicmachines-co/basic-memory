@@ -67,7 +67,7 @@ async def test_temporal_filter_round_trips_through_v2_search(
         v2_project_url,
         text="cache layer",
         entity_types=["observation"],
-        time_role="effective",
+        time_kind="effective",
         valid_at="2026-07-28",
     )
 
@@ -78,10 +78,10 @@ async def test_temporal_filter_round_trips_through_v2_search(
 
     [result] = payload["results"]
     [assertion] = result["temporal"]
-    assert assertion["role"] == "effective"
+    assert assertion["kind"] == "effective"
     assert assertion["source_text"] == "@effective[2026-07-27,)"
     assert assertion["valid_during"] == {
-        "kind": "date",
+        "axis": "date",
         "literal": "[2026-07-27,)",
         "lower": "2026-07-27",
         "upper": None,
@@ -249,7 +249,7 @@ async def test_temporal_only_query_is_accepted_as_criteria(
     await _index_note(entity_service, search_service, "Cache Layer", CACHE_LAYER_MARKDOWN)
 
     payload = await _search(
-        client, v2_project_url, entity_types=["observation"], time_role="effective"
+        client, v2_project_url, entity_types=["observation"], time_kind="effective"
     )
 
     assert payload["temporal_applied"] is True

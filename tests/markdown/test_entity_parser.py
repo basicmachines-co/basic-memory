@@ -454,7 +454,7 @@ async def test_malformed_qualifier_logs_diagnostic_with_file_path(entity_parser)
 
     [observation] = entity.observations
     assert observation.temporal == []
-    assert "unknown temporal role 'asserted'" in (observation.temporal_error or "")
+    assert "unknown temporal kind 'asserted'" in (observation.temporal_error or "")
     # The qualifier is never dropped from the content, only from the projection.
     assert observation.content.startswith("@asserted[2026-06-10,)")
 

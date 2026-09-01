@@ -72,7 +72,7 @@ async def test_valid_at_after_cutover_returns_memcached_excludes_redis(client, t
     response = await search_notes(
         project=test_project.name,
         query="cache layer",
-        time_role="effective",
+        time_kind="effective",
         valid_at="2026-07-28",
         output_format="json",
     )
@@ -91,7 +91,7 @@ async def test_valid_at_before_cutover_returns_redis_excludes_memcached(client, 
     response = await search_notes(
         project=test_project.name,
         query="cache layer",
-        time_role="effective",
+        time_kind="effective",
         valid_at="2026-07-01",
         output_format="json",
     )
@@ -120,14 +120,14 @@ async def test_point_qualifier_answers_the_cutover_like_a_range(client, test_pro
     after = await search_notes(
         project=test_project.name,
         query="cache layer",
-        time_role="effective",
+        time_kind="effective",
         valid_at="2026-07-28",
         output_format="json",
     )
     before = await search_notes(
         project=test_project.name,
         query="cache layer",
-        time_role="effective",
+        time_kind="effective",
         valid_at="2026-07-01",
         output_format="json",
     )
@@ -170,7 +170,7 @@ async def test_valid_overlaps_returns_both_decisions(client, test_project):
     response = await search_notes(
         project=test_project.name,
         query="cache layer",
-        time_role="effective",
+        time_kind="effective",
         valid_overlaps="[2026-06-01,2026-08-01)",
         output_format="json",
     )
@@ -235,7 +235,7 @@ async def test_valid_at_excludes_undated_observations(client, test_project):
 
 @pytest.mark.asyncio
 async def test_results_carry_the_assertion_that_matched(client, test_project):
-    """A valid-time hit explains itself: role, canonical range, and authored text."""
+    """A valid-time hit explains itself: kind, canonical range, and authored text."""
     await _write_cache_layer_note(test_project.name)
 
     response = await search_notes(
@@ -248,10 +248,10 @@ async def test_results_carry_the_assertion_that_matched(client, test_project):
     assert isinstance(response, dict), response
     [result] = [r for r in response["results"] if "Memcached" in (r["content"] or "")]
     [assertion] = result["temporal"]
-    assert assertion["role"] == "effective"
+    assert assertion["kind"] == "effective"
     assert assertion["source_text"] == "@effective[2026-07-27,)"
     assert assertion["valid_during"]["literal"] == "[2026-07-27,)"
-    assert assertion["valid_during"]["kind"] == "date"
+    assert assertion["valid_during"]["axis"] == "date"
     assert assertion["valid_during"]["lower"] == "2026-07-27"
     assert assertion["valid_during"]["lower_inclusive"] is True
     # JSON output drops null fields, so an unbounded end shows up as an absent key.
@@ -259,8 +259,8 @@ async def test_results_carry_the_assertion_that_matched(client, test_project):
 
 
 @pytest.mark.asyncio
-async def test_markdown_output_labels_the_time_axis(client, test_project):
-    """Human-readable output names the axis instead of printing a bare date."""
+async def test_markdown_output_labels_the_time_kind(client, test_project):
+    """Human-readable output names the kind instead of printing a bare date."""
     await _write_cache_layer_note(test_project.name)
 
     rendered = await search_notes(
@@ -274,8 +274,8 @@ async def test_markdown_output_labels_the_time_axis(client, test_project):
 
 
 @pytest.mark.asyncio
-async def test_role_only_filter_finds_every_source_on_that_axis(client, test_project):
-    """A role with no point or range is a legal question: who asserts on this axis?"""
+async def test_kind_only_filter_finds_every_source_of_that_kind(client, test_project):
+    """A kind with no point or range is a legal question: who asserts this kind?"""
     await _write_cache_layer_note(test_project.name)
     await write_note(
         project=test_project.name,
@@ -287,7 +287,7 @@ async def test_role_only_filter_finds_every_source_on_that_axis(client, test_pro
     response = await search_notes(
         project=test_project.name,
         query="layer",
-        time_role="effective",
+        time_kind="effective",
         output_format="json",
     )
 
@@ -311,13 +311,13 @@ async def test_valid_at_and_valid_overlaps_together_are_refused(client, test_pro
 
 
 @pytest.mark.asyncio
-async def test_time_role_alone_is_enough_search_criteria(client, test_project):
+async def test_time_kind_alone_is_enough_search_criteria(client, test_project):
     """A valid-time filter is real criteria, so it must not trip the empty-query guard."""
     await _write_cache_layer_note(test_project.name)
 
     response = await search_notes(
         project=test_project.name,
-        time_role="effective",
+        time_kind="effective",
         output_format="json",
     )
 
@@ -329,4 +329,4 @@ def test_tool_help_documents_undated_exclusion():
     """Acceptance 8: the exclusion is documented where a caller will read it."""
     doc = inspect.getdoc(search_notes) or ""
     assert "Sources with no temporal qualifier are excluded" in doc
-    assert "valid_at" in doc and "valid_overlaps" in doc and "time_role" in doc
+    assert "valid_at" in doc and "valid_overlaps" in doc and "time_kind" in doc

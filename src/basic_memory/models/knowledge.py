@@ -434,22 +434,22 @@ class MemoryTimeIndex(Base):
     __tablename__ = "memory_time_index"
     __table_args__ = (
         # The valid-time predicate selects (source_type, source_id) after filtering on
-        # project, role, and axis, so this index both drives the scan and covers its
+        # project, kind, and axis, so this index both drives the scan and covers its
         # projection. project_id leads it, which is why the column carries no separate
         # index of its own the way sibling projection tables do.
         Index(
             "ix_memory_time_index_lookup",
             "project_id",
-            "time_role",
-            "range_kind",
+            "time_kind",
+            "range_axis",
             "source_type",
             "source_id",
         ),
         # Fenced replace deletes by entity_id, and the cascade follows the same column.
         Index("ix_memory_time_index_entity_id", "entity_id"),
         CheckConstraint(
-            "range_kind IN ('date', 'instant')",
-            name="ck_memory_time_index_range_kind",
+            "range_axis IN ('date', 'instant')",
+            name="ck_memory_time_index_range_axis",
         ),
         # The empty range has no endpoints at all; representing it with bounds would
         # make two rows describe the same interval two different ways.
@@ -474,8 +474,8 @@ class MemoryTimeIndex(Base):
     # (type, id) pair. No FK: the target table varies with source_type.
     source_type: Mapped[str] = mapped_column(String(32))
     source_id: Mapped[int] = mapped_column(Integer)
-    time_role: Mapped[str] = mapped_column(String(32))
-    range_kind: Mapped[str] = mapped_column(String(16))
+    time_kind: Mapped[str] = mapped_column(String(32))
+    range_axis: Mapped[str] = mapped_column(String(16))
     # Canonical lexical bounds; NULL means unbounded on that side.
     lower_value: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     upper_value: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
@@ -496,7 +496,7 @@ class MemoryTimeIndex(Base):
     def __repr__(self) -> str:  # pragma: no cover
         return (
             f"MemoryTimeIndex(id={self.id}, entity_id={self.entity_id}, "
-            f"source={self.source_type}:{self.source_id}, role='{self.time_role}', "
+            f"source={self.source_type}:{self.source_id}, kind='{self.time_kind}', "
             f"range='{self.source_text}')"
         )
 

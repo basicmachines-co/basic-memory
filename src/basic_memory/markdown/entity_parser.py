@@ -336,11 +336,12 @@ class EntityParser:
             parse(post.content) if parse_semantics else EntityContent(content=post.content)
         )
 
-        # The parser reports exactly one thing: a qualifier that reads as time but names
-        # an unknown role. That never reaches the index, so this warning is how an author
-        # learns the line needs fixing. Text that simply is not a date is ordinary content
-        # and says nothing here. The typed `temporal_error` field carries the same message
-        # to programmatic callers; this layer adds the path.
+        # The parser reports only a qualifier the author plainly meant: an unknown kind,
+        # an unterminated quote, or a date the one-token rule truncated. None of those
+        # reach the index, so this warning is how an author learns the line needs fixing.
+        # Text that simply is not a date is ordinary content and says nothing here. The
+        # typed `temporal_error` field carries the same message to programmatic callers;
+        # this layer adds the path.
         # `as_posix()` rather than the Path itself: Basic Memory names files with
         # forward slashes everywhere (entity.file_path, permalinks, search rows), so a
         # Windows `WindowsPath` rendering `decisions\cache-layer.md` would print a path

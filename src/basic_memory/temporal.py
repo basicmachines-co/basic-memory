@@ -22,7 +22,7 @@ Both are fixed width with ASCII digits in fixed positions, so byte-lexicographic
 is chronological order. That is what lets containment and overlap be plain string
 comparisons with identical SQL text in either dialect.
 
-The two kinds never mix and never convert into one another. A date bound is a calendar
+The two axes never mix and never convert into one another. A date bound is a calendar
 date: it acquires no time of day and no timezone, ever. An instant bound names a moment
 and is normalized to UTC, so two instants written in different offsets compare as the
 instants they name. A timestamp written without an offset is *read as UTC*, which is
@@ -54,8 +54,8 @@ class TemporalQualifierError(ValueError):
     """A temporal qualifier, range literal, or bound failed to parse or validate."""
 
 
-class TimeRole(StrEnum):
-    """Which time axis an assertion describes.
+class TimeKind(StrEnum):
+    """Which kind of time an assertion describes.
 
     `recorded` is deliberately absent: recorded time is never authored in markdown.
     """
@@ -67,7 +67,7 @@ class TimeRole(StrEnum):
     MENTIONED = "mentioned"
 
 
-class TemporalRangeKind(StrEnum):
+class TemporalRangeAxis(StrEnum):
     """Whether a range is measured in calendar dates or in instants."""
 
     DATE = "date"
@@ -110,11 +110,11 @@ _TIMESTAMP_SHAPE = re.compile(r"^\d{4}-\d{2}-\d{2}[Tt ]")
 _RANGE_LITERAL = re.compile(r"^([\[(])([^,\[\]()]*),([^,\[\]()]*)([\])])$")
 
 
-def _classify_bound(bound: str) -> TemporalRangeKind:
+def _classify_bound(bound: str) -> TemporalRangeAxis:
     """Decide which axis an authored bound is written on."""
     if _TIMESTAMP_SHAPE.match(bound):
-        return TemporalRangeKind.INSTANT
-    return TemporalRangeKind.DATE
+        return TemporalRangeAxis.INSTANT
+    return TemporalRangeAxis.DATE
 
 
 def _canonical_date(bound: str) -> str:
@@ -154,18 +154,18 @@ def _canonical_instant(bound: str) -> str:
     return _instant_value(moment)
 
 
-def canonical_bound(bound: str, kind: TemporalRangeKind) -> str:
-    """Normalize one authored bound to the canonical fixed-width form for its kind."""
-    if kind is TemporalRangeKind.DATE:
+def canonical_bound(bound: str, axis: TemporalRangeAxis) -> str:
+    """Normalize one authored bound to the canonical fixed-width form for its axis."""
+    if axis is TemporalRangeAxis.DATE:
         return _canonical_date(bound)
     return _canonical_instant(bound)
 
 
-def _require_canonical(value: str, kind: TemporalRangeKind) -> None:
+def _require_canonical(value: str, axis: TemporalRangeAxis) -> None:
     """Reject a value that skipped `canonical_bound` on its way into a domain value."""
-    pattern = _DATE_BOUND if kind is TemporalRangeKind.DATE else _CANONICAL_INSTANT
+    pattern = _DATE_BOUND if axis is TemporalRangeAxis.DATE else _CANONICAL_INSTANT
     if not pattern.match(value):
-        raise TemporalQualifierError(f"{kind.value} bound is not canonical: {value!r}")
+        raise TemporalQualifierError(f"{axis.value} bound is not canonical: {value!r}")
 
 
 def _next_calendar_day(bound: str) -> str | None:
@@ -188,11 +188,11 @@ def _next_calendar_day(bound: str) -> str | None:
 class TemporalPoint:
     """One calendar date or instant that a containment question is asked about."""
 
-    kind: TemporalRangeKind
+    axis: TemporalRangeAxis
     value: str
 
     def __post_init__(self) -> None:
-        _require_canonical(self.value, self.kind)
+        _require_canonical(self.value, self.axis)
 
     @override
     def __str__(self) -> str:
@@ -228,7 +228,7 @@ class TemporalRange:
     re-parsing that rendering yields this same value.
     """
 
-    kind: TemporalRangeKind
+    axis: TemporalRangeAxis
     lower: str | None = None
     upper: str | None = None
     lower_inclusive: bool = False
@@ -250,7 +250,7 @@ class TemporalRange:
 
         for bound in (self.lower, self.upper):
             if bound is not None:
-                _require_canonical(bound, self.kind)
+                _require_canonical(bound, self.axis)
 
         # Canonical bounds are fixed width, so string order is chronological order.
         # Judged on the bounds as authored: an interval written backwards is an author
@@ -270,7 +270,7 @@ class TemporalRange:
         #
         # Rewrite a date range to `[lower,upper)`. See the class docstring for why the
         # scalar overlap predicate needs this and why instants must not get it.
-        if self.kind is TemporalRangeKind.DATE:
+        if self.axis is TemporalRangeAxis.DATE:
             if self.lower is not None and not self.lower_inclusive:
                 after_lower = _next_calendar_day(self.lower)
                 if after_lower is None:
@@ -306,9 +306,9 @@ class TemporalRange:
         object.__setattr__(self, "is_empty", True)
 
     @classmethod
-    def empty(cls, kind: TemporalRangeKind) -> "TemporalRange":
+    def empty(cls, axis: TemporalRangeAxis) -> "TemporalRange":
         """The empty range on one axis."""
-        return cls(kind=kind, is_empty=True)
+        return cls(axis=axis, is_empty=True)
 
     @override
     def __str__(self) -> str:
@@ -333,12 +333,12 @@ class TemporalFilter:
     """A valid-time question asked of the stored assertions.
 
     Exactly one of `at` (containment) or `overlaps` may be given, or neither -- a
-    role-only filter asks for sources that carry *any* assertion on that axis, which
+    kind-only filter asks for sources that carry *any* assertion of that kind, which
     is a legal and useful question. A filter that asks nothing at all is refused
     rather than silently matching everything.
     """
 
-    role: TimeRole | None = None
+    kind: TimeKind | None = None
     at: TemporalPoint | None = None
     overlaps: TemporalRange | None = None
 
@@ -347,12 +347,12 @@ class TemporalFilter:
             raise TemporalQualifierError(
                 "a temporal filter asks either 'at' or 'overlaps', never both"
             )
-        if self.role is None and self.at is None and self.overlaps is None:
-            raise TemporalQualifierError("a temporal filter must name a role, a point, or a range")
+        if self.kind is None and self.at is None and self.overlaps is None:
+            raise TemporalQualifierError("a temporal filter must name a kind, a point, or a range")
 
     @property
     def window(self) -> TemporalRange | None:
-        """The interval this filter tests against, or None for a role-only filter.
+        """The interval this filter tests against, or None for a kind-only filter.
 
         Containment of a point is overlap with the closed range `[p,p]`: both ask
         whether the stored interval and the queried interval share at least one point.
@@ -363,7 +363,7 @@ class TemporalFilter:
         """
         if self.at is not None:
             return TemporalRange(
-                kind=self.at.kind,
+                axis=self.at.axis,
                 lower=self.at.value,
                 upper=self.at.value,
                 lower_inclusive=True,
@@ -385,7 +385,7 @@ class TemporalAssertion:
     `valid_during` holds the normalized form.
     """
 
-    time_role: TimeRole
+    time_kind: TimeKind
     valid_during: TemporalRange
     source_text: str
     extractor: str = OBSERVATION_EXTRACTOR
@@ -395,20 +395,20 @@ class TemporalAssertion:
 # --- Literal parsing ---
 
 
-def parse_range_literal(literal: str, *, kind: TemporalRangeKind | None = None) -> TemporalRange:
+def parse_range_literal(literal: str, *, axis: TemporalRangeAxis | None = None) -> TemporalRange:
     """Parse a PostgreSQL-style range literal into a canonical `TemporalRange`.
 
     Accepts `[lower,upper)`, `(lower,upper]`, `[lower,)`, `(,upper)`, `(,)`, and the
-    bare token `empty`. `kind` asserts the expected axis; when omitted the axis is
+    bare token `empty`. `axis` asserts the axis the caller expects; when omitted it is
     inferred from the bounds, which is why the bound-less forms require it explicitly.
     """
     text = literal.strip()
     if text == EMPTY_RANGE_LITERAL:
-        if kind is None:
+        if axis is None:
             raise TemporalQualifierError(
-                "the 'empty' range literal has no bounds, so its kind must be given"
+                "the 'empty' range literal has no bounds, so its axis must be given"
             )
-        return TemporalRange.empty(kind)
+        return TemporalRange.empty(axis)
 
     match = _RANGE_LITERAL.match(text)
     if match is None:
@@ -419,28 +419,28 @@ def parse_range_literal(literal: str, *, kind: TemporalRangeKind | None = None) 
     lower_text = lower_text.strip()
     upper_text = upper_text.strip()
 
-    written_kinds = {_classify_bound(bound) for bound in (lower_text, upper_text) if bound}
-    if len(written_kinds) > 1:
+    written_axes = {_classify_bound(bound) for bound in (lower_text, upper_text) if bound}
+    if len(written_axes) > 1:
         raise TemporalQualifierError(
             f"a range must not mix date-only and timestamp bounds: {literal!r}"
         )
-    if not written_kinds:
-        if kind is None:
+    if not written_axes:
+        if axis is None:
             raise TemporalQualifierError(
                 f"a fully unbounded range has no bounds to classify: {literal!r}"
             )
-        range_kind = kind
+        range_axis = axis
     else:
-        range_kind = written_kinds.pop()
-        if kind is not None and range_kind is not kind:
+        range_axis = written_axes.pop()
+        if axis is not None and range_axis is not axis:
             raise TemporalQualifierError(
-                f"expected {kind.value} bounds but found {range_kind.value} bounds: {literal!r}"
+                f"expected {axis.value} bounds but found {range_axis.value} bounds: {literal!r}"
             )
 
     return TemporalRange(
-        kind=range_kind,
-        lower=canonical_bound(lower_text, range_kind) if lower_text else None,
-        upper=canonical_bound(upper_text, range_kind) if upper_text else None,
+        axis=range_axis,
+        lower=canonical_bound(lower_text, range_axis) if lower_text else None,
+        upper=canonical_bound(upper_text, range_axis) if upper_text else None,
         lower_inclusive=open_bracket == "[",
         upper_inclusive=close_bracket == "]",
     )
@@ -451,8 +451,8 @@ def parse_point(text: str) -> TemporalPoint:
     bound = text.strip()
     if not bound:
         raise TemporalQualifierError("a temporal point must not be empty")
-    kind = _classify_bound(bound)
-    return TemporalPoint(kind=kind, value=canonical_bound(bound, kind))
+    axis = _classify_bound(bound)
+    return TemporalPoint(axis=axis, value=canonical_bound(bound, axis))
 
 
 # --- Flexible authored points ---
@@ -481,7 +481,7 @@ def _date_data_parser(date_order: DateOrder) -> "DateDataParser":
 def _calendar_span(lower: date, upper: date) -> TemporalRange:
     """The half-open calendar period `[lower,upper)`."""
     return TemporalRange(
-        kind=TemporalRangeKind.DATE,
+        axis=TemporalRangeAxis.DATE,
         lower=lower.isoformat(),
         upper=upper.isoformat(),
         lower_inclusive=True,
@@ -517,7 +517,7 @@ def parse_authored_point(
         # Outcome: ISO dates are parsed as ISO, or refused.
         try:
             return TemporalRange(
-                kind=TemporalRangeKind.DATE,
+                axis=TemporalRangeAxis.DATE,
                 lower=date.fromisoformat(point).isoformat(),
                 lower_inclusive=True,
             )
@@ -534,7 +534,7 @@ def parse_authored_point(
     match date_data.period:
         case "time":
             return TemporalRange(
-                kind=TemporalRangeKind.INSTANT,
+                axis=TemporalRangeAxis.INSTANT,
                 lower=_instant_value(moment),
                 lower_inclusive=True,
             )
@@ -555,7 +555,7 @@ def parse_authored_point(
             # Day precision, and any coarser calendar period dateparser resolves to a
             # specific day ("last week"): the day it named, onward.
             return TemporalRange(
-                kind=TemporalRangeKind.DATE,
+                axis=TemporalRangeAxis.DATE,
                 lower=moment.date().isoformat(),
                 lower_inclusive=True,
             )

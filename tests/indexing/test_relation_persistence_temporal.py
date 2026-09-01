@@ -37,29 +37,29 @@ from basic_memory.repository.relation_repository import RelationRepository
 from basic_memory.schemas.search import SearchItemType
 from basic_memory.temporal import (
     TemporalAssertion,
-    TemporalRangeKind,
-    TimeRole,
+    TemporalRangeAxis,
+    TimeKind,
     parse_range_literal,
 )
 
-DATE = TemporalRangeKind.DATE
+DATE = TemporalRangeAxis.DATE
 
 
-def _assertion(literal: str, role: TimeRole = TimeRole.EFFECTIVE) -> TemporalAssertion:
+def _assertion(literal: str, kind: TimeKind = TimeKind.EFFECTIVE) -> TemporalAssertion:
     return TemporalAssertion(
-        time_role=role,
-        valid_during=parse_range_literal(literal, kind=DATE),
-        source_text=f"@{role.value}{literal}",
+        time_kind=kind,
+        valid_during=parse_range_literal(literal, axis=DATE),
+        source_text=f"@{kind.value}{literal}",
     )
 
 
 def _accepted(
-    source_id: int, literal: str, role: TimeRole = TimeRole.EFFECTIVE
+    source_id: int, literal: str, kind: TimeKind = TimeKind.EFFECTIVE
 ) -> AcceptedTemporalAssertion:
     return AcceptedTemporalAssertion(
         source_type=SearchItemType.OBSERVATION.value,
         source_id=source_id,
-        assertion=_assertion(literal, role),
+        assertion=_assertion(literal, kind),
     )
 
 
@@ -111,7 +111,7 @@ async def test_temporal_projection_replaced_under_the_generation_fence(
             generation=3,
             assertions=[
                 _accepted(2, "[2026-07-27,)"),
-                _accepted(3, "[2026-01-01,2026-06-10)", TimeRole.DUE),
+                _accepted(3, "[2026-01-01,2026-06-10)", TimeKind.DUE),
             ],
         )
 
@@ -119,7 +119,7 @@ async def test_temporal_projection_replaced_under_the_generation_fence(
     async with db.scoped_session(session_maker) as session:
         rows = await repository.find_by_entity(session, sample_entity.id)
 
-    assert [(row.source_id, row.time_role) for row in rows] == [(2, "effective"), (3, "due")]
+    assert [(row.source_id, row.time_kind) for row in rows] == [(2, "effective"), (3, "due")]
     assert rows[0].lower_value == "2026-07-27"
     assert rows[0].upper_value is None
 
