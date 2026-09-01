@@ -23,6 +23,7 @@ Output follows the ``bm tool`` contract: Rich rendering on a TTY, stable JSON
 on ``--json`` or when piped, undecorated text with ``--plain``.
 """
 
+import json
 import sys
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Optional
@@ -266,6 +267,63 @@ def _plain_find(result: dict[str, Any]) -> None:
     """Render find results as find(1) style lines (one path per line)."""
     for node in result.get("nodes", []):
         print(str(node.get("file_path") or node.get("directory_path") or ""))
+
+
+# --- find --meta --fields rendering ---
+# Metadata predicates flip find's payload to the search response shape; without
+# --fields the shared search renderers (grep's) apply, with --fields these two
+# small renderers add the projected columns so the shared ones stay untouched.
+
+
+def _search_page_summary(result: dict[str, Any]) -> str:
+    """Describe a search results page without inventing a final page."""
+    summary = f"page {result.get('current_page', 1)}  •  total {result.get('total', 0)}"
+    if result.get("has_more") is True:
+        summary += "  •  more available (--page)"
+    return summary
+
+
+def _field_cell(value: Any) -> str:
+    """Render one projected field value: strings bare, null empty, the rest compact JSON."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, separators=(",", ":"))
+
+
+def _display_find_fields(
+    result: dict[str, Any], path: str, meta: list[str], fields: list[str]
+) -> None:
+    """Render metadata hits with their projected fields as a Rich table."""
+    rows: list[dict[str, Any]] = list(result.get("results", []))
+    title = (
+        f"find [bold cyan]{markup_escape(path)}[/bold cyan]"
+        f" [dim]--meta {markup_escape(' AND '.join(meta))}[/dim]"
+    )
+    subtitle = _search_page_summary(result)
+
+    if not rows:
+        console.print(Panel(Text("No matches.", style="dim"), title=title, subtitle=subtitle))
+        return
+
+    table = Table(show_header=True, header_style="bold", expand=False)
+    table.add_column("Path", style="bold cyan")
+    for field_name in fields:
+        table.add_column(markup_escape(field_name))
+    for row in rows:
+        projected = row.get("fields") or {}
+        cells = [markup_escape(str(row.get("file_path") or ""))]
+        cells.extend(markup_escape(_field_cell(projected.get(field_name))) for field_name in fields)
+        table.add_row(*cells)
+    console.print(Panel(table, title=title, subtitle=subtitle, expand=False))
+
+
+def _plain_find_fields(result: dict[str, Any]) -> None:
+    """Render metadata hits as file-path<TAB>compact-JSON-fields lines."""
+    for row in result.get("results", []):
+        fields_json = json.dumps(row.get("fields") or {}, separators=(",", ":"))
+        print(f"{row.get('file_path', '')}\t{fields_json}")
 
 
 # --- tail rendering ---
@@ -684,6 +742,26 @@ def find(
     page_size: Annotated[
         int, typer.Option("--page-size", help="Nodes per page")
     ] = DEFAULT_DIRECTORY_PAGE_SIZE,
+    meta: Annotated[
+        Optional[list[str]],
+        typer.Option(
+            "--meta",
+            help=(
+                "Metadata predicate, repeatable: 'status=active', 'confidence>0.6', "
+                "'priority in high,critical', 'tags has security', 'score between 0.3,0.8'"
+            ),
+        ),
+    ] = None,
+    fields: Annotated[
+        Optional[str],
+        typer.Option(
+            "--fields",
+            help=(
+                'Comma-separated frontmatter fields to show per hit, e.g. "title,priority" '
+                "(requires --meta)"
+            ),
+        ),
+    ] = None,
     json_output: JsonOption = False,
     plain: PlainOption = False,
     project: ProjectOption = None,
@@ -691,13 +769,14 @@ def find(
     local: LocalOption = False,
     cloud: CloudOption = False,
 ) -> None:
-    """Recursively list files under a directory, optionally filtered by name glob.
+    """Recursively list files by name glob, or query notes by frontmatter metadata.
 
     Examples:
 
     bm find --name "*.md"
     bm find /specs --depth 3
     bm find /notes --name "auth*" --plain
+    bm find --meta "status=active" --meta "confidence>0.6" --fields title,priority
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
     from basic_memory.mcp.tools import find as mcp_find
@@ -706,6 +785,9 @@ def find(
     try:
         validate_routing_flags(local, cloud)
         _validate_output_flags(json_output, plain)
+        # The CLI only splits the comma form; validation (non-empty names,
+        # requires --meta) lives in the shared tool layer.
+        field_list = [item.strip() for item in fields.split(",")] if fields is not None else None
 
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(
@@ -715,6 +797,8 @@ def find(
                     depth=depth,
                     page=page,
                     page_size=page_size,
+                    meta=meta,
+                    fields=field_list,
                     project=project,
                     project_id=project_id,
                 )
@@ -722,6 +806,19 @@ def find(
         mode = _resolve_output_mode(json_output, plain)
         if mode == "json":
             _print_json(result)
+        elif "results" in result:
+            # --meta flips the payload to the search response shape: projected
+            # fields get the dedicated renderers, otherwise grep's search
+            # renderers apply.
+            if field_list:
+                if mode == "plain":
+                    _plain_find_fields(result)
+                else:
+                    _display_find_fields(result, path, meta or [], field_list)
+            elif mode == "plain":
+                _plain_search_results(result, query=" AND ".join(meta or []))
+            else:
+                _display_search_results(result, query=" AND ".join(meta or []))
         elif mode == "plain":
             _plain_find(result)
         else:

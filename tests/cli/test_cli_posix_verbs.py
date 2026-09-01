@@ -180,6 +180,39 @@ FIND_RESULT = {
 
 FIND_RESULT_EMPTY = {"nodes": [], "page": 1, "page_size": 10, "total": 0, "has_more": False}
 
+# --meta flips find's payload to the search response shape (the same contract
+# grep returns); --fields adds a projected `fields` object per hit, with null
+# for a field the hit does not carry.
+FIND_META_RESULT = GREP_RESULT
+
+FIND_META_FIELDS_RESULT = {
+    **GREP_RESULT,
+    "results": [
+        {
+            **GREP_RESULT["results"][0],
+            "fields": {
+                "title": "Spec [draft] v2",
+                "priority": "high",
+                "approved": True,
+                "missing": None,
+            },
+        },
+        {
+            **GREP_RESULT["results"][1],
+            "fields": {
+                "title": "Another Note",
+                "priority": None,
+                "approved": False,
+                "missing": None,
+            },
+        },
+    ],
+}
+
+FIND_META_FIELDS_EMPTY = {**GREP_RESULT_EMPTY, "results": []}
+
+FIND_META_FIELDS_MORE = {**FIND_META_FIELDS_RESULT, "has_more": True}
+
 # tail rows: {type, title, permalink, file_path, created_at}, newest first.
 TAIL_RESULT = [
     {
@@ -687,6 +720,159 @@ def test_find_name_and_depth_passthrough(mock_find):
     assert mock_find.call_args.args == ("/specs",)
     assert mock_find.call_args.kwargs["name"] == "*.md"
     assert mock_find.call_args.kwargs["depth"] == 3
+
+
+# ---------------------------------------------------------------------------
+# find --meta / --fields
+# ---------------------------------------------------------------------------
+
+
+@patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=FIND_META_RESULT)
+def test_find_without_meta_sends_no_predicates(mock_find):
+    """The plain listing call is unchanged: both new params default to None."""
+    result = _invoke(["find", "/specs"])
+
+    assert result.exit_code == 0, result.output
+    assert mock_find.call_args.kwargs["meta"] is None
+    assert mock_find.call_args.kwargs["fields"] is None
+
+
+@patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=FIND_META_FIELDS_RESULT)
+def test_find_meta_is_repeatable_and_fields_splits_on_commas(mock_find):
+    """--meta collects one predicate per flag; --fields is the comma form the
+    tool receives as a list. The CLI only splits — validation stays in the tool."""
+    result = _invoke(
+        [
+            "find",
+            "/specs",
+            "--meta",
+            "status=active",
+            "--meta",
+            "confidence>0.6",
+            "--fields",
+            "title, priority",
+        ]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert mock_find.call_args.args == ("/specs",)
+    assert mock_find.call_args.kwargs["meta"] == ["status=active", "confidence>0.6"]
+    assert mock_find.call_args.kwargs["fields"] == ["title", "priority"]
+
+
+@patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=FIND_META_FIELDS_RESULT)
+def test_find_meta_json_is_the_tool_payload_verbatim(mock_find):
+    """JSON stability is the tool payload's stability, projected fields included."""
+    result = _invoke(["find", "--meta", "status=active", "--fields", "title", "--json"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout) == FIND_META_FIELDS_RESULT
+
+
+@patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=FIND_META_RESULT)
+def test_find_meta_without_fields_uses_the_search_renderers(mock_find):
+    """A metadata payload with no projection renders like grep's results, with
+    the predicates as the query label."""
+    result = _tty_invoke(["find", "--meta", "status=active", "--meta", "confidence>0.6", "--plain"])
+
+    assert result.exit_code == 0, result.output
+    assert "Search: status=active AND confidence>0.6" in result.stdout
+    assert "1. Spec [draft] v2" in result.stdout
+
+
+@patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=FIND_META_RESULT)
+def test_find_meta_rich_without_fields_shows_the_predicates(mock_find):
+    result = _tty_invoke(["find", "--meta", "status=active"])
+
+    flat = _flattened(result.output)
+    assert result.exit_code == 0, result.output
+    _assert_not_json(result.output)
+    assert "status=active" in flat
+    # User-sourced bracketed titles survive Rich markup parsing.
+    assert "[draft]" in result.output
+
+
+@patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=FIND_META_FIELDS_RESULT)
+def test_find_meta_fields_plain_is_path_tab_json(mock_find):
+    """Plain projection output is one line per hit: path, TAB, compact JSON."""
+    result = _tty_invoke(
+        [
+            "find",
+            "--meta",
+            "status=active",
+            "--fields",
+            "title,priority,approved,missing",
+            "--plain",
+        ]
+    )
+
+    assert result.exit_code == 0, result.output
+    assert result.stdout == (
+        'specs/Spec [draft] v2.md\t{"title":"Spec [draft] v2","priority":"high",'
+        '"approved":true,"missing":null}\n'
+        'notes/Another Note.md\t{"title":"Another Note","priority":null,'
+        '"approved":false,"missing":null}\n'
+    )
+
+
+@patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=FIND_META_FIELDS_RESULT)
+def test_find_meta_fields_rich_adds_one_column_per_field(mock_find):
+    """The projected table keeps the requested field order; null renders empty
+    and a non-string value renders as compact JSON."""
+    result = _tty_invoke(
+        ["find", "--meta", "status=active", "--fields", "title,priority,approved,missing"]
+    )
+
+    flat = _flattened(result.output)
+    assert result.exit_code == 0, result.output
+    _assert_not_json(result.output)
+    header = next(line for line in result.output.splitlines() if "priority" in line)
+    columns = ["Path", "title", "priority", "approved", "missing"]
+    assert [header.index(name) for name in columns] == sorted(header.index(n) for n in columns)
+    assert "specs/Spec [draft] v2.md" in flat
+    assert "high" in flat
+    assert "true" in flat
+    assert "false" in flat
+    # total/page summary comes from the search shape (current_page, not page).
+    assert "page 1" in flat
+    assert "total 2" in flat
+
+
+@patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=FIND_META_FIELDS_MORE)
+def test_find_meta_fields_rich_reports_more_pages(mock_find):
+    """The projected table's summary reads the search shape's current_page and
+    points at --page when the result set continues."""
+    result = _tty_invoke(["find", "--meta", "status=active", "--fields", "title"])
+
+    flat = _flattened(result.output)
+    assert result.exit_code == 0, result.output
+    assert "page 1" in flat
+    # The panel subtitle is clipped to the table width, so match its opening.
+    assert "more available" in flat
+
+
+@patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=FIND_META_FIELDS_EMPTY)
+def test_find_meta_fields_rich_no_matches(mock_find):
+    result = _tty_invoke(["find", "--meta", "status=nope", "--fields", "title"])
+
+    assert result.exit_code == 0, result.output
+    assert "No matches." in result.output
+
+
+@patch(
+    "basic_memory.mcp.tools.find",
+    new_callable=AsyncMock,
+    side_effect=ValueError("find: 'fields' requires 'meta' predicates"),
+)
+def test_find_fields_without_meta_reports_the_tool_refusal(mock_find):
+    """The combination rules live in the shared tool layer; the CLI passes the
+    flags through and reports the refusal."""
+    result = _invoke(["find", "--fields", "title"])
+
+    assert result.exit_code == 1
+    assert "Error: find: 'fields' requires 'meta' predicates" in result.stderr
+    assert mock_find.call_args.kwargs["fields"] == ["title"]
+    assert mock_find.call_args.kwargs["meta"] is None
 
 
 # ---------------------------------------------------------------------------
