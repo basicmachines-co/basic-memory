@@ -996,6 +996,22 @@ async def detect_project_from_identifier_prefix(
 # every mount `ls /` advertises is reachable by name and an unqualified
 # reference in a many-project workspace refuses instead of picking a default
 # (#1421).
+#
+# Precedence: the mount table wins the first path segment, ahead of
+# workspace-qualified '<workspace>/<project>/<path>' parsing. A project permalink
+# can also be an accessible workspace's slug, and only one reading of '<name>/...'
+# can win. Mount-wins is what the advertised list promises — a name `ls /` shows
+# must address that mount, or we advertise a name that resolves somewhere else,
+# which is worse than not advertising it at all.
+#
+# The cost of that choice, stated plainly: when a project's permalink equals an
+# accessible workspace's slug, that workspace's OTHER projects lose their
+# qualified path spelling. With '/team' advertised as a mount, 'team/docs/x' is
+# project 'team', path 'docs/x' — never workspace 'team', project 'docs'. Those
+# projects stay addressable through the project param (project='team/docs' with
+# the project-relative path 'x'), which is the escape hatch the prefix-conflict
+# message already teaches, so nothing becomes unreachable — only differently
+# spelled.
 
 
 @dataclass(frozen=True)
@@ -1168,13 +1184,19 @@ async def resolve_project_path_route(
        explicit '<workspace>/<project>' outlives a bare local prefix match.
     3. Otherwise a first segment naming an addressable project routes there
        with the remainder as the project-relative path.
-    4. Otherwise, when the session addresses more than one project, raise
+    4. Otherwise a workspace-qualified '<workspace>/<project>/<path>' spelling
+       routes to that project in that workspace — those projects belong to
+       workspaces this session's own route does not list, so they never appear
+       in the mount table rule 3 reads.
+    5. Otherwise, when the session addresses more than one project, raise
        UnqualifiedPathRefusedError instead of silently defaulting; a session
        that addresses at most one project keeps today's default resolution.
 
-    Rules 3 and 4 read the set from ``addressable_projects`` — the same set
+    Rules 3 and 5 read the set from ``addressable_projects`` — the same set
     ``ls /`` advertises — so a project can never be listed at the root and then
-    go unrecognized as a path prefix (#1421).
+    go unrecognized as a path prefix (#1421). Rule 3 deliberately precedes rule
+    4; see the mount-precedence note above this section for the collision that
+    ordering resolves and the spelling it costs.
     """
     if project_id is not None:
         return ProjectPathRoute(project=project, path=path, stripped=False)
@@ -1188,21 +1210,21 @@ async def resolve_project_path_route(
     detected: Optional[str] = None
     remainder = ""
     addressable: tuple[AddressableProject, ...] | None = None
-    if "/" in candidate:
-        detected = await detect_project_from_identifier_prefix(candidate, config, context=context)
-        if detected is not None:
-            remainder = _detected_route_remainder(candidate, detected)
 
-    # Trigger: no workspace-qualified route resolved and the input still has a
-    #   leading segment — a bare mount name ('ls research'), or a cloud session
-    #   whose local config holds only the placeholder 'main' entry.
-    # Why: split_project_prefix needs a slash, and the detection above reads the
-    #   local config and the workspace index; neither can name a project that
-    #   only this session's own listing knows about (#1421). Advertising a mount
-    #   at '/' that a path prefix cannot name is the bug being closed.
-    # Outcome: a first segment matching an addressable project routes there,
-    #   with the remainder as the project-relative path.
-    if detected is None and candidate:
+    # --- Rule 3: the advertised mount table claims the first segment ---
+    # Trigger: the input carries a leading segment at all — a bare mount name
+    #   ('ls research') or a path under one.
+    # Why: this set is what `ls /` advertises, and an advertised name that
+    #   resolves somewhere else is worse than one never advertised. The workspace
+    #   parse below would take '<slug>/<project>/...' first, so a project whose
+    #   permalink is also an accessible workspace slug would hand 'team/docs/x'
+    #   to project 'docs' in workspace 'team' instead of the mount named 'team'
+    #   — reading another project's data under an advertised name.
+    # Outcome: a first segment matching an addressable project routes there with
+    #   the remainder as the project-relative path, and workspace discovery is
+    #   never consulted for it. A local session pays nothing (its config is its
+    #   mount table); a cloud session pays one per-request memoized listing.
+    if candidate:
         addressable = await addressable_projects(context=context)
         first_segment, _, remaining_segments = candidate.partition("/")
         first_permalink = generate_permalink(first_segment)
@@ -1213,6 +1235,23 @@ async def resolve_project_path_route(
         if mount is not None:
             detected = mount.name
             remainder = remaining_segments
+
+    # --- Rule 4: workspace-qualified spellings for everything else ---
+    # Trigger: no advertised mount claimed the first segment and the input still
+    #   has more than one segment to parse.
+    # Why: '<workspace>/<project>/<path>' addresses projects in workspaces this
+    #   session's own route does not list, so they are absent from the mount
+    #   table above and would otherwise be unreachable. Local-config prefixes
+    #   also resolve here — a locally routed session's config IS its mount
+    #   table, so rule 3 already claimed those; what reaches this line is a
+    #   cloud-routed session whose local config names a project its own tenant
+    #   listing does not.
+    # Outcome: those spellings keep resolving exactly as before; the mount
+    #   collision described above is the only address this ordering takes away.
+    if detected is None and "/" in candidate:
+        detected = await detect_project_from_identifier_prefix(candidate, config, context=context)
+        if detected is not None:
+            remainder = _detected_route_remainder(candidate, detected)
 
     if explicit is not None:
         if detected is None:
