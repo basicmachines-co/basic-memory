@@ -39,6 +39,7 @@ from basic_memory.man import bundled_pages, find_page, parse_page_ref, render_in
 from basic_memory.mcp.container import get_container
 from basic_memory.mcp.note_reads import read_note_json_by_external_id
 from basic_memory.mcp.project_context import (
+    ProjectPathRoute,
     addressable_projects,
     get_project_client,
     resolve_project_path_route,
@@ -51,6 +52,60 @@ from basic_memory.schemas.directory import (
     DirectoryNode,
 )
 from basic_memory.schemas.search import SearchItemType, SearchQuery, SearchRetrievalMode
+from basic_memory.utils import generate_permalink
+
+# --- Round-trip coherence ---
+# A path a routed verb returns must be a path the resolver accepts. When a call
+# addresses its project in the path ('ls research/notes'), the project prefix is
+# stripped before the project-scoped API sees it, so that API answers in
+# project-relative paths — '/notes'. Handing those back unchanged breaks the
+# navigation loop the mount model promises: feeding '/notes' into `ls` refuses as
+# unqualified, or worse, opens a *different* project that happens to be mounted
+# as 'notes'.
+#
+# So every verb that can strip a prefix re-attaches it to the paths it returns,
+# through this one function. Only addressing fields are re-qualified:
+# `directory_path` and `file_path` are what a caller feeds back to `ls`, `find`,
+# and `cat`. `permalink` is deliberately left alone — it is an identity with its
+# own canonical form (permalinks_include_project, workspace qualification), and
+# re-prefixing it here would mint a second, competing spelling of it.
+_ROUTED_PATH_FIELDS = frozenset({"directory_path", "file_path"})
+
+
+def _requalified_path(value: str, prefix: str) -> str:
+    """Re-attach a stripped project prefix, preserving the field's slash shape."""
+    if value.startswith("/"):
+        return f"/{prefix}" if value == "/" else f"/{prefix}{value}"
+    return f"{prefix}/{value}" if value else prefix
+
+
+def _requalify(payload: Any, prefix: str) -> Any:
+    """Rewrite addressing fields anywhere in a response payload."""
+    if isinstance(payload, dict):
+        return {
+            key: _requalified_path(value, prefix)
+            if key in _ROUTED_PATH_FIELDS and isinstance(value, str)
+            else _requalify(value, prefix)
+            for key, value in payload.items()
+        }
+    if isinstance(payload, list):
+        return [_requalify(item, prefix) for item in payload]
+    return payload
+
+
+def qualify_routed_paths(payload: Any, route: ProjectPathRoute) -> Any:
+    """Return ``payload`` with the project prefix ``route`` stripped put back.
+
+    A no-op when the route stripped nothing — then the caller addressed the
+    project some other way (an explicit param, or a single-project session) and
+    the project-relative paths it gets back are the ones it can feed back.
+    """
+    if not route.stripped or route.project is None:
+        return payload
+    # The permalink form is the spelling `ls "/"` advertises and the resolver
+    # normalizes to, so it round-trips for display names too ('My Research').
+    return _requalify(payload, generate_permalink(route.project))
+
 
 # The manual project holds the non-bundled manual pages as ordinary notes;
 # `man` falls back to it for page reads and searches it in query mode.
@@ -182,7 +237,7 @@ async def cat(
         )
 
     if server_side_slice or (start_line is None and end_line is None):
-        return payload
+        return qualify_routed_paths(payload, route)
 
     lines = str(payload["content"]).splitlines()
     total_lines = len(lines)
@@ -192,7 +247,7 @@ async def cat(
     payload["start_line"] = first
     payload["end_line"] = last
     payload["total_lines"] = total_lines
-    return payload
+    return qualify_routed_paths(payload, route)
 
 
 def _grep_retrieval_mode(literal: bool) -> SearchRetrievalMode:
@@ -371,7 +426,76 @@ async def ls(
 
         directory_client = DirectoryClient(client, active_project.external_id)
         listing = await directory_client.list(list_path, depth=1, page=page, page_size=page_size)
-        return listing.model_dump(mode="json")
+        return qualify_routed_paths(listing.model_dump(mode="json"), route)
+
+
+def routed_listing_root(path: str, route: ProjectPathRoute) -> str:
+    """The directory the returned paths are relative to, in *their* address space.
+
+    Returned paths carry the project prefix whenever the call put it in the
+    path, so the root a caller strips to rebuild a hierarchy must carry it too —
+    and in the permalink spelling the payload uses, not the caller's ('My
+    Research' vs 'my-research').
+    """
+    if not route.stripped or route.project is None:
+        return path
+    prefix = generate_permalink(route.project)
+    return f"{prefix}/{route.path}" if route.path else prefix
+
+
+async def find_listing(
+    path: str = "/",
+    *,
+    name: Optional[str] = None,
+    depth: int = _MAX_FIND_DEPTH,
+    page: int = 1,
+    page_size: int = DEFAULT_DIRECTORY_PAGE_SIZE,
+    project: Optional[str] = None,
+    project_id: Optional[str] = None,
+    context: Context | None = None,
+) -> tuple[dict[str, Any], str]:
+    """find's body: the listing, plus the root its paths are relative to.
+
+    `bm tree` needs both halves — the listing to render and the root to strip —
+    and resolving the path twice to get them cost a second project-list round
+    trip on every cloud CLI call, since CLI calls carry no FastMCP context for
+    the per-request cache to live in. One resolve now answers both.
+    """
+    if depth < 1 or depth > _MAX_FIND_DEPTH:
+        raise ValueError(f"depth must be between 1 and {_MAX_FIND_DEPTH}, got {depth}")
+    if page < 1:
+        raise ValueError(f"page must be >= 1, got {page}")
+    if page_size < 1:
+        raise ValueError(f"page_size must be >= 1, got {page_size}")
+    if page_size > MAX_DIRECTORY_PAGE_SIZE:
+        raise ValueError(f"page_size must be <= {MAX_DIRECTORY_PAGE_SIZE}, got {page_size}")
+
+    # The directory API is project-scoped, so cross-project find does not exist:
+    # find "/" with no project in a multi-project config refuses, teaching the
+    # per-project '<project>/path' form instead.
+    route = await resolve_project_path_route(
+        path, project=project, project_id=project_id, context=context
+    )
+    list_path = f"/{route.path}" if route.stripped else path
+
+    async with get_project_client(route.project, context=context, project_id=route.project_id) as (
+        client,
+        active_project,
+    ):
+        # Import here to avoid circular import
+        from basic_memory.mcp.clients import DirectoryClient
+
+        directory_client = DirectoryClient(client, active_project.external_id)
+        listing = await directory_client.list(
+            list_path,
+            depth=depth,
+            file_name_glob=name,
+            page=page,
+            page_size=page_size,
+        )
+        payload = qualify_routed_paths(listing.model_dump(mode="json"), route)
+
+    return payload, routed_listing_root(path, route)
 
 
 @mcp.tool(
@@ -412,39 +536,17 @@ async def find(
     Returns:
         The directory listing as JSON: nodes, pagination, and totals.
     """
-    if depth < 1 or depth > _MAX_FIND_DEPTH:
-        raise ValueError(f"depth must be between 1 and {_MAX_FIND_DEPTH}, got {depth}")
-    if page < 1:
-        raise ValueError(f"page must be >= 1, got {page}")
-    if page_size < 1:
-        raise ValueError(f"page_size must be >= 1, got {page_size}")
-    if page_size > MAX_DIRECTORY_PAGE_SIZE:
-        raise ValueError(f"page_size must be <= {MAX_DIRECTORY_PAGE_SIZE}, got {page_size}")
-
-    # The directory API is project-scoped, so cross-project find does not exist:
-    # find "/" with no project in a multi-project config refuses, teaching the
-    # per-project '<project>/path' form instead.
-    route = await resolve_project_path_route(
-        path, project=project, project_id=project_id, context=context
+    listing, _ = await find_listing(
+        path,
+        name=name,
+        depth=depth,
+        page=page,
+        page_size=page_size,
+        project=project,
+        project_id=project_id,
+        context=context,
     )
-    list_path = f"/{route.path}" if route.stripped else path
-
-    async with get_project_client(route.project, context=context, project_id=route.project_id) as (
-        client,
-        active_project,
-    ):
-        # Import here to avoid circular import
-        from basic_memory.mcp.clients import DirectoryClient
-
-        directory_client = DirectoryClient(client, active_project.external_id)
-        listing = await directory_client.list(
-            list_path,
-            depth=depth,
-            file_name_glob=name,
-            page=page,
-            page_size=page_size,
-        )
-        return listing.model_dump(mode="json")
+    return listing
 
 
 @mcp.tool(

@@ -742,12 +742,22 @@ async def test_cat_qualified_identifier_equals_explicit_project_read(
     client, test_graph, test_project, second_project, no_project_constraint
 ):
     """'test-project/test/root' with no project param reads the same note as
-    project='test-project' + 'test/root' — inputs accept what outputs produce."""
+    project='test-project' + 'test/root'.
+
+    The payloads are not identical, and deliberately so: each answers in the
+    addressing frame its caller used, so the file_path it hands back is one the
+    same call shape accepts again. Content is what must match.
+    """
     qualified = await cat("test-project/test/root")
     explicit = await cat("test/root", project=test_project.name)
 
-    assert qualified == explicit
-    assert qualified["title"] == "Root"
+    assert qualified["title"] == explicit["title"] == "Root"
+    assert qualified["content"] == explicit["content"]
+
+    # Each frame's file_path round-trips in that same frame.
+    assert qualified["file_path"] == f"test-project/{explicit['file_path']}"
+    assert (await cat(qualified["file_path"]))["title"] == "Root"
+    assert (await cat(explicit["file_path"], project=test_project.name))["title"] == "Root"
 
 
 @pytest.mark.asyncio
@@ -788,8 +798,14 @@ async def test_explicit_project_with_agreeing_prefix_strips(
     qualified = await ls("/test-project/test", project=test_project.name)
     relative = await ls("/test", project=test_project.name)
 
-    assert qualified == relative
-    assert qualified["total"] == 5
+    # Same listing, each in its caller's addressing frame (see cat's twin above).
+    assert qualified["total"] == relative["total"] == 5
+    assert [node["name"] for node in qualified["nodes"]] == [
+        node["name"] for node in relative["nodes"]
+    ]
+    assert [node["file_path"] for node in qualified["nodes"]] == [
+        f"test-project/{node['file_path']}" for node in relative["nodes"]
+    ]
 
 
 @pytest.mark.asyncio
@@ -928,3 +944,93 @@ async def test_project_id_routes_without_prefix_parsing(
     result = await cat("test/root", project_id=test_project.external_id)
 
     assert result["title"] == "Root"
+
+
+# -- round-trip coherence: a returned path is an accepted path (#1421) --
+# The property belongs to the routing layer, not to any one verb, so these tests
+# enumerate the verbs rather than naming them. A seventh posix verb that accepts
+# a path has to answer for the property here before it can ship.
+
+
+def _path_accepting_posix_verbs() -> set[str]:
+    """Posix verbs whose first parameter is a routable path or identifier.
+
+    Derived from the tools themselves so a new one cannot slip past the round-trip
+    tests below by simply not being listed.
+    """
+    import inspect
+
+    verbs = {}
+    for verb in (cat, grep, ls, find, tail, man):
+        fn = getattr(verb, "fn", verb)
+        first = next(iter(inspect.signature(fn).parameters), None)
+        if first in {"path", "identifier"}:
+            verbs[fn.__name__] = verb
+    return set(verbs)
+
+
+def test_path_accepting_verbs_are_the_ones_covered_below():
+    """Pins the set the round-trip tests cover. Adding a path-accepting verb
+    fails here, which is the prompt to give it the same guarantee — the class is
+    closed by this enumeration, not by every author remembering."""
+    assert _path_accepting_posix_verbs() == {"cat", "ls", "find"}
+
+
+@pytest.mark.asyncio
+async def test_ls_returned_paths_route_back_to_the_same_project(
+    client, test_project, second_project, no_project_constraint
+):
+    """A qualified `ls` advertises child paths; feeding one back must reach the
+    same project. Returning the API's project-relative '/notes' refused as
+    unqualified — or, with a project mounted as 'notes', opened that one."""
+    await write_note(
+        title="Second Root Note",
+        directory="notes",
+        content="# Second Root Note",
+        project="second-project",
+    )
+
+    listing = await ls("second-project")
+    child = next(node for node in listing["nodes"] if node["name"] == "notes")
+    assert child["directory_path"] == "/second-project/notes"
+
+    # The advertised path is accepted verbatim, with no project param.
+    nested = await ls(child["directory_path"])
+    assert {node["name"] for node in nested["nodes"]} == {"Second Root Note.md"}
+
+
+@pytest.mark.asyncio
+async def test_find_returned_paths_route_back_to_the_same_project(
+    client, test_project, second_project, no_project_constraint
+):
+    """find advertises both directory_path and file_path; each must address the
+    project the call routed to, so `cat` and `ls` accept them unchanged."""
+    await write_note(
+        title="Second Root Note",
+        directory="notes",
+        content="# Second Root Note",
+        project="second-project",
+    )
+
+    listing = await find("second-project")
+    file_node = next(node for node in listing["nodes"] if node["type"] == "file")
+    dir_node = next(node for node in listing["nodes"] if node["type"] == "directory")
+
+    assert file_node["file_path"].startswith("second-project/")
+    assert dir_node["directory_path"].startswith("/second-project")
+
+    assert (await cat(file_node["file_path"]))["title"] == "Second Root Note"
+    assert (await ls(dir_node["directory_path"]))["total"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_unrouted_listings_keep_project_relative_paths(
+    client, test_graph, test_project, second_project, no_project_constraint
+):
+    """The prefix goes back only when the call put it in the path. An explicit
+    project param is a different addressing frame: those paths are fed back with
+    the same param, so re-prefixing them would break that round trip instead."""
+    listing = await ls("/test", project=test_project.name)
+
+    assert all(not node["file_path"].startswith("test-project/") for node in listing["nodes"])
+    assert (await ls("/test", project=test_project.name))["total"] == listing["total"]

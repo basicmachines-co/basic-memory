@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Iterable, Optional
 
 from basic_memory.config import BasicMemoryConfig
 from basic_memory.mcp.workspace_project_index import WorkspaceProjectEntry
@@ -91,43 +91,71 @@ def identifier_path(identifier: str) -> str:
     return memory_url_path(stripped) if stripped.startswith("memory://") else stripped
 
 
-def split_workspace_identifier_segments(identifier: str) -> tuple[str, str, str] | None:
-    """Split ``<workspace>/<project>/<path>`` identifiers into route segments."""
+def split_project_permalink_prefix(
+    path: str,
+    permalinks: Iterable[str],
+) -> tuple[str, str] | None:
+    """Split a path into the project permalink it names and the remainder.
+
+    This is the *only* way to turn a path-shaped input into a project plus a
+    project-relative path, and it deliberately takes the candidate set as an
+    argument: a project name may contain '/', and ``generate_permalink``
+    preserves it, so how many leading segments a project consumes is a fact
+    about the known projects, never about the string. Callers that split on
+    the first '/' instead kept rediscovering that — for mounts (#1421), then
+    again for workspace routes.
+
+    The longest permalink wins, which is also the only reading that can be
+    right when one project's permalink prefixes another's ('research' beside
+    'research/2026'). Returns None when no permalink claims the leading
+    segments; the remainder has no leading slash and is "" at the root.
+    """
+    segments = normalize_project_reference(identifier_path(path)).strip("/").split("/")
+    # An empty interior segment ('a//b') names nothing. Matching around it would
+    # repair a malformed path into a route the caller did not write.
+    if not all(segments):
+        return None
+
+    claimed: tuple[str, str] | None = None
+    claimed_depth = 0
+    for permalink in permalinks:
+        depth = permalink.count("/") + 1
+        if depth > len(segments) or depth <= claimed_depth:
+            continue
+        if generate_permalink("/".join(segments[:depth])) != permalink:
+            continue
+        claimed = (permalink, "/".join(segments[depth:]))
+        claimed_depth = depth
+    return claimed
+
+
+def split_workspace_slug_prefix(identifier: str) -> tuple[str, str] | None:
+    """Split ``<workspace-slug>/<rest>`` — the workspace half of a qualified route.
+
+    A workspace slug is always one segment, so this parse is pure shape. What
+    follows it is a project permalink plus a path, which only
+    ``split_project_permalink_prefix`` can separate.
+    """
     normalized = normalize_project_reference(identifier_path(identifier)).strip("/")
-    parts = normalized.split("/", 2)
-    if len(parts) != 3:
+    workspace_slug, _, rest = normalized.partition("/")
+    # A rest starting with '/' means the project segment is empty ('acme//notes').
+    # The caller wrote nothing there, so this is not a workspace route.
+    if not workspace_slug or not rest or rest.startswith("/"):
         return None
-    workspace_slug, project_identifier, remainder = parts
-    if not workspace_slug or not project_identifier or not remainder:
-        return None
-    return workspace_slug, project_identifier, remainder
+    return workspace_slug, rest
 
 
-def split_workspace_route_segments(identifier: str) -> tuple[str, str, str] | None:
-    """Split ``<workspace>/<project>[/<path>]`` where the trailing path may be empty.
+def is_workspace_route_shaped(identifier: str) -> bool:
+    """True when an identifier has enough segments to spell workspace/project/path.
 
-    The strict three-segment parse above is what memory URLs need: there,
-    ``memory://main/notes`` has to stay readable as project ``main``. A posix
-    path only reaches this looser parse after the advertised mount table has
-    declined its first segment, so no addressable project can be meant by it and
-    the bare ``<workspace>/<project>`` form unambiguously names that project's
-    root.
+    A shape question only — it gates whether workspace discovery may be
+    consulted at all, and deliberately says nothing about where the project
+    ends. Three segments is the unmistakable form: fewer could equally be a
+    project-relative path in the session's own project.
     """
     normalized = normalize_project_reference(identifier_path(identifier)).strip("/")
     parts = normalized.split("/", 2)
-    if len(parts) < 2:
-        return None
-    workspace_slug, project_identifier = parts[0], parts[1]
-    if not workspace_slug or not project_identifier:
-        return None
-    return workspace_slug, project_identifier, parts[2] if len(parts) == 3 else ""
-
-
-def split_workspace_memory_url_segments(identifier: str) -> tuple[str, str, str] | None:
-    """Split ``memory://<workspace>/<project>/<path>`` into route segments."""
-    if not identifier.strip().startswith("memory://"):
-        return None
-    return split_workspace_identifier_segments(identifier)
+    return len(parts) == 3 and all(parts)
 
 
 def canonical_memory_path_for_workspace(
@@ -223,11 +251,16 @@ def detect_project_from_url_prefix(
     """Return the local config project matching a memory URL path prefix."""
     path = memory_url_path(identifier) if identifier.strip().startswith("memory://") else identifier
     normalized = normalize_project_reference(path)
+    # The '*' guard belongs to the glob case: a globbed first segment is search
+    # input, not a project prefix, and must not be matched against any project.
     prefix, _ = split_project_prefix(normalized)
     if prefix is None:
         return None
-    prefix_permalink = generate_permalink(prefix)
-    for project_name in config.projects:
-        if generate_permalink(project_name) == prefix_permalink:
-            return project_name
-    return None
+
+    by_permalink = {generate_permalink(name): name for name in config.projects}
+    claimed = split_project_permalink_prefix(normalized, by_permalink)
+    # A prefix with no remainder names the project itself, not a path in it;
+    # split_project_prefix already rejected that shape above.
+    if claimed is None or not claimed[1]:
+        return None
+    return by_permalink[claimed[0]]

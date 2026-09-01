@@ -47,9 +47,6 @@ from basic_memory.cli.commands.tool import (
     console,
 )
 
-# project_context is already loaded at CLI import time (command_utils imports
-# it), so this costs nothing beyond the deferred-MCP budget (#886).
-from basic_memory.mcp.project_context import resolve_project_path_route
 from basic_memory.schemas.directory import DEFAULT_DIRECTORY_PAGE_SIZE
 
 # MCP tool functions are imported inside each command: importing
@@ -825,33 +822,29 @@ def tree(
     # tree is a client-side recombination of find: the same flat listing, with
     # the hierarchy rebuilt from directory paths for display, so its JSON
     # contract is exactly find's payload.
-    from basic_memory.mcp.tools import find as mcp_find
+    from basic_memory.mcp.tools.posix_tools import find_listing
     from fastmcp.exceptions import ToolError
 
     try:
         validate_routing_flags(local, cloud)
         _validate_output_flags(json_output, plain)
 
-        async def _routed_find() -> tuple[dict[str, Any], str]:
-            # find strips a recognized '<project>/' prefix (#1415), so node
-            # paths come back project-relative; the same resolver derives the
-            # root the hierarchy rebuild must strip, or every node's first
-            # segment would duplicate under a '<project>/dir' root.
-            route = await resolve_project_path_route(path, project=project, project_id=project_id)
-            root = f"/{route.path}" if route.stripped else path
-            listing = await mcp_find(
-                path,
-                name=name,
-                depth=depth,
-                page=page,
-                page_size=page_size,
-                project=project,
-                project_id=project_id,
-            )
-            return listing, root
-
+        # find returns the listing and the root its node paths are relative to
+        # from one resolution. Resolving here as well cost a second project-list
+        # round trip on every cloud call, because a CLI invocation has no
+        # FastMCP context for the per-request cache to live in (#1421).
         with force_routing(local=local, cloud=cloud):
-            result, root = run_with_cleanup(_routed_find())
+            result, root = run_with_cleanup(
+                find_listing(
+                    path,
+                    name=name,
+                    depth=depth,
+                    page=page,
+                    page_size=page_size,
+                    project=project,
+                    project_id=project_id,
+                )
+            )
         mode = _resolve_output_mode(json_output, plain)
         if mode == "json":
             _print_json(result)

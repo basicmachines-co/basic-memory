@@ -12,7 +12,7 @@ verify three things per verb:
 
 import json
 import os
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from fastmcp.exceptions import ToolError
@@ -278,16 +278,33 @@ def _assert_not_json(output: str) -> None:
         json.loads(output)
 
 
-# Every verb with its patch target and a realistic payload. head shares cat's
-# tool and payload; tree shares find's — their JSON contracts are identical.
+# Every verb with its patch target, the payload it must print, and what the
+# patched callable returns. head shares cat's tool and payload; tree's JSON
+# contract is still find's, but it calls find_listing, which hands back the
+# listing and the root its paths are relative to from one resolution (#1421).
+FIND_LISTING_TARGET = "basic_memory.mcp.tools.posix_tools.find_listing"
 VERB_CASES = [
-    pytest.param(["cat", "specs/search"], "basic_memory.mcp.tools.cat", CAT_RESULT, id="cat"),
-    pytest.param(["head", "specs/search"], "basic_memory.mcp.tools.cat", CAT_RESULT, id="head"),
-    pytest.param(["grep", "ranking"], "basic_memory.mcp.tools.grep", GREP_RESULT, id="grep"),
-    pytest.param(["ls", "/specs"], "basic_memory.mcp.tools.ls", LS_RESULT, id="ls"),
-    pytest.param(["find", "/specs"], "basic_memory.mcp.tools.find", FIND_RESULT, id="find"),
-    pytest.param(["tail"], "basic_memory.mcp.tools.tail", TAIL_RESULT, id="tail"),
-    pytest.param(["tree", "/specs"], "basic_memory.mcp.tools.find", TREE_RESULT, id="tree"),
+    pytest.param(
+        ["cat", "specs/search"], "basic_memory.mcp.tools.cat", CAT_RESULT, CAT_RESULT, id="cat"
+    ),
+    pytest.param(
+        ["head", "specs/search"], "basic_memory.mcp.tools.cat", CAT_RESULT, CAT_RESULT, id="head"
+    ),
+    pytest.param(
+        ["grep", "ranking"], "basic_memory.mcp.tools.grep", GREP_RESULT, GREP_RESULT, id="grep"
+    ),
+    pytest.param(["ls", "/specs"], "basic_memory.mcp.tools.ls", LS_RESULT, LS_RESULT, id="ls"),
+    pytest.param(
+        ["find", "/specs"], "basic_memory.mcp.tools.find", FIND_RESULT, FIND_RESULT, id="find"
+    ),
+    pytest.param(["tail"], "basic_memory.mcp.tools.tail", TAIL_RESULT, TAIL_RESULT, id="tail"),
+    pytest.param(
+        ["tree", "/specs"],
+        FIND_LISTING_TARGET,
+        TREE_RESULT,
+        (TREE_RESULT, "/specs"),
+        id="tree",
+    ),
 ]
 
 
@@ -296,10 +313,10 @@ VERB_CASES = [
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("args", "target", "payload"), VERB_CASES)
-def test_verb_non_tty_outputs_tool_payload_verbatim(args, target, payload):
+@pytest.mark.parametrize(("args", "target", "payload", "tool_return"), VERB_CASES)
+def test_verb_non_tty_outputs_tool_payload_verbatim(args, target, payload, tool_return):
     """Piped output is the MCP tool's return value, unchanged (auto-JSON)."""
-    with patch(target, new_callable=AsyncMock, return_value=payload) as mock_tool:
+    with patch(target, new_callable=AsyncMock, return_value=tool_return) as mock_tool:
         result = _invoke(args)
 
     assert result.exit_code == 0, result.output
@@ -307,10 +324,10 @@ def test_verb_non_tty_outputs_tool_payload_verbatim(args, target, payload):
     mock_tool.assert_called_once()
 
 
-@pytest.mark.parametrize(("args", "target", "payload"), VERB_CASES)
-def test_verb_json_flag_overrides_tty(args, target, payload):
+@pytest.mark.parametrize(("args", "target", "payload", "tool_return"), VERB_CASES)
+def test_verb_json_flag_overrides_tty(args, target, payload, tool_return):
     """--json wins over the interactive renderer on a TTY."""
-    with patch(target, new_callable=AsyncMock, return_value=payload):
+    with patch(target, new_callable=AsyncMock, return_value=tool_return):
         result = _tty_invoke([*args, "--json"])
 
     assert result.exit_code == 0, result.output
@@ -737,7 +754,7 @@ def test_tail_lines_and_timeframe_passthrough(mock_tail):
 # ---------------------------------------------------------------------------
 
 
-@patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=TREE_RESULT)
+@patch(FIND_LISTING_TARGET, new_callable=AsyncMock, return_value=(TREE_RESULT, "/"))
 def test_tree_plain_rebuilds_nesting_from_flat_nodes(mock_find):
     """The API page is flat; nesting is rebuilt from directory_path segments,
     including a synthesized parent for files whose directory node was filtered
@@ -748,7 +765,7 @@ def test_tree_plain_rebuilds_nesting_from_flat_nodes(mock_find):
     assert result.stdout == "/\n  specs/\n    search.md\n    auth/\n      deep.md\n"
 
 
-@patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=TREE_RESULT)
+@patch(FIND_LISTING_TARGET, new_callable=AsyncMock, return_value=(TREE_RESULT, "/"))
 def test_tree_rich_output(mock_find):
     result = _tty_invoke(["tree"])
 
@@ -759,7 +776,7 @@ def test_tree_rich_output(mock_find):
     assert "deep.md" in result.output
 
 
-@patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=TREE_ROOTED_RESULT)
+@patch(FIND_LISTING_TARGET, new_callable=AsyncMock, return_value=(TREE_ROOTED_RESULT, "/specs"))
 def test_tree_rooted_path_skips_the_root_node(mock_find):
     """The search root's own node must not render as its own child."""
     result = _tty_invoke(["tree", "/specs", "--plain"])
@@ -768,11 +785,7 @@ def test_tree_rooted_path_skips_the_root_node(mock_find):
     assert result.stdout == "/specs\n  intro.md\n"
 
 
-@patch(
-    "basic_memory.mcp.tools.find",
-    new_callable=AsyncMock,
-    return_value=TREE_DIR_AFTER_FILE_RESULT,
-)
+@patch(FIND_LISTING_TARGET, new_callable=AsyncMock, return_value=(TREE_DIR_AFTER_FILE_RESULT, "/"))
 def test_tree_directory_node_after_synthesized_intermediate(mock_find):
     """A directory listed after a file already implied it stays one directory."""
     result = _tty_invoke(["tree", "--plain"])
@@ -781,7 +794,7 @@ def test_tree_directory_node_after_synthesized_intermediate(mock_find):
     assert result.stdout == "/\n  specs/\n    search.md\n"
 
 
-@patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=TREE_RESULT_MORE)
+@patch(FIND_LISTING_TARGET, new_callable=AsyncMock, return_value=(TREE_RESULT_MORE, "/"))
 def test_tree_rich_reports_more_entries(mock_find):
     result = _tty_invoke(["tree"])
 
@@ -789,7 +802,7 @@ def test_tree_rich_reports_more_entries(mock_find):
     assert "more entries" in _flattened(result.output)
 
 
-@patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=TREE_RESULT_MORE)
+@patch(FIND_LISTING_TARGET, new_callable=AsyncMock, return_value=(TREE_RESULT_MORE, "/"))
 def test_tree_plain_more_entries_note_goes_to_stderr(mock_find):
     result = _tty_invoke(["tree", "--plain"])
 
@@ -798,7 +811,7 @@ def test_tree_plain_more_entries_note_goes_to_stderr(mock_find):
     assert "more entries" in result.stderr
 
 
-@patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=TREE_RESULT_EMPTY)
+@patch(FIND_LISTING_TARGET, new_callable=AsyncMock, return_value=(TREE_RESULT_EMPTY, "/"))
 def test_tree_rich_empty(mock_find):
     result = _tty_invoke(["tree"])
 
@@ -806,7 +819,7 @@ def test_tree_rich_empty(mock_find):
     assert "empty" in result.output
 
 
-@patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=TREE_RESULT)
+@patch(FIND_LISTING_TARGET, new_callable=AsyncMock, return_value=(TREE_RESULT, "/"))
 def test_tree_passes_find_arguments_through(mock_find):
     result = _invoke(["tree", "/specs", "--name", "*.md", "--depth", "2"])
 
@@ -816,28 +829,47 @@ def test_tree_passes_find_arguments_through(mock_find):
     assert mock_find.call_args.kwargs["depth"] == 2
 
 
-# The tool layer strips a recognized '<project>/' prefix (#1415), so a
-# qualified tree root gets back PROJECT-RELATIVE node paths.
+# A qualified tree root gets back node paths that carry the project prefix, and
+# the root to strip carries it too — both from the one resolution (#1421). The
+# --project spelling is the other addressing frame: project-relative throughout.
 TREE_QUALIFIED_RESULT = {
     "nodes": [
-        _dir_node(name="notes", directory_path="/notes", type="directory"),
-        _dir_node(name="foo.md", file_path="notes/foo.md", directory_path="/notes/foo.md"),
+        _dir_node(name="notes", directory_path="/second-project/notes", type="directory"),
+        _dir_node(
+            name="foo.md",
+            file_path="second-project/notes/foo.md",
+            directory_path="/second-project/notes/foo.md",
+        ),
     ],
     "page": 1,
     "page_size": 10,
     "total": 2,
     "has_more": False,
 }
+TREE_RELATIVE_RESULT = {
+    **TREE_QUALIFIED_RESULT,
+    "nodes": [
+        _dir_node(name="notes", directory_path="/notes", type="directory"),
+        _dir_node(name="foo.md", file_path="notes/foo.md", directory_path="/notes/foo.md"),
+    ],
+}
 
 
-@patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=TREE_QUALIFIED_RESULT)
+@patch(
+    FIND_LISTING_TARGET,
+    new_callable=AsyncMock,
+    side_effect=[
+        (TREE_QUALIFIED_RESULT, "second-project/notes"),
+        (TREE_RELATIVE_RESULT, "/notes"),
+    ],
+)
 def test_tree_qualified_path_matches_project_flag_hierarchy(
     mock_find, config_manager, tmp_path_factory
 ):
     """'bm tree <project>/dir' and 'bm tree /dir --project <project>' are the
-    same call by rule 2, so they must render the same hierarchy: the rebuild
-    strips the routed project-relative root, not the caller's qualified
-    spelling, or the first path segment duplicates under the root (#1415)."""
+    same call by rule 2, so they must render the same hierarchy — each stripping
+    the root in its own addressing frame, or the project segment duplicates
+    under the root (#1415)."""
     config = config_manager.load_config()
     config.projects["second-project"] = ProjectEntry(
         path=str(tmp_path_factory.mktemp("second-project-cli"))
@@ -854,6 +886,7 @@ def test_tree_qualified_path_matches_project_flag_hierarchy(
     assert qualified.stdout.splitlines()[1:] == flagged.stdout.splitlines()[1:]
     # The tool still receives the caller's spelling; routing stays in the tool layer.
     assert mock_find.call_args_list[0].args == ("second-project/notes",)
+    assert mock_find.call_count == 2
 
 
 # ---------------------------------------------------------------------------
@@ -861,8 +894,8 @@ def test_tree_qualified_path_matches_project_flag_hierarchy(
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(("args", "target", "payload"), VERB_CASES)
-def test_verb_tool_error_exits_nonzero(args, target, payload):
+@pytest.mark.parametrize(("args", "target", "payload", "tool_return"), VERB_CASES)
+def test_verb_tool_error_exits_nonzero(args, target, payload, tool_return):
     """A strict-resolve miss (ToolError) becomes stderr + exit 1, per verb."""
     with patch(target, new_callable=AsyncMock, side_effect=ToolError("Entity not found: nope")):
         result = _invoke(args)
@@ -942,3 +975,28 @@ def test_local_flag_forces_local_routing_during_the_call(mock_tail):
 
     assert result.exit_code == 0, result.output
     assert seen["force_local"] == "true"
+
+
+@patch(
+    FIND_LISTING_TARGET,
+    new_callable=AsyncMock,
+    return_value=(TREE_QUALIFIED_RESULT, "second-project/notes"),
+)
+def test_tree_routes_the_path_exactly_once(mock_find):
+    """tree gets the listing and the root from one resolution, so it must not
+    resolve the path itself.
+
+    A CLI invocation carries no FastMCP context, so the per-request project-list
+    cache has nowhere to live: a second resolution is a second project-list
+    round trip on every cloud call, and for a workspace-qualified path a second
+    workspace/project index build (#1421). Patching the resolver to explode is
+    the check — if tree still reaches for it, this fails loudly.
+    """
+    boom = Mock(side_effect=AssertionError("tree resolved the path a second time"))
+    with patch("basic_memory.mcp.project_context.resolve_project_path_route", boom):
+        result = _tty_invoke(["tree", "second-project/notes", "--plain"])
+
+    assert result.exit_code == 0, result.output
+    assert result.stdout == "second-project/notes\n  foo.md\n"
+    mock_find.assert_called_once()
+    boom.assert_not_called()
