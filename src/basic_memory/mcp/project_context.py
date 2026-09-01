@@ -1185,24 +1185,41 @@ def _claim_mount_prefix(
     return claimed
 
 
-async def _detect_workspace_project_root(
+async def _detect_workspace_qualified_route(
     candidate: str,
     config: BasicMemoryConfig,
     context: Optional[Context] = None,
-) -> Optional[str]:
-    """Resolve a bare '<workspace>/<project>' candidate to that project's root.
+) -> tuple[str, str] | None:
+    """Resolve an explicitly qualified '<workspace>/<project>[/<path>]' candidate.
+
+    Returns the qualified project identifier and the project-relative remainder,
+    or None when the candidate does not spell a reachable workspace route.
+
+    Both segments must match — the first an accessible workspace slug, the
+    second a project inside *that* workspace — so this never reaches a project
+    the caller did not name. Resolving only the first segment and searching
+    every accessible workspace for it is what let an ordinary project-relative
+    path ('notes/foo', where this session's workspace has no 'notes') route
+    into another tenant's same-named project (#1421). An unqualified first
+    segment now falls through to the refusal below, which names the mounts this
+    session can actually address.
 
     Workspace-qualified memory URLs require three segments so that
     'memory://main/notes' stays readable as project 'main'. A posix path only
-    reaches here after the mount table declined its first segment, so nothing
-    addressable can be meant by it and the two-segment form is unambiguous —
-    without this, 'ls acme/docs/notes' resolved while 'ls acme/docs' (that same
-    project's root) had no spelling at all.
+    reaches here after the mount table declined its leading segments, so nothing
+    addressable can be meant by it and the two-segment form unambiguously names
+    that project's root — without which 'ls acme/docs/notes' resolved while
+    'ls acme/docs' (that same project's root) had no spelling at all.
     """
     segments = _split_workspace_route_segments(candidate)
-    if segments is None or segments[2]:
+    if segments is None:
         return None
-    if not _cloud_workspace_discovery_available(config):
+    # One guard covers both shapes. For the three-segment form it matches the
+    # identifier detector this replaced: a local session holding cloud
+    # credentials may consult discovery for an unmistakable workspace route. A
+    # two-segment identifier never splits into three, so for the pathless root
+    # form the same call narrows to cloud-routed sessions, as it did before.
+    if not _workspace_identifier_discovery_available(candidate, config):
         return None
 
     try:
@@ -1212,26 +1229,11 @@ async def _detect_workspace_project_root(
             return None
         raise
 
-    return resolution.project_identifier if resolution is not None else None
-
-
-def _detected_route_remainder(candidate: str, detected: str) -> str:
-    """Return the project-relative path left after the detected route prefix.
-
-    A local project consumes one leading segment. A workspace-qualified route
-    ('<workspace>/<project>') consumes two only when the candidate spelled both
-    segments; a bare project prefix resolved into a workspace consumed one.
-    """
-    segments = candidate.split("/")
-    route_permalinks = generate_permalink(detected).split("/")
-    consumed = 1
-    if (
-        len(route_permalinks) == 2
-        and len(segments) >= 2
-        and [generate_permalink(segment) for segment in segments[:2]] == route_permalinks
-    ):
-        consumed = 2
-    return "/".join(segments[consumed:])
+    if resolution is None:
+        return None
+    # The remainder comes straight from the parse, so the route and the path it
+    # leaves behind can never disagree about how many segments were consumed.
+    return resolution.project_identifier, segments[2]
 
 
 def _project_routes_agree(detected: str, explicit: str) -> bool:
@@ -1267,11 +1269,12 @@ async def resolve_project_path_route(
        explicit '<workspace>/<project>' outlives a bare local prefix match.
     3. Otherwise leading segments naming an addressable project route there
        with the remainder as the project-relative path.
-    4. Otherwise a workspace-qualified '<workspace>/<project>[/<path>]' spelling
-       routes to that project in that workspace — those projects belong to
-       workspaces this session's own route does not list, so they never appear
-       in the mount table rule 3 reads. With no path it names that project's
-       root, the same way a bare mount name does.
+    4. Otherwise an explicitly workspace-qualified '<workspace>/<project>[/<path>]'
+       spelling routes to that project in that workspace — those projects belong
+       to workspaces this session's own route does not list, so they never appear
+       in the mount table rule 3 reads. Both segments must match, so an
+       unqualified first segment never reaches another workspace. With no path it
+       names that project's root, the same way a bare mount name does.
     5. Otherwise, when the session addresses more than one project, raise
        UnqualifiedPathRefusedError instead of silently defaulting; a session
        that addresses at most one project keeps today's default resolution.
@@ -1317,26 +1320,21 @@ async def resolve_project_path_route(
             detected = mount.name
             mount_project_id = mount.external_id
 
-    # --- Rule 4: workspace-qualified spellings for everything else ---
+    # --- Rule 4: explicitly workspace-qualified spellings for everything else ---
     # Trigger: no advertised mount claimed the leading segments and the input still
     #   has more than one segment to parse.
-    # Why: '<workspace>/<project>/<path>' addresses projects in workspaces this
+    # Why: '<workspace>/<project>[/<path>]' addresses projects in workspaces this
     #   session's own route does not list, so they are absent from the mount
-    #   table above and would otherwise be unreachable. Local-config prefixes
-    #   also resolve here — a locally routed session's config IS its mount
-    #   table, so rule 3 already claimed those; what reaches this line is a
-    #   cloud-routed session whose local config names a project its own tenant
-    #   listing does not.
-    # Outcome: those spellings keep resolving exactly as before; the mount
-    #   collision described above is the only address this ordering takes away.
+    #   table above and would otherwise be unreachable.
+    # Outcome: only a route naming BOTH an accessible workspace and a project
+    #   inside it resolves here. An unqualified first segment falls through to
+    #   the refusal below instead of being searched for across every accessible
+    #   workspace — that search read another tenant's same-named project under
+    #   an ordinary project-relative path (#1421).
     if detected is None and "/" in candidate:
-        detected = await detect_project_from_identifier_prefix(candidate, config, context=context)
-        if detected is not None:
-            remainder = _detected_route_remainder(candidate, detected)
-        else:
-            # A bare '<workspace>/<project>' names that project's root, so the
-            # remainder stays empty — see _detect_workspace_project_root.
-            detected = await _detect_workspace_project_root(candidate, config, context=context)
+        qualified = await _detect_workspace_qualified_route(candidate, config, context=context)
+        if qualified is not None:
+            detected, remainder = qualified
 
     if explicit is not None:
         if detected is None:

@@ -24,7 +24,6 @@ from basic_memory.mcp.project_context import (
     ProjectPathRoute,
     ProjectPrefixConflictError,
     UnqualifiedPathRefusedError,
-    _detected_route_remainder,
     _project_routes_agree,
     resolve_project_path_route,
     resolve_workspace_project_identifier,
@@ -211,18 +210,10 @@ async def test_conflicting_prefix_raises_naming_both(multi_project_config):
 
 
 # --- workspace-qualified spellings ---
-# The remainder/agreement helpers are pure functions; driving the qualified
-# spellings through them directly avoids standing up cloud workspace discovery.
-
-
-def test_detected_route_remainder_spelled_workspace_route_consumes_two_segments():
-    """A workspace-qualified route spelled as both path segments consumes both."""
-    assert _detected_route_remainder("other/research/notes/foo", "other/research") == "notes/foo"
-
-
-def test_detected_route_remainder_bare_prefix_resolved_into_workspace_consumes_one():
-    """A bare project prefix that resolved into a workspace consumed one segment."""
-    assert _detected_route_remainder("research/notes/foo", "other/research") == "notes/foo"
+# The agreement helper is a pure function; driving the qualified spellings
+# through it directly avoids standing up cloud workspace discovery. The
+# remainder is no longer derived separately — it comes from the same parse that
+# matched the route, so the qualified-path tests below pin it end to end.
 
 
 def test_split_workspace_route_segments_needs_two_named_segments():
@@ -695,6 +686,21 @@ async def test_cloud_project_listing_is_fetched_once_per_request(cloud_session):
 
 _SESSION_DOCS_ID = "11111111-1111-1111-1111-111111111111"
 _DEFAULT_DOCS_ID = "22222222-2222-2222-2222-222222222222"
+_SESSION_RESEARCH_ID = "33333333-3333-3333-3333-333333333333"
+_SESSION_ENGINEERING_ID = "44444444-4444-4444-4444-444444444444"
+_DEFAULT_NOTES_ID = "55555555-5555-5555-5555-555555555555"
+
+# Every (workspace, project) pair gets its own id: the same project name living
+# in two workspaces is the whole point of this section, and the id is what pins
+# a mount to the workspace that advertised it. UUID-shaped because the index
+# looks an external_id up as a UUID before falling back to a name search.
+_WORKSPACE_PROJECT_IDS = {
+    ("session-tenant", "docs"): _SESSION_DOCS_ID,
+    ("session-tenant", "research"): _SESSION_RESEARCH_ID,
+    ("session-tenant", "engineering"): _SESSION_ENGINEERING_ID,
+    ("default-tenant", "docs"): _DEFAULT_DOCS_ID,
+    ("default-tenant", "notes"): _DEFAULT_NOTES_ID,
+}
 
 
 @dataclass
@@ -702,6 +708,23 @@ class _FakeHttpClient:
     """Stands in for the routed client, carrying only the workspace selector."""
 
     workspace: Optional[str]
+
+
+def _tenant_listing(tenant_id: str, names: tuple[str, ...]) -> ProjectList:
+    """Build one tenant's project listing, the first name carrying is_default."""
+    return ProjectList(
+        projects=[
+            ProjectItem(
+                id=index + 1,
+                external_id=_WORKSPACE_PROJECT_IDS[(tenant_id, name)],
+                name=name,
+                path=f"/app/data/{generate_permalink(name)}",
+                is_default=index == 0,
+            )
+            for index, name in enumerate(names)
+        ],
+        default_project=names[0],
+    )
 
 
 @pytest.fixture
@@ -714,7 +737,12 @@ def cross_workspace_session(monkeypatch, config_manager):
     reaches each accessible tenant, so the two answer with different projects.
     """
 
-    def build(*, failed_tenant: Optional[str] = None) -> tuple[WorkspaceInfo, WorkspaceInfo]:
+    def build(
+        *,
+        failed_tenant: Optional[str] = None,
+        session_projects: tuple[str, ...] = ("docs",),
+        default_projects: tuple[str, ...] = ("docs",),
+    ) -> tuple[WorkspaceInfo, WorkspaceInfo]:
         config = config_manager.load_config()
         config.projects = {}
         config.default_project = None
@@ -737,30 +765,8 @@ def cross_workspace_session(monkeypatch, config_manager):
             is_default=True,
         )
         listings = {
-            "session-tenant": ProjectList(
-                projects=[
-                    ProjectItem(
-                        id=1,
-                        external_id=_SESSION_DOCS_ID,
-                        name="docs",
-                        path="/app/data/docs",
-                        is_default=True,
-                    )
-                ],
-                default_project="docs",
-            ),
-            "default-tenant": ProjectList(
-                projects=[
-                    ProjectItem(
-                        id=1,
-                        external_id=_DEFAULT_DOCS_ID,
-                        name="docs",
-                        path="/app/data/docs",
-                        is_default=True,
-                    )
-                ],
-                default_project="docs",
-            ),
+            "session-tenant": _tenant_listing("session-tenant", session_projects),
+            "default-tenant": _tenant_listing("default-tenant", default_projects),
         }
 
         @asynccontextmanager
@@ -838,3 +844,85 @@ async def test_cloud_workspace_project_root_surfaces_a_failed_workspace(cross_wo
 
     with pytest.raises(ValueError, match="could not be loaded"):
         await resolve_project_path_route("acme/docs", project=None, project_id=None)
+
+
+# --- an unqualified first segment never leaves this session's workspace (#1421) ---
+# The companion to mount-id binding above. That one covers a name present in
+# both workspaces; these cover a name present only in the *other* one, where
+# there is no mount to claim the segment and the workspace fallback used to
+# resolve the bare name across every accessible workspace.
+
+
+@pytest.mark.asyncio
+async def test_cloud_unqualified_first_segment_never_reaches_another_workspace(
+    cross_workspace_session,
+):
+    """The leak: this session's workspace has no 'notes', another accessible
+    workspace does, and `cat("notes/foo")` is an ordinary project-relative path.
+    Resolving the bare first segment against every accessible workspace found
+    the other tenant's 'notes' and read it. It must refuse instead, naming only
+    the mounts this session can actually address."""
+    cross_workspace_session(
+        session_projects=("research", "engineering"),
+        default_projects=("notes",),
+    )
+
+    with pytest.raises(UnqualifiedPathRefusedError) as excinfo:
+        await resolve_project_path_route("notes/foo", project=None, project_id=None)
+
+    # The other workspace's project is named nowhere in the refusal — it was
+    # never addressable from here, so advertising it would teach a wrong route.
+    assert str(excinfo.value) == ("no project 'notes' — active projects: engineering/, research/")
+
+
+@pytest.mark.asyncio
+async def test_cloud_unqualified_first_segment_stays_local_in_a_single_project_workspace(
+    cross_workspace_session,
+):
+    """Same shape, one project in this workspace: rule 5 has no ambiguity to
+    refuse, so the path stays unstripped for the ordinary default resolution.
+    The point is where it does *not* go — a lone mount must not make the
+    cross-workspace name lookup the tiebreaker."""
+    cross_workspace_session(session_projects=("research",), default_projects=("notes",))
+
+    route = await resolve_project_path_route("notes/foo", project=None, project_id=None)
+
+    assert route == ProjectPathRoute(project=None, path="notes/foo", stripped=False)
+
+
+@pytest.mark.asyncio
+async def test_cloud_empty_route_segment_is_not_a_workspace_route(cross_workspace_session):
+    """An empty segment names nothing, so 'acme//notes' is not the qualified
+    spelling of anything even though 'acme' is a real workspace slug. It refuses
+    rather than being repaired into a route the caller did not write."""
+    cross_workspace_session(
+        session_projects=("research", "engineering"),
+        default_projects=("notes",),
+    )
+
+    with pytest.raises(UnqualifiedPathRefusedError) as excinfo:
+        await resolve_project_path_route("acme//notes", project=None, project_id=None)
+
+    assert str(excinfo.value) == ("no project 'acme' — active projects: engineering/, research/")
+
+
+@pytest.mark.asyncio
+async def test_cloud_other_workspace_stays_reachable_when_qualified(cross_workspace_session):
+    """Refuse-don't-default takes no address away: naming the workspace is how a
+    caller reaches it deliberately, as a path and through the project param, and
+    both spellings still land on the other tenant's project."""
+    cross_workspace_session(
+        session_projects=("research", "engineering"),
+        default_projects=("notes",),
+    )
+
+    qualified_path = await resolve_project_path_route(
+        "acme/notes/foo", project=None, project_id=None
+    )
+    assert qualified_path == ProjectPathRoute(project="acme/notes", path="foo", stripped=True)
+
+    root = await resolve_project_path_route("acme/notes", project=None, project_id=None)
+    assert root == ProjectPathRoute(project="acme/notes", path="", stripped=True)
+
+    explicit = await resolve_project_path_route("foo", project="acme/notes", project_id=None)
+    assert explicit == ProjectPathRoute(project="acme/notes", path="foo", stripped=False)
