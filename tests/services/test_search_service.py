@@ -328,6 +328,35 @@ async def test_search_categories_only_is_not_no_criteria():
 
 
 @pytest.mark.asyncio
+async def test_file_path_prefix_only_is_not_no_criteria():
+    """A subtree scope is criteria; a root spelling of it is not.
+
+    The scope normalizes at the schema boundary, so "/" cannot look like a
+    filter that the query then fails to apply.
+    """
+    assert SearchQuery(file_path_prefix="specs").no_criteria() is False
+    assert SearchQuery(file_path_prefix="/").no_criteria() is True
+    assert SearchQuery(file_path_prefix="/specs/").file_path_prefix == "specs"
+
+
+@pytest.mark.asyncio
+async def test_search_by_file_path_prefix_alone_runs_a_scoped_query(search_service, test_graph):
+    """A scope-only query executes instead of short-circuiting as criteria-free.
+
+    test_graph seeds every note under test/, so the matching scope must return
+    rows and a non-matching one must return none — the second half proving the
+    predicate really ran rather than the scope being dropped.
+    """
+    scoped = await search_service.search(SearchQuery(file_path_prefix="test"), limit=100)
+    elsewhere = await search_service.search(SearchQuery(file_path_prefix="nowhere"), limit=100)
+
+    assert len(scoped) > 0
+    assert all(row.file_path.startswith("test/") for row in scoped)
+    assert elsewhere == []
+    assert await search_service.count(SearchQuery(file_path_prefix="test")) == len(scoped)
+
+
+@pytest.mark.asyncio
 async def test_extract_entity_tags_exception_handling(search_service):
     """Test the _extract_entity_tags method exception handling (lines 147-151)."""
     from basic_memory.models.knowledge import Entity

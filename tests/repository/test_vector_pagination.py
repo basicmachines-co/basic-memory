@@ -66,6 +66,7 @@ class ConcreteSearchRepo(SearchRepositoryBase):
         search_item_types: list[SearchItemType] | None = None,
         categories: list[str] | None = None,
         metadata_filters: dict[str, Any] | None = None,
+        file_path_prefix: str | None = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: float | None = None,
         limit: int = 10,
@@ -192,6 +193,7 @@ async def test_page1_scores_gte_page2_scores():
                 search_item_types=None,
                 categories=None,
                 metadata_filters=None,
+                file_path_prefix=None,
                 limit=limit,
                 offset=offset,
             )

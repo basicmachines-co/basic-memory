@@ -26,6 +26,7 @@ from basic_memory.repository.semantic_chunking import VectorChunkRecord
 from basic_memory.repository.search_repository_base import (
     SearchRepositoryBase,
     VectorChunkState,
+    file_path_prefix_condition,
 )
 from basic_memory.repository.search_trace import (
     SearchTraceCollector,
@@ -968,6 +969,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         search_item_types: Optional[List[SearchItemType]] = None,
         categories: Optional[List[str]] = None,
         metadata_filters: Optional[dict[str, Any]] = None,
+        file_path_prefix: Optional[str] = None,
         allow_relaxed: bool = False,
     ) -> tuple[str, str, dict[str, Any], str, str]:
         """Build Postgres FTS FROM/WHERE params shared by search and count."""
@@ -1129,6 +1131,13 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 conditions.append("search_index.permalink LIKE :permalink")
             else:
                 conditions.append("search_index.permalink = :permalink")
+
+        # Handle directory subtree scope. The predicate is built by the shared
+        # helper so Postgres and SQLite scope by the identical rule; see
+        # file_path_prefix_condition for the boundary and escaping reasoning.
+        subtree_condition = file_path_prefix_condition(file_path_prefix, params)
+        if subtree_condition is not None:
+            conditions.append(subtree_condition)
 
         # Handle search item type filter (parameterized for defense-in-depth)
         if search_item_types:
@@ -1341,6 +1350,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         search_item_types: Optional[List[SearchItemType]] = None,
         categories: Optional[List[str]] = None,
         metadata_filters: Optional[dict[str, Any]] = None,
+        file_path_prefix: Optional[str] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
         limit: int = 10,
@@ -1362,6 +1372,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             search_item_types=search_item_types,
             categories=categories,
             metadata_filters=metadata_filters,
+            file_path_prefix=file_path_prefix,
             retrieval_mode=retrieval_mode,
             min_similarity=min_similarity,
             limit=limit,
@@ -1388,6 +1399,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             search_item_types=search_item_types,
             categories=categories,
             metadata_filters=metadata_filters,
+            file_path_prefix=file_path_prefix,
             allow_relaxed=allow_relaxed,
         )
 
@@ -1534,6 +1546,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         search_item_types: Optional[List[SearchItemType]] = None,
         categories: Optional[List[str]] = None,
         metadata_filters: Optional[dict[str, Any]] = None,
+        file_path_prefix: Optional[str] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
         allow_relaxed: bool = False,
@@ -1550,6 +1563,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 search_item_types=search_item_types,
                 categories=categories,
                 metadata_filters=metadata_filters,
+                file_path_prefix=file_path_prefix,
                 retrieval_mode=retrieval_mode,
                 min_similarity=min_similarity,
             )
@@ -1570,6 +1584,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             search_item_types=search_item_types,
             categories=categories,
             metadata_filters=metadata_filters,
+            file_path_prefix=file_path_prefix,
             allow_relaxed=allow_relaxed,
         )
         sql = f"SELECT COUNT(*) FROM {from_clause} WHERE {where_clause}"

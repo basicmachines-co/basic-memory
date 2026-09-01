@@ -28,7 +28,10 @@ from basic_memory.repository.rerank_provider import RerankProvider
 from basic_memory.repository.rerank_provider_factory import create_rerank_provider
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_query import relaxed_query_words
-from basic_memory.repository.search_repository_base import SearchRepositoryBase
+from basic_memory.repository.search_repository_base import (
+    SearchRepositoryBase,
+    file_path_prefix_condition,
+)
 from basic_memory.repository.script_ngrams import analyze_script_query
 from basic_memory.repository.search_trace import (
     SearchTraceCollector,
@@ -782,6 +785,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         search_item_types: Optional[List[SearchItemType]] = None,
         categories: Optional[List[str]] = None,
         metadata_filters: Optional[dict[str, Any]] = None,
+        file_path_prefix: Optional[str] = None,
     ) -> tuple[str, str, dict[str, Any], str, str]:
         """Build SQLite FTS FROM/WHERE params shared by search and count."""
         conditions = []
@@ -867,6 +871,13 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                     permalink_text = self._prepare_search_term(permalink_text, is_prefix=False)
                     params["permalink"] = permalink_text
                     match_conditions.append("search_index.permalink MATCH :permalink")
+
+        # Handle directory subtree scope. The predicate is built by the shared
+        # helper so SQLite and Postgres scope by the identical rule; see
+        # file_path_prefix_condition for the boundary and escaping reasoning.
+        subtree_condition = file_path_prefix_condition(file_path_prefix, params)
+        if subtree_condition is not None:
+            conditions.append(subtree_condition)
 
         # Handle entity type filter (parameterized for defense-in-depth)
         if search_item_types:
@@ -1055,6 +1066,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         search_item_types: Optional[List[SearchItemType]] = None,
         categories: Optional[List[str]] = None,
         metadata_filters: Optional[dict[str, Any]] = None,
+        file_path_prefix: Optional[str] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
         limit: int = 10,
@@ -1082,6 +1094,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             search_item_types=search_item_types,
             categories=categories,
             metadata_filters=metadata_filters,
+            file_path_prefix=file_path_prefix,
             retrieval_mode=retrieval_mode,
             min_similarity=min_similarity,
             limit=limit,
@@ -1108,6 +1121,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             search_item_types=search_item_types,
             categories=categories,
             metadata_filters=metadata_filters,
+            file_path_prefix=file_path_prefix,
         )
 
         # set limit on search query
@@ -1239,6 +1253,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         search_item_types: Optional[List[SearchItemType]] = None,
         categories: Optional[List[str]] = None,
         metadata_filters: Optional[dict[str, Any]] = None,
+        file_path_prefix: Optional[str] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
         allow_relaxed: bool = False,
@@ -1255,6 +1270,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 search_item_types=search_item_types,
                 categories=categories,
                 metadata_filters=metadata_filters,
+                file_path_prefix=file_path_prefix,
                 retrieval_mode=retrieval_mode,
                 min_similarity=min_similarity,
             )
@@ -1275,6 +1291,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             search_item_types=search_item_types,
             categories=categories,
             metadata_filters=metadata_filters,
+            file_path_prefix=file_path_prefix,
         )
         sql = f"SELECT COUNT(*) FROM {from_clause} WHERE {where_clause}"
         logger.trace(f"Count {sql} params: {params}")

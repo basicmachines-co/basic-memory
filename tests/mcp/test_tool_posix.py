@@ -738,6 +738,10 @@ async def diverged_permalink_notes(client, test_project):
     honest construction here: the shared test config sets
     update_permalinks_on_move=True, so a move would NOT reproduce the split the
     product's own default (False) produces in the field.
+
+    One note lives under specs/ but permalinks under archive/; the other is its
+    mirror image. Any scope built from permalinks answers this pair exactly
+    backwards, which is what the regression below pins down.
     """
     await write_note(
         title="Housed In Specs",
@@ -824,49 +828,73 @@ async def test_find_meta_answers_at_the_project_root(client, test_project, meta_
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("path", ["specs", "/specs", "My Notes", "nonexistent"])
-async def test_find_meta_refuses_a_subtree_scope(client, test_project, meta_notes, path):
-    """CONTRACT (changed): `meta` answers only at a project root.
+@pytest.mark.parametrize(
+    ("path", "expected_titles"),
+    [
+        ("specs", {"Alpha Spec", "Beta Spec"}),
+        ("/specs", {"Alpha Spec", "Beta Spec"}),
+        # A spaced directory name is a file path, not a slug: it scopes verbatim.
+        ("My Notes", {"Gamma Note"}),
+        ("nonexistent", set()),
+    ],
+)
+async def test_find_meta_scopes_by_path_subtree(
+    client, test_project, meta_notes, path, expected_titles
+):
+    """`path` narrows the metadata query to one directory, server-side."""
+    result = await find(path, meta=["note_type=note"], project=test_project.name)
 
-    This used to scope by permalink prefix and report the resulting count as
-    exact. The search API has no file-path filter — permalink_match is its only
-    path-shaped predicate — and a permalink is not a file path, so that scope
-    both dropped and admitted the wrong notes silently. Refuse instead of
-    answering a different question under an exact-looking total.
-    """
-    with pytest.raises(ValueError) as excinfo:
-        await find(path, meta=["status=active"], project=test_project.name)
-
-    message = str(excinfo.value)
-    assert f"find: 'meta' cannot be scoped to '{path}'" in message
-    assert "permalink, not by file path" in message
+    assert {row["title"] for row in result["results"]} == expected_titles
+    assert result["total"] == len(expected_titles)
+    assert result["total_is_exact"] is True
 
 
 @pytest.mark.asyncio
-async def test_permalink_prefix_scope_would_have_answered_wrongly(
+async def test_find_meta_scope_stops_at_a_directory_boundary(client, test_project, meta_notes):
+    """A sibling directory whose name starts with the scope stays out."""
+    await write_note(
+        title="Archived Spec",
+        directory="specs-archive",
+        content="# Archived Spec",
+        project=test_project.name,
+        metadata={"status": "active"},
+    )
+
+    result = await find("specs", meta=["status=active"], project=test_project.name)
+
+    assert {row["title"] for row in result["results"]} == {"Alpha Spec"}
+
+
+@pytest.mark.asyncio
+async def test_scope_follows_the_file_path_not_the_permalink(
     client, test_project, diverged_permalink_notes
 ):
-    """EVIDENCE for the refusal above: a permalink does not track its file path.
+    """REGRESSION: `find /specs --meta` scopes by where the file lives.
 
-    An explicit frontmatter `permalink:` is honored verbatim (#93) — the same
-    divergence a move produces under the default update_permalinks_on_move=False.
-    Here one note lives under specs/ but permalinks under archive/, and the other
-    is its mirror image, so a `find /specs --meta` scoped by permalink prefix
-    would have dropped the first, admitted the second, and called that total
-    exact. The root query sees both, and the rows show the split directly.
+    A permalink stops mirroring its file path once a note pins one in
+    frontmatter (#93) or is moved with update_permalinks_on_move disabled (the
+    default). A scope built from permalink prefixes therefore answers this pair
+    exactly backwards: it would drop "Housed In Specs", which really is under
+    specs/, and admit "Housed In Archive", which is not — while still reporting
+    that count as exact. Scoping by the indexed file_path answers the question
+    the caller asked, so reintroducing a permalink-based scope fails here.
     """
-    result = await find(meta=["status=active"], project=test_project.name)
+    result = await find("specs", meta=["status=active"], project=test_project.name)
 
     rows = {row["title"]: row for row in result["results"]}
+    assert set(rows) == {"Housed In Specs"}
+    assert result["total"] == 1
     assert result["total_is_exact"] is True
-    assert set(rows) == {"Housed In Specs", "Housed In Archive"}
+    # The hit is the one whose *file* is under specs/, and its permalink is not.
     assert rows["Housed In Specs"]["file_path"] == "specs/Housed In Specs.md"
     assert rows["Housed In Specs"]["permalink"].endswith("archive/housed-in-specs")
-    assert rows["Housed In Archive"]["file_path"] == "archive/Housed In Archive.md"
-    assert rows["Housed In Archive"]["permalink"].endswith("specs/housed-in-archive")
 
-    with pytest.raises(ValueError, match="permalink, not by file path"):
-        await find("specs", meta=["status=active"], project=test_project.name)
+    # The mirror image: permalinked under specs/, but housed under archive/.
+    archive = await find("archive", meta=["status=active"], project=test_project.name)
+    archive_rows = {row["title"]: row for row in archive["results"]}
+    assert set(archive_rows) == {"Housed In Archive"}
+    assert archive_rows["Housed In Archive"]["file_path"] == "archive/Housed In Archive.md"
+    assert archive_rows["Housed In Archive"]["permalink"].endswith("specs/housed-in-archive")
 
 
 @pytest.mark.asyncio
@@ -914,10 +942,10 @@ async def test_find_meta_projects_requested_fields(client, test_project, meta_no
 @pytest.mark.parametrize(
     ("kwargs", "message"),
     [
-        # The metadata search matches slugified permalinks, so a filename glob
-        # has no faithful translation — refuse rather than silently ignore it.
+        # The search API has no filename-glob facility, so a `name` pattern has
+        # no faithful translation — refuse rather than silently ignore it.
         ({"name": "*.md", "meta": ["status=active"]}, "'name' cannot combine with 'meta'"),
-        # Permalink-prefix scope is whole-subtree; a depth bound is inexpressible.
+        # The file-path scope is whole-subtree; a depth bound is inexpressible.
         ({"depth": 3, "meta": ["status=active"]}, "'depth' cannot combine with 'meta'"),
         ({"fields": ["title"]}, "'fields' requires 'meta' predicates"),
         ({"meta": ["status=active"], "fields": []}, "must be non-empty"),
@@ -1347,12 +1375,13 @@ async def test_find_qualified_path_routes_to_project(
 async def test_find_meta_qualified_path_routes_to_project(
     client, test_project, second_project, no_project_constraint
 ):
-    """The meta arm shares find's route resolution, so a bare '<project>' routes
-    to that project's root and nothing from the other project leaks in.
+    """The meta arm shares find's route resolution, so '<project>/dir' scopes to
+    that project's subtree and nothing from the other project leaks in.
 
-    A project prefix is a mount point, not a subtree, so it survives the
-    subtree-scope refusal: 'second-project' strips to the empty project-relative
-    path. 'second-project/notes' does not, and is refused.
+    A project prefix is a mount point, not a subtree: a bare 'second-project'
+    strips to the empty project-relative path and answers at that project's
+    root, while 'second-project/notes' strips to the 'notes' subtree of the
+    same project.
     """
     await write_note(
         title="Second Meta Note",
@@ -1369,12 +1398,19 @@ async def test_find_meta_qualified_path_routes_to_project(
         metadata={"status": "active"},
     )
 
-    result = await find("second-project", meta=["status=active"])
+    await write_note(
+        title="Second Root Note",
+        directory="specs",
+        content="# Second Root Note",
+        project="second-project",
+        metadata={"status": "active"},
+    )
 
-    assert {row["title"] for row in result["results"]} == {"Second Meta Note"}
+    root = await find("second-project", meta=["status=active"])
+    scoped = await find("second-project/notes", meta=["status=active"])
 
-    with pytest.raises(ValueError, match="permalink, not by file path"):
-        await find("second-project/notes", meta=["status=active"])
+    assert {row["title"] for row in root["results"]} == {"Second Meta Note", "Second Root Note"}
+    assert {row["title"] for row in scoped["results"]} == {"Second Meta Note"}
 
 
 @pytest.mark.asyncio

@@ -571,24 +571,24 @@ async def find(
     """Recursively list files by name glob, or query notes by frontmatter metadata.
 
     Without `meta`, this is a recursive directory listing. With `meta`, find
-    routes through the metadata search instead: predicates AND together over
-    the whole project, and non-markdown files (which carry no frontmatter) are
-    never hits. `name`, `depth`, and any `path` below the project root are all
-    refused alongside `meta`, because the search API expresses none of them: it
-    has no filename glob, no depth bound, and no file-path filter — it scopes
-    by permalink, and a permalink stops mirroring its file path the moment a
-    note pins one in frontmatter or is moved under the default
-    update_permalinks_on_move=False. Substituting any of the three would
-    misreport the match set while still calling the total exact.
+    routes through the metadata search instead: predicates AND together, `path`
+    still scopes the results — server-side, by the indexed file path, so a note
+    is scoped by where it actually lives rather than by a permalink that may no
+    longer say — and non-markdown files (which carry no frontmatter) are never
+    hits. `name` and `depth` are refused alongside `meta`: the search API has no
+    filename-glob or depth-bound facility, and silently ignoring either would
+    misreport the match set.
 
     Args:
         path: Directory to start from (default: project root). '<project>/path'
-            routes into that project. With `meta`, only a project root is
-            addressable — a directory below it is refused (see above).
+            routes into that project. With `meta`, scopes the search to this
+            subtree (matched on a directory boundary, so "specs" never admits
+            "specs-archive/").
         name: File-name glob to match, e.g. "*.md". None matches everything.
-            Cannot combine with `meta`.
+            Cannot combine with `meta` — scope with `path` instead.
         depth: How many levels to recurse (1-10, default: 10). A non-default
-            depth cannot combine with `meta`.
+            depth cannot combine with `meta` (the subtree scope is
+            all-or-nothing).
         page: Page number (1-indexed).
         page_size: Nodes per page.
         meta: Frontmatter metadata predicates, repeatable; every predicate must
@@ -630,13 +630,11 @@ async def find(
     if page_size > MAX_DIRECTORY_PAGE_SIZE:
         raise ValueError(f"page_size must be <= {MAX_DIRECTORY_PAGE_SIZE}, got {page_size}")
 
-    # Combination rules, before any I/O. The metadata search matches slugified
-    # permalinks, where a filename glob has no faithful translation, and it
-    # takes no depth bound — refuse both rather than silently ignoring either.
-    # (The `path` scope is refused too, after routing, where the caller's
-    # project prefix has been stripped and "is this the project root?" can be
-    # answered.) `fields` is the SELECT to the predicates' WHERE; without
-    # predicates the directory listing stays byte-identical to today.
+    # Combination rules, before any I/O. The metadata search takes no filename
+    # glob and no depth bound, so `name` and `depth` are refused rather than
+    # silently ignored; `path` survives, because the search API does express a
+    # file-path subtree. `fields` is the SELECT to the predicates' WHERE;
+    # without predicates the directory listing stays byte-identical to today.
     if meta is not None:
         # Trigger: 'meta' present but carrying no predicates.
         # Why: an empty list parses to an empty filters dict, which is not None
@@ -651,13 +649,13 @@ async def find(
             )
         if name is not None:
             raise ValueError(
-                "find: 'name' cannot combine with 'meta' — the metadata search matches "
-                "slugified permalinks, not filenames"
+                "find: 'name' cannot combine with 'meta' — the metadata search has no "
+                "filename glob; scope with 'path' instead"
             )
         if depth != _MAX_FIND_DEPTH:
             raise ValueError(
-                "find: 'depth' cannot combine with 'meta' — the metadata search takes "
-                "no depth bound"
+                "find: 'depth' cannot combine with 'meta' — the metadata search scopes "
+                "by whole subtree; scope with 'path' instead"
             )
     if fields is not None:
         if meta is None:
@@ -678,33 +676,13 @@ async def find(
     )
 
     if metadata_filters is not None:
-        # Trigger: a metadata query addressed below the project root.
-        # Why: the search API has no file-path filter. Its only path-shaped
-        #      predicate is permalink_match, and a permalink is not a file path:
-        #      a note that pins `permalink:` in frontmatter, or that was moved
-        #      while update_permalinks_on_move is off (the default), keeps a
-        #      permalink that no longer says where the file lives. Scoping by
-        #      permalink prefix would therefore drop notes that really are under
-        #      the requested directory and admit notes that are not — and report
-        #      the resulting count as total_is_exact.
-        # Outcome: refuse the subtree scope naming the limitation, rather than
-        #          answer a different question with an exact-looking total. The
-        #          project-root form stays exact, so it is the offered path.
-        #
-        # route.path is the caller's input verbatim when no project prefix was
-        # recognized, so one strip covers both routed and raw spellings.
-        if route.path.strip("/"):
-            raise ValueError(
-                f"find: 'meta' cannot be scoped to '{path}' — the search API filters by "
-                "permalink, not by file path, and a permalink stops mirroring its file "
-                "path once a note pins one in frontmatter or is moved with "
-                "update_permalinks_on_move disabled (the default). A subtree scope would "
-                "omit matching files and admit unrelated ones while still reporting the "
-                "total as exact. Query the project root and filter the hits by their "
-                "file_path, or drop 'meta' for a path-scoped directory listing"
-            )
         return await _find_by_metadata(
             route_project=route.project,
+            # route.path is the caller's input verbatim when no project prefix
+            # was recognized, so one strip covers both routed and raw spellings.
+            # A bare '<project>' strips to "", the project root — a mount point,
+            # not a subtree.
+            scope=route.path.strip("/"),
             metadata_filters=metadata_filters,
             fields=fields,
             page=page,
@@ -736,6 +714,7 @@ async def find(
 async def _find_by_metadata(
     *,
     route_project: Optional[str],
+    scope: str,
     metadata_filters: dict[str, Any],
     fields: Optional[list[str]],
     page: int,
@@ -743,12 +722,15 @@ async def _find_by_metadata(
     project_id: Optional[str],
     context: Context | None,
 ) -> dict[str, Any]:
-    """find's metadata arm: one project-wide search call, plus field projection.
+    """find's metadata arm: one search call, plus per-hit field projection.
 
-    The predicates are the whole WHERE — `find` has already refused any scope
-    below the project root, because the search API offers no file-path filter
-    to express one honestly. So the total the server reports is the real match
-    count for the query that ran, and every page of it is reachable.
+    The path scope composes server-side as a file-path prefix — the indexed
+    `file_path`, which is where the note actually lives, not its permalink,
+    which stops mirroring that path once a note pins one in frontmatter or is
+    moved with update_permalinks_on_move disabled (the default). It ANDs with
+    the metadata filters in the same WHERE, so the total the server reports is
+    the real match count for the scope that ran, and every page of it is
+    reachable.
     """
     async with get_project_client(route_project, context=context, project_id=project_id) as (
         client,
@@ -758,6 +740,8 @@ async def _find_by_metadata(
         from basic_memory.mcp.clients import KnowledgeClient, SearchClient
 
         query = SearchQuery(
+            # "" is the project root: the predicates are then the whole WHERE.
+            file_path_prefix=scope or None,
             metadata_filters=metadata_filters,
             entity_types=[SearchItemType.ENTITY],
         )

@@ -120,7 +120,11 @@ async def search(
             or query.permalink_match
         ),
         has_filters=bool(
-            query.note_types or query.entity_types or query.categories or query.metadata_filters
+            query.note_types
+            or query.entity_types
+            or query.categories
+            or query.metadata_filters
+            or query.file_path_prefix
         ),
     ):
         cache_key = ReadCacheKey(

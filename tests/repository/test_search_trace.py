@@ -1391,6 +1391,7 @@ def test_non_text_criteria_and_null_owner_rows_stay_inspectable():
         categories=None,
         after_date=None,
         metadata_filters=None,
+        file_path_prefix=None,
         retrieval_mode=SearchRetrievalMode.FTS,
         min_similarity=None,
     )
