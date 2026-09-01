@@ -71,6 +71,120 @@ async def test_filter_missing_metadata_field(search_repository, session_maker):
 
 
 @pytest.mark.asyncio
+async def test_null_filter_matches_a_missing_key_and_an_explicit_null(
+    search_repository, session_maker
+):
+    """CONTRACT: {"key": None} is IS NULL, and both dialects draw the same line.
+
+    SQLite's json_extract and Postgres's jsonb_extract_path_text each collapse a
+    missing key and an explicit JSON null to SQL NULL, so "which notes have no
+    owner?" answers row for row on either backend. The regression this pins is
+    the equality clause it replaced: `= NULL` satisfies no row, so the query
+    reported an exact zero no matter how many notes were missing the field.
+    """
+    missing = await _index_entity_with_metadata(
+        search_repository,
+        session_maker,
+        "Owner Key Absent",
+        {"status": "active"},
+    )
+    explicit = await _index_entity_with_metadata(
+        search_repository,
+        session_maker,
+        "Owner Explicitly Null",
+        {"status": "active", "owner": None},
+    )
+
+    results = await search_repository.search(metadata_filters={"owner": None})
+
+    assert {r.id for r in results} == {missing.id, explicit.id}
+    assert await search_repository.count(metadata_filters={"owner": None}) == 2
+
+
+@pytest.mark.asyncio
+async def test_null_filter_excludes_a_note_carrying_a_value(search_repository, session_maker):
+    """A note with a real value is never a null match.
+
+    The positive control matters: a filter that matched nothing at all would
+    also "exclude" this note, which is exactly the bug being fixed.
+    """
+    alice = await _index_entity_with_metadata(
+        search_repository,
+        session_maker,
+        "Owner Alice",
+        {"owner": "alice"},
+    )
+    unowned = await _index_entity_with_metadata(
+        search_repository,
+        session_maker,
+        "Owner Unset",
+        {"status": "active"},
+    )
+
+    null_matches = await search_repository.search(metadata_filters={"owner": None})
+    alice_matches = await search_repository.search(metadata_filters={"owner": "alice"})
+
+    assert {r.id for r in null_matches} == {unowned.id}
+    assert {r.id for r in alice_matches} == {alice.id}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "present_value"),
+    [("status", "active"), ("type", "spec"), ("tags", ["security"])],
+)
+async def test_null_filter_on_the_indexed_frontmatter_fields(
+    search_repository, session_maker, field, present_value
+):
+    """The three fields SQLite answers from generated columns behave identically.
+
+    status, type and tags take `entity.frontmatter_status` / `frontmatter_type`
+    / `tags_json` on SQLite instead of a json_extract call, while Postgres has
+    no such columns and always extracts from the JSONB. Those columns are
+    defined AS that json_extract, so IS NULL means the same thing on both sides
+    — this is the one place the dialects build structurally different SQL for
+    the same filter, so it gets its own contract test.
+    """
+    missing = await _index_entity_with_metadata(
+        search_repository,
+        session_maker,
+        f"Indexed {field} absent",
+        {"unrelated": "x"},
+    )
+    await _index_entity_with_metadata(
+        search_repository,
+        session_maker,
+        f"Indexed {field} present",
+        {field: present_value},
+    )
+
+    results = await search_repository.search(metadata_filters={field: None})
+
+    assert {r.id for r in results} == {missing.id}
+
+
+@pytest.mark.asyncio
+async def test_null_filter_walks_a_nested_path(search_repository, session_maker):
+    """A dot-path null match asks the same question one level down."""
+    unreviewed = await _index_entity_with_metadata(
+        search_repository,
+        session_maker,
+        "Nested Review Missing",
+        {"review": {"reviewer": "alice"}},
+    )
+    await _index_entity_with_metadata(
+        search_repository,
+        session_maker,
+        "Nested Review Approved",
+        {"review": {"reviewer": "alice", "approved": True}},
+    )
+
+    results = await search_repository.search(metadata_filters={"review.approved": None})
+
+    assert {r.id for r in results} == {unreviewed.id}
+
+
+@pytest.mark.asyncio
 async def test_filter_multiple_conditions_and_logic(search_repository, session_maker):
     """Multiple metadata_filters are combined with AND logic."""
     entity_both = await _index_entity_with_metadata(
