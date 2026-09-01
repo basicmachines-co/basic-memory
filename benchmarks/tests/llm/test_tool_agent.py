@@ -273,6 +273,148 @@ def test_error_body_redacts_a_json_escaping_secret(monkeypatch: pytest.MonkeyPat
     assert "invalid api key" in message
 
 
+def _unicode_escape(character: str, *, uppercase: bool = False) -> str:
+    """The JSON ``\\uXXXX`` spelling of one character.
+
+    Built rather than written literally so the tests state which character is
+    being escaped, and so the same helper produces both hex cases.
+    """
+    return f"\\u{ord(character):04X}" if uppercase else f"\\u{ord(character):04x}"
+
+
+def _go_encoded(value: str) -> str:
+    """``value`` as Go's default JSON encoder spells it inside a string.
+
+    Go HTML-escapes ``<``, ``>`` and ``&`` unless the caller opts out, so a
+    gateway written in Go echoes a header value in a spelling ``json.dumps``
+    never produces and ``_encoded_forms`` therefore cannot enumerate.
+    """
+    return "".join(
+        _unicode_escape(character) if character in "<>&" else character for character in value
+    )
+
+
+# A --model-header value is any visible ASCII, so it may contain the characters
+# a Go encoder escapes. This is the value from the reported reproduction.
+GO_ESCAPING_SECRET = "wrk<secret>"
+
+
+def test_redact_secrets_withholds_a_body_using_go_style_unicode_escapes() -> None:
+    """The reported leak: a valid spelling that masking alone cannot reach."""
+    body = '{"seen":"' + _go_encoded(GO_ESCAPING_SECRET) + '"}'
+    # Precondition: neither the plaintext nor any json.dumps spelling is
+    # present, so every form _encoded_forms derives provably fails to match
+    # and the body would otherwise pass through untouched.
+    assert GO_ESCAPING_SECRET not in body
+    assert json.dumps(GO_ESCAPING_SECRET)[1:-1] not in body
+
+    masked = tool_agent.redact_secrets(body, [GO_ESCAPING_SECRET])
+
+    assert masked == tool_agent.WITHHELD_BODY_MARKER
+    assert _go_encoded(GO_ESCAPING_SECRET) not in masked
+
+
+def test_redact_secrets_detects_unicode_escapes_in_either_hex_case() -> None:
+    """JSON allows both hex cases, so neither spelling may be privileged."""
+    lower = '{"seen":"wrk' + _unicode_escape("<") + "secret" + _unicode_escape(">") + '"}'
+    upper = (
+        '{"seen":"wrk'
+        + _unicode_escape("<", uppercase=True)
+        + "secret"
+        + _unicode_escape(">", uppercase=True)
+        + '"}'
+    )
+    assert lower != upper
+
+    for body in (lower, upper):
+        assert tool_agent.redact_secrets(body, [GO_ESCAPING_SECRET]) == (
+            tool_agent.WITHHELD_BODY_MARKER
+        )
+
+
+def test_redact_secrets_handles_a_truncated_body_without_parsing_it() -> None:
+    """Error bodies arrive cut mid-string; a json.loads backstop would raise."""
+    body = '{"error":{"seen":"wrk' + _unicode_escape("<") + "secret" + _unicode_escape(">")
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(body)
+
+    assert tool_agent.redact_secrets(body, [GO_ESCAPING_SECRET]) == (
+        tool_agent.WITHHELD_BODY_MARKER
+    )
+
+
+def test_redact_secrets_detects_a_doubly_escaped_unicode_spelling() -> None:
+    """A proxy wrapping an upstream body escapes the upstream's own escapes."""
+    upstream = '{"seen":"' + _go_encoded(GO_ESCAPING_SECRET) + '"}'
+    body = json.dumps({"error": {"message": "upstream rejected", "upstream": upstream}})
+    # One pass only recovers the upstream text; the secret needs the second,
+    # which is what the fixpoint loop (rather than a single unescape) buys.
+    assert GO_ESCAPING_SECRET not in tool_agent._unescape_once(body)
+
+    assert tool_agent.redact_secrets(body, [GO_ESCAPING_SECRET]) == (
+        tool_agent.WITHHELD_BODY_MARKER
+    )
+
+
+def test_redact_secrets_keeps_an_ordinary_body_readable() -> None:
+    """Withholding is the exception: a maskable body keeps its diagnostic."""
+    body = json.dumps({"error": {"message": "invalid api key", "key": SECRET_KEY}})
+
+    masked = tool_agent.redact_secrets(body, [SECRET_KEY])
+
+    assert SECRET_KEY not in masked
+    assert tool_agent.REDACTION_MARKER in masked
+    assert "invalid api key" in masked
+    assert masked != tool_agent.WITHHELD_BODY_MARKER
+
+
+# A control escape must decode to its character rather than merely lose its
+# backslash: dropping it would splice "…i" and "formation" into a literal match
+# and withhold a multi-line diagnostic that never contained the secret at all.
+NEWLINE_STRADDLING_SECRET = "wrkspc_information"
+
+
+def test_redact_secrets_decodes_control_escapes_rather_than_dropping_them() -> None:
+    body = json.dumps({"error": "check wrkspc_i\nformation and retry"})
+    assert NEWLINE_STRADDLING_SECRET not in body
+
+    assert tool_agent.redact_secrets(body, [NEWLINE_STRADDLING_SECRET]) == body
+
+
+def test_error_body_withheld_when_a_secret_survives_masking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End-to-end: a Go-style echo costs the body, never the credential."""
+
+    def go_escaping_401(url: str, **kwargs: Any) -> httpx.Response:
+        return httpx.Response(
+            status_code=401,
+            text='{"error":{"message":"invalid api key","seen":"'
+            + _go_encoded(GO_ESCAPING_SECRET)
+            + '"}}',
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr(tool_agent.httpx, "post", go_escaping_401)
+    agent = OpenAICompatToolAgent(
+        "m",
+        "http://localhost/v1",
+        extra_headers={"anthropic-workspace-id": GO_ESCAPING_SECRET},
+        max_retries=0,
+    )
+
+    with pytest.raises(LLMRunnerError) as caught:
+        agent.propose([UserMessage(text="hi")], [SEARCH_TOOL])
+
+    message = str(caught.value)
+    assert GO_ESCAPING_SECRET not in message
+    assert _go_encoded(GO_ESCAPING_SECRET) not in message
+    assert tool_agent.WITHHELD_BODY_MARKER in message
+    # The status still names the rejection, so dropping the body does not
+    # leave the operator with nothing to act on.
+    assert "401" in message
+
+
 class TestOpenAICompatToolAgent:
     def _agent(self) -> OpenAICompatToolAgent:
         return OpenAICompatToolAgent("qwen3", "http://localhost:11434/v1", max_retries=0)
