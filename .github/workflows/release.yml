@@ -8,12 +8,21 @@ on:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
+# Every job that builds a uv environment sets UV_PYTHON. Without it, `uv run`
+# — which every `just` recipe shells out to — resolves its interpreter from
+# .python-version (3.14) rather than the matrix version, and DELETES a .venv
+# that disagrees, taking the pip-installed extras with it. That is why the
+# 3.12/3.13 matrix rows silently tested 3.14 and why typecheck lost pymilvus.
 jobs:
   release:
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: write
+
+    # Pin every uv call, including `uv run` inside just recipes. See top of file.
+    env:
+      UV_PYTHON: "3.12"
 
     steps:
       - uses: actions/checkout@v6

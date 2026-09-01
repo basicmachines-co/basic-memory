@@ -78,6 +78,11 @@ jobs:
     defaults:
       run:
         working-directory: integrations/hermes
+    # `uv python install 3.12` only downloads that interpreter; it does not
+    # select it. Without this, `just check` runs `uv run`, which resolves from
+    # .python-version (3.14) instead.
+    env:
+      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
 
