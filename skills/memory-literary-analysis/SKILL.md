@@ -35,7 +35,7 @@ the work in a long analysis — prefer the POSIX read verbs where they are avail
 | Need | Use | Instead of |
 |------|-----|-----------|
 | A section of a long note | `cat <note> --section Observations` | reading the whole note |
-| A line range of the source text | `cat <source>.txt --lines 4200-4890` | loading the whole book |
+| A line range of the source text | `cat <source>.txt --lines 4200-4890` | pulling the whole book into context |
 | Notes matching frontmatter | `find --meta status=active` | reading notes to check fields |
 | Fields across many notes | `find --meta ... --fields pov,setting` | one read per note |
 | Where something lives | `ls`, `tree`, `find --name '*.md'` | listing everything |
@@ -44,8 +44,10 @@ The two rules that matter across a 100+ chapter run:
 
 - **Never read a note to check a field.** That is what `--meta` predicates and `--fields`
   projection are for — one call answers what a read-per-note loop would cost.
-- **Never read a whole file to reach one part of it.** Sections and line ranges exist so a
-  long chapter or a full source text costs what the relevant part costs.
+- **Never pull a whole file into context to reach one part of it.** Sections and line ranges
+  slice the *output*: the full note is still fetched, then cut down before it is returned. What
+  they save is context, not I/O — a long chapter or a full source text costs you the tokens of
+  the relevant part, not of the whole file.
 
 These compound. In measured runs, predicate queries replaced 28-call scans with a single
 call; across 138 chapters that difference is the run.
@@ -339,11 +341,11 @@ Two constraints that make this the right shape, both worth respecting:
 
 **Then build a chapter offset map once, before processing.** Scan the text for chapter
 headings and record the line range of each chapter, then read chapters by range rather than
-reloading the book:
+re-reading the whole book into context:
 
 ```bash
 grep -n '^CHAPTER ' ~/basic-memory/moby-dick/moby-dick.txt   # heading -> line number
-bm cat moby-dick.txt --lines 4200-4890 --plain               # one chapter, not the whole text
+bm cat moby-dick.txt --lines 4200-4890 --plain               # returns one chapter, not the whole text
 ```
 
 `grep -n` here is the shell's grep on a filesystem path (this is the map-building step, and
@@ -354,7 +356,7 @@ writing the grep pattern.
 
 Store the map in the project (a note or a small JSON file) so later batches — and a resumed
 run after context compaction — do not have to rediscover it. On a long work this is the
-single largest read saving in the pipeline.
+single largest context saving in the pipeline.
 
 ### Batching Strategy
 
@@ -659,7 +661,7 @@ This pipeline works for any literary text. Adjust schemas for genre:
 - **Seed before processing.** Create entity stubs first so wiki-links resolve immediately during chapter processing.
 - **Batch for sanity.** Processing ~10 chapters at a time balances depth with momentum. Track progress with a Task note.
 - **Read the source text.** Don't rely on memory or summaries. Read (or re-read) the actual text for each batch before creating notes. Textual evidence is everything.
-- **Read narrowly.** Keep the source text in the project as `.txt`, index it once, build the chapter offset map once, then read chapters by line range and notes by section. On a long work, whole-file reads are the largest avoidable cost in the pipeline.
+- **Read narrowly.** Keep the source text in the project as `.txt`, index it once, build the chapter offset map once, then read chapters by line range and notes by section. On a long work, whole files landing in context are the largest avoidable cost in the pipeline.
 - **Query, don't scan.** When you need to know which notes have a field, ask with `--meta` predicates and `--fields` projection. Reading notes to check frontmatter is the mistake this pipeline makes at scale. Two ways these queries lie quietly: `--meta` is case-sensitive against the frontmatter `type:` your schemas authored, and `find` returns 10 rows unless you pass `--page-size`.
 - **Observations are your index.** The knowledge graph's value comes from categorized observations. Be generous with categories and specific with content.
 - **Relations are your web.** Every chapter should link to characters, themes, locations, and devices. Every entity should link back to chapters where it appears.
