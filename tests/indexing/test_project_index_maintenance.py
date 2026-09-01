@@ -1312,7 +1312,13 @@ class FailingUpdateProjectIndexSession(FakeProjectIndexSession):
     ) -> FakeProjectIndexResult:
         if "UPDATE entity" in str(statement):
             raise RuntimeError("simulated intra-batch failure")
-        return await super().execute(statement, params)
+        # Constraint: `dataclass(slots=True)` cannot add __slots__ in place, so it
+        # rebuilds the class. Before CPython 3.14 (gh-90562) the rebuilt methods keep
+        # a `__class__` cell pointing at the discarded original, and zero-argument
+        # `super()` then rejects `self` with "obj must be an instance or subtype of
+        # type". Naming the class re-looks it up at call time, which resolves to the
+        # rebuilt class on every supported interpreter.
+        return await super(FailingUpdateProjectIndexSession, self).execute(statement, params)
 
 
 @pytest.mark.asyncio
