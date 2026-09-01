@@ -748,7 +748,8 @@ def find(
             "--meta",
             help=(
                 "Metadata predicate, repeatable: 'status=active', 'confidence>0.6', "
-                "'priority in high,critical', 'tags has security', 'score between 0.3,0.8'. "
+                "'priority in high,critical', 'tags has security', 'score between 0.3,0.8', "
+                "'owner=null' (key missing or null). "
                 "PATH still scopes the query, by file path"
             ),
         ),

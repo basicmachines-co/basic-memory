@@ -77,12 +77,28 @@ confidence>0.6             comparison: > >= < <=
 priority in high,critical  any of the listed values
 tags has security,oauth    array contains ALL listed values
 score between 0.3,0.8      inclusive range
+owner=null                 key missing or explicitly null
 ```
 
 Values are JSON-scalar inferred: `true`/`false`/`null` and numbers become
 booleans, null, and numbers. Quote a token to force the literal string —
 `status="true"` matches the four-character string. Quoting also protects a
-comma inside a list element: `label in "a,b",c` matches `a,b` or `c`.
+comma inside a list element: `label in "a,b",c` matches `a,b` or `c`. An
+unterminated quote is a typo, not a value: `status="active` is refused rather
+than searched for as the text `"active`.
+
+`null` matches only through `=`, and it means "this note carries no value
+here" — the key is absent from the frontmatter, or present and explicitly
+null. Both backends extract those two cases identically, so `owner=null`
+answers the same note set on SQLite and Postgres. The other operators compare
+against their value and a SQL comparison with null is never true, so
+`score>null` and `priority in null,high` are refused instead of answering a
+confident zero.
+
+Numbers must be finite. `score=NaN`, `score=Infinity` and an overflowing
+exponent like `score=1e999` are refused by the grammar rather than failing
+later as an encoding error; quote one (`score="NaN"`) to match the literal
+text.
 
 Keys accept dot-paths into nested frontmatter (`review.approved`), and
 `note_type` is accepted as a spelling of the frontmatter `type` key, matching
@@ -114,6 +130,7 @@ bm find /notes --name "auth*" --plain
 bm find --meta "status=active"
 bm find /specs --meta "status=active" --meta "confidence>0.6"
 bm find myproject --meta "status=active"
+bm find --meta "owner=null" --fields title
 bm find --meta "tags has security,oauth" --fields title,priority
 bm find --meta "status=active" --fields title --plain
 ```

@@ -58,7 +58,10 @@ which is how the manual implements apropos (see [[Manpage]]).
 - **search_type** — see modes above; default is dynamic (`hybrid` if semantic
   search is enabled, else `text`)
 - **metadata_filters** — dict of frontmatter field → value; integer values
-  match integer YAML fields (`{"section": 3}` works)
+  match integer YAML fields (`{"section": 3}` works). A `None` value is an
+  is-null match — notes where the key is absent or explicitly null. `None`
+  inside `$in`, `$between`, a contains list, or a comparison is refused: those
+  compare against the value, and a comparison with null is never true
 - **tags** — list or comma string, same convention as [[write-note(3)]]
 - **min_similarity** — float override for vector/hybrid threshold; `0.0`
   shows everything, `0.8` is high precision

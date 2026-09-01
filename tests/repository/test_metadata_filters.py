@@ -54,6 +54,35 @@ def test_parse_normalizes_scalar_types():
     assert values["ratio"] == "0.5"
 
 
+def test_parse_null_equality_is_an_is_null_clause():
+    """A None value is not equality: `= NULL` is never true in SQL.
+
+    The op is distinct so both dialects have to make a deliberate choice about
+    it — an is-null filter that fell through to the equality branch would report
+    a confident zero for every note in the project.
+    """
+    parsed = parse_metadata_filters({"owner": None})
+    assert parsed == [ParsedMetadataFilter(["owner"], "is_null", None)]
+
+
+@pytest.mark.parametrize(
+    "filters",
+    [
+        {"score": {"$gt": None}},
+        {"score": {"$lte": None}},
+        {"priority": {"$in": ["high", None]}},
+        {"score": {"$between": [None, 0.8]}},
+        {"tags": ["security", None]},
+    ],
+)
+def test_null_refused_outside_equality(filters):
+    """Every operator but equality compares against its value, and a comparison
+    with NULL is never true — so a null bound is refused rather than answering
+    zero rows for a query it cannot express."""
+    with pytest.raises(ValueError, match="null is not supported by"):
+        parse_metadata_filters(filters)
+
+
 def test_invalid_filter_key():
     with pytest.raises(ValueError):
         parse_metadata_filters({"bad key": "value"})

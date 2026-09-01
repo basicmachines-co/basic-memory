@@ -1206,6 +1206,15 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 text_expr = f"jsonb_extract_path_text({metadata_expr}, {path_args})"
                 json_expr = f"jsonb_extract_path({metadata_expr}, {path_args})"
 
+                # jsonb_extract_path_text returns SQL NULL both for a missing key
+                # and for an explicit JSON null — the same two cases SQLite's
+                # json_extract collapses — so the dialects answer
+                # `{"owner": None}` row for row. `= NULL` is never true, so
+                # equality here would report a confident zero.
+                if filt.op == "is_null":
+                    conditions.append(f"{text_expr} IS NULL")
+                    continue
+
                 if filt.op == "eq":
                     value_param = f"meta_val_{idx}"
                     params[value_param] = filt.value

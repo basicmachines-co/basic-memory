@@ -27,6 +27,7 @@ project is addressable (where there is no ambiguity); the qualified
 
 import asyncio
 import json
+import math
 import os
 import re
 from typing import Annotated, Any, Optional
@@ -407,8 +408,26 @@ _OPERATOR_VALUE_PREFIXES = frozenset("=<>")
 _METADATA_KEY_ALIASES = {"note_type": "type"}
 
 
+def _opens_an_unterminated_quote(text: str) -> bool:
+    """True when a double quote opens in `text` and nothing closes it.
+
+    One scanner decides this for every value token, scalar or list element, so
+    the two paths cannot disagree about what "quoted" means.
+    """
+    in_quotes = False
+    escaped = False
+    for char in text:
+        if escaped:
+            escaped = False
+        elif in_quotes and char == "\\":
+            escaped = True
+        elif char == '"':
+            in_quotes = not in_quotes
+    return in_quotes
+
+
 def _predicate_scalar(token: str, predicate: str) -> Any:
-    """Read one predicate value token, refusing a folded-in operator character.
+    """Read one predicate value token, refusing everything a search cannot answer.
 
     "true"/"false"/"null"/numbers become bool/None/int/float so the produced
     filters dict is byte-equal to what a rich search_notes caller passes as
@@ -431,10 +450,37 @@ def _predicate_scalar(token: str, predicate: str) -> Any:
             f"supported: {_SUPPORTED_PREDICATE_OPS}; quote the value as "
             f'"{text}" to match text that starts with that character'
         )
+    # Trigger: a quote opens in the token and never closes.
+    # Why: json.loads rejects it, and the raw-text fallback would then keep the
+    #      dangling quote as part of a literal value — 'status="active' would
+    #      search for the seven-character text '"active', report no matches,
+    #      and hide the typo behind an ordinary empty result.
+    # Outcome: refuse for every value token, so the scalar operators and the
+    #          list operators (where a severed quote would also mis-split the
+    #          list) answer a dangling quote the same way.
+    if _opens_an_unterminated_quote(text):
+        raise ValueError(
+            f"find: predicate '{predicate}' has an unterminated quoted value; "
+            "close the quote — 'status=\"active\"' forces a literal string, and "
+            "'label in \"a,b\",c' protects a comma inside a list element"
+        )
     try:
         value = json.loads(text)
     except json.JSONDecodeError:
         return text
+    # Trigger: the token parsed to a non-finite float. Python's JSON reader
+    #          accepts NaN/Infinity/-Infinity as an extension, and overflows a
+    #          large exponent ("1e999") to infinity.
+    # Why: none of those are JSON the request encoder will emit, so the filter
+    #      died at transport with "Out of range float values are not JSON
+    #      compliant" — a network-shaped error for what is a predicate typo.
+    # Outcome: refuse here, in the same shape as the grammar's other refusals.
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError(
+            f"find: predicate '{predicate}' has a non-finite number '{text}'; "
+            f'predicate values must be finite numbers; quote the value as "{text}" '
+            "to match that literal text"
+        )
     if value is None or isinstance(value, (bool, int, float, str)):
         return value
     return text
@@ -448,8 +494,11 @@ def _split_predicate_items(raw_value: str, predicate: str) -> list[str]:
     and `between` too: 'label in "a,b",c' yields ['"a,b"', 'c'], which
     _predicate_scalar then reads as the literal strings "a,b" and "c". Splitting
     the raw string first would sever the quoted token into '"a' and 'b"' and
-    filter for values nothing carries — wrong, and silent. An unterminated quote
-    is a typo rather than a value, so it fails fast for the same reason.
+    filter for values nothing carries — wrong, and silent.
+
+    A split only happens outside quotes, so an unterminated quote here always
+    ends up inside one element and _predicate_scalar refuses it; this function
+    does not repeat that check.
     """
     items: list[str] = []
     current: list[str] = []
@@ -467,16 +516,30 @@ def _split_predicate_items(raw_value: str, predicate: str) -> list[str]:
             current.pop()
             items.append("".join(current))
             current = []
-    if in_quotes:
-        raise ValueError(
-            f"find: predicate '{predicate}' has an unterminated quoted value; "
-            'quote a list element as "text with, commas"'
-        )
     items.append("".join(current))
     stripped = [item.strip() for item in items]
     if any(not item for item in stripped):
         raise ValueError(f"find: predicate '{predicate}' has an empty list element")
     return stripped
+
+
+def _refuse_null_outside_equality(values: list[Any], op: str, predicate: str) -> None:
+    """Refuse a null bound, list element, or comparison value.
+
+    Trigger: `null` reached an operator other than '='.
+    Why: '=' compiles to IS NULL server-side, which is the question null asks —
+         does this note carry a value here at all. Every other operator compares
+         against the value, and a SQL comparison with NULL is never true, so
+         'score>null' or 'priority in null,high' would answer zero rows for
+         every note in the project rather than name the query it cannot run.
+    Outcome: refuse, pointing at the equality spelling that does work.
+    """
+    if any(value is None for value in values):
+        raise ValueError(
+            f"find: predicate '{predicate}' uses null with '{op}'; null matches only "
+            "as equality ('owner=null' finds notes carrying no owner); quote the "
+            'value as "null" to match that literal text'
+        )
 
 
 def _parse_meta_predicates(predicates: list[str]) -> dict[str, Any]:
@@ -509,6 +572,7 @@ def _parse_meta_predicates(predicates: list[str]) -> dict[str, Any]:
                 _predicate_scalar(item, predicate)
                 for item in _split_predicate_items(raw_value, predicate)
             ]
+            _refuse_null_outside_equality(items, op, predicate)
             if op == "between" and len(items) != 2:
                 raise ValueError(f"find: 'between' needs exactly min,max in '{predicate}'")
             filters[key] = (
@@ -518,6 +582,8 @@ def _parse_meta_predicates(predicates: list[str]) -> dict[str, Any]:
             if not raw_value.strip():
                 raise ValueError(f"find: predicate '{predicate}' has no value")
             value = _predicate_scalar(raw_value, predicate)
+            if op != "=":
+                _refuse_null_outside_equality([value], op, predicate)
             filters[key] = value if op == "=" else {_SYMBOL_OPERATORS[op]: value}
     return filters
 
@@ -599,14 +665,17 @@ async def find(
               "priority in high,critical"  any of the listed values
               "tags has security,oauth"    array contains ALL listed values
               "score between 0.3,0.8"      inclusive range
+              "owner=null"                 key missing or explicitly null
             Values are JSON-scalar inferred ("true"/"false"/"null"/numbers
             become booleans/None/numbers); quote a token to force a literal
             string (e.g. 'status="true"'), including inside a list, where the
             quotes also protect a comma ('label in "a,b",c' matches "a,b" or
             "c") and a value that itself starts with an operator character
-            ('range=">=5"'). Keys accept dot-paths ("review.approved");
-            "note_type" aliases the frontmatter "type" key. Any other operator
-            fails fast naming the supported set.
+            ('range=">=5"'). Numbers must be finite, and null is only meaningful
+            with "=" — the other operators compare against the value, and a
+            comparison with null is never true. Keys accept dot-paths
+            ("review.approved"); "note_type" aliases the frontmatter "type" key.
+            Any other operator fails fast naming the supported set.
         fields: Frontmatter fields to return per hit (dot-paths allowed), e.g.
             ["title", "priority"]. Requires `meta`. A field missing on a hit
             renders as null — rows are never dropped.

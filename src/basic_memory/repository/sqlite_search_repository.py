@@ -952,6 +952,15 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                     params[path_param] = build_sqlite_json_path(filt.path_parts)
                     extract_expr = f"json_extract(entity.entity_metadata, :{path_param})"
 
+                # json_extract returns SQL NULL both for a missing key and for an
+                # explicit JSON null, and the generated frontmatter_* columns are
+                # that same json_extract — so IS NULL means "the note carries no
+                # value here", the question `{"owner": None}` asks. `= NULL` is
+                # never true, so equality here would report a confident zero.
+                if filt.op == "is_null":
+                    conditions.append(f"{extract_expr} IS NULL")
+                    continue
+
                 if filt.op == "eq":
                     value_param = f"meta_val_{idx}"
                     params[value_param] = filt.value
