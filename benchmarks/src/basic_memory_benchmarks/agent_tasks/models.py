@@ -2,15 +2,24 @@
 
 from __future__ import annotations
 
+import re
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from basic_memory_benchmarks.models import RuntimeInfo
 
 # "error" marks a loop that died mid-task (model or dispatch failure): the
 # partial accounting is kept on the errored row, never counted as a budget stop.
 StopReason = Literal["final", "turns", "tokens", "wall_clock", "error"]
+
+# run_id is not merely a label. The driver splices it into a `bm project add`
+# argv token (project names are `{run_id}-{task.id}`) and into two filesystem
+# paths (the benchmark home and the run dir), so it must be safe as both. A
+# leading "-" makes the BM CLI parse the project name as options and abort with
+# "No such option: -t" — naming a flag the operator never typed — and a path
+# separator would place run artifacts outside the run dir.
+RUN_ID_PATTERN = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*")
 
 
 class AgentBudget(BaseModel):
@@ -32,7 +41,12 @@ class AgentTasksConfig(BaseModel):
     # None = the temperature parameter is omitted from requests entirely
     # (Claude 5 endpoints reject it). Provenance: the value the model factory
     # used for this run.
-    model_temperature: float | None = 0.0
+    # allow_inf_nan=False because nan/inf survive float() and Pydantic's plain
+    # float schema: they would reach the request body, where httpx raises a bare
+    # ValueError mid-run. Worse for provenance, model_dump_json() encodes them
+    # as null — which is exactly this field's "temperature omitted" sentinel, so
+    # the recorded run config would silently misreport what was sent.
+    model_temperature: float | None = Field(default=0.0, allow_inf_nan=False)
     judge_spec: str | None = None
     corpus_dir: str = "benchmarks/datasets/agent-tasks/corpus"
     output_root: str = "benchmarks/runs"
@@ -42,6 +56,23 @@ class AgentTasksConfig(BaseModel):
     tool_timeout_seconds: float = Field(default=120.0, gt=0.0)
     settle_timeout_seconds: float = Field(default=180.0, gt=0.0)
     allow_surface_skip: bool = True
+
+    @field_validator("run_id")
+    @classmethod
+    def _run_id_is_argv_and_path_safe(cls, value: str) -> str:
+        # Rejected here rather than in the driver so the run dies before any
+        # setup cost: without this the first `bm project add` fails only after
+        # the benchmark home, a warm `bm mcp` subprocess, and a full corpus copy
+        # exist — and run_command captures stderr, so the operator sees a bare
+        # CalledProcessError exit status, not the CLI's own complaint. The
+        # abandoned home then blocks re-running the same run_id.
+        if not RUN_ID_PATTERN.fullmatch(value):
+            raise ValueError(
+                "run_id must start with a letter, digit, or underscore and use only "
+                "letters, digits, '.', '_', or '-'; it becomes both a CLI argument "
+                f"and a path component, got {value!r}"
+            )
+        return value
 
 
 class TurnRecord(BaseModel):

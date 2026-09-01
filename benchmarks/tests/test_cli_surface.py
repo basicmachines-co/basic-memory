@@ -466,3 +466,35 @@ def test_non_finite_temperature_would_break_the_request_body() -> None:
             "http://localhost/v1/chat/completions",
             json={"model": "m", "temperature": float("nan")},
         )
+
+
+@pytest.mark.parametrize("raw", ["-trial", "nested/run", ".."])
+def test_run_agent_tasks_rejects_unsafe_run_id(tmp_path: Path, raw: str) -> None:
+    # AgentTasksConfig owns the rule; the CLI must surface it as a parameter
+    # error rather than letting a Pydantic traceback escape. Without it,
+    # --run-id=-trial reached `bm project add -trial-<task>`, which parses the
+    # name as options and aborts after the corpus copy.
+    script = tmp_path / "script.json"
+    script.write_text('{"tasks": {}}', encoding="utf-8")
+    bm_checkout = tmp_path / "bm"
+    bm_checkout.mkdir()
+
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "agent-tasks",
+            "--model",
+            f"scripted:{script}",
+            "--bm-local-path",
+            str(bm_checkout),
+            # The "=" form is what lets a leading-hyphen value through Typer's
+            # own option parsing — exactly how the bad run_id reaches the model.
+            f"--run-id={raw}",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "run_id must start with" in result.output
+    # A parameter error, not an escaped traceback.
+    assert result.exception is None or isinstance(result.exception, SystemExit)
