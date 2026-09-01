@@ -206,6 +206,57 @@ def metadata_filter_content_type_condition(params: Dict[str, Any]) -> str:
     return "entity.content_type = :metadata_filter_content_type"
 
 
+# SQLite's LIKE has no default escape character, and Postgres's is already the
+# backslash, so naming this one explicitly in every pattern is what lets a single
+# escaped pattern mean the same thing on both backends.
+_LIKE_ESCAPE_CHARACTER = "\\"
+
+
+def metadata_contains_like_condition(
+    extract_expr: str,
+    value: Any,
+    *,
+    param_prefix: str,
+    params: Dict[str, Any],
+) -> str:
+    """Build the compatibility half of an array-contains metadata filter.
+
+    The primary half of a ``{"tags": ["security"]}`` filter asks JSON whether the
+    array holds the element — ``json_each`` on SQLite, ``@>`` on Postgres — and
+    answers only when the stored value really is a JSON array. Frontmatter
+    written before tags were normalized can hold the array's *text* instead,
+    either JSON-quoted ('["security", "auth"]') or as a Python repr
+    ("['security', 'auth']"), and only a substring match finds an element inside
+    those. Hence a pattern per quote style, and hence the pattern-language
+    problem this function exists to solve.
+
+    LIKE reads "%" and "_" in the searched-for value as wildcards, so
+    interpolating the value raw turned `tags has 100%` into a pattern that also
+    matched "100-percent" — a wrong hit and an inflated exact total, produced by
+    the branch the caller only meant as a fallback. Escaping both wildcards and
+    the escape character itself makes the value literal again.
+
+    Shared by both backends for the same reason the subtree scope is: a filter
+    that admits different rows per dialect would report an exact total for a
+    match set the other never produces.
+    """
+    escaped = (
+        str(value)
+        .replace(_LIKE_ESCAPE_CHARACTER, _LIKE_ESCAPE_CHARACTER * 2)
+        .replace("%", f"{_LIKE_ESCAPE_CHARACTER}%")
+        .replace("_", f"{_LIKE_ESCAPE_CHARACTER}_")
+    )
+    double_quoted_param = f"{param_prefix}_like"
+    single_quoted_param = f"{param_prefix}_like_single"
+    params[double_quoted_param] = f'%"{escaped}"%'
+    params[single_quoted_param] = f"%'{escaped}'%"
+    escape_clause = f" ESCAPE '{_LIKE_ESCAPE_CHARACTER}'"
+    return (
+        f"{extract_expr} LIKE :{double_quoted_param}{escape_clause} "
+        f"OR {extract_expr} LIKE :{single_quoted_param}{escape_clause}"
+    )
+
+
 async def purge_stale_search_index_rows(
     session_maker: async_sessionmaker[AsyncSession],
     project_id: int,

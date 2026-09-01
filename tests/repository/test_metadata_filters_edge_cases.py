@@ -274,6 +274,118 @@ async def test_filter_contains_single_element_array(search_repository, session_m
 
 
 @pytest.mark.asyncio
+async def test_contains_filter_matches_an_array_stored_as_text(search_repository, session_maker):
+    """CONTRACT: the substring fallback is what reaches un-normalized frontmatter.
+
+    A `tags` filter is answered first by an exact JSON-membership test, which
+    needs the stored value to really be an array. Frontmatter written before
+    tags were normalized can hold the array's *text* instead, in either quote
+    style, and only a substring match finds an element inside those. This is the
+    positive control for the escaping tests below: a fix that made the wildcard
+    leak impossible by disabling the fallback would pass those and fail here.
+    """
+    json_text = await _index_entity_with_metadata(
+        search_repository,
+        session_maker,
+        "Tags As Json Text",
+        {"tags": '["security", "auth"]'},
+    )
+    python_repr = await _index_entity_with_metadata(
+        search_repository,
+        session_maker,
+        "Tags As Python Repr",
+        {"tags": "['security', 'auth']"},
+    )
+    await _index_entity_with_metadata(
+        search_repository,
+        session_maker,
+        "Tags As Text Without The Element",
+        {"tags": '["database", "migration"]'},
+    )
+
+    results = await search_repository.search(metadata_filters={"tags": ["security"]})
+
+    assert {r.id for r in results} == {json_text.id, python_repr.id}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("literal_tag", "lookalike_tag"),
+    [
+        # "%" is LIKE's any-run wildcard: the unescaped pattern for "100%" read
+        # as '"100' + anything + '"', which "100-percent" satisfies.
+        ("100%", "100-percent"),
+        # "_" is LIKE's any-single-character wildcard.
+        ("a_c", "abc"),
+        # The escape character itself. Escaping only the two wildcards would
+        # leave this value's "%" preceded by an escaped backslash and therefore
+        # still live as a wildcard — so the pattern would match any run there.
+        ("a\\%c", "a\\zzzc"),
+    ],
+)
+async def test_contains_filter_treats_like_metacharacters_literally(
+    search_repository, session_maker, literal_tag, lookalike_tag
+):
+    """REGRESSION: a `has` value is text to match, not a pattern to interpret.
+
+    The exact JSON-membership half of a contains filter always read the value
+    literally; the substring fallback interpolated it straight into a LIKE
+    pattern, so a tag carrying "%" or "_" silently matched tags that merely
+    looked like it. The wrong rows counted into the exact total too, which is
+    what makes this a wrong answer rather than a cosmetic one.
+
+    The literal tag still has to match — via the exact half — or the escaping
+    would just be a way to match nothing.
+    """
+    literal = await _index_entity_with_metadata(
+        search_repository,
+        session_maker,
+        "Tag Literal",
+        {"tags": [literal_tag]},
+    )
+    await _index_entity_with_metadata(
+        search_repository,
+        session_maker,
+        "Tag Lookalike",
+        {"tags": [lookalike_tag]},
+    )
+
+    results = await search_repository.search(metadata_filters={"tags": [literal_tag]})
+
+    assert {r.id for r in results} == {literal.id}
+    # The total is what paginates, so the lookalike must be out of it too.
+    assert await search_repository.count(metadata_filters={"tags": [literal_tag]}) == 1
+
+
+@pytest.mark.asyncio
+async def test_contains_filter_escapes_metacharacters_on_a_nested_path(
+    search_repository, session_maker
+):
+    """The nested path takes the generic json_extract branch, not the tags column.
+
+    SQLite answers a bare `tags` filter from its generated `tags_json` column and
+    anything else from a json_extract call, so the escaping has to hold on both
+    expressions rather than on the one the tags tests happen to exercise.
+    """
+    literal = await _index_entity_with_metadata(
+        search_repository,
+        session_maker,
+        "Nested Labels Literal",
+        {"review": {"labels": ["100%"]}},
+    )
+    await _index_entity_with_metadata(
+        search_repository,
+        session_maker,
+        "Nested Labels Lookalike",
+        {"review": {"labels": ["100-percent"]}},
+    )
+
+    results = await search_repository.search(metadata_filters={"review.labels": ["100%"]})
+
+    assert {r.id for r in results} == {literal.id}
+
+
+@pytest.mark.asyncio
 async def test_filter_nested_path_missing_intermediate(search_repository, session_maker):
     """Filtering on a nested path where intermediate keys are missing returns no match."""
     await _index_entity_with_metadata(

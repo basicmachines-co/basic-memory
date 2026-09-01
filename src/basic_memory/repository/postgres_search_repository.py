@@ -27,6 +27,7 @@ from basic_memory.repository.search_repository_base import (
     SearchRepositoryBase,
     VectorChunkState,
     file_path_prefix_condition,
+    metadata_contains_like_condition,
     metadata_filter_content_type_condition,
 )
 from basic_memory.repository.search_trace import (
@@ -1242,14 +1243,16 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     for j, val in enumerate(filt.value):
                         tag_param = f"{base_param}_{j}"
                         params[tag_param] = json.dumps([val])
-                        like_param = f"{base_param}_{j}_like"
-                        params[like_param] = f'%"{val}"%'
-                        like_param_single = f"{base_param}_{j}_like_single"
-                        params[like_param_single] = f"%'{val}'%"
+                        # The exact JSONB containment test is the primary path; the
+                        # substring patterns only reach values stored as array text.
+                        like_condition = metadata_contains_like_condition(
+                            text_expr,
+                            val,
+                            param_prefix=tag_param,
+                            params=params,
+                        )
                         tag_conditions.append(
-                            f"({json_expr} @> CAST(:{tag_param} AS jsonb) "
-                            f"OR {text_expr} LIKE :{like_param} "
-                            f"OR {text_expr} LIKE :{like_param_single})"
+                            f"({json_expr} @> CAST(:{tag_param} AS jsonb) OR {like_condition})"
                         )
                     conditions.append(" AND ".join(tag_conditions))
                     continue
