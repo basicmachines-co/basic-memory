@@ -98,6 +98,34 @@ class ToolAgentModel(ABC):
 
 REDACTION_MARKER = "[redacted]"
 
+# A gateway quotes the offending value into its JSON error body once; a proxy
+# that wraps an upstream JSON body in a string field quotes it twice. Nothing
+# an OpenAI-compatible endpoint emits nests deeper than that, and each level is
+# strictly longer than the last, so two is where the form set stops earning its
+# keep.
+_MAX_JSON_ESCAPE_DEPTH = 2
+
+
+def _encoded_forms(secret: str) -> list[str]:
+    """Every spelling ``secret`` can take in an error body.
+
+    HTTP allows any visible ASCII character in a header value, so an operator
+    may pass a ``--model-header`` secret containing ``"`` or ``\\``. Echoed
+    inside a JSON error body such a value arrives *escaped* — ``"`` as ``\\"``,
+    ``\\`` as ``\\\\`` — and a search for the plaintext never matches it, so
+    the credential would ride the body into the artifact intact.
+
+    A value with nothing to escape yields the plaintext at every level, so the
+    common alphanumeric key still costs a single replacement.
+    """
+    forms = [secret]
+    for _ in range(_MAX_JSON_ESCAPE_DEPTH):
+        # json.dumps wraps its result in quotes; [1:-1] drops them to leave the
+        # escaped payload exactly as it appears inside a surrounding JSON
+        # string. Re-applying it models one more level of nesting.
+        forms.append(json.dumps(forms[-1])[1:-1])
+    return forms
+
 
 def redact_secrets(text: str, secrets: Sequence[str]) -> str:
     """Mask known secret values in text that is headed for run artifacts.
@@ -110,13 +138,17 @@ def redact_secrets(text: str, secrets: Sequence[str]) -> str:
 
     Redaction is value-based rather than pattern-based: masking exactly the
     values we were handed is deterministic and cannot be defeated by an
-    unfamiliar credential format.
+    unfamiliar credential format. Each value is masked in every spelling
+    ``_encoded_forms`` derives, because the body that leaks it is usually JSON.
     """
-    # Longest first: when one secret contains another (a bare key and the same
-    # key inside a longer header value), masking the short one first would
-    # leave the remainder of the longer value exposed.
-    for secret in sorted(secrets, key=len, reverse=True):
-        text = text.replace(secret, REDACTION_MARKER)
+    forms = {form for secret in secrets for form in _encoded_forms(secret)}
+    # Longest first: when one form contains another — a bare key and the same
+    # key inside a longer header value, or a plaintext value inside its own
+    # escaped spelling — masking the short one first would leave the remainder
+    # of the longer value exposed. Ties break on the form itself so that a set
+    # of equal-length secrets still redacts identically on every run.
+    for form in sorted(forms, key=lambda form: (-len(form), form)):
+        text = text.replace(form, REDACTION_MARKER)
     return text
 
 
