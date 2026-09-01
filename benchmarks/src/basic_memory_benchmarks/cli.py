@@ -473,6 +473,8 @@ def run_agent_tasks_command(
         "--model-header",
         help="Extra HTTP header for the agent endpoint as 'Name=value' (repeatable); "
         "e.g. anthropic-workspace-id=wrkspc_... for identity-linked Anthropic keys. "
+        "Header names are matched case-insensitively, so 'authorization=...' "
+        "replaces the bearer derived from OPENAI_API_KEY rather than joining it. "
         "Values are never recorded in run artifacts.",
     ),
     model_temperature: str = typer.Option(
