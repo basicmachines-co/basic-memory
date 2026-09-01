@@ -8,17 +8,21 @@ tagged ``POSIX_TOOLS_TAG`` and hidden by default: the composition root in
 checks config itself.
 
 Projects are mount points (#1415): when no ``project``/``project_id`` param is
-given, a path or identifier whose first segment names an active project routes
-there, with the remainder as the project-relative path — inputs accept exactly
-the '<project>/path' identifiers tool outputs produce. An explicit project
-param plus an agreeing prefix strips the prefix; a disagreeing one refuses
-naming both. In multi-project configs an unrecognized first segment refuses
-with the active project list rather than silently defaulting. Collision rule:
-the project always wins over a same-named top-level folder in the default
-project, so that folder is only reachable unqualified in single-project
-configs (where there is no ambiguity); the qualified '<project>/folder/...'
-form always reaches it. ``man`` is excluded — its ``project`` param names the
-manual project, not a data project.
+given, a path or identifier whose first segment names an addressable project
+routes there, with the remainder as the project-relative path — inputs accept
+exactly the '<project>/path' identifiers tool outputs produce. An explicit
+project param plus an agreeing prefix strips the prefix; a disagreeing one
+refuses naming both. Where more than one project is addressable — several local
+projects, or a cloud workspace holding several — an unrecognized first segment
+refuses with the project list rather than silently defaulting (#1421); the
+mount view and the resolver read one list, so anything ``ls "/"`` advertises is
+addressable by name.
+
+Collision rule: the project always wins over a same-named top-level folder in
+the default project, so that folder is only reachable unqualified when a single
+project is addressable (where there is no ambiguity); the qualified
+'<project>/folder/...' form always reaches it. ``man`` is excluded — its
+``project`` param names the manual project, not a data project.
 """
 
 import os
@@ -31,7 +35,11 @@ from basic_memory.config import ConfigManager
 from basic_memory.man import bundled_pages, find_page, parse_page_ref, render_index
 from basic_memory.mcp.container import get_container
 from basic_memory.mcp.note_reads import read_note_json_by_external_id
-from basic_memory.mcp.project_context import get_project_client, resolve_project_path_route
+from basic_memory.mcp.project_context import (
+    addressable_projects,
+    get_project_client,
+    resolve_project_path_route,
+)
 from basic_memory.mcp.server import POSIX_TOOLS_TAG, mcp, set_posix_tools_visibility
 from basic_memory.schemas.directory import (
     DEFAULT_DIRECTORY_PAGE_SIZE,
@@ -198,7 +206,7 @@ def _grep_retrieval_mode(literal: bool) -> SearchRetrievalMode:
 
 @mcp.tool(
     title="Grep",
-    description="Search note content for a pattern. Multi-project configs require 'project'.",
+    description="Search note content for a pattern. Requires 'project' when several are addressable.",
     tags={POSIX_TOOLS_TAG, "search"},
     annotations={
         "title": "Grep",
@@ -223,7 +231,7 @@ async def grep(
         literal: Force literal full-text matching instead of semantic search.
         page: Page number (1-indexed).
         page_size: Results per page.
-        project: Project name. Required when more than one project is configured.
+        project: Project name. Required when more than one project is addressable.
         project_id: Project external_id (UUID); takes precedence over `project`.
         context: Optional FastMCP context.
 
@@ -261,32 +269,25 @@ async def grep(
         return response.model_dump(mode="json", exclude_none=True)
 
 
-async def _project_mount_listing(*, page: int, page_size: int) -> dict[str, Any]:
-    """Render the active projects as directory entries (the mount-point view).
+async def _project_mount_listing(
+    *, page: int, page_size: int, context: Context | None
+) -> dict[str, Any]:
+    """Render the addressable projects as directory entries (the mount-point view).
 
-    Reuses list_memory_projects' stdio enumeration path: in-process ASGI
-    locally, the same call over HTTP in global cloud mode. Each row's
-    ``directory_path`` is the copyable '/<project>' prefix form.
+    Sources ``addressable_projects`` — the same set the path resolver routes by
+    — so every mount advertised here is reachable as '<project>/path' (#1421).
+    Each row's ``directory_path`` is the copyable '/<project>' prefix form, and
+    the set already arrives sorted by project name.
     """
-    # Import here to avoid circular import
-    from basic_memory.mcp.async_client import get_client
-    from basic_memory.mcp.clients import ProjectClient
-
-    async with get_client() as client:
-        project_list = await ProjectClient(client).list_projects()
-
-    rows = sorted(
-        (
-            DirectoryNode(
-                name=item.name,
-                directory_path=f"/{item.permalink}",
-                permalink=item.permalink,
-                type="directory",
-            )
-            for item in project_list.projects
-        ),
-        key=lambda node: node.name,
-    )
+    rows = [
+        DirectoryNode(
+            name=item.name,
+            directory_path=f"/{item.permalink}",
+            permalink=item.permalink,
+            type="directory",
+        )
+        for item in await addressable_projects(context=context)
+    ]
     start = (page - 1) * page_size
     listing = DirectoryListResponse(
         nodes=rows[start : start + page_size],
@@ -326,7 +327,8 @@ async def ls(
         page: Page number (1-indexed).
         page_size: Nodes per page.
         project: Project name. Optional - '/' lists projects; qualified paths
-            route themselves; multi-project configs refuse other unqualified paths.
+            route themselves; other unqualified paths refuse when several
+            projects are addressable.
         project_id: Project external_id (UUID); takes precedence over `project`.
         context: Optional FastMCP context.
 
@@ -350,7 +352,7 @@ async def ls(
         and not os.environ.get("BASIC_MEMORY_MCP_PROJECT")
         and not path.strip().strip("/")
     ):
-        return await _project_mount_listing(page=page, page_size=page_size)
+        return await _project_mount_listing(page=page, page_size=page_size, context=context)
 
     route = await resolve_project_path_route(
         path, project=project, project_id=project_id, context=context
@@ -400,7 +402,7 @@ async def find(
         page: Page number (1-indexed).
         page_size: Nodes per page.
         project: Project name. Optional - qualified paths route themselves;
-            multi-project configs refuse unqualified paths.
+            unqualified paths refuse when several projects are addressable.
         project_id: Project external_id (UUID); takes precedence over `project`.
         context: Optional FastMCP context.
 
@@ -444,7 +446,7 @@ async def find(
 
 @mcp.tool(
     title="Tail",
-    description="Show recently changed notes. Multi-project configs require 'project'.",
+    description="Show recently changed notes. Requires 'project' when several are addressable.",
     tags={POSIX_TOOLS_TAG, "navigation", "notes"},
     annotations={
         "title": "Tail",
@@ -465,7 +467,7 @@ async def tail(
     Args:
         timeframe: Time window, e.g. "7d", "yesterday", "2 days ago".
         lines: Maximum number of rows to return (1-100).
-        project: Project name. Required when more than one project is configured.
+        project: Project name. Required when more than one project is addressable.
         project_id: Project external_id (UUID); takes precedence over `project`.
         context: Optional FastMCP context.
 
