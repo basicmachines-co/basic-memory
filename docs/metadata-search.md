@@ -55,6 +55,23 @@ Range filter (inclusive). Takes a `[min, max]` pair.
 {"score": {"$between": [0.3, 0.8]}}
 ```
 
+### Null (missing or explicitly null)
+
+A `None` value asks whether a note carries any value for the field at all.
+
+```json
+{"owner": null}
+```
+
+Matches notes whose frontmatter has no `owner` key, and notes whose `owner` is
+explicitly null. Both backends extract those two cases to SQL `NULL`, so the
+filter answers the same note set on SQLite and Postgres.
+
+Null works only through equality. Inside `$in`, `$between`, an array-contains
+list, or a comparison it is rejected: those compile to a SQL comparison against
+the value, and a comparison with `NULL` is never true, so the filter would
+report a confident zero rather than the query it cannot express.
+
 ### Nested Access (dot notation)
 
 Access nested frontmatter values using dots.
@@ -70,6 +87,7 @@ This queries the `version` key inside a `schema` object in frontmatter.
 | Operator | Syntax | Example |
 |----------|--------|---------|
 | Equality | `{"field": "value"}` | `{"status": "active"}` |
+| Is null | `{"field": null}` | `{"owner": null}` |
 | Array contains (all) | `{"field": ["a", "b"]}` | `{"tags": ["security", "oauth"]}` |
 | `$in` (any of) | `{"field": {"$in": [...]}}` | `{"priority": {"$in": ["high", "critical"]}}` |
 | `$gt` / `$gte` | `{"field": {"$gt": N}}` | `{"confidence": {"$gt": 0.7}}` |
@@ -82,6 +100,7 @@ This queries the `version` key inside a `schema` object in frontmatter.
 - Each operator dict must contain exactly one operator.
 - `$in` and array-contains require non-empty lists.
 - `$between` requires exactly two values `[min, max]`.
+- `null` is an is-null match and only valid as a plain equality value.
 
 ## MCP Tool — `search_notes`
 

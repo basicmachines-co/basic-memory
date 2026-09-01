@@ -895,7 +895,10 @@ async def search_notes(
                    ["requirement"]). Pair with entity_types=["observation"] to return only
                    observations whose category matches exactly.
         after_date: Optional date filter for recent content (e.g., "1 week", "2d", "2024-01-01")
-        metadata_filters: Optional structured frontmatter filters (e.g., {"status": "in-progress"})
+        metadata_filters: Optional structured frontmatter filters (e.g., {"status": "in-progress"}).
+                A None value is an is-null match: notes where the key is absent or explicitly
+                null. None inside $in/$between/a contains list/a comparison is refused —
+                those compare against the value, and a comparison with null is never true.
         tags: Optional tag filter (frontmatter tags); shorthand for metadata_filters["tags"].
               Accepts a list (["a", "b"]) or a comma-separated string ("a,b"), matching the
               write_note tags convention and the tag: query shorthand.

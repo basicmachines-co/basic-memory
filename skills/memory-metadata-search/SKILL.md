@@ -56,6 +56,17 @@ Numeric values use numeric comparison; strings use lexicographic comparison.
 {"score": {"$between": [0.3, 0.8]}}
 ```
 
+### Null (field missing or explicitly null)
+
+```json
+{"owner": null}
+```
+
+Matches notes with no `owner` key and notes whose `owner` is explicitly null.
+Null works only as a plain equality value — inside `$in`, `$between`, an
+array-contains list, or a comparison it is rejected, because those compare
+against the value and a comparison with null is never true.
+
 ### Nested Access (dot notation)
 
 ```json
@@ -67,6 +78,7 @@ Numeric values use numeric comparison; strings use lexicographic comparison.
 | Operator | Syntax | Example |
 |----------|--------|---------|
 | Equality | `{"field": "value"}` | `{"status": "active"}` |
+| Is null | `{"field": null}` | `{"owner": null}` |
 | Array contains | `{"field": ["a", "b"]}` | `{"tags": ["security", "oauth"]}` |
 | `$in` | `{"field": {"$in": [...]}}` | `{"priority": {"$in": ["high", "critical"]}}` |
 | `$gt` / `$gte` | `{"field": {"$gt": N}}` | `{"confidence": {"$gt": 0.7}}` |
@@ -79,6 +91,7 @@ Numeric values use numeric comparison; strings use lexicographic comparison.
 - Operator dicts must contain exactly one operator
 - `$in` and array-contains require non-empty lists
 - `$between` requires exactly `[min, max]`
+- `null` is an is-null match and only valid as a plain equality value
 
 > **Warning:** Operators MUST include the `$` prefix — write `$gte`, not `gte`. Without the prefix the filter is treated as an exact-match key and will silently return no results. Correct: `{"confidence": {"$gte": 0.7}}`. Wrong: `{"confidence": {"gte": 0.7}}`.
 

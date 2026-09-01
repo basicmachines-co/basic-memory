@@ -22,7 +22,7 @@ from basic_memory.mcp.project_context import (
     UnqualifiedPathRefusedError,
 )
 from basic_memory.mcp.tools import cat, find, grep, ls, man, search_notes, tail, write_note
-from basic_memory.repository.metadata_filters import parse_metadata_filters
+from basic_memory.repository.metadata_filters import ParsedMetadataFilter, parse_metadata_filters
 from basic_memory.schemas.search import SearchRetrievalMode
 
 
@@ -529,6 +529,10 @@ PREDICATE_GRAMMAR = [
     # Quoting is the documented escape for literal values, and it holds inside
     # a list: the comma it protects belongs to the value, not to the list.
     ('label in "a,b",c', {"label": {"$in": ["a,b", "c"]}}),
+    # A backslash-escaped quote stays inside the value; it neither closes the
+    # token nor leaves it looking unterminated.
+    ('label in "a\\"b",c', {"label": {"$in": ['a"b', "c"]}}),
+    ('note="say \\"hi\\""', {"note": 'say "hi"'}),
     ('tags has "red, green"', {"tags": ["red, green"]}),
     ('name in "quoted"', {"name": {"$in": ["quoted"]}}),
     # An unquoted value may not start with an operator character (a mis-spelled
@@ -538,6 +542,11 @@ PREDICATE_GRAMMAR = [
     ('range>"<=5"', {"range": {"$gt": "<=5"}}),
     ('bound in ">=5","<=9"', {"bound": {"$in": [">=5", "<=9"]}}),
     ('marks has "<a>","=b"', {"marks": ["<a>", "=b"]}),
+    # Quoting is also the escape for the tokens the grammar refuses unquoted:
+    # the non-finite number spellings and null outside equality.
+    ('score="NaN"', {"score": "NaN"}),
+    ('score>"Infinity"', {"score": {"$gt": "Infinity"}}),
+    ('owner in "null","alice"', {"owner": {"$in": ["null", "alice"]}}),
     # Dot-paths address nested frontmatter and pass through verbatim.
     ("review.approved=true", {"review.approved": True}),
     # The one alias search_notes carries, so both surfaces accept one spelling.
@@ -607,6 +616,10 @@ def test_parse_meta_predicates_and_together():
         (['priority in "high,low'], "unterminated quoted value"),
         (['tags has red,"green'], "unterminated quoted value"),
         (["status="], "has no value"),
+        # Non-finite numbers and null-outside-equality: both used to reach the
+        # server (or the request encoder) as a query nothing could answer.
+        (["score=NaN"], "non-finite number"),
+        (["score>null"], "uses null with '>'"),
         (["status=active", "status=draft"], "duplicate predicate key 'status'"),
         # The alias collapses onto the same key, so the collision is still caught.
         (["note_type=note", "type=spec"], "duplicate predicate key 'type'"),
@@ -668,6 +681,121 @@ def test_malformed_operator_refusal_teaches_the_grammar_and_the_escape():
     assert "unsupported predicate operator in 'status==active'" in message
     assert "supported: = > >= < <= in has between" in message
     assert 'quote the value as "=active"' in message
+
+
+@pytest.mark.parametrize(
+    "predicate",
+    [
+        # Python's JSON reader accepts these three spellings as an extension...
+        "score=NaN",
+        "score=Infinity",
+        "score=-Infinity",
+        # ...and silently overflows an oversized exponent to infinity.
+        "score=1e999",
+        "score=-1e999",
+        # Every operator reads its values through the same scalar reader.
+        "score>NaN",
+        "score<=Infinity",
+        "score in 0.5,NaN",
+        "marks has NaN",
+        "score between NaN,0.8",
+        "score between 0.3,1e999",
+    ],
+)
+def test_non_finite_numbers_refuse_instead_of_failing_at_transport(predicate):
+    """REGRESSION: a non-finite number died in the request encoder, not the grammar.
+
+    json.loads builds a real float for NaN/Infinity/-Infinity and overflows
+    1e999 to inf, so the parser accepted them into the filters dict. Nothing
+    rejected them until httpx serialized the request body and raised "Out of
+    range float values are not JSON compliant" — a transport failure standing in
+    for a predicate typo, naming neither find nor the offending predicate.
+    """
+    with pytest.raises(ValueError, match="non-finite number"):
+        posix_tools._parse_meta_predicates([predicate])
+
+
+def test_non_finite_refusal_names_the_predicate_and_the_escape():
+    """The refusal is shaped like the grammar's others: what, where, and the way out."""
+    with pytest.raises(ValueError) as excinfo:
+        posix_tools._parse_meta_predicates(["score=NaN"])
+
+    message = str(excinfo.value)
+    assert "predicate 'score=NaN' has a non-finite number 'NaN'" in message
+    assert "predicate values must be finite numbers" in message
+    assert 'quote the value as "NaN"' in message
+
+
+@pytest.mark.parametrize(
+    "predicate",
+    [
+        'status="active',
+        'status = "active',
+        'confidence>"0.6',
+        # A quote that opens, closes, and opens again is still unterminated.
+        'name="a"b"c',
+        # The list operators reach the same check through their split elements.
+        'priority in "high,low',
+        'tags has red,"green',
+        'score between "0.3,0.8',
+    ],
+)
+def test_a_dangling_quote_refuses_for_every_operator(predicate):
+    """REGRESSION: the scalar path used to keep the dangling quote as the value.
+
+    'status="active' fails json.loads, and the raw-text fallback then filtered
+    for the literal seven characters '"active' — a search that runs, matches
+    nothing, and reports an ordinary empty result with the typo buried in it.
+    The list operators already refused a severed quote; one shared check now
+    gives both paths the same answer.
+    """
+    with pytest.raises(ValueError, match="unterminated quoted value"):
+        posix_tools._parse_meta_predicates([predicate])
+
+
+def test_unterminated_quote_refusal_teaches_both_uses_of_quoting():
+    with pytest.raises(ValueError) as excinfo:
+        posix_tools._parse_meta_predicates(['status="active'])
+
+    message = str(excinfo.value)
+    assert "predicate 'status=\"active' has an unterminated quoted value" in message
+    assert 'status="active"' in message
+    assert 'label in "a,b",c' in message
+
+
+@pytest.mark.parametrize(
+    "predicate",
+    [
+        "score>null",
+        "score>=null",
+        "score<null",
+        "score<=null",
+        "priority in null,high",
+        "tags has null",
+        "score between null,0.8",
+    ],
+)
+def test_null_refuses_outside_equality(predicate):
+    """null only compiles to a query through '='.
+
+    Every other operator compares against its value, and a SQL comparison with
+    NULL is never true — so these would answer a confident zero for every note
+    in the project rather than name the query the search cannot express.
+    """
+    with pytest.raises(ValueError, match=re.escape("null matches only as equality")):
+        posix_tools._parse_meta_predicates([predicate])
+
+
+def test_null_equality_reaches_the_api_as_an_is_null_clause():
+    """'owner=null' is the one null spelling the grammar keeps, and it is not equality.
+
+    The API parser turns it into an IS NULL clause; an ordinary equality clause
+    would be `= NULL`, which no row satisfies.
+    """
+    filters = posix_tools._parse_meta_predicates(["owner=null"])
+
+    assert filters == {"owner": None}
+    assert parse_metadata_filters(filters) == [ParsedMetadataFilter(["owner"], "is_null", None)]
 
 
 @pytest.mark.parametrize(
@@ -805,6 +933,8 @@ async def test_find_meta_returns_the_search_response_shape(client, test_project,
         (["tags has security,oauth"], {"Alpha Spec"}),
         (["confidence between 0.1,0.6"], {"Beta Spec", "Gamma Note"}),
         (["review.approved=true"], {"Alpha Spec"}),
+        # Only Alpha Spec carries review.approved, so null is its complement.
+        (["review.approved=null"], {"Beta Spec", "Gamma Note"}),
         (["note_type=note"], {"Alpha Spec", "Beta Spec", "Gamma Note"}),
         # Repeated predicates AND together.
         (["status=active", "priority=high"], {"Alpha Spec"}),
@@ -817,6 +947,25 @@ async def test_find_meta_operators_select_the_right_notes(
     result = await find(meta=meta, project=test_project.name)
 
     assert {row["title"] for row in result["results"]} == expected_titles
+
+
+@pytest.mark.asyncio
+async def test_find_meta_null_finds_the_notes_carrying_no_value(client, test_project, meta_notes):
+    """REGRESSION: 'key=null' answers "which notes have no value here?".
+
+    It used to compile to `= NULL`, which no row satisfies, so find reported an
+    exact total of zero however many notes were missing the field — a wrong
+    answer wearing the same confident `total_is_exact` as a right one. Asserting
+    the complementary query in the same test keeps the null side honest: a
+    filter that matched nothing would pass a bare exclusion check.
+    """
+    absent = await find(meta=["review.approved=null"], project=test_project.name)
+    present = await find(meta=["review.approved=true"], project=test_project.name)
+
+    assert {row["title"] for row in absent["results"]} == {"Beta Spec", "Gamma Note"}
+    assert absent["total"] == 2
+    assert absent["total_is_exact"] is True
+    assert {row["title"] for row in present["results"]} == {"Alpha Spec"}
 
 
 @pytest.mark.asyncio
