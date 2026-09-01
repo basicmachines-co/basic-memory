@@ -12,6 +12,11 @@ each inclusivity combination, each unbounded side, the fully unbounded range, th
 range, and a separate instant axis that must never mix with the date axis. Timestamps
 are written as explicit constants, never as "now", so the answers are the same on every
 run and on every machine.
+
+A second population covers the dimension a *discrete* domain adds: date ranges whose
+authored bounds and whose sets of days come apart. Those cases are what the half-open
+canonicalization in `basic_memory.temporal` exists for, and both dialects must agree
+about them too.
 """
 
 from dataclasses import dataclass
@@ -83,6 +88,39 @@ STORED_ASSERTIONS: tuple[StoredAssertion, ...] = (
         _instant_range("[2026-07-27T16:00:00+02:00,2026-07-27T17:00:00+02:00)"),
     ),
     StoredAssertion("due_window", _date_range("[2026-06-10,2026-07-27)"), role=TimeRole.DUE),
+    # --- The discrete population ---
+    #
+    # Filed on the `occurred` axis and dated in March so it never widens an expectation
+    # above, and so no bound collides with the January bookkeeping timestamps that
+    # `test_projection_rows_carry_only_authored_bounds` watches for.
+    #
+    # Only March 2, and only March 3: adjacent as authored bounds, disjoint as days.
+    # This is the pair the half-open canonical form exists to tell apart.
+    StoredAssertion("only_mar_02", _date_range("(2026-03-01,2026-03-03)"), role=TimeRole.OCCURRED),
+    StoredAssertion("only_mar_03", _date_range("(2026-03-02,2026-03-04)"), role=TimeRole.OCCURRED),
+    # Back-to-back half-open periods, the shape a sequence of effective windows takes.
+    StoredAssertion(
+        "half_open_first", _date_range("[2026-03-10,2026-03-12)"), role=TimeRole.OCCURRED
+    ),
+    StoredAssertion(
+        "half_open_second", _date_range("[2026-03-12,2026-03-14)"), role=TimeRole.OCCURRED
+    ),
+    # Closed periods written by an author who means "through the 22nd": they share it.
+    StoredAssertion("closed_first", _date_range("[2026-03-20,2026-03-22]"), role=TimeRole.OCCURRED),
+    StoredAssertion(
+        "closed_second", _date_range("[2026-03-22,2026-03-24]"), role=TimeRole.OCCURRED
+    ),
+    StoredAssertion("one_day", _date_range("[2026-03-30,2026-03-30]"), role=TimeRole.OCCURRED),
+    # After the 5th and before the 6th there is no day, so this authored range is the
+    # empty range -- something only the discrete reading can see.
+    StoredAssertion("no_such_day", _date_range("(2026-03-05,2026-03-06)"), role=TimeRole.OCCURRED),
+    # An instant range with a closed upper end, so the date rewrite is proven to stop
+    # at the date axis rather than pushing this endpoint forward by a day.
+    StoredAssertion(
+        "instant_closed",
+        _instant_range("[2026-07-27T20:00:00Z,2026-07-27T21:00:00Z]"),
+        role=TimeRole.OCCURRED,
+    ),
 )
 
 DATE_LABELS = frozenset(
@@ -300,6 +338,216 @@ async def test_stored_empty_range_matches_no_query(search_repository, temporal_p
             TemporalFilter(role=TimeRole.EFFECTIVE, at=parse_point(at)),
         )
         assert "empty" not in matched, at
+
+
+# --- The discrete domain: authored bounds vs. the days they denote ---
+#
+# Calendar dates are discrete, so an authored bound is not the boundary of the set of
+# days it delimits. `basic_memory.temporal` closes that gap by storing every date range
+# half-open; these tests are what proves the SQL predicate then answers about *days*
+# rather than about endpoint strings -- identically on both backends.
+
+
+async def _occurred_overlaps(search_repository, labels_by_id, literal: str) -> set[str]:
+    return await _matching_labels(
+        search_repository,
+        labels_by_id,
+        TemporalFilter(role=TimeRole.OCCURRED, overlaps=_date_range(literal)),
+    )
+
+
+async def _occurred_at(search_repository, labels_by_id, at: str) -> set[str]:
+    return await _matching_labels(
+        search_repository,
+        labels_by_id,
+        TemporalFilter(role=TimeRole.OCCURRED, at=parse_point(at)),
+    )
+
+
+@pytest.mark.asyncio
+async def test_date_ranges_that_share_no_day_do_not_overlap(search_repository, temporal_population):
+    """The case the half-open canonical form exists to get right.
+
+    `(2026-03-01,2026-03-03)` holds only March 2 and `(2026-03-02,2026-03-04)` holds
+    only March 3, so the two share nothing. Yet each range's raw endpoints lie inside
+    the other's raw bounds, so comparing the bounds *as authored* reports an overlap
+    that does not exist. Canonicalized to `[2026-03-02,2026-03-03)` and
+    `[2026-03-03,2026-03-04)`, the same scalar comparison is right.
+    """
+    assert await _occurred_overlaps(
+        search_repository, temporal_population, "(2026-03-01,2026-03-03)"
+    ) == {"only_mar_02"}
+
+    assert await _occurred_overlaps(
+        search_repository, temporal_population, "(2026-03-02,2026-03-04)"
+    ) == {"only_mar_03"}
+
+    # And each holds exactly the one day it names.
+    assert await _occurred_at(search_repository, temporal_population, "2026-03-02") == {
+        "only_mar_02"
+    }
+    assert await _occurred_at(search_repository, temporal_population, "2026-03-03") == {
+        "only_mar_03"
+    }
+
+
+@pytest.mark.asyncio
+async def test_adjacent_half_open_ranges_share_no_day(search_repository, temporal_population):
+    """`[a,b)` and `[b,c)` meet at b without sharing it -- the point of the shape."""
+    assert await _occurred_overlaps(
+        search_repository, temporal_population, "[2026-03-10,2026-03-12)"
+    ) == {"half_open_first"}
+
+    assert await _occurred_overlaps(
+        search_repository, temporal_population, "[2026-03-12,2026-03-14)"
+    ) == {"half_open_second"}
+
+    # March 12 belongs to the second period alone.
+    assert await _occurred_at(search_repository, temporal_population, "2026-03-11") == {
+        "half_open_first"
+    }
+    assert await _occurred_at(search_repository, temporal_population, "2026-03-12") == {
+        "half_open_second"
+    }
+
+
+@pytest.mark.asyncio
+async def test_closed_ranges_sharing_an_endpoint_do_overlap(search_repository, temporal_population):
+    """`[a,b]` and `[b,c]` both contain b, so they overlap on that one day.
+
+    Canonicalization must preserve that: `[a,b+1)` and `[b,c+1)` still meet on b. An
+    author who writes closed bounds means the endpoint day is included, and the stored
+    form may not quietly take it away.
+    """
+    assert await _occurred_overlaps(
+        search_repository, temporal_population, "[2026-03-20,2026-03-22]"
+    ) == {"closed_first", "closed_second"}
+
+    # Narrowed to the shared day alone, both are still there.
+    assert await _occurred_at(search_repository, temporal_population, "2026-03-22") == {
+        "closed_first",
+        "closed_second",
+    }
+    assert await _occurred_at(search_repository, temporal_population, "2026-03-21") == {
+        "closed_first"
+    }
+    assert await _occurred_at(search_repository, temporal_population, "2026-03-23") == {
+        "closed_second"
+    }
+
+
+@pytest.mark.asyncio
+async def test_a_single_day_range_holds_exactly_that_day(search_repository, temporal_population):
+    """`[a,a]` is one day: neither empty, nor wider than the day the author wrote."""
+    assert await _occurred_at(search_repository, temporal_population, "2026-03-30") == {"one_day"}
+    assert await _occurred_at(search_repository, temporal_population, "2026-03-29") == set()
+    assert await _occurred_at(search_repository, temporal_population, "2026-03-31") == set()
+
+    assert await _occurred_overlaps(
+        search_repository, temporal_population, "[2026-03-30,2026-03-30]"
+    ) == {"one_day"}
+
+
+@pytest.mark.asyncio
+async def test_a_date_range_spanning_no_day_is_stored_empty(
+    search_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    temporal_population,
+    test_project: Project,
+):
+    """`(2026-03-05,2026-03-06)` reads as an interval but names no day.
+
+    Only the discrete reading can tell: as a continuous interval it looks like an
+    ordinary bounded range. Stored empty, it answers no question -- not even one about
+    the days on either side of it.
+    """
+    for at in ("2026-03-05", "2026-03-06"):
+        assert "no_such_day" not in await _occurred_at(
+            search_repository, temporal_population, at
+        ), at
+
+    assert await _occurred_overlaps(
+        search_repository, temporal_population, "[2026-03-01,2026-03-09)"
+    ) == {"only_mar_02", "only_mar_03"}
+
+    repository = MemoryTimeIndexRepository(project_id=test_project.id)
+    async with db.scoped_session(session_maker) as session:
+        rows = await repository.find_for_sources(
+            session,
+            [(SearchItemType.OBSERVATION.value, source_id) for source_id in temporal_population],
+        )
+    row = {temporal_population[row.source_id]: row for row in rows}["no_such_day"]
+    assert (row.is_empty, row.lower_value, row.upper_value) == (True, None, None)
+
+
+@pytest.mark.asyncio
+async def test_instant_ranges_are_untouched_by_the_date_canonicalization(
+    search_repository, temporal_population
+):
+    """`instant_closed` is `[20:00Z,21:00Z]`, and stays exactly that.
+
+    Instants are continuous: there is no next moment to close at, so the endpoint stays
+    owned and is emphatically not pushed forward by a day the way an inclusive date end
+    is. A query one microsecond past it, and one a whole day past it, both miss.
+    """
+    at_upper = await _matching_labels(
+        search_repository,
+        temporal_population,
+        TemporalFilter(role=TimeRole.OCCURRED, at=parse_point("2026-07-27T21:00:00Z")),
+    )
+    assert at_upper == {"instant_closed"}
+
+    for outside in ("2026-07-27T21:00:00.000001Z", "2026-07-28T21:00:00Z"):
+        missed = await _matching_labels(
+            search_repository,
+            temporal_population,
+            TemporalFilter(role=TimeRole.OCCURRED, at=parse_point(outside)),
+        )
+        assert missed == set(), outside
+
+
+@pytest.mark.asyncio
+async def test_projection_stores_date_bounds_in_the_canonical_half_open_form(
+    session_maker: async_sessionmaker[AsyncSession],
+    temporal_population,
+    test_project: Project,
+):
+    """What actually lands in the columns the SQL predicate reads.
+
+    The predicate compares bound values and inclusivity flags directly, so the
+    canonical form has to be in the rows -- not merely in the domain value that built
+    them.
+    """
+    repository = MemoryTimeIndexRepository(project_id=test_project.id)
+    async with db.scoped_session(session_maker) as session:
+        rows = await repository.find_for_sources(
+            session,
+            [(SearchItemType.OBSERVATION.value, source_id) for source_id in temporal_population],
+        )
+    by_label = {temporal_population[row.source_id]: row for row in rows}
+
+    # Authored `(2026-03-01,2026-03-03)`: the exclusive lower end moved to the next day.
+    assert (by_label["only_mar_02"].lower_value, by_label["only_mar_02"].upper_value) == (
+        "2026-03-02",
+        "2026-03-03",
+    )
+    # Authored `[2026-03-20,2026-03-22]`: the inclusive upper end moved to the next day.
+    assert (by_label["closed_first"].lower_value, by_label["closed_first"].upper_value) == (
+        "2026-03-20",
+        "2026-03-23",
+    )
+    # Authored `[2026-03-30,2026-03-30]`: one day, spelled half-open.
+    assert (by_label["one_day"].lower_value, by_label["one_day"].upper_value) == (
+        "2026-03-30",
+        "2026-03-31",
+    )
+    for label in ("only_mar_02", "only_mar_03", "half_open_first", "closed_first", "one_day"):
+        row = by_label[label]
+        assert (row.lower_inclusive, row.upper_inclusive) == (True, False), label
+
+    # The instant axis keeps the endpoint the author wrote, inclusivity and all.
+    instant = by_label["instant_closed"]
+    assert (instant.upper_value, instant.upper_inclusive) == ("2026-07-27T21:00:00.000000Z", True)
 
 
 # --- Acceptance 9 and 10: the two axes are never confused ---

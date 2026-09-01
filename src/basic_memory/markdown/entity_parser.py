@@ -341,10 +341,15 @@ class EntityParser:
         # learns the line needs fixing. Text that simply is not a date is ordinary content
         # and says nothing here. The typed `temporal_error` field carries the same message
         # to programmatic callers; this layer adds the path.
+        # `as_posix()` rather than the Path itself: Basic Memory names files with
+        # forward slashes everywhere (entity.file_path, permalinks, search rows), so a
+        # Windows `WindowsPath` rendering `decisions\cache-layer.md` would print a path
+        # the author cannot find in any other surface.
         for observation in entity_content.observations:
             if observation.temporal_error:
                 logger.warning(
-                    f"Temporal qualifier ignored in {file_path}: {observation.temporal_error}"
+                    f"Temporal qualifier ignored in {file_path.as_posix()}: "
+                    f"{observation.temporal_error}"
                 )
 
         # Sections are structural, not semantic: they index the body for range reads,

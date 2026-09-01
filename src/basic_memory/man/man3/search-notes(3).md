@@ -130,6 +130,8 @@ bm tool search-notes "conflict error" --project manual --page-size 2
 - [gotcha] valid_at and valid_overlaps never mix calendar dates with instants: a date query matches only date ranges and an instant query only instant ranges, so `2026-07-27` and `2026-07-27T00:00:00Z` are different questions #valid-time
 - [gotcha] A timestamp written without an offset is read as UTC, in an authored qualifier and in a filter alike — same convention as every other naive datetime in Basic Memory #valid-time
 - [gotcha] An authored token that does not read as a date is left as ordinary observation content with no warning; only an unknown role (`@asserted:2026-06-10`) is reported #valid-time
+- [gotcha] An authored point is one whitespace-delimited token: `@occurred:2026-06-10`, `@occurred:03/04/2026` and `@occurred:yesterday` work, but a multi-word date like `@occurred:June 10, 2026` is left as content because nothing can tell where it ends #valid-time
+- [gotcha] `@occurred:03/04/2026` resolves by the `date_order` setting (YMD/DMY read it as 3 April, MDY as 4 March); ISO dates are never re-guessed #valid-time
 
 ## SEE ALSO
 
