@@ -39,6 +39,7 @@ from basic_memory.schemas.search import (
     SearchResult,
     SearchRetrievalMode,
 )
+from basic_memory.temporal import TemporalQualifierError, parse_temporal_filter
 
 _SERVICE_UNAVAILABLE_HEADING = "# Search Failed - Service Temporarily Unavailable"
 
@@ -594,7 +595,9 @@ async def _search_all_projects(
     # Each per-project call runs through search_notes -> SearchClient, which refuses a
     # response that does not confirm the filter ran. So a project either honored the
     # valid-time filter or was dropped with a warning below; the merged answer never
-    # silently mixes filtered and unfiltered rows.
+    # silently mixes filtered and unfiltered rows. The filter itself is already known to
+    # be well formed -- search_notes parses it before reaching here -- which is what
+    # makes "dropped with a warning" mean an unavailable project and nothing else.
     temporal_requested = bool(valid_at or valid_overlaps or time_kind)
     project_refs = await _load_search_project_refs(context=context)
     if not project_refs:
@@ -1114,6 +1117,20 @@ async def search_notes(
     # Outcome: one clear error naming the two mutually exclusive parameters.
     if valid_at and valid_overlaps:
         raise ValueError("Use either valid_at (containment) or valid_overlaps (overlap), not both.")
+
+    # Trigger: any valid-time filter string is supplied.
+    # Why: these strings are parsed server-side, so a typo comes back as a 400 that the
+    #      fan-out below cannot tell from a project being unavailable -- it logs the
+    #      project, skips it, and after every project is skipped reports an empty result
+    #      that still claims the filter ran. A malformed filter would read as "no matches"
+    #      instead of as an error. This is the only layer that can tell a client mistake
+    #      from a per-project availability failure, and it shares the parser the search
+    #      service uses so the two can never disagree about what is well formed.
+    # Outcome: one error naming the bad value, before any project is searched.
+    try:
+        parse_temporal_filter(valid_at=valid_at, valid_overlaps=valid_overlaps, time_kind=time_kind)
+    except TemporalQualifierError as exc:
+        raise ValueError(f"Invalid valid-time filter: {exc}") from exc
 
     # Trigger: list params arrived via a direct function call instead of the MCP layer.
     # Why: the BeforeValidator annotations only run through MCP/Pydantic validation; direct

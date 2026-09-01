@@ -470,6 +470,48 @@ def parse_point(text: str) -> TemporalPoint:
     return TemporalPoint(axis=axis, value=canonical_bound(bound, axis))
 
 
+def parse_temporal_filter(
+    *,
+    valid_at: str | None = None,
+    valid_overlaps: str | None = None,
+    time_kind: str | None = None,
+) -> TemporalFilter | None:
+    """Parse the three flat boundary fields into one portable filter value.
+
+    Every request surface -- HTTP, MCP, CLI -- carries a valid-time question as these
+    three independent strings, so this is the one place that turns them into the domain
+    value. Sharing it is what lets a caller validate the question *before* asking it and
+    be certain the answer to "is this filter well formed?" is the same one the search
+    service will reach.
+
+    Every rejection is deliberate and loud: an unknown kind, a malformed range literal, a
+    range mixing calendar dates with instants, or an impossible range raises rather than
+    degrading into a filter that quietly matches something else. A timestamp written
+    without an offset is not a rejection -- like every other naive datetime in the
+    codebase, it is read as UTC.
+
+    Returns None when no valid-time question was asked at all.
+    """
+    if not (valid_at or valid_overlaps or time_kind):
+        return None
+
+    kind: TimeKind | None = None
+    if time_kind:
+        try:
+            kind = TimeKind(time_kind)
+        except ValueError as exc:
+            raise TemporalQualifierError(
+                f"unknown time_kind {time_kind!r}; expected one of "
+                f"{', '.join(item.value for item in TimeKind)}"
+            ) from exc
+
+    return TemporalFilter(
+        kind=kind,
+        at=parse_point(valid_at) if valid_at else None,
+        overlaps=parse_range_literal(valid_overlaps) if valid_overlaps else None,
+    )
+
+
 # --- Flexible authored points ---
 
 
@@ -559,6 +601,25 @@ def parse_authored_point(
             )
         except ValueError:
             return None
+
+    if _INSTANT_BOUND.match(point):
+        # Trigger: the text is already in the canonical RFC 3339 timestamp shape.
+        # Why: the leniency the branch above guards against reaches timestamps too --
+        #   dateparser reads "2026-13-01T10:00:00" as 10:00 on the 13th of January -- and
+        #   every reindex would project that same wrong instant, so it is worse than an
+        #   unread token. Only the *shape* is matched here, so the flexible spellings
+        #   dateparser alone reads ("2026-06-10 10:00 AM", a timestamp with no seconds)
+        #   still reach it below.
+        # Outcome: RFC 3339 timestamps are parsed as RFC 3339, or refused.
+        try:
+            instant = _canonical_instant(point)
+        except TemporalQualifierError:
+            return None
+        return TemporalRange(
+            axis=TemporalRangeAxis.INSTANT,
+            lower=instant,
+            lower_inclusive=True,
+        )
 
     date_data = _date_data_parser(date_order).get_date_data(point)
     moment = date_data.date_obj

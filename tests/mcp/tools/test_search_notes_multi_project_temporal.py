@@ -141,6 +141,49 @@ async def test_all_projects_search_without_a_filter_claims_nothing(monkeypatch, 
     assert "temporal_applied" not in result
 
 
+@pytest.mark.parametrize(
+    ("valid_at", "valid_overlaps", "time_kind", "bad_value"),
+    [
+        ("2026-13-01", None, None, "2026-13-01"),
+        (None, "2026-06-10..2026-07-27", None, "2026-06-10..2026-07-27"),
+        (None, None, "asserted", "asserted"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_malformed_filter_is_refused_before_any_project_is_searched(
+    monkeypatch,
+    cloud_routing,
+    valid_at: str | None,
+    valid_overlaps: str | None,
+    time_kind: str | None,
+    bad_value: str,
+):
+    """A typo must read as an error, never as an all-projects search with no matches.
+
+    Each per-project leg turns the API's 400 into a `# Search Failed` string, which the
+    fan-out cannot tell from a project being unavailable: it logs it and skips on. With
+    every project skipped the merged answer is an empty success that still reports
+    `temporal_applied`, so a mistyped filter would come back as the plausible-looking
+    "no matches found" for a question that never ran anywhere. Client-side validation is
+    the only layer that can tell the two apart, so it runs once, before the fan-out.
+    """
+    payloads: list[dict[str, Any]] = []
+    _install_stub_client(monkeypatch, payloads, PROJECT_REFS)
+    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+
+    with pytest.raises(ValueError, match=bad_value):
+        await search_mod.search_notes(
+            query="cache layer",
+            search_all_projects=True,
+            output_format="json",
+            valid_at=valid_at,
+            valid_overlaps=valid_overlaps,
+            time_kind=time_kind,
+        )
+
+    assert payloads == []
+
+
 @pytest.mark.asyncio
 async def test_all_projects_search_with_no_projects_still_confirms_the_filter(
     monkeypatch, cloud_routing

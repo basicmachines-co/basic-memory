@@ -34,10 +34,7 @@ from basic_memory.runtime.vector_sync import (
 from basic_memory.services import FileService
 from basic_memory.temporal import (
     TemporalFilter,
-    TemporalQualifierError,
-    TimeKind,
-    parse_point,
-    parse_range_literal,
+    parse_temporal_filter,
 )
 
 # Maximum size for content_stems field to stay under Postgres's 8KB index row limit.
@@ -93,32 +90,17 @@ def entity_embeddings_enabled(entity: Entity) -> bool:
 
 
 def build_temporal_filter(query: SearchQuery) -> TemporalFilter | None:
-    """Parse the flat valid-time fields into one portable filter value.
+    """Read the query's flat valid-time fields as one portable filter value.
 
-    The boundary carries strings so HTTP and MCP callers can pass a single flat value
-    per field. Every rejection here is deliberate and loud: an unknown kind, a malformed
-    range literal, a range mixing calendar dates with instants, or an impossible range
-    raises rather than degrading into a filter that quietly matches something else.
-    Callers above map the error to a 400. A timestamp written without an offset is not
-    a rejection -- like every other naive datetime in the codebase, it is read as UTC.
+    The parsing itself lives in `temporal.parse_temporal_filter`, which every request
+    surface shares, so a caller that pre-validates the same three strings can never
+    disagree with what runs here. `TemporalQualifierError` is a `ValueError`, so callers
+    above map it to a 400.
     """
-    if not query.has_temporal_filter():
-        return None
-
-    kind: TimeKind | None = None
-    if query.time_kind:
-        try:
-            kind = TimeKind(query.time_kind)
-        except ValueError as exc:
-            raise TemporalQualifierError(
-                f"unknown time_kind {query.time_kind!r}; expected one of "
-                f"{', '.join(item.value for item in TimeKind)}"
-            ) from exc
-
-    return TemporalFilter(
-        kind=kind,
-        at=parse_point(query.valid_at) if query.valid_at else None,
-        overlaps=parse_range_literal(query.valid_overlaps) if query.valid_overlaps else None,
+    return parse_temporal_filter(
+        valid_at=query.valid_at,
+        valid_overlaps=query.valid_overlaps,
+        time_kind=query.time_kind,
     )
 
 
