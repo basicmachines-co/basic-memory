@@ -35,6 +35,7 @@ from basic_memory.repository.search_trace import (
     build_fts_page_stage,
 )
 from basic_memory.repository.metadata_filters import parse_metadata_filters
+from basic_memory.repository.temporal_filters import build_temporal_predicate
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.semantic_vector_index import SemanticVectorIndex
 from basic_memory.repository.semantic_vector_sync import (
@@ -48,6 +49,7 @@ from basic_memory.repository.semantic_vector_index_factory import (
 from basic_memory.repository.pgvector_index import PgVectorIndex
 from basic_memory.repository.postgres_fts_chunks import split_postgres_fts_chunks
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
+from basic_memory.temporal import TemporalFilter
 
 
 _TSQUERY_OPERAND_PATTERN = re.compile(r"'(?:''|[^'])*'(?::\*)?|[^\s&|!()]+")
@@ -972,6 +974,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         categories: Optional[List[str]] = None,
         metadata_filters: Optional[dict[str, Any]] = None,
         file_path_prefix: Optional[str] = None,
+        temporal: Optional[TemporalFilter] = None,
         allow_relaxed: bool = False,
     ) -> tuple[str, str, dict[str, Any], str, str]:
         """Build Postgres FTS FROM/WHERE params shared by search and count."""
@@ -1189,6 +1192,18 @@ class PostgresSearchRepository(SearchRepositoryBase):
             # order by most recent first
             order_by_clause = ", search_index.updated_at DESC"
 
+        # Handle authored valid time (SPEC-82).
+        # Trigger: caller asked when a statement was true of the world.
+        # Why: `after_date` above filters `updated_at`, which records when the note was
+        #      last edited. That is bookkeeping, never a semantic claim; a decision
+        #      effective through July says nothing about when its file was touched.
+        # Outcome: an independent predicate over the temporal projection, textually
+        #          identical to the SQLite one because canonical bounds compare
+        #          lexicographically on both backends. Undated sources carry no row and
+        #          are therefore excluded whenever a valid-time filter is present.
+        if temporal is not None:
+            conditions.append(build_temporal_predicate(temporal, params))
+
         # Handle structured metadata filters (frontmatter)
         # Uses jsonb_extract_path_text() / jsonb_extract_path() with parameterized
         # path parts instead of #>> / #> with interpolated paths.
@@ -1368,6 +1383,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         categories: Optional[List[str]] = None,
         metadata_filters: Optional[dict[str, Any]] = None,
         file_path_prefix: Optional[str] = None,
+        temporal: Optional[TemporalFilter] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
         limit: int = 10,
@@ -1390,6 +1406,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             categories=categories,
             metadata_filters=metadata_filters,
             file_path_prefix=file_path_prefix,
+            temporal=temporal,
             retrieval_mode=retrieval_mode,
             min_similarity=min_similarity,
             limit=limit,
@@ -1417,6 +1434,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             categories=categories,
             metadata_filters=metadata_filters,
             file_path_prefix=file_path_prefix,
+            temporal=temporal,
             allow_relaxed=allow_relaxed,
         )
 
@@ -1564,6 +1582,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         categories: Optional[List[str]] = None,
         metadata_filters: Optional[dict[str, Any]] = None,
         file_path_prefix: Optional[str] = None,
+        temporal: Optional[TemporalFilter] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
         allow_relaxed: bool = False,
@@ -1581,6 +1600,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 categories=categories,
                 metadata_filters=metadata_filters,
                 file_path_prefix=file_path_prefix,
+                temporal=temporal,
                 retrieval_mode=retrieval_mode,
                 min_similarity=min_similarity,
             )
@@ -1602,6 +1622,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             categories=categories,
             metadata_filters=metadata_filters,
             file_path_prefix=file_path_prefix,
+            temporal=temporal,
             allow_relaxed=allow_relaxed,
         )
         sql = f"SELECT COUNT(*) FROM {from_clause} WHERE {where_clause}"

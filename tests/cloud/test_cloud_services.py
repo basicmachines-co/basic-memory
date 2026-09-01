@@ -523,6 +523,7 @@ async def test_note_content_mutation_service_publishes_graph_after_commit(monkey
 
     observation_repository = object()
     section_repository = object()
+    temporal_repository = object()
     relation_repository = object()
 
     class WriteRepositories:
@@ -535,6 +536,11 @@ async def test_note_content_mutation_service_publishes_graph_after_commit(monkey
             assert project_id == publication.project_id
             events.append("section_repository")
             return section_repository
+
+        def temporal_repository(self, project_id: int) -> object:
+            assert project_id == publication.project_id
+            events.append("temporal_repository")
+            return temporal_repository
 
         def relation_repository(self, project_id: int) -> object:
             assert project_id == publication.project_id
@@ -565,11 +571,13 @@ async def test_note_content_mutation_service_publishes_graph_after_commit(monkey
             *,
             observation_repository: object,
             section_repository: object,
+            temporal_repository: object,
             relation_repository: object,
             session_maker: object,
         ) -> None:
             assert observation_repository is not None
             assert section_repository is not None
+            assert temporal_repository is not None
             assert relation_repository is not None
             assert session_maker is not None
 
@@ -615,6 +623,7 @@ async def test_note_content_mutation_service_publishes_graph_after_commit(monkey
         "relation_repository",
         "observation_repository",
         "section_repository",
+        "temporal_repository",
         "publish",
     ]
 
@@ -641,6 +650,10 @@ async def test_note_content_mutation_service_continues_after_graph_publication_f
             assert project_id == publication.project_id
             return object()
 
+        def temporal_repository(self, project_id: int) -> object:
+            assert project_id == publication.project_id
+            return object()
+
         def relation_repository(self, project_id: int) -> object:
             assert project_id == publication.project_id
             return object()
@@ -663,11 +676,13 @@ async def test_note_content_mutation_service_continues_after_graph_publication_f
             *,
             observation_repository: object,
             section_repository: object,
+            temporal_repository: object,
             relation_repository: object,
             session_maker: object,
         ) -> None:
             assert observation_repository is not None
             assert section_repository is not None
+            assert temporal_repository is not None
             assert relation_repository is not None
             assert session_maker is not None
 

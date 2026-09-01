@@ -33,6 +33,7 @@ from basic_memory.repository.semantic_vector_index import (
 )
 from basic_memory.repository.semantic_vector_sync import PendingEmbeddingJob
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
+from basic_memory.temporal import TemporalFilter
 
 
 # --- Helpers ---
@@ -88,6 +89,7 @@ class _ConcreteRepo(SearchRepositoryBase):
         categories: list[str] | None = None,
         metadata_filters: dict[str, Any] | None = None,
         file_path_prefix: str | None = None,
+        temporal: TemporalFilter | None = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: float | None = None,
         limit: int = 10,

@@ -335,6 +335,18 @@ class EntityParser:
         entity_content = (
             parse(post.content) if parse_semantics else EntityContent(content=post.content)
         )
+
+        # The parser reports exactly one thing: a qualifier that reads as time but names
+        # an unknown role. That never reaches the index, so this warning is how an author
+        # learns the line needs fixing. Text that simply is not a date is ordinary content
+        # and says nothing here. The typed `temporal_error` field carries the same message
+        # to programmatic callers; this layer adds the path.
+        for observation in entity_content.observations:
+            if observation.temporal_error:
+                logger.warning(
+                    f"Temporal qualifier ignored in {file_path}: {observation.temporal_error}"
+                )
+
         # Sections are structural, not semantic: they index the body for range reads,
         # so the bm_parse_semantics opt-out above must not suppress them.
         sections = scan_sections(post.content)

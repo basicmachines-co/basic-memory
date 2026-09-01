@@ -40,12 +40,14 @@ from basic_memory.repository.search_trace import (
     build_fts_page_stage,
 )
 from basic_memory.repository.metadata_filters import parse_metadata_filters, build_sqlite_json_path
+from basic_memory.repository.temporal_filters import build_temporal_predicate
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.semantic_vector_index import SemanticVectorIndex
 from basic_memory.repository.semantic_vector_sync import StagedVectorDeletion
 from basic_memory.repository.semantic_vector_index_factory import build_vector_index_scope
 from basic_memory.repository.sqlite_vec_index import SQLiteVecIndex
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
+from basic_memory.temporal import TemporalFilter
 
 
 SQLITE_WORD_COLUMNS = "{title content_stems content_snippet}"
@@ -788,6 +790,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         categories: Optional[List[str]] = None,
         metadata_filters: Optional[dict[str, Any]] = None,
         file_path_prefix: Optional[str] = None,
+        temporal: Optional[TemporalFilter] = None,
     ) -> tuple[str, str, dict[str, Any], str, str]:
         """Build SQLite FTS FROM/WHERE params shared by search and count."""
         conditions = []
@@ -930,6 +933,18 @@ class SQLiteSearchRepository(SearchRepositoryBase):
 
             # order by most recent first
             order_by_clause = ", search_index.updated_at DESC"
+
+        # Handle authored valid time (SPEC-82).
+        # Trigger: caller asked when a statement was true of the world.
+        # Why: `after_date` above filters `updated_at`, which records when the note was
+        #      last edited. That is bookkeeping, never a semantic claim; a decision
+        #      effective through July says nothing about when its file was touched.
+        # Outcome: an independent predicate over the temporal projection. It matches
+        #          only sources carrying a structured qualifier, so undated sources are
+        #          excluded whenever a valid-time filter is present, and no ordering
+        #          changes -- relevance still decides the ranking.
+        if temporal is not None:
+            conditions.append(build_temporal_predicate(temporal, params))
 
         # Handle structured metadata filters (frontmatter)
         if metadata_filters:
@@ -1085,6 +1100,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         categories: Optional[List[str]] = None,
         metadata_filters: Optional[dict[str, Any]] = None,
         file_path_prefix: Optional[str] = None,
+        temporal: Optional[TemporalFilter] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
         limit: int = 10,
@@ -1113,6 +1129,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             categories=categories,
             metadata_filters=metadata_filters,
             file_path_prefix=file_path_prefix,
+            temporal=temporal,
             retrieval_mode=retrieval_mode,
             min_similarity=min_similarity,
             limit=limit,
@@ -1140,6 +1157,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             categories=categories,
             metadata_filters=metadata_filters,
             file_path_prefix=file_path_prefix,
+            temporal=temporal,
         )
 
         # set limit on search query
@@ -1272,6 +1290,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         categories: Optional[List[str]] = None,
         metadata_filters: Optional[dict[str, Any]] = None,
         file_path_prefix: Optional[str] = None,
+        temporal: Optional[TemporalFilter] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
         allow_relaxed: bool = False,
@@ -1289,6 +1308,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 categories=categories,
                 metadata_filters=metadata_filters,
                 file_path_prefix=file_path_prefix,
+                temporal=temporal,
                 retrieval_mode=retrieval_mode,
                 min_similarity=min_similarity,
             )
@@ -1310,6 +1330,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             categories=categories,
             metadata_filters=metadata_filters,
             file_path_prefix=file_path_prefix,
+            temporal=temporal,
         )
         sql = f"SELECT COUNT(*) FROM {from_clause} WHERE {where_clause}"
         logger.trace(f"Count {sql} params: {params}")

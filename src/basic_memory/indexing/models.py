@@ -44,6 +44,7 @@ from basic_memory.runtime.storage import (
     StorageEtag,
     normalize_storage_etag,
 )
+from basic_memory.temporal import TemporalAssertion
 
 if TYPE_CHECKING:  # pragma: no cover
     from basic_memory.models import Entity
@@ -123,6 +124,9 @@ class IndexedObservation:
     category: str | None
     context: str | None
     tags: list[str] | None
+    # Authored valid time (SPEC-82). Published as its own projection keyed on the
+    # observation row this write creates, never as observation columns.
+    temporal: tuple[TemporalAssertion, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

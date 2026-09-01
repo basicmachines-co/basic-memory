@@ -6,6 +6,7 @@ from typing import override, TYPE_CHECKING, Any, List, Optional
 from pydantic import BaseModel, Field, model_validator
 
 from basic_memory.markdown.sections import MarkdownSection
+from basic_memory.temporal import TemporalAssertion
 
 
 class Observation(BaseModel):
@@ -15,10 +16,22 @@ class Observation(BaseModel):
     content: str
     tags: Optional[List[str]] = None
     context: Optional[str] = None
+    # Collection-shaped from day one: the MVP parses at most one qualifier per
+    # observation, but carrying several later must not be a schema break (SPEC-82).
+    temporal: List[TemporalAssertion] = []
+    # Set for the one reported case: a qualifier that reads as time but names an
+    # unknown role. Its text stays in `content`, so nothing is dropped -- only the
+    # derived temporal projection is withheld until the author fixes the line. Text
+    # that simply is not a date sets nothing here; it is ordinary content.
+    temporal_error: Optional[str] = None
 
     @override
     def __str__(self) -> str:
-        obs_string = f"- [{self.category}] {self.content}"
+        # Replaying `source_text` verbatim is what makes parse/serialize a byte-exact
+        # round trip: `valid_during` holds normalized bounds, the author's text does not.
+        qualifiers = " ".join(assertion.source_text for assertion in self.temporal)
+        prefix = f"{qualifiers} " if qualifiers else ""
+        obs_string = f"- [{self.category}] {prefix}{self.content}"
         if self.context:
             obs_string += f" ({self.context})"
         return obs_string

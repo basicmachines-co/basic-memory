@@ -5,8 +5,9 @@ import stat
 import tempfile
 import pytest
 from datetime import datetime
-from typing import Any, cast
+from typing import Any, cast, get_args
 
+from basic_memory.cli.commands.config import CONFIGURABLE_FIELDS
 from basic_memory.config import (
     BasicMemoryConfig,
     ConfigManager,
@@ -15,6 +16,7 @@ from basic_memory.config import (
     default_fastembed_cache_dir,
     resolve_data_dir,
 )
+from basic_memory.temporal import DEFAULT_DATE_ORDER, DateOrder
 from pathlib import Path
 
 
@@ -1259,6 +1261,36 @@ class TestSemanticSearchConfig:
         """default_search_type rejects unknown values."""
         with pytest.raises(Exception):
             BasicMemoryConfig(default_search_type="invalid")
+
+
+class TestDateOrderConfig:
+    """The preference used to read an ambiguous authored date (SPEC-82)."""
+
+    def test_date_order_defaults_to_iso(self):
+        assert BasicMemoryConfig().date_order == "YMD"
+
+    def test_date_order_accepts_the_three_component_orders(self):
+        for date_order in ("YMD", "DMY", "MDY"):
+            assert BasicMemoryConfig(date_order=date_order).date_order == date_order
+
+    def test_date_order_rejects_anything_else(self):
+        with pytest.raises(Exception):
+            BasicMemoryConfig(date_order="ISO")
+
+    def test_date_order_matches_the_domain_alias(self):
+        """The field is spelled as a bare Literal so `bm config set` can discover it.
+
+        `temporal.DateOrder` is the same union used in function signatures; this pins
+        the two spellings together so neither can drift.
+        """
+        assert set(get_args(BasicMemoryConfig.model_fields["date_order"].annotation)) == set(
+            get_args(DateOrder.__value__)
+        )
+        assert BasicMemoryConfig().date_order == DEFAULT_DATE_ORDER
+
+    def test_date_order_is_settable_from_the_cli(self):
+        """A user-facing preference is worth nothing if `bm config set` cannot reach it."""
+        assert "date_order" in CONFIGURABLE_FIELDS
 
 
 class TestFormattingConfig:

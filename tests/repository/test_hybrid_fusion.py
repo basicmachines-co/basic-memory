@@ -18,6 +18,7 @@ from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_repository_base import FUSION_BONUS, SearchRepositoryBase
 from basic_memory.repository.search_trace import SearchTraceCollector
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
+from basic_memory.temporal import TemporalFilter
 
 
 @dataclass
@@ -82,6 +83,7 @@ class ConcreteSearchRepo(SearchRepositoryBase):
         categories: Optional[list[str]] = None,
         metadata_filters: Optional[dict[str, Any]] = None,
         file_path_prefix: Optional[str] = None,
+        temporal: Optional[TemporalFilter] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
         limit: int = 10,
@@ -162,6 +164,7 @@ HYBRID_KWARGS: dict[str, Any] = dict(
     categories=None,
     metadata_filters=None,
     file_path_prefix=None,
+    temporal=None,
     limit=10,
     offset=0,
 )

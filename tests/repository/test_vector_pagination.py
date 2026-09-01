@@ -16,6 +16,7 @@ from basic_memory.repository.search_repository_base import SearchRepositoryBase
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_trace import SearchTraceCollector
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
+from basic_memory.temporal import TemporalFilter
 
 
 @dataclass
@@ -67,6 +68,7 @@ class ConcreteSearchRepo(SearchRepositoryBase):
         categories: list[str] | None = None,
         metadata_filters: dict[str, Any] | None = None,
         file_path_prefix: str | None = None,
+        temporal: TemporalFilter | None = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: float | None = None,
         limit: int = 10,
@@ -194,6 +196,7 @@ async def test_page1_scores_gte_page2_scores():
                 categories=None,
                 metadata_filters=None,
                 file_path_prefix=None,
+                temporal=None,
                 limit=limit,
                 offset=offset,
             )

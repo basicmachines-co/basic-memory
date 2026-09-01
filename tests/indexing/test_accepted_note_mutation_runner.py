@@ -49,6 +49,10 @@ from basic_memory.repository import (
     AcceptedSectionWrite,
 )
 from basic_memory.repository.entity_repository import AcceptedPendingEntityWrite
+from basic_memory.repository.memory_time_index_repository import (
+    AcceptedTemporalAssertion,
+    TemporalGenerationWriteResult,
+)
 from basic_memory.repository.note_section_repository import SectionGenerationWriteResult
 from basic_memory.repository.observation_repository import ObservationGenerationWriteResult
 from basic_memory.repository.relation_repository import RelationGenerationWriteResult
@@ -551,6 +555,20 @@ class _SectionRepository:
         raise AssertionError("section publication was not expected inside the accepted transaction")
 
 
+class _TemporalRepository:
+    async def replace_assertions_for_generation(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+        generation: int,
+        assertions: Sequence[AcceptedTemporalAssertion],
+    ) -> TemporalGenerationWriteResult:
+        raise AssertionError(
+            "temporal publication was not expected inside the accepted transaction"
+        )
+
+
 class _RelationRepository:
     def __init__(self) -> None:
         self.calls: list[tuple[int, Sequence[AcceptedRelationWrite]]] = []
@@ -595,6 +613,7 @@ class _MutationWriteRepositories:
     search_repository_result: _SearchRepository
     observation_repository_result: _ObservationRepository
     section_repository_result: _SectionRepository
+    temporal_repository_result: _TemporalRepository
     relation_repository_result: _RelationRepository
 
     def pending_entity_repository(self, project_id: int) -> _PendingEntityRepository:
@@ -616,6 +635,10 @@ class _MutationWriteRepositories:
     def section_repository(self, project_id: int) -> _SectionRepository:
         _ = project_id
         return self.section_repository_result
+
+    def temporal_repository(self, project_id: int) -> _TemporalRepository:
+        _ = project_id
+        return self.temporal_repository_result
 
     def relation_repository(self, project_id: int) -> _RelationRepository:
         _ = project_id
@@ -763,6 +786,7 @@ def _dependencies(
             search_repository_result=search_repository,
             observation_repository_result=observation_repository or _ObservationRepository(),
             section_repository_result=_SectionRepository(),
+            temporal_repository_result=_TemporalRepository(),
             relation_repository_result=relation_repository or _RelationRepository(),
         ),
         move_policy=move_policy

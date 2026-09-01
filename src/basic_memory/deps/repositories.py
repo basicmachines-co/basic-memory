@@ -18,6 +18,7 @@ from basic_memory.deps.config import AppConfigDep
 from basic_memory.deps.db import SessionMakerDep
 from basic_memory.deps.projects import ProjectExternalIdPathDep
 from basic_memory.repository.entity_repository import EntityRepository
+from basic_memory.repository.memory_time_index_repository import MemoryTimeIndexRepository
 from basic_memory.repository.observation_repository import ObservationRepository
 from basic_memory.repository.relation_repository import RelationRepository
 from basic_memory.repository.search_repository import SearchRepository, create_search_repository
@@ -65,6 +66,21 @@ async def get_relation_repository_v2_external(
 
 RelationRepositoryV2ExternalDep = Annotated[
     RelationRepository, Depends(get_relation_repository_v2_external)
+]
+
+
+# --- Temporal Projection Repository ---
+
+
+async def get_memory_time_index_repository_v2_external(
+    project_id: ProjectExternalIdPathDep,
+) -> MemoryTimeIndexRepository:
+    """Create a MemoryTimeIndexRepository instance for v2 API (uses external_id)."""
+    return MemoryTimeIndexRepository(project_id=project_id)
+
+
+MemoryTimeIndexRepositoryV2ExternalDep = Annotated[
+    MemoryTimeIndexRepository, Depends(get_memory_time_index_repository_v2_external)
 ]
 
 

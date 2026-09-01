@@ -11,6 +11,7 @@ from sqlalchemy.orm.interfaces import LoaderOption
 from basic_memory.models import Observation
 from basic_memory.repository.relation_repository import current_relation_generation_statement
 from basic_memory.repository.repository import Repository
+from basic_memory.temporal import TemporalAssertion
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,19 +21,30 @@ class AcceptedObservationWrite:
     Mirrors the markdown ``Observation`` fields so the accepted-write path can
     persist the graph without constructing ORM rows in the storage-neutral
     runner (issue #1076).
+
+    ``temporal`` rides along rather than becoming observation columns: authored
+    valid time is its own projection keyed on the row this write mints, and an
+    observation may carry several assertions (SPEC-82).
     """
 
     content: str
     category: str | None
     context: str | None
     tags: list[str] | None
+    temporal: tuple[TemporalAssertion, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class ObservationGenerationWriteResult:
-    """Whether a guarded observation replacement still owned its source generation."""
+    """Whether a guarded observation replacement still owned its source generation.
+
+    ``observation_ids`` are the freshly minted row ids in document order, aligned
+    with the sequence that was written. The temporal projection addresses those
+    rows, and they only exist once the insert has flushed.
+    """
 
     generation_is_current: bool
+    observation_ids: tuple[int, ...] = ()
 
 
 class ObservationRepository(Repository[Observation]):
@@ -142,4 +154,10 @@ class ObservationRepository(Repository[Observation]):
             for obs in observations
         ]
         await self.add_all_no_return(session, rows)
-        return ObservationGenerationWriteResult(generation_is_current=True)
+        # add_all_no_return flushes, so every row now carries its database id.
+        # Reading them here, inside the same transaction, is what lets the temporal
+        # projection address these exact rows.
+        return ObservationGenerationWriteResult(
+            generation_is_current=True,
+            observation_ids=tuple(row.id for row in rows),
+        )

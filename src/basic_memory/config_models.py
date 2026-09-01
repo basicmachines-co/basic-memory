@@ -586,6 +586,15 @@ class BasicMemoryConfig(BaseSettings):
         gt=0,
     )
 
+    # Spelled as a bare Literal rather than the `DateOrder` alias so `bm config set`
+    # keeps discovering it: CONFIGURABLE_FIELDS reads model_fields annotations, and a
+    # PEP 695 alias arrives there unresolved. `temporal.DateOrder` is the same union,
+    # and a test pins the two together.
+    date_order: Literal["YMD", "DMY", "MDY"] = Field(
+        default="YMD",
+        description="Component order used to read an ambiguous slash-formatted date in an authored temporal qualifier (e.g. '@10/07/2026'). YMD and DMY read that as 10 July 2026, MDY as 7 October 2026. ISO dates like '2026-07-10' are never re-guessed.",
+    )
+
     kebab_filenames: bool = Field(
         default=False,
         description="Format for generated filenames. False preserves spaces and special chars, True converts them to hyphens for consistency with permalinks",

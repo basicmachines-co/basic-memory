@@ -1,7 +1,7 @@
 """Publish a note's derived graph under one accepted content generation.
 
-The publication carries the complete observation, section, and relation projections
-through one note_content fence lifecycle and one durable retry marker.
+The publication carries the complete observation, temporal, section, and relation
+projections through one note_content fence lifecycle and one durable retry marker.
 
 The graph tables are eventually consistent projections, not part of the accepted write's
 transaction. Publication runs after the content commit; a stale fence makes every statement
@@ -23,6 +23,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.indexing.models import IndexedObservation, IndexedRelation, IndexedSection
+from basic_memory.repository.memory_time_index_repository import (
+    AcceptedTemporalAssertion,
+    TemporalGenerationWriteResult,
+)
 from basic_memory.repository.note_section_repository import (
     AcceptedSectionWrite,
     SectionGenerationWriteResult,
@@ -37,6 +41,7 @@ from basic_memory.repository.relation_repository import (
     RelationGenerationWriteResult,
 )
 from basic_memory.runtime.storage import ProjectId, RuntimeEntityId, RuntimeNoteContentVersion
+from basic_memory.schemas.search import SearchItemType
 
 
 class RelationGenerationStore(Protocol):
@@ -94,6 +99,19 @@ class SectionGenerationStore(Protocol):
     ) -> SectionGenerationWriteResult: ...
 
 
+class TemporalGenerationStore(Protocol):
+    """Repository operation needed to replace one temporal generation."""
+
+    async def replace_assertions_for_generation(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+        generation: int,
+        assertions: Sequence[AcceptedTemporalAssertion],
+    ) -> TemporalGenerationWriteResult: ...
+
+
 @dataclass(frozen=True, slots=True)
 class RelationGenerationPublication:
     """Derived graph intent authorized by one accepted note-content generation."""
@@ -108,11 +126,12 @@ class RelationGenerationPublication:
 
 @dataclass(frozen=True, slots=True)
 class RelationGenerationPublisher:
-    """Commit observations, sections, relation chunks, and cleanup under source fences."""
+    """Commit observations, valid time, sections, relations, and cleanup under fences."""
 
     relation_repository: RelationGenerationStore
     observation_repository: ObservationGenerationStore
     section_repository: SectionGenerationStore
+    temporal_repository: TemporalGenerationStore
     session_maker: async_sessionmaker[AsyncSession]
 
     async def publish(
@@ -163,27 +182,11 @@ class RelationGenerationPublisher:
         if not publication.generation_is_current:
             return False
 
-        # Observations fit one statement batch, so their fenced replacement owns one short
-        # transaction. An empty desired set must still execute to wipe the prior projection.
-        accepted_observations = tuple(
-            AcceptedObservationWrite(
-                content=observation.content,
-                category=observation.category,
-                context=observation.context,
-                tags=observation.tags,
-            )
-            for observation in observations
-        )
-        async with db.scoped_session(self.session_maker) as session:
-            observation_result = (
-                await self.observation_repository.replace_observations_for_generation(
-                    session,
-                    entity_id=entity_id,
-                    generation=generation,
-                    observations=accepted_observations,
-                )
-            )
-        if not observation_result.generation_is_current:
+        if not await self._publish_observations(
+            entity_id=entity_id,
+            generation=generation,
+            observations=observations,
+        ):
             return False
 
         # Sections mirror the observation projection: one fenced wipe-and-recreate in
@@ -234,3 +237,85 @@ class RelationGenerationPublisher:
                 generation=generation,
             )
         return cleanup.generation_is_current
+
+    async def _publish_observations(
+        self,
+        *,
+        entity_id: int,
+        generation: int,
+        observations: Sequence[IndexedObservation],
+    ) -> bool:
+        """Replace observations and their authored valid time under one fence.
+
+        Observations fit one statement batch, so their fenced replacement owns one
+        short transaction. An empty desired set must still execute, for both writes,
+        to wipe the prior projections.
+
+        Constraint: the temporal projection addresses observations by row id, and
+        those ids are minted by the insert here. Unlike sections and observations,
+        which key on the stable entity_id, this write cannot be deferred to a
+        transaction of its own: a same-generation republish landing between two
+        commits would wipe and re-mint the observation rows, leaving temporal rows
+        addressing ids that no longer exist and that no later pass repairs. One
+        transaction under one held fence keeps a row and its valid time atomic. That
+        is a narrow exception earned by the id dependency, not a licence to widen the
+        other statements.
+        """
+        accepted_observations = tuple(
+            AcceptedObservationWrite(
+                content=observation.content,
+                category=observation.category,
+                context=observation.context,
+                tags=observation.tags,
+                temporal=observation.temporal,
+            )
+            for observation in observations
+        )
+        async with db.scoped_session(self.session_maker) as session:
+            observation_result = (
+                await self.observation_repository.replace_observations_for_generation(
+                    session,
+                    entity_id=entity_id,
+                    generation=generation,
+                    observations=accepted_observations,
+                )
+            )
+            if not observation_result.generation_is_current:
+                return False
+
+            temporal_result = await self.temporal_repository.replace_assertions_for_generation(
+                session,
+                entity_id=entity_id,
+                generation=generation,
+                assertions=_accepted_temporal_assertions(
+                    observations,
+                    observation_result.observation_ids,
+                ),
+            )
+        return temporal_result.generation_is_current
+
+
+def _accepted_temporal_assertions(
+    observations: Sequence[IndexedObservation],
+    observation_ids: Sequence[int],
+) -> tuple[AcceptedTemporalAssertion, ...]:
+    """Pair each authored assertion with the observation row that now carries it.
+
+    Both sequences are in document order, so position is the pairing. A length
+    mismatch means the observation write returned ids for a different set of rows
+    than it was given, which would silently attach valid time to the wrong statement.
+    """
+    if len(observation_ids) != len(observations):
+        raise ValueError(
+            f"Observation publication returned {len(observation_ids)} row ids "
+            f"for {len(observations)} observations"
+        )
+    return tuple(
+        AcceptedTemporalAssertion(
+            source_type=SearchItemType.OBSERVATION.value,
+            source_id=observation_id,
+            assertion=assertion,
+        )
+        for observation, observation_id in zip(observations, observation_ids)
+        for assertion in observation.temporal
+    )

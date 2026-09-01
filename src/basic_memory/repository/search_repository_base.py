@@ -83,6 +83,7 @@ from basic_memory.schemas.search import (
     SearchRetrievalMode,
     normalize_file_path_prefix,
 )
+from basic_memory.temporal import TemporalFilter
 from basic_memory.utils import ensure_timezone_aware
 
 # --- Semantic search constants ---
@@ -416,6 +417,7 @@ class SearchRepositoryBase(ABC):
         categories: Optional[List[str]] = None,
         metadata_filters: Optional[Dict[str, Any]] = None,
         file_path_prefix: Optional[str] = None,
+        temporal: Optional[TemporalFilter] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
         limit: int = 10,
@@ -437,6 +439,9 @@ class SearchRepositoryBase(ABC):
             categories: Filter observations by exact category (e.g. "requirement")
             metadata_filters: Structured frontmatter metadata filters
             file_path_prefix: Directory subtree scope, matched against file_path
+            temporal: Authored valid-time filter. Unlike after_date, which reads the
+                note's edit bookkeeping, this reads the time an observation claims to
+                be true of the world. Sources without such a claim are excluded.
             limit: Maximum results to return
             offset: Number of results to skip
 
@@ -461,6 +466,7 @@ class SearchRepositoryBase(ABC):
         categories: Optional[List[str]] = None,
         metadata_filters: Optional[Dict[str, Any]] = None,
         file_path_prefix: Optional[str] = None,
+        temporal: Optional[TemporalFilter] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
         allow_relaxed: bool = False,
@@ -2014,6 +2020,7 @@ class SearchRepositoryBase(ABC):
         categories: Optional[List[str]],
         metadata_filters: Optional[dict[str, Any]],
         file_path_prefix: Optional[str],
+        temporal: Optional[TemporalFilter],
         retrieval_mode: SearchRetrievalMode,
         min_similarity: Optional[float] = None,
         limit: int,
@@ -2050,6 +2057,7 @@ class SearchRepositoryBase(ABC):
                 categories=categories,
                 metadata_filters=metadata_filters,
                 file_path_prefix=file_path_prefix,
+                temporal=temporal,
                 min_similarity=min_similarity,
                 limit=limit,
                 offset=offset,
@@ -2072,6 +2080,7 @@ class SearchRepositoryBase(ABC):
                 categories=categories,
                 metadata_filters=metadata_filters,
                 file_path_prefix=file_path_prefix,
+                temporal=temporal,
                 min_similarity=min_similarity,
                 limit=limit,
                 offset=offset,
@@ -2251,6 +2260,7 @@ class SearchRepositoryBase(ABC):
         categories: Optional[List[str]],
         metadata_filters: Optional[dict[str, Any]],
         file_path_prefix: Optional[str],
+        temporal: Optional[TemporalFilter],
         min_similarity: Optional[float] = None,
         limit: int,
         offset: int,
@@ -2439,6 +2449,7 @@ class SearchRepositoryBase(ABC):
                 categories,
                 metadata_filters,
                 file_path_prefix,
+                temporal,
             ]
         )
 
@@ -2454,6 +2465,7 @@ class SearchRepositoryBase(ABC):
                 categories=categories,
                 metadata_filters=metadata_filters,
                 file_path_prefix=file_path_prefix,
+                temporal=temporal,
                 retrieval_mode=SearchRetrievalMode.FTS,
                 limit=VECTOR_FILTER_SCAN_LIMIT,
                 offset=0,
@@ -2518,6 +2530,7 @@ class SearchRepositoryBase(ABC):
                         categories=categories,
                         metadata_filters=metadata_filters,
                         file_path_prefix=file_path_prefix,
+                        temporal=temporal,
                         min_similarity=min_similarity,
                         limit=stable_candidate_limit,
                         offset=0,
@@ -2591,6 +2604,7 @@ class SearchRepositoryBase(ABC):
         categories: Optional[List[str]],
         metadata_filters: Optional[dict[str, Any]],
         file_path_prefix: Optional[str],
+        temporal: Optional[TemporalFilter],
         min_similarity: Optional[float] = None,
         limit: int,
         offset: int,
@@ -2630,6 +2644,7 @@ class SearchRepositoryBase(ABC):
             categories=categories,
             metadata_filters=metadata_filters,
             file_path_prefix=file_path_prefix,
+            temporal=temporal,
             retrieval_mode=SearchRetrievalMode.FTS,
             limit=candidate_limit,
             offset=0,
@@ -2649,6 +2664,7 @@ class SearchRepositoryBase(ABC):
             categories=categories,
             metadata_filters=metadata_filters,
             file_path_prefix=file_path_prefix,
+            temporal=temporal,
             min_similarity=min_similarity,
             limit=candidate_limit,
             offset=0,
@@ -2800,6 +2816,7 @@ class SearchRepositoryBase(ABC):
                     categories=categories,
                     metadata_filters=metadata_filters,
                     file_path_prefix=file_path_prefix,
+                    temporal=temporal,
                     min_similarity=min_similarity,
                     limit=stable_candidate_limit,
                     offset=0,

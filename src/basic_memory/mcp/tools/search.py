@@ -395,6 +395,14 @@ def _format_search_markdown(
         parts.append(f"- score: {r.score:.4f}")
         if r.matched_chunk:
             parts.append(f"- match: {r.matched_chunk[:200]}")
+        # Name the axis and the units. A bare "2026-06-10" here would read as an edit
+        # date; "effective valid time ... (date)" says which time this is and that it
+        # is a calendar date carrying no timezone.
+        for assertion in r.temporal or []:
+            parts.append(
+                f"- {assertion.role} valid time: {assertion.valid_during.literal} "
+                f"({assertion.valid_during.kind})"
+            )
         parts.append("")
 
     # --- Footer with pagination ---
@@ -575,11 +583,19 @@ async def _search_all_projects(
     tags: list[str] | None,
     status: str | None,
     min_similarity: float | None,
+    valid_at: str | None,
+    valid_overlaps: str | None,
+    time_role: str | None,
     context: Context | None,
 ) -> dict[str, Any] | str:
     """Search every accessible project when the caller explicitly opts in."""
     requested_page = max(page, 1)
     requested_page_size = max(page_size, 1)
+    # Each per-project call runs through search_notes -> SearchClient, which refuses a
+    # response that does not confirm the filter ran. So a project either honored the
+    # valid-time filter or was dropped with a warning below; the merged answer never
+    # silently mixes filtered and unfiltered rows.
+    temporal_requested = bool(valid_at or valid_overlaps or time_role)
     project_refs = await _load_search_project_refs(context=context)
     if not project_refs:
         response = SearchResponse(
@@ -589,6 +605,7 @@ async def _search_all_projects(
             total=0,
             total_is_exact=True,
             has_more=False,
+            temporal_applied=True if temporal_requested else None,
         )
         if output_format == "json":
             return response.model_dump(mode="json", exclude_none=True)
@@ -636,6 +653,9 @@ async def _search_all_projects(
                 tags=tags,
                 status=status,
                 min_similarity=min_similarity,
+                valid_at=valid_at,
+                valid_overlaps=valid_overlaps,
+                time_role=time_role,
                 search_all_projects=False,
                 context=context,
             )
@@ -679,6 +699,7 @@ async def _search_all_projects(
             "total": total,
             "total_is_exact": total_is_exact,
             "has_more": any_project_has_more or total > end or len(sorted_results) > end,
+            "temporal_applied": True if temporal_requested else None,
         }
     )
 
@@ -789,6 +810,41 @@ async def search_notes(
             validation_alias=AliasChoices("min_similarity", "threshold", "similarity_threshold"),
         ),
     ] = None,
+    # --- Valid-time filters (SPEC-82) ---
+    # A different axis from after_date: these ask what a note SAYS was true, not when
+    # the note was last touched. Appended at the end of the signature so no existing
+    # positional caller shifts.
+    valid_at: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            validation_alias=AliasChoices("valid_at", "as_of", "valid_on"),
+        ),
+        "Return only sources whose authored valid range CONTAINS this date "
+        "('2026-07-28') or RFC 3339 instant ('2026-07-28T09:00:00Z'; a timestamp "
+        "with no offset is read as UTC). Sources with no temporal qualifier are "
+        "excluded.",
+    ] = None,
+    valid_overlaps: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            validation_alias=AliasChoices("valid_overlaps", "overlaps", "valid_during"),
+        ),
+        "Return only sources whose authored valid range OVERLAPS this range literal, "
+        "written PostgreSQL-style: '[2026-06-10,2026-07-27)', '(,2026-07-27]', "
+        "'[2026-06-10,)'. Mutually exclusive with valid_at.",
+    ] = None,
+    time_role: Annotated[
+        Optional[str],
+        Field(
+            default=None,
+            validation_alias=AliasChoices("time_role", "role", "time_axis"),
+        ),
+        "Narrow valid-time matching to one authored axis: 'effective', 'valid', "
+        "'occurred', 'due', or 'mentioned'. Usable on its own to find every source "
+        "carrying an assertion on that axis.",
+    ] = None,
     context: Context | None = None,
 ) -> dict[str, Any] | str:
     """Search across all content in the knowledge base with comprehensive syntax support.
@@ -866,6 +922,44 @@ async def search_notes(
     `tags` and `status` are shorthand for metadata_filters. If the same key exists in
     metadata_filters, that value wins.
 
+    ### Valid-Time Filters (what a note says was true)
+    Notes can state when a fact holds, by writing a qualifier on an observation:
+
+        - [decision] @effective[2026-06-10,2026-07-27) The cache layer will use Redis.
+        - [decision] @effective:2026-07-27 The cache layer will use Memcached.
+
+    The bracket form is an explicit range; the `@role:date` form is a point, meaning
+    the span its precision covers — `@2026` that year, `@2026-06` that month, and
+    `@2026-06-10` from that date onward. The role may be omitted (`@2026-07-27`),
+    which files the assertion on the `valid` axis; a role-less point has to start
+    with a digit and be at least as wide as a year, so `@v2` and `@may` stay prose.
+
+    These filters query that authored time, which is a different axis from `after_date`
+    (last-indexed time) — `after_date` is never reinterpreted as valid time.
+    - `search_notes("cache layer", role="effective", valid_at="2026-07-28")`
+      - Returns the Memcached decision; the Redis decision expired at the cutover.
+    - `search_notes("cache layer", role="effective", valid_at="2026-07-01")`
+      - Returns the Redis decision; Memcached is not yet effective.
+    - `search_notes("cache layer", role="effective", valid_overlaps="[2026-06-01,2026-08-01)")`
+      - Returns both, since each overlaps that window.
+    - `search_notes("cache layer")` with no valid-time filter
+      - Both compete under ordinary relevance, exactly as before.
+
+    **Sources with no temporal qualifier are excluded from any valid-time query.**
+    An undated note makes no claim about when it holds, so it cannot answer "what was
+    true on this date". Drop the valid-time filter to search dated and undated content
+    together.
+
+    Because a single note can carry several assertions that disagree (as above), these
+    queries return observation-level results by default rather than whole notes, and
+    each result carries the assertion that matched so the answer can explain itself.
+
+    Bounds follow PostgreSQL range conventions: `[` / `]` include an endpoint, `(` / `)`
+    exclude it, and an omitted side is unbounded. Calendar dates (`2026-07-27`) and
+    instants (`2026-07-27T16:42:00Z`) are separate axes that never convert into each
+    other: a date query matches only date ranges, an instant query only instant ranges.
+    An instant written without an offset is read as UTC.
+
     ### Advanced Pattern Examples
     - `search_notes("project AND (meeting OR discussion)", project="work-project")` - Complex boolean logic
     - `search_notes('"exact phrase" AND keyword', project="research")` - Combine phrase and keyword search
@@ -906,6 +1000,14 @@ async def search_notes(
         min_similarity: Optional float to override the global semantic_min_similarity threshold
                        for this query. E.g., 0.0 to see all vector results, or 0.8 for high precision.
                        Only applies to vector and hybrid search types.
+        valid_at: Optional date ("2026-07-28") or RFC 3339 instant ("2026-07-28T09:00:00Z";
+                 a timestamp with no offset is read as UTC). Returns sources whose authored
+                 valid range contains it. Sources with no temporal qualifier are excluded.
+        valid_overlaps: Optional PostgreSQL-style range literal ("[2026-06-10,2026-07-27)",
+                 "(,2026-07-27]", "[2026-06-10,)"). Returns sources whose authored valid range
+                 overlaps it. Mutually exclusive with valid_at; also excludes undated sources.
+        time_role: Optional valid-time axis to narrow to: "effective", "valid", "occurred",
+                 "due", or "mentioned". Valid on its own.
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -990,6 +1092,14 @@ async def search_notes(
     if page_size < 1:
         raise ValueError(f"page_size must be >= 1, got {page_size}")
 
+    # Trigger: both valid-time forms supplied.
+    # Why: SearchQuery rejects the pair too, but the tool assigns its fields after
+    #      construction, so that validator never runs on this path — the caller would
+    #      otherwise learn about it as an opaque 422 from the API.
+    # Outcome: one clear error naming the two mutually exclusive parameters.
+    if valid_at and valid_overlaps:
+        raise ValueError("Use either valid_at (containment) or valid_overlaps (overlap), not both.")
+
     # Trigger: list params arrived via a direct function call instead of the MCP layer.
     # Why: the BeforeValidator annotations only run through MCP/Pydantic validation; direct
     #      callers (e.g. `bm tool search-notes --type note,task` in cli/commands/tool.py,
@@ -1065,6 +1175,9 @@ async def search_notes(
             tags=tags,
             status=status,
             min_similarity=min_similarity,
+            valid_at=valid_at,
+            valid_overlaps=valid_overlaps,
+            time_role=time_role,
             context=context,
         )
         return all_projects_result
@@ -1092,9 +1205,13 @@ async def search_notes(
             or entity_types
             or categories
             or after_date
+            or valid_at
+            or valid_overlaps
+            or time_role
         ),
         has_tags_filter=bool(tags),
         has_status_filter=bool(status),
+        has_temporal_filter=bool(valid_at or valid_overlaps or time_role),
     ):
         async with get_project_client(project, context=context, project_id=project_id) as (
             client,
@@ -1175,6 +1292,12 @@ async def search_notes(
                     search_query.status = status
                 if min_similarity is not None:
                     search_query.min_similarity = min_similarity
+                if valid_at:
+                    search_query.valid_at = valid_at
+                if valid_overlaps:
+                    search_query.valid_overlaps = valid_overlaps
+                if time_role:
+                    search_query.time_role = time_role
 
                 # Reject searches with no criteria at all
                 if search_query.no_criteria():
@@ -1182,7 +1305,7 @@ async def search_notes(
                         "# No Search Criteria\n\n"
                         "Please provide at least one of: `query`, `metadata_filters`, "
                         "`tags`, `status`, `note_types`, `entity_types`, `categories`, "
-                        "or `after_date`."
+                        "`after_date`, `valid_at`, `valid_overlaps`, or `time_role`."
                     )
 
                 # Default to entity-level results to avoid returning individual
@@ -1190,14 +1313,17 @@ async def search_notes(
                 # Applied after no_criteria() so that the implicit default doesn't
                 # mask a truly empty search request.
                 if not search_query.entity_types:
-                    # Trigger: a category filter was supplied without an explicit
-                    #          entity_types.
-                    # Why: categories only exist on observations — defaulting to "entity"
-                    #      (whose rows have NULL category) would AND a category filter against
-                    #      entity rows and return nothing, defeating a category-only search.
+                    # Trigger: a category or valid-time filter was supplied without an
+                    #          explicit entity_types.
+                    # Why: both only exist on observations — categories live on observation
+                    #      rows, and temporal assertions are projected against an
+                    #      observation's (type, id). Defaulting to "entity" would AND either
+                    #      filter against entity rows and return nothing, defeating the
+                    #      whole query.
                     # Outcome: scope the implicit default to observations so
-                    #          search_notes(categories=[...]) returns the matching bullets.
-                    if search_query.categories:
+                    #          search_notes(categories=[...]) and search_notes(valid_at=...)
+                    #          return the matching bullets.
+                    if search_query.categories or search_query.has_temporal_filter():
                         search_query.entity_types = [SearchItemType("observation")]
                     else:
                         search_query.entity_types = [SearchItemType("entity")]
