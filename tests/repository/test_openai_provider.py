@@ -391,10 +391,11 @@ def test_openai_provider_reports_runtime_log_attrs():
     }
 
 
-def test_embedding_provider_factory_auto_tunes_fastembed_runtime_knobs_from_cpu_budget(monkeypatch):
+def test_embedding_provider_factory_auto_tunes_fastembed_runtime_knobs_from_cpu_budget(
+    pin_cpu_budget,
+):
     """Unset FastEmbed runtime knobs should resolve from available CPU budget."""
-    monkeypatch.setattr(embedding_provider_factory_module.os, "process_cpu_count", lambda: 8)
-    monkeypatch.setattr(embedding_provider_factory_module.os, "cpu_count", lambda: 8)
+    pin_cpu_budget(8)
 
     config = BasicMemoryConfig(
         env="test",
@@ -413,10 +414,9 @@ def test_embedding_provider_factory_auto_tunes_fastembed_runtime_knobs_from_cpu_
     assert provider.parallel == 1
 
 
-def test_embedding_provider_factory_auto_tuning_caps_large_cpu_budgets(monkeypatch):
+def test_embedding_provider_factory_auto_tuning_caps_large_cpu_budgets(pin_cpu_budget):
     """Large workers should still leave some headroom and stop at the thread cap."""
-    monkeypatch.setattr(embedding_provider_factory_module.os, "process_cpu_count", lambda: 16)
-    monkeypatch.setattr(embedding_provider_factory_module.os, "cpu_count", lambda: 16)
+    pin_cpu_budget(16)
 
     config = BasicMemoryConfig(
         env="test",
@@ -436,11 +436,10 @@ def test_embedding_provider_factory_auto_tuning_caps_large_cpu_budgets(monkeypat
 
 
 def test_embedding_provider_factory_auto_tuning_stays_conservative_on_small_cpu_budget(
-    monkeypatch,
+    pin_cpu_budget,
 ):
     """Small workers should not get an oversized FastEmbed runtime footprint."""
-    monkeypatch.setattr(embedding_provider_factory_module.os, "process_cpu_count", lambda: 2)
-    monkeypatch.setattr(embedding_provider_factory_module.os, "cpu_count", lambda: 2)
+    pin_cpu_budget(2)
 
     config = BasicMemoryConfig(
         env="test",
@@ -457,6 +456,56 @@ def test_embedding_provider_factory_auto_tuning_stays_conservative_on_small_cpu_
     assert isinstance(provider, FastEmbedEmbeddingProvider)
     assert provider.threads == 2
     assert provider.parallel == 1
+
+
+def test_embedding_provider_factory_auto_tunes_without_process_cpu_count(monkeypatch):
+    """Auto-tuning must land on the same knobs when only os.cpu_count() exists.
+
+    ``os.process_cpu_count`` is new in Python 3.13, so on 3.12 the factory always
+    takes the ``os.cpu_count()`` fallback. Deleting the attribute reproduces that
+    runtime on newer interpreters, where the branch is otherwise unreachable, and
+    asserts 3.12 resolves the identical 8-CPU budget as the preferred API does.
+    """
+    monkeypatch.delattr(embedding_provider_factory_module.os, "process_cpu_count", raising=False)
+    monkeypatch.setattr(embedding_provider_factory_module.os, "cpu_count", lambda: 8)
+
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="fastembed",
+        semantic_embedding_threads=None,
+        semantic_embedding_parallel=None,
+    )
+
+    provider = create_embedding_provider(config)
+
+    assert isinstance(provider, FastEmbedEmbeddingProvider)
+    assert provider.threads == 6
+    assert provider.parallel == 1
+
+
+def test_embedding_provider_factory_leaves_knobs_unset_when_cpu_budget_is_unknown(monkeypatch):
+    """An unreported CPU budget must leave FastEmbed on its own runtime defaults."""
+    monkeypatch.delattr(embedding_provider_factory_module.os, "process_cpu_count", raising=False)
+    monkeypatch.setattr(embedding_provider_factory_module.os, "cpu_count", lambda: None)
+
+    config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        semantic_search_enabled=True,
+        semantic_embedding_provider="fastembed",
+        semantic_embedding_threads=None,
+        semantic_embedding_parallel=None,
+    )
+
+    provider = create_embedding_provider(config)
+
+    assert isinstance(provider, FastEmbedEmbeddingProvider)
+    assert provider.threads is None
+    assert provider.parallel is None
 
 
 def test_embedding_provider_factory_reuses_provider_for_same_cache_key():
@@ -484,10 +533,9 @@ def test_embedding_provider_factory_reuses_provider_for_same_cache_key():
     assert provider_a is provider_b
 
 
-def test_embedding_provider_factory_reuses_auto_tuned_provider_for_same_cpu_budget(monkeypatch):
+def test_embedding_provider_factory_reuses_auto_tuned_provider_for_same_cpu_budget(pin_cpu_budget):
     """Auto-tuned FastEmbed providers should still reuse the process cache."""
-    monkeypatch.setattr(embedding_provider_factory_module.os, "process_cpu_count", lambda: 8)
-    monkeypatch.setattr(embedding_provider_factory_module.os, "cpu_count", lambda: 8)
+    pin_cpu_budget(8)
 
     config_a = BasicMemoryConfig(
         env="test",
@@ -685,7 +733,7 @@ def test_embedding_provider_factory_reuses_provider_when_only_thread_knobs_diffe
     assert provider_a is provider_b
 
 
-def test_embedding_provider_factory_reuses_provider_when_cpu_budget_drifts(monkeypatch):
+def test_embedding_provider_factory_reuses_provider_when_cpu_budget_drifts(pin_cpu_budget):
     """A drifting CPU budget between calls must not reload the model (#872).
 
     Simulates a container/cgroup where the auto-tuned thread count changes between
@@ -702,13 +750,11 @@ def test_embedding_provider_factory_reuses_provider_when_cpu_budget_drifts(monke
         semantic_embedding_parallel=None,
     )
 
-    monkeypatch.setattr(embedding_provider_factory_module.os, "process_cpu_count", lambda: 8)
-    monkeypatch.setattr(embedding_provider_factory_module.os, "cpu_count", lambda: 8)
+    pin_cpu_budget(8)
     provider_first = create_embedding_provider(config)
 
     # CPU budget shrinks (e.g. cgroup throttling) → auto-tuned thread count changes.
-    monkeypatch.setattr(embedding_provider_factory_module.os, "process_cpu_count", lambda: 4)
-    monkeypatch.setattr(embedding_provider_factory_module.os, "cpu_count", lambda: 4)
+    pin_cpu_budget(4)
     provider_second = create_embedding_provider(config)
 
     assert provider_first is provider_second

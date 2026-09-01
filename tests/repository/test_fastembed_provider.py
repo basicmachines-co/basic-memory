@@ -598,7 +598,9 @@ async def test_fastembed_provider_fails_fast_without_cache_dir(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_factory_loads_native_model_once_across_repo_constructions(monkeypatch):
+async def test_factory_loads_native_model_once_across_repo_constructions(
+    monkeypatch, pin_cpu_budget
+):
     """The native ONNX model must load exactly once per process despite reuse (#872).
 
     Counting native model loads requires a stub TextEmbedding that increments a
@@ -614,7 +616,6 @@ async def test_factory_loads_native_model_once_across_repo_constructions(monkeyp
     from typing import Any, cast
 
     from basic_memory.config import BasicMemoryConfig, DatabaseBackend, ProjectEntry
-    from basic_memory.repository import embedding_provider_factory as factory_module
     from basic_memory.repository.embedding_provider_factory import (
         create_embedding_provider,
         reset_embedding_provider_cache,
@@ -643,13 +644,11 @@ async def test_factory_loads_native_model_once_across_repo_constructions(monkeyp
 
     try:
         # First resolution under one CPU budget.
-        monkeypatch.setattr(factory_module.os, "process_cpu_count", lambda: 8)
-        monkeypatch.setattr(factory_module.os, "cpu_count", lambda: 8)
+        pin_cpu_budget(8)
         provider_first = create_embedding_provider(config)
 
         # CPU budget drifts (cgroup throttling) — used to force a second model load.
-        monkeypatch.setattr(factory_module.os, "process_cpu_count", lambda: 4)
-        monkeypatch.setattr(factory_module.os, "cpu_count", lambda: 4)
+        pin_cpu_budget(4)
 
         # Build several repositories the way per-request/per-sync code does. Each
         # one is injected with the cached provider rather than deriving its own.
