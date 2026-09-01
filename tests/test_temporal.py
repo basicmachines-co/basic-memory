@@ -577,6 +577,32 @@ def test_a_real_time_of_day_still_follows_an_iso_date(written: str, lower: str):
     assert span.lower == lower
 
 
+@pytest.mark.parametrize(
+    ("written", "lower"),
+    [
+        # A clock reading on a date written in no machine syntax at all. The ISO rules
+        # never see these -- there is no literal reading to hold them to -- so the
+        # flexible reader's answer is taken as given, clock and all.
+        ("10/07/2026 14:00", "2026-07-10T14:00:00.000000Z"),
+        ("10/07/2026 14:00:00+02:00", "2026-07-10T12:00:00.000000Z"),
+        ("June 10, 2026 2pm", "2026-06-10T14:00:00.000000Z"),
+        ("June 10, 2026 at 14:00", "2026-06-10T14:00:00.000000Z"),
+    ],
+)
+def test_a_non_iso_date_may_carry_a_clock_reading(written: str, lower: str):
+    """Both readers file instants, and only one of them checks the date it was given.
+
+    An ISO head is authoritative, so a clock reading beside one is verified against it.
+    These spellings have no such head -- `@occurred:"June 10, 2026 2pm"` says everything
+    it means through the flexible reader -- so nothing here is second-guessed.
+    """
+    span = parse_authored_point(written)
+
+    assert span is not None
+    assert span.axis is INSTANT
+    assert span.lower == lower
+
+
 @pytest.mark.parametrize("today", ["2026-03-07", "2026-09-01"])
 def test_an_impossible_iso_month_is_not_completed_from_the_indexing_date(today: str):
     """The worst shape of all: a date whose meaning depended on when the reindex ran.
@@ -685,18 +711,22 @@ def test_a_year_beyond_the_calendar_is_unread():
 @pytest.mark.parametrize(
     "written",
     [
-        # The canonical shape, refused by the strict timestamp branch...
+        # The canonical shape, read exactly and refused by the ISO reader...
         "9999-12-31T23:59:59-05:00",
-        # ...and the same moment spelled loosely, refused after dateparser reads it.
+        # ...the same moment spelled loosely, still ISO-headed, so the ISO reader asks
+        # the flexible one for the clock and then finds the moment unstorable...
         "9999-12-31 23:59:59 -05:00",
+        # ...and the same moment in no machine syntax at all, which the flexible reader
+        # owns outright.
+        "December 31, 9999 23:59:59 -05:00",
     ],
 )
 def test_an_authored_instant_that_leaves_the_calendar_in_utc_is_unread(written: str):
     """The flexible reader has no bound to refuse, so it reads no date at all.
 
     Its contract is None-for-unreadable, not an exception: `parse_temporal_qualifier`
-    does not guard this call, so anything raised here fails the note. Both spellings are
-    pinned because they take different routes to the same refusal.
+    does not guard this call, so anything raised here fails the note. All three spellings
+    are pinned because they take different routes to the same refusal.
     """
     assert parse_authored_point(written) is None
 
