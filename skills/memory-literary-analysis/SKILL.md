@@ -56,18 +56,17 @@ Three sharp edges to know before you write a query. The first two fail *quietly*
 answer, exit 0, no warning — so learn them here rather than from a graph you thought you had
 audited:
 
-- **`--meta` reads frontmatter, and matches case-sensitively.** `note_type` is an alias for
-  the frontmatter `type:` key, compared with SQL `=`. A note written with
-  `note_type="Chapter"` matches `--meta 'note_type=Chapter'` and **not**
-  `--meta 'note_type=chapter'` — the lowercase form returns zero rows and exit 0. Confusingly,
-  a result row *displays* the snake-cased index projection (`"note_type": "chapter"`,
-  `"literary_device"`); that is not the value to query with. Query with the casing your
-  schemas authored.
+- **`--meta` matches case-sensitively, and the stored value is always snake_case.** `note_type`
+  is an alias for the frontmatter `type:` key, compared with SQL `=`. `write_note` normalizes
+  `note_type` through `to_snake_case` before writing, so a note authored as `note_type="Chapter"`
+  is stored as `type: chapter` — the casing you author with is *not* the casing on disk. Query
+  the snake_case form: `--meta 'note_type=chapter'`. The capitalized spelling returns zero rows
+  and exit 0. The value a result row displays is the value to query with.
 - **`find` pages, and the default page is 10.** Any query whose answer is "all N chapters"
   needs `--page-size 200` (the maximum) — see [Coverage Checks](#coverage-checks).
 - **`--name` cannot combine with `--meta`.** The metadata search matches slugified permalinks,
   not filenames. Scope a `--meta` query with the positional path instead: `find /characters
-  --meta 'note_type=Character'`.
+  --meta 'note_type=character'`.
 
 If the POSIX verbs are unavailable, every step below still works with `search_notes`,
 `read_note`, and `list_directory` — it just costs more.
@@ -471,8 +470,8 @@ After all chapters are processed:
 Do not re-read every note to decide what is thin. Query for it:
 
 ```bash
-bm find --meta 'note_type=Chapter' --fields chapter_number,pov,setting --page-size 200
-bm find --meta 'note_type=Character' --fields role,status --page-size 200   # who is still a stub
+bm find --meta 'note_type=chapter' --fields chapter_number,pov,setting --page-size 200
+bm find --meta 'note_type=character' --fields role,status --page-size 200   # who is still a stub
 bm find --meta 'chapter_number>100' --fields pov --page-size 200           # late-book POV drift
 ```
 
@@ -558,9 +557,9 @@ Fix issues found — common fixes:
 Schema validation proves notes match their shape. These prove the graph is *complete*:
 
 ```bash
-bm find --meta 'note_type=Chapter' --fields chapter_number --page-size 200   # every chapter present?
-bm find --meta 'note_type=Chapter' --fields pov,setting --page-size 200      # missing context?
-bm find /characters --meta 'note_type=Character' --fields role --page-size 200  # inventory vs. seed list
+bm find --meta 'note_type=chapter' --fields chapter_number --page-size 200   # every chapter present?
+bm find --meta 'note_type=chapter' --fields pov,setting --page-size 200      # missing context?
+bm find /characters --meta 'note_type=character' --fields role --page-size 200  # inventory vs. seed list
 ```
 
 **A coverage check that pages is not a coverage check.** `bm find` defaults to
@@ -578,7 +577,7 @@ For the sequence gap — the failure that a count alone cannot catch — take th
 `--json`, which carries `total`, `total_is_exact`, and `has_more`:
 
 ```bash
-bm find --meta 'note_type=Chapter' --fields chapter_number --page-size 200 --json \
+bm find --meta 'note_type=chapter' --fields chapter_number --page-size 200 --json \
   | jq --argjson expected 138 '
       [.results[].fields.chapter_number | tonumber] as $n
       | { total, has_more,
@@ -614,11 +613,16 @@ With the graph complete, traverse it to find what the chapter-by-chapter pass co
 
 ```bash
 bm tool build-context 'memory://characters/major/*' --depth 2         # the character web
-bm find --meta 'note_type=Theme' --fields prevalence --page-size 200  # thematic weight
-bm grep "doubloon" --project <work>                                   # a symbol across the work
+bm find --meta 'note_type=theme' --fields prevalence --page-size 200  # thematic weight
+bm grep -F "doubloon" --page-size 100 --project <work>                # every mention of a symbol
 ```
 
 `build-context` takes its URL as a positional argument — there is no `--url` option.
+
+`grep` defaults to semantic ranking and a page of 10, which answers "what is this about?" but
+quietly truncates "where does this appear?" — a symbol in 40 chapters comes back as 10. For
+symbol tracing, pass `-F` for literal matching and raise `--page-size`; the meaning shifts you
+are hunting are usually in the later occurrences, which the default would have dropped.
 
 Traversal is where second-order questions get answered — which characters share the most
 chapters, which themes converge in the final act, where a symbol's meaning shifts. Capture
