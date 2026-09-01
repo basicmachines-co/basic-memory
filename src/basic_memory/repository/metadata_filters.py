@@ -1,4 +1,9 @@
-"""Helpers for parsing structured metadata filters for search."""
+"""The frontmatter metadata path grammar, and the filters built on top of it.
+
+Every surface that accepts a caller-written dot path into frontmatter — the
+search API's ``metadata_filters``, find's ``--meta`` predicates, find's
+``--fields`` projection — parses it here, through `parse_metadata_path`.
+"""
 
 from __future__ import annotations
 
@@ -8,13 +13,11 @@ import re
 from typing import Any, Iterable, List, cast
 
 
-# The one definition of a well-formed metadata key: dot-separated name segments
-# of letters, digits, '_' or '-', so a doubled, leading or trailing dot is not a
-# path. Public because callers that build filters — the POSIX find predicate
-# grammar — refuse a malformed key against this same pattern before spending a
-# request; a private copy there would be free to drift from what this parser
-# actually accepts.
-METADATA_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$")
+# Dot-separated name segments of letters, digits, '_' or '-', so a doubled,
+# leading or trailing dot is not a path. Private on purpose: `parse_metadata_path`
+# is the only way to apply it, which is what keeps the check and the split that
+# depends on it from drifting apart in a caller.
+_METADATA_KEY_RE = re.compile(r"^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$")
 _NUMERIC_RE = re.compile(r"^-?\d+(\.\d+)?$")
 _COMPARISON_OPERATORS = {
     "$gt": "gt",
@@ -22,6 +25,37 @@ _COMPARISON_OPERATORS = {
     "$lt": "lt",
     "$lte": "lte",
 }
+
+
+@dataclass(frozen=True)
+class MetadataPath:
+    """A dot path into a note's frontmatter, already checked against the grammar.
+
+    `parts` lives here and nowhere else, and only `parse_metadata_path` builds
+    one — so walking a caller-written path requires having validated it first.
+    That is the entire point of the type. Splitting the string at the call site
+    is what let `--fields` accept `review..approved` and quietly walk an empty
+    segment to null for every hit, indistinguishable from a field that is
+    genuinely absent; there is no longer a second `.split(".")` to forget.
+    """
+
+    key: str
+    parts: tuple[str, ...]
+
+
+def parse_metadata_path(raw_key: str) -> MetadataPath | None:
+    """Parse one frontmatter dot path, or None when the text is not one.
+
+    Returns None instead of raising so each surface refuses in its own words —
+    the search API, find's predicates and find's field projection all word it
+    differently. The optional return is also the enforcement: a caller that
+    skips the check has a `MetadataPath | None` and cannot reach `.parts`
+    without the type checker objecting.
+    """
+    key = raw_key.strip()
+    if not _METADATA_KEY_RE.match(key):
+        return None
+    return MetadataPath(key, tuple(key.split(".")))
 
 
 @dataclass(frozen=True)
@@ -100,11 +134,11 @@ def parse_metadata_filters(filters: dict[str, Any]) -> List[ParsedMetadataFilter
     for raw_key, raw_value in (filters or {}).items():
         if not isinstance(raw_key, str) or not raw_key.strip():
             raise ValueError("metadata filter keys must be non-empty strings")
-        key = raw_key.strip()
-        if not METADATA_KEY_RE.match(key):
+        path = parse_metadata_path(raw_key)
+        if path is None:
             raise ValueError(f"Unsupported metadata filter key: {raw_key}")
 
-        path_parts = key.split(".")
+        path_parts = list(path.parts)
 
         # Operator form
         if isinstance(raw_value, dict):

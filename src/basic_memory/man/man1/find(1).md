@@ -125,7 +125,9 @@ quote one that genuinely does, as in `range=">=5"`.
 - **--meta** — frontmatter predicate, repeatable; see PREDICATE GRAMMAR.
   Switches the payload to the search response shape
 - **--fields** — comma-separated frontmatter fields to show per hit, e.g.
-  `"title,priority"`; dot-paths allowed. Requires `--meta`
+  `"title,priority"`; dot-paths allowed, in the same shape predicate keys
+  take, and a malformed one is refused rather than shown as null for every
+  hit. A field a note does not carry shows as null. Requires `--meta`
 - **--page, --page-size** — pagination (defaults 1 and 10)
 
 ## EXAMPLES

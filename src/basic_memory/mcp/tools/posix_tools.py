@@ -50,7 +50,7 @@ from basic_memory.mcp.project_context import (
     resolve_project_path_route,
 )
 from basic_memory.mcp.server import POSIX_TOOLS_TAG, mcp, set_posix_tools_visibility
-from basic_memory.repository.metadata_filters import METADATA_KEY_RE
+from basic_memory.repository.metadata_filters import MetadataPath, parse_metadata_path
 from basic_memory.schemas.directory import (
     DEFAULT_DIRECTORY_PAGE_SIZE,
     MAX_DIRECTORY_PAGE_SIZE,
@@ -548,8 +548,8 @@ async def find_listing(
 # match any given predicate. Two-char symbols sit first in the alternation so
 # ">=" never parses as ">" plus a value starting with "=".
 # The key capture admits '.' anywhere on purpose — it is looser than a dot path.
-# METADATA_KEY_RE, the search API's own key grammar, is what decides a
-# well-formed one, checked in _parse_meta_predicates once the predicate has
+# parse_metadata_path, which owns the frontmatter path grammar, is what decides
+# a well-formed one, applied in _parse_meta_predicates once the predicate has
 # split. Tightening the capture instead would make '.owner=null' match no regex
 # at all and be reported as a missing operator rather than as the bad key it is.
 _PREDICATE_WORD_RE = re.compile(r"^([A-Za-z0-9_.-]+)\s+(in|has|between)\s+(.+)$")
@@ -731,7 +731,7 @@ def _parse_meta_predicates(predicates: list[str]) -> dict[str, Any]:
         #      the shape a key must have — every other predicate mistake is
         #      refused here, before transport, in find's own words.
         # Outcome: refuse locally, naming the offending key and the grammar.
-        if not METADATA_KEY_RE.match(key):
+        if parse_metadata_path(key) is None:
             raise ValueError(
                 f"find: malformed predicate key '{key}' in '{predicate}'; keys are "
                 "dot-separated names of letters, digits, '_' or '-' "
@@ -764,22 +764,27 @@ def _parse_meta_predicates(predicates: list[str]) -> dict[str, Any]:
 
 
 def _project_metadata_fields(
-    entity_metadata: dict[str, Any] | None, fields: list[str]
+    entity_metadata: dict[str, Any] | None, fields: list[MetadataPath]
 ) -> dict[str, Any]:
     """Project requested frontmatter fields out of an entity's metadata.
 
     Field names are echoed verbatim as keys (dot-paths walk nested dicts). A
     missing key or non-dict intermediate yields None — never a dropped row.
+
+    Takes parsed paths rather than strings because null here is a real answer
+    ("this note has no such field"), so a malformed path that walked to null
+    would be indistinguishable from data. Requiring MetadataPath moves that
+    refusal to the one parse that can tell the two apart.
     """
     projected: dict[str, Any] = {}
-    for field_name in fields:
+    for field in fields:
         value: Any = entity_metadata
-        for part in field_name.split("."):
+        for part in field.parts:
             if not isinstance(value, dict):
                 value = None
                 break
             value = value.get(part)
-        projected[field_name] = value
+        projected[field.key] = value
     return projected
 
 
@@ -892,6 +897,7 @@ async def find(
                 "find: 'depth' cannot combine with 'meta' — the metadata search scopes "
                 "by whole subtree; scope with 'path' instead"
             )
+    projected_fields: list[MetadataPath] | None = None
     if fields is not None:
         if meta is None:
             raise ValueError(
@@ -901,6 +907,26 @@ async def find(
         fields = [field_name.strip() for field_name in fields]
         if not fields or any(not field_name for field_name in fields):
             raise ValueError("find: 'fields' entries must be non-empty frontmatter field names")
+        # Trigger: a field path that is not a dot path ('review..approved',
+        #          '.owner', 'owner.').
+        # Why: projection answers a missing field with null, so an empty segment
+        #      walked to null for every hit and read exactly like a field the
+        #      notes genuinely do not carry — a typo returning a uniform,
+        #      plausible, wrong answer, after paying the search and one entity
+        #      GET per hit. Predicates at least reached a server that refused
+        #      them; this one had nothing to fail against.
+        # Outcome: refuse before routing, through the same parse the predicate
+        #          keys use, so the two cannot diverge.
+        projected_fields = []
+        for field_name in fields:
+            field_path = parse_metadata_path(field_name)
+            if field_path is None:
+                raise ValueError(
+                    f"find: malformed field path '{field_name}'; field paths are "
+                    "dot-separated names of letters, digits, '_' or '-' "
+                    "(e.g. 'title' or 'review.approved')"
+                )
+            projected_fields.append(field_path)
     metadata_filters = _parse_meta_predicates(meta) if meta is not None else None
 
     # Trigger: predicates are present, so this call queries metadata rather than
@@ -941,7 +967,7 @@ async def find(
             # to, a mount point rather than a subtree — onto "no scope".
             scope=route.path,
             metadata_filters=metadata_filters,
-            fields=fields,
+            fields=projected_fields,
             page=page,
             page_size=page_size,
             # The route's id, not the caller's raw param: it is what keeps a
@@ -968,7 +994,7 @@ async def _find_by_metadata(
     route_project: Optional[str],
     scope: str,
     metadata_filters: dict[str, Any],
-    fields: Optional[list[str]],
+    fields: Optional[list[MetadataPath]],
     page: int,
     page_size: int,
     project_id: Optional[str],
