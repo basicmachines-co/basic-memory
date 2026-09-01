@@ -10,7 +10,7 @@ both search dialects. Two properties carry the whole design and are pinned here:
   of the codebase applies to naive datetimes.
 """
 
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -136,6 +136,25 @@ def test_timestamp_shaped_bound_on_a_date_that_does_not_exist_is_refused():
     """The lexical shape admits `2026-02-30T...`; the calendar does not."""
     with pytest.raises(TemporalQualifierError, match="not a valid timestamp"):
         canonical_bound("2026-02-30T10:00:00Z", INSTANT)
+
+
+@pytest.mark.parametrize(
+    "bound",
+    [
+        "9999-12-31T23:59:59-05:00",  # 10000-01-01 in UTC
+        "0001-01-01T00:00:00+05:00",  # year 0 in UTC
+    ],
+)
+def test_instant_bounds_that_leave_the_calendar_in_utc_are_refused(bound: str):
+    """Normalizing to UTC *moves* a moment, and the move can run off the calendar.
+
+    Refused as a `TemporalQualifierError` like every other unreadable bound, which is
+    what makes it survivable: `datetime.astimezone` signals this with `OverflowError`,
+    and an `OverflowError` is not a `ValueError`, so it slipped past every handler above
+    -- failing a whole note's parse, or a whole search request, over one bound.
+    """
+    with pytest.raises(TemporalQualifierError, match="leaves the calendar"):
+        canonical_bound(bound, INSTANT)
 
 
 # --- TemporalPoint ---
@@ -359,16 +378,58 @@ def test_text_that_names_no_date_reads_as_nothing(written: str):
     assert parse_authored_point(written) is None
 
 
-def test_a_year_with_no_successor_is_unread():
-    """Year 9999 has no January 1 after it to close the span with."""
-    assert parse_authored_point("9999") is None
-    # The year before it still resolves, so the guard is the calendar edge, not 4 digits.
-    assert parse_authored_point("9998") == TemporalRange(
-        axis=DATE,
-        lower=date(9998, 1, 1).isoformat(),
-        upper=date(9999, 1, 1).isoformat(),
-        lower_inclusive=True,
-    )
+@pytest.mark.parametrize(
+    ("written", "literal"),
+    [
+        # The last year and the last month have no successor to close at, so the
+        # canonical form for them is unbounded -- exactly as it is for an inclusive
+        # upper bound on the last date.
+        ("9999", "[9999-01-01,)"),
+        ("9999-12", "[9999-12-01,)"),
+        # The last day was always open-ended, like every other day.
+        ("9999-12-31", "[9999-12-31,)"),
+    ],
+)
+def test_periods_at_the_end_of_the_calendar_run_to_the_end_of_it(written: str, literal: str):
+    """Unbounded above loses no days: nothing follows 9999-12-31.
+
+    `[9999-12-01,)` holds exactly the days a closed `[9999-12-01,10000-01-01)` would --
+    and year 10000 is not a date Python can build. Constructing it raised `ValueError`
+    straight through `parse_authored_point` and `parse_temporal_qualifier` into the
+    markdown parser, failing the *whole note* over one qualifier, which is the one thing
+    the qualifier contract promises can never happen.
+    """
+    span = parse_authored_point(written)
+
+    assert span is not None
+    assert str(span) == literal
+    assert span.is_empty is False
+
+
+@pytest.mark.parametrize(
+    ("written", "literal"),
+    [("9998", "[9998-01-01,9999-01-01)"), ("9999-11", "[9999-11-01,9999-12-01)")],
+)
+def test_the_period_before_the_calendar_edge_still_closes(written: str, literal: str):
+    """The open upper end is the calendar's edge, not "four digits" or "December"."""
+    span = parse_authored_point(written)
+
+    assert span is not None
+    assert str(span) == literal
+
+
+def test_a_year_beyond_the_calendar_is_unread():
+    """Year 10000 is not a date at all, so the token names nothing and stays content."""
+    assert parse_authored_point("10000") is None
+
+
+def test_an_authored_instant_that_leaves_the_calendar_in_utc_is_unread():
+    """The flexible reader has no bound to refuse, so it reads no date at all.
+
+    Its contract is None-for-unreadable, not an exception: `parse_temporal_qualifier`
+    does not guard this call, so anything raised here fails the note.
+    """
+    assert parse_authored_point("9999-12-31T23:59:59-05:00") is None
 
 
 # --- TemporalRange normalization ---

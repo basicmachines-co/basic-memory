@@ -126,16 +126,26 @@ def _canonical_date(bound: str) -> str:
         raise TemporalQualifierError(f"not a calendar date: {bound!r}") from exc
 
 
-def _instant_value(moment: datetime) -> str:
+def _instant_value(moment: datetime) -> str | None:
     """Render one moment as the canonical fixed-width UTC instant.
 
     A naive moment is read as UTC rather than refused. That is the house convention for
     every other naive datetime in the codebase, and it is what lets an author write
     `2026-07-27T18:42:00` without learning RFC 3339's offset syntax first.
+
+    None means the moment has no UTC rendering: shifting it by its offset carries it off
+    the calendar, as `9999-12-31T23:59:59-05:00` does into year 10000. Reported the way
+    `_next_calendar_day` reports its own edge -- each caller decides what running off the
+    calendar means for it -- rather than raised, so the overflow can never escape as a
+    bare `OverflowError` and fail a whole note's parse.
     """
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=UTC)
-    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
+    try:
+        utc = moment.astimezone(UTC)
+    except OverflowError:
+        return None
+    return utc.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
 
 
 def _canonical_instant(bound: str) -> str:
@@ -151,7 +161,12 @@ def _canonical_instant(bound: str) -> str:
         moment = datetime.fromisoformat(bound.upper())
     except ValueError as exc:
         raise TemporalQualifierError(f"not a valid timestamp: {bound!r}") from exc
-    return _instant_value(moment)
+    value = _instant_value(moment)
+    if value is None:
+        raise TemporalQualifierError(
+            f"timestamp bound leaves the calendar when converted to UTC: {bound!r}"
+        )
+    return value
 
 
 def canonical_bound(bound: str, axis: TemporalRangeAxis) -> str:
@@ -478,12 +493,33 @@ def _date_data_parser(date_order: DateOrder) -> "DateDataParser":
     )
 
 
-def _calendar_span(lower: date, upper: date) -> TemporalRange:
-    """The half-open calendar period `[lower,upper)`."""
+def _next_month_start(year: int, month: int) -> date | None:
+    """The first day of the month after `year`-`month`, or None past the calendar's end.
+
+    Only December 9999 has no successor month; year 10000 is not a date `datetime` can
+    hold. Reported as None for the same reason `_next_calendar_day` reports its own
+    edge: the caller decides what running off the end of the calendar means for it.
+    """
+    if month < 12:
+        return date(year, month + 1, 1)
+    if year == date.max.year:
+        return None
+    return date(year + 1, 1, 1)
+
+
+def _calendar_span(lower: date, upper: date | None) -> TemporalRange:
+    """The half-open calendar period `[lower,upper)`, unbounded when it runs to the end.
+
+    A period whose successor is off the calendar needs no upper end: nothing follows
+    9999-12-31, so `[lower,)` holds exactly the days `[lower,successor)` would have. It
+    is the same equivalence `TemporalRange` applies to an inclusive upper bound on the
+    last date, and it is why December 9999 is a period this reader can express rather
+    than one it fails on.
+    """
     return TemporalRange(
         axis=TemporalRangeAxis.DATE,
         lower=lower.isoformat(),
-        upper=upper.isoformat(),
+        upper=None if upper is None else upper.isoformat(),
         lower_inclusive=True,
     )
 
@@ -533,24 +569,26 @@ def parse_authored_point(
     # the components `period` vouches for may be read off `moment`.
     match date_data.period:
         case "time":
+            instant = _instant_value(moment)
+            if instant is None:
+                # A moment that leaves the calendar in UTC names no storable instant,
+                # so it reads as no date at all -- the token stays content.
+                return None
             return TemporalRange(
                 axis=TemporalRangeAxis.INSTANT,
-                lower=_instant_value(moment),
+                lower=instant,
                 lower_inclusive=True,
             )
         case "year":
-            if moment.year >= date.max.year:
-                # There is no January 1 after year 9999 to close the span with.
-                return None
-            return _calendar_span(date(moment.year, 1, 1), date(moment.year + 1, 1, 1))
+            # The month after December is the following January 1 -- except at year
+            # 9999, where there is none and `_calendar_span` leaves the span open at
+            # `[9999-01-01,)`, which is still exactly that year.
+            return _calendar_span(date(moment.year, 1, 1), _next_month_start(moment.year, 12))
         case "month":
-            first = date(moment.year, moment.month, 1)
-            next_month = (
-                date(first.year + 1, 1, 1)
-                if first.month == 12
-                else date(first.year, first.month + 1, 1)
+            return _calendar_span(
+                date(moment.year, moment.month, 1),
+                _next_month_start(moment.year, moment.month),
             )
-            return _calendar_span(first, next_month)
         case _:
             # Day precision, and any coarser calendar period dateparser resolves to a
             # specific day ("last week"): the day it named, onward.
