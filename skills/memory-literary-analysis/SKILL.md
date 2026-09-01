@@ -479,9 +479,11 @@ A field a note never set comes back as a blank cell (`null` under `--json`), so 
 blanks are the work queue. This turns "audit the graph" from a read of every note into one
 call per question.
 
-Note the capitalized `Chapter`/`Character` — they must match the `note_type` your Phase 0
-schemas authored, exactly. And `--page-size 200` is not decoration: without it these return
-the first 10 rows and the work queue looks ten items long.
+Note the lowercase `chapter`/`character` — `write_note` snake-cases `note_type` before the
+note is written, so that is the value on disk no matter how your Phase 0 schemas spelled it.
+Match it exactly; the capitalized spelling returns zero rows and exit 0. And `--page-size 200`
+is not decoration: without it these return the first 10 rows and the work queue looks ten
+items long.
 
 ### Character Arcs
 For each major character, write a full `[arc]` summary observation covering their trajectory across the work.
