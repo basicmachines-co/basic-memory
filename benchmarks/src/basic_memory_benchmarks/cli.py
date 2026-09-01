@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import shutil
 import uuid
 from functools import partial
@@ -568,6 +569,14 @@ def run_agent_tasks_command(
             raise typer.BadParameter(
                 f"--model-temperature must be a number or 'omit', got {model_temperature!r}"
             ) from None
+        # nan/inf parse cleanly and pass config validation, but JSON has no
+        # encoding for them: httpx raises a bare ValueError when it serializes
+        # the request body. That escapes _post's handled transports, so the run
+        # dies mid-flight after surface setup with no artifacts written.
+        if not math.isfinite(temperature):
+            raise typer.BadParameter(
+                f"--model-temperature must be a finite number or 'omit', got {model_temperature!r}"
+            )
 
     # Fail fast at parse time: a bad model spec (including claude:) and a
     # missing judge for judge-graded tasks must not survive to mid-run.

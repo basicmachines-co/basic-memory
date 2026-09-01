@@ -3,6 +3,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from typer.testing import CliRunner
 
@@ -426,3 +427,42 @@ def test_run_agent_tasks_model_temperature_omit(
     config = captured["config"]
     assert isinstance(config, AgentTasksConfig)
     assert config.model_temperature is None
+
+
+@pytest.mark.parametrize("raw", ["nan", "inf", "-inf", "Infinity"])
+def test_run_agent_tasks_rejects_non_finite_model_temperature(tmp_path: Path, raw: str) -> None:
+    # float() accepts these and the config model stores them, but JSON cannot
+    # encode them: httpx raises a bare ValueError while serializing the request
+    # body, which is not one of _post's handled transport failures. The run
+    # would die after surface setup with no artifacts, so reject at parse time.
+    script = tmp_path / "script.json"
+    script.write_text('{"tasks": {}}', encoding="utf-8")
+    bm_checkout = tmp_path / "bm"
+    bm_checkout.mkdir()
+
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "agent-tasks",
+            "--model",
+            f"scripted:{script}",
+            "--bm-local-path",
+            str(bm_checkout),
+            "--model-temperature",
+            raw,
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "finite" in result.output
+
+
+def test_non_finite_temperature_would_break_the_request_body() -> None:
+    """Pins the reason the CLI guard exists: httpx rejects non-finite floats."""
+    with pytest.raises(ValueError, match="not JSON compliant"):
+        httpx.Request(
+            "POST",
+            "http://localhost/v1/chat/completions",
+            json={"model": "m", "temperature": float("nan")},
+        )
