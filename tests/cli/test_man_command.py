@@ -1,13 +1,20 @@
 """Tests for `bm man` (#952 / #610): reading bundled pages and making `man bm` work."""
 
+import re
 import subprocess
 from unittest.mock import AsyncMock, patch
 
 import pytest
+import typer.main
 from fastmcp.exceptions import ToolError
+from typer.core import TyperGroup
 from typer.testing import CliRunner
 
 from basic_memory.cli.app import app
+
+# Importing main registers every command group, including the POSIX verbs the
+# section-1 pages document.
+from basic_memory.cli.main import app as full_app
 from basic_memory.man import bundled_pages
 
 # Importing the module registers the man command group on the top-level app.
@@ -147,6 +154,37 @@ def test_man_install_treats_manpath_failure_as_unknown(tmp_path, monkeypatch):
 
     assert result.exit_code == 0, result.output
     assert "not on your manpath" not in _flattened(result.output)
+
+
+# Section 1 is the CLI's own documentation, so a page and its command must not
+# drift: an option a user can type that the page never names is undocumented.
+# find(1) went stale exactly this way when `bm find` grew --meta/--fields.
+PAGES_WITHOUT_TOP_LEVEL_COMMANDS = {"apropos"}  # `bm man apropos`, not `bm apropos`
+DOCUMENTED_VERBS = {"cat", "find", "grep", "head", "ls", "tail", "tree"}
+
+
+def test_section_1_pages_document_every_option_of_their_command():
+    """Every long option of a documented verb appears in its manual page."""
+    # typer vendors its own click, so the group type comes from typer.core.
+    cli = typer.main.get_command(full_app)
+    assert isinstance(cli, TyperGroup)
+    checked: set[str] = set()
+
+    for page in bundled_pages():
+        if page.section != 1 or page.name in PAGES_WITHOUT_TOP_LEVEL_COMMANDS:
+            continue
+        body = page.body()
+        for param in cli.commands[page.name].params:
+            for option in param.opts:
+                if not option.startswith("--"):
+                    continue
+                # Boundary match so --page cannot stand in for --page-size.
+                assert re.search(rf"{re.escape(option)}(?![\w-])", body), (
+                    f"{page.title} does not document {option}; the page is stale"
+                )
+        checked.add(page.name)
+
+    assert checked == DOCUMENTED_VERBS
 
 
 def test_man_install_skips_app_initialization(tmp_path, monkeypatch):

@@ -5,10 +5,13 @@ use, so these tests run the real ASGI stack via the shared `client` fixture and
 assert on the JSON shapes the canonical `output_format="json"` paths produce.
 """
 
+import asyncio
+import re
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import pytest_asyncio
 import yaml
 from fastmcp.exceptions import ToolError
 
@@ -17,7 +20,8 @@ from basic_memory.mcp.project_context import (
     ProjectPrefixConflictError,
     UnqualifiedPathRefusedError,
 )
-from basic_memory.mcp.tools import cat, find, grep, ls, man, tail, write_note
+from basic_memory.mcp.tools import cat, find, grep, ls, man, search_notes, tail, write_note
+from basic_memory.repository.metadata_filters import parse_metadata_filters
 from basic_memory.schemas.search import SearchRetrievalMode
 
 
@@ -506,6 +510,484 @@ async def test_find_rejects_bad_arguments(kwargs, message):
         await find(**kwargs)
 
 
+# --- find --meta: predicate parsing ---
+# Each predicate string translates onto exactly one metadata_filters entry, in
+# the grammar the search API's parse_metadata_filters already supports.
+
+PREDICATE_GRAMMAR = [
+    ("status=active", {"status": "active"}),
+    ("status = active", {"status": "active"}),
+    ("confidence>0.6", {"confidence": {"$gt": 0.6}}),
+    ("confidence >= 0.6", {"confidence": {"$gte": 0.6}}),
+    ("confidence<0.6", {"confidence": {"$lt": 0.6}}),
+    ("confidence<=0.6", {"confidence": {"$lte": 0.6}}),
+    ("priority in high,critical", {"priority": {"$in": ["high", "critical"]}}),
+    ("priority in high, critical", {"priority": {"$in": ["high", "critical"]}}),
+    ("tags has security,oauth", {"tags": ["security", "oauth"]}),
+    ("score between 0.3,0.8", {"score": {"$between": [0.3, 0.8]}}),
+    # Quoting is the documented escape for literal values, and it holds inside
+    # a list: the comma it protects belongs to the value, not to the list.
+    ('label in "a,b",c', {"label": {"$in": ["a,b", "c"]}}),
+    ('tags has "red, green"', {"tags": ["red, green"]}),
+    ('name in "quoted"', {"name": {"$in": ["quoted"]}}),
+    # Dot-paths address nested frontmatter and pass through verbatim.
+    ("review.approved=true", {"review.approved": True}),
+    # The one alias search_notes carries, so both surfaces accept one spelling.
+    ("note_type=spec", {"type": "spec"}),
+]
+
+
+@pytest.mark.parametrize(("predicate", "expected"), PREDICATE_GRAMMAR)
+def test_parse_meta_predicate_grammar(predicate, expected):
+    assert posix_tools._parse_meta_predicates([predicate]) == expected
+
+
+@pytest.mark.parametrize(("predicate", "expected"), PREDICATE_GRAMMAR)
+def test_parsed_predicates_are_valid_api_metadata_filters(predicate, expected):
+    """Every predicate the parser accepts is a filter the search API accepts.
+
+    parse_metadata_filters is the server-side authority; running the produced
+    dict through it proves the CLI/MCP grammar is a strict subset rather than a
+    parallel dialect that only fails at request time.
+    """
+    assert parse_metadata_filters(posix_tools._parse_meta_predicates([predicate]))
+
+
+@pytest.mark.parametrize(
+    ("predicate", "expected_value"),
+    [
+        ("done=true", True),
+        ("done=false", False),
+        ("owner=null", None),
+        ("count=3", 3),
+        ("ratio=1.5", 1.5),
+        ("status=active", "active"),
+        # A JSON-quoted token forces the literal string, escaping the inference.
+        ('status="true"', "true"),
+        # Non-scalar JSON is not a filter value; the raw text stays a string.
+        ("shape=[1,2]", "[1,2]"),
+    ],
+)
+def test_predicate_values_are_json_scalar_inferred(predicate, expected_value):
+    """Values type-infer so a predicate string produces the same dict a rich
+    search_notes caller would pass as JSON."""
+    key = predicate.split("=", 1)[0]
+
+    assert posix_tools._parse_meta_predicates([predicate]) == {key: expected_value}
+
+
+def test_parse_meta_predicates_and_together():
+    assert posix_tools._parse_meta_predicates(["status=active", "confidence>0.6"]) == {
+        "status": "active",
+        "confidence": {"$gt": 0.6},
+    }
+
+
+@pytest.mark.parametrize(
+    ("predicates", "message"),
+    [
+        # The API has no $ne, so != is deliberately absent from the grammar.
+        (["status!=active"], "unsupported predicate operator in 'status!=active'"),
+        (["status ~= active"], "unsupported predicate operator"),
+        (["priority gte 3"], "unsupported predicate operator"),
+        (["priority in"], "unsupported predicate operator"),
+        (["nothing"], "unsupported predicate operator"),
+        (["score between 0.3"], "'between' needs exactly min,max"),
+        (["score between 0.1,0.2,0.3"], "'between' needs exactly min,max"),
+        (["priority in high,,low"], "empty list element"),
+        # A severed quote would silently filter for values nothing carries.
+        (['priority in "high,low'], "unterminated quoted value"),
+        (['tags has red,"green'], "unterminated quoted value"),
+        (["status="], "has no value"),
+        (["status=active", "status=draft"], "duplicate predicate key 'status'"),
+        # The alias collapses onto the same key, so the collision is still caught.
+        (["note_type=note", "type=spec"], "duplicate predicate key 'type'"),
+    ],
+)
+def test_parse_meta_predicates_fails_fast(predicates, message):
+    with pytest.raises(ValueError, match=re.escape(message)):
+        posix_tools._parse_meta_predicates(predicates)
+
+
+def test_unsupported_operator_names_the_supported_set():
+    """The refusal teaches the whole grammar instead of just rejecting."""
+    with pytest.raises(ValueError, match="supported: = > >= < <= in has between"):
+        posix_tools._parse_meta_predicates(["status matches active"])
+
+
+def test_duplicate_key_refusal_points_at_between():
+    with pytest.raises(ValueError, match=re.escape("use 'between' for ranges")):
+        posix_tools._parse_meta_predicates(["score>0.3", "score<0.8"])
+
+
+@pytest.mark.parametrize(
+    ("entity_metadata", "fields", "expected"),
+    [
+        ({"title": "Alpha"}, ["title"], {"title": "Alpha"}),
+        ({"review": {"approved": True}}, ["review.approved"], {"review.approved": True}),
+        # A missing key renders as null — the row is never dropped.
+        ({"title": "Alpha"}, ["missing"], {"missing": None}),
+        # A non-dict intermediate ends the walk at null rather than raising.
+        ({"review": "yes"}, ["review.approved"], {"review.approved": None}),
+        (None, ["title"], {"title": None}),
+        ({"a": {"b": {"c": 1}}}, ["a.b.c", "a.b"], {"a.b.c": 1, "a.b": {"c": 1}}),
+    ],
+)
+def test_project_metadata_fields(entity_metadata, fields, expected):
+    assert posix_tools._project_metadata_fields(entity_metadata, fields) == expected
+
+
+# --- find --meta: metadata search arm ---
+
+
+@pytest_asyncio.fixture
+async def meta_notes(client, test_project):
+    """Seed metadata-bearing notes across two directories (one name has a space)."""
+    await write_note(
+        title="Alpha Spec",
+        directory="specs",
+        content="# Alpha Spec\n\nalpha body",
+        project=test_project.name,
+        metadata={
+            "status": "active",
+            "priority": "high",
+            "confidence": 0.9,
+            "tags": ["security", "oauth"],
+            "review": {"approved": True},
+        },
+    )
+    await write_note(
+        title="Beta Spec",
+        directory="specs",
+        content="# Beta Spec\n\nbeta body",
+        project=test_project.name,
+        metadata={
+            "status": "draft",
+            "priority": "low",
+            "confidence": 0.2,
+            "tags": ["security"],
+        },
+    )
+    await write_note(
+        title="Gamma Note",
+        directory="My Notes",
+        content="# Gamma Note\n\ngamma body",
+        project=test_project.name,
+        metadata={
+            "status": "active",
+            "priority": "critical",
+            "confidence": 0.5,
+            "tags": ["oauth"],
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_find_meta_returns_the_search_response_shape(client, test_project, meta_notes):
+    result = await find(meta=["status=active"], project=test_project.name)
+
+    assert set(result) == {
+        "results",
+        "current_page",
+        "page_size",
+        "total",
+        "total_is_exact",
+        "has_more",
+    }
+    assert result["total"] == 2
+    assert result["total_is_exact"] is True
+    assert {row["title"] for row in result["results"]} == {"Alpha Spec", "Gamma Note"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("meta", "expected_titles"),
+    [
+        (["status=active"], {"Alpha Spec", "Gamma Note"}),
+        (["confidence>0.5"], {"Alpha Spec"}),
+        (["confidence>=0.5"], {"Alpha Spec", "Gamma Note"}),
+        (["confidence<0.5"], {"Beta Spec"}),
+        (["confidence<=0.5"], {"Beta Spec", "Gamma Note"}),
+        (["priority in high,critical"], {"Alpha Spec", "Gamma Note"}),
+        # `has` is contains-ALL, so a two-element list narrows to one note.
+        (["tags has security"], {"Alpha Spec", "Beta Spec"}),
+        (["tags has security,oauth"], {"Alpha Spec"}),
+        (["confidence between 0.1,0.6"], {"Beta Spec", "Gamma Note"}),
+        (["review.approved=true"], {"Alpha Spec"}),
+        (["note_type=note"], {"Alpha Spec", "Beta Spec", "Gamma Note"}),
+        # Repeated predicates AND together.
+        (["status=active", "priority=high"], {"Alpha Spec"}),
+        (["status=active", "priority=nonexistent"], set()),
+    ],
+)
+async def test_find_meta_operators_select_the_right_notes(
+    client, test_project, meta_notes, meta, expected_titles
+):
+    result = await find(meta=meta, project=test_project.name)
+
+    assert {row["title"] for row in result["results"]} == expected_titles
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "expected_titles"),
+    [
+        ("/", {"Alpha Spec", "Gamma Note"}),
+        ("specs", {"Alpha Spec"}),
+        ("/specs", {"Alpha Spec"}),
+        # A spaced directory scopes by its slug, the same transform used at index time.
+        ("My Notes", {"Gamma Note"}),
+        ("nonexistent", set()),
+    ],
+)
+async def test_find_meta_scopes_by_path_subtree(
+    client, test_project, meta_notes, path, expected_titles
+):
+    result = await find(path, meta=["status=active"], project=test_project.name)
+
+    assert {row["title"] for row in result["results"]} == expected_titles
+
+
+@pytest.mark.asyncio
+async def test_find_meta_paginates_with_exact_totals(client, test_project, meta_notes):
+    """Scope and predicates AND inside one server-side WHERE, so the total is
+    the real match count and every page is reachable."""
+    first = await find(meta=["status=active"], page_size=1, project=test_project.name)
+    second = await find(meta=["status=active"], page=2, page_size=1, project=test_project.name)
+
+    assert first["total"] == 2
+    assert first["total_is_exact"] is True
+    assert first["has_more"] is True
+    assert len(first["results"]) == 1
+    assert second["has_more"] is False
+    assert first["results"][0]["permalink"] != second["results"][0]["permalink"]
+
+
+@pytest.mark.asyncio
+async def test_find_meta_projects_requested_fields(client, test_project, meta_notes):
+    """Projection reads the entity's normalized frontmatter; a field a hit does
+    not carry renders as null instead of dropping the row."""
+    result = await find(
+        meta=["status=active"],
+        fields=["title", "priority", "review.approved", "missing_field"],
+        project=test_project.name,
+    )
+
+    projected = {row["title"]: row["fields"] for row in result["results"]}
+    assert projected["Alpha Spec"] == {
+        "title": "Alpha Spec",
+        "priority": "high",
+        # Frontmatter round-trips the nested boolean as its stored string form.
+        "review.approved": "True",
+        "missing_field": None,
+    }
+    assert projected["Gamma Note"] == {
+        "title": "Gamma Note",
+        "priority": "critical",
+        "review.approved": None,
+        "missing_field": None,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        # The metadata search matches slugified permalinks, so a filename glob
+        # has no faithful translation — refuse rather than silently ignore it.
+        ({"name": "*.md", "meta": ["status=active"]}, "'name' cannot combine with 'meta'"),
+        # Permalink-prefix scope is whole-subtree; a depth bound is inexpressible.
+        ({"depth": 3, "meta": ["status=active"]}, "'depth' cannot combine with 'meta'"),
+        ({"fields": ["title"]}, "'fields' requires 'meta' predicates"),
+        ({"meta": ["status=active"], "fields": []}, "must be non-empty"),
+        ({"meta": ["status=active"], "fields": ["  "]}, "must be non-empty"),
+        # An empty predicate list is not "no filter": it would parse to {} and
+        # run the metadata search with no WHERE at all, matching every note in
+        # the project where the caller asked for a filtered set.
+        ({"meta": []}, "'meta' must carry at least one predicate"),
+    ],
+)
+async def test_find_meta_combination_rules_refuse_before_io(kwargs, message):
+    with pytest.raises(ValueError, match=re.escape(message)):
+        await find(**kwargs)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"page": 0}, "page must be >= 1"),
+        ({"page_size": 0}, "page_size must be >= 1"),
+        ({"page_size": 201}, "page_size must be <= 200"),
+    ],
+)
+async def test_find_meta_rejects_bad_pagination(kwargs, message):
+    """The metadata arm bounds pagination exactly as the listing arm does.
+
+    `find_listing` states those bounds for the directory arm, and the metadata
+    arm never reaches it — so `find` states them again on the branch it does
+    take. Unstated, a `page=0` would route, open a client, and come back as a
+    transport error from the search API instead of the refusal the plain
+    listing gives for the same argument. No project fixture here is the point:
+    the refusal lands before any I/O.
+    """
+    with pytest.raises(ValueError, match=re.escape(message)):
+        await find(meta=["status=active"], **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_find_meta_quoted_list_element_keeps_its_comma(client, test_project):
+    """The quoting escape reaches the list operators, not just the scalar ones.
+
+    Splitting the raw value before scalar inference would sever '"a,b"' into
+    '"a' and 'b"' and filter for values nothing carries — no error, no hits.
+    """
+    await write_note(
+        title="Comma Note",
+        directory="notes",
+        content="# Comma Note",
+        project=test_project.name,
+        metadata={"label": "a,b"},
+    )
+
+    result = await find(meta=['label in "a,b",c'], project=test_project.name)
+
+    assert {row["title"] for row in result["results"]} == {"Comma Note"}
+
+
+@pytest.mark.asyncio
+async def test_find_meta_empty_list_is_not_an_unfiltered_search(client, test_project, meta_notes):
+    """meta=[] must never widen to the whole project.
+
+    The MCP surface can produce it directly (`"meta": []`, or `"meta": "[]"`
+    through coerce_list), so the refusal is asserted against the real stack —
+    where an unfiltered metadata search would return all three seeded notes.
+    """
+    with pytest.raises(ValueError, match=re.escape("'meta' must carry at least one predicate")):
+        await find(meta=[], project=test_project.name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("limit", "expected_peak"), [(8, 2), (1, 1)])
+async def test_find_meta_fields_hydrates_hits_concurrently(
+    client, test_project, meta_notes, monkeypatch, limit, expected_peak
+):
+    """Projection costs one entity GET per hit (no bulk read exists), so the
+    reads must overlap up to the bound instead of serializing — a full page
+    serialized is up to MAX_DIRECTORY_PAGE_SIZE round trips inside one call."""
+    # Import here to mirror the tool's own deferred client import.
+    from basic_memory.mcp.clients import KnowledgeClient
+
+    monkeypatch.setattr(posix_tools, "_FIELD_PROJECTION_CONCURRENCY", limit)
+    original_get_entity = KnowledgeClient.get_entity
+    in_flight = 0
+    peak = 0
+
+    async def counting_get_entity(self, entity_id, **kwargs):
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        try:
+            # Yield once so an overlap, if any, is observable deterministically.
+            await asyncio.sleep(0)
+            return await original_get_entity(self, entity_id, **kwargs)
+        finally:
+            in_flight -= 1
+
+    monkeypatch.setattr(KnowledgeClient, "get_entity", counting_get_entity)
+
+    result = await find(meta=["status=active"], fields=["title"], project=test_project.name)
+
+    assert peak == expected_peak
+    # Order still pairs each hit with its own entity, concurrency notwithstanding.
+    assert {row["title"]: row["fields"]["title"] for row in result["results"]} == {
+        "Alpha Spec": "Alpha Spec",
+        "Gamma Note": "Gamma Note",
+    }
+
+
+@pytest.mark.asyncio
+async def test_find_meta_unsupported_key_surfaces_the_api_error(client, test_project, meta_notes):
+    """The server owns key validation; its refusal reaches the caller intact."""
+    with pytest.raises(ToolError, match="metadata filter key"):
+        await find(meta=["status.=active"], project=test_project.name)
+
+
+@pytest.mark.asyncio
+async def test_find_meta_fields_requires_hit_external_ids(client, test_project, monkeypatch):
+    """Projection hydrates each hit by external_id, so a server old enough to
+    omit it fails fast instead of silently returning unprojected rows."""
+    # Import here to mirror the tool's own deferred client import.
+    from basic_memory.mcp.clients import SearchClient
+    from basic_memory.schemas.search import SearchItemType, SearchResponse, SearchResult
+
+    async def legacy_search(self, query, page=1, page_size=10):
+        return SearchResponse(
+            results=[
+                SearchResult(
+                    title="Alpha Spec",
+                    type=SearchItemType.ENTITY,
+                    score=1.0,
+                    permalink="test-project/specs/alpha-spec",
+                    file_path="specs/Alpha Spec.md",
+                )
+            ],
+            current_page=page,
+            page_size=page_size,
+            total=1,
+        )
+
+    monkeypatch.setattr(SearchClient, "search", legacy_search)
+
+    with pytest.raises(ToolError, match="server too old for field projection"):
+        await find(meta=["status=active"], fields=["title"], project=test_project.name)
+
+
+@pytest.mark.asyncio
+async def test_find_without_meta_stays_the_directory_listing(client, test_graph, test_project):
+    """The no-meta arm is untouched: same payload with the new params defaulted
+    or passed as None, and no search-shape keys anywhere."""
+    baseline = await find(name="*.md", project=test_project.name)
+    with_defaults = await find(name="*.md", meta=None, fields=None, project=test_project.name)
+
+    assert with_defaults == baseline
+    assert set(baseline) == {"nodes", "page", "page_size", "total", "has_more"}
+    assert baseline["total"] == 5
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("meta", "filters"),
+    [
+        (["status=active"], {"status": "active"}),
+        (["confidence>0.5"], {"confidence": {"$gt": 0.5}}),
+        (["priority in high,critical"], {"priority": {"$in": ["high", "critical"]}}),
+        (["tags has security,oauth"], {"tags": ["security", "oauth"]}),
+        (["confidence between 0.1,0.6"], {"confidence": {"$between": [0.1, 0.6]}}),
+        (["review.approved=true"], {"review.approved": True}),
+    ],
+)
+async def test_find_meta_matches_search_notes_parity(
+    client, test_project, meta_notes, meta, filters
+):
+    """PARITY: the POSIX surface and the rich surface answer the same question
+    identically — same filters dict, same hits — through the same real stack."""
+    assert posix_tools._parse_meta_predicates(meta) == filters
+
+    found = await find(meta=meta, project=test_project.name)
+    searched = await search_notes(
+        project=test_project.name,
+        metadata_filters=filters,
+        output_format="json",
+    )
+
+    assert isinstance(searched, dict)
+    assert found["results"]
+    assert {row["permalink"] for row in found["results"]} == {
+        row["permalink"] for row in searched["results"]
+    }
+
+
 # --- tail ---
 
 
@@ -737,6 +1219,53 @@ async def test_find_qualified_path_routes_to_project(
 
     names = {node["name"] for node in result["nodes"]}
     assert names == {"Second Find Note.md"}
+
+
+@pytest.mark.asyncio
+async def test_find_meta_qualified_path_routes_to_project(
+    client, test_project, second_project, no_project_constraint
+):
+    """The meta arm shares find's route resolution, so '<project>/dir' scopes to
+    that project's subtree and nothing from the other project leaks in."""
+    await write_note(
+        title="Second Meta Note",
+        directory="notes",
+        content="# Second Meta Note",
+        project="second-project",
+        metadata={"status": "active"},
+    )
+    await write_note(
+        title="Home Meta Note",
+        directory="notes",
+        content="# Home Meta Note",
+        project=test_project.name,
+        metadata={"status": "active"},
+    )
+
+    result = await find("second-project/notes", meta=["status=active"])
+
+    assert {row["title"] for row in result["results"]} == {"Second Meta Note"}
+
+
+@pytest.mark.asyncio
+async def test_find_meta_unqualified_refuses_in_multi_project_config(
+    client, test_project, second_project, no_project_constraint
+):
+    """A metadata query is still project-scoped, so an unqualified call in a
+    multi-project config refuses with the active project list."""
+    with pytest.raises(UnqualifiedPathRefusedError, match="no project specified"):
+        await find(meta=["status=active"])
+
+
+@pytest.mark.asyncio
+async def test_find_meta_predicate_errors_precede_routing(
+    client, test_project, second_project, no_project_constraint
+):
+    """Predicate parsing happens before any routing decision, so a bad operator
+    reports itself instead of hiding behind the multi-project refusal."""
+    with pytest.raises(ValueError, match="unsupported predicate operator") as excinfo:
+        await find(meta=["status!=active"])
+    assert not isinstance(excinfo.value, UnqualifiedPathRefusedError)
 
 
 @pytest.mark.asyncio

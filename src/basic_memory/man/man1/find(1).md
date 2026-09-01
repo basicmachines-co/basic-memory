@@ -3,7 +3,7 @@ title: find(1)
 type: manpage
 section: 1
 name: find
-summary: recursively list files matching a name glob
+summary: recursively list files, or query notes by frontmatter metadata
 generated: hand
 ---
 
@@ -11,7 +11,7 @@ generated: hand
 
 ## NAME
 
-**find** — recursively list files matching a name glob
+**find** — recursively list files, or query notes by frontmatter metadata
 
 ## SYNOPSIS
 
@@ -19,21 +19,76 @@ generated: hand
 bm find [PATH] [--name GLOB] [--depth N] [--page N] [--page-size N]
         [--json | --plain] [--project NAME | --project-id UUID]
         [--local | --cloud]
+
+bm find [PATH] --meta PREDICATE [--meta PREDICATE ...] [--fields LIST]
+        [--page N] [--page-size N] [--json | --plain]
+        [--project NAME | --project-id UUID] [--local | --cloud]
 ```
 
 ## DESCRIPTION
 
-Recursively lists files under a directory (default: the project root),
-optionally filtered by a file-name glob. Depth is bounded 1-10 by the
-directory API. On a TTY results render as a table; `--plain` prints one
-path per line, find(1) style; `--json` (or piped output) emits the listing
-with pagination and totals.
+Two modes, chosen by `--meta`.
+
+Without `--meta`, find recursively lists files under a directory (default:
+the project root), optionally filtered by a file-name glob. Depth is bounded
+1-10 by the directory API. On a TTY results render as a table; `--plain`
+prints one path per line, find(1) style; `--json` (or piped output) emits the
+listing with pagination and totals.
+
+With `--meta`, find queries notes by their frontmatter instead: every
+predicate must hold, and `PATH` still scopes the results — server-side, by
+permalink prefix, so the totals are exact and every page is reachable. The
+payload becomes the search response shape (the same one `bm grep` returns),
+not the directory listing. Non-markdown files carry no frontmatter and are
+never metadata hits.
+
+`--fields` is the SELECT to the predicates' WHERE: it adds a `fields` object
+to each hit carrying the named frontmatter values, so a filtered set can be
+tabulated without reading every note. A field a hit does not carry renders as
+null; the row is never dropped.
+
+`--name` and `--depth` are refused alongside `--meta`. The metadata query
+matches slugified permalinks, where a filename glob has no faithful
+translation, and its subtree scope is all-or-nothing, where a depth bound is
+not expressible — refusing beats silently ignoring either and misreporting
+the match set. Scope with `PATH` instead. `--fields` without `--meta` is
+refused for the same honesty: without predicates there is nothing to project.
+
+## PREDICATE GRAMMAR
+
+One predicate per `--meta`, one predicate per key; repeated flags AND
+together. A repeated key is an error, not last-wins — use `between` for a
+range.
+
+```
+status=active              equality
+confidence>0.6             comparison: > >= < <=
+priority in high,critical  any of the listed values
+tags has security,oauth    array contains ALL listed values
+score between 0.3,0.8      inclusive range
+```
+
+Values are JSON-scalar inferred: `true`/`false`/`null` and numbers become
+booleans, null, and numbers. Quote a token to force the literal string —
+`status="true"` matches the four-character string. Quoting also protects a
+comma inside a list element: `label in "a,b",c` matches `a,b` or `c`.
+
+Keys accept dot-paths into nested frontmatter (`review.approved`), and
+`note_type` is accepted as a spelling of the frontmatter `type` key, matching
+`search-notes(3)`. Any other operator (`!=` among them — the search API has
+no not-equals) fails fast, naming the supported set.
 
 ## OPTIONS
 
-- **--name** — file-name glob, e.g. `"*.md"`; omitted matches everything
-- **--depth** — recursion depth, 1-10 (default 10)
-- **--page, --page-size** — node pagination (defaults 1 and 10)
+- **--name** — file-name glob, e.g. `"*.md"`; omitted matches everything.
+  Cannot combine with `--meta`
+- **--depth** — recursion depth, 1-10 (default 10). A non-default depth
+  cannot combine with `--meta`
+- **--meta** — frontmatter predicate, repeatable; see PREDICATE GRAMMAR.
+  Switches the payload to the search response shape
+- **--fields** — comma-separated frontmatter fields to show per hit, e.g.
+  `"title,priority"`; dot-paths allowed. Requires `--meta`
+- **--page, --page-size** — pagination (defaults 1 and 10)
 
 ## EXAMPLES
 
@@ -41,10 +96,16 @@ with pagination and totals.
 bm find --name "*.md"
 bm find /specs --depth 3
 bm find /notes --name "auth*" --plain
+bm find --meta "status=active"
+bm find /specs --meta "status=active" --meta "confidence>0.6"
+bm find --meta "tags has security,oauth" --fields title,priority
+bm find --meta "status=active" --fields title --plain
 ```
 
 ## SEE ALSO
 
 - see_also [[ls(1)]]
 - see_also [[tree(1)]]
+- see_also [[grep(1)]]
 - see_also [[list-directory(3)]]
+- see_also [[search-notes(3)]]

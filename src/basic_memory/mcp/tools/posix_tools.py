@@ -28,11 +28,15 @@ project is addressable (where there is no ambiguity); the qualified
 ``project`` param names the manual project, not a data project.
 """
 
+import asyncio
+import json
 import os
-from typing import Any, Optional
+import re
+from typing import Annotated, Any, Optional
 
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
+from pydantic import BeforeValidator
 
 from basic_memory.config import ConfigManager
 from basic_memory.man import bundled_pages, find_page, parse_page_ref, render_index
@@ -44,6 +48,7 @@ from basic_memory.mcp.project_context import (
     get_project_client,
     resolve_project_path_route,
 )
+from basic_memory.mcp.project_context_identifiers import canonical_memory_path_for_active_route
 from basic_memory.mcp.server import POSIX_TOOLS_TAG, mcp, set_posix_tools_visibility
 from basic_memory.schemas.directory import (
     DEFAULT_DIRECTORY_PAGE_SIZE,
@@ -52,7 +57,7 @@ from basic_memory.schemas.directory import (
     DirectoryNode,
 )
 from basic_memory.schemas.search import SearchItemType, SearchQuery, SearchRetrievalMode
-from basic_memory.utils import generate_permalink
+from basic_memory.utils import coerce_list, generate_permalink
 
 # --- Round-trip coherence ---
 # A path a routed verb returns must be a path the resolver accepts. When a call
@@ -143,6 +148,15 @@ _MAX_FIND_DEPTH = 10
 
 # recent_activity's page-size cap; tail's `lines` maps onto it.
 _MAX_TAIL_LINES = 100
+
+# In-flight entity reads while projecting `find --fields`. The knowledge API has
+# no bulk entity read, so a full page costs page_size GETs; this bounds how many
+# are open at once — enough to hide per-request latency on a cloud-routed
+# project, small enough not to flood the API with one tool call's fan-out.
+# Deliberately not max_tokens-sliced: a slice param 404s on an entity with no
+# markdown content (knowledge_router._apply_note_slice), which would turn a
+# projected row into a failed find.
+_FIELD_PROJECTION_CONCURRENCY = 8
 
 
 @mcp.tool(
@@ -525,9 +539,147 @@ async def find_listing(
     return payload, routed_listing_root(path, route)
 
 
+# --- find metadata predicates ---
+# find's `meta` strings translate onto the search API's metadata_filters dict —
+# the exact grammar parse_metadata_filters supports (eq, $gt/$gte/$lt/$lte, $in,
+# array-contains-all, $between), nothing more. Word ops need whitespace around
+# them and symbol ops exclude the key character class, so exactly one regex can
+# match any given predicate. Two-char symbols sit first in the alternation so
+# ">=" never parses as ">" plus a value starting with "=".
+_PREDICATE_WORD_RE = re.compile(r"^([A-Za-z0-9_.-]+)\s+(in|has|between)\s+(.+)$")
+_PREDICATE_SYMBOL_RE = re.compile(r"^([A-Za-z0-9_.-]+)\s*(>=|<=|=|>|<)\s*(.*)$")
+_SYMBOL_OPERATORS = {">": "$gt", ">=": "$gte", "<": "$lt", "<=": "$lte"}
+_SUPPORTED_PREDICATE_OPS = "= > >= < <= in has between"
+# Mirrors search_notes' alias: "note_type" (the entity model column) means the
+# frontmatter "type" key, so the two surfaces accept the same spelling.
+_METADATA_KEY_ALIASES = {"note_type": "type"}
+
+
+def _predicate_scalar(token: str) -> Any:
+    """JSON-scalar-infer one predicate value token.
+
+    "true"/"false"/"null"/numbers become bool/None/int/float so the produced
+    filters dict is byte-equal to what a rich search_notes caller passes as
+    JSON; a JSON-quoted token ('"true"') forces a literal string; anything that
+    is not a JSON scalar stays the raw string.
+    """
+    text = token.strip()
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        return text
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    return text
+
+
+def _split_predicate_items(raw_value: str, predicate: str) -> list[str]:
+    """Split a list-op value on its top-level commas, refusing empty elements.
+
+    A comma inside a JSON-quoted token belongs to the value, not to the list, so
+    the quoting escape hatch the scalar operators document works for `in`, `has`
+    and `between` too: 'label in "a,b",c' yields ['"a,b"', 'c'], which
+    _predicate_scalar then reads as the literal strings "a,b" and "c". Splitting
+    the raw string first would sever the quoted token into '"a' and 'b"' and
+    filter for values nothing carries — wrong, and silent. An unterminated quote
+    is a typo rather than a value, so it fails fast for the same reason.
+    """
+    items: list[str] = []
+    current: list[str] = []
+    in_quotes = False
+    escaped = False
+    for char in raw_value:
+        current.append(char)
+        if escaped:
+            escaped = False
+        elif in_quotes and char == "\\":
+            escaped = True
+        elif char == '"':
+            in_quotes = not in_quotes
+        elif char == "," and not in_quotes:
+            current.pop()
+            items.append("".join(current))
+            current = []
+    if in_quotes:
+        raise ValueError(
+            f"find: predicate '{predicate}' has an unterminated quoted value; "
+            'quote a list element as "text with, commas"'
+        )
+    items.append("".join(current))
+    stripped = [item.strip() for item in items]
+    if any(not item for item in stripped):
+        raise ValueError(f"find: predicate '{predicate}' has an empty list element")
+    return stripped
+
+
+def _parse_meta_predicates(predicates: list[str]) -> dict[str, Any]:
+    """Translate POSIX-style predicate strings into the search API metadata_filters dict.
+
+    One predicate per string; predicates AND together. Exactly one predicate
+    per key — the API admits one operator per key, so a repeated key fails fast
+    instead of last-wins. Raises ValueError (surfaced to MCP callers as
+    ToolError) on any operator outside the supported set.
+    """
+    filters: dict[str, Any] = {}
+    for predicate in predicates:
+        match = _PREDICATE_WORD_RE.match(predicate.strip()) or _PREDICATE_SYMBOL_RE.match(
+            predicate.strip()
+        )
+        if match is None:
+            raise ValueError(
+                f"find: unsupported predicate operator in '{predicate}'; "
+                f"supported: {_SUPPORTED_PREDICATE_OPS}"
+            )
+        raw_key, op, raw_value = match.groups()
+        key = _METADATA_KEY_ALIASES.get(raw_key, raw_key)
+        if key in filters:
+            raise ValueError(
+                f"find: duplicate predicate key '{key}' in '{predicate}'; "
+                "use 'between' for ranges (e.g. 'score between 0.3,0.8')"
+            )
+        if op in ("in", "has", "between"):
+            items = [
+                _predicate_scalar(item) for item in _split_predicate_items(raw_value, predicate)
+            ]
+            if op == "between" and len(items) != 2:
+                raise ValueError(f"find: 'between' needs exactly min,max in '{predicate}'")
+            filters[key] = (
+                {"$in": items} if op == "in" else items if op == "has" else {"$between": items}
+            )
+        else:
+            if not raw_value.strip():
+                raise ValueError(f"find: predicate '{predicate}' has no value")
+            value = _predicate_scalar(raw_value)
+            filters[key] = value if op == "=" else {_SYMBOL_OPERATORS[op]: value}
+    return filters
+
+
+def _project_metadata_fields(
+    entity_metadata: dict[str, Any] | None, fields: list[str]
+) -> dict[str, Any]:
+    """Project requested frontmatter fields out of an entity's metadata.
+
+    Field names are echoed verbatim as keys (dot-paths walk nested dicts). A
+    missing key or non-dict intermediate yields None — never a dropped row.
+    """
+    projected: dict[str, Any] = {}
+    for field_name in fields:
+        value: Any = entity_metadata
+        for part in field_name.split("."):
+            if not isinstance(value, dict):
+                value = None
+                break
+            value = value.get(part)
+        projected[field_name] = value
+    return projected
+
+
 @mcp.tool(
     title="Find",
-    description="Recursively list files matching a name glob. Paths accept '<project>/path'.",
+    description=(
+        'Recursively list files by name glob or metadata predicates (e.g. "status=active"). '
+        "Paths accept '<project>/path'."
+    ),
     tags={POSIX_TOOLS_TAG, "navigation"},
     annotations={
         "title": "Find",
@@ -542,27 +694,143 @@ async def find(
     depth: int = _MAX_FIND_DEPTH,
     page: int = 1,
     page_size: int = DEFAULT_DIRECTORY_PAGE_SIZE,
+    meta: Annotated[Optional[list[str]], BeforeValidator(coerce_list)] = None,
+    fields: Annotated[Optional[list[str]], BeforeValidator(coerce_list)] = None,
     project: Optional[str] = None,
     project_id: Optional[str] = None,
     context: Context | None = None,
 ) -> dict[str, Any]:
-    """Recursively list files under a directory, optionally filtered by name glob.
+    """Recursively list files by name glob, or query notes by frontmatter metadata.
+
+    Without `meta`, this is a recursive directory listing. With `meta`, find
+    routes through the metadata search instead: predicates AND together and
+    `path` still scopes the results — server-side, by slugified-permalink
+    prefix, so non-markdown files (which have no permalink) are never metadata
+    hits. `name` and `depth` are refused alongside `meta`: the search API has
+    no filename-glob or depth-bound facility, and silently ignoring either
+    would misreport the match set.
 
     Args:
         path: Directory to start from (default: project root). '<project>/path'
-            routes into that project.
+            routes into that project. With `meta`, scopes the search to this
+            subtree.
         name: File-name glob to match, e.g. "*.md". None matches everything.
-        depth: How many levels to recurse (1-10, default: 10).
+            Cannot combine with `meta` — scope with `path` instead.
+        depth: How many levels to recurse (1-10, default: 10). A non-default
+            depth cannot combine with `meta` (subtree scope is all-or-nothing).
         page: Page number (1-indexed).
         page_size: Nodes per page.
+        meta: Frontmatter metadata predicates, repeatable; every predicate must
+            hold. One predicate per string, one predicate per key, at least one
+            predicate (omit `meta` for the directory listing):
+              "status=active"              equality
+              "confidence>0.6"             comparison: > >= < <=
+              "priority in high,critical"  any of the listed values
+              "tags has security,oauth"    array contains ALL listed values
+              "score between 0.3,0.8"      inclusive range
+            Values are JSON-scalar inferred ("true"/"false"/"null"/numbers
+            become booleans/None/numbers); quote a token to force a literal
+            string (e.g. 'status="true"'), including inside a list, where the
+            quotes also protect a comma ('label in "a,b",c' matches "a,b" or
+            "c"). Keys accept dot-paths ("review.approved"); "note_type"
+            aliases the frontmatter "type" key. Any other operator fails fast
+            naming the supported set.
+        fields: Frontmatter fields to return per hit (dot-paths allowed), e.g.
+            ["title", "priority"]. Requires `meta`. A field missing on a hit
+            renders as null — rows are never dropped.
         project: Project name. Optional - qualified paths route themselves;
             unqualified paths refuse when several projects are addressable.
         project_id: Project external_id (UUID); takes precedence over `project`.
         context: Optional FastMCP context.
 
     Returns:
-        The directory listing as JSON: nodes, pagination, and totals.
+        Without `meta`: the directory listing as JSON (nodes, pagination,
+        totals). With `meta`: the search response as JSON (results, pagination,
+        totals); each result carries a `fields` object when `fields` was
+        requested.
     """
+    # Combination rules, before any I/O. The metadata search matches slugified
+    # permalinks, where a filename glob has no faithful translation, and its
+    # permalink-prefix scope is whole-subtree, so a depth bound is not
+    # expressible — refuse both rather than silently ignoring either. `fields`
+    # is the SELECT to the predicates' WHERE; without predicates the directory
+    # listing stays byte-identical to today.
+    if meta is not None:
+        # Trigger: 'meta' present but carrying no predicates.
+        # Why: an empty list parses to an empty filters dict, which is not None
+        #      and would route into the metadata search with no predicate at
+        #      all — an unfiltered project-wide match where the caller asked for
+        #      a filtered set, and not the directory listing either.
+        # Outcome: refuse, exactly as 'fields' refuses an empty list.
+        if not meta:
+            raise ValueError(
+                "find: 'meta' must carry at least one predicate — omit 'meta' entirely "
+                "for the plain directory listing"
+            )
+        if name is not None:
+            raise ValueError(
+                "find: 'name' cannot combine with 'meta' — the metadata search matches "
+                "slugified permalinks, not filenames; scope with 'path' instead"
+            )
+        if depth != _MAX_FIND_DEPTH:
+            raise ValueError(
+                "find: 'depth' cannot combine with 'meta' — the metadata search scopes "
+                "by whole subtree; scope with 'path' instead"
+            )
+    if fields is not None:
+        if meta is None:
+            raise ValueError(
+                "find: 'fields' requires 'meta' predicates — without predicates find "
+                "returns the plain directory listing"
+            )
+        fields = [field_name.strip() for field_name in fields]
+        if not fields or any(not field_name for field_name in fields):
+            raise ValueError("find: 'fields' entries must be non-empty frontmatter field names")
+    metadata_filters = _parse_meta_predicates(meta) if meta is not None else None
+
+    # Trigger: predicates are present, so this call queries metadata rather than
+    #          walking directories.
+    # Why: the two arms call different project-scoped APIs, and each resolves the
+    #      route exactly once — find_listing already owns validation and
+    #      resolution for the listing arm, so branching before resolving keeps a
+    #      routed call to one project-list round trip (which is why find_listing
+    #      exists at all).
+    # Outcome: the metadata arm answers with search results; otherwise the
+    #          directory listing comes back unchanged.
+    if metadata_filters is not None:
+        # Pagination is an argument check, so it refuses here with the rest of
+        # them, before any I/O. The listing arm inherits these same bounds from
+        # find_listing, which the metadata arm never reaches — stated once per
+        # arm rather than once for both, so neither can drift onto the other's
+        # error message.
+        if page < 1:
+            raise ValueError(f"page must be >= 1, got {page}")
+        if page_size < 1:
+            raise ValueError(f"page_size must be >= 1, got {page_size}")
+        if page_size > MAX_DIRECTORY_PAGE_SIZE:
+            raise ValueError(f"page_size must be <= {MAX_DIRECTORY_PAGE_SIZE}, got {page_size}")
+
+        # The search API is project-scoped too, so cross-project find does not
+        # exist here either: an unqualified path in a multi-project config
+        # refuses, teaching the per-project '<project>/path' form instead.
+        route = await resolve_project_path_route(
+            path, project=project, project_id=project_id, context=context
+        )
+        return await _find_by_metadata(
+            route_project=route.project,
+            # route.path is the caller's input verbatim when no project prefix
+            # was recognized, so one strip covers both routed and raw spellings.
+            scope=route.path.strip("/"),
+            metadata_filters=metadata_filters,
+            fields=fields,
+            page=page,
+            page_size=page_size,
+            # The route's id, not the caller's raw param: it is what keeps a
+            # cloud mount bound to the workspace whose listing advertised it.
+            project_id=route.project_id,
+            context=context,
+        )
+
     listing, _ = await find_listing(
         path,
         name=name,
@@ -574,6 +842,91 @@ async def find(
         context=context,
     )
     return listing
+
+
+async def _find_by_metadata(
+    *,
+    route_project: Optional[str],
+    scope: str,
+    metadata_filters: dict[str, Any],
+    fields: Optional[list[str]],
+    page: int,
+    page_size: int,
+    project_id: Optional[str],
+    context: Context | None,
+) -> dict[str, Any]:
+    """find's metadata arm: one search call, plus per-hit field projection.
+
+    The listing arm's counterpart to ``find_listing``; `find` has already bounded
+    the pagination and refused `name` and `depth` against `meta`.
+
+    The path scope composes server-side as a permalink-prefix GLOB, built in
+    the indexed permalink namespace with the same slug transform used at index
+    time — so a spaced directory name scopes correctly — and ANDed with the
+    metadata filters in the search WHERE, keeping totals exact and pagination
+    honest.
+    """
+    async with get_project_client(route_project, context=context, project_id=project_id) as (
+        client,
+        active_project,
+    ):
+        # Import here to avoid circular import
+        from basic_memory.mcp.clients import KnowledgeClient, SearchClient
+
+        # Indexed permalinks carry the project (and, hosted, the workspace)
+        # route prefix, so the subtree GLOB must be built in that same
+        # namespace — the one memory:// paths resolve into — or a
+        # project-relative pattern like "specs/*" would match nothing.
+        permalink_match = (
+            canonical_memory_path_for_active_route(
+                active_project,
+                f"{generate_permalink(scope, split_extension=False)}/*",
+                include_project=ConfigManager().config.permalinks_include_project,
+            )
+            if scope
+            else None
+        )
+        query = SearchQuery(
+            permalink_match=permalink_match,
+            metadata_filters=metadata_filters,
+            entity_types=[SearchItemType.ENTITY],
+        )
+        search_client = SearchClient(client, active_project.external_id)
+        response = await search_client.search(query.model_dump(), page=page, page_size=page_size)
+        payload = response.model_dump(mode="json", exclude_none=True)
+        if not fields:
+            return payload
+
+        # Field projection hydrates from the entity's full normalized
+        # frontmatter — the search hit's own `metadata` is index-row metadata,
+        # not the canonical projection source. One GET per hit is unavoidable
+        # (the knowledge API has no bulk entity read), so the cost that matters
+        # is whether they serialize: page_size is capped at
+        # MAX_DIRECTORY_PAGE_SIZE, and under per-project cloud routing that
+        # would be up to 200 round trips end to end inside one find call.
+        # Bounded concurrency turns the wall time into ceil(hits / limit)
+        # round trips while keeping the server load predictable.
+        knowledge_client = KnowledgeClient(client, active_project.external_id)
+        hit_ids: list[str] = []
+        for result in response.results:
+            if result.external_id is None:
+                raise ToolError(
+                    "find: search hit carries no external_id — server too old for field projection"
+                )
+            hit_ids.append(result.external_id)
+
+        limiter = asyncio.Semaphore(_FIELD_PROJECTION_CONCURRENCY)
+
+        async def entity_metadata(entity_external_id: str) -> dict[str, Any] | None:
+            async with limiter:
+                entity = await knowledge_client.get_entity(entity_external_id)
+            return entity.entity_metadata
+
+        hydrated = await asyncio.gather(*(entity_metadata(hit_id) for hit_id in hit_ids))
+        # Injected post-dump so null field values survive exclude_none.
+        for row, metadata in zip(payload["results"], hydrated, strict=True):
+            row["fields"] = _project_metadata_fields(metadata, fields)
+    return payload
 
 
 @mcp.tool(
