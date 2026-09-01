@@ -81,6 +81,7 @@ class ConcreteSearchRepo(SearchRepositoryBase):
         search_item_types: Optional[list[SearchItemType]] = None,
         categories: Optional[list[str]] = None,
         metadata_filters: Optional[dict[str, Any]] = None,
+        file_path_prefix: Optional[str] = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: Optional[float] = None,
         limit: int = 10,
@@ -160,6 +161,7 @@ HYBRID_KWARGS: dict[str, Any] = dict(
     search_item_types=None,
     categories=None,
     metadata_filters=None,
+    file_path_prefix=None,
     limit=10,
     offset=0,
 )

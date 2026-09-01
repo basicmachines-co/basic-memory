@@ -87,6 +87,7 @@ class _ConcreteRepo(SearchRepositoryBase):
         search_item_types: list[SearchItemType] | None = None,
         categories: list[str] | None = None,
         metadata_filters: dict[str, Any] | None = None,
+        file_path_prefix: str | None = None,
         retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
         min_similarity: float | None = None,
         limit: int = 10,

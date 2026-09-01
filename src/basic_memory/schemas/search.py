@@ -30,6 +30,22 @@ class SearchRetrievalMode(str, Enum):
     HYBRID = "hybrid"
 
 
+def normalize_file_path_prefix(value: Optional[str]) -> Optional[str]:
+    """Reduce a directory scope to its bare project-relative spelling.
+
+    "", "/", and "   " all name the project root — no subtree scope — and must
+    collapse to None. "/" in particular is a non-empty string, so left as-is it
+    would read as criteria to the service's has-criteria check while
+    contributing no predicate: a query that filters nothing yet reports its
+    total as if it had. "/specs/" and "specs" are the same scope, so they too
+    normalize to the one value the SQL predicate and the criteria check share.
+    """
+    if value is None:
+        return None
+    normalized = value.strip().strip("/")
+    return normalized or None
+
+
 class SearchQuery(BaseModel):
     """Search query parameters.
 
@@ -45,6 +61,7 @@ class SearchQuery(BaseModel):
     - categories: Limit observation results to exact category matches (e.g. "requirement")
     - after_date: Only items after date
     - metadata_filters: Structured frontmatter filters (field -> value)
+    - file_path_prefix: Limit to one directory subtree of the project
     - tags: Convenience frontmatter tag filter
     - status: Convenience frontmatter status filter
 
@@ -67,6 +84,10 @@ class SearchQuery(BaseModel):
     categories: Optional[List[str]] = None  # Filter observations by exact category
     after_date: Optional[Union[datetime, str]] = None  # Time-based filter
     metadata_filters: Optional[dict[str, Any]] = None  # Structured frontmatter filters
+    # Directory subtree scope, matched against the indexed file_path — not the
+    # permalink, which stops mirroring its file path once a note pins one in
+    # frontmatter or is moved with update_permalinks_on_move disabled.
+    file_path_prefix: Optional[str] = None
     tags: Optional[List[str]] = None  # Convenience tag filter
     status: Optional[str] = None  # Convenience status filter
     retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS
@@ -88,6 +109,17 @@ class SearchQuery(BaseModel):
             return None
         return [normalize_note_type(value) for value in values]
 
+    @field_validator("file_path_prefix")
+    @classmethod
+    def normalize_scope(cls, value: Optional[str]) -> Optional[str]:
+        """Collapse the root spellings onto "no scope" at the boundary.
+
+        Parsing once here means every consumer — the criteria check, the
+        executed-criteria description, and the SQL predicate — reads the same
+        value instead of each rediscovering that "/" is not a subtree.
+        """
+        return normalize_file_path_prefix(value)
+
     def no_criteria(self) -> bool:
         text_is_empty = self.text is None or (isinstance(self.text, str) and not self.text.strip())
         metadata_is_empty = not self.metadata_filters
@@ -106,6 +138,8 @@ class SearchQuery(BaseModel):
             and entity_types_is_empty
             and categories_is_empty
             and metadata_is_empty
+            # Normalized above, so a bare "/" never counts as a scope here.
+            and self.file_path_prefix is None
             and tags_is_empty
             and status_is_empty
         )

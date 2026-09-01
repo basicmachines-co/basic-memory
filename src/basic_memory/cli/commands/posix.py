@@ -746,7 +746,7 @@ def find(
             help=(
                 "Metadata predicate, repeatable: 'status=active', 'confidence>0.6', "
                 "'priority in high,critical', 'tags has security', 'score between 0.3,0.8'. "
-                "Queries the whole project — a PATH below the project root is refused"
+                "PATH still scopes the query, by file path"
             ),
         ),
     ] = None,
@@ -774,7 +774,7 @@ def find(
     bm find --name "*.md"
     bm find /specs --depth 3
     bm find /notes --name "auth*" --plain
-    bm find --meta "status=active" --meta "confidence>0.6" --fields title,priority
+    bm find /specs --meta "status=active" --meta "confidence>0.6" --fields title,priority
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
     from basic_memory.mcp.tools import find as mcp_find
