@@ -748,7 +748,8 @@ def find(
             "--meta",
             help=(
                 "Metadata predicate, repeatable: 'status=active', 'confidence>0.6', "
-                "'priority in high,critical', 'tags has security', 'score between 0.3,0.8'"
+                "'priority in high,critical', 'tags has security', 'score between 0.3,0.8'. "
+                "Queries the whole project — a PATH below the project root is refused"
             ),
         ),
     ] = None,
