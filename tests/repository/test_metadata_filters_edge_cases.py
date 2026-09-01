@@ -15,10 +15,18 @@ from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.schemas.search import SearchItemType
 
 
-async def _index_entity_with_metadata(search_repository, session_maker, title, entity_metadata):
+async def _index_entity_with_metadata(
+    search_repository,
+    session_maker,
+    title,
+    entity_metadata,
+    *,
+    content_type="text/markdown",
+    extension="md",
+):
     """Helper: create an entity with given metadata and index it for search."""
     slug = "-".join(title.lower().split())
-    file_path = f"test/{slug}.md"
+    file_path = f"test/{slug}.{extension}"
     permalink = f"test/{slug}"
     now = datetime.now(timezone.utc)
 
@@ -29,7 +37,7 @@ async def _index_entity_with_metadata(search_repository, session_maker, title, e
             note_type="note",
             permalink=permalink,
             file_path=file_path,
-            content_type="text/markdown",
+            content_type=content_type,
             entity_metadata=entity_metadata,
             created_at=now,
             updated_at=now,
@@ -99,6 +107,39 @@ async def test_null_filter_matches_a_missing_key_and_an_explicit_null(
 
     assert {r.id for r in results} == {missing.id, explicit.id}
     assert await search_repository.count(metadata_filters={"owner": None}) == 2
+
+
+@pytest.mark.asyncio
+async def test_metadata_filters_never_match_a_non_markdown_file(search_repository, session_maker):
+    """REGRESSION: a PDF or an image is not an unowned note.
+
+    Frontmatter is a Markdown-only construct, but every indexed file gets an
+    ENTITY row, and a regular file's entity_metadata carries no keys at all —
+    so `IS NULL` matched every PDF, image and binary in the project and counted
+    them into an exact total. Positive predicates hid the hole because nothing
+    a regular file carries could satisfy one; the content-type constraint makes
+    the frontmatter-only contract hold for either shape of predicate.
+    """
+    unowned_note = await _index_entity_with_metadata(
+        search_repository,
+        session_maker,
+        "Unowned Note",
+        {"status": "active"},
+    )
+    await _index_entity_with_metadata(
+        search_repository,
+        session_maker,
+        "Scanned Contract",
+        None,
+        content_type="application/pdf",
+        extension="pdf",
+    )
+
+    results = await search_repository.search(metadata_filters={"owner": None})
+
+    assert {r.id for r in results} == {unowned_note.id}
+    # The total is what paginates, so it has to exclude the PDF too.
+    assert await search_repository.count(metadata_filters={"owner": None}) == 1
 
 
 @pytest.mark.asyncio

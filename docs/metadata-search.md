@@ -10,6 +10,8 @@ Basic Memory automatically indexes custom frontmatter fields so you can query th
 
 Filters are a JSON dictionary where each key targets a frontmatter field and the value specifies the match condition. Multiple keys combine with **AND** logic — every filter must match.
 
+Metadata filters only ever match Markdown notes. A project can also index PDFs, images and other regular files, but those carry no frontmatter, so they are never metadata hits and never counted in the result total — including for the null filter below, which asks about a *missing* value.
+
 ### Equality
 
 Match a single value exactly.

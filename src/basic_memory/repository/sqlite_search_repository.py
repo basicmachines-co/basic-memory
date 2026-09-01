@@ -31,6 +31,7 @@ from basic_memory.repository.search_query import relaxed_query_words
 from basic_memory.repository.search_repository_base import (
     SearchRepositoryBase,
     file_path_prefix_condition,
+    metadata_filter_content_type_condition,
 )
 from basic_memory.repository.script_ngrams import analyze_script_query
 from basic_memory.repository.search_trace import (
@@ -933,6 +934,10 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         if metadata_filters:
             parsed_filters = parse_metadata_filters(metadata_filters)
             from_clause = "search_index JOIN entity ON search_index.entity_id = entity.id"
+            # Frontmatter filters answer for notes only; see
+            # metadata_filter_content_type_condition for why every regular file
+            # would otherwise satisfy a null predicate.
+            conditions.append(metadata_filter_content_type_condition(params))
             entity_columns = await self._get_entity_columns()
 
             for idx, filt in enumerate(parsed_filters):

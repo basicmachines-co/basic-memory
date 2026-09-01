@@ -31,19 +31,32 @@ class SearchRetrievalMode(str, Enum):
 
 
 def normalize_file_path_prefix(value: Optional[str]) -> Optional[str]:
-    """Reduce a directory scope to its bare project-relative spelling.
+    """Reduce a directory scope to the bare project-relative spelling the index stores.
 
-    "", "/", and "   " all name the project root — no subtree scope — and must
-    collapse to None. "/" in particular is a non-empty string, so left as-is it
-    would read as criteria to the service's has-criteria check while
-    contributing no predicate: a query that filters nothing yet reports its
-    total as if it had. "/specs/" and "specs" are the same scope, so they too
-    normalize to the one value the SQL predicate and the criteria check share.
+    Exactly two things here are notation rather than path: a leading "./" and
+    the surrounding separators. ``DirectoryService`` removes those two before it
+    lists a directory, and ``find``'s two arms read one ``path`` argument — a
+    scope that means "specs/" without ``meta`` and "./specs/" with it is the
+    same argument asking two different questions, and the SQL prefix built from
+    the second matches nothing, silently.
+
+    Everything else survives byte for byte, whitespace included. A directory
+    really can be named " specs ", and stripping would answer for "specs/"
+    instead: a different subtree, reported under the same exact total as the
+    right one. The preserved spelling gives the honest empty result.
+
+    A spelling carrying no path at all — "", "/", "./", "   ", "  /  " — names
+    the project root, i.e. no subtree scope, and must collapse to None. "/" in
+    particular is a non-empty string, so left as-is it would read as criteria to
+    the service's has-criteria check while contributing no predicate: a query
+    that filters nothing yet reports its total as if it had.
     """
     if value is None:
         return None
-    normalized = value.strip().strip("/")
-    return normalized or None
+    scope = value.removeprefix("./")
+    if not scope.strip().strip("/"):
+        return None
+    return scope.strip("/")
 
 
 class SearchQuery(BaseModel):
