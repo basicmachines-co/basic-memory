@@ -637,6 +637,13 @@ even 100, so check whether the last page was full and walk `--page 2`, `--page 3
 not. A truncated symbol search fails the same silent way as an unpaginated `find`: a plausible
 answer, exit 0, and no sign that the tail is missing.
 
+And `grep` searches **your notes, not the source**. The `<work>.txt` is indexed as an entity,
+but its body is not in the searchable text, so an occurrence you never carried into a note is
+unreachable — verified: a word present only in the source returns `total: 0` while a word in
+both returns just the note. So this answers "where have I written about the doubloon", not
+"where does the doubloon appear in the book". For the latter, search the file itself and use
+the [chapter offset map](#source-text-preparation) to turn a hit into a chapter.
+
 Traversal is where second-order questions get answered — which characters share the most
 chapters, which themes converge in the final act, where a symbol's meaning shifts. Capture
 what you find as `analysis/` notes; those syntheses are the payoff of having built the graph.
