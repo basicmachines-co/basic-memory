@@ -473,6 +473,110 @@ def test_iso_shaped_points_with_malformed_calendar_runs_are_unread(written: str)
     assert parse_authored_point(written) is None
 
 
+@pytest.mark.parametrize(
+    "written",
+    [
+        # The reported shapes: a calendar date carrying an instant marker with no instant
+        # behind it. dateparser drops the marker and answers with the bare date, so the
+        # author reached for a moment and the index recorded a whole open-ended day.
+        "2026-01-01T",
+        "2026-01-01Z",
+        "2026-01-01+14:00",  # a real UTC offset -- with no time for it to offset
+        "2026-01-01-05:00",
+        # The same defect wearing shapes nobody listed. Naming the marker would have
+        # caught the three above and missed each of these, which is why the guard asks
+        # what the reader *returned* rather than what the suffix looks like.
+        "2026-01-01UTC",
+        "2026-01-01TZ",
+        "2026-01-01T ",
+        "2026-01-01,",
+        "2026-01-01.",
+        # A dangling separator, which the guard's previous cut could not even see: its
+        # trailing `(?![\\d-])` lookahead made the head fail to match, so the token
+        # skipped the guard entirely and reached the lenient reader.
+        "2026-01-01-",
+        "2026-01-01-5",
+    ],
+)
+def test_iso_dates_with_a_dangling_instant_suffix_are_unread(written: str):
+    """A calendar date is a complete point, so only a clock reading may follow one.
+
+    Each of these was peeled off its observation and filed as `[2026-01-01,)` -- a
+    plausible-looking assertion the author never wrote, re-derived identically by every
+    reindex. The guard is stated on the whole token rather than on a list of suffixes:
+    what the reader hands back must account for everything the author typed.
+    """
+    assert parse_authored_point(written) is None
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        # A stray character next to an ISO date makes dateparser abandon the ISO reading
+        # and re-guess the components under the configured order: June 10 became
+        # *October 6*. Worse than the dangling markers above, which at least kept the day.
+        "2026-06-10x",
+        "2026-06x",
+        # The same re-guess with a clock reading present, so the reader does come back
+        # with an instant -- on the wrong date. Only comparing that date against the one
+        # the author wrote catches it.
+        "2026-06-10 14:00 x",
+        "2026-06-10 x 14:00",
+        # A relative phrase after an absolute date: the reader answers with *today*
+        # shifted, and the ISO date the author wrote is nowhere in the result.
+        "2026-06-10 tomorrow 14:00",
+        "2026-06-10T14:00 yesterday",
+    ],
+)
+def test_an_iso_date_whose_suffix_re_guesses_it_is_unread(written: str):
+    """The reader must come back with the date the author wrote, not a nearby one."""
+    assert parse_authored_point(written) is None
+
+
+@pytest.mark.parametrize("today", ["2026-03-07", "2026-09-01"])
+def test_a_clock_reading_on_a_month_is_not_completed_from_the_indexing_date(today: str):
+    """`2026-13`'s disease in the suffix: a time of day needs a day to fall on.
+
+    `2026-06 10:00` gave dateparser a year, a month and a clock but no day, and it filled
+    the day from the current date -- `[2026-06-07T10:00...,)` in March,
+    `[2026-06-01T10:00...,)` in September. The same note projected different valid time on
+    different days. A head that names only a month owns no day, so nothing may trail it.
+    """
+    with freeze_time(today):
+        assert parse_authored_point("2026-06 10:00") is None
+
+
+@pytest.mark.parametrize(
+    ("written", "lower"),
+    [
+        # The boundary the suffix rule draws is "did the reader turn this into a time on
+        # that date?", not "does this look like a clock?". These carry no colon and no
+        # digit at all, yet each really is the time it claims to be, so each still reads.
+        ("2026-06-10 noon", "2026-06-10T12:00:00.000000Z"),
+        ("2026-06-10 midnight", "2026-06-10T00:00:00.000000Z"),
+        ("2026-06-10 2pm", "2026-06-10T14:00:00.000000Z"),
+        ("2026-06-10 at 14:00", "2026-06-10T14:00:00.000000Z"),
+        # An offset and a zone are only dangling when there is no time in front of them.
+        ("2026-06-10T14:00Z", "2026-06-10T14:00:00.000000Z"),
+        ("2026-06-10 14:00:00.5", "2026-06-10T14:00:00.500000Z"),
+        ("2026-06-10 14:00:00 UTC", "2026-06-10T14:00:00.000000Z"),
+        ("2026-06-10T14:00:00+0200", "2026-06-10T12:00:00.000000Z"),
+    ],
+)
+def test_a_real_time_of_day_still_follows_an_iso_date(written: str, lower: str):
+    """Refusing a dangling suffix must not cost a genuine one.
+
+    A rule written as a grammar for what may follow a date would have taken these with
+    it: none of them is RFC 3339, and half of them do not start with a digit. Deciding on
+    the reader's answer instead leaves every spelling it can genuinely read.
+    """
+    span = parse_authored_point(written)
+
+    assert span is not None
+    assert span.axis is INSTANT
+    assert span.lower == lower
+
+
 @pytest.mark.parametrize("today", ["2026-03-07", "2026-09-01"])
 def test_an_impossible_iso_month_is_not_completed_from_the_indexing_date(today: str):
     """The worst shape of all: a date whose meaning depended on when the reindex ran.

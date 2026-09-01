@@ -535,24 +535,31 @@ def _date_data_parser(date_order: DateOrder) -> "DateDataParser":
     )
 
 
-# The ISO calendar components a point opens with, when it opens with any: `YYYY-MM`
-# optionally followed by `-DD`. Not a bound grammar -- it deliberately matches a *prefix*
-# and leaves whatever follows (a time, an offset, nothing) to the reader below.
+# The ISO calendar components a point *opens* with, when it opens with any: `YYYY-MM`
+# optionally followed by `-DD`. The head of a point, not the whole of one -- a date
+# carrying a time (`2026-06-10T14:00`, `2026-06-10 10:00 AM`) is matched on its date part
+# alone, because `\d+` cannot cross the separator.
 #
-# Each component is `\d+` rather than `\d{2}` so that an over-long run is *captured and
-# judged* rather than failing to match and slipping past the guard entirely. Bounding the
-# run instead would reopen the hole it closes: against `\d{2}`, `2026-01-0100` matched
-# nothing -- the day `01` left a trailing `00` that the lookahead refused -- so the token
-# reached dateparser and came back as the whole month of January. The lookahead still ends
-# the run at the first character that cannot continue a calendar date, so a date carrying a
-# time (`2026-06-10T14:00`, `2026-06-10 10:00 AM`) is matched on its date part alone.
-_ISO_CALENDAR_PREFIX = re.compile(r"^(\d{4})-(\d+)(?:-(\d+))?(?![\d-])")
+# Two rules keep the head from letting a malformed token escape by simply failing to
+# match, which is the shape every earlier cut of this guard was wrong in:
+#
+# * Each component is `\d+` rather than `\d{2}`, so an over-long run is *captured and
+#   judged* rather than matching nothing. Against `\d{2}`, `2026-01-0100` matched nothing
+#   -- the day `01` left a trailing `00` no lookahead would accept -- so the token reached
+#   dateparser and came back as the whole month of January.
+# * Nothing terminates the pattern. An earlier cut ended it with `(?![\d-])`, which put
+#   the same hole on the trailing side: `2026-01-01-` matched nothing at all, so the
+#   dangling separator reached dateparser, which dropped it and filed a bare date.
+#
+# A head that always matches when a point opens with ISO components leaves a remainder
+# that `parse_authored_point` always judges. Between them the two cover the whole token.
+_ISO_CALENDAR_HEAD = re.compile(r"^(\d{4})-(\d+)(?:-(\d+))?")
 
 
 def _names_a_real_calendar_date(year: str, month: str, day: str | None) -> bool:
     """Whether ISO-shaped calendar components name a date that exists.
 
-    A month-only prefix is judged on the first of that month: the day is a component the
+    A month-only head is judged on the first of that month: the day is a component the
     author did not write, not one to guess at. `date` is the authority rather than a range
     check because it already owns leap years and month lengths.
     """
@@ -618,6 +625,12 @@ def parse_authored_point(
     still holds, so closing the range at midnight would expire it overnight. Callers
     that need a closed interval write the range literal instead.
 
+    Non-ISO spellings are read leniently, because guessing at `June 10, 2026` is the
+    whole point of this reader. A token that *is* ISO-shaped is held to its own text
+    instead: its calendar components must name a real date, and anything trailing them
+    must be a time of day on that date. `2026-06-10 10:00 AM` reads; `2026-01-01T` does
+    not, because the author reached for an instant and no instant is there.
+
     Returns None when the text names no date. That is not an error -- the caller leaves
     such a token as ordinary observation content.
     """
@@ -656,27 +669,60 @@ def parse_authored_point(
             lower_inclusive=True,
         )
 
-    iso_calendar = _ISO_CALENDAR_PREFIX.match(point)
-    if iso_calendar is not None and not _names_a_real_calendar_date(*iso_calendar.groups()):
-        # Trigger: the text opens with ISO calendar components that name no real date.
-        # Why: the two branches above only match a token that is *exactly* a canonical
-        #   date or timestamp, so every other ISO-shaped spelling still reached
-        #   dateparser -- a bare `2026-13`, a space-separated `2026-13-01 10:00:00`, a
-        #   minute-precision `2026-13-01T10:00`. It reads the impossible month as a day
-        #   and then fills the month it never got from *today*, so `2026-13` projects a
-        #   different date on every reindex day: the same note yields different data
-        #   depending on when it was indexed. A mistyped *width* is read just as freely --
-        #   `2026-01-0100` comes back as the whole month of January -- so a slipped
-        #   keystroke silently widens one day into a range nobody wrote. Only the leading
-        #   calendar components are judged here -- an impossible *time* already reads as no
-        #   date at all -- so every non-ISO spelling and every ISO date that does exist
-        #   still reach the flexible reader below.
-        # Outcome: refused, and the token stays ordinary observation content.
-        return None
+    # --- An ISO-shaped point is judged on its whole text ---
+    #
+    # Everything past this section is read by dateparser, which answers "what date can I
+    # find in here?" rather than "does this text name a date?". It reads past what it does
+    # not understand, so an ISO-shaped token is checked in both halves: the calendar head
+    # must name a real date, and whatever trails that head must be accounted for.
+    iso_head = _ISO_CALENDAR_HEAD.match(point)
+    iso_day: date | None = None
+    trailing = ""
+    if iso_head is not None:
+        year, month, day = iso_head.groups()
+        if not _names_a_real_calendar_date(year, month, day):
+            # Trigger: the text opens with ISO calendar components that name no real date.
+            # Why: the two branches above only match a token that is *exactly* a canonical
+            #   date or timestamp, so every other ISO-shaped spelling still reached
+            #   dateparser -- a bare `2026-13`, a space-separated `2026-13-01 10:00:00`, a
+            #   minute-precision `2026-13-01T10:00`. It reads the impossible month as a day
+            #   and then fills the month it never got from *today*, so `2026-13` projects a
+            #   different date on every reindex day: the same note yields different data
+            #   depending on when it was indexed. A mistyped *width* is read just as freely
+            #   -- `2026-01-0100` comes back as the whole month of January -- so a slipped
+            #   keystroke silently widens one day into a range nobody wrote.
+            # Outcome: refused, and the token stays ordinary observation content.
+            return None
+        # Vouched for just above, so building the date cannot raise. None means the author
+        # wrote a month, which owns no day for a trailing time to fall on.
+        iso_day = None if day is None else date(int(year), int(month), int(day))
+        trailing = point[iso_head.end() :]
 
     date_data = _date_data_parser(date_order).get_date_data(point)
     moment = date_data.date_obj
     if moment is None:
+        return None
+
+    if trailing and not (date_data.period == "time" and moment.date() == iso_day):
+        # Trigger: an ISO calendar head is followed by text the reader did not turn into
+        #   a time of day on that very date.
+        # Why: a calendar date is a complete point, so the only thing that can legally
+        #   follow one is a clock reading. dateparser does not enforce that -- it drops a
+        #   suffix it cannot use and answers with the date alone, so `2026-01-01T`,
+        #   `2026-01-01Z` and `2026-01-01+14:00` all came back as `[2026-01-01,)`: the
+        #   author reached for an instant and the index recorded a whole open-ended day,
+        #   re-derived identically by every reindex. Worse, a suffix can make the reader
+        #   abandon the ISO reading altogether and re-guess the *date* under the
+        #   configured order -- `2026-06-10x` came back as October 6 -- or fill a
+        #   component from *today*, so `2026-06 10:00` (a clock reading on a head that
+        #   names no day) landed on a different date depending on when it was indexed.
+        #   Checking what the reader *returned* rather than what the suffix looks like is
+        #   what makes this close the class: any trailing text the reader silently drops
+        #   or reinterprets fails here, whether or not it is a shape anyone anticipated.
+        #   The flexible spellings are untouched, because in every one of them the trailing
+        #   text really is the time it looks like: `T14:00`, ` 10:00 AM`, ` 14:00:00+02:00`
+        #   and even ` noon` all come back as an instant on the date the author wrote.
+        # Outcome: refused, and the token stays ordinary observation content.
         return None
 
     # dateparser fills components the author did not write from today's date, so only
