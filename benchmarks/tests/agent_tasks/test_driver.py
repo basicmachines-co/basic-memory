@@ -919,3 +919,44 @@ def test_json_escaping_header_secret_never_reaches_the_saved_error_artifact(
     assert escaped not in saved_error
     # The operator still learns why the call was rejected.
     assert "invalid api key" in saved_error
+
+
+def test_transport_refusal_text_never_reaches_the_saved_error_artifact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Leak proof for a --model-header value the transport itself refuses.
+
+    CR and LF are illegal in a header value but survive --model-header, which
+    strips only surrounding whitespace. h11 then quotes the whole value into a
+    LocalProtocolError, so the credential rides into per-task-agent.jsonl
+    without any response body being involved — the source every earlier
+    body-side fix left open.
+    """
+    secret_header = "wrkspc" + chr(13) + chr(10) + "secret_9999"
+    escaped = json.dumps(secret_header)[1:-1]
+
+    def refusing_post(url: str, **kwargs: Any) -> httpx.Response:
+        raise httpx.LocalProtocolError(f"Illegal header value {secret_header.encode()!r}")
+
+    monkeypatch.setattr(tool_agent.httpx, "post", refusing_post)
+    agent = OpenAICompatToolAgent(
+        "m",
+        "http://localhost/v1",
+        extra_headers={"anthropic-workspace-id": secret_header},
+        max_retries=0,
+    )
+    task = AgentTaskSpec(id="t1", skill="s", source="src", prompt="p", graders=())
+
+    with pytest.raises(LLMRunnerError) as caught:
+        agent.propose([UserMessage(text="hi")], [ToolDef("search", "d", {})])
+
+    row = driver._errored_result("bm-rich", task, str(caught.value))
+    artifact = tmp_path / "per-task-agent.jsonl"
+    driver._write_jsonl(artifact, [row.model_dump(mode="json", exclude={"turn_records"})])
+
+    saved_error = json.loads(artifact.read_text(encoding="utf-8"))["error"]
+    assert secret_header not in saved_error
+    assert escaped not in saved_error
+    # The operator still learns what the transport refused, and where.
+    assert "Illegal header value" in saved_error
+    assert "http://localhost/v1" in saved_error

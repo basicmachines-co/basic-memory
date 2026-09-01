@@ -179,7 +179,10 @@ def redact_secrets(text: str, secrets: Sequence[str]) -> str:
     can echo the rejected key, and proxies name the header they refused. That
     body then rides an ``LLMRunnerError`` into ``per-task-agent.jsonl`` and
     ``summary.md``, which ``publish`` copies into the public results bundle —
-    so it is not safe to persist raw.
+    so it is not safe to persist raw. A response body is only the commonest
+    source: ``OpenAICompatToolAgent._error`` runs every foreign string through
+    here, including transport exception text, which quotes a rejected header
+    value without any body being involved.
 
     Redaction is value-based rather than pattern-based: masking exactly the
     values we were handed is deterministic and cannot be defeated by an
@@ -289,8 +292,9 @@ class OpenAICompatToolAgent(ToolAgentModel):
         # never recorded in run artifacts.
         self._extra_headers = dict(extra_headers or {})
         # The exact values that must never reach a run artifact: the bearer
-        # token and every operator-supplied header value. Error bodies are
-        # redacted against this set before they escape _post.
+        # token and every operator-supplied header value. Every error message
+        # this class raises is scrubbed against this set in _error, which is
+        # the one place it constructs an LLMRunnerError.
         self._secret_values: tuple[str, ...] = tuple(
             value for value in (api_key, *self._extra_headers.values()) if value
         )
@@ -303,11 +307,61 @@ class OpenAICompatToolAgent(ToolAgentModel):
         self._timeout_seconds = timeout_seconds
         self._max_retries = max_retries
 
-    def _post(self, body: dict[str, Any]) -> dict[str, Any]:
-        headers = {"Content-Type": "application/json"}
+    def _request_headers(self) -> httpx.Headers:
+        """Merge derived auth with operator headers under HTTP's name equality.
+
+        HTTP header names are case-insensitive, so ``authorization`` and
+        ``Authorization`` are the *same* header. A plain dict does not know
+        that: merging operator headers into one kept both spellings and httpx
+        serialized both, leaving the endpoint to pick — and disclosing the
+        ambient ``OPENAI_API_KEY`` to an endpoint the operator never meant to
+        hand it to. ``httpx.Headers.__setitem__`` drops every existing entry
+        with that name, which is exactly the merge HTTP describes.
+
+        Operator headers are applied last and therefore win, rather than being
+        refused as a conflict: ``--model-header`` is a deliberate choice made
+        for this run, while the bearer is derived from whatever the shell
+        happens to export, so the explicit value is the one that should
+        survive. Refusing the pair would strand the common case of a shell that
+        exports ``OPENAI_API_KEY`` for unrelated tools.
+        """
+        headers = httpx.Headers({"Content-Type": "application/json"})
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
-        headers.update(self._extra_headers)
+        # Assigned one at a time rather than passed as a mapping: --model-header
+        # is repeatable and its names are compared case-sensitively at parse, so
+        # the operator's own dict can spell one header two ways, and building
+        # Headers from that mapping in one step would keep both entries.
+        for name, value in self._extra_headers.items():
+            headers[name] = value
+        return headers
+
+    def _error(self, summary: str, detail: str | None = None) -> LLMRunnerError:
+        """Build this class's only ``LLMRunnerError``, scrubbing the foreign half.
+
+        The credentials this agent holds can leave the process in exactly one
+        way — inside an error message — and every such message has the same two
+        parts: a ``summary`` the harness wrote, and a ``detail`` that came from
+        outside (a transport exception, a gateway body, a model turn). Scrubbing
+        here rather than at each origin is what makes the guarantee checkable by
+        reading one method. Three earlier fixes each masked one origin — an
+        echoed 401 body, its JSON-escaped spelling, its unicode-escaped spelling
+        — and the next origin arrived unredacted anyway: h11 quotes an illegal
+        header value into ``LocalProtocolError``, whose text is transport-made
+        and never passed through the body scrub at all.
+
+        Only ``detail`` is redacted, because ``redact_secrets`` withholds its
+        whole input when masking provably failed. Keeping the summary outside
+        that blast radius preserves the trade the withhold marker documents: the
+        operator still learns which endpoint failed and how, even when the
+        diagnostic itself has to be dropped.
+        """
+        if detail is None:
+            return LLMRunnerError(summary)
+        return LLMRunnerError(f"{summary}: {redact_secrets(detail, self._secret_values)}")
+
+    def _post(self, body: dict[str, Any]) -> dict[str, Any]:
+        headers = self._request_headers()
         last_error: Exception | None = None
         error_body = ""
         for _ in range(self._max_retries + 1):
@@ -329,13 +383,14 @@ class OpenAICompatToolAgent(ToolAgentModel):
                 # missing header, quota) — without it the operator sees only
                 # a bare status code.
                 # Redact before truncating: a secret straddling the 300-char
-                # cut would otherwise survive as an unmatched prefix.
+                # cut would survive as an unmatched prefix that the scrub in
+                # _error could no longer recognize either.
                 if isinstance(exc, httpx.HTTPStatusError):
                     error_body = redact_secrets(exc.response.text, self._secret_values)[:300]
-        detail = f": {error_body}" if error_body else ""
-        raise LLMRunnerError(
-            f"openai-compat call to {self.base_url} failed after "
-            f"{self._max_retries + 1} attempts: {last_error}{detail}"
+        body_suffix = f": {error_body}" if error_body else ""
+        raise self._error(
+            f"openai-compat call to {self.base_url} failed after {self._max_retries + 1} attempts",
+            f"{last_error}{body_suffix}",
         )
 
     def propose(self, transcript: Sequence[TranscriptItem], tools: Sequence[ToolDef]) -> AgentTurn:
@@ -354,7 +409,7 @@ class OpenAICompatToolAgent(ToolAgentModel):
         try:
             message = payload["choices"][0]["message"]
         except (KeyError, IndexError, TypeError) as exc:
-            raise LLMRunnerError(f"openai-compat response has no message: {exc}") from exc
+            raise self._error("openai-compat response has no message", str(exc)) from exc
 
         tool_calls: list[ToolCall] = []
         for index, raw_call in enumerate(message.get("tool_calls") or []):
@@ -365,14 +420,16 @@ class OpenAICompatToolAgent(ToolAgentModel):
             except json.JSONDecodeError as exc:
                 # Malformed arguments are an explicit task error, never a
                 # silent skip: the loop propagates this to the driver.
-                raise LLMRunnerError(
-                    f"model returned malformed tool arguments for "
-                    f"'{function.get('name')}': {raw_arguments[:200]}"
+                # The tool name is endpoint-supplied like the arguments are, so
+                # it rides in the detail half and is scrubbed with them.
+                raise self._error(
+                    "model returned malformed tool arguments",
+                    f"'{function.get('name')}': {raw_arguments[:200]}",
                 ) from exc
             if not isinstance(arguments, dict):
-                raise LLMRunnerError(
-                    f"model returned non-object tool arguments for "
-                    f"'{function.get('name')}': {raw_arguments[:200]}"
+                raise self._error(
+                    "model returned non-object tool arguments",
+                    f"'{function.get('name')}': {raw_arguments[:200]}",
                 )
             tool_calls.append(
                 ToolCall(
@@ -387,7 +444,9 @@ class OpenAICompatToolAgent(ToolAgentModel):
         # never trip max_total_tokens, so a missing block is an explicit error.
         usage = payload.get("usage")
         if not isinstance(usage, dict):
-            raise LLMRunnerError(
+            # No detail: the whole message is harness-authored, so there is
+            # nothing from the endpoint here for _error to scrub.
+            raise self._error(
                 f"openai-compat response from {self.base_url} has no 'usage' block; "
                 "token accounting would be silently wrong"
             )
@@ -395,9 +454,10 @@ class OpenAICompatToolAgent(ToolAgentModel):
             input_tokens = int(usage["prompt_tokens"])
             output_tokens = int(usage["completion_tokens"])
         except (KeyError, TypeError, ValueError) as exc:
-            raise LLMRunnerError(
+            raise self._error(
                 f"openai-compat usage block from {self.base_url} has missing or "
-                f"malformed token counts: {usage!r}"
+                "malformed token counts",
+                repr(usage),
             ) from exc
         return AgentTurn(
             text=str(message.get("content") or "").strip(),
@@ -508,7 +568,9 @@ def create_tool_agent_model(
 
     Formats: ``openai-compat:<model>@<base_url>`` or ``scripted:<path.json>``.
     ``extra_headers`` are sent on every openai-compat request (ignored for
-    scripted) and never recorded in run artifacts.
+    scripted) and never recorded in run artifacts. A header naming the same
+    HTTP field as the derived bearer — ``authorization`` in any casing —
+    replaces it, so the ambient ``OPENAI_API_KEY`` is not also sent.
     """
     transport, _, remainder = spec.partition(":")
     if transport == "claude":

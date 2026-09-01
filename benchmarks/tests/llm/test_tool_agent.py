@@ -95,6 +95,82 @@ def test_extra_headers_ride_every_request(monkeypatch: pytest.MonkeyPatch) -> No
     assert captured["headers"]["Authorization"] == "Bearer k"
 
 
+AMBIENT_KEY = "sk-ambient-must-not-be-sent"
+OPERATOR_AUTHORIZATION = "Bearer op-token-intended"
+
+
+def _capturing_post(captured: dict[str, Any]) -> Any:
+    def fake_post(url: str, **kwargs: Any) -> httpx.Response:
+        captured["headers"] = kwargs["headers"]
+        return _response(
+            {
+                "choices": [{"message": {"content": "ok", "tool_calls": []}}],
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            }
+        )
+
+    return fake_post
+
+
+def _authorization_values(headers: Any) -> list[bytes]:
+    """Every Authorization value as httpx would put it on the wire.
+
+    Reads the raw list rather than indexing, because indexing collapses the
+    duplicate this asserts the absence of. Wrapping in ``httpx.Headers`` is
+    what a plain dict would go through inside httpx anyway, so a dict spelling
+    the name twice still yields two entries here.
+    """
+    return [value for name, value in httpx.Headers(headers).raw if name.lower() == b"authorization"]
+
+
+def test_operator_authorization_header_replaces_the_ambient_bearer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A differently-cased operator header must replace the bearer, not join it.
+
+    HTTP header names are case-insensitive, so sending both is not "two
+    headers": the endpoint picks one, and the ambient OPENAI_API_KEY — which
+    the operator exported for some other tool — is disclosed to a custom
+    endpoint they never meant to hand it to.
+    """
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(tool_agent.httpx, "post", _capturing_post(captured))
+    monkeypatch.setenv("OPENAI_API_KEY", AMBIENT_KEY)
+
+    agent = create_tool_agent_model(
+        "openai-compat:m@http://localhost/v1",
+        extra_headers={"authorization": OPERATOR_AUTHORIZATION},
+    )
+    agent.propose([UserMessage(text="hi")], [SEARCH_TOOL])
+
+    assert _authorization_values(captured["headers"]) == [OPERATOR_AUTHORIZATION.encode()]
+    # The ambient credential must not ride along under any header name.
+    assert all(
+        AMBIENT_KEY.encode() not in value for _, value in httpx.Headers(captured["headers"]).raw
+    )
+
+
+def test_repeated_model_header_spellings_collapse_to_the_last_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--model-header is repeatable and its names are case-sensitive at parse.
+
+    So the operator's own header map can spell one HTTP field two ways, which
+    is the same duplicate-serialization defect without an ambient key involved.
+    """
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(tool_agent.httpx, "post", _capturing_post(captured))
+
+    agent = OpenAICompatToolAgent(
+        "m",
+        "http://localhost/v1",
+        extra_headers={"Authorization": "Bearer first", "authorization": OPERATOR_AUTHORIZATION},
+    )
+    agent.propose([UserMessage(text="hi")], [SEARCH_TOOL])
+
+    assert _authorization_values(captured["headers"]) == [OPERATOR_AUTHORIZATION.encode()]
+
+
 def test_temperature_none_omits_the_parameter(monkeypatch: pytest.MonkeyPatch) -> None:
     """Claude 5 endpoints reject any temperature; None must drop the key entirely."""
     captured: dict[str, Any] = {}
@@ -413,6 +489,84 @@ def test_error_body_withheld_when_a_secret_survives_masking(
     # The status still names the rejection, so dropping the body does not
     # leave the operator with nothing to act on.
     assert "401" in message
+
+
+# HTTP forbids CR and LF in a header value, but --model-header only strips
+# surrounding whitespace, so an embedded one reaches httpx intact. Built from
+# chr() rather than written as escapes so the test states which bytes it means.
+CRLF_HEADER_SECRET = "wrkspc" + chr(13) + chr(10) + "secret_9999"
+
+
+def test_transport_exception_text_does_not_leak_a_header_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The leak source that is not a response body: h11 quoting a bad header.
+
+    Verified against a live socket: h11 refuses to serialize the value and
+    raises LocalProtocolError("Illegal header value b'wrkspc...'"), whose text
+    the harness interpolates straight into LLMRunnerError. Nothing in that path
+    touches exc.response, so masking the body alone never reached it.
+    """
+    quoted = f"Illegal header value {CRLF_HEADER_SECRET.encode()!r}"
+
+    def refusing_post(url: str, **kwargs: Any) -> httpx.Response:
+        raise httpx.LocalProtocolError(quoted)
+
+    # Precondition: a bytes repr escapes CR and LF, so the plaintext genuinely
+    # is absent and a plaintext-only search would pass vacuously.
+    escaped = json.dumps(CRLF_HEADER_SECRET)[1:-1]
+    assert CRLF_HEADER_SECRET not in quoted
+    assert escaped in quoted
+
+    monkeypatch.setattr(tool_agent.httpx, "post", refusing_post)
+    agent = OpenAICompatToolAgent(
+        "m",
+        "http://localhost/v1",
+        extra_headers={"anthropic-workspace-id": CRLF_HEADER_SECRET},
+        max_retries=0,
+    )
+
+    with pytest.raises(LLMRunnerError) as caught:
+        agent.propose([UserMessage(text="hi")], [SEARCH_TOOL])
+
+    message = str(caught.value)
+    assert CRLF_HEADER_SECRET not in message
+    assert escaped not in message
+    assert tool_agent.REDACTION_MARKER in message
+    # The summary half is harness-authored, so the operator still learns which
+    # endpoint failed and why even though the value was masked out.
+    assert "Illegal header value" in message
+    assert "http://localhost/v1" in message
+
+
+def test_error_summary_survives_a_withheld_detail(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Withholding must cost the diagnostic, never the endpoint that failed.
+
+    redact_secrets replaces its whole input when masking provably failed, so
+    routing the entire message through it would drop the summary too. This
+    pins the split: a transport exception spelling the secret in a form the
+    form set cannot enumerate loses the detail and keeps the locator.
+    """
+
+    def go_escaping_post(url: str, **kwargs: Any) -> httpx.Response:
+        raise httpx.ConnectError('{"seen":"' + _go_encoded(GO_ESCAPING_SECRET) + '"}')
+
+    monkeypatch.setattr(tool_agent.httpx, "post", go_escaping_post)
+    agent = OpenAICompatToolAgent(
+        "m",
+        "http://localhost/v1",
+        extra_headers={"anthropic-workspace-id": GO_ESCAPING_SECRET},
+        max_retries=0,
+    )
+
+    with pytest.raises(LLMRunnerError) as caught:
+        agent.propose([UserMessage(text="hi")], [SEARCH_TOOL])
+
+    message = str(caught.value)
+    assert GO_ESCAPING_SECRET not in message
+    assert _go_encoded(GO_ESCAPING_SECRET) not in message
+    assert tool_agent.WITHHELD_BODY_MARKER in message
+    assert "http://localhost/v1" in message
 
 
 class TestOpenAICompatToolAgent:
