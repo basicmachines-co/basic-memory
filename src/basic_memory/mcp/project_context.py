@@ -1030,6 +1030,28 @@ async def detect_project_from_identifier_prefix(
 # which is worse than not advertising it at all. "Segments", plural: a project
 # name may contain '/', so its advertised permalink can span more than one.
 #
+# Route versus path is inherently ambiguous, so the answer is a precedence
+# order, not a parser. 'acme/docs/foo' is a well-formed workspace route AND a
+# well-formed folder path inside the caller's own project; no analysis of the
+# string, and no amount of knowing which projects exist, recovers which the
+# caller meant. One question settles it: does the call already say which project
+# it means?
+#
+#   1. An explicit project (param or env constraint) says so. The remaining path
+#      is inside that project and nothing reroutes it. A prefix naming a
+#      *different* addressable mount still conflicts rather than being silently
+#      preferred — that is a contradiction in one call, not an ambiguity.
+#   2. Otherwise, if several projects are addressable, an unqualified path
+#      cannot resolve at all (it refuses, below). Reading the leading segments
+#      as a route is then the only way the input can mean anything, so route
+#      wins.
+#   3. Otherwise the session addresses one project, the path already resolves
+#      inside it, and route parsing would take a working input and send it to
+#      another tenant. Path wins.
+#
+# Rule 3 (mounts) sits above all of this: a name `ls /` advertises always
+# addresses that mount.
+#
 # The cost of that choice, stated plainly: when a project's permalink equals an
 # accessible workspace's slug, that workspace's OTHER projects lose their
 # qualified path spelling. With '/team' advertised as a mount, 'team/docs/x' is
@@ -1355,17 +1377,28 @@ async def resolve_project_path_route(
             mount_project_id = mount.external_id
 
     # --- Rule 4: explicitly workspace-qualified spellings for everything else ---
-    # Trigger: no advertised mount claimed the leading segments and the input still
-    #   has more than one segment to parse.
+    # Trigger: no advertised mount claimed the leading segments, the input has
+    #   more than one segment, no project was named, and this session addresses
+    #   more than one project.
     # Why: '<workspace>/<project>[/<path>]' addresses projects in workspaces this
     #   session's own route does not list, so they are absent from the mount
-    #   table above and would otherwise be unreachable.
+    #   table above and would otherwise be unreachable. But 'acme/docs/foo' is
+    #   equally a well-formed folder path inside the caller's own project, and
+    #   nothing in the string or the project set recovers which was meant — see
+    #   the route-versus-path precedence note above this section for why the
+    #   two conditions on this line are the whole answer.
     # Outcome: only a route naming BOTH an accessible workspace and a project
     #   inside it resolves here. An unqualified first segment falls through to
     #   the refusal below instead of being searched for across every accessible
     #   workspace — that search read another tenant's same-named project under
     #   an ordinary project-relative path (#1421).
-    if detected is None and "/" in candidate:
+    if (
+        detected is None
+        and "/" in candidate
+        and explicit is None
+        and addressable is not None
+        and len(addressable) > 1
+    ):
         qualified = await _detect_workspace_qualified_route(candidate, config, context=context)
         if qualified is not None:
             detected, remainder = qualified

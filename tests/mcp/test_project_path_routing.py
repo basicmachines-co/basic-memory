@@ -935,6 +935,59 @@ async def test_cloud_mount_routes_by_the_id_that_names_its_workspace(cross_works
 
 
 @pytest.mark.asyncio
+async def test_sole_project_keeps_workspace_shaped_paths_at_home(cross_workspace_session):
+    """Route versus path, decided by the precedence order rather than a parse.
+
+    With one mounted project, 'acme/docs/foo' resolves perfectly well as a
+    folder inside it, so it stays there — even though 'acme' is a real
+    accessible workspace holding a real project 'docs'. Parsing it as a route
+    took a working in-project read and served another tenant's project instead.
+    """
+    cross_workspace_session(session_projects=("research",), default_projects=("docs",))
+
+    route = await resolve_project_path_route("acme/docs/foo", project=None, project_id=None)
+
+    assert route == ProjectPathRoute(project=None, path="acme/docs/foo", stripped=False)
+
+
+@pytest.mark.asyncio
+async def test_named_project_keeps_the_rest_of_the_path_inside_it(cross_workspace_session):
+    """An explicit project settles route-versus-path: the caller said which
+    project they mean, so the remaining path is inside it and nothing reroutes.
+
+    This spelling previously raised a prefix conflict, which left the reported
+    bug with no workaround at all — the path could neither stay home on its own
+    nor be pinned there.
+    """
+    cross_workspace_session(session_projects=("research",), default_projects=("docs",))
+
+    route = await resolve_project_path_route("acme/docs/foo", project="research", project_id=None)
+
+    assert route == ProjectPathRoute(project="research", path="acme/docs/foo", stripped=False)
+
+
+@pytest.mark.asyncio
+async def test_workspace_route_still_wins_when_the_path_could_not_resolve(
+    cross_workspace_session,
+):
+    """The other half of the order: with several projects mounted, an
+    unqualified path refuses anyway, so reading the leading segments as a route
+    is the only way the input can mean anything. Cross-workspace addressing must
+    not be lost to the fix above."""
+    cross_workspace_session(
+        session_projects=("research", "engineering"), default_projects=("docs",)
+    )
+
+    route = await resolve_project_path_route("acme/docs/foo", project=None, project_id=None)
+
+    assert route == ProjectPathRoute(project="acme/docs", path="foo", stripped=True)
+
+    # And an unaddressable name still refuses rather than defaulting.
+    with pytest.raises(UnqualifiedPathRefusedError):
+        await resolve_project_path_route("nope/nothing/x", project=None, project_id=None)
+
+
+@pytest.mark.asyncio
 async def test_cloud_explicit_qualified_project_drops_the_mount_id(cross_workspace_session):
     """The escape hatch keeps working: an explicit '<workspace>/<project>' names
     a workspace of its own, so it must not inherit the mount's id and be routed
@@ -950,8 +1003,15 @@ async def test_cloud_explicit_qualified_project_drops_the_mount_id(cross_workspa
 async def test_cloud_workspace_project_root_surfaces_a_failed_workspace(cross_workspace_session):
     """A '<workspace>/<project>' root whose workspace could not be listed is a
     real failure, not an unrecognized path: it must say so rather than fall
-    through to a refusal that claims the project does not exist."""
-    cross_workspace_session(failed_tenant="default-tenant")
+    through to a refusal that claims the project does not exist.
+
+    Two mounted projects, because workspace routes are only parsed when an
+    unqualified path could not resolve anyway — see the precedence order.
+    """
+    cross_workspace_session(
+        failed_tenant="default-tenant",
+        session_projects=("research", "engineering"),
+    )
 
     with pytest.raises(ValueError, match="could not be loaded"):
         await resolve_project_path_route("acme/docs", project=None, project_id=None)
