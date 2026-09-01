@@ -48,7 +48,6 @@ from basic_memory.mcp.project_context import (
     get_project_client,
     resolve_project_path_route,
 )
-from basic_memory.mcp.project_context_identifiers import canonical_memory_path_for_active_route
 from basic_memory.mcp.server import POSIX_TOOLS_TAG, mcp, set_posix_tools_visibility
 from basic_memory.schemas.directory import (
     DEFAULT_DIRECTORY_PAGE_SIZE,
@@ -550,13 +549,19 @@ _PREDICATE_WORD_RE = re.compile(r"^([A-Za-z0-9_.-]+)\s+(in|has|between)\s+(.+)$"
 _PREDICATE_SYMBOL_RE = re.compile(r"^([A-Za-z0-9_.-]+)\s*(>=|<=|=|>|<)\s*(.*)$")
 _SYMBOL_OPERATORS = {">": "$gt", ">=": "$gte", "<": "$lt", "<=": "$lte"}
 _SUPPORTED_PREDICATE_OPS = "= > >= < <= in has between"
+# The symbol regex consumes the first operator it recognizes, so an operator
+# spelling outside the supported set ("==", "=>", ">>", ">=>") leaves its
+# second character at the head of the value. These are the characters that can
+# be left behind that way. A set, not a string: "" is a substring of any string
+# but is not a member here, so an empty token never reads as operator-prefixed.
+_OPERATOR_VALUE_PREFIXES = frozenset("=<>")
 # Mirrors search_notes' alias: "note_type" (the entity model column) means the
 # frontmatter "type" key, so the two surfaces accept the same spelling.
 _METADATA_KEY_ALIASES = {"note_type": "type"}
 
 
-def _predicate_scalar(token: str) -> Any:
-    """JSON-scalar-infer one predicate value token.
+def _predicate_scalar(token: str, predicate: str) -> Any:
+    """Read one predicate value token, refusing a folded-in operator character.
 
     "true"/"false"/"null"/numbers become bool/None/int/float so the produced
     filters dict is byte-equal to what a rich search_notes caller passes as
@@ -564,6 +569,21 @@ def _predicate_scalar(token: str) -> Any:
     is not a JSON scalar stays the raw string.
     """
     text = token.strip()
+    # Trigger: an unquoted value opens with one of the operator characters.
+    # Why: only the operators in _SUPPORTED_PREDICATE_OPS are real, but the
+    #      regexes match the longest supported one and hand the rest to the
+    #      value — 'status==active' would filter for the string "=active" and
+    #      'count>>3' for ">3", so a typo'd operator answered as an empty (or
+    #      worse, a non-empty but wrong) result set instead of the refusal the
+    #      grammar documents.
+    # Outcome: refuse, naming the supported set and the quoting escape hatch a
+    #          value that genuinely starts with '=', '<' or '>' needs.
+    if text[:1] in _OPERATOR_VALUE_PREFIXES:
+        raise ValueError(
+            f"find: unsupported predicate operator in '{predicate}'; "
+            f"supported: {_SUPPORTED_PREDICATE_OPS}; quote the value as "
+            f'"{text}" to match text that starts with that character'
+        )
     try:
         value = json.loads(text)
     except json.JSONDecodeError:
@@ -639,7 +659,8 @@ def _parse_meta_predicates(predicates: list[str]) -> dict[str, Any]:
             )
         if op in ("in", "has", "between"):
             items = [
-                _predicate_scalar(item) for item in _split_predicate_items(raw_value, predicate)
+                _predicate_scalar(item, predicate)
+                for item in _split_predicate_items(raw_value, predicate)
             ]
             if op == "between" and len(items) != 2:
                 raise ValueError(f"find: 'between' needs exactly min,max in '{predicate}'")
@@ -649,7 +670,7 @@ def _parse_meta_predicates(predicates: list[str]) -> dict[str, Any]:
         else:
             if not raw_value.strip():
                 raise ValueError(f"find: predicate '{predicate}' has no value")
-            value = _predicate_scalar(raw_value)
+            value = _predicate_scalar(raw_value, predicate)
             filters[key] = value if op == "=" else {_SYMBOL_OPERATORS[op]: value}
     return filters
 
@@ -703,21 +724,24 @@ async def find(
     """Recursively list files by name glob, or query notes by frontmatter metadata.
 
     Without `meta`, this is a recursive directory listing. With `meta`, find
-    routes through the metadata search instead: predicates AND together and
-    `path` still scopes the results — server-side, by slugified-permalink
-    prefix, so non-markdown files (which have no permalink) are never metadata
-    hits. `name` and `depth` are refused alongside `meta`: the search API has
-    no filename-glob or depth-bound facility, and silently ignoring either
-    would misreport the match set.
+    routes through the metadata search instead: predicates AND together over
+    the whole project, and non-markdown files (which carry no frontmatter) are
+    never hits. `name`, `depth`, and any `path` below the project root are all
+    refused alongside `meta`, because the search API expresses none of them: it
+    has no filename glob, no depth bound, and no file-path filter — it scopes
+    by permalink, and a permalink stops mirroring its file path the moment a
+    note pins one in frontmatter or is moved under the default
+    update_permalinks_on_move=False. Substituting any of the three would
+    misreport the match set while still calling the total exact.
 
     Args:
         path: Directory to start from (default: project root). '<project>/path'
-            routes into that project. With `meta`, scopes the search to this
-            subtree.
+            routes into that project. With `meta`, only a project root is
+            addressable — a directory below it is refused (see above).
         name: File-name glob to match, e.g. "*.md". None matches everything.
-            Cannot combine with `meta` — scope with `path` instead.
+            Cannot combine with `meta`.
         depth: How many levels to recurse (1-10, default: 10). A non-default
-            depth cannot combine with `meta` (subtree scope is all-or-nothing).
+            depth cannot combine with `meta`.
         page: Page number (1-indexed).
         page_size: Nodes per page.
         meta: Frontmatter metadata predicates, repeatable; every predicate must
@@ -732,9 +756,10 @@ async def find(
             become booleans/None/numbers); quote a token to force a literal
             string (e.g. 'status="true"'), including inside a list, where the
             quotes also protect a comma ('label in "a,b",c' matches "a,b" or
-            "c"). Keys accept dot-paths ("review.approved"); "note_type"
-            aliases the frontmatter "type" key. Any other operator fails fast
-            naming the supported set.
+            "c") and a value that itself starts with an operator character
+            ('range=">=5"'). Keys accept dot-paths ("review.approved");
+            "note_type" aliases the frontmatter "type" key. Any other operator
+            fails fast naming the supported set.
         fields: Frontmatter fields to return per hit (dot-paths allowed), e.g.
             ["title", "priority"]. Requires `meta`. A field missing on a hit
             renders as null — rows are never dropped.
@@ -750,11 +775,12 @@ async def find(
         requested.
     """
     # Combination rules, before any I/O. The metadata search matches slugified
-    # permalinks, where a filename glob has no faithful translation, and its
-    # permalink-prefix scope is whole-subtree, so a depth bound is not
-    # expressible — refuse both rather than silently ignoring either. `fields`
-    # is the SELECT to the predicates' WHERE; without predicates the directory
-    # listing stays byte-identical to today.
+    # permalinks, where a filename glob has no faithful translation, and it
+    # takes no depth bound — refuse both rather than silently ignoring either.
+    # (The `path` scope is refused too, after routing, where the caller's
+    # project prefix has been stripped and "is this the project root?" can be
+    # answered.) `fields` is the SELECT to the predicates' WHERE; without
+    # predicates the directory listing stays byte-identical to today.
     if meta is not None:
         # Trigger: 'meta' present but carrying no predicates.
         # Why: an empty list parses to an empty filters dict, which is not None
@@ -770,12 +796,12 @@ async def find(
         if name is not None:
             raise ValueError(
                 "find: 'name' cannot combine with 'meta' — the metadata search matches "
-                "slugified permalinks, not filenames; scope with 'path' instead"
+                "slugified permalinks, not filenames"
             )
         if depth != _MAX_FIND_DEPTH:
             raise ValueError(
-                "find: 'depth' cannot combine with 'meta' — the metadata search scopes "
-                "by whole subtree; scope with 'path' instead"
+                "find: 'depth' cannot combine with 'meta' — the metadata search takes "
+                "no depth bound"
             )
     if fields is not None:
         if meta is None:
@@ -816,11 +842,33 @@ async def find(
         route = await resolve_project_path_route(
             path, project=project, project_id=project_id, context=context
         )
+        # Trigger: a metadata query addressed below the project root.
+        # Why: the search API has no file-path filter. Its only path-shaped
+        #      predicate is permalink_match, and a permalink is not a file path:
+        #      a note that pins `permalink:` in frontmatter, or that was moved
+        #      while update_permalinks_on_move is off (the default), keeps a
+        #      permalink that no longer says where the file lives. Scoping by
+        #      permalink prefix would therefore drop notes that really are under
+        #      the requested directory and admit notes that are not — and report
+        #      the resulting count as total_is_exact.
+        # Outcome: refuse the subtree scope naming the limitation, rather than
+        #          answer a different question with an exact-looking total. The
+        #          project-root form stays exact, so it is the offered path.
+        #
+        # route.path is the caller's input verbatim when no project prefix was
+        # recognized, so one strip covers both routed and raw spellings.
+        if route.path.strip("/"):
+            raise ValueError(
+                f"find: 'meta' cannot be scoped to '{path}' — the search API filters by "
+                "permalink, not by file path, and a permalink stops mirroring its file "
+                "path once a note pins one in frontmatter or is moved with "
+                "update_permalinks_on_move disabled (the default). A subtree scope would "
+                "omit matching files and admit unrelated ones while still reporting the "
+                "total as exact. Query the project root and filter the hits by their "
+                "file_path, or drop 'meta' for a path-scoped directory listing"
+            )
         return await _find_by_metadata(
             route_project=route.project,
-            # route.path is the caller's input verbatim when no project prefix
-            # was recognized, so one strip covers both routed and raw spellings.
-            scope=route.path.strip("/"),
             metadata_filters=metadata_filters,
             fields=fields,
             page=page,
@@ -847,7 +895,6 @@ async def find(
 async def _find_by_metadata(
     *,
     route_project: Optional[str],
-    scope: str,
     metadata_filters: dict[str, Any],
     fields: Optional[list[str]],
     page: int,
@@ -855,16 +902,15 @@ async def _find_by_metadata(
     project_id: Optional[str],
     context: Context | None,
 ) -> dict[str, Any]:
-    """find's metadata arm: one search call, plus per-hit field projection.
+    """find's metadata arm: one project-wide search call, plus field projection.
 
     The listing arm's counterpart to ``find_listing``; `find` has already bounded
     the pagination and refused `name` and `depth` against `meta`.
 
-    The path scope composes server-side as a permalink-prefix GLOB, built in
-    the indexed permalink namespace with the same slug transform used at index
-    time — so a spaced directory name scopes correctly — and ANDed with the
-    metadata filters in the search WHERE, keeping totals exact and pagination
-    honest.
+    The predicates are the whole WHERE — `find` has already refused any scope
+    below the project root, because the search API offers no file-path filter
+    to express one honestly. So the total the server reports is the real match
+    count for the query that ran, and every page of it is reachable.
     """
     async with get_project_client(route_project, context=context, project_id=project_id) as (
         client,
@@ -873,21 +919,7 @@ async def _find_by_metadata(
         # Import here to avoid circular import
         from basic_memory.mcp.clients import KnowledgeClient, SearchClient
 
-        # Indexed permalinks carry the project (and, hosted, the workspace)
-        # route prefix, so the subtree GLOB must be built in that same
-        # namespace — the one memory:// paths resolve into — or a
-        # project-relative pattern like "specs/*" would match nothing.
-        permalink_match = (
-            canonical_memory_path_for_active_route(
-                active_project,
-                f"{generate_permalink(scope, split_extension=False)}/*",
-                include_project=ConfigManager().config.permalinks_include_project,
-            )
-            if scope
-            else None
-        )
         query = SearchQuery(
-            permalink_match=permalink_match,
             metadata_filters=metadata_filters,
             entity_types=[SearchItemType.ENTITY],
         )
