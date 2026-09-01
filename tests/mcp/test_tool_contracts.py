@@ -59,7 +59,17 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "output_format",
     ],
     "fetch": ["id"],
-    "find": ["path", "name", "depth", "page", "page_size", "project", "project_id"],
+    "find": [
+        "path",
+        "name",
+        "depth",
+        "page",
+        "page_size",
+        "meta",
+        "fields",
+        "project",
+        "project_id",
+    ],
     "grep": ["pattern", "literal", "page", "page_size", "project", "project_id"],
     "list_directory": [
         "dir_name",
