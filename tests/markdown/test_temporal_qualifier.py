@@ -437,6 +437,54 @@ def test_quoted_point_reads_a_multi_word_date(qualifier: str, literal: str, kind
     assert str(observation) == line
 
 
+@pytest.mark.parametrize(
+    "point",
+    [
+        "2026-01-01T10:00:00.1234567",
+        "2026-01-01T10:00:00.1234567Z",
+        "2026-01-01T10:00:00.1234567+02:00",
+        "2026-01-01T10:00:00." + "1" * 30,
+    ],
+)
+def test_a_point_finer_than_a_microsecond_stays_content_in_both_forms(point: str):
+    """An over-precise instant is refused whichever form carries it to the reader.
+
+    Both forms filed `[2026-01-01T10:00:00.123456Z,)` -- the authored instant with its
+    last digits dropped, and no sign to the author that anything was lost. The quoted form
+    reached it by a different route than the bare one: quoting suppresses the truncation
+    guards, on the reasoning that a delimited value cannot be a truncated *token*. That is
+    still true, and beside the point here -- the loss is inside the value, so only refusing
+    the point itself covers both. Pinned together so a fix to one form cannot miss the
+    other.
+    """
+    for qualifier in (f"@occurred:{point}", f'@occurred:"{point}"'):
+        line = f"- [decision] {qualifier} The cutover ran."
+
+        observation = _observation(line)
+
+        assert observation.temporal == []
+        # Refused, not reported: how someone spelled a date is not a diagnostic this
+        # feature issues. The line keeps every character and stays full-text searchable.
+        assert observation.temporal_error is None
+        assert observation.content == f"{qualifier} The cutover ran."
+        assert str(observation) == line
+
+
+def test_a_point_at_exactly_microsecond_precision_is_still_filed():
+    """The boundary the refusal above stops at, end to end through the parser."""
+    for qualifier in (
+        "@occurred:2026-01-01T10:00:00.123456",
+        '@occurred:"2026-01-01T10:00:00.123456"',
+    ):
+        observation = _observation(f"- [decision] {qualifier} The cutover ran.")
+
+        [assertion] = observation.temporal
+        assert assertion.time_kind is TimeKind.OCCURRED
+        assert str(assertion.valid_during) == "[2026-01-01T10:00:00.123456Z,)"
+        assert assertion.valid_during.axis is TemporalRangeAxis.INSTANT
+        assert observation.content == "The cutover ran."
+
+
 def test_a_quoted_relative_date_is_read_where_its_unquoted_form_is_not():
     """`2 days ago` always read fine; only the token rule kept it out."""
     quoted = _observation('- [decision] @occurred:"2 days ago" The cutover ran.')

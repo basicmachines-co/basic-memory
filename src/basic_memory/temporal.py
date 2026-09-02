@@ -580,8 +580,20 @@ def _calendar_span(lower: date, upper: date | None) -> TemporalRange:
 # *once* is the whole design. Four review rounds went the other way: each added a shape test
 # whose failure meant "not my business", so a token that failed the test fell through to the
 # flexible reader and the next round found another shape that failed it. Here the classifier
-# is total -- a token that opens with ISO syntax is an `_IsoDay`, an `_IsoMonth` or a
-# `_MalformedIso`, and none of the three can reach the flexible reader.
+# is total: a token that opens with ISO syntax is an `_IsoDay`, an `_IsoMonth` or a
+# `_MalformedIso`, and there is no fourth answer to fall through on.
+#
+# What that buys is narrower than "ISO-shaped text never reaches the flexible reader", and
+# stating it precisely matters, because the loose version is false. An `_IsoDay`'s *trailing*
+# text is still read by the flexible reader -- that is what reads `2026-06-10 10:00 AM`, and
+# no grammar of clock spellings could. What the classifier settles for good is the *calendar*:
+# a head that names no date dies here, and a real one is carried on the variant so the reading
+# below can be held to it. The trailing is fenced by two rules instead, and dateparser's answer
+# is believed only when both hold. It must come back as a time of day on the day the head names
+# -- checked in `_read_iso_day`, against what it *returned*, since a suffix's looks do not say
+# what it will do with it. And the text must not spell precision a canonical instant cannot
+# carry -- checked here, on the text, because that is the one defect the returned-value check
+# cannot see: a truncated fraction still lands on the right day.
 
 # The ISO calendar components a point *opens* with: `YYYY-MM` and an optional `-DD`. A date
 # carrying a time (`2026-06-10T14:00`, `2026-06-10 10:00 AM`) is matched on its date part
@@ -594,6 +606,18 @@ def _calendar_span(lower: date, upper: date | None) -> TemporalRange:
 # trailing `(?![\d-])` lookahead `2026-01-01-` matched nothing. Both reached the flexible
 # reader, which is the one outcome ISO syntax must never have.
 _ISO_CALENDAR_HEAD = re.compile(r"^(\d{4})-(\d+)(?:-(\d+))?")
+
+# A fractional-second run too wide for a canonical instant to carry. `_INSTANT_BOUND` caps the
+# fraction at six digits and *refuses* a longer one rather than truncating it, because dropping
+# digits would store a different instant than the author wrote -- but that refusal only ever
+# governed the strict path. The flexible reader has no such scruple: it truncates
+# `2026-01-01T10:00:00.1234567` to `...123456Z` and reports a time on the right day, so every
+# check `_read_iso_day` makes passes and the authored instant is quietly rewritten on each
+# reindex. Judged on the text so both paths refuse the same token for the same reason, and it
+# is the same reason the calendar width rule exists: a digit run wider than the syntax allows
+# is a typo, not a shorthand. Six digits and fewer are untouched -- `14:00:00.5` is precision
+# a canonical instant holds exactly, so it still reads.
+_OVER_PRECISE_FRACTION = re.compile(r"\.\d{7,}")
 
 
 def _named_calendar_date(year: str, month: str, day: str | None) -> date | None:
@@ -645,11 +669,12 @@ class _IsoMonth:
 
 @dataclass(frozen=True, slots=True)
 class _MalformedIso:
-    """A point written in ISO syntax that names nothing on the calendar.
+    """A point written in ISO syntax that cannot be read as written.
 
-    `2026-13-01`, `2026-01-0100`, `2026-06 10:00`. The author reached for a machine date
-    and missed, so there is no reading to fall back on -- only a guess, which is what this
-    variant exists to make unreachable.
+    `2026-13-01`, `2026-01-0100`, `2026-06 10:00`, `2026-01-01T10:00:00.1234567`. Either the
+    components name nothing on the calendar, or they name a moment finer than a canonical
+    instant records. The author reached for a machine date and missed, so there is no reading
+    to fall back on -- only a guess, which is what this variant exists to make unreachable.
     """
 
 
@@ -690,6 +715,16 @@ def _classify_authored_point(point: str) -> _AuthoredPoint:
         # Outcome: a bare month denotes its own period; a month with anything after it is
         #   malformed.
         return _MALFORMED_ISO if trailing else _IsoMonth(int(year), int(month))
+
+    # Trigger: the text after the date spells a fraction of a second wider than six digits.
+    # Why: no reader here can store it, and the two that try disagree -- `_canonical_instant`
+    #   refuses it, while the flexible reader truncates it and still answers with a time on
+    #   the head's day, which is precisely what `_read_iso_day`'s returned-value check cannot
+    #   catch. A guard that asks what came back cannot see digits that never made it in.
+    # Outcome: refused as malformed, so the strict and flexible paths give the same answer to
+    #   the same text and the token stays observation content rather than a rounded instant.
+    if _OVER_PRECISE_FRACTION.search(trailing):
+        return _MALFORMED_ISO
     return _IsoDay(named, trailing)
 
 
@@ -794,8 +829,10 @@ def parse_authored_point(
     Non-ISO spellings are read leniently, because guessing at `June 10, 2026` is the
     whole point of this reader. A token that *is* ISO-shaped is held to its own text
     instead: its calendar components must name a real date, and anything trailing them
-    must be a time of day on that date. `2026-06-10 10:00 AM` reads; `2026-01-01T` does
-    not, because the author reached for an instant and no instant is there.
+    must be a time of day on that date, written to a precision this module can store.
+    `2026-06-10 10:00 AM` reads; `2026-01-01T` does not, because the author reached for an
+    instant and no instant is there; `2026-01-01T10:00:00.1234567` does not either,
+    because storing it would mean dropping the digits that made it worth writing.
 
     Returns None when the text names no date. That is not an error -- the caller leaves
     such a token as ordinary observation content.

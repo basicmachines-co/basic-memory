@@ -533,6 +533,73 @@ def test_an_iso_date_whose_suffix_re_guesses_it_is_unread(written: str):
     assert parse_authored_point(written) is None
 
 
+@pytest.mark.parametrize(
+    "written",
+    [
+        # The reported shape: one digit more than a canonical instant carries. The lenient
+        # reader truncated it to `...123456Z`, on the very day the head names, so every
+        # check the reading makes passed and the index recorded an instant 100ns off the
+        # one the author wrote -- re-derived identically by every reindex.
+        "2026-01-01T10:00:00.1234567",
+        # The same defect wearing every spelling of the syntax around it. None of these is
+        # distinguishable by what the reader *returned* -- each truncates and each lands on
+        # the right day -- which is why this one is judged on the text instead.
+        "2026-01-01t10:00:00.1234567",
+        "2026-01-01 10:00:00.1234567",
+        "2026-01-01T10:00:00.1234567Z",
+        "2026-01-01T10:00:00.1234567z",
+        "2026-01-01T10:00:00.1234567+02:00",
+        "2026-01-01T10:00:00.1234567-05:00",
+        "2026-01-01T10:00:00.1234567+0200",
+        # Precision far past anything a clock emits, truncated just as quietly: a 20- and a
+        # 30-digit fraction both stored six digits and discarded the rest without a word.
+        "2026-01-01T10:00:00.12345678901234567890",
+        "2026-01-01T10:00:00." + "1" * 30,
+    ],
+)
+def test_an_iso_point_finer_than_a_microsecond_is_unread(written: str):
+    """Over-precision is refused on the lenient path too, not silently rounded.
+
+    `canonical_bound` has always refused these -- dropping digits would store a different
+    instant than the author wrote -- but that refusal only governed the strict path. A
+    point one digit too precise never matched `_INSTANT_BOUND`, so it fell to the lenient
+    reader, which truncated it and answered with a time on the correct day. The day check
+    is what guards that path, and a truncated fraction sails straight through it: the
+    digits it drops were never in the answer to be checked. Judged on the author's text
+    instead, so both readers refuse the same token for the same reason.
+    """
+    assert parse_authored_point(written) is None
+
+
+@pytest.mark.parametrize(
+    ("written", "lower"),
+    [
+        # Exactly six digits: the widest fraction a canonical instant carries, so it is
+        # stored whole and nothing is dropped. The refusal above must stop precisely here.
+        ("2026-01-01T10:00:00.123456", "2026-01-01T10:00:00.123456Z"),
+        ("2026-01-01 10:00:00.123456", "2026-01-01T10:00:00.123456Z"),
+        ("2026-01-01T10:00:00.123456Z", "2026-01-01T10:00:00.123456Z"),
+        ("2026-01-01T10:00:00.123456+02:00", "2026-01-01T08:00:00.123456Z"),
+        # Narrower fractions were never in question, and are pinned so a future widening
+        # of the rule cannot quietly take them.
+        ("2026-01-01T10:00:00.1", "2026-01-01T10:00:00.100000Z"),
+        ("2026-06-10 14:00:00.5", "2026-06-10T14:00:00.500000Z"),
+    ],
+)
+def test_a_fraction_a_canonical_instant_can_hold_still_reads(written: str, lower: str):
+    """Refusing over-precision must cost nothing that stores losslessly.
+
+    Six digits is the boundary, not "any fraction is suspicious": these name a moment the
+    canonical form records exactly, so there is no truncation to prevent and no reason to
+    withhold the assertion.
+    """
+    span = parse_authored_point(written)
+
+    assert span is not None
+    assert span.axis is INSTANT
+    assert span.lower == lower
+
+
 @pytest.mark.parametrize("today", ["2026-03-07", "2026-09-01"])
 def test_a_clock_reading_on_a_month_is_not_completed_from_the_indexing_date(today: str):
     """`2026-13`'s disease in the suffix: a time of day needs a day to fall on.
