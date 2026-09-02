@@ -1261,3 +1261,78 @@ async def test_qualified_name_beats_a_colliding_whole_permalink():
         index, "22222222-2222-2222-2222-222222222222"
     )
     assert by_id.project.name == "acme/docs"
+
+
+@pytest.mark.asyncio
+async def test_empty_session_workspace_still_reaches_a_named_workspace(monkeypatch, config_manager):
+    """Route-versus-path protects *exactly* one addressable project, not none.
+
+    A factory session whose connection-time workspace holds no projects has no
+    project for a relative path to resolve inside, and an empty mount table
+    cannot refuse on the caller's behalf either — so 'acme/docs/note' fell
+    through to project=None and tried the empty workspace. With nothing to take
+    away, the explicitly named workspace wins.
+    """
+    config = config_manager.load_config()
+    config.projects = {}
+    config.default_project = None
+    config_manager.save_config(config)
+
+    empty_ws = WorkspaceInfo(
+        tenant_id="empty-tenant",
+        workspace_type="organization",
+        slug="beta",
+        name="Beta",
+        role="editor",
+        is_default=False,
+    )
+    acme = WorkspaceInfo(
+        tenant_id="acme-tenant",
+        workspace_type="organization",
+        slug="acme",
+        name="Acme",
+        role="editor",
+        is_default=True,
+    )
+
+    @asynccontextmanager
+    async def fake_get_client(*a, **k):
+        yield object()
+
+    async def fake_list_projects(self):
+        return ProjectList(projects=[], default_project=None)  # session workspace is EMPTY
+
+    async def fake_workspaces(context=None):
+        return [empty_ws, acme]
+
+    async def fake_entries(ws, context=None):
+        if ws.tenant_id != "acme-tenant":
+            return ()
+        return (
+            WorkspaceProjectEntry(
+                workspace=ws,
+                project=ProjectItem(
+                    id=1,
+                    external_id="77777777-7777-7777-7777-777777777777",
+                    name="docs",
+                    path="/app/docs",
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(async_client, "is_factory_mode", lambda: True)
+    monkeypatch.setattr(async_client, "get_client", fake_get_client)
+    monkeypatch.setattr(
+        "basic_memory.mcp.clients.project.ProjectClient.list_projects", fake_list_projects
+    )
+    monkeypatch.setattr(project_context, "get_available_workspaces", fake_workspaces)
+    monkeypatch.setattr(project_context, "_fetch_workspace_project_entries", fake_entries)
+
+    route = await resolve_project_path_route("acme/docs/note", project=None, project_id=None)
+
+    assert route == ProjectPathRoute(
+        project="acme/docs",
+        path="note",
+        stripped=True,
+        project_id="77777777-7777-7777-7777-777777777777",
+    )
