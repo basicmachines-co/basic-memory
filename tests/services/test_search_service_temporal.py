@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from textwrap import dedent
 
 import pytest
+from pydantic import ValidationError
 
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.schemas.search import SearchQuery
@@ -181,6 +182,48 @@ def test_kind_only_query_builds_a_kind_filter():
     assert temporal is not None
     assert temporal.kind is TimeKind.EFFECTIVE
     assert temporal.at is None and temporal.overlaps is None
+
+
+@pytest.mark.parametrize(
+    ("field", "build"),
+    [
+        ("valid_at", lambda blank: SearchQuery(text="cache", valid_at=blank)),
+        ("valid_overlaps", lambda blank: SearchQuery(text="cache", valid_overlaps=blank)),
+        ("time_kind", lambda blank: SearchQuery(text="cache", time_kind=blank)),
+    ],
+)
+@pytest.mark.parametrize("blank", ["", "   ", "\t"])
+def test_a_present_but_empty_valid_time_field_is_refused(field: str, build, blank: str):
+    """An empty value is a caller who thinks they filtered, not one who did not ask.
+
+    These fields are `Optional[str] = None`, so "no valid-time filter" already has a
+    spelling, and it is not `""`. Read as absence, an empty value ran the query unfiltered
+    and answered with exactly the undated rows the filter existed to exclude -- reporting
+    itself as a plain search all the while. That is the same silent-unfiltered failure the
+    rest of this feature keeps closing, so it is refused loudly and by name.
+    """
+    with pytest.raises(ValidationError, match=f"{field} was given as an empty value"):
+        build(blank)
+
+
+def test_omitting_every_valid_time_field_still_searches_unfiltered():
+    """`None` keeps meaning absent, which is the whole reason `""` can mean a mistake."""
+    query = SearchQuery(text="cache")
+
+    assert query.has_temporal_filter() is False
+    assert build_temporal_filter(query) is None
+    assert query.no_criteria() is False
+
+
+def test_a_real_valid_time_value_still_filters():
+    """The refusal must cost nothing that was actually asking a question."""
+    query = SearchQuery(text="cache", valid_at=EFFECTIVE_WINDOW_INSIDE)
+
+    assert query.has_temporal_filter() is True
+    temporal = build_temporal_filter(query)
+    assert temporal is not None
+    assert temporal.at is not None
+    assert temporal.at.value == EFFECTIVE_WINDOW_INSIDE
 
 
 def test_valid_at_and_valid_overlaps_are_mutually_exclusive_at_the_schema():

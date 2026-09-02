@@ -474,6 +474,27 @@ def parse_point(text: str) -> TemporalPoint:
     return TemporalPoint(axis=axis, value=canonical_bound(bound, axis))
 
 
+TEMPORAL_FILTER_FIELDS = ("valid_at", "valid_overlaps", "time_kind")
+
+
+def reject_blank_temporal_value(field: str, value: str | None) -> None:
+    """Refuse a valid-time field that is present but carries nothing.
+
+    `None` is how a caller says "no valid-time filter"; these fields are declared optional
+    precisely so that spelling exists. An empty or whitespace-only string is a different
+    statement -- a caller who believes they applied a filter -- and reading it as absence
+    is the failure this whole feature keeps having to close: a query that reports itself as
+    filtered, runs unfiltered, and answers with the undated rows the filter was meant to
+    exclude. Truthiness cannot tell the two apart, so presence is tested against `None`
+    everywhere on this path and blankness is refused here.
+    """
+    if value is not None and not value.strip():
+        raise TemporalQualifierError(
+            f"{field} was given as an empty value; omit {field} to search without a "
+            f"valid-time filter"
+        )
+
+
 def parse_temporal_filter(
     *,
     valid_at: str | None = None,
@@ -494,13 +515,17 @@ def parse_temporal_filter(
     without an offset is not a rejection -- like every other naive datetime in the
     codebase, it is read as UTC.
 
-    Returns None when no valid-time question was asked at all.
+    Returns None when no valid-time question was asked at all -- which means all three
+    fields are absent, not merely falsy. See `reject_blank_temporal_value`.
     """
-    if not (valid_at or valid_overlaps or time_kind):
+    for field, value in zip(TEMPORAL_FILTER_FIELDS, (valid_at, valid_overlaps, time_kind)):
+        reject_blank_temporal_value(field, value)
+
+    if valid_at is None and valid_overlaps is None and time_kind is None:
         return None
 
     kind: TimeKind | None = None
-    if time_kind:
+    if time_kind is not None:
         try:
             kind = TimeKind(time_kind)
         except ValueError as exc:
@@ -511,8 +536,8 @@ def parse_temporal_filter(
 
     return TemporalFilter(
         kind=kind,
-        at=parse_point(valid_at) if valid_at else None,
-        overlaps=parse_range_literal(valid_overlaps) if valid_overlaps else None,
+        at=parse_point(valid_at) if valid_at is not None else None,
+        overlaps=parse_range_literal(valid_overlaps) if valid_overlaps is not None else None,
     )
 
 

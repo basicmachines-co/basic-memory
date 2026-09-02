@@ -598,7 +598,9 @@ async def _search_all_projects(
     # silently mixes filtered and unfiltered rows. The filter itself is already known to
     # be well formed -- search_notes parses it before reaching here -- which is what
     # makes "dropped with a warning" mean an unavailable project and nothing else.
-    temporal_requested = bool(valid_at or valid_overlaps or time_kind)
+    # Presence, not truthiness: a blank value is refused by `parse_temporal_filter`
+    # before any project is searched, so anything not None is a real question here.
+    temporal_requested = valid_at is not None or valid_overlaps is not None or time_kind is not None
     project_refs = await _load_search_project_refs(context=context)
     if not project_refs:
         response = SearchResponse(
@@ -1243,7 +1245,9 @@ async def search_notes(
         ),
         has_tags_filter=bool(tags),
         has_status_filter=bool(status),
-        has_temporal_filter=bool(valid_at or valid_overlaps or time_kind),
+        has_temporal_filter=(
+            valid_at is not None or valid_overlaps is not None or time_kind is not None
+        ),
     ):
         async with get_project_client(project, context=context, project_id=project_id) as (
             client,
@@ -1324,11 +1328,14 @@ async def search_notes(
                     search_query.status = status
                 if min_similarity is not None:
                     search_query.min_similarity = min_similarity
-                if valid_at:
+                # Presence, not truthiness, for the same reason as everywhere else on
+                # this path: these are assigned after construction, so the model's own
+                # blank guard never runs here, and a blank has already been refused above.
+                if valid_at is not None:
                     search_query.valid_at = valid_at
-                if valid_overlaps:
+                if valid_overlaps is not None:
                     search_query.valid_overlaps = valid_overlaps
-                if time_kind:
+                if time_kind is not None:
                     search_query.time_kind = time_kind
 
                 # Reject searches with no criteria at all
