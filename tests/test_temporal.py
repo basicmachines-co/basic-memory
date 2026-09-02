@@ -10,8 +10,6 @@ both search dialects. Two properties carry the whole design and are pinned here:
   of the codebase applies to naive datetimes.
 """
 
-from datetime import datetime, timedelta
-
 import pytest
 from freezegun import freeze_time
 
@@ -248,18 +246,20 @@ def test_authored_naive_timestamp_is_read_as_utc_not_local_time():
     assert naive.lower == "2026-06-10T14:00:00.000000Z"
 
 
-def test_authored_relative_dates_resolve_at_parse_time():
-    """`yesterday` is read against the clock now, and re-read on every index pass.
+def test_a_relative_point_names_nothing_the_note_can_keep():
+    """`yesterday` names a different day every day, so it names nothing storable.
 
-    That is documented behavior rather than a diagnostic: a file edited by hand keeps
-    its relative wording, and each pass resolves it fresh.
+    A qualifier's meaning has to be recoverable from the note's own bytes, because those
+    are the only thing that travels to a clone or survives a re-import. Read against the
+    wall clock, an unedited file's stored range changed on every index pass -- and a
+    search that matched it last week stopped matching today with nothing written. The two
+    obvious anchors are no better: `created_at` is derived metadata that can shift, and a
+    stored resolution cannot be reproduced by a fresh clone reindexing from markdown
+    alone. Refusing is what leaves the file as the only source of the answer.
     """
-    span = parse_authored_point("yesterday")
-
-    assert span is not None
-    assert span.axis is DATE
-    yesterday = datetime.now().date() - timedelta(days=1)
-    assert span.lower == yesterday.isoformat()
+    with freeze_time("2026-09-02"):
+        assert parse_authored_point("yesterday") is None
+        assert parse_authored_point("2 days ago") is None
 
 
 # The written vocabulary. These are what the *reader* accepts; the qualifier grammar
@@ -295,13 +295,98 @@ def test_written_dates_read_on_the_axis_their_precision_names(written, literal, 
     assert span.axis is axis
 
 
-def test_written_relative_dates_resolve_against_now():
-    """dateparser's relative vocabulary is read whole when it is handed a whole phrase."""
-    span = parse_authored_point("2 days ago")
+# Two clocks far enough apart that anything taken from "now" lands somewhere different
+# under each. Every accepted spelling must name one interval under both; every refused one
+# must be refused under both. This pair is the actual guarantee -- it catches relative
+# wording nobody thought to enumerate, in languages nobody thought to test.
+_FAR_APART_CLOCKS = ("2026-09-02", "2027-04-19")
 
-    assert span is not None
-    assert span.axis is DATE
-    assert span.lower == (datetime.now().date() - timedelta(days=2)).isoformat()
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        # ISO, in every precision the reader distinguishes.
+        "2026-06-10",
+        "2026-06",
+        "9999-12",
+        "2026",
+        "2026-1-5",
+        "2026-06-10T14:00",
+        "2026-06-10 14:00:00+02:00",
+        "2026-06-10 14:00:00.5",
+        "2026-01-01T10:00:00.123456",
+        # Spelled out, and slash-formatted: absolute, just not machine syntax.
+        "June 10, 2026",
+        "10 June 2026",
+        "Jan 15, 2024",
+        "June 2026",
+        "2026/03/04",
+        "10/07/2026",
+        # A clock reading beside an absolute date, in both syntaxes.
+        "2026-06-10 10:00 AM",
+        "2026-06-10 noon",
+        "10/07/2026 14:00",
+        "June 10, 2026 2pm",
+    ],
+)
+def test_an_accepted_point_names_the_same_interval_whenever_it_is_read(written: str):
+    """Precision the author did not write is fine; meaning that moves is not.
+
+    `2026` and `June 2026` name periods the author delimited, and they must go on reading
+    -- refusing everything under-specified would have taken them with the relative forms.
+    What separates the two is not syntax or precision but whether the answer depends on
+    the day the question is asked.
+    """
+    readings = []
+    for clock in _FAR_APART_CLOCKS:
+        with freeze_time(clock):
+            readings.append(parse_authored_point(written))
+
+    assert readings[0] is not None
+    assert readings[0] == readings[1]
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        # The reported shapes.
+        "yesterday",
+        "2 days ago",
+        # The rest of the relative vocabulary, in every direction and grain.
+        "today",
+        "tomorrow",
+        "now",
+        "last week",
+        "next week",
+        "last month",
+        "next month",
+        "last year",
+        "next year",
+        "in 3 days",
+        "3 hours ago",
+        "an hour ago",
+        "the day before yesterday",
+        # Under-specified rather than relative, and just as unstable: the year, or the
+        # year and month, would be taken from whenever the index happened to run.
+        "March",
+        "may",
+        "December",
+        # dateparser reads far more than English, which is exactly why the rule is
+        # determinism and not a list of words somebody wrote down.
+        "hace 2 dias",
+        "il y a 2 jours",
+        "vor 2 tagen",
+    ],
+)
+def test_a_point_whose_meaning_moves_with_the_clock_is_unread(written: str):
+    """Refused under every clock, not merely different under two.
+
+    A form that read on one day and not another would be worse than either -- the note
+    would gain and lose an assertion as the calendar turned.
+    """
+    for clock in _FAR_APART_CLOCKS:
+        with freeze_time(clock):
+            assert parse_authored_point(written) is None
 
 
 @pytest.mark.parametrize(

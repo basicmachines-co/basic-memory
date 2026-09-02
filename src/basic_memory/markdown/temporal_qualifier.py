@@ -10,19 +10,20 @@ content. Three authored forms exist, and the kind is optional in all of them:
 
 The bracket form carries a range literal and needs no separator, because no kind name
 can begin with `[` or `(`. The point forms need the `:` because a date can begin with a
-letter (`yesterday`), so nothing else would tell `@occurred:yesterday` from a handle.
+letter (`June 10, 2026`), so nothing else would tell a kind-and-date from a handle.
 
 **An unquoted point is one whitespace-delimited token.** dateparser reads far more than
-one token -- `June 10, 2026`, `2 days ago`, `2026-06-10 10:00 AM` all resolve, and
+one token -- `June 10, 2026` and `2026-06-10 10:00 AM` both resolve, and
 `parse_authored_point` accepts them -- but nothing here can tell where such a date ends:
 dateparser also reads `June 10, 2026 The` and `2026-06-10 The`, so growing the token
 until parsing fails would swallow the author's prose.
 
 **A quoted point is exactly what the author put between the quotes**, which is how a
-multi-word, relative, or month-only date is written: `@occurred:"June 10, 2026"`,
-`@occurred:"2 days ago"`, `@"June 2026"`. The closing quote is the token boundary, so
-whatever follows it is ordinary content, and a `\\"` inside the value does not end the
-token. The scan mirrors `_split_predicate_items` in `mcp/tools/posix_tools.py`, down to
+multi-word or month-only date is written: `@occurred:"June 10, 2026"`, `@"June 2026"`.
+Quoting settles where the token ends; it does not make a date mean something fixed, so
+`@occurred:"2 days ago"` is delimited and still refused. The closing quote is the token
+boundary, so whatever follows it is ordinary content, and a `\\"` inside the value does
+not end the token. The scan mirrors `_split_predicate_items` in `mcp/tools/posix_tools.py`, down to
 its rule that an unterminated quote is a typo to report rather than a boundary to guess
 at -- scanning on to end of line would hand the author's prose to dateparser. Only the
 double quote opens the form: an apostrophe is ordinary punctuation, and a scan looking
@@ -37,8 +38,11 @@ that do parse, so a truncated read never becomes a plausible-looking assertion:
   least as wide as a year.
 * **A word naming only a month or a year** (`June`, `may`, `v2`). Alone it is usually
   prose; as the first token of `June 10, 2026` reading it would file June 2026 and leave
-  `10, 2026` in the content. A word is taken only when it names a specific day
-  (`yesterday`, `today`), in whatever language dateparser resolves it.
+  `10, 2026` in the content. No bare word is filed at all now: the only ones that named a
+  specific day were relative (`yesterday`, `today`), and a qualifier whose meaning moves
+  with the calendar is refused outright -- see `basic_memory.temporal` for why. A month
+  name is still *recognized* here, not to file it but to tell an author who wrote
+  `@occurred:June 10, 2026` that quoting is the fix.
 
 Beyond those, one rule decides everything: **if the payload reads as time, the token
 becomes a qualifier; if it does not, the token stays ordinary observation content,
@@ -68,6 +72,7 @@ from basic_memory.temporal import (
     TemporalQualifierError,
     TemporalRange,
     TimeKind,
+    names_only_a_calendar_period,
     parse_authored_point,
     parse_range_literal,
 )
@@ -238,23 +243,25 @@ def _locate_point(content: str) -> _PointToken | _Refusal | None:
     )
 
 
-def _truncation_reason(point: str, valid_during: TemporalRange) -> str | None:
-    """Why an unquoted point is too coarse to file, or None when it names a day.
+def _truncation_reason(point: str, date_order: DateOrder) -> str | None:
+    """Why an unquoted point is too coarse to be the whole date, or None if it is not.
 
-    The two shapes named here both parse, which is exactly why they need refusing --
-    see the module docstring for what each one costs if it is read. The wording is the
-    diagnostic's, so the reason a token was refused and the reason it *is* refused stay
-    the same sentence.
+    The wording is the diagnostic's, so the reason a token was refused and the reason it
+    *is* refused stay the same sentence.
 
-    A bounded span is how a coarse point announces itself: `parse_authored_point` closes
-    a year or a month at its successor and leaves a day or a moment open, so
-    `upper is None` *is* "this names a specific day". The one period with no successor
-    to close at -- December 9999 -- is left open too, and so reads here as a day; no word
-    resolves to it, so the guard never sees that shape.
+    Neither branch consults the reading, and that is what lets the question still be asked
+    of a point the reader threw away. A **number** is judged on its width alone, which was
+    always the real rule -- `1` and `3.5` are list markers and version numbers whatever
+    dateparser makes of them. A **word** is judged on the shape of its reading rather than
+    its value: no bare word is filed any more, since the only ones naming a specific day
+    were relative, but `June` is still recognizably a month, and that fact does not move
+    with the calendar even though the year it would take does.
     """
     if point[0].isdigit():
         return None if len(point) >= _MIN_NUMERIC_POINT_WIDTH else "is narrower than a year"
-    return None if valid_during.upper is None else "names only a month or a year"
+    if names_only_a_calendar_period(point, date_order=date_order):
+        return "names only a month or a year"
+    return None
 
 
 def _truncated_point_refusal(content: str, token: _PointToken, reason: str) -> _Refusal | None:
@@ -297,14 +304,19 @@ def _read_point_qualifier(content: str, date_order: DateOrder | None) -> _Qualif
 
     order = date_order if date_order is not None else ConfigManager().config.date_order
     valid_during = parse_authored_point(located.point, date_order=order)
-    if valid_during is None:
-        return None
 
     # Quotes are the author's own delimiters, so a quoted value cannot be the truncated
     # head of a longer date and the guards do not apply to it.
-    reason = None if located.quoted else _truncation_reason(located.point, valid_during)
+    #
+    # Asked before the unread check below, not after: a token the reader refuses can still
+    # be the truncated head of a date the author wrote out in full, and a bare month name
+    # is now exactly that case. Bailing on `valid_during is None` first would lose the one
+    # diagnostic quoting exists for.
+    reason = None if located.quoted else _truncation_reason(located.point, order)
     if reason is not None:
         return _truncated_point_refusal(content, located, reason)
+    if valid_during is None:
+        return None
     return _ReadQualifier(content[: located.end], located.end, located.kind_name, valid_during)
 
 

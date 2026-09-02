@@ -17,8 +17,6 @@ stays in the observation content, so the line indexes and round-trips exactly as
 before valid time existed.
 """
 
-from datetime import datetime, timedelta
-
 import pytest
 
 from basic_memory import config as config_module
@@ -259,18 +257,19 @@ def test_point_qualifier_names_its_kind_with_a_colon(qualifier: str, kind: TimeK
     assert str(assertion.valid_during) == "[2026-06-10,)"
 
 
-def test_a_point_with_a_kind_accepts_a_relative_date():
-    """With a kind the author has said what they mean, so any readable date is taken.
+def test_a_point_with_a_kind_still_will_not_take_a_relative_date():
+    """Naming the kind says what the author meant, not when -- the date must still say that.
 
-    Relative wording resolves at parse time and is re-resolved on every index pass.
-    That is documented behavior, not a mistake to warn about.
+    A qualifier whose meaning is re-derived from the wall clock on each index pass makes
+    an unedited note assert a different valid time every day, so it is refused however
+    plainly it was meant. Silently, like every other unread point: the line keeps its
+    text and stays full-text searchable.
     """
     observation = _observation("- [decision] @occurred:yesterday The cutover ran.")
 
-    [assertion] = observation.temporal
-    yesterday = datetime.now().date() - timedelta(days=1)
-    assert assertion.valid_during.lower == yesterday.isoformat()
-    assert observation.content == "The cutover ran."
+    assert observation.temporal == []
+    assert observation.temporal_error is None
+    assert observation.content == "@occurred:yesterday The cutover ran."
 
 
 @pytest.mark.parametrize(
@@ -302,23 +301,21 @@ def test_a_point_with_no_kind_must_be_digit_led_and_year_wide(qualifier: str):
     assert observation.content.startswith(qualifier)
 
 
-def test_a_word_point_is_read_only_when_it_names_a_specific_day():
-    """A kind opens the form to words, but not to words that name only a period.
+def test_no_bare_word_point_is_read_any_more():
+    """The word branch is empty now, and both halves of it stay silent.
 
-    `yesterday` resolves to one day and is taken. `may` resolves to a whole month, and
-    a bare month name at the head of a line is either prose or -- worse -- the first
-    token of `May 10, 2026`, where reading it would file May 2026 and leave `10, 2026`
-    behind as content.
+    `yesterday` used to be the case that justified admitting words at all; it is refused
+    now because its meaning moves. `may` was always refused -- a bare month name at the
+    head of a line is either prose or, worse, the first token of `May 10, 2026`, where
+    reading it would file May 2026 and leave `10, 2026` behind as content. Neither is
+    reported here, because neither line continues with a digit.
     """
-    day = _observation("- [decision] @occurred:yesterday The cutover ran.")
-    [assertion] = day.temporal
-    assert assertion.time_kind is TimeKind.OCCURRED
-    assert day.content == "The cutover ran."
+    for qualifier in ("@occurred:yesterday", "@occurred:may"):
+        observation = _observation(f"- [decision] {qualifier} The cutover ran.")
 
-    period = _observation("- [decision] @occurred:may The cutover ran.")
-    assert period.temporal == []
-    assert period.temporal_error is None
-    assert period.content.startswith("@occurred:may")
+        assert observation.temporal == []
+        assert observation.temporal_error is None
+        assert observation.content.startswith(qualifier)
 
 
 # --- The flexible vocabulary, as the qualifier grammar sees it ---
@@ -341,9 +338,8 @@ def test_a_word_point_is_read_only_when_it_names_a_specific_day():
             "[2026-06-10T10:00:00.000000Z,)",
             TemporalRangeAxis.INSTANT,
         ),
-        # A kind admits a word, as long as it names one day.
-        ("@occurred:today", None, TemporalRangeAxis.DATE),
-        ("@occurred:yesterday", None, TemporalRangeAxis.DATE),
+        # No word is admitted any more: the only ones that named a single day did it by
+        # asking the clock. See test_a_point_with_a_kind_still_will_not_take_a_relative_date.
     ],
 )
 def test_single_token_points_are_accepted(qualifier: str, literal: str | None, axis):
@@ -485,17 +481,21 @@ def test_a_point_at_exactly_microsecond_precision_is_still_filed():
         assert observation.content == "The cutover ran."
 
 
-def test_a_quoted_relative_date_is_read_where_its_unquoted_form_is_not():
-    """`2 days ago` always read fine; only the token rule kept it out."""
-    quoted = _observation('- [decision] @occurred:"2 days ago" The cutover ran.')
+def test_quoting_a_relative_date_does_not_rescue_it():
+    """Quotes fix a token-boundary problem; they cannot fix a meaning that moves.
 
-    [assertion] = quoted.temporal
-    two_days_ago = datetime.now().date() - timedelta(days=2)
-    assert assertion.valid_during.lower == two_days_ago.isoformat()
-    assert quoted.content == "The cutover ran."
+    `"2 days ago"` is delimited, so the one-token rule has nothing to truncate -- and it
+    is still refused, because what it names depends on the day it is read. The two guards
+    are independent, and the quoted form only ever answered the first.
+    """
+    for line in (
+        '- [decision] @occurred:"2 days ago" The cutover ran.',
+        "- [decision] @occurred:2 days ago The cutover ran.",
+    ):
+        observation = _observation(line)
 
-    unquoted = _observation("- [decision] @occurred:2 days ago The cutover ran.")
-    assert unquoted.temporal == []
+        assert observation.temporal == []
+        assert observation.temporal_error is None
 
 
 def test_a_quoted_month_is_filed_where_the_specific_day_guard_refuses_it():
