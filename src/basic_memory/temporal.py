@@ -34,11 +34,13 @@ opposite directions:
 
 * A **range literal** (`[2026-06-10,2026-07-27)`) is the precise form. Its bounds must
   be written in the canonical lexical shapes above, to at most microsecond precision.
-* A **point** (`2026-06-10`, `2026-06`, `2026`, `yesterday`) is the convenient form. It
-  denotes the span its precision covers, so an author never has to spell out a range to
+* A **point** (`2026-06-10`, `2026-06`, `2026`, `June 10, 2026`) is the convenient form.
+  It denotes the span its precision covers, so an author never has to spell out a range to
   say when something started. A point written in ISO calendar syntax is read literally,
   because its text fixes its meaning; any other spelling is read with `dateparser`,
-  because there is no literal reading for a guess to contradict.
+  because there is no literal reading for a guess to contradict. Either way the reading
+  must be the same on every pass -- `yesterday` names no fixed span and is refused, for
+  the reasons set out above `parse_authored_point`.
 """
 
 import re
@@ -517,13 +519,17 @@ def parse_temporal_filter(
 # --- Flexible authored points ---
 
 
-@lru_cache(maxsize=8)
-def _date_data_parser(date_order: DateOrder) -> "DateDataParser":
-    """The flexible reader for authored points, built once per configured date order.
+@lru_cache(maxsize=16)
+def _date_data_parser(date_order: DateOrder, relative_base: datetime) -> "DateDataParser":
+    """The flexible reader for authored points, built once per order and reference instant.
 
     Deferred import: dateparser costs ~0.13s and loads locale data, and the modules
     that carry these values are imported on every CLI start (#886). Only an
     observation that already looks like a qualifier ever reaches this function.
+
+    `relative_base` is the instant the reader treats as "now". It is always supplied
+    explicitly, never left to the wall clock, because the wall clock is what made a
+    reading depend on the day it ran -- see `_STABILITY_PROBE_BASES`.
     """
     from dateparser.date import DateDataParser
 
@@ -533,6 +539,9 @@ def _date_data_parser(date_order: DateOrder) -> "DateDataParser":
             # Makes `period` report "time" when the author wrote a clock reading,
             # which is exactly the date-vs-instant distinction this module keeps.
             "RETURN_TIME_AS_PERIOD": True,
+            # Fixes what "now" means for this reading, so relative wording resolves
+            # against a stated instant rather than the moment the indexer happened to run.
+            "RELATIVE_BASE": relative_base,
         }
     )
 
@@ -572,9 +581,10 @@ def _calendar_span(lower: date, upper: date | None) -> TemporalRange:
 #
 # An author writes a point in one of two languages, and they come with opposite promises.
 # **ISO calendar syntax** is machine syntax: the text fixes the meaning, so it must be read
-# literally or refused. **Everything else** -- `June 10, 2026`, `2026/03/04`, `10/07/2026`,
-# `yesterday` -- is human syntax with no literal reading to contradict, so the flexible
-# reader is trusted with it.
+# literally or refused. **Everything else** -- `June 10, 2026`, `2026/03/04`, `10/07/2026`
+# -- is human syntax with no literal reading to contradict, so the flexible reader is
+# trusted with it. Trusted to *read* it, that is: what it hands back must still name the
+# same span whenever it is asked, which is what refuses `yesterday` further down.
 #
 # The variants below are what a point can be once that question is settled, and settling it
 # *once* is the whole design. Four review rounds went the other way: each added a shape test
@@ -728,7 +738,9 @@ def _classify_authored_point(point: str) -> _AuthoredPoint:
     return _IsoDay(named, trailing)
 
 
-def _read_iso_day(iso: _IsoDay, point: str, date_order: DateOrder) -> TemporalRange | None:
+def _read_iso_day(
+    iso: _IsoDay, point: str, date_order: DateOrder, relative_base: datetime
+) -> TemporalRange | None:
     """Read a point whose head names a calendar day, holding it to its own text."""
     if not iso.trailing:
         return TemporalRange(
@@ -756,7 +768,7 @@ def _read_iso_day(iso: _IsoDay, point: str, date_order: DateOrder) -> TemporalRa
     # makes it abandon the ISO reading and re-guess the components under the configured
     # order (`2026-06-10x` came back as October 6). Asking what it *returned* rather than
     # what the suffix looks like is what covers every such shape, named or not.
-    date_data = _date_data_parser(date_order).get_date_data(point)
+    date_data = _date_data_parser(date_order, relative_base).get_date_data(point)
     moment = date_data.date_obj
     if moment is None or date_data.period != "time" or moment.date() != iso.day:
         return None
@@ -768,15 +780,19 @@ def _read_iso_day(iso: _IsoDay, point: str, date_order: DateOrder) -> TemporalRa
     return TemporalRange(axis=TemporalRangeAxis.INSTANT, lower=instant, lower_inclusive=True)
 
 
-def _read_flexible_point(point: str, date_order: DateOrder) -> TemporalRange | None:
+def _read_flexible_point(
+    point: str, date_order: DateOrder, relative_base: datetime
+) -> TemporalRange | None:
     """Read a point written in no machine syntax, taking the flexible reader at its word."""
-    date_data = _date_data_parser(date_order).get_date_data(point)
+    date_data = _date_data_parser(date_order, relative_base).get_date_data(point)
     moment = date_data.date_obj
     if moment is None:
         return None
 
-    # dateparser fills components the author did not write from today's date, so only
-    # the components `period` vouches for may be read off `moment`.
+    # dateparser fills components the author did not write from the reference instant, so
+    # only the components `period` vouches for may be read off `moment`. Discarding the
+    # rest is also what lets `June 2026` survive the stability check: the filled-in day
+    # differs between probes, and the month this builds from it does not.
     match date_data.period:
         case "time":
             instant = _instant_value(moment)
@@ -809,6 +825,64 @@ def _read_flexible_point(point: str, date_order: DateOrder) -> TemporalRange | N
             )
 
 
+# --- Readings must not depend on when they are taken ---
+#
+# A qualifier's meaning has to be recoverable from the note's own bytes, because those are
+# the only thing that travels. `@occurred:yesterday` failed that: dateparser resolved it
+# against the wall clock of each parse, so reindexing an unedited note replaced its stored
+# range with a different one -- `[2026-08-31,)` on September 1, `[2026-09-09,)` on the
+# 10th -- and a search that matched last week stopped matching today with nothing having
+# changed on disk.
+#
+# The two obvious repairs both reintroduce the drift by another route. Anchoring to the
+# entity's `created_at` anchors to derived metadata that can shift on re-import or clone.
+# Storing the resolved range makes the projection unreproducible: a fresh clone reindexing
+# from markdown alone cannot arrive at it, and this table is rebuilt from markdown by
+# definition. Refusing is what keeps the file the sole source of truth, and it is what the
+# classifier already does with an ISO-shaped token it cannot pin down.
+#
+# The rule is *determinism*, not a vocabulary. A list of relative words is the shape this
+# guard was refactored away from once already, and it could never have covered the whole
+# of dateparser's relative vocabulary in every language it reads. Instead the reading is
+# taken twice against two stated reference instants and kept only if it did not move.
+# Whatever `now` was reaching -- a word, a phrase, an omitted component -- lands somewhere
+# different under each, so it is caught without ever being named.
+#
+# The comparison is on the resulting *range*, never on dateparser's datetime. A month or a
+# year is delimited by what the author wrote, and `_read_flexible_point` discards the
+# components its `period` does not vouch for, so `June 2026` and `2026` answer with one
+# range from two different datetimes. Comparing datetimes would refuse them.
+
+# Two reference instants that disagree in every component -- year, month, day, weekday,
+# hour, minute, second -- so nothing filled in from "now" can coincide across them.
+_STABILITY_PROBE_BASES = (
+    datetime(2001, 3, 4, 5, 6, 7),
+    datetime(2097, 11, 21, 22, 33, 44),
+)
+
+
+def _read_authored_point(
+    point: str, date_order: DateOrder, relative_base: datetime
+) -> TemporalRange | None:
+    """Read one already-stripped point, treating `relative_base` as the present."""
+    match _classify_authored_point(point):
+        case _IsoDay() as iso:
+            return _read_iso_day(iso, point, date_order, relative_base)
+        case _IsoMonth() as iso:
+            return _calendar_span(
+                date(iso.year, iso.month, 1), _next_month_start(iso.year, iso.month)
+            )
+        case _MalformedIso():
+            # The author wrote a machine date that names nothing. Refusal is `None`, as
+            # everywhere else here: the token stays ordinary observation content,
+            # unindexed but still full-text searchable.
+            return None
+        case _FlexiblePoint():
+            return _read_flexible_point(point, date_order, relative_base)
+        case unreachable:  # pragma: no cover - `_AuthoredPoint` is closed
+            assert_never(unreachable)
+
+
 def parse_authored_point(
     text: str, *, date_order: DateOrder = DEFAULT_DATE_ORDER
 ) -> TemporalRange | None:
@@ -834,23 +908,46 @@ def parse_authored_point(
     instant and no instant is there; `2026-01-01T10:00:00.1234567` does not either,
     because storing it would mean dropping the digits that made it worth writing.
 
+    A reading that would depend on when it was taken is refused, however it is spelled:
+    `yesterday`, `2 days ago`, `next month`, a bare `March` whose year would come from
+    the current one. What the author wrote must name the same interval on every pass, or
+    the note does not say when it holds -- see the section comment above for why anchoring
+    it elsewhere would not fix that. Precision the author simply did not write is a
+    different thing and still reads: `2026` and `June 2026` delimit their own periods.
+
     Returns None when the text names no date. That is not an error -- the caller leaves
     such a token as ordinary observation content.
     """
     point = text.strip()
-    match _classify_authored_point(point):
-        case _IsoDay() as iso:
-            return _read_iso_day(iso, point, date_order)
-        case _IsoMonth() as iso:
-            return _calendar_span(
-                date(iso.year, iso.month, 1), _next_month_start(iso.year, iso.month)
-            )
-        case _MalformedIso():
-            # The author wrote a machine date that names nothing. Refusal is `None`, as
-            # everywhere else here: the token stays ordinary observation content,
-            # unindexed but still full-text searchable.
-            return None
-        case _FlexiblePoint():
-            return _read_flexible_point(point, date_order)
-        case unreachable:  # pragma: no cover - `_AuthoredPoint` is closed
-            assert_never(unreachable)
+    early, late = _STABILITY_PROBE_BASES
+    reading = _read_authored_point(point, date_order, early)
+    if reading is None:
+        return None
+    # Trigger: the same text named a different interval when "now" was somewhere else.
+    # Why: then the note's bytes do not fix its meaning, and every reindex is free to
+    #   file a different valid time for a file nobody edited.
+    # Outcome: refused like any other unreadable point -- the token stays content.
+    #   A point that never consults the flexible reader cannot move, so this second pass
+    #   costs those tokens a regex and no date parsing at all.
+    if _read_authored_point(point, date_order, late) != reading:
+        return None
+    return reading
+
+
+def names_only_a_calendar_period(text: str, *, date_order: DateOrder = DEFAULT_DATE_ORDER) -> bool:
+    """Whether the text names a month or a year rather than a specific day.
+
+    This explains a refusal; it never files one. `parse_authored_point` answers "does this
+    name one interval, whatever the date?", and a bare month name fails that because its
+    year comes from the present. But *that it is a month at all* does not: `June` reads as
+    a bounded calendar period under any present, and only which one moves. Asking for the
+    shape rather than the value recovers a fact the stability rule would otherwise take
+    with it -- the fact that lets `@occurred:June 10, 2026` be told to quote itself instead
+    of going silently unread.
+
+    False for text that names nothing and for text that names a specific day, which are
+    the two cases with no truncated multi-word date to warn about.
+    """
+    point = text.strip()
+    readings = (_read_authored_point(point, date_order, base) for base in _STABILITY_PROBE_BASES)
+    return all(reading is not None and reading.upper is not None for reading in readings)
