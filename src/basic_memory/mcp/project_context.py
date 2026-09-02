@@ -1333,17 +1333,43 @@ def _workspace_qualifies(qualified: str, bare: str) -> bool:
     )
 
 
-def _agreed_route_project(detected: str, explicit: str) -> str | None:
+def _agreed_route_project(
+    detected: str,
+    explicit: str,
+    addressable: tuple[AddressableProject, ...],
+) -> str | None:
     """The project both spellings name, or None when they name different projects.
+
+    Identity first, spelling only as a last resort. When ``explicit`` names a
+    project this session addresses, the question is settled without looking at
+    the strings at all: the two either name the same addressable project or two
+    different ones, and two different ones are a conflict. Deciding that by
+    shape instead read 'team/docs' as a workspace-qualified spelling of 'docs'
+    and served the wrong project, silently, in a config where both exist.
+
+    The shape comparison survives for exactly one case: ``explicit`` names no
+    addressable project, so it addresses another workspace. There is no local
+    identity to compare against — resolving it would take the workspace
+    discovery that rule 1 deliberately does not run when a project was named —
+    and a workspace slug is exactly one segment, so the qualified spelling is
+    the bare one plus exactly one leading segment. That is a genuine fallback
+    for identities this session cannot resolve, not a shortcut around ones it
+    can.
 
     Returns the more-qualified spelling, so an explicit '<workspace>/<project>'
     outlives a bare prefix match: a local project can shadow a same-named
     project in another workspace, and dropping the explicitly named workspace
-    would silently reroute the call to the local shadow. Agreement and which
-    spelling wins come from one comparison, so they cannot disagree.
+    would silently reroute the call to the local shadow.
     """
     if generate_permalink(detected) == generate_permalink(explicit):
         return detected
+
+    # Both name projects this session can address, and they are not the same
+    # one — a contradiction in a single call, whatever their spellings suggest.
+    explicit_permalink = generate_permalink(explicit)
+    if any(project.permalink == explicit_permalink for project in addressable):
+        return None
+
     if _workspace_qualifies(explicit, detected):
         return explicit
     if _workspace_qualifies(detected, explicit):
@@ -1463,7 +1489,7 @@ async def resolve_project_path_route(
             return ProjectPathRoute(
                 project=_canonicalize_project_name(explicit, config), path=path, stripped=False
             )
-        routed = _agreed_route_project(detected, explicit)
+        routed = _agreed_route_project(detected, explicit, addressable or ())
         if routed is not None:
             # Trigger: the explicit spelling is workspace-qualified while the
             #   path prefix matched an unqualified local config name.

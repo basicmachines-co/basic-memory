@@ -21,6 +21,7 @@ import basic_memory.mcp.async_client as async_client
 import basic_memory.mcp.project_context as project_context
 from basic_memory.config_models import ProjectEntry
 from basic_memory.mcp.project_context import (
+    AddressableProject,
     ProjectPathRoute,
     ProjectPrefixConflictError,
     AmbiguousMountError,
@@ -223,6 +224,36 @@ async def test_colliding_mount_permalinks_refuse_rather_than_pick(config_manager
 
 
 @pytest.mark.asyncio
+async def test_sibling_slash_bearing_project_conflicts_with_its_prefix(
+    config_manager, tmp_path_factory
+):
+    """'docs' and 'team/docs' are two projects, not two spellings of one.
+
+    The path names the 'team/docs' mount while the caller named 'docs', so this
+    is the ordinary prefix conflict — but the shape heuristic read the extra
+    leading segment as a workspace qualifier, made them agree, and discarded the
+    explicit selection to read the other project instead.
+    """
+    config = config_manager.load_config()
+    config.projects["docs"] = ProjectEntry(path=str(tmp_path_factory.mktemp("docs-sibling")))
+    config.projects["team/docs"] = ProjectEntry(
+        path=str(tmp_path_factory.mktemp("team-docs-sibling"))
+    )
+    config_manager.save_config(config)
+
+    with pytest.raises(ProjectPrefixConflictError) as excinfo:
+        await resolve_project_path_route("team/docs/note", project="docs", project_id=None)
+
+    assert "team/docs" in str(excinfo.value)
+    assert "'docs' was passed" in str(excinfo.value)
+
+    # Each project is still reachable by naming it and giving a relative path.
+    for name in ("docs", "team/docs"):
+        route = await resolve_project_path_route(f"{name}/note", project=name, project_id=None)
+        assert route == ProjectPathRoute(project=name, path="note", stripped=True)
+
+
+@pytest.mark.asyncio
 async def test_glob_first_segment_never_routes(multi_project_config):
     """split_project_prefix's '*' guard: a glob first segment is search input,
     not a mount — it falls through to the multi-project refusal."""
@@ -308,22 +339,52 @@ def test_agreed_route_project_across_mixed_qualification():
     the same project, in either direction, and the more-qualified one carries
     the route; different projects never agree.
 
-    Agreement is decided by segment count, not by looking for a slash: a
-    workspace slug is exactly one segment, so 'acme/Research/2026' qualifies the
-    project 'Research/2026' while it does not qualify a project named '2026'.
-    Asking "is this identifier workspace-qualified?" of one string is not
-    answerable at all once project names may contain '/'.
+    This is the fallback path, reached only when the explicit spelling names no
+    project this session addresses — so there is no identity to compare and the
+    shapes are all there is. Then segment count decides, not the mere presence
+    of a slash: a workspace slug is exactly one segment, so 'acme/Research/2026'
+    qualifies the project 'Research/2026' while it does not qualify a project
+    named '2026'.
     """
-    assert _agreed_route_project("research", "other/research") == "other/research"
-    assert _agreed_route_project("other/research", "research") == "other/research"
-    assert _agreed_route_project("second-project", "other/research") is None
+    outside = ()
+
+    assert _agreed_route_project("research", "other/research", outside) == "other/research"
+    assert _agreed_route_project("other/research", "research", outside) == "other/research"
+    assert _agreed_route_project("second-project", "other/research", outside) is None
 
     # Slash-bearing project names: the escape hatch has to keep working.
-    assert _agreed_route_project("Research/2026", "acme/Research/2026") == "acme/Research/2026"
+    assert (
+        _agreed_route_project("Research/2026", "acme/Research/2026", outside)
+        == "acme/Research/2026"
+    )
     # ...without agreeing with a different project that merely shares a tail.
-    assert _agreed_route_project("2026", "acme/Research/2026") is None
+    assert _agreed_route_project("2026", "acme/Research/2026", outside) is None
     # A mount named after a workspace still conflicts with that workspace route.
-    assert _agreed_route_project("team", "team/docs") is None
+    assert _agreed_route_project("team", "team/docs", outside) is None
+
+
+def test_agreed_route_project_prefers_identity_over_shape():
+    """When the explicit spelling names a project this session addresses, the
+    answer comes from identity and the shapes are never consulted.
+
+    'team/docs' beside 'docs' are two real projects, not one project spelled two
+    ways. Reading the extra leading segment as a workspace qualifier made them
+    agree, so an explicit project='docs' was silently discarded and the call read
+    the other project instead of conflicting.
+    """
+    addressable = (
+        AddressableProject(name="docs", permalink="docs"),
+        AddressableProject(name="team/docs", permalink="team/docs"),
+    )
+
+    assert _agreed_route_project("team/docs", "docs", addressable) is None
+    assert _agreed_route_project("docs", "team/docs", addressable) is None
+
+    # The same project under two spellings still agrees, by permalink equality.
+    assert _agreed_route_project("Team/Docs", "team/docs", addressable) == "Team/Docs"
+
+    # With no such project addressable, the shape fallback still applies.
+    assert _agreed_route_project("team/docs", "docs", ()) == "team/docs"
 
 
 @pytest.mark.asyncio
