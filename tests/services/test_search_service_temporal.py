@@ -324,6 +324,56 @@ async def test_same_statement_at_two_times_is_queryable_at_each(entity_service, 
     assert first.id != second.id
 
 
+# Two identical observations, plus a third whose own content slugs to the tail the
+# second twin would take if the ordinal shared a namespace with real content.
+ORDINAL_COLLISION_MARKDOWN = dedent("""
+    # Cache Layer
+
+    ## Observations
+    - [note] @effective[2026-06-10,2026-07-27) redis
+    - [note] @effective[2027-06-10,2027-07-27) redis
+    - [note] @effective[2028-06-10,2028-07-27) redis/1
+    """)
+
+THIRD_WINDOW_INSIDE = "2028-07-01"
+
+
+@pytest.mark.asyncio
+async def test_a_duplicate_ordinal_cannot_be_taken_by_an_authors_own_text(
+    entity_service, search_service
+):
+    """The ordinal needs a namespace content cannot occupy, not just a spare-looking one.
+
+    Spelling the second twin of `redis` as `.../redis/1` put it in the same space as an
+    observation whose text genuinely slugs to `redis/1`. Whichever came second lost its
+    search row to the permalink-keyed index, and if that was the dated one, its temporal
+    assertion pointed at nothing and the window went unanswerable -- the very failure the
+    ordinal was added to fix, reintroduced by the ordinal itself. `generate_permalink`
+    emits no `~`, so the mark cannot be produced by any author's text.
+    """
+    entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Cache Layer Ordinal",
+            note_type="note",
+            directory="decisions",
+            content=ORDINAL_COLLISION_MARKDOWN,
+        )
+    )
+    await search_service.index_entity(entity)
+
+    first, second, natural = entity.observations
+    assert len({first.permalink, second.permalink, natural.permalink}) == 3
+
+    # Each of the three windows answers with its own observation, none lost.
+    for window, expected in (
+        (EFFECTIVE_WINDOW_INSIDE, first),
+        (SECOND_WINDOW_INSIDE, second),
+        (THIRD_WINDOW_INSIDE, natural),
+    ):
+        hits = await search_service.search(SearchQuery(text="redis", valid_at=window))
+        assert [result.id for result in hits] == [expected.id]
+
+
 MIXED_CATEGORY_MARKDOWN = dedent("""
     # Cache Layer
 

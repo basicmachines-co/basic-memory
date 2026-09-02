@@ -621,6 +621,9 @@ async def _search_all_projects(
     total = 0
     total_is_exact = True
     any_project_has_more = False
+    # How many projects actually answered. A leg that fails is skipped with a warning,
+    # so without this the caller cannot tell "no note matched" from "nothing ran".
+    projects_answered = 0
 
     # Trigger: caller asked for an account-wide search.
     # Why: project_id (external UUID) routes through the cloud v2 API path,
@@ -683,11 +686,28 @@ async def _search_all_projects(
             total_is_exact = False
             continue
 
+        projects_answered += 1
         raw_results = _raw_results_from_search_payload(results)
         total += _result_total(results, raw_results)
         total_is_exact = total_is_exact and _result_total_is_exact(results)
         any_project_has_more = any_project_has_more or results.get("has_more") is True
         merged_results.extend(_qualify_results_for_project(raw_results, project_ref))
+
+    # Trigger: a valid-time filter was requested and not one project answered.
+    # Why: each leg confirms the filter through SearchClient or is refused by it, and a
+    #   refusal is caught above, logged, and skipped -- so a fleet of servers predating
+    #   SPEC-82 drops every leg and arrives here indistinguishable from "no note matched".
+    #   Claiming `temporal_applied` on that would confirm a filter that ran nowhere, which
+    #   is the version skew the client's own check exists to make loud.
+    # Outcome: the skew is propagated as one error naming it, rather than returning an
+    #   empty result wearing the shape of a successful filtered search.
+    if temporal_requested and projects_answered == 0:
+        raise ValueError(
+            "No project applied the requested valid-time filter: every project was "
+            "skipped, so the filter ran nowhere and an empty result would not mean "
+            "'no matches'. The servers are likely older than this client; upgrade them "
+            "or drop valid_at / valid_overlaps / time_kind from the query."
+        )
 
     # Each project owns retrieval and optional reranking behind its typed API client.
     # The MCP process only merges returned scores; it must not instantiate repository
@@ -704,6 +724,8 @@ async def _search_all_projects(
             "total": total,
             "total_is_exact": total_is_exact,
             "has_more": any_project_has_more or total > end or len(sorted_results) > end,
+            # Confirmed only because a project answered: `projects_answered` is
+            # non-zero here for any temporal query, guarded immediately above.
             "temporal_applied": True if temporal_requested else None,
         }
     )
