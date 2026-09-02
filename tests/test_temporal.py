@@ -1405,3 +1405,43 @@ def test_a_numeric_date_the_order_can_name_still_reads(written: str, date_order,
 
     assert span is not None
     assert str(span) == literal
+
+
+# --- A token no reader can be handed ---
+
+# Comfortably past Python's default integer-conversion limit of 4300 digits.
+_OVERSIZED_RUN = "9" * 5000
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        # The reported shape: a bare numeric token long enough that converting it to an
+        # int is itself an error.
+        _OVERSIZED_RUN,
+        # The same run behind an ISO date, which reaches the flexible reader by the other
+        # route -- `_read_iso_day` hands a trailing clock reading to exactly the same
+        # parser, so guarding only the bare form would have left this one crashing.
+        f"2026-06-10 {_OVERSIZED_RUN}",
+        f"2026-06-10T{_OVERSIZED_RUN}",
+        # Runs far shorter than Python's limit but still no calendar component.
+        "9" * 32,
+        "1" * 64,
+    ],
+)
+def test_a_digit_run_no_component_could_be_is_unread(written: str):
+    """An unreadable qualifier must cost its own token and nothing else.
+
+    dateparser converts the digit runs it finds without catching Python's refusal to
+    convert one longer than `sys.get_int_max_str_digits()`, so `ValueError` came straight
+    back out of the reader. Every other unreadable point returns None and leaves the token
+    as content; this one aborted the parse of the whole note, which is the one outcome
+    worse than a wrong date -- it costs every other observation on the page.
+    """
+    assert parse_authored_point(written) is None
+
+
+def test_a_digit_run_just_inside_the_limit_still_reads_as_no_date():
+    """The guard reports "not a date", never an error, on either side of the boundary."""
+    assert parse_authored_point("9" * 4299) is None
+    assert parse_authored_point("9" * 4301) is None

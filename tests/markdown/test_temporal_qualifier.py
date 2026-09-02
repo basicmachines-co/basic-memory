@@ -934,3 +934,22 @@ def test_scanner_takes_an_explicit_date_order():
     [assertion] = result.assertions
     assert assertion.valid_during.lower == "2026-10-07"
     assert result.content == "The cutover ran."
+
+
+def test_an_oversized_numeric_qualifier_costs_only_its_own_token():
+    """The rest of the note must survive a qualifier no reader can be handed.
+
+    A digit run past Python's integer-conversion limit made dateparser raise, and the
+    exception escaped the qualifier scan to abort the entire note -- so one unreadable
+    token on one line silently cost every other observation on the page its indexing.
+    """
+    oversized = "9" * 5000
+    observation, second = parse(
+        f"- [note] @{oversized} the statement\n- [note] a second observation\n"
+    ).observations
+
+    assert observation.temporal == []
+    assert observation.temporal_error is None
+    assert observation.content == f"@{oversized} the statement"
+    # The line that had nothing to do with it is indexed exactly as it always was.
+    assert second.content == "a second observation"
