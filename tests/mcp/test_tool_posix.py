@@ -6,6 +6,7 @@ assert on the JSON shapes the canonical `output_format="json"` paths produce.
 """
 
 import asyncio
+import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1237,6 +1238,65 @@ async def test_find_meta_projects_requested_fields(client, test_project, meta_no
         "review.approved": None,
         "missing_field": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_find_meta_fields_returns_identity_and_projection_only(
+    client, test_project, meta_notes
+):
+    """REGRESSION: a projected row carried the whole note beside the projection.
+
+    `fields` is the entire reason to call find instead of reading every note,
+    and the row it produced still carried the note's `content` — up to
+    SearchIndexRow.CONTENT_DISPLAY_LIMIT (4000) characters of it. The 200-row
+    inventory the literary-analysis skill documents therefore spent, on note
+    bodies nobody asked for, most of what the projection exists to save.
+
+    The assertion is the row's key set, not its size: a projected row is the
+    note's identity plus the fields requested, and nothing else.
+    """
+    projected = await find(meta=["status=active"], fields=["priority"], project=test_project.name)
+
+    assert projected["results"], "fixture should produce hits to project"
+    for row in projected["results"]:
+        assert set(row) == {
+            "title",
+            "permalink",
+            "file_path",
+            "external_id",
+            "updated_at",
+            "fields",
+        }
+        # The identity still names the note well enough to read it next.
+        assert row["file_path"] and row["permalink"] and row["external_id"]
+        # No note body reaches the caller by any key.
+        serialized = json.dumps(row)
+        assert "alpha body" not in serialized
+        assert "gamma body" not in serialized
+
+    assert {row["title"]: row["fields"] for row in projected["results"]} == {
+        "Alpha Spec": {"priority": "high"},
+        "Gamma Note": {"priority": "critical"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_find_meta_without_fields_still_returns_the_full_search_shape(
+    client, test_project, meta_notes
+):
+    """The narrowing belongs to projection mode only.
+
+    Without `fields` there is no projection to stand in for the hit, so `meta`
+    keeps answering with the search response `bm grep` renders — content
+    included. Pinned here so the projection change cannot quietly strip the
+    unprojected arm too.
+    """
+    unprojected = await find(meta=["status=active"], project=test_project.name)
+
+    assert unprojected["results"]
+    for row in unprojected["results"]:
+        assert "content" in row
+        assert "fields" not in row
 
 
 @pytest.mark.asyncio
