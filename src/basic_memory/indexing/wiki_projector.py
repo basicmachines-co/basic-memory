@@ -375,6 +375,7 @@ def plan_wiki_projection(
             snapshot=snapshot,
             notes=notes,
             scope=scope,
+            projected_scopes=scopes,
             source_watermark=request.through_partition_position,
         )
         rendered[_reserved_path(scope, "log.md")] = _render_log(
@@ -503,6 +504,7 @@ def _render_index(
     snapshot: WikiProjectionSnapshot,
     notes: tuple[WikiSourceNote, ...],
     scope: str,
+    projected_scopes: tuple[str, ...],
     source_watermark: int,
 ) -> bytes:
     direct_notes = sorted(
@@ -519,6 +521,10 @@ def _render_index(
         if not _is_descendant(note.path, scope):
             continue
         child_scope = _direct_child_scope(scope, note.path)
+        if child_scope is not None:
+            child_scope_set.add(child_scope)
+    for projected_scope in projected_scopes:
+        child_scope = _direct_child_projected_scope(scope, projected_scope)
         if child_scope is not None:
             child_scope_set.add(child_scope)
     child_scopes = sorted(child_scope_set)
@@ -808,6 +814,18 @@ def _direct_child_scope(scope: str, note_path: str) -> str | None:
         return None
     prefix = f"{scope}/" if scope else ""
     child_name = note_parent[len(prefix) :].split("/", maxsplit=1)[0]
+    return f"{scope}/{child_name}" if scope else child_name
+
+
+def _direct_child_projected_scope(scope: str, projected_scope: str) -> str | None:
+    if (
+        not projected_scope
+        or projected_scope == scope
+        or not _is_descendant(projected_scope, scope)
+    ):
+        return None
+    prefix = f"{scope}/" if scope else ""
+    child_name = projected_scope[len(prefix) :].split("/", maxsplit=1)[0]
     return f"{scope}/{child_name}" if scope else child_name
 
 

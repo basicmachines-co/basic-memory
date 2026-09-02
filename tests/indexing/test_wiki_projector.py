@@ -399,6 +399,28 @@ def test_projection_renders_root_and_affected_directory_indexes_and_logs() -> No
     assert plan.result.state == WikiProjectionState.current
 
 
+def test_requested_empty_folder_links_parent_indexes() -> None:
+    snapshot = WikiProjectionSnapshot(
+        project_id="project-88",
+        project_name="Project 88",
+        source_partition_position=0,
+        current_output_watermark=0,
+        source_accepted_at=ACCEPTED_AT,
+        notes=(),
+        changes=(),
+    )
+
+    plan = plan_wiki_projection(
+        _request(position=0, scopes=("guides/setup",)),
+        snapshot,
+    )
+
+    rendered = {write.path: write.content.decode() for write in plan.writes}
+    assert "[[guides/index|Guides]]" in rendered["index.md"]
+    assert "[[guides/setup/index|Setup]]" in rendered["guides/index.md"]
+    assert "No concepts have been projected" in rendered["guides/setup/index.md"]
+
+
 def test_projection_bytes_match_the_shared_contract_fixture() -> None:
     fixture_path = (
         Path(__file__).parents[1] / "fixtures" / "wiki_projector" / "basic_projection.json"
