@@ -469,6 +469,39 @@ def test_incremental_projection_preserves_existing_empty_folder_links() -> None:
     assert "[[guides/index|Guides]]" in rendered["index.md"]
 
 
+def test_incremental_projection_rejects_case_folded_existing_empty_scope() -> None:
+    note = WikiSourceNote(
+        path="foo/note.md",
+        permalink="foo/note",
+        title="Note",
+        note_type="Note",
+        checksum="note-checksum",
+    )
+    change = WikiSourceChange(
+        partition_position=1,
+        operation=WikiChangeOperation.created,
+        path=note.path,
+        permalink=note.permalink,
+        title=note.title,
+        accepted_at=ACCEPTED_AT,
+        materialized=True,
+        source="web",
+    )
+    snapshot = WikiProjectionSnapshot(
+        project_id="project-88",
+        project_name="Project 88",
+        source_partition_position=1,
+        current_output_watermark=0,
+        source_accepted_at=ACCEPTED_AT,
+        notes=(note,),
+        changes=(change,),
+        reserved_documents=(_reserved("Foo/index.md", b"# Foo\n"),),
+    )
+
+    with pytest.raises(ValueError, match="projected scopes must be unique"):
+        plan_wiki_projection(_request(position=1, scopes=()), snapshot)
+
+
 def test_projection_bytes_match_the_shared_contract_fixture() -> None:
     fixture_path = (
         Path(__file__).parents[1] / "fixtures" / "wiki_projector" / "basic_projection.json"
