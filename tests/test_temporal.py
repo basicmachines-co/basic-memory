@@ -1366,6 +1366,17 @@ def test_a_real_value_beside_absent_ones_still_builds_a_filter():
         # setting, which is exactly why the check has to consult it.
         ("2026/12/31", "DMY"),
         ("2026/03/31", "DMY"),
+        # The year written last, where the order applies just as literally. Under MDY the
+        # 13 sits in the month slot, and dateparser answered January 13 by moving it to the
+        # day -- the reported case, and the one this rule originally scoped itself out of.
+        ("13/01/2026", "MDY"),
+        ("31/12/2026", "MDY"),
+        # `YMD` describes no arrangement ending in the year, so the reader falls back to
+        # day-first and the same check applies to that reading: `01/13` is day 1, month 13.
+        ("01/13/2026", "YMD"),
+        ("12/31/2026", "YMD"),
+        # And under DMY, which is day-first by name rather than by fallback.
+        ("01/13/2026", "DMY"),
     ],
 )
 def test_a_numeric_date_the_configured_order_cannot_name_is_unread(written: str, date_order):
@@ -1392,11 +1403,19 @@ def test_a_numeric_date_the_configured_order_cannot_name_is_unread(written: str,
         ("2026/03/04", "DMY", "[2026-04-03,)"),
         ("2026/03/04", "MDY", "[2026-03-04,)"),
         ("2026/1/5", "YMD", "[2026-01-05,)"),
-        # Year-last forms are left to the reader's own fallback, untouched: predicting it
-        # here would mean reimplementing heuristics that could then drift out of step.
+        # Year-last forms under each order, including the two the guard test pins. `YMD`
+        # cannot describe them, so its day-first fallback is what they are held to -- named
+        # explicitly rather than trusted, which is what makes these the same rule and not
+        # an exception to it.
         ("10/07/2026", "YMD", "[2026-07-10,)"),
         ("10/07/2026", "MDY", "[2026-10-07,)"),
+        ("10/07/2026", "DMY", "[2026-07-10,)"),
         ("01/02/2026", "YMD", "[2026-02-01,)"),
+        ("13/01/2026", "DMY", "[2026-01-13,)"),
+        ("01/13/2026", "MDY", "[2026-01-13,)"),
+        # A two-digit year names no shape this rule can state -- which run is even the year
+        # is the reader's call -- so it is left alone.
+        ("03/04/26", "MDY", "[2026-03-04,)"),
     ],
 )
 def test_a_numeric_date_the_order_can_name_still_reads(written: str, date_order, literal: str):
