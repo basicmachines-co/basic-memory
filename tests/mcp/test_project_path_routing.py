@@ -1019,19 +1019,51 @@ async def test_cloud_mount_routes_by_the_id_that_names_its_workspace(cross_works
 
 
 @pytest.mark.asyncio
-async def test_sole_project_keeps_workspace_shaped_paths_at_home(cross_workspace_session):
+async def test_emitted_cross_workspace_path_replays_with_one_mount(cross_workspace_session):
+    """A path this layer emits must route back through the same session.
+
+    `ls("docs", project="acme/docs")` strips the agreeing prefix and requalifies
+    its children as 'acme/docs/...'. Replaying one without the project argument
+    used to hit the mount-count gate, skip workspace parsing, and read the sole
+    mount's same-named path in the *other* tenant — a navigation path returned
+    for one workspace silently reading another.
+    """
+    cross_workspace_session(session_projects=("docs",), default_projects=("docs",))
+
+    original = await resolve_project_path_route("docs", project="acme/docs", project_id=None)
+    assert original.project == "acme/docs"
+
+    replay = await resolve_project_path_route("acme/docs/notes", project=None, project_id=None)
+
+    assert replay == ProjectPathRoute(
+        project="acme/docs", path="notes", stripped=True, project_id=_DEFAULT_DOCS_ID
+    )
+
+
+@pytest.mark.asyncio
+async def test_workspace_shaped_path_routes_even_with_one_mount(cross_workspace_session):
     """Route versus path, decided by the precedence order rather than a parse.
 
-    With one mounted project, 'acme/docs/foo' resolves perfectly well as a
-    folder inside it, so it stays there — even though 'acme' is a real
-    accessible workspace holding a real project 'docs'. Parsing it as a route
-    took a working in-project read and served another tenant's project instead.
+    An unqualified path whose leading segments name a real accessible workspace
+    and a real project inside it is read as a route, whatever the session
+    mounts. This briefly depended on the mount count, to keep a coincidentally
+    workspace-shaped relative path at home in a one-mount session — but that
+    made the qualified paths this layer itself emits unroutable there, and both
+    readings are a silent wrong-project read. The tie breaks on whose string it
+    is: the emitted canonical form is ours and must route back; a user-typed
+    collision has the explicit fix asserted in the test below.
     """
     cross_workspace_session(session_projects=("research",), default_projects=("docs",))
 
     route = await resolve_project_path_route("acme/docs/foo", project=None, project_id=None)
 
-    assert route == ProjectPathRoute(project=None, path="acme/docs/foo", stripped=False)
+    assert route == ProjectPathRoute(
+        project="acme/docs", path="foo", stripped=True, project_id=_DEFAULT_DOCS_ID
+    )
+
+    # A path that only looks workspace-shaped matches no workspace and stays put.
+    coincidence = await resolve_project_path_route("notes/2026/foo", project=None, project_id=None)
+    assert coincidence == ProjectPathRoute(project=None, path="notes/2026/foo", stripped=False)
 
 
 @pytest.mark.asyncio
