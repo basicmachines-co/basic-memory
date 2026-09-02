@@ -421,6 +421,54 @@ def test_requested_empty_folder_links_parent_indexes() -> None:
     assert "No concepts have been projected" in rendered["guides/setup/index.md"]
 
 
+def test_incremental_projection_preserves_existing_empty_folder_links() -> None:
+    empty_snapshot = WikiProjectionSnapshot(
+        project_id="project-88",
+        project_name="Project 88",
+        source_partition_position=0,
+        current_output_watermark=0,
+        source_accepted_at=ACCEPTED_AT,
+        notes=(),
+        changes=(),
+    )
+    initial = plan_wiki_projection(
+        _request(position=0, scopes=("guides/setup",)),
+        empty_snapshot,
+    )
+    overview = WikiSourceNote(
+        path="overview.md",
+        permalink="overview",
+        title="Overview",
+        note_type="Note",
+        checksum="overview-checksum",
+    )
+    overview_change = WikiSourceChange(
+        partition_position=1,
+        operation=WikiChangeOperation.created,
+        path=overview.path,
+        permalink=overview.permalink,
+        title=overview.title,
+        accepted_at=ACCEPTED_AT,
+        materialized=True,
+        source="web",
+    )
+    incremental_snapshot = replace(
+        empty_snapshot,
+        source_partition_position=1,
+        notes=(overview,),
+        changes=(overview_change,),
+        reserved_documents=tuple(_reserved(write.path, write.content) for write in initial.writes),
+    )
+
+    incremental = plan_wiki_projection(
+        _request(position=1, scopes=()),
+        incremental_snapshot,
+    )
+
+    rendered = {write.path: write.content.decode() for write in incremental.writes}
+    assert "[[guides/index|Guides]]" in rendered["index.md"]
+
+
 def test_projection_bytes_match_the_shared_contract_fixture() -> None:
     fixture_path = (
         Path(__file__).parents[1] / "fixtures" / "wiki_projector" / "basic_projection.json"

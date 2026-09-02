@@ -369,13 +369,24 @@ def plan_wiki_projection(
     existing_by_path = {
         _portable_path_key(document.path): document for document in snapshot.reserved_documents
     }
+    projected_scopes = tuple(
+        sorted(
+            set(scopes)
+            | {
+                _parent_scope(document.path)
+                for document in snapshot.reserved_documents
+                if document.projector_owned
+                and PurePosixPath(document.path).name.casefold() == "index.md"
+            }
+        )
+    )
     rendered: dict[str, bytes] = {}
     for scope in scopes:
         rendered[_reserved_path(scope, "index.md")] = _render_index(
             snapshot=snapshot,
             notes=notes,
             scope=scope,
-            projected_scopes=scopes,
+            projected_scopes=projected_scopes,
             source_watermark=request.through_partition_position,
         )
         rendered[_reserved_path(scope, "log.md")] = _render_log(
