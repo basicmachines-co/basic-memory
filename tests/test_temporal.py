@@ -1601,3 +1601,79 @@ def test_a_worded_clock_that_leaves_the_calendar_in_utc_is_unread(written: str):
     which has its own guard for it.
     """
     assert parse_authored_point(written) is None
+
+
+# --- The one component the parser normalizes instead of refusing ---
+
+_OVERFLOWING_OFFSETS = ["+14:60", "+14:99", "+1460", "-14:60", "-14:99"]
+
+
+@pytest.mark.parametrize("offset", _OVERFLOWING_OFFSETS)
+def test_an_offset_whose_minutes_overflow_is_unread(offset: str):
+    """`fromisoformat` carries an overflowing offset minute into the hour rather than refusing.
+
+    `+14:60` comes back as `+15:00` and `+14:99` as `+15:39`, so the token names one instant
+    and the stored value names another -- reproduced on every reindex. Delegating validity to
+    the parser is right for every other field, which is exactly why this one needs saying: it
+    is the single component `fromisoformat` normalizes rather than rejects.
+    """
+    assert parse_authored_point(f"2026-01-01T10:00:00{offset}") is None
+
+
+@pytest.mark.parametrize("offset", _OVERFLOWING_OFFSETS)
+def test_an_overflowing_offset_is_refused_on_every_surface(offset: str):
+    """One rule, three surfaces: an authored point, a `valid_at`, and a range bound.
+
+    They reach it through two different grammars -- a bound is held to the canonical RFC 3339
+    shape, an authored point to the wider set of machine spellings -- but the validity
+    question underneath is one question and is answered in one place. Asserting all three
+    here is what would catch the rule being restated in only one of them.
+    """
+    bound = f"2026-01-01T10:00:00{offset}"
+
+    assert parse_authored_point(bound) is None
+    with pytest.raises(TemporalQualifierError):
+        parse_point(bound)
+    with pytest.raises(TemporalQualifierError):
+        parse_range_literal(f"[{bound},2027-01-01T00:00:00Z)")
+
+
+@pytest.mark.parametrize(
+    ("offset", "lower"),
+    [
+        # The real maximum and minimum, the zero spellings, and a half-hour zone.
+        ("+14:00", "2025-12-31T20:00:00.000000Z"),
+        ("-12:00", "2026-01-01T22:00:00.000000Z"),
+        ("+00:00", "2026-01-01T10:00:00.000000Z"),
+        ("Z", "2026-01-01T10:00:00.000000Z"),
+        ("+0530", "2026-01-01T04:30:00.000000Z"),
+        # RFC 3339 bounds each field rather than the real-world range, so the widest legal
+        # offset still reads. Bounding minutes is what makes the parser's own total-magnitude
+        # check equal to the RFC's `00-23` on the hour.
+        ("+23:59", "2025-12-31T10:01:00.000000Z"),
+    ],
+)
+def test_a_legal_offset_still_reads(offset: str, lower: str):
+    """Bounding the minutes must cost no offset anyone can actually write."""
+    span = parse_authored_point(f"2026-01-01T10:00:00{offset}")
+
+    assert span is not None
+    assert span.lower == lower
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        # Fields the parser *does* refuse, pinned so the delegation stays a checked claim
+        # rather than an assumption: an offset past 24 hours in either spelling, and every
+        # component of the time proper.
+        "2026-01-01T10:00:00+25:00",
+        "2026-01-01T10:00:00+9999",
+        "2026-01-01T25:00:00",
+        "2026-01-01T10:60:00",
+        "2026-01-01T10:00:60",
+    ],
+)
+def test_the_components_the_parser_refuses_stay_refused(written: str):
+    """What is delegated is delegated because it was checked, not because it was assumed."""
+    assert parse_authored_point(written) is None

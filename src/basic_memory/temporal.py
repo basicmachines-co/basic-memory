@@ -152,19 +152,48 @@ def _instant_value(moment: datetime) -> str | None:
     return utc.strftime("%Y-%m-%dT%H:%M:%S.%f") + "Z"
 
 
+# The one component `datetime.fromisoformat` normalizes instead of refusing. It bounds an
+# offset's *total* magnitude below 24 hours, so `+25:00` and `+9999` are rejected, but it
+# does not bound the minutes field on its own: `+14:60` is carried into the hour and read as
+# `+15:00`, and `+14:99` as `+15:39`. Both spellings have the hole -- `+1460` too -- and both
+# signs. So the token names one instant and the stored bound names another, on every reindex.
+#
+# Minutes are the whole of it. Every other field is refused rather than normalized -- hour
+# 25, minute 60 and second 60 of the time proper all raise -- and once minutes are held below
+# 60 the total-magnitude check *is* RFC 3339's `00-23` on the hour, so the delegation that is
+# right for the rest of the grammar stays right. This is the exception, not a lost trust.
+_OVERFLOWING_OFFSET_MINUTES = re.compile(r"[+-]\d{2}:?[6-9]\d$")
+
+
+def _iso_instant(text: str) -> datetime | None:
+    """Parse one machine-syntax ISO timestamp, or None when its text names no moment.
+
+    The single place this module turns ISO text into a moment, shared by the range-literal
+    bounds and by authored points. They reach it through different grammars -- bounds are
+    held to the canonical RFC 3339 shape, an authored point to the wider set of machine
+    spellings people write -- but the validity question underneath is one question, and the
+    offset rule above only has to be stated once because of that.
+
+    RFC 3339 allows lowercase `t`/`z`, which `fromisoformat` rejects. Machine syntax carries
+    no other letters, so upper-casing only touches those two markers.
+    """
+    if _OVERFLOWING_OFFSET_MINUTES.search(text):
+        return None
+    try:
+        return datetime.fromisoformat(text.upper())
+    except ValueError:
+        return None
+
+
 def _canonical_instant(bound: str) -> str:
     if not _INSTANT_BOUND.match(bound):
         raise TemporalQualifierError(
             f"timestamp bound must be RFC 3339 to microsecond precision, "
             f"with an optional offset or Z: {bound!r}"
         )
-    # RFC 3339 allows lowercase `t`/`z`, which `datetime.fromisoformat` rejects. Every
-    # other character in a matched bound is a digit or punctuation, so upper-casing the
-    # whole bound only touches those two markers.
-    try:
-        moment = datetime.fromisoformat(bound.upper())
-    except ValueError as exc:
-        raise TemporalQualifierError(f"not a valid timestamp: {bound!r}") from exc
+    moment = _iso_instant(bound)
+    if moment is None:
+        raise TemporalQualifierError(f"not a valid timestamp: {bound!r}")
     value = _instant_value(moment)
     if value is None:
         raise TemporalQualifierError(
@@ -829,9 +858,8 @@ def _read_iso_day(
         #   -- second-less, fractional, `Z`, `±HH:MM` and `±HHMM` alike. Upper-casing is safe
         #   because machine syntax carries no letters but ISO's own `t` and `z` markers.
         # Outcome: an instant, or a refusal; never a guess, and never a rounded reading.
-        try:
-            moment = datetime.fromisoformat(point.upper())
-        except ValueError:
+        moment = _iso_instant(point)
+        if moment is None:
             return None
         instant = _instant_value(moment)
         if instant is None:
