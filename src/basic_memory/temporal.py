@@ -823,36 +823,56 @@ def _read_iso_day(
     return TemporalRange(axis=TemporalRangeAxis.INSTANT, lower=instant, lower_inclusive=True)
 
 
-# A year-first, fully numeric date. It is the one non-ISO shape whose meaning is *fixed*
-# rather than guessed: `date_order` says which of the two trailing runs is the month, so
-# the text plus one setting determine the date exactly, and there is nothing left to
-# interpret. dateparser does not treat it that way. Handed `2026/13/01` under YMD it finds
-# month 13 impossible, silently moves the 13 into the day slot, and answers January 13 --
-# a date the configured order does not name and the author did not write, refiled
+# A fully numeric date, with the year written first or last. It is the one non-ISO shape
+# whose meaning is *fixed* rather than guessed: `date_order` says which of the other two
+# runs is the month, so the text plus one setting determine the date exactly and there is
+# nothing left to interpret. dateparser does not treat it that way. Handed a run it cannot
+# use where the author put it, it silently moves that run to the other slot and answers with
+# a real date -- `2026/13/01` under YMD, or `13/01/2026` under MDY, both come back as
+# January 13, a date the configured order does not name and the author did not write, refiled
 # identically by every reindex. That is the `2026-13-01` disease in the one syntax the ISO
 # classifier deliberately does not claim.
-#
-# Only the year-first shape is judged here. With the year written last (`01/02/2026`)
-# dateparser abandons the configured order for its own fallback, so this module cannot say
-# what the text "should" mean without reimplementing those heuristics -- and reimplementing
-# them is how the two readings drift apart.
-_ORDERED_NUMERIC_DATE = re.compile(r"^(\d{4})/(\d{1,2})/(\d{1,2})$")
+_YEAR_FIRST_NUMERIC_DATE = re.compile(r"^(\d{4})/(\d{1,2})/(\d{1,2})$")
+_YEAR_LAST_NUMERIC_DATE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})$")
 
-# Whether the run after a leading year names the month. Only DMY puts the day there.
-_MONTH_LEADS_AFTER_YEAR: dict[DateOrder, bool] = {"YMD": True, "MDY": True, "DMY": False}
+# Whether the first of the two non-year runs names the month, given the configured order and
+# where the year was written. Five of the six are the order read literally. The sixth is not:
+# `YMD` describes no arrangement that ends in the year, so with the year last the reader
+# falls back to day-first, and that fallback is this module's behaviour too -- pinned by the
+# `10/07/2026` cases rather than left implicit. Naming all six is what lets the check compare
+# against a reading it can state, instead of trusting whatever came back.
+_MONTH_LEADS_THE_REMAINDER: dict[tuple[DateOrder, bool], bool] = {
+    ("YMD", True): True,
+    ("MDY", True): True,
+    ("DMY", True): False,
+    ("MDY", False): True,
+    ("DMY", False): False,
+    ("YMD", False): False,
+}
 
 
 def _ordered_numeric_date(point: str, date_order: DateOrder) -> date | None | Literal[False]:
-    """The date a year-first numeric token names under `date_order`.
+    """The date a fully numeric token names under `date_order`.
 
     `False` means the token is not that shape and this rule has nothing to say about it;
     `None` means it is, and names no date on the calendar.
+
+    A two-digit year is not this shape: `03/04/26` leaves which run is even the year to the
+    reader, so there is no stated reading to hold it to.
     """
-    ordered = _ORDERED_NUMERIC_DATE.match(point)
+    year_first = _YEAR_FIRST_NUMERIC_DATE.match(point)
+    ordered = year_first or _YEAR_LAST_NUMERIC_DATE.match(point)
     if ordered is None:
         return False
-    year, first, second = (int(run) for run in ordered.groups())
-    month, day = (first, second) if _MONTH_LEADS_AFTER_YEAR[date_order] else (second, first)
+
+    runs = [int(run) for run in ordered.groups()]
+    year = runs.pop(0) if year_first else runs.pop()
+    first, second = runs
+    month, day = (
+        (first, second)
+        if _MONTH_LEADS_THE_REMAINDER[(date_order, bool(year_first))]
+        else (second, first)
+    )
     try:
         return date(year, month, day)
     except ValueError:
