@@ -50,6 +50,15 @@ def canonicalize_project_name(
     if project_name is None:
         return None
 
+    # Exact before fuzzy, the same ordering the v2 project router and the
+    # workspace index use. It matters when two configured names share a
+    # permalink: matching by permalink alone would answer a caller who named one
+    # of them exactly with whichever the config happened to list first — the
+    # other project — which is precisely the escape hatch the ambiguity error
+    # tells them to use.
+    if project_name in config.projects:
+        return project_name
+
     requested_permalink = generate_permalink(project_name)
     for configured_name in config.projects:
         if generate_permalink(configured_name) == requested_permalink:

@@ -1227,27 +1227,36 @@ def _claim_mount_prefix(
     lives in ``split_project_permalink_prefix``; this only maps the winning
     permalink back to the project that owns it.
     """
+    # Two addressable projects can share a permalink ('My Docs' beside
+    # 'my-docs'). add_project refuses that now, so only a config written before
+    # the check, or edited by hand, still holds one. Record the pair rather than
+    # rejecting the table: an ambiguity is only a problem for the paths that
+    # actually resolve to it, and failing at build time failed every route in
+    # the session — including the exact-name escape hatch the error recommends,
+    # which does not go through this lookup at all.
     by_permalink: dict[str, AddressableProject] = {}
+    collisions: dict[str, AddressableProject] = {}
     for project in projects:
-        collision = by_permalink.setdefault(project.permalink, project)
-        # Trigger: two addressable projects share a permalink ('My Docs' beside
-        #   'my-docs'). add_project refuses this now, so only a config written
-        #   before that check, or edited by hand, can reach here.
-        # Why: the permalink is the address. Silently keeping one would route
-        #   every path under it to whichever project happened to sort last and
-        #   read that project's content under the other's name.
-        # Outcome: refuse the whole route and name both, rather than pick.
-        if collision is not project:
-            raise AmbiguousMountError(
-                f"projects '{collision.name}' and '{project.name}' share the permalink "
-                f"'{project.permalink}', so that path names both. Rename one, or pass "
-                "project= with the exact name."
-            )
+        first = by_permalink.setdefault(project.permalink, project)
+        if first is not project:
+            collisions.setdefault(project.permalink, project)
 
     claimed = _split_project_permalink_prefix(candidate, by_permalink)
     if claimed is None:
         return None
     permalink, remainder = claimed
+
+    # This path names the duplicated permalink, so it genuinely names two
+    # projects. Refuse it — silently picking one would read that project's
+    # content under the other's name — and name both so the caller can act.
+    duplicate = collisions.get(permalink)
+    if duplicate is not None:
+        raise AmbiguousMountError(
+            f"projects '{by_permalink[permalink].name}' and '{duplicate.name}' share the "
+            f"permalink '{permalink}', so that path names both. Rename one, or pass "
+            "project= with the exact name."
+        )
+
     return by_permalink[permalink], remainder
 
 
