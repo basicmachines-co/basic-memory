@@ -226,18 +226,22 @@ class ProjectService:
             ValueError: If the project already exists, the name has no permalink,
                 or the path collides with an existing project
         """
-        # Trigger: a name whose permalink is empty — pure punctuation or emoji
-        #   ('!!!', '💥'), which generate_permalink reduces to "".
-        # Why: the permalink is the project's address. An empty one advertises
-        #   itself at the root as '/', is indistinguishable from every other such
-        #   project, and cannot be entered by the path it advertises — it breaks
-        #   the rule that anything the mount view lists is addressable (#1421).
+        # Trigger: a name whose permalink has an empty segment — pure punctuation
+        #   or emoji ('!!!', '💥') reduce to "", and a leading slash ('/foo')
+        #   leaves an empty first segment.
+        # Why: the permalink is the project's address, and the resolver matches
+        #   it segment by segment against a path whose leading slashes are
+        #   already stripped. An empty segment means no path can ever match it:
+        #   '' advertises at the root as '/', indistinguishable from every other
+        #   such project, and '/foo' advertises '//foo' and cannot be entered.
+        #   Either way the mount view lists something unaddressable (#1421).
         # Outcome: refused at the one boundary that creates projects, so an
         #   unaddressable mount cannot exist rather than being handled downstream.
-        if not generate_permalink(name).strip("/"):
+        if not all(generate_permalink(name).split("/")):
             raise ValueError(
                 f"Project name '{name}' has no usable permalink. Names need at least one "
-                "letter, digit, or CJK character so the project has an address."
+                "letter, digit, or CJK character in every path segment, and may not start "
+                "with '/', so the project has an address."
             )
 
         # If project_root is set, constrain all projects to that directory
