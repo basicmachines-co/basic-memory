@@ -64,9 +64,13 @@ audited:
   and exit 0. The value a result row displays is the value to query with.
 - **`find` pages, and the default page is 10.** Any query whose answer is "all N chapters"
   needs `--page-size 200` (the maximum) — see [Coverage Checks](#coverage-checks).
-- **`--name` cannot combine with `--meta`.** The metadata search matches slugified permalinks,
-  not filenames. Scope a `--meta` query with the positional path instead: `find /characters
-  --meta 'note_type=character'`.
+- **`--name` cannot combine with `--meta`.** The metadata search has no filename glob. Scope a
+  `--meta` query with the positional path instead: `find /characters --meta
+  'note_type=character'`. That path is matched on a directory boundary against the *file path*
+  a note is indexed under — where the note actually lives, not its permalink, which stops
+  mirroring the file path once a note pins `permalink:` in frontmatter or is moved. So
+  `/characters` reaches everything filed under `characters/` (including `characters/major/`),
+  and never `characters-cut/`.
 
 If the POSIX verbs are unavailable, every step below still works with `search_notes`,
 `read_note`, and `list_directory` — it just costs more.
@@ -568,8 +572,11 @@ bm find /characters --meta 'note_type=character' --fields role --page-size 200  
 `--page-size 10`, so the un-sized form of the first query "proves" a 138-chapter work has 10
 chapters. 200 is the maximum page size; past that, iterate with `--page 2`, `--page 3`, … .
 Scope a `--meta` query with the positional path (`/characters`), never `--name` — the two
-options are mutually exclusive, because metadata search matches slugified permalinks rather
-than filenames.
+options are mutually exclusive, because the metadata search has no filename glob. The
+positional path scopes by the *file path* a note is indexed under, matched on a directory
+boundary: `/characters` admits `characters/major/ahab.md` but never `characters-cut/`. It is
+not a permalink match, so a note that pins its own `permalink:` is still found where its file
+lives.
 
 Read the count off the footer, not off the rows you can see. Every `find` result reports
 `page 1 • total 138`, and appends `• more available (--page)` when the page truncated the
