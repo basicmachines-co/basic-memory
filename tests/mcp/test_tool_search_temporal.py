@@ -347,6 +347,56 @@ async def test_all_projects_search_refuses_a_malformed_filter_instead_of_reporti
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "search"),
+    [
+        (
+            "valid_at",
+            lambda: search_notes(
+                query="cache layer",
+                search_all_projects=True,
+                output_format="json",
+                valid_at="",
+            ),
+        ),
+        (
+            "valid_overlaps",
+            lambda: search_notes(
+                query="cache layer",
+                search_all_projects=True,
+                output_format="json",
+                valid_overlaps="   ",
+            ),
+        ),
+        (
+            "time_kind",
+            lambda: search_notes(
+                query="cache layer",
+                search_all_projects=True,
+                output_format="json",
+                time_kind="",
+            ),
+        ),
+    ],
+)
+async def test_all_projects_search_refuses_an_empty_filter_instead_of_running_unfiltered(
+    client, test_project, field: str, search
+):
+    """An empty value must not resurrect the silent-unfiltered fan-out.
+
+    This is the shape the fan-out is least able to survive. A blank field read as absence
+    meant every per-project leg ran an ordinary unfiltered search, so the merged answer
+    came back full of undated rows with nothing marking it as unfiltered -- the caller
+    asked a valid-time question and got a plain search wearing the same shape. Refused
+    once, before any project is searched, by the parser the per-project legs share.
+    """
+    await _write_cache_layer_note(test_project.name)
+
+    with pytest.raises(ValueError, match=f"{field} was given as an empty value"):
+        await search()
+
+
+@pytest.mark.asyncio
 async def test_time_kind_alone_is_enough_search_criteria(client, test_project):
     """A valid-time filter is real criteria, so it must not trip the empty-query guard."""
     await _write_cache_layer_note(test_project.name)

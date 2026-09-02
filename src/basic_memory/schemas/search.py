@@ -9,9 +9,10 @@ The search system supports three primary modes:
 from typing import Optional, List, Union, Any
 from datetime import datetime
 from enum import Enum
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from basic_memory.schemas.base import Permalink, normalize_note_type
+from basic_memory.temporal import TemporalQualifierError, reject_blank_temporal_value
 
 
 class SearchItemType(str, Enum):
@@ -128,6 +129,24 @@ class SearchQuery(BaseModel):
             )
         return self
 
+    @field_validator("valid_at", "valid_overlaps", "time_kind")
+    @classmethod
+    def check_temporal_value_not_blank(
+        cls, value: Optional[str], info: ValidationInfo
+    ) -> Optional[str]:
+        """Refuse a valid-time field that is present but empty.
+
+        Enforced at the boundary as well as in the parser, because `no_criteria()` runs
+        first: a query carrying only an empty `valid_at` would otherwise be turned away as
+        having no criteria at all, which is true of the value and false of the request.
+        The rule itself lives in `basic_memory.temporal` so the two cannot disagree.
+        """
+        try:
+            reject_blank_temporal_value(info.field_name or "", value)
+        except TemporalQualifierError as exc:
+            raise ValueError(str(exc)) from exc
+        return value
+
     @field_validator("after_date")
     @classmethod
     def validate_date(cls, v: Optional[Union[datetime, str]]) -> Optional[str]:
@@ -162,7 +181,14 @@ class SearchQuery(BaseModel):
         assertion of that kind. Callers use this to decide whether valid time was
         requested without parsing the values, which is why it never raises.
         """
-        return bool(self.valid_at or self.valid_overlaps or self.time_kind)
+        # Presence, not truthiness: a blank value is refused above, so anything that is
+        # not None is a real question. Testing truthiness here is what let an empty
+        # `valid_at` read as "no filter requested" and run the query unfiltered.
+        return (
+            self.valid_at is not None
+            or self.valid_overlaps is not None
+            or self.time_kind is not None
+        )
 
     def no_criteria(self) -> bool:
         text_is_empty = self.text is None or (isinstance(self.text, str) and not self.text.strip())

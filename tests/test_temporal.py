@@ -26,6 +26,7 @@ from basic_memory.temporal import (
     parse_authored_point,
     parse_point,
     parse_range_literal,
+    parse_temporal_filter,
 )
 
 DATE = TemporalRangeAxis.DATE
@@ -1268,3 +1269,42 @@ def test_recorded_time_is_not_an_authorable_kind():
         "due",
         "mentioned",
     }
+
+
+# --- A present but empty valid-time field ---
+
+
+@pytest.mark.parametrize("field", ["valid_at", "valid_overlaps", "time_kind"])
+@pytest.mark.parametrize("blank", ["", "   ", "\t"])
+def test_a_blank_valid_time_field_is_refused_by_the_shared_parser(field: str, blank: str):
+    """The parser every surface shares refuses a field that is present but says nothing.
+
+    `parse_temporal_filter` is the one place HTTP, MCP and CLI all reach, and its contract
+    is that a rejection is loud rather than a filter that quietly matches something else.
+    Testing the three fields for truthiness broke exactly that: an empty value read as
+    absence and the query ran unfiltered.
+    """
+    with pytest.raises(TemporalQualifierError, match=f"{field} was given as an empty value"):
+        parse_temporal_filter(**{field: blank})
+
+
+def test_the_message_names_the_field_and_the_way_to_say_no_filter():
+    """A diagnostic is only useful if the fix is in it."""
+    with pytest.raises(TemporalQualifierError) as caught:
+        parse_temporal_filter(valid_at="")
+
+    assert "omit valid_at" in str(caught.value)
+
+
+def test_absent_valid_time_fields_still_build_no_filter():
+    """`None` means absent, and must go on meaning that -- only blankness changed."""
+    assert parse_temporal_filter() is None
+    assert parse_temporal_filter(valid_at=None, valid_overlaps=None, time_kind=None) is None
+
+
+def test_a_real_value_beside_absent_ones_still_builds_a_filter():
+    temporal = parse_temporal_filter(valid_at="2026-07-28")
+
+    assert temporal is not None
+    assert temporal.at is not None
+    assert temporal.at.value == "2026-07-28"
