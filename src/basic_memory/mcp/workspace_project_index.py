@@ -214,11 +214,20 @@ def format_qualified_choices(entries: Sequence[WorkspaceProjectEntry]) -> str:
     return " or ".join(entry.qualified_name for entry in entries)
 
 
-def match_workspace_identifier(
+def find_workspace_identifier(
     workspaces: tuple[WorkspaceInfo, ...],
     workspace_identifier: str,
-) -> WorkspaceInfo:
-    """Resolve a qualified route segment by slug, tenant_id, then display name."""
+) -> WorkspaceInfo | None:
+    """Resolve a qualified route segment by slug, tenant_id, then display name.
+
+    Returns None when nothing matches, so a caller probing whether a segment
+    *is* a workspace can ask without catching. The precedence lives here only:
+    slugs win globally over tenant ids, which win over display names, so one
+    workspace's display name never shadows another's slug. A second matcher
+    that walked the list once and took the first field to hit would decide by
+    iteration order instead, and did — it sent a route naming a slug-owned
+    workspace to a whole-permalink project in a third workspace entirely.
+    """
     slug_matches = [
         workspace
         for workspace in workspaces
@@ -247,7 +256,19 @@ def match_workspace_identifier(
     if name_matches:
         return name_matches[0]
 
-    available = ", ".join(workspace.slug for workspace in workspaces)
+    return None
+
+
+def match_workspace_identifier(
+    workspaces: tuple[WorkspaceInfo, ...],
+    workspace_identifier: str,
+) -> WorkspaceInfo:
+    """Resolve a qualified route segment, failing when nothing matches."""
+    workspace = find_workspace_identifier(workspaces, workspace_identifier)
+    if workspace is not None:
+        return workspace
+
+    available = ", ".join(item.slug for item in workspaces)
     raise ValueError(
         f"Workspace '{workspace_identifier}' was not found by slug, tenant_id, or name. "
         f"Available workspace slugs: {available}"
@@ -281,16 +302,7 @@ async def resolve_workspace_project_from_index(
     workspace_identifier, project_identifier = split_qualified_project_identifier(project)
     whole_permalink = generate_permalink(project)
     qualified_workspace = (
-        next(
-            (
-                workspace
-                for workspace in index.workspaces
-                if workspace.slug.casefold() == workspace_identifier.casefold()
-                or workspace.tenant_id == workspace_identifier
-                or workspace.name.casefold() == workspace_identifier.casefold()
-            ),
-            None,
-        )
+        find_workspace_identifier(index.workspaces, workspace_identifier)
         if workspace_identifier
         else None
     )
