@@ -652,17 +652,40 @@ _ISO_CALENDAR_HEAD = re.compile(r"^(\d{4})-(\d+)(?:-(\d+))?")
 # rest of it was too broken to parse. A bare `2026` carries no hyphen and is untouched.
 _ISO_CALENDAR_OPENING = re.compile(r"^\d{4}-")
 
-# A fractional-second run too wide for a canonical instant to carry. `_INSTANT_BOUND` caps the
-# fraction at six digits and *refuses* a longer one rather than truncating it, because dropping
-# digits would store a different instant than the author wrote -- but that refusal only ever
-# governed the strict path. The flexible reader has no such scruple: it truncates
-# `2026-01-01T10:00:00.1234567` to `...123456Z` and reports a time on the right day, so every
-# check `_read_iso_day` makes passes and the authored instant is quietly rewritten on each
-# reindex. Judged on the text so both paths refuse the same token for the same reason, and it
-# is the same reason the calendar width rule exists: a digit run wider than the syntax allows
-# is a typo, not a shorthand. Six digits and fewer are untouched -- `14:00:00.5` is precision
-# a canonical instant holds exactly, so it still reads.
-_OVER_PRECISE_FRACTION = re.compile(r"\.\d{7,}")
+# --- Which language the *time* portion is written in ---
+#
+# The calendar portion has always been judged strictly: an ISO head either names a real date
+# or the whole point is `_MalformedIso`, with no path to the lenient reader. The time portion
+# never got that treatment. It was fenced instead by one returned-value check plus a text
+# check per defect discovered -- one for over-long fractions, one for wrong-width calendar
+# runs -- and a dangling `.` was simply the next defect no existing check named. Growing that
+# list is the shape this module has been refactored away from twice.
+#
+# So the same question is asked of the trailing text that is asked of the head: which
+# language is it in? **Letters mean a human spelling** -- `10:00 AM`, `2pm`, `14:00:00 UTC`,
+# `at 14:00`, `noon` -- which has no literal reading for a guess to contradict, so the
+# lenient reader is trusted with it exactly as the two-language contract requires. **Digits
+# and punctuation alone mean machine syntax**, and machine syntax is read literally or
+# refused. `T` and `Z` are the two exceptions: they are ISO's own markers rather than words.
+#
+# That split is what a shape test on `[T ]digit` alone cannot do. `10:00 AM`, `2pm` and
+# `14:00:00 UTC` all open that way and all must stay lenient; every malformed spelling that
+# reached the reader carried no letters at all.
+_HUMAN_TIME_LETTER = re.compile(r"[^\W\dTtZz_]")
+
+# The machine spellings of a time of day, as the trailing text after a complete ISO date.
+# Seconds and the fraction are optional and the zone may be `Z`, `±HH:MM` or `±HHMM`, which
+# is every ISO-time shape the pinned spellings use. A fraction must carry one to six digits,
+# so this one grammar refuses both the over-long fraction and the dangling separator that
+# needed a rule apiece before.
+_ISO_TIME_TRAILING = re.compile(
+    r"^[Tt ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:[Zz]|[+-]\d{2}:?\d{2})?$"
+)
+
+
+def _is_machine_time(trailing: str) -> bool:
+    """Whether trailing text after a date is written in machine syntax rather than words."""
+    return _HUMAN_TIME_LETTER.search(trailing) is None
 
 
 def _named_calendar_date(year: str, month: str, day: str | None) -> date | None:
@@ -776,7 +799,14 @@ def _classify_authored_point(point: str) -> _AuthoredPoint:
     #   catch. A guard that asks what came back cannot see digits that never made it in.
     # Outcome: refused as malformed, so the strict and flexible paths give the same answer to
     #   the same text and the token stays observation content rather than a rounded instant.
-    if _OVER_PRECISE_FRACTION.search(trailing):
+    # Trigger: text follows a complete date, written in machine syntax rather than words.
+    # Why: the head is already held to naming a real date; this holds the *time* to the same
+    #   standard instead of leaving it to a returned-value check and a text rule per defect.
+    #   A bare date has no trailing at all and is untouched; a worded clock is the other
+    #   language and goes to the lenient reader, which is what the contract requires.
+    # Outcome: one grammar refuses every machine-syntax malformation -- the over-long
+    #   fraction, the dangling separator, and the shapes nobody has written down yet.
+    if trailing and _is_machine_time(trailing) and not _ISO_TIME_TRAILING.match(trailing):
         return _MALFORMED_ISO
     return _IsoDay(named, trailing)
 
@@ -790,20 +820,27 @@ def _read_iso_day(
             axis=TemporalRangeAxis.DATE, lower=iso.day.isoformat(), lower_inclusive=True
         )
 
-    if _INSTANT_BOUND.match(point):
-        # Trigger: the whole token is canonical RFC 3339.
-        # Why: the author wrote the one form this module defines exactly, so it is read
-        #   exactly -- to the microsecond, and refused rather than rounded when it names no
-        #   moment (`2026-06-10T25:00:00+02:00`) or leaves the calendar in UTC. The flexible
-        #   reader is neither that precise nor that strict.
-        # Outcome: an instant, or a refusal; never a guess.
+    if _is_machine_time(iso.trailing):
+        # Trigger: the time is written in machine syntax -- digits and punctuation, no words.
+        # Why: the classifier has already held its *shape* to `_ISO_TIME_TRAILING`, so what
+        #   is left to establish is that those components name a real time. `fromisoformat`
+        #   is the authority for that, exactly as `date` is for the calendar head: it knows
+        #   hour 25 and minute 60 are not times, and it reads the shapes the grammar admits
+        #   -- second-less, fractional, `Z`, `±HH:MM` and `±HHMM` alike. Upper-casing is safe
+        #   because machine syntax carries no letters but ISO's own `t` and `z` markers.
+        # Outcome: an instant, or a refusal; never a guess, and never a rounded reading.
         try:
-            instant = _canonical_instant(point)
-        except TemporalQualifierError:
+            moment = datetime.fromisoformat(point.upper())
+        except ValueError:
+            return None
+        instant = _instant_value(moment)
+        if instant is None:
+            # Shifting it to UTC carries it off the calendar, so it names no storable
+            # instant -- reported like any other unreadable point.
             return None
         return TemporalRange(axis=TemporalRangeAxis.INSTANT, lower=instant, lower_inclusive=True)
 
-    # The author wrote a clock reading in some spelling of their own, so the flexible reader
+    # The author wrote the clock in words, so the flexible reader
     # is asked for it -- but only for it. What it hands back must be a time of day on the
     # very day the head names, which is the check that keeps its guessing out of the answer:
     # dateparser silently drops a suffix it cannot use (`2026-01-01T`, `2026-01-01Z`,
@@ -1046,11 +1083,14 @@ def parse_authored_point(
 
     Non-ISO spellings are read leniently, because guessing at `June 10, 2026` is the
     whole point of this reader. A token that *is* ISO-shaped is held to its own text
-    instead: its calendar components must name a real date, and anything trailing them
-    must be a time of day on that date, written to a precision this module can store.
-    `2026-06-10 10:00 AM` reads; `2026-01-01T` does not, because the author reached for an
-    instant and no instant is there; `2026-01-01T10:00:00.1234567` does not either,
-    because storing it would mean dropping the digits that made it worth writing.
+    instead, in both halves. Its calendar components must name a real date. And a time of
+    day after them is judged by the language it is written in: words are a human spelling
+    the lenient reader is trusted with (`10:00 AM`, `2pm`, `noon`, `14:00:00 UTC`), while
+    digits and punctuation alone are machine syntax, which must parse as a real ISO time or
+    the whole point goes unread. So `2026-06-10 10:00 AM` reads and `2026-01-01T` does not;
+    `2026-01-01T10:00:00.1234567` does not, because storing it would mean dropping the
+    digits that made it worth writing; and `2026-01-01T10:00:00.` does not either, because
+    a fractional separator with no fraction behind it names no moment at all.
 
     A reading that would depend on when it was taken is refused, however it is spelled:
     `yesterday`, `2 days ago`, `next month`, a bare `March` whose year would come from

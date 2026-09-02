@@ -971,3 +971,32 @@ def test_an_oversized_run_behind_a_word_costs_only_its_own_token():
     assert observation.temporal == []
     assert observation.content == f"@occurred:{oversized} 2026 statement"
     assert second.content == "a second observation"
+
+
+@pytest.mark.parametrize(
+    "point",
+    ["2026-01-01T10:00:00.", "2026-01-01T10:00:00.Z", "2026-01-01T14:00.."],
+)
+def test_a_dangling_fraction_stays_content_in_both_forms(point: str):
+    """A separator with no fraction behind it names no instant, quoted or not.
+
+    dateparser discarded the dot and answered `...10:00:00.000000Z`, so the qualifier was
+    peeled and an instant the author never wrote was filed on every reindex. Quoting does
+    not help: it settles where a token ends, not whether the time inside it is one.
+    """
+    for qualifier in (f"@occurred:{point}", f'@occurred:"{point}"'):
+        observation = _observation(f"- [decision] {qualifier} The cutover ran.")
+
+        assert observation.temporal == []
+        assert observation.temporal_error is None
+        assert observation.content == f"{qualifier} The cutover ran."
+
+
+def test_a_fraction_the_canonical_form_holds_is_still_filed():
+    """The boundary the refusal stops at, end to end through the parser."""
+    for qualifier in ("@occurred:2026-01-01T10:00:00.5", '@occurred:"2026-01-01T10:00:00.5"'):
+        observation = _observation(f"- [decision] {qualifier} The cutover ran.")
+
+        [assertion] = observation.temporal
+        assert str(assertion.valid_during) == "[2026-01-01T10:00:00.500000Z,)"
+        assert observation.content == "The cutover ran."
