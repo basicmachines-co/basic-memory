@@ -1496,3 +1496,108 @@ def test_the_diagnostic_reader_is_guarded_too():
 
     assert parse_authored_point(word_led) is None
     assert names_only_a_calendar_period(word_led) is False
+
+
+# --- The time portion is a language, judged like the calendar ---
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        # The reported shape: a fractional separator with no fraction behind it. dateparser
+        # discarded the dot and answered `...10:00:00.000000Z`, an instant the token never
+        # named -- the same defect class as the over-long fraction, in a spelling no text
+        # check named.
+        "2026-01-01T10:00:00.",
+        "2026-01-01T10:00:00.Z",
+        "2026-01-01T10:00:00.+02:00",
+        "2026-01-01T14:00.",
+        "2026-01-01T14:00..",
+        # Over-precision, which the general rule now covers on its own: the fraction must
+        # be one to six digits, so seven is refused for the same reason none is.
+        "2026-01-01T10:00:00.1234567",
+        "2026-01-01T10:00:00." + "1" * 30,
+        # Times that are shaped right and are not times.
+        "2026-01-01T25:00:00",
+        "2026-01-01T14:60",
+        "2026-01-01T14:00:60",
+        # Zone malformations, machine syntax throughout.
+        "2026-01-01T14:00:00+2:00",
+        "2026-01-01T14:00:00Z+01:00",
+    ],
+)
+def test_a_malformed_machine_time_is_unread(written: str):
+    """A time written in machine syntax is read literally or refused, like the calendar.
+
+    The calendar head has always been held to naming a real date, with no path from a
+    malformed one to the lenient reader. The time portion was fenced instead by a
+    returned-value check plus a text rule per defect discovered -- one for the over-long
+    fraction, one for wrong-width calendar runs -- so a dangling separator was simply the
+    next defect no rule happened to name. Judged as a language instead: digits and
+    punctuation mean machine syntax, and machine syntax must parse.
+    """
+    assert parse_authored_point(written) is None
+
+
+@pytest.mark.parametrize(
+    ("written", "lower"),
+    [
+        # One fractional digit is the boundary the refusal stops at, and six is the widest
+        # the canonical form holds.
+        ("2026-01-01T10:00:00.5", "2026-01-01T10:00:00.500000Z"),
+        ("2026-01-01T10:00:00.123456", "2026-01-01T10:00:00.123456Z"),
+        # Every machine spelling the guard test pins, read strictly rather than leniently.
+        ("2026-06-10T14:00", "2026-06-10T14:00:00.000000Z"),
+        ("2026-06-10 10:00", "2026-06-10T10:00:00.000000Z"),
+        ("2026-06-10 14:00:00+02:00", "2026-06-10T12:00:00.000000Z"),
+        ("2026-06-10T14:00Z", "2026-06-10T14:00:00.000000Z"),
+        ("2026-06-10T14:00:00+0200", "2026-06-10T12:00:00.000000Z"),
+        ("2026-06-10t14:00:00z", "2026-06-10T14:00:00.000000Z"),
+    ],
+)
+def test_a_well_formed_machine_time_still_reads(written: str, lower: str):
+    """Strictness must cost nothing that names a real moment in machine syntax."""
+    span = parse_authored_point(written)
+
+    assert span is not None
+    assert span.axis is INSTANT
+    assert span.lower == lower
+
+
+@pytest.mark.parametrize(
+    ("written", "lower"),
+    [
+        # Words are the other language, and they are what a shape test on `[T ]digit` alone
+        # cannot separate: each of these opens exactly like a machine time and none of them
+        # is one. They stay with the lenient reader, which is the two-language contract.
+        ("2026-06-10 10:00 AM", "2026-06-10T10:00:00.000000Z"),
+        ("2026-06-10 2pm", "2026-06-10T14:00:00.000000Z"),
+        ("2026-06-10 14:00:00 UTC", "2026-06-10T14:00:00.000000Z"),
+        ("2026-06-10 noon", "2026-06-10T12:00:00.000000Z"),
+        ("2026-06-10 at 14:00", "2026-06-10T14:00:00.000000Z"),
+    ],
+)
+def test_a_worded_clock_is_still_the_lenient_readers(written: str, lower: str):
+    """The split is machine-versus-words, not a grammar of what may follow a date."""
+    span = parse_authored_point(written)
+
+    assert span is not None
+    assert span.axis is INSTANT
+    assert span.lower == lower
+
+
+@pytest.mark.parametrize(
+    "written",
+    ["9999-12-31 8pm EST", "9999-12-31 11pm PST", "9999-12-31 23:00 EST"],
+)
+def test_a_worded_clock_that_leaves_the_calendar_in_utc_is_unread(written: str):
+    """The lenient path has its own edge at the end of the calendar, and keeps it.
+
+    Each of these is a real time on the last date there is, named in words with a zone
+    behind UTC -- so converting it forward carries it into year 10000, which `date` cannot
+    hold. The moment is genuine and the storable instant does not exist, so it reads as no
+    date rather than raising out of a note's parse. Pinned on a *worded* spelling because
+    the machine spellings that used to cover this edge are now read by the strict path,
+    which has its own guard for it.
+    """
+    assert parse_authored_point(written) is None
