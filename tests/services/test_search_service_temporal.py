@@ -281,6 +281,55 @@ async def test_same_statement_at_two_times_is_queryable_at_each(entity_service, 
     assert first.id != second.id
 
 
+MIXED_CATEGORY_MARKDOWN = dedent("""
+    # Cache Layer
+
+    ## Observations
+    - @effective[2026-06-10,2026-07-27) The cache layer will use Redis. #infra
+    - [note] @effective[2027-06-10,2027-07-27) The cache layer will use Redis. #infra
+    """)
+
+
+@pytest.mark.asyncio
+async def test_an_omitted_category_is_the_same_category_when_ordinals_are_counted(
+    entity_service, search_service
+):
+    """The ordinal has to be counted on the category the row will hold, not the one given.
+
+    A line promoted to an observation by its hashtags alone carries no `[category]`, so it
+    arrives as `None`, while the explicit `[note]` line beside it arrives as `"note"`.
+    They look like different identities at the moment the ordinal is assigned and are the
+    same category one flush later, when the column default lands -- so both were numbered
+    0, derived one permalink, and lost a search row between them exactly as if the ordinal
+    had never been added. Normalizing before counting is what keeps the two halves of the
+    identity agreeing about what a row is.
+    """
+    entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Cache Layer Mixed",
+            note_type="note",
+            directory="decisions",
+            content=MIXED_CATEGORY_MARKDOWN,
+        )
+    )
+    await search_service.index_entity(entity)
+
+    first, second = entity.observations
+    # The stored rows agree on category; the addresses must still tell them apart.
+    assert first.category == second.category
+    assert first.permalink != second.permalink
+
+    in_first = await search_service.search(
+        SearchQuery(text="cache layer", valid_at=EFFECTIVE_WINDOW_INSIDE)
+    )
+    in_second = await search_service.search(
+        SearchQuery(text="cache layer", valid_at=SECOND_WINDOW_INSIDE)
+    )
+
+    assert [result.id for result in in_first] == [first.id]
+    assert [result.id for result in in_second] == [second.id]
+
+
 @pytest.mark.asyncio
 async def test_a_valid_time_query_can_also_scope_by_note_type(entity_service, search_service):
     """Valid time selects observation rows; note type must not then exclude them.
