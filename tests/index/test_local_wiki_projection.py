@@ -128,7 +128,7 @@ async def test_local_wiki_rejects_incomplete_filesystem_scan(
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Symlink setup requires extra privileges")
 @pytest.mark.asyncio
-async def test_local_wiki_refuses_symlinked_projection_parent(
+async def test_local_wiki_rejects_source_tree_replaced_by_symlink(
     config_home,
     session_maker,
     test_project,
@@ -136,35 +136,39 @@ async def test_local_wiki_refuses_symlinked_projection_parent(
 ):
     outside = tmp_path / "outside"
     outside.mkdir()
-    (config_home / "linked").symlink_to(outside, target_is_directory=True)
-    accepted_at = datetime.now(UTC)
-    async with db.scoped_session(session_maker) as session:
-        project = await session.get(Project, test_project.id)
-        assert project is not None
-        project.partition_position = 1
-        session.add(
-            AcceptedProjectNoteChange(
-                project_id=test_project.id,
-                project_external_id=test_project.external_id,
-                partition_position=1,
-                entity_id=1,
-                note_external_id="deleted-note",
-                permalink="linked/note",
-                title="Deleted note",
-                operation="deleted",
-                file_path="linked/note.md",
-                accepted_at=accepted_at,
-                materialized_at=accepted_at,
-                source="delete_note",
-            )
-        )
+    linked = config_home / "linked"
+    linked.mkdir()
+    source_note = linked / "note.md"
+    source_note.write_text("# Note\n", encoding="utf-8")
 
     inspection = await inspect_local_wiki_projection(test_project, session_maker=session_maker)
 
-    with pytest.raises(LocalWikiWriteConflict, match="crosses a symlink.*linked/index.md"):
+    # A symlink changes the source-tree identity even when the note bytes are
+    # unchanged, so the all-input preflight rejects the stale inspection.
+    source_note.rename(outside / "note.md")
+    linked.rmdir()
+    linked.symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(LocalWikiWriteConflict, match="inputs changed after planning"):
         await apply_local_wiki_projection(inspection, session_maker=session_maker)
 
-    assert list(outside.iterdir()) == []
+    assert [path.name for path in outside.iterdir()] == ["note.md"]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Symlink setup requires extra privileges")
+def test_local_wiki_destination_guard_rejects_symlinked_parent(tmp_path):
+    project_root = tmp_path / "project"
+    project_root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (project_root / "linked").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(LocalWikiWriteConflict, match="crosses a symlink.*linked/index.md"):
+        local_wiki_projection._require_safe_projection_destination(
+            project_root=project_root,
+            target=project_root / "linked" / "index.md",
+            relative_path="linked/index.md",
+        )
 
 
 @pytest.mark.asyncio
