@@ -788,6 +788,43 @@ def _project_metadata_fields(
     return projected
 
 
+# --- What a projected row carries ---
+# `fields` is the SELECT to the predicates' WHERE, and a SELECT answers with the
+# columns asked for. A whole SearchResult carries the note body too — up to
+# SearchIndexRow.CONTENT_DISPLAY_LIMIT (4000) characters of it — so the 200-row
+# inventory call the literary-analysis skill documents answered a request for two
+# frontmatter values with most of a megabyte of prose, which is the exact cost
+# `fields` exists to remove.
+#
+# A whitelist rather than a content blocklist: the row is the note's identity —
+# how to name it (title), read it (permalink, file_path) and deep-link it
+# (external_id, #1423) — plus when it last changed and the projection itself. A
+# SearchResult that later grows another bulky column therefore cannot leak into a
+# projected response. What is left out is a body (content, matched_chunk), a
+# ranking no text query produced (score, -0.0 on every metadata hit), a second
+# spelling of an identity already here (entity, entity_id), or index-row metadata
+# a caller can name as a field instead ("type").
+#
+# Only projection mode narrows. Without `fields`, `meta` still answers with the
+# full search response grep's renderers read, because there the hit *is* the
+# answer.
+_PROJECTED_ROW_KEYS = ("title", "permalink", "file_path", "external_id", "updated_at")
+
+
+def _projected_row(
+    row: dict[str, Any], entity_metadata: dict[str, Any] | None, fields: list[MetadataPath]
+) -> dict[str, Any]:
+    """One projected hit: the note's identity, plus the fields the caller asked for.
+
+    Takes the already-dumped row so the identity values keep the response's own
+    JSON serialization (`updated_at` as an ISO string), and `fields` is injected
+    post-dump so a null field value survives the response's exclude_none.
+    """
+    projected = {key: row[key] for key in _PROJECTED_ROW_KEYS if key in row}
+    projected["fields"] = _project_metadata_fields(entity_metadata, fields)
+    return projected
+
+
 @mcp.tool(
     title="Find",
     description=(
@@ -858,7 +895,9 @@ async def find(
             Any other operator fails fast naming the supported set.
         fields: Frontmatter fields to return per hit (dot-paths allowed), e.g.
             ["title", "priority"]. Requires `meta`. A field missing on a hit
-            renders as null — rows are never dropped.
+            renders as null — rows are never dropped. Requesting fields also
+            narrows each row to the note's identity plus those values: the
+            projection replaces the note body rather than riding alongside it.
         project: Project name. Optional - qualified paths route themselves;
             unqualified paths refuse when several projects are addressable.
         project_id: Project external_id (UUID); takes precedence over `project`.
@@ -867,8 +906,9 @@ async def find(
     Returns:
         Without `meta`: the directory listing as JSON (nodes, pagination,
         totals). With `meta`: the search response as JSON (results, pagination,
-        totals); each result carries a `fields` object when `fields` was
-        requested.
+        totals). Adding `fields` projects each result down to the note's
+        identity — title, permalink, file_path, external_id, updated_at — plus
+        the requested `fields` object; no note content comes back.
     """
     # Combination rules, before any I/O. The metadata search takes no filename
     # glob and no depth bound, so `name` and `depth` are refused rather than
@@ -1076,9 +1116,10 @@ async def _find_by_metadata(
             for read in reads:
                 read.cancel()
             await asyncio.gather(*reads, return_exceptions=True)
-        # Injected post-dump so null field values survive exclude_none.
-        for row, metadata in zip(payload["results"], hydrated, strict=True):
-            row["fields"] = _project_metadata_fields(metadata, fields)
+        payload["results"] = [
+            _projected_row(row, metadata, fields)
+            for row, metadata in zip(payload["results"], hydrated, strict=True)
+        ]
     return payload
 
 

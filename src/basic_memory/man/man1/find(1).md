@@ -58,10 +58,14 @@ directory named `" specs "` is addressed by that exact spelling.
 routing prefix, a mount point rather than a subtree, and scopes to that
 project's root.
 
-`--fields` is the SELECT to the predicates' WHERE: it adds a `fields` object
-to each hit carrying the named frontmatter values, so a filtered set can be
-tabulated without reading every note. A field a hit does not carry renders as
-null; the row is never dropped.
+`--fields` is the SELECT to the predicates' WHERE: each hit comes back as the
+note's identity — title, permalink, file path, external id, last-updated — plus
+a `fields` object carrying the named frontmatter values, so a filtered set can
+be tabulated without reading every note. A field a hit does not carry renders as
+null; the row is never dropped. The projection *replaces* the note body rather
+than riding alongside it, so a 200-row inventory answers with the values asked
+for and not with 200 note bodies. Without `--fields`, hits keep the full search
+shape, content included.
 
 `--name` and `--depth` are refused alongside `--meta`. The search API has no
 filename glob, and its path scope is whole-subtree, where a depth bound is not
@@ -127,7 +131,8 @@ quote one that genuinely does, as in `range=">=5"`.
 - **--fields** — comma-separated frontmatter fields to show per hit, e.g.
   `"title,priority"`; dot-paths allowed, in the same shape predicate keys
   take, and a malformed one is refused rather than shown as null for every
-  hit. A field a note does not carry shows as null. Requires `--meta`
+  hit. A field a note does not carry shows as null. Projects each hit down to
+  its identity plus those fields — no note content. Requires `--meta`
 - **--page, --page-size** — pagination (defaults 1 and 10)
 
 ## EXAMPLES

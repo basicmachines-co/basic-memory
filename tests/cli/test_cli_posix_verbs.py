@@ -181,15 +181,22 @@ FIND_RESULT = {
 FIND_RESULT_EMPTY = {"nodes": [], "page": 1, "page_size": 10, "total": 0, "has_more": False}
 
 # --meta flips find's payload to the search response shape (the same contract
-# grep returns); --fields adds a projected `fields` object per hit, with null
-# for a field the hit does not carry.
+# grep returns). --fields then *projects* each hit: the row is the note's
+# identity plus a `fields` object, with null for a field the hit does not carry,
+# and no note body. A projected row is therefore not a grep row with an extra
+# key — spelled out here rather than spread from GREP_RESULT so this mock cannot
+# drift back into promising the CLI content the tool no longer sends.
 FIND_META_RESULT = GREP_RESULT
 
 FIND_META_FIELDS_RESULT = {
     **GREP_RESULT,
     "results": [
         {
-            **GREP_RESULT["results"][0],
+            "title": "Spec [draft] v2",
+            "permalink": "specs/spec-draft-v2",
+            "file_path": "specs/Spec [draft] v2.md",
+            "external_id": "0b3f0d1e-5f9a-4d2b-8c31-1f0b7a9c4d55",
+            "updated_at": "2025-01-01T00:00:00",
             "fields": {
                 "title": "Spec [draft] v2",
                 "priority": "high",
@@ -198,7 +205,11 @@ FIND_META_FIELDS_RESULT = {
             },
         },
         {
-            **GREP_RESULT["results"][1],
+            "title": "Another Note",
+            "permalink": "notes/another-note",
+            "file_path": "notes/Another Note.md",
+            "external_id": "7c2a91b4-3d68-4e0f-9a15-2b6c8e4f0a37",
+            "updated_at": "2025-01-02T00:00:00",
             "fields": {
                 "title": "Another Note",
                 "priority": None,
