@@ -416,3 +416,43 @@ def test_tool_help_documents_undated_exclusion():
     doc = inspect.getdoc(search_notes) or ""
     assert "Sources with no temporal qualifier are excluded" in doc
     assert "valid_at" in doc and "valid_overlaps" in doc and "time_kind" in doc
+
+
+# --- The instructions must not promise what the reader refuses ---
+
+_RELATIVE_QUALIFIER_SPELLINGS = ("yesterday", "2 days ago", "last week")
+
+
+def test_the_tool_instructions_do_not_advertise_relative_qualifiers():
+    """Docs are the interface an agent actually programs against.
+
+    `search_notes`' docstring is what an LLM reads before writing a qualifier, so a stale
+    promise here is worse than a stale comment: the agent writes `@occurred:yesterday`,
+    the reader silently declines it, the line stays ordinary content, and every valid-time
+    search quietly omits it. The behaviour is pinned in tests/test_temporal.py; this pins
+    that the instructions agree with it.
+    """
+    from basic_memory.mcp.tools.search import search_notes
+
+    docs = (
+        (search_notes.fn.__doc__ or "")
+        if hasattr(search_notes, "fn")
+        else (search_notes.__doc__ or "")
+    )
+
+    assert "Relative dates are not accepted" in docs
+    for spelling in _RELATIVE_QUALIFIER_SPELLINGS:
+        # Named only to refuse them; never shown as a working example.
+        if spelling in docs:
+            assert "not accepted" in docs
+
+
+def test_the_man_page_does_not_advertise_relative_qualifiers():
+    """The same promise, in the page a human reads."""
+    from basic_memory.man import MAN_DIR
+
+    page = (MAN_DIR / "man3" / "search-notes(3).md").read_text(encoding="utf-8")
+
+    assert "A relative date is never filed as a qualifier" in page
+    # The quoted-form example list must not offer one as a spelling that files.
+    assert '`@occurred:"2 days ago"` and `@"June 2026"` all file' not in page

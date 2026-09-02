@@ -941,18 +941,25 @@ async def search_notes(
 
     An unquoted point is **one whitespace-delimited token**, because nothing can tell
     where a multi-word date ends. Slash dates (`@occurred:03/04/2026`, read by the
-    `date_order` setting) and single-word relative dates (`@occurred:yesterday`) work
-    as they are; anything longer goes in double quotes, which move the token boundary
-    to the closing quote:
+    `date_order` setting) work as they are; anything longer goes in double quotes,
+    which move the token boundary to the closing quote:
 
         - [decision] @occurred:"June 10, 2026" The cutover ran.
-        - [decision] @occurred:"2 days ago" The cutover ran.
         - [decision] @occurred:"June 2026" The cutover ran.
         - [decision] @"June 10, 2026" The cutover ran.
 
-    Whatever is inside the quotes is read as the date, month-only and relative forms
-    included, and whatever follows the closing quote is ordinary content. An unreadable
-    token is left as content, never half-read.
+    Whatever is inside the quotes is read as the date, month-only forms included, and
+    whatever follows the closing quote is ordinary content. An unreadable token is left
+    as content, never half-read.
+
+    **Relative dates are not accepted here.** `@occurred:yesterday`, `@occurred:"2 days
+    ago"`, `@occurred:"last week"` and a bare month name like `@occurred:March` all name
+    a different span depending on the day the note is indexed, so an unedited file would
+    assert a different valid time on every pass. They stay ordinary content, silently,
+    and quoting does not change that — quotes settle where a token ends, not what a date
+    means. Write the date the qualifier should mean: `@occurred:2026-06-10`. This is the
+    authored-time axis only; `recent_activity` and `build_context` still take relative
+    `timeframe` values, because those ask about edit time, which really is relative to now.
 
     These filters query that authored time, which is a different axis from `after_date`
     (last-indexed time) — `after_date` is never reinterpreted as valid time.
