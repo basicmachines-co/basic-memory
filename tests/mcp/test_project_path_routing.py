@@ -23,6 +23,7 @@ from basic_memory.config_models import ProjectEntry
 from basic_memory.mcp.project_context import (
     ProjectPathRoute,
     ProjectPrefixConflictError,
+    AmbiguousMountError,
     UnqualifiedPathRefusedError,
     _agreed_route_project,
     resolve_project_path_route,
@@ -197,6 +198,28 @@ async def test_multi_segment_mount_agrees_with_explicit_workspace_spelling(
     assert route == ProjectPathRoute(
         project="acme/Research/2026", path="notes/x", stripped=True, project_id=None
     )
+
+
+@pytest.mark.asyncio
+async def test_colliding_mount_permalinks_refuse_rather_than_pick(config_manager, tmp_path_factory):
+    """Two names that normalize to one permalink are one address for two
+    projects, and the resolver must not choose.
+
+    add_project refuses this now, so only a config written before that check or
+    edited by hand can reach it — but silently keeping whichever sorted last
+    read that project's content under the other's name, which is worse than a
+    loud failure naming both.
+    """
+    config = config_manager.load_config()
+    config.projects["My Docs"] = ProjectEntry(path=str(tmp_path_factory.mktemp("my-docs-a")))
+    config.projects["my-docs"] = ProjectEntry(path=str(tmp_path_factory.mktemp("my-docs-b")))
+    config_manager.save_config(config)
+
+    with pytest.raises(AmbiguousMountError) as excinfo:
+        await resolve_project_path_route("my-docs/notes", project=None, project_id=None)
+
+    assert "My Docs" in str(excinfo.value)
+    assert "my-docs" in str(excinfo.value)
 
 
 @pytest.mark.asyncio

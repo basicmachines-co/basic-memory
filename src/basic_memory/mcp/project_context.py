@@ -1112,6 +1112,10 @@ class UnqualifiedPathRefusedError(ValueError):
     """Unqualified input matched no project in a workspace that addresses several."""
 
 
+class AmbiguousMountError(ValueError):
+    """Two addressable projects share one permalink, so a path names both."""
+
+
 @dataclass(frozen=True)
 class AddressableProject:
     """One project this session can both advertise and route to.
@@ -1223,7 +1227,23 @@ def _claim_mount_prefix(
     lives in ``split_project_permalink_prefix``; this only maps the winning
     permalink back to the project that owns it.
     """
-    by_permalink = {project.permalink: project for project in projects}
+    by_permalink: dict[str, AddressableProject] = {}
+    for project in projects:
+        collision = by_permalink.setdefault(project.permalink, project)
+        # Trigger: two addressable projects share a permalink ('My Docs' beside
+        #   'my-docs'). add_project refuses this now, so only a config written
+        #   before that check, or edited by hand, can reach here.
+        # Why: the permalink is the address. Silently keeping one would route
+        #   every path under it to whichever project happened to sort last and
+        #   read that project's content under the other's name.
+        # Outcome: refuse the whole route and name both, rather than pick.
+        if collision is not project:
+            raise AmbiguousMountError(
+                f"projects '{collision.name}' and '{project.name}' share the permalink "
+                f"'{project.permalink}', so that path names both. Rename one, or pass "
+                "project= with the exact name."
+            )
+
     claimed = _split_project_permalink_prefix(candidate, by_permalink)
     if claimed is None:
         return None
