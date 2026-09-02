@@ -40,6 +40,10 @@ from basic_memory.repository.search_trace import (
     build_fts_page_stage,
 )
 from basic_memory.repository.metadata_filters import parse_metadata_filters, build_sqlite_json_path
+from basic_memory.repository.note_type_filters import (
+    SQLITE_NOTE_TYPE_VALUE,
+    build_note_type_predicate,
+)
 from basic_memory.repository.temporal_filters import build_temporal_predicate
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.semantic_vector_index import SemanticVectorIndex
@@ -909,20 +913,18 @@ class SQLiteSearchRepository(SearchRepositoryBase):
 
         # Handle note type filter (frontmatter type field, parameterized).
         # Trigger: caller passed `note_types` to scope by the frontmatter `type` field.
-        # Why: the stored note_type preserves the frontmatter casing (e.g. `Chapter`),
-        #      but the filter is documented case-insensitive; comparing raw values
-        #      would miss capitalized types.
-        # Outcome: fold both sides to lowercase so `note_types=["Chapter"]` matches a
-        #          stored `Chapter`, `chapter`, etc.
+        # Why: the type belongs to the note, but only its entity row carries the
+        #      frontmatter; observation and relation rows do not. Reading it off each row
+        #      silently excluded every non-entity row, which made `note_types` combined
+        #      with a valid-time filter unsatisfiable.
+        # Outcome: resolved through the owning note in one shared builder, so both
+        #          backends ask the same question and observation rows of a matching note
+        #          are admitted.
         if note_types:
-            type_placeholders = []
-            for idx, t in enumerate(note_types):
-                param_name = f"note_type_{idx}"
-                params[param_name] = t.lower()
-                type_placeholders.append(f":{param_name}")
             conditions.append(
-                "LOWER(json_extract(search_index.metadata, '$.note_type')) "
-                f"IN ({', '.join(type_placeholders)})"
+                build_note_type_predicate(
+                    note_types, params, note_type_value=SQLITE_NOTE_TYPE_VALUE
+                )
             )
 
         # Handle date filter using datetime() for proper comparison

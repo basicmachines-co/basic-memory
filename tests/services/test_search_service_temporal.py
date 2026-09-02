@@ -228,3 +228,87 @@ async def test_search_trace_describes_the_valid_time_question(search_service):
     assert "temporal=kind=effective,valid_at=2026-07-28" in describe_search_criteria(containment)
     assert "temporal=valid_overlaps=[2026-06-10,2026-07-27)" in describe_search_criteria(overlap)
     assert "temporal=" not in describe_search_criteria(plain)
+
+
+# --- Every authored assertion stays queryable by its own time ---
+
+TWICE_DATED_MARKDOWN = dedent("""
+    # Cache Layer
+
+    ## Observations
+    - [decision] @effective[2026-06-10,2026-07-27) The cache layer will use Redis.
+    - [decision] @effective[2027-06-10,2027-07-27) The cache layer will use Redis.
+    """)
+
+SECOND_WINDOW_INSIDE = "2027-07-01"
+
+
+@pytest.mark.asyncio
+async def test_same_statement_at_two_times_is_queryable_at_each(entity_service, search_service):
+    """One note, one sentence, two authored windows -- both must remain findable.
+
+    The qualifier is peeled off before the observation is stored, so these two lines
+    persist identical content and derived identical synthetic permalinks. The search
+    index is keyed on permalink, so the second observation was skipped as a duplicate
+    while its temporal assertion went on addressing a row with no search projection:
+    querying 2027 returned nothing, and every reindex reproduced the omission from the
+    same markdown. The note says two things happened at two times; both must answer.
+    """
+    entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Cache Layer Twice",
+            note_type="note",
+            directory="decisions",
+            content=TWICE_DATED_MARKDOWN,
+        )
+    )
+    await search_service.index_entity(entity)
+
+    # The two rows are distinct statements and must carry distinct addresses.
+    first, second = entity.observations
+    assert first.permalink != second.permalink
+
+    in_first = await search_service.search(
+        SearchQuery(text="cache layer", valid_at=EFFECTIVE_WINDOW_INSIDE)
+    )
+    in_second = await search_service.search(
+        SearchQuery(text="cache layer", valid_at=SECOND_WINDOW_INSIDE)
+    )
+
+    assert [result.id for result in in_first] == [first.id]
+    assert [result.id for result in in_second] == [second.id]
+    # Each window answers with exactly one of them, never the same row twice.
+    assert first.id != second.id
+
+
+@pytest.mark.asyncio
+async def test_a_valid_time_query_can_also_scope_by_note_type(entity_service, search_service):
+    """Valid time selects observation rows; note type must not then exclude them.
+
+    A note's type lives in its frontmatter, so only its entity row carries it. Reading the
+    type off each row made these two filters contradict each other -- every row the
+    temporal predicate admitted, the note-type predicate rejected -- so the conjunction
+    returned nothing however well the note matched. Resolving the type through the owning
+    note is what lets both questions be asked at once.
+    """
+    entity = await _index_cache_layer_note(entity_service, search_service)
+
+    scoped = await search_service.search(
+        SearchQuery(
+            text="cache layer",
+            valid_at=EFFECTIVE_WINDOW_INSIDE,
+            note_types=["note"],
+        )
+    )
+
+    assert [result.type for result in scoped] == ["observation"]
+    assert scoped[0].entity_id == entity.id
+    # A type the note does not have still excludes it, so the filter is doing real work.
+    unscoped = await search_service.search(
+        SearchQuery(
+            text="cache layer",
+            valid_at=EFFECTIVE_WINDOW_INSIDE,
+            note_types=["conversation"],
+        )
+    )
+    assert unscoped == []

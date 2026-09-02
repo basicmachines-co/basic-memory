@@ -339,6 +339,45 @@ class NoteSection(Base):
         )
 
 
+def observation_permalink_tail(category: str | None, content: str) -> str:
+    """The part of an observation's permalink that distinguishes it within its note.
+
+    This is the single definition of what makes two observations of one note share an
+    address, and it is deliberately shared with the writer that assigns
+    `Observation.duplicate_index`: an ordinal only disambiguates if it is counted over
+    exactly the identity the permalink is built from. Computing the two separately is the
+    defect this function exists to prevent -- rebuilding the permalink format inline is
+    what diverged from the search index for long observations (#929).
+
+    Note what is *not* here. A qualifier (`@effective[...]`) and a `(context)` are peeled
+    off the line before the observation is stored, so neither reaches this string, and two
+    observations that differ only in one of them arrive identical. That is not an oversight
+    to correct by stuffing them back in: the peel is the feature, and valid time is its own
+    projection rather than an observation column. The note still distinguishes such lines,
+    so the *address* must too, which is what the ordinal counted over this tail supplies.
+
+    Slug aliasing is why the count keys on this generated text rather than on the raw
+    values: `Foo Bar` and `foo-bar` are different content that generate one permalink, so
+    an ordinal counted over raw content would leave them colliding.
+
+    Content is truncated to 200 chars to stay under PostgreSQL's btree index limit of
+    2704 bytes.
+    """
+    if len(content) > 200:
+        # Trigger: content exceeds the 200-char budget imposed by PostgreSQL's
+        # 2704-byte btree index row limit, so the permalink can only carry a prefix.
+        # Why: two distinct observations with the same category and an identical
+        # 200-char prefix would collide on the same synthetic permalink, and the
+        # search index (permalink-keyed upsert) silently drops the second one.
+        # Outcome: a short stable digest of the FULL content disambiguates
+        # truncated permalinks while staying well under the index limit.
+        digest = hashlib.sha256(content.encode("utf-8")).hexdigest()[:12]
+        content_for_permalink = f"{content[:200]}-{digest}"
+    else:
+        content_for_permalink = content
+    return generate_permalink(f"observations/{category}/{content_for_permalink}")
+
+
 class Observation(Base):
     """An observation about an entity.
 
@@ -360,6 +399,11 @@ class Observation(Base):
     tags: Mapped[Optional[list[str]]] = mapped_column(
         JSON, nullable=True, default=list, server_default="[]"
     )
+    # Which of the note's same-identity observations this one is, in document order.
+    # See `observation_permalink_tail` for why an ordinal is needed at all and why it is
+    # stored rather than derived: `permalink` is read on *detached* instances, long after
+    # the session that could have looked at this row's siblings has closed.
+    duplicate_index: Mapped[int] = mapped_column(Integer, default=0, server_default=text("0"))
 
     # Relationships
     entity = relationship("Entity", back_populates="observations")
@@ -371,24 +415,17 @@ class Observation(Base):
         We can construct these because observations are always defined in
         and owned by a single entity.
 
-        Content is truncated to 200 chars to stay under PostgreSQL's
-        btree index limit of 2704 bytes.
+        `duplicate_index` is what keeps the address faithful when one note says the same
+        thing twice. It is 0 for the first observation carrying a given identity, so the
+        overwhelming majority of permalinks are byte-identical to what they have always
+        been; only the second and later twins gain a trailing ordinal.
         """
-        if len(self.content) > 200:
-            # Trigger: content exceeds the 200-char budget imposed by PostgreSQL's
-            # 2704-byte btree index row limit, so the permalink can only carry a prefix.
-            # Why: two distinct observations with the same category and an identical
-            # 200-char prefix would collide on the same synthetic permalink, and the
-            # search index (permalink-keyed upsert) silently drops the second one.
-            # Outcome: a short stable digest of the FULL content disambiguates
-            # truncated permalinks while staying well under the index limit.
-            digest = hashlib.sha256(self.content.encode("utf-8")).hexdigest()[:12]
-            content_for_permalink = f"{self.content[:200]}-{digest}"
-        else:
-            content_for_permalink = self.content
-        return generate_permalink(
-            f"{self.entity.permalink}/observations/{self.category}/{content_for_permalink}"
+        base = generate_permalink(
+            f"{self.entity.permalink}/{observation_permalink_tail(self.category, self.content)}"
         )
+        if not self.duplicate_index:
+            return base
+        return f"{base}/{self.duplicate_index}"
 
     @override
     def __repr__(self) -> str:  # pragma: no cover

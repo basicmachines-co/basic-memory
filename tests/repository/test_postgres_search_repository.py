@@ -142,6 +142,10 @@ async def test_postgres_search_repository_index_and_search(session_maker, test_p
         permalink="docs/coffee-brewing",
         file_path="docs/coffee-brewing.md",
         type="entity",
+        # An entity row addresses itself: every indexing path sets entity_id on all three
+        # row kinds, and note_type is resolved through it, so a row built by hand here
+        # must carry it too or it belongs to no note at all.
+        entity_id=1,
         metadata={"note_type": "note"},
         created_at=now,
         updated_at=now,
