@@ -943,6 +943,20 @@ def _read_flexible_point(
 # components its `period` does not vouch for, so `June 2026` and `2026` answer with one
 # range from two different datetimes. Comparing datetimes would refuse them.
 
+# A digit run no calendar component could be, and the reason this module refuses to hand
+# one to a reader at all. Python declines to convert a decimal string longer than
+# `sys.get_int_max_str_digits()` -- 4300 by default, and never settable below 640 -- into an
+# int, and dateparser converts the runs it finds without catching that. So a token carrying
+# a long enough run raised `ValueError` straight out of the reader and aborted the parse of
+# the *entire note*, taking every other observation on the page with it. That is worse than
+# any wrong date: elsewhere an unreadable qualifier costs its own token and nothing else.
+#
+# The cap is far below the smallest limit the runtime allows and far above the widest run a
+# point can legitimately carry -- six digits of a fractional second, four of a year -- so it
+# separates "no date" from "real date" without ever being the rule that decides a readable
+# token's fate.
+_UNREADABLE_DIGIT_RUN = re.compile(r"\d{32,}")
+
 # Two reference instants that disagree in every component -- year, month, day, weekday,
 # hour, minute, second -- so nothing filled in from "now" can coincide across them.
 _STABILITY_PROBE_BASES = (
@@ -1009,6 +1023,16 @@ def parse_authored_point(
     such a token as ordinary observation content.
     """
     point = text.strip()
+    # Trigger: a run of digits too long for any calendar component, or for Python to
+    #   convert at all.
+    # Why: the readers below call int() on the runs they find, so this is refused before
+    #   either sees it -- both of them reach dateparser, and neither can be trusted with a
+    #   token that makes it raise.
+    # Outcome: no date, the same answer as any other unreadable point, and the rest of the
+    #   note goes on indexing.
+    if _UNREADABLE_DIGIT_RUN.search(point):
+        return None
+
     early, late = _STABILITY_PROBE_BASES
     reading = _read_authored_point(point, date_order, early)
     if reading is None:
