@@ -823,6 +823,42 @@ def _read_iso_day(
     return TemporalRange(axis=TemporalRangeAxis.INSTANT, lower=instant, lower_inclusive=True)
 
 
+# A year-first, fully numeric date. It is the one non-ISO shape whose meaning is *fixed*
+# rather than guessed: `date_order` says which of the two trailing runs is the month, so
+# the text plus one setting determine the date exactly, and there is nothing left to
+# interpret. dateparser does not treat it that way. Handed `2026/13/01` under YMD it finds
+# month 13 impossible, silently moves the 13 into the day slot, and answers January 13 --
+# a date the configured order does not name and the author did not write, refiled
+# identically by every reindex. That is the `2026-13-01` disease in the one syntax the ISO
+# classifier deliberately does not claim.
+#
+# Only the year-first shape is judged here. With the year written last (`01/02/2026`)
+# dateparser abandons the configured order for its own fallback, so this module cannot say
+# what the text "should" mean without reimplementing those heuristics -- and reimplementing
+# them is how the two readings drift apart.
+_ORDERED_NUMERIC_DATE = re.compile(r"^(\d{4})/(\d{1,2})/(\d{1,2})$")
+
+# Whether the run after a leading year names the month. Only DMY puts the day there.
+_MONTH_LEADS_AFTER_YEAR: dict[DateOrder, bool] = {"YMD": True, "MDY": True, "DMY": False}
+
+
+def _ordered_numeric_date(point: str, date_order: DateOrder) -> date | None | Literal[False]:
+    """The date a year-first numeric token names under `date_order`.
+
+    `False` means the token is not that shape and this rule has nothing to say about it;
+    `None` means it is, and names no date on the calendar.
+    """
+    ordered = _ORDERED_NUMERIC_DATE.match(point)
+    if ordered is None:
+        return False
+    year, first, second = (int(run) for run in ordered.groups())
+    month, day = (first, second) if _MONTH_LEADS_AFTER_YEAR[date_order] else (second, first)
+    try:
+        return date(year, month, day)
+    except ValueError:
+        return None
+
+
 def _read_flexible_point(
     point: str, date_order: DateOrder, relative_base: datetime
 ) -> TemporalRange | None:
@@ -830,6 +866,17 @@ def _read_flexible_point(
     date_data = _date_data_parser(date_order, relative_base).get_date_data(point)
     moment = date_data.date_obj
     if moment is None:
+        return None
+
+    # Trigger: a year-first numeric date, whose meaning `date_order` fixes exactly.
+    # Why: the reader is free to move a run it cannot use where the author put it, and
+    #   `2026/13/01` under YMD comes back as January 13 rather than as the impossible month
+    #   the author actually typed. Holding it to the order is the same rule the ISO
+    #   classifier applies to `2026-13-01`, in the syntax that classifier does not claim.
+    # Outcome: refused when the order names no date, and when the reader answered with a
+    #   different one than the order names -- never quietly re-ordered.
+    ordered = _ordered_numeric_date(point, date_order)
+    if ordered is not False and moment.date() != ordered:
         return None
 
     # dateparser fills components the author did not write from the reference instant, so

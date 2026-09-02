@@ -1345,3 +1345,63 @@ def test_a_real_value_beside_absent_ones_still_builds_a_filter():
     assert temporal is not None
     assert temporal.at is not None
     assert temporal.at.value == "2026-07-28"
+
+
+# --- A numeric date must mean what the configured order says ---
+
+
+@pytest.mark.parametrize(
+    ("written", "date_order"),
+    [
+        # The reported shape: month 13 is impossible where YMD puts the month, so
+        # dateparser moved the 13 into the day slot and answered January 13 -- a date the
+        # order does not name and the author did not write.
+        ("2026/13/01", "YMD"),
+        ("2026/13/01", "MDY"),
+        # The same slip in the other slot, and a day the month has no room for.
+        ("2026/00/05", "YMD"),
+        ("2026/02/30", "YMD"),
+        # Read under DMY the runs swap roles, so it is the *other* spellings that name
+        # nothing: `12/31` is day 12 of month 31. Which token is malformed depends on the
+        # setting, which is exactly why the check has to consult it.
+        ("2026/12/31", "DMY"),
+        ("2026/03/31", "DMY"),
+    ],
+)
+def test_a_numeric_date_the_configured_order_cannot_name_is_unread(written: str, date_order):
+    """A fully numeric date is machine syntax whose reading `date_order` fixes.
+
+    There is nothing left to guess once the setting is known, so a run the order cannot
+    use where the author put it is a typo, not an invitation to try the other slot. The
+    lenient reader disagrees: it silently reassigns the components and answers with a real
+    date, which every reindex then reproduces. This is `2026-13-01`'s disease in the one
+    syntax the ISO classifier deliberately does not claim.
+    """
+    assert parse_authored_point(written, date_order=date_order) is None
+
+
+@pytest.mark.parametrize(
+    ("written", "date_order", "literal"),
+    [
+        # The same tokens under an order that *can* name them still read, so the guard is
+        # reading the setting rather than banning a shape.
+        ("2026/13/01", "DMY", "[2026-01-13,)"),
+        ("2026/12/31", "YMD", "[2026-12-31,)"),
+        # The spellings the guard test pins, across every order.
+        ("2026/03/04", "YMD", "[2026-03-04,)"),
+        ("2026/03/04", "DMY", "[2026-04-03,)"),
+        ("2026/03/04", "MDY", "[2026-03-04,)"),
+        ("2026/1/5", "YMD", "[2026-01-05,)"),
+        # Year-last forms are left to the reader's own fallback, untouched: predicting it
+        # here would mean reimplementing heuristics that could then drift out of step.
+        ("10/07/2026", "YMD", "[2026-07-10,)"),
+        ("10/07/2026", "MDY", "[2026-10-07,)"),
+        ("01/02/2026", "YMD", "[2026-02-01,)"),
+    ],
+)
+def test_a_numeric_date_the_order_can_name_still_reads(written: str, date_order, literal: str):
+    """Refusing an impossible ordering must cost nothing that the ordering allows."""
+    span = parse_authored_point(written, date_order=date_order)
+
+    assert span is not None
+    assert str(span) == literal
