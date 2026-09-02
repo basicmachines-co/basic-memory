@@ -989,6 +989,18 @@ def _read_authored_point(
     point: str, date_order: DateOrder, relative_base: datetime
 ) -> TemporalRange | None:
     """Read one already-stripped point, treating `relative_base` as the present."""
+    # Trigger: a run of digits too long for any calendar component, or for Python to
+    #   convert at all.
+    # Why: every path below reaches dateparser, which calls int() on the runs it finds and
+    #   does not catch the runtime's refusal to convert one. Guarding here rather than in
+    #   `parse_authored_point` is the point: this is the one function every reading passes
+    #   through, and `names_only_a_calendar_period` reaches it by its own route, so a guard
+    #   on the public entry alone left the diagnostic path still raising.
+    # Outcome: no date, the same answer as any other unreadable point, and the rest of the
+    #   note goes on indexing.
+    if _UNREADABLE_DIGIT_RUN.search(point):
+        return None
+
     match _classify_authored_point(point):
         case _IsoDay() as iso:
             return _read_iso_day(iso, point, date_order, relative_base)
@@ -1043,16 +1055,6 @@ def parse_authored_point(
     such a token as ordinary observation content.
     """
     point = text.strip()
-    # Trigger: a run of digits too long for any calendar component, or for Python to
-    #   convert at all.
-    # Why: the readers below call int() on the runs they find, so this is refused before
-    #   either sees it -- both of them reach dateparser, and neither can be trusted with a
-    #   token that makes it raise.
-    # Outcome: no date, the same answer as any other unreadable point, and the rest of the
-    #   note goes on indexing.
-    if _UNREADABLE_DIGIT_RUN.search(point):
-        return None
-
     early, late = _STABILITY_PROBE_BASES
     reading = _read_authored_point(point, date_order, early)
     if reading is None:

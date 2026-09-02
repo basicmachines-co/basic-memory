@@ -953,3 +953,21 @@ def test_an_oversized_numeric_qualifier_costs_only_its_own_token():
     assert observation.content == f"@{oversized} the statement"
     # The line that had nothing to do with it is indexed exactly as it always was.
     assert second.content == "a second observation"
+
+
+def test_an_oversized_run_behind_a_word_costs_only_its_own_token():
+    """The truncation diagnostic must not crash the note the qualifier could not.
+
+    A word-led token is refused by the reader safely, and then the "did you mean to quote
+    this?" check asks the same question by another route. While that route was unguarded,
+    the note aborted from the diagnostic rather than from the parse -- so the token stayed
+    content and the page was lost anyway.
+    """
+    oversized = "x" + "9" * 5000
+    observation, second = parse(
+        f"- [note] @occurred:{oversized} 2026 statement\n- [note] a second observation\n"
+    ).observations
+
+    assert observation.temporal == []
+    assert observation.content == f"@occurred:{oversized} 2026 statement"
+    assert second.content == "a second observation"

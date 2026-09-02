@@ -25,6 +25,7 @@ from basic_memory.temporal import (
     canonical_bound,
     parse_authored_point,
     parse_point,
+    names_only_a_calendar_period,
     parse_range_literal,
     parse_temporal_filter,
 )
@@ -1464,3 +1465,18 @@ def test_a_digit_run_just_inside_the_limit_still_reads_as_no_date():
     """The guard reports "not a date", never an error, on either side of the boundary."""
     assert parse_authored_point("9" * 4299) is None
     assert parse_authored_point("9" * 4301) is None
+
+
+def test_the_diagnostic_reader_is_guarded_too():
+    """The oversized-run guard has to sit where *every* reading passes through.
+
+    `names_only_a_calendar_period` exists to explain a refusal, and it reaches the reader by
+    its own route rather than through `parse_authored_point`. A guard on the public entry
+    alone therefore left this path raising, and a word-led token is what finds it: the point
+    itself is refused safely, and then the truncation diagnostic asks the same question again
+    and crashes the note.
+    """
+    word_led = "x" + "9" * 5000
+
+    assert parse_authored_point(word_led) is None
+    assert names_only_a_calendar_period(word_led) is False
