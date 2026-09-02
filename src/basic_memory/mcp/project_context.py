@@ -1053,9 +1053,11 @@ async def detect_project_from_identifier_prefix(
 #      cannot resolve at all (it refuses, below). Reading the leading segments
 #      as a route is then the only way the input can mean anything, so route
 #      wins.
-#   3. Otherwise the session addresses one project, the path already resolves
-#      inside it, and route parsing would take a working input and send it to
-#      another tenant. Path wins.
+#   3. Otherwise the session addresses *exactly* one project, the path already
+#      resolves inside it, and route parsing would take a working input and send
+#      it to another tenant. Path wins. Exactly one, because with none there is
+#      no project for the path to resolve inside — nothing is taken away, and
+#      the empty mount table cannot refuse on the caller's behalf either.
 #
 # Rule 3 (mounts) sits above all of this: a name `ls /` advertises always
 # addresses that mount.
@@ -1398,7 +1400,7 @@ async def resolve_project_path_route(
     # --- Rule 4: explicitly workspace-qualified spellings for everything else ---
     # Trigger: no advertised mount claimed the leading segments, the input has
     #   more than one segment, no project was named, and this session addresses
-    #   more than one project.
+    #   any number of projects other than exactly one.
     # Why: '<workspace>/<project>[/<path>]' addresses projects in workspaces this
     #   session's own route does not list, so they are absent from the mount
     #   table above and would otherwise be unreachable. But 'acme/docs/foo' is
@@ -1416,7 +1418,7 @@ async def resolve_project_path_route(
         and "/" in candidate
         and explicit is None
         and addressable is not None
-        and len(addressable) > 1
+        and len(addressable) != 1
     ):
         qualified = await _detect_workspace_qualified_route(candidate, config, context=context)
         if qualified is not None:
