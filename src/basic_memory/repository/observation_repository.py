@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.interfaces import LoaderOption
 
 from basic_memory.models import Observation
+from basic_memory.models.knowledge import observation_permalink_tail
 from basic_memory.repository.relation_repository import current_relation_generation_statement
 from basic_memory.repository.repository import Repository
 from basic_memory.temporal import TemporalAssertion
@@ -142,17 +143,33 @@ class ObservationRepository(Repository[Observation]):
             return ObservationGenerationWriteResult(generation_is_current=False)
 
         await self.delete_by_fields(session, entity_id=entity_id)
-        rows = [
-            Observation(
-                project_id=self.project_id,
-                entity_id=entity_id,
-                content=obs.content,
-                category=obs.category,
-                context=obs.context,
-                tags=obs.tags,
+        # A note may say the same thing twice and mean two different things -- most
+        # sharply when a temporal qualifier or a (context) is what separates them, since
+        # both are peeled off before the content reaches this row. The permalink is built
+        # from what survives that peel, so those twins would address one row, and the
+        # permalink-keyed search index would keep only the first (SPEC-82).
+        #
+        # This is the one place that sees a note's whole observation set in document
+        # order, so it is where the ordinal that separates them can be counted at all.
+        # `observation_permalink_tail` is shared with `Observation.permalink` so the
+        # count is taken over exactly the identity the address is built from.
+        duplicates_seen: dict[str, int] = {}
+        rows = []
+        for obs in observations:
+            identity = observation_permalink_tail(obs.category, obs.content)
+            duplicate_index = duplicates_seen.get(identity, 0)
+            duplicates_seen[identity] = duplicate_index + 1
+            rows.append(
+                Observation(
+                    project_id=self.project_id,
+                    entity_id=entity_id,
+                    content=obs.content,
+                    category=obs.category,
+                    context=obs.context,
+                    tags=obs.tags,
+                    duplicate_index=duplicate_index,
+                )
             )
-            for obs in observations
-        ]
         await self.add_all_no_return(session, rows)
         # add_all_no_return flushes, so every row now carries its database id.
         # Reading them here, inside the same transaction, is what lets the temporal

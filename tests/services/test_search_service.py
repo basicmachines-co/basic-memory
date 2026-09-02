@@ -274,13 +274,32 @@ async def test_after_date_uses_updated_at(search_service):
 
 @pytest.mark.asyncio
 async def test_search_type(search_service, test_graph):
-    """Test search filters."""
+    """`note_types` scopes results to notes of a type, not to entity rows.
 
-    # Should find only type
+    This test used to assert every result was an ENTITY row, which recorded a defect
+    rather than an intention: a note's type lives in its frontmatter, so only its entity
+    row carried it, and reading the type off each row dropped every observation and
+    relation belonging to the very same note. That is what made `note_types` unsatisfiable
+    together with a valid-time filter, since authored time lives on observation rows
+    (SPEC-82) -- the two predicates could not both be true of any row.
+
+    Restricting *which kind* of row may match is `entity_types`' job, pinned by the test
+    directly below. The two axes are independent, and a query that sets neither returns
+    all three row kinds, so scoping by note type must not silently change the kinds.
+    """
     results = await search_service.search(SearchQuery(note_types=["test"]))
     assert len(results) > 0
-    for r in results:
-        assert r.type == SearchItemType.ENTITY
+
+    # The three notes the fixture gives `note_type="test"`; "deep" and "deeper" differ.
+    typed_entity_ids = {
+        test_graph["root"].id,
+        test_graph["connected1"].id,
+        test_graph["connected2"].id,
+    }
+    # Every row belongs to a note of the requested type, whatever kind of row it is.
+    assert {r.entity_id for r in results} <= typed_entity_ids
+    # And rows other than the notes' own now survive the filter, which is the fix.
+    assert {r.type for r in results} - {SearchItemType.ENTITY}
 
 
 @pytest.mark.asyncio
