@@ -60,10 +60,11 @@ a point, `- [decision] @effective:2026-07-27 ...` / `- [decision] @2026-07-27
 ...` — and these filters match against that authored interval. A point means
 the span its precision covers: `@2026` is that year, `@2026-06` that month,
 and `@2026-06-10` from that date onward. An unquoted point is one
-whitespace-delimited token; a multi-word, relative, or month-only date goes in
-double quotes, which end the token at the closing quote:
-`@occurred:"June 10, 2026"`, `@occurred:"2 days ago"`, `@"June 2026"`. It is a
-separate axis from `after_date`, which keeps filtering last-indexed time.
+whitespace-delimited token; a multi-word or month-only date goes in double
+quotes, which end the token at the closing quote: `@occurred:"June 10, 2026"`,
+`@"June 2026"`. A relative date is not accepted in a qualifier at all — it would
+name a different span on every index pass — so write the date it should mean. It
+is a separate axis from `after_date`, which keeps filtering last-indexed time.
 Bounds follow
 PostgreSQL range conventions, calendar dates and instants never convert into
 one another, and a source with no qualifier is excluded from any valid-time
@@ -134,8 +135,10 @@ bm tool search-notes "conflict error" --project manual --page-size 2
 - [gotcha] valid_at and valid_overlaps never mix calendar dates with instants: a date query matches only date ranges and an instant query only instant ranges, so `2026-07-27` and `2026-07-27T00:00:00Z` are different questions #valid-time
 - [gotcha] A timestamp written without an offset is read as UTC, in an authored qualifier and in a filter alike — same convention as every other naive datetime in Basic Memory #valid-time
 - [gotcha] An authored token that does not read as a date is left as ordinary observation content with no warning; only a qualifier the author plainly meant is reported — an unknown kind (`@asserted:2026-06-10`), an unterminated quote, or a date the one-token rule truncated #valid-time
-- [gotcha] An unquoted authored point is one whitespace-delimited token: `@occurred:2026-06-10`, `@occurred:03/04/2026` and `@occurred:yesterday` work, but a multi-word date like `@occurred:June 10, 2026` is left as content because nothing can tell where it ends #valid-time
-- [gotcha] Double quotes lift the one-token rule and end the point at the closing quote, so `@occurred:"June 10, 2026"`, `@occurred:"2 days ago"` and `@"June 2026"` all file — inside quotes even a month-only or year-only date is taken, since the author delimited it #valid-time
+- [gotcha] An unquoted authored point is one whitespace-delimited token: `@occurred:2026-06-10` and `@occurred:03/04/2026` work, but a multi-word date like `@occurred:June 10, 2026` is left as content because nothing can tell where it ends #valid-time
+- [gotcha] Double quotes lift the one-token rule and end the point at the closing quote, so `@occurred:"June 10, 2026"` and `@"June 2026"` both file — inside quotes even a month-only or year-only date is taken, since the author delimited it #valid-time
+- [gotcha] A relative date is never filed as a qualifier, quoted or not: `@occurred:yesterday`, `@occurred:"2 days ago"` and a bare month name like `@occurred:March` each name a different span depending on when the note is indexed, so they stay ordinary content — quoting settles where a token ends, not what a date means #valid-time
+- [gotcha] Relative wording still works for `timeframe` in recent-activity and build-context, which ask about edit time rather than authored time — only the valid-time qualifier requires a date that means the same thing on every pass #valid-time
 - [gotcha] Only `"` opens a quoted point, never `'`, and an unterminated quote is reported rather than swallowing the rest of the line #valid-time
 - [gotcha] `@occurred:03/04/2026` resolves by the `date_order` setting (YMD/DMY read it as 3 April, MDY as 4 March); ISO dates are never re-guessed #valid-time
 
