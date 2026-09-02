@@ -103,6 +103,7 @@ This queries the `version` key inside a `schema` object in frontmatter.
 - `$in` and array-contains require non-empty lists.
 - `$between` requires exactly two values `[min, max]`.
 - `null` is an is-null match and only valid as a plain equality value.
+- Comparison and `$between` bounds must be finite numbers. A magnitude no float can hold — a 400-digit integer, which JSON keeps as an ordinary `int` — is refused as a filter error rather than compared against an infinite bound.
 
 ## MCP Tool — `search_notes`
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+import math
 import re
 from typing import Any, Iterable, List, cast
 
@@ -94,9 +95,36 @@ def _normalize_scalar(value: Any) -> Any:
     return value
 
 
-def _normalize_numeric(value: object) -> float:
-    """Normalize a value already proven numeric by _is_numeric_value."""
-    return float(cast(str | int | float, value))
+def _normalize_numeric(value: object, raw_key: str) -> float:
+    """Normalize a value already proven numeric by _is_numeric_value.
+
+    A comparison bound has to be a finite float — it is what the SQL predicate
+    compares against, and neither an infinity nor a magnitude beyond float names
+    a value any indexed note can hold.
+
+    Trigger: a number too large for a float reaches a comparison or a range
+             bound. `json.loads` keeps a 400-digit literal as an ordinary finite
+             `int`, so it passes _is_numeric_value and every check before this.
+    Why: the two spellings failed differently and both failed badly. `float()`
+         raises OverflowError on the int, and OverflowError is not a ValueError,
+         so the search router's translation missed it and the request became a
+         500 for what is a filter typo. The same magnitude written as a string
+         does not raise at all — `float()` answers it with inf — which silently
+         made the bound infinite, matching every note or none.
+    Outcome: one refusal covering both, worded like this module's other filter
+             errors, so every surface that builds filters (find's predicates,
+             search_notes' metadata_filters) reports it as the bad value it is
+             and the router answers 400.
+    """
+    try:
+        normalized = float(cast(str | int | float, value))
+    except OverflowError:
+        normalized = math.inf
+    if not math.isfinite(normalized):
+        raise ValueError(
+            f"numeric metadata filter value for '{raw_key}' is not a finite number: {value}"
+        )
+    return normalized
 
 
 def _refuse_null(values: Iterable[Any], raw_key: str, op: str) -> None:
@@ -163,7 +191,7 @@ def parse_metadata_filters(filters: dict[str, Any]) -> List[ParsedMetadataFilter
             if op in _COMPARISON_OPERATORS:
                 _refuse_null([value], raw_key, op)
                 if _is_numeric_value(value):
-                    normalized = _normalize_numeric(value)
+                    normalized = _normalize_numeric(value, raw_key)
                     comparison = "numeric"
                 else:
                     normalized = _normalize_scalar(value)
@@ -183,7 +211,7 @@ def parse_metadata_filters(filters: dict[str, Any]) -> List[ParsedMetadataFilter
                     raise ValueError(f"$between requires [min, max] for '{raw_key}'")
                 _refuse_null(value, raw_key, op)
                 if _is_numeric_collection(value):
-                    normalized = [_normalize_numeric(v) for v in value]
+                    normalized = [_normalize_numeric(v, raw_key) for v in value]
                     comparison = "numeric"
                 else:
                     normalized = [_normalize_scalar(v) for v in value]
