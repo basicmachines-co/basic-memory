@@ -19,6 +19,7 @@ from basic_memory.services.search_service import (
     describe_search_criteria,
 )
 from basic_memory.temporal import TemporalQualifierError, TimeKind
+from basic_memory.utils import generate_permalink
 
 # The entity is created "now"; the qualifier claims June-July 2026. Keeping the two
 # ranges disjoint is what makes acceptance case 11 testable at all.
@@ -363,6 +364,13 @@ async def test_a_duplicate_ordinal_cannot_be_taken_by_an_authors_own_text(
 
     first, second, natural = entity.observations
     assert len({first.permalink, second.permalink, natural.permalink}) == 3
+
+    # The address a result advertises has to survive being looked up. `build_context`
+    # re-normalizes every memory:// URL through `generate_permalink`, so a marker that
+    # normalization rewrites would send the reader to a different observation -- and with
+    # a natural `redis/1` on the page, to that one specifically.
+    for observation in (first, second, natural):
+        assert generate_permalink(observation.permalink) == observation.permalink
 
     # Each of the three windows answers with its own observation, none lost.
     for window, expected in (

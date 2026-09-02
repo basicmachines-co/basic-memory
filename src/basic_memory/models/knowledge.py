@@ -347,14 +347,24 @@ class NoteSection(Base):
 # each believe they were the first of their kind.
 OBSERVATION_DEFAULT_CATEGORY = "note"
 
-# Opens the permalink segment carrying a duplicate ordinal. `generate_permalink` replaces
-# every character outside `[a-z0-9/-.]` (plus CJK) with a hyphen, so a tail generated from
-# an author's own text can never contain `~` -- which is exactly what makes this a
-# namespace the ordinal can own rather than one it shares with real content.
-OBSERVATION_DUPLICATE_MARK = "~"
+# The segment every observation tail opens with, and the one place a duplicate ordinal can
+# safely live. Two requirements pull against each other: the ordinal must sit where an
+# author's own text can never land, and it must survive `generate_permalink`, because
+# lookup re-normalizes a memory:// URL before resolving it.
+#
+# Nothing appended *after* the content can do both. Content may itself contain `/`, so any
+# trailing segment is a position content can also occupy, and the only characters that
+# would escape that are exactly the ones normalization strips -- a marker that survives
+# content is erased by lookup, and one that survives lookup is reachable by content.
+#
+# The leading segment has neither problem. It is generated here rather than authored, and
+# every tail opens with it literally, so no observation can produce `observations-2` however
+# its category or content is spelled; and it is ordinary lowercase-and-hyphen text, so
+# normalization returns it unchanged.
+OBSERVATION_SEGMENT = "observations"
 
 
-def observation_permalink_tail(category: str | None, content: str) -> str:
+def observation_permalink_tail(category: str | None, content: str, duplicate_index: int = 0) -> str:
     """The part of an observation's permalink that distinguishes it within its note.
 
     This is the single definition of what makes two observations of one note share an
@@ -398,7 +408,10 @@ def observation_permalink_tail(category: str | None, content: str) -> str:
         content_for_permalink = f"{content[:200]}-{digest}"
     else:
         content_for_permalink = content
-    return generate_permalink(f"observations/{category}/{content_for_permalink}")
+    segment = (
+        OBSERVATION_SEGMENT if not duplicate_index else f"{OBSERVATION_SEGMENT}-{duplicate_index}"
+    )
+    return generate_permalink(f"{segment}/{category}/{content_for_permalink}")
 
 
 class Observation(Base):
@@ -445,19 +458,16 @@ class Observation(Base):
         overwhelming majority of permalinks are byte-identical to what they have always
         been; only the second and later twins gain a trailing ordinal.
 
-        That ordinal lives in a segment natural content cannot reach. `generate_permalink`
-        emits only `[a-z0-9/-.]` plus CJK, so no observation's own text can ever slug to a
-        segment beginning with `~` -- whereas a plain `/1` is a segment content *can*
-        produce, and an observation whose text slugged to `foo/1` would then collide with
-        the second twin of `foo` and cost one of them its search row. Reserving the mark
-        is what makes the ordinal a namespace rather than a guess about what authors write.
+        That ordinal rides on the leading `observations` segment rather than trailing the
+        content, because only that segment satisfies both things it has to. See
+        `OBSERVATION_SEGMENT`: a trailing marker is either reachable by content, which puts
+        the collision back, or erased by the normalization every memory:// lookup performs,
+        which makes the advertised address resolve to a different observation.
         """
-        base = generate_permalink(
-            f"{self.entity.permalink}/{observation_permalink_tail(self.category, self.content)}"
+        return generate_permalink(
+            f"{self.entity.permalink}/"
+            f"{observation_permalink_tail(self.category, self.content, self.duplicate_index)}"
         )
-        if not self.duplicate_index:
-            return base
-        return f"{base}/{OBSERVATION_DUPLICATE_MARK}{self.duplicate_index}"
 
     @override
     def __repr__(self) -> str:  # pragma: no cover
