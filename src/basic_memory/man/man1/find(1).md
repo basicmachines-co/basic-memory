@@ -106,7 +106,9 @@ confident zero.
 Numbers must be finite. `score=NaN`, `score=Infinity` and an overflowing
 exponent like `score=1e999` are refused by the grammar rather than failing
 later as an encoding error; quote one (`score="NaN"`) to match the literal
-text.
+text. A magnitude no float can hold — a 400-digit integer, which JSON keeps as
+an ordinary finite `int` — travels, and the search API refuses it as the filter
+error it is rather than as a server error.
 
 Keys accept dot-paths into nested frontmatter (`review.approved`), and
 `note_type` is accepted as a spelling of the frontmatter `type` key, matching

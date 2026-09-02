@@ -83,6 +83,44 @@ def test_null_refused_outside_equality(filters):
         parse_metadata_filters(filters)
 
 
+_TOO_LARGE_FOR_FLOAT = 10**400
+
+
+@pytest.mark.parametrize(
+    "filters",
+    [
+        {"score": {"$gt": _TOO_LARGE_FOR_FLOAT}},
+        {"score": {"$lte": -_TOO_LARGE_FOR_FLOAT}},
+        {"score": {"$between": [0, _TOO_LARGE_FOR_FLOAT]}},
+        # The same magnitude spelled as a numeric string. float() does not raise
+        # for this one — it answers inf — so it reached the SQL bound intact.
+        {"score": {"$gte": "9" * 400}},
+        {"score": {"$between": ["0", "9" * 400]}},
+    ],
+)
+def test_oversized_numeric_bound_is_a_filter_error(filters):
+    """REGRESSION: an unrepresentable bound was a server error, or worse, silent.
+
+    json.loads keeps a 400-digit literal as a finite Python int, so it passed
+    _is_numeric_value and every check before it, then reached float() — which
+    raises OverflowError. OverflowError is not a ValueError, and ValueError is
+    the only thing the search router translates, so the request became a 500 for
+    what is a filter typo. The string spelling of the same magnitude did not
+    raise at all: float() answers it with inf, making the bound infinite so the
+    comparison matched every note or none, silently.
+    """
+    with pytest.raises(ValueError, match="not a finite number"):
+        parse_metadata_filters(filters)
+
+
+def test_oversized_numeric_refusal_names_the_key():
+    """Worded like this module's other filter errors: which key, and what is wrong."""
+    with pytest.raises(ValueError) as excinfo:
+        parse_metadata_filters({"schema.confidence": {"$gt": _TOO_LARGE_FOR_FLOAT}})
+
+    assert "numeric metadata filter value for 'schema.confidence'" in str(excinfo.value)
+
+
 def test_invalid_filter_key():
     with pytest.raises(ValueError):
         parse_metadata_filters({"bad key": "value"})

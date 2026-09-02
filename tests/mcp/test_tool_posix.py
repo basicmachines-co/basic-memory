@@ -1300,6 +1300,32 @@ async def test_find_meta_without_fields_still_returns_the_full_search_shape(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "predicate",
+    [
+        f"score>{'9' * 400}",
+        f"score<=-{'9' * 400}",
+        f"score between 0,{'9' * 400}",
+    ],
+)
+async def test_find_meta_oversized_integer_refuses_as_a_filter_error(
+    client, test_project, meta_notes, predicate
+):
+    """REGRESSION: a 400-digit comparison bound came back as a server error.
+
+    The grammar's finite-number check reads what json.loads built, and
+    json.loads keeps an oversized *integer* literal as an ordinary finite
+    Python int — only the float spellings (NaN, Infinity, 1e999) are caught
+    there. So the int travelled, and _normalize_numeric raised OverflowError
+    server-side. OverflowError is not a ValueError, which is the only thing the
+    search router translates, so a predicate typo surfaced as a 500 rather than
+    a refusal naming the filter.
+    """
+    with pytest.raises(ToolError, match="not a finite number"):
+        await find(meta=[predicate], project=test_project.name)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("field", ["review..approved", ".owner", "owner."])
 async def test_find_meta_malformed_field_path_refuses_without_reading_anything(
     client, test_project, meta_notes, monkeypatch, field

@@ -92,6 +92,9 @@ against the value and a comparison with null is never true.
 - `$in` and array-contains require non-empty lists
 - `$between` requires exactly `[min, max]`
 - `null` is an is-null match and only valid as a plain equality value
+- Comparison and `$between` bounds must be finite numbers — a magnitude no float
+  can hold (a 400-digit integer, which JSON keeps as an ordinary `int`) is
+  refused rather than compared against an infinite bound
 - Metadata filters match Markdown notes only — indexed PDFs, images and other
   regular files carry no frontmatter and are never hits, not even for `null`
 
