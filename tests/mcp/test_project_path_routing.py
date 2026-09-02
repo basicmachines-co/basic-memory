@@ -1035,6 +1035,30 @@ async def test_sole_project_keeps_workspace_shaped_paths_at_home(cross_workspace
 
 
 @pytest.mark.asyncio
+async def test_named_project_strips_its_own_qualified_prefix(cross_workspace_session):
+    """Rule 2 — an agreeing prefix strips — has to hold for the qualified
+    spelling too, and it is decidable without any network.
+
+    Only rule 4's discovery used to recognize a workspace-qualified project in
+    the path, and the precedence order now declines to run that when a project
+    was named. So the caller's own two spellings of one project stopped
+    agreeing: 'foo' was read as 'acme/docs/foo'. It also broke the round trip,
+    since a routed ls("acme/docs") returns exactly this prefixed form.
+    """
+    cross_workspace_session(session_projects=("research",), default_projects=("docs",))
+
+    route = await resolve_project_path_route("acme/docs/foo", project="acme/docs", project_id=None)
+
+    assert route == ProjectPathRoute(project="acme/docs", path="foo", stripped=True)
+
+    # A prefix that is NOT the named project still stays part of the path.
+    unrelated = await resolve_project_path_route(
+        "acme/docs/foo", project="research", project_id=None
+    )
+    assert unrelated.path == "acme/docs/foo"
+
+
+@pytest.mark.asyncio
 async def test_named_project_keeps_the_rest_of_the_path_inside_it(cross_workspace_session):
     """An explicit project settles route-versus-path: the caller said which
     project they mean, so the remaining path is inside it and nothing reroutes.

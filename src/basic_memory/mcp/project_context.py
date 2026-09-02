@@ -1397,6 +1397,22 @@ async def resolve_project_path_route(
             detected = mount.name
             mount_project_id = mount.external_id
 
+    # --- Rule 3b: the explicit project's own permalink, spelled as the prefix ---
+    # Trigger: a project was named, no mount claimed the segments, and the path
+    #   begins with that same project's permalink.
+    # Why: rule 2 already strips a prefix that agrees with the explicit project;
+    #   that only worked for spellings the mount table recognizes, so a
+    #   workspace-qualified project reached it solely through rule 4's discovery
+    #   — which the precedence order now (correctly) declines to run when a
+    #   project was named. The agreement is decidable right here without any
+    #   network: it is the caller's own two spellings of one project.
+    # Outcome: cat("acme/docs/foo", project="acme/docs") reads 'foo', and a path
+    #   from a routed ls("acme/docs") round-trips with the project param set.
+    if detected is None and explicit is not None:
+        explicit_claim = _split_project_permalink_prefix(candidate, (generate_permalink(explicit),))
+        if explicit_claim is not None:
+            detected, remainder = explicit, explicit_claim[1]
+
     # --- Rule 4: explicitly workspace-qualified spellings for everything else ---
     # Trigger: no advertised mount claimed the leading segments, the input has
     #   more than one segment, no project was named, and this session addresses
