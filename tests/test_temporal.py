@@ -1378,6 +1378,16 @@ def test_a_real_value_beside_absent_ones_still_builds_a_filter():
         ("12/31/2026", "YMD"),
         # And under DMY, which is day-first by name rather than by fallback.
         ("01/13/2026", "DMY"),
+        # Every separator a fully numeric date is written with, not just the slash this
+        # rule was first written for. Each of these reached the reader and came back as
+        # January 13 while the check enumerated punctuation instead of describing it.
+        ("2026.13.01", "YMD"),
+        ("2026 13 01", "YMD"),
+        ("2026_13_01", "YMD"),
+        ("2026\\13\\01", "YMD"),
+        ("13.01.2026", "MDY"),
+        ("13-01-2026", "MDY"),
+        ("13 01 2026", "MDY"),
     ],
 )
 def test_a_numeric_date_the_configured_order_cannot_name_is_unread(written: str, date_order):
@@ -1417,6 +1427,12 @@ def test_a_numeric_date_the_configured_order_cannot_name_is_unread(written: str,
         # A two-digit year names no shape this rule can state -- which run is even the year
         # is the reader's call -- so it is left alone.
         ("03/04/26", "MDY", "[2026-03-04,)"),
+        # The same separators carrying a date the order *can* name still read, so widening
+        # the rule cost none of them.
+        ("2026.03.04", "YMD", "[2026-03-04,)"),
+        ("2026 03 04", "YMD", "[2026-03-04,)"),
+        ("2026_03_04", "YMD", "[2026-03-04,)"),
+        ("03.04.2026", "MDY", "[2026-03-04,)"),
     ],
 )
 def test_a_numeric_date_the_order_can_name_still_reads(written: str, date_order, literal: str):

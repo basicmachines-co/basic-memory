@@ -832,8 +832,13 @@ def _read_iso_day(
 # January 13, a date the configured order does not name and the author did not write, refiled
 # identically by every reindex. That is the `2026-13-01` disease in the one syntax the ISO
 # classifier deliberately does not claim.
-_YEAR_FIRST_NUMERIC_DATE = re.compile(r"^(\d{4})/(\d{1,2})/(\d{1,2})$")
-_YEAR_LAST_NUMERIC_DATE = re.compile(r"^(\d{1,2})/(\d{1,2})/(\d{4})$")
+# The separator is `(\D)` matched twice rather than a list of the punctuation people
+# use, because enumerating it is how this rule got half-applied the first time: written
+# for `/` alone it left `2026.13.01`, `2026 13 01` and `2026_13_01` reaching the reader
+# and coming back as January 13. What makes a token fully numeric is that its runs are
+# digits and whatever stands between them does not, so that is what the pattern says.
+_YEAR_FIRST_NUMERIC_DATE = re.compile(r"^(\d{4})(\D)(\d{1,2})\2(\d{1,2})$")
+_YEAR_LAST_NUMERIC_DATE = re.compile(r"^(\d{1,2})(\D)(\d{1,2})\2(\d{4})$")
 
 # Whether the first of the two non-year runs names the month, given the configured order and
 # where the year was written. Five of the six are the order read literally. The sixth is not:
@@ -865,7 +870,10 @@ def _ordered_numeric_date(point: str, date_order: DateOrder) -> date | None | Li
     if ordered is None:
         return False
 
-    runs = [int(run) for run in ordered.groups()]
+    # groups() is (run, separator, run, run); the separator is captured only so the
+    # backreference can require the same one twice.
+    year_run, _separator, second_run, third_run = ordered.groups()
+    runs = [int(year_run), int(second_run), int(third_run)]
     year = runs.pop(0) if year_first else runs.pop()
     first, second = runs
     month, day = (
