@@ -224,6 +224,43 @@ async def test_colliding_mount_permalinks_refuse_rather_than_pick(config_manager
 
 
 @pytest.mark.asyncio
+async def test_colliding_mounts_only_fail_the_paths_that_name_them(
+    config_manager, tmp_path_factory
+):
+    """An ambiguity fails the calls that depend on it, and no others.
+
+    Raising while building the lookup table rejected every non-empty path in the
+    session, so an unrelated project became unreachable and the exact-name
+    escape hatch the error itself recommends did not work — that call never goes
+    through the ambiguous lookup at all.
+    """
+    config = config_manager.load_config()
+    config.projects["My Docs"] = ProjectEntry(path=str(tmp_path_factory.mktemp("dup-a")))
+    config.projects["my-docs"] = ProjectEntry(path=str(tmp_path_factory.mktemp("dup-b")))
+    config.projects["Other"] = ProjectEntry(path=str(tmp_path_factory.mktemp("dup-other")))
+    config_manager.save_config(config)
+
+    # A path claimed by an unrelated mount is unaffected.
+    unrelated = await resolve_project_path_route("other/note", project=None, project_id=None)
+    assert unrelated == ProjectPathRoute(project="Other", path="note", stripped=True)
+
+    # So is the escape hatch, for the unrelated project...
+    hatch = await resolve_project_path_route("note", project="Other", project_id=None)
+    assert hatch == ProjectPathRoute(project="Other", path="note", stripped=False)
+
+    # ...and for either side of the collision, which naming exactly must reach.
+    for name in ("My Docs", "my-docs"):
+        route = await resolve_project_path_route("note", project=name, project_id=None)
+        assert route == ProjectPathRoute(project=name, path="note", stripped=False)
+
+    # The path that genuinely names both still refuses, naming both.
+    with pytest.raises(AmbiguousMountError) as excinfo:
+        await resolve_project_path_route("my-docs/note", project=None, project_id=None)
+    assert "My Docs" in str(excinfo.value)
+    assert "my-docs" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
 async def test_sibling_slash_bearing_project_conflicts_with_its_prefix(
     config_manager, tmp_path_factory
 ):
