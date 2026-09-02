@@ -222,17 +222,19 @@ async def test_get_project_info(project_service: ProjectService, test_graph, tes
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name", ["💥", "!!!", "---", "/"])
+@pytest.mark.parametrize("name", ["💥", "!!!", "---", "/", "/foo", "/a/b"])
 async def test_add_project_rejects_names_without_a_permalink(
     project_service: ProjectService, name: str
 ):
     """A project's permalink is its address, and generate_permalink reduces pure
     punctuation or emoji to "".
 
-    Such a project advertises itself at the root as '/', is indistinguishable
-    from every other one like it, and cannot be entered by the path it
-    advertises — breaking the rule that anything the mount view lists is
-    addressable. Refused where projects are created, so it cannot exist.
+    The resolver matches a permalink segment by segment against a path whose
+    leading slashes are already stripped, so any empty segment is unmatchable:
+    "" advertises at the root as '/', indistinguishable from every other such
+    project, and '/foo' advertises '//foo' and cannot be entered. Either breaks
+    the rule that anything the mount view lists is addressable, so both are
+    refused where projects are created.
     """
     with tempfile.TemporaryDirectory() as temp_dir:
         with pytest.raises(ValueError, match="no usable permalink"):
