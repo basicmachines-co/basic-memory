@@ -387,21 +387,21 @@ def plan_wiki_projection(
             or PurePosixPath(document.path).name.casefold() != "index.md"
         ):
             continue
-        projected_scope = _parent_scope(document.path)
-        portable_scope = _portable_path_key(projected_scope)
-        if existing_note := note_by_path.get(portable_scope):
-            raise ValueError(
-                "Wiki projection scope collides with an existing source note path: "
-                f"{projected_scope}, {existing_note.path}"
-            )
-        if (
-            existing_scope := projected_scope_by_portable_path.get(portable_scope)
-        ) is not None and existing_scope != projected_scope:
-            raise ValueError(
-                "Wiki projected scopes must be unique when compared as portable paths: "
-                f"{existing_scope}, {projected_scope}"
-            )
-        projected_scope_by_portable_path[portable_scope] = projected_scope
+        for projected_scope in affected_wiki_scopes(document.path):
+            portable_scope = _portable_path_key(projected_scope)
+            if existing_note := note_by_path.get(portable_scope):
+                raise ValueError(
+                    "Wiki projection scope collides with an existing source note path: "
+                    f"{projected_scope}, {existing_note.path}"
+                )
+            if (
+                existing_scope := projected_scope_by_portable_path.get(portable_scope)
+            ) is not None and existing_scope != projected_scope:
+                raise ValueError(
+                    "Wiki projected scopes must be unique when compared as portable paths: "
+                    f"{existing_scope}, {projected_scope}"
+                )
+            projected_scope_by_portable_path[portable_scope] = projected_scope
     projected_scopes = tuple(sorted(projected_scope_by_portable_path.values()))
     rendered: dict[str, bytes] = {}
     for scope in scopes:
