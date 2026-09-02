@@ -1295,6 +1295,71 @@ def _index_with(*entries: tuple[WorkspaceInfo, str, str]) -> WorkspaceProjectInd
 
 
 @pytest.mark.asyncio
+async def test_slug_precedence_survives_the_whole_permalink_probe():
+    """One workspace's display name must not shadow another's slug.
+
+    match_workspace_identifier gives slugs global precedence. The probe that
+    decides whether the qualified reading resolves had its own inline matcher
+    that took the first field to hit in iteration order, so a display-name
+    workspace won, the qualified reading looked like a miss, and the request
+    fell through to an unrelated whole-permalink project in a third workspace —
+    a cross-workspace read from a route that named a real slug.
+    """
+    named_foo = WorkspaceInfo(
+        tenant_id="t1",
+        workspace_type="organization",
+        slug="wsone",
+        name="foo",
+        role="editor",
+        is_default=False,
+    )
+    slug_foo = WorkspaceInfo(
+        tenant_id="t2",
+        workspace_type="organization",
+        slug="foo",
+        name="Second",
+        role="editor",
+        is_default=False,
+    )
+    third = WorkspaceInfo(
+        tenant_id="t3",
+        workspace_type="organization",
+        slug="third",
+        name="Third",
+        role="editor",
+        is_default=False,
+    )
+    index = build_workspace_project_index(
+        (named_foo, slug_foo, third),
+        (
+            WorkspaceProjectEntry(
+                workspace=slug_foo,
+                project=ProjectItem(
+                    id=1,
+                    external_id="11111111-1111-1111-1111-111111111111",
+                    name="docs",
+                    path="/app/docs",
+                ),
+            ),
+            WorkspaceProjectEntry(
+                workspace=third,
+                project=ProjectItem(
+                    id=2,
+                    external_id="22222222-2222-2222-2222-222222222222",
+                    name="foo/docs",
+                    path="/app/foo-docs",
+                ),
+            ),
+        ),
+    )
+
+    entry = await resolve_workspace_project_from_index(index, "foo/docs")
+
+    assert entry.workspace.slug == "foo"
+    assert entry.project.name == "docs"
+
+
+@pytest.mark.asyncio
 async def test_qualified_name_beats_a_colliding_whole_permalink():
     """'<workspace>/<project>' and a project literally named 'acme/docs' are the
     same shape, so the index tries both readings — qualified first.
