@@ -339,6 +339,15 @@ class NoteSection(Base):
         )
 
 
+# The category a row takes when the author wrote no `[category]` prefix -- a line promoted
+# to an observation by its hashtags alone arrives with none. Named here so the column
+# default and the identity below are the same value by construction: SQLAlchemy applies
+# this at flush, so identity computed from an un-normalized `None` would be identity for a
+# category the stored row never has, and two lines that end up in the same category would
+# each believe they were the first of their kind.
+OBSERVATION_DEFAULT_CATEGORY = "note"
+
+
 def observation_permalink_tail(category: str | None, content: str) -> str:
     """The part of an observation's permalink that distinguishes it within its note.
 
@@ -360,9 +369,17 @@ def observation_permalink_tail(category: str | None, content: str) -> str:
     values: `Foo Bar` and `foo-bar` are different content that generate one permalink, so
     an ordinal counted over raw content would leave them colliding.
 
+    The category is normalized the way the column is, because identity has to be computed
+    on the value the row will *hold*, not the value it was handed. A hashtag-promoted line
+    arrives with `None` and an explicit `[note]` line with `"note"`; they look distinct
+    here and are the same row category after flush, so leaving them distinct would hand
+    both the ordinal 0 and put the collision straight back.
+
     Content is truncated to 200 chars to stay under PostgreSQL's btree index limit of
     2704 bytes.
     """
+    if category is None:
+        category = OBSERVATION_DEFAULT_CATEGORY
     if len(content) > 200:
         # Trigger: content exceeds the 200-char budget imposed by PostgreSQL's
         # 2704-byte btree index row limit, so the permalink can only carry a prefix.
@@ -394,7 +411,9 @@ class Observation(Base):
     project_id: Mapped[int] = mapped_column(Integer, ForeignKey("project.id"), index=True)
     entity_id: Mapped[int] = mapped_column(Integer, ForeignKey("entity.id", ondelete="CASCADE"))
     content: Mapped[str] = mapped_column(Text)
-    category: Mapped[str] = mapped_column(String, nullable=False, default="note")
+    category: Mapped[str] = mapped_column(
+        String, nullable=False, default=OBSERVATION_DEFAULT_CATEGORY
+    )
     context: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     tags: Mapped[Optional[list[str]]] = mapped_column(
         JSON, nullable=True, default=list, server_default="[]"
