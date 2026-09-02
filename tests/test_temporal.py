@@ -562,6 +562,43 @@ def test_iso_shaped_points_with_malformed_calendar_runs_are_unread(written: str)
 @pytest.mark.parametrize(
     "written",
     [
+        # The reported shapes: a doubled or dangling separator right after the year, which
+        # left no digits for the head to read. Each reached the flexible reader and came
+        # back with a date the author never wrote -- January 2026, and the whole of 2026.
+        "2026--01",
+        "2026---01",
+        "2026-",
+        "2026--",
+        # The same slip with a day still attached, which invented a specific day.
+        "2026--01-02",
+        # A space where the month should be; dateparser filled the month itself.
+        "2026-  01",
+        # The worst of them: a stray letter made dateparser abandon the ISO reading and
+        # re-guess, answering with October 1st -- a month and a day found nowhere in the
+        # text, in a token whose first four characters are the year the author wrote.
+        "2026-x01",
+        # Spellings this module does not implement. Refusing them is the honest answer;
+        # guessing was not.
+        "2026-W03",
+        "2026-2027",
+    ],
+)
+def test_a_year_and_a_hyphen_that_names_no_date_is_unread(written: str):
+    """Opening in ISO syntax settles the question even when the rest is unreadable.
+
+    The head needed digits after the first hyphen, so these matched it not at all and fell
+    through to the flexible reader -- the one outcome ISO syntax must never have, and the
+    same "not my business" gap every earlier cut of this guard had. A reader that re-guesses
+    does not report failure: it answers, confidently, with a date nobody wrote, and every
+    reindex reproduces it. A four-digit year followed by a hyphen is a commitment to machine
+    syntax, so it is judged as machine syntax or refused.
+    """
+    assert parse_authored_point(written) is None
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
         # The reported shapes: a calendar date carrying an instant marker with no instant
         # behind it. dateparser drops the marker and answers with the bare date, so the
         # author reached for a moment and the index recorded a whole open-ended day.

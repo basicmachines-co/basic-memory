@@ -642,6 +642,16 @@ def _calendar_span(lower: date, upper: date | None) -> TemporalRange:
 # reader, which is the one outcome ISO syntax must never have.
 _ISO_CALENDAR_HEAD = re.compile(r"^(\d{4})-(\d+)(?:-(\d+))?")
 
+# What it takes to be *reaching* for an ISO date, as opposed to naming one. A year and a
+# hyphen is a commitment to machine syntax; nothing else is spelled that way. The head
+# above still needs digits after that hyphen, so `2026--01`, `2026-` and `2026-x01` matched
+# it not at all and fell to the flexible reader -- which invented January 2026, the whole of
+# 2026, and *October 1st* respectively, none of which appears in the text. Claiming the
+# opening separately is what makes the classifier total in the way it always claimed to be:
+# a token that opens in ISO syntax is judged as ISO or refused, never handed on because the
+# rest of it was too broken to parse. A bare `2026` carries no hyphen and is untouched.
+_ISO_CALENDAR_OPENING = re.compile(r"^\d{4}-")
+
 # A fractional-second run too wide for a canonical instant to carry. `_INSTANT_BOUND` caps the
 # fraction at six digits and *refuses* a longer one rather than truncating it, because dropping
 # digits would store a different instant than the author wrote -- but that refusal only ever
@@ -735,6 +745,14 @@ def _classify_authored_point(point: str) -> _AuthoredPoint:
     """
     head = _ISO_CALENDAR_HEAD.match(point)
     if head is None:
+        # Trigger: the token opens `YYYY-` but no calendar components could be read from it.
+        # Why: the author reached for a machine date and mistyped it. Handing that to the
+        #   flexible reader is the one outcome ISO syntax must never have -- it does not
+        #   report failure, it re-guesses, and a slipped keystroke becomes a confident date
+        #   nobody wrote, reproduced identically by every reindex.
+        # Outcome: malformed, so the token stays observation content.
+        if _ISO_CALENDAR_OPENING.match(point):
+            return _MALFORMED_ISO
         return _FLEXIBLE_POINT
 
     year, month, day = head.groups()
