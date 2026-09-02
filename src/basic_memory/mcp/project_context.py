@@ -241,6 +241,14 @@ def _workspace_identifier_discovery_available(
     if _cloud_workspace_discovery_available(config):
         return True
 
+    # Identifier detection serves read_note and search, which have no mount
+    # table and no refusal rule, so only the unmistakable three-segment form may
+    # reach for the network here.
+    return _local_cloud_discovery_allowed(config) and _is_workspace_route_shaped(identifier)
+
+
+def _local_cloud_discovery_allowed(config: BasicMemoryConfig) -> bool:
+    """Return True when a locally routed session may still consult cloud discovery."""
     from basic_memory.mcp.async_client import (
         _explicit_routing,
         _force_local_mode,
@@ -249,7 +257,7 @@ def _workspace_identifier_discovery_available(
     if _explicit_routing() and _force_local_mode():
         return False
 
-    return has_cloud_credentials(config) and _is_workspace_route_shaped(identifier)
+    return has_cloud_credentials(config)
 
 
 async def resolve_workspace_qualified_memory_url(
@@ -1245,12 +1253,18 @@ async def _detect_workspace_qualified_route(
     """
     if _split_workspace_slug_prefix(candidate) is None:
         return None
-    # One guard covers both shapes. For the three-segment form it matches the
-    # identifier detector this replaced: a local session holding cloud
-    # credentials may consult discovery for an unmistakable workspace route. A
-    # two-segment identifier is not route-shaped, so for the pathless root form
-    # the same call narrows to cloud-routed sessions, as it did before.
-    if not _workspace_identifier_discovery_available(candidate, config):
+    # The pathless root gets the same permission as the path form. The
+    # three-segment requirement in _workspace_identifier_discovery_available
+    # guards *identifier* detection, where a two-segment string is more likely
+    # an ordinary relative path than a workspace route. Here that judgement has
+    # already been made: the mount table declined these segments, no project was
+    # named, and several are addressable, so an unqualified path refuses anyway
+    # (see the precedence order). Keeping the stricter gate only made
+    # 'acme/docs/note' resolve while 'acme/docs' — that project's own root —
+    # refused, in a locally routed session holding cloud credentials.
+    if not _cloud_workspace_discovery_available(config) and not _local_cloud_discovery_allowed(
+        config
+    ):
         return None
 
     try:
