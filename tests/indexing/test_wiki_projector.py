@@ -411,7 +411,11 @@ def test_requested_empty_folder_links_parent_indexes() -> None:
     )
 
     plan = plan_wiki_projection(
-        _request(position=0, scopes=("guides/setup",)),
+        _request(
+            position=0,
+            reason=WikiProjectionReason.folder_created,
+            scopes=("guides/setup",),
+        ),
         snapshot,
     )
 
@@ -432,7 +436,11 @@ def test_incremental_projection_preserves_existing_empty_folder_links() -> None:
         changes=(),
     )
     initial = plan_wiki_projection(
-        _request(position=0, scopes=("guides/setup",)),
+        _request(
+            position=0,
+            reason=WikiProjectionReason.folder_created,
+            scopes=("guides/setup",),
+        ),
         empty_snapshot,
     )
     overview = WikiSourceNote(
@@ -837,6 +845,47 @@ def test_requested_scopes_cannot_omit_a_changed_note_scope() -> None:
         "secret/log.md",
     }
     assert plan.result.output_watermark == 3
+
+
+def test_stale_accepted_change_does_not_recreate_deleted_folder() -> None:
+    deleted_change = WikiSourceChange(
+        partition_position=1,
+        operation=WikiChangeOperation.created,
+        path="deleted/note.md",
+        permalink="deleted/note",
+        title="Deleted note",
+        accepted_at=ACCEPTED_AT,
+        materialized=True,
+        source="web",
+    )
+    snapshot = WikiProjectionSnapshot(
+        project_id="project-88",
+        project_name="Project 88",
+        source_partition_position=1,
+        current_output_watermark=0,
+        source_accepted_at=ACCEPTED_AT,
+        notes=(),
+        changes=(deleted_change,),
+    )
+
+    incremental = plan_wiki_projection(
+        _request(position=1, scopes=("deleted",)),
+        snapshot,
+    )
+    rebuilt = plan_wiki_projection(
+        _request(
+            position=1,
+            reason=WikiProjectionReason.manual_rebuild,
+            scopes=(),
+        ),
+        snapshot,
+    )
+
+    assert {write.path for write in incremental.writes} == {"index.md", "log.md"}
+    assert {write.path for write in rebuilt.writes} == {"index.md", "log.md"}
+    assert "Deleted note" in next(
+        write.content.decode() for write in rebuilt.writes if write.path == "log.md"
+    )
 
 
 def test_full_rebuild_covers_every_note_directory() -> None:
