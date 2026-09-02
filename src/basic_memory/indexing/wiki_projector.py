@@ -369,7 +369,18 @@ def plan_wiki_projection(
     existing_by_path = {
         _portable_path_key(document.path): document for document in snapshot.reserved_documents
     }
-    projected_scope_by_portable_path = dict(scope_by_portable_path)
+    projected_scope_by_portable_path: dict[str, str] = {}
+    note_scopes = affected_wiki_scopes(*(note.path for note in notes))
+    for projected_scope in (*note_scopes, *scopes):
+        portable_scope = _portable_path_key(projected_scope)
+        if (
+            existing_scope := projected_scope_by_portable_path.get(portable_scope)
+        ) is not None and existing_scope != projected_scope:
+            raise ValueError(
+                "Wiki projected scopes must be unique when compared as portable paths: "
+                f"{existing_scope}, {projected_scope}"
+            )
+        projected_scope_by_portable_path[portable_scope] = projected_scope
     for document in snapshot.reserved_documents:
         if (
             not document.projector_owned
