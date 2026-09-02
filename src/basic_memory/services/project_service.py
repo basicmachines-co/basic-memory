@@ -223,8 +223,23 @@ class ProjectService:
             set_default: Whether to set this project as the default
 
         Raises:
-            ValueError: If the project already exists or path collides with existing project
+            ValueError: If the project already exists, the name has no permalink,
+                or the path collides with an existing project
         """
+        # Trigger: a name whose permalink is empty — pure punctuation or emoji
+        #   ('!!!', '💥'), which generate_permalink reduces to "".
+        # Why: the permalink is the project's address. An empty one advertises
+        #   itself at the root as '/', is indistinguishable from every other such
+        #   project, and cannot be entered by the path it advertises — it breaks
+        #   the rule that anything the mount view lists is addressable (#1421).
+        # Outcome: refused at the one boundary that creates projects, so an
+        #   unaddressable mount cannot exist rather than being handled downstream.
+        if not generate_permalink(name).strip("/"):
+            raise ValueError(
+                f"Project name '{name}' has no usable permalink. Names need at least one "
+                "letter, digit, or CJK character so the project has an address."
+            )
+
         # If project_root is set, constrain all projects to that directory
         project_root = self.config_manager.config.project_root
         sanitized_name = None

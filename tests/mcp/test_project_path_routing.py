@@ -573,6 +573,60 @@ async def test_cloud_workspace_qualified_path_without_mount_collision_still_rout
 
 
 @pytest.mark.asyncio
+async def test_local_cloud_session_lists_a_workspace_project_root(
+    multi_project_config, monkeypatch
+):
+    """The pathless root gets the same discovery permission as the path form.
+
+    In a locally routed session holding cloud credentials, 'acme/docs/note'
+    resolved through workspace discovery while 'acme/docs' — that same project's
+    root, and the thing `ls` needs to enter it — refused. The stricter
+    three-segment gate belongs to identifier detection (read_note, search),
+    which has no mount table to decline first and no refusal rule behind it.
+    """
+    workspace = WorkspaceInfo(
+        tenant_id="acme-tenant",
+        workspace_type="organization",
+        slug="acme",
+        name="Acme",
+        role="editor",
+        is_default=True,
+    )
+
+    async def fake_workspaces(context=None) -> list[WorkspaceInfo]:
+        return [workspace]
+
+    async def fake_entries(ws, context=None):
+        return (
+            WorkspaceProjectEntry(
+                workspace=ws,
+                project=ProjectItem(
+                    id=1,
+                    external_id="99999999-9999-9999-9999-999999999999",
+                    name="docs",
+                    path="/app/data/docs",
+                ),
+            ),
+        )
+
+    monkeypatch.setattr(project_context, "get_available_workspaces", fake_workspaces)
+    monkeypatch.setattr(project_context, "_fetch_workspace_project_entries", fake_entries)
+    monkeypatch.setattr(project_context, "has_cloud_credentials", lambda config: True)
+
+    root = await resolve_project_path_route("acme/docs", project=None, project_id=None)
+    nested = await resolve_project_path_route("acme/docs/note", project=None, project_id=None)
+
+    assert root == ProjectPathRoute(
+        project="acme/docs",
+        path="",
+        stripped=True,
+        project_id="99999999-9999-9999-9999-999999999999",
+    )
+    assert nested.project == "acme/docs"
+    assert nested.path == "note"
+
+
+@pytest.mark.asyncio
 async def test_cloud_workspace_qualified_project_root_routes(cloud_session):
     """'<workspace>/<project>' with no path names that project's root, exactly as
     a bare mount name does. Only the three-segment form used to resolve, so a

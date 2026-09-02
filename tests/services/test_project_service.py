@@ -222,6 +222,24 @@ async def test_get_project_info(project_service: ProjectService, test_graph, tes
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("name", ["💥", "!!!", "---", "/"])
+async def test_add_project_rejects_names_without_a_permalink(
+    project_service: ProjectService, name: str
+):
+    """A project's permalink is its address, and generate_permalink reduces pure
+    punctuation or emoji to "".
+
+    Such a project advertises itself at the root as '/', is indistinguishable
+    from every other one like it, and cannot be entered by the path it
+    advertises — breaking the rule that anything the mount view lists is
+    addressable. Refused where projects are created, so it cannot exist.
+    """
+    with tempfile.TemporaryDirectory() as temp_dir:
+        with pytest.raises(ValueError, match="no usable permalink"):
+            await project_service.add_project(name, temp_dir)
+
+
+@pytest.mark.asyncio
 async def test_add_project_async(project_service: ProjectService):
     """Test adding a project with the updated async method."""
     test_project_name = f"test-async-project-{os.urandom(4).hex()}"
