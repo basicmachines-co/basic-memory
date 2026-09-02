@@ -270,6 +270,24 @@ class ProjectService:
 
         async with db.scoped_session(self.session_maker) as session:
             existing_projects = await self.repository.find_all(session, use_load_options=False)
+
+            # Trigger: a different name that normalizes to an existing project's
+            #   permalink ('My Docs' beside 'my-docs').
+            # Why: the permalink is the address, so two of them are one address
+            #   for two projects. The mount view advertises both at the same
+            #   path and the resolver can only pick one, leaving the other
+            #   unreachable and its paths reading the wrong project's content.
+            # Outcome: refused here, where the second one would be created.
+            name_permalink = generate_permalink(name)
+            for existing in existing_projects:
+                if existing.name != name and generate_permalink(existing.name) == name_permalink:
+                    raise ValueError(
+                        f"Project name '{name}' has the same permalink as existing project "
+                        f"'{existing.name}' ('{name_permalink}'). Project permalinks are "
+                        "addresses and must be unique; choose a name that differs by more "
+                        "than case, spacing, or punctuation."
+                    )
+
             if project_root:
                 # Check for case-insensitive path collisions with existing projects
                 for existing in existing_projects:

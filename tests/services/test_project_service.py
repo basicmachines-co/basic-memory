@@ -242,6 +242,22 @@ async def test_add_project_rejects_names_without_a_permalink(
 
 
 @pytest.mark.asyncio
+async def test_add_project_rejects_a_colliding_permalink(
+    project_service: ProjectService, test_project
+):
+    """Permalinks are addresses, so two projects cannot share one.
+
+    'My Docs' beside 'my-docs' advertised both mounts at the same path and the
+    resolver could only pick one, leaving the other unreachable and its paths
+    reading the wrong project's content.
+    """
+    with tempfile.TemporaryDirectory() as temp_dir:
+        colliding = test_project.name.upper().replace("-", " ")
+        with pytest.raises(ValueError, match="same permalink as existing project"):
+            await project_service.add_project(colliding, temp_dir)
+
+
+@pytest.mark.asyncio
 async def test_add_project_async(project_service: ProjectService):
     """Test adding a project with the updated async method."""
     test_project_name = f"test-async-project-{os.urandom(4).hex()}"
