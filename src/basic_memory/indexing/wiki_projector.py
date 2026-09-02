@@ -325,6 +325,18 @@ def plan_wiki_projection(
         new_changes,
         repair_complete_projection=projector_only_advance,
     )
+    projector_owned_index_scopes = {
+        _parent_scope(document.path)
+        for document in snapshot.reserved_documents
+        if document.projector_owned and PurePosixPath(document.path).name.casefold() == "index.md"
+    }
+    retained_scope_ancestors = {
+        scope
+        for document in snapshot.reserved_documents
+        if document.projector_owned and PurePosixPath(document.path).name.casefold() == "index.md"
+        for scope in affected_wiki_scopes(document.path)
+    }
+    scopes = tuple(sorted(set(scopes) | (retained_scope_ancestors - projector_owned_index_scopes)))
     all_projection_paths: list[str | None] = [note.path for note in notes]
     all_projection_paths.extend(document.path for document in snapshot.reserved_documents)
     all_projection_paths.extend(change.path for change in changes)
