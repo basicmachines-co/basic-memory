@@ -255,6 +255,30 @@ def plan_wiki_projection(
     snapshot: WikiProjectionSnapshot,
 ) -> WikiProjectionPlan:
     """Plan deterministic OKF index/log writes without performing I/O."""
+    return _plan_wiki_projection(request, snapshot, created_scopes=())
+
+
+def plan_wiki_folder_creation(
+    request: WikiProjectionRequest,
+    snapshot: WikiProjectionSnapshot,
+) -> WikiProjectionPlan:
+    """Plan a synchronous folder creation against the current accepted snapshot."""
+    if request.reason is not WikiProjectionReason.folder_created:
+        raise ValueError("Wiki folder creation requires the folder_created reason")
+    return _plan_wiki_projection(
+        request,
+        snapshot,
+        created_scopes=request.requested_scopes,
+    )
+
+
+def _plan_wiki_projection(
+    request: WikiProjectionRequest,
+    snapshot: WikiProjectionSnapshot,
+    *,
+    created_scopes: tuple[str, ...],
+) -> WikiProjectionPlan:
+    """Share deterministic planning while keeping folder creation out of queued runs."""
     if request.project_id != snapshot.project_id:
         raise ValueError("Wiki projection request and snapshot project_id differ")
     if request.through_partition_position < snapshot.current_output_watermark:
@@ -330,6 +354,7 @@ def plan_wiki_projection(
         snapshot,
         notes,
         new_changes,
+        created_scopes=created_scopes,
         repair_complete_projection=projector_only_advance,
     )
     projector_owned_index_scopes = {
@@ -518,6 +543,7 @@ def _projection_scopes(
     notes: tuple[WikiSourceNote, ...],
     new_changes: tuple[WikiSourceChange, ...],
     *,
+    created_scopes: tuple[str, ...],
     repair_complete_projection: bool,
 ) -> tuple[str, ...]:
     current_paths = [note.path for note in notes]
@@ -536,8 +562,14 @@ def _projection_scopes(
         while scope != PurePosixPath("."):
             scopes.add(scope.as_posix())
             scope = scope.parent
-    if request.reason == WikiProjectionReason.folder_created:
-        return tuple(sorted(scopes))
+    # A missing scope may only be established by the synchronous folder-creation
+    # planner. Durable queued requests carry no folder-lifetime proof, so replaying
+    # one after deletion cannot resurrect its reserved documents.
+    for created_scope in created_scopes:
+        scope = PurePosixPath(created_scope)
+        while scope != PurePosixPath("."):
+            current_scopes.add(scope.as_posix())
+            scope = scope.parent
     return tuple(sorted(scopes & current_scopes))
 
 

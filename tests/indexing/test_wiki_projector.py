@@ -21,6 +21,7 @@ from basic_memory.indexing.wiki_projector import (
     WikiSourceNote,
     WIKI_LOG_ENTRY_LIMIT,
     affected_wiki_scopes,
+    plan_wiki_folder_creation,
     plan_wiki_projection,
 )
 
@@ -410,7 +411,7 @@ def test_requested_empty_folder_links_parent_indexes() -> None:
         changes=(),
     )
 
-    plan = plan_wiki_projection(
+    plan = plan_wiki_folder_creation(
         _request(
             position=0,
             reason=WikiProjectionReason.folder_created,
@@ -425,6 +426,30 @@ def test_requested_empty_folder_links_parent_indexes() -> None:
     assert "No concepts have been projected" in rendered["guides/setup/index.md"]
 
 
+def test_queued_folder_creation_cannot_resurrect_a_missing_scope() -> None:
+    snapshot = WikiProjectionSnapshot(
+        project_id="project-88",
+        project_name="Project 88",
+        source_partition_position=0,
+        current_output_watermark=0,
+        source_accepted_at=ACCEPTED_AT,
+        notes=(),
+        changes=(),
+    )
+
+    plan = plan_wiki_projection(
+        _request(
+            position=0,
+            reason=WikiProjectionReason.folder_created,
+            scopes=("guides/setup",),
+        ),
+        snapshot,
+    )
+
+    assert {write.path for write in plan.writes} == {"index.md", "log.md"}
+    assert all(not write.path.startswith("guides/") for write in plan.writes)
+
+
 def test_incremental_projection_preserves_existing_empty_folder_links() -> None:
     empty_snapshot = WikiProjectionSnapshot(
         project_id="project-88",
@@ -435,7 +460,7 @@ def test_incremental_projection_preserves_existing_empty_folder_links() -> None:
         notes=(),
         changes=(),
     )
-    initial = plan_wiki_projection(
+    initial = plan_wiki_folder_creation(
         _request(
             position=0,
             reason=WikiProjectionReason.folder_created,
