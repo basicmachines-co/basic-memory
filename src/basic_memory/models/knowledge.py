@@ -347,6 +347,12 @@ class NoteSection(Base):
 # each believe they were the first of their kind.
 OBSERVATION_DEFAULT_CATEGORY = "note"
 
+# Opens the permalink segment carrying a duplicate ordinal. `generate_permalink` replaces
+# every character outside `[a-z0-9/-.]` (plus CJK) with a hyphen, so a tail generated from
+# an author's own text can never contain `~` -- which is exactly what makes this a
+# namespace the ordinal can own rather than one it shares with real content.
+OBSERVATION_DUPLICATE_MARK = "~"
+
 
 def observation_permalink_tail(category: str | None, content: str) -> str:
     """The part of an observation's permalink that distinguishes it within its note.
@@ -438,13 +444,20 @@ class Observation(Base):
         thing twice. It is 0 for the first observation carrying a given identity, so the
         overwhelming majority of permalinks are byte-identical to what they have always
         been; only the second and later twins gain a trailing ordinal.
+
+        That ordinal lives in a segment natural content cannot reach. `generate_permalink`
+        emits only `[a-z0-9/-.]` plus CJK, so no observation's own text can ever slug to a
+        segment beginning with `~` -- whereas a plain `/1` is a segment content *can*
+        produce, and an observation whose text slugged to `foo/1` would then collide with
+        the second twin of `foo` and cost one of them its search row. Reserving the mark
+        is what makes the ordinal a namespace rather than a guess about what authors write.
         """
         base = generate_permalink(
             f"{self.entity.permalink}/{observation_permalink_tail(self.category, self.content)}"
         )
         if not self.duplicate_index:
             return base
-        return f"{base}/{self.duplicate_index}"
+        return f"{base}/{OBSERVATION_DUPLICATE_MARK}{self.duplicate_index}"
 
     @override
     def __repr__(self) -> str:  # pragma: no cover

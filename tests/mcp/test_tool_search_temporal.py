@@ -456,3 +456,53 @@ def test_the_man_page_does_not_advertise_relative_qualifiers():
     assert "A relative date is never filed as a qualifier" in page
     # The quoted-form example list must not offer one as a spelling that files.
     assert '`@occurred:"2 days ago"` and `@"June 2026"` all file' not in page
+
+
+@pytest.mark.asyncio
+async def test_all_projects_search_propagates_a_filter_no_project_could_apply(
+    client, test_project, monkeypatch
+):
+    """Every leg failing must not read as a successful search that found nothing.
+
+    A server predating SPEC-82 accepts a valid-time query and answers unfiltered, so
+    `SearchClient` refuses any response that does not confirm `temporal_applied`. The
+    fan-out catches that refusal, logs the project and skips it -- correct for one
+    unavailable project, and wrong for a whole fleet of old servers, because the merged
+    answer then reported `temporal_applied: true` over zero results. The caller could not
+    tell "no note asserts that window" from "the filter ran nowhere", which is the exact
+    confusion the confirmation field exists to prevent.
+    """
+    await _write_cache_layer_note(test_project.name)
+
+    import sys
+
+    # `basic_memory.mcp.tools.search` is shadowed by a `search` function exported
+    # from the package, so reach the module itself rather than that name.
+    search_module = sys.modules["basic_memory.mcp.tools.search"]
+
+    async def refuse_every_leg(*args: Any, **kwargs: Any) -> str:
+        # What a per-project leg looks like once SearchClient rejects the response.
+        return "# Search Failed\n\nThe search API did not apply the requested valid-time filter"
+
+    monkeypatch.setattr(search_module, "search_notes", refuse_every_leg)
+
+    with pytest.raises(ValueError, match="No project applied the requested valid-time filter"):
+        await search_module._search_all_projects(
+            query="cache layer",
+            page=1,
+            page_size=10,
+            search_type="text",
+            output_format="json",
+            note_types=None,
+            entity_types=None,
+            categories=None,
+            after_date=None,
+            metadata_filters=None,
+            tags=None,
+            status=None,
+            min_similarity=None,
+            valid_at="2026-07-01",
+            valid_overlaps=None,
+            time_kind=None,
+            context=None,
+        )
