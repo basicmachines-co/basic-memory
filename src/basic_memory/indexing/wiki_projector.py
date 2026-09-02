@@ -31,6 +31,7 @@ class WikiProjectionReason(StrEnum):
     """Why a projector run was requested."""
 
     accepted_note = "accepted_note"
+    folder_created = "folder_created"
     project_created = "project_created"
     import_rebuild = "import_rebuild"
     manual_rebuild = "manual_rebuild"
@@ -317,11 +318,17 @@ def plan_wiki_projection(
         for note in snapshot.notes
         if PurePosixPath(note.path).name.lower() not in RESERVED_WIKI_FILENAMES
     )
+    note_by_path = {_portable_path_key(note.path): note for note in notes}
+    for requested_scope in request.requested_scopes:
+        if existing_note := note_by_path.get(_portable_path_key(requested_scope)):
+            raise ValueError(
+                "Wiki projection scope collides with an existing source note path: "
+                f"{requested_scope}, {existing_note.path}"
+            )
     scopes = _projection_scopes(
         request,
         snapshot,
         notes,
-        changes,
         new_changes,
         repair_complete_projection=projector_only_advance,
     )
@@ -363,7 +370,6 @@ def plan_wiki_projection(
                 "Wiki source change permalink collides with a generated document identity: "
                 f"{change.permalink}"
             )
-    note_by_path = {_portable_path_key(note.path): note for note in notes}
     scope_by_portable_path: dict[str, str] = {}
     for scope in scopes:
         portable_scope = _portable_path_key(scope)
@@ -510,17 +516,18 @@ def _projection_scopes(
     request: WikiProjectionRequest,
     snapshot: WikiProjectionSnapshot,
     notes: tuple[WikiSourceNote, ...],
-    changes: tuple[WikiSourceChange, ...],
     new_changes: tuple[WikiSourceChange, ...],
     *,
     repair_complete_projection: bool,
 ) -> tuple[str, ...]:
+    current_paths = [note.path for note in notes]
+    current_paths.extend(document.path for document in snapshot.reserved_documents)
+    current_scopes = set(affected_wiki_scopes(*current_paths))
     if request.is_full_rebuild or repair_complete_projection:
-        paths = [note.path for note in notes]
-        paths.extend(document.path for document in snapshot.reserved_documents)
-        paths.extend(change.path for change in changes)
-        paths.extend(change.previous_path for change in changes if change.previous_path is not None)
-        return affected_wiki_scopes(*paths)
+        # Historical changes feed logs, but only current notes and reserved documents prove
+        # that a directory still exists. Otherwise a rebuild after a directory delete would
+        # recreate that directory's projector-owned index and log.
+        return tuple(sorted(current_scopes))
     paths = [change.path for change in new_changes]
     paths.extend(change.previous_path for change in new_changes if change.previous_path is not None)
     scopes = set(affected_wiki_scopes(*paths))
@@ -529,7 +536,9 @@ def _projection_scopes(
         while scope != PurePosixPath("."):
             scopes.add(scope.as_posix())
             scope = scope.parent
-    return tuple(sorted(scopes))
+    if request.reason == WikiProjectionReason.folder_created:
+        return tuple(sorted(scopes))
+    return tuple(sorted(scopes & current_scopes))
 
 
 def _without_projection_metadata(content: bytes) -> bytes:
