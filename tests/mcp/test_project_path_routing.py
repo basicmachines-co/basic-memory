@@ -325,6 +325,22 @@ async def test_agreeing_prefix_strips_with_explicit_project(multi_project_config
 
 
 @pytest.mark.asyncio
+async def test_same_named_note_is_not_read_as_its_own_project(multi_project_config):
+    """A note whose file stem equals its project's name resolves as a
+    project-relative path, not as a prefix claim with an empty remainder
+    (#1458). Without the fix, rule 3b's extension-stripping match claims
+    'second-project.txt' as the project itself, leaving 'cat' unable to tell
+    it apart from a bare project-root reference."""
+    route = await resolve_project_path_route(
+        "second-project.txt", project="second-project", project_id=None
+    )
+
+    assert route == ProjectPathRoute(
+        project="second-project", path="second-project.txt", stripped=False
+    )
+
+
+@pytest.mark.asyncio
 async def test_conflicting_prefix_raises_naming_both(multi_project_config):
     """The conflict message names both projects and offers both spellings."""
     with pytest.raises(ProjectPrefixConflictError) as excinfo:
@@ -364,6 +380,25 @@ def test_split_project_permalink_prefix_matches_whole_permalinks_longest_first()
         "my-research",
         "notes",
     )
+
+
+def test_split_project_permalink_prefix_does_not_swallow_a_same_named_note():
+    """A note whose file stem equals its project's name must not be misread as
+    the project itself with no remainder (#1458). Extension-stripping is only
+    safe when a remainder still follows the claimed segments; a match that
+    would leave nothing after it must spell the permalink exactly, extension
+    included, or it is a note living at the project's root, not the project."""
+    permalinks = ["moby-dick"]
+
+    assert split_project_permalink_prefix("moby-dick.txt", permalinks) is None
+    # A real path under the project still strips the extension-free segment.
+    assert split_project_permalink_prefix("moby-dick/moby-dick.txt", permalinks) == (
+        "moby-dick",
+        "moby-dick.txt",
+    )
+    # The bare project name (no extension to mistakenly drop) still claims the
+    # whole path with an empty remainder.
+    assert split_project_permalink_prefix("moby-dick", permalinks) == ("moby-dick", "")
 
 
 @pytest.mark.asyncio

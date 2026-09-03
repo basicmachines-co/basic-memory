@@ -45,6 +45,16 @@
 
 ### Bug Fixes
 
+- **#1458**: A note whose file stem equals its project's name is now readable by its bare
+  identifier. `split_project_permalink_prefix` matches a leading path segment against a
+  project's permalink via `generate_permalink`, which drops file extensions -- so a single
+  segment like `moby-dick.txt` in project `moby-dick` collapsed to the project's own
+  permalink with an empty remainder, and `cat`/`find` refused it as "names a project, not a
+  note" instead of resolving the note. A prefix claim that would leave no remainder now
+  requires the raw segment to spell the permalink exactly, extension included; a claim that
+  still has a remainder after it is unaffected, since project names never carry a real
+  extension in that position.
+
 - **#1437**: An observation and a relation can no longer collide in the search index.
   A relation's permalink is `from/type/to` with the type authored by the user, so a
   note that says `- [decision] redis` and `- observations [[decision/redis]]` gives
