@@ -10,6 +10,7 @@ prompt preamble are identical (the fairness contract).
 from __future__ import annotations
 
 import json
+import subprocess
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -312,6 +313,20 @@ SEEDED_RECENCY_WINDOW = f"{RECENT_AGE_DAYS + 1}d"
 INDEXING_PROJECT_ADD_REVISION = "370ab5b"
 
 
+class SeedingError(RuntimeError):
+    """A seeded project is not fit to run tasks against.
+
+    Recorded against every task that would have used the project, then the
+    run continues: one persona with an unindexable file must not discard the
+    tasks already paid for on the other personas (the first xAFS run lost 27
+    completed tasks this way).
+    """
+
+
+class IncompatibleCheckoutError(RuntimeError):
+    """The checkout under test cannot seed at all; every project would fail the same way."""
+
+
 def verify_seeded_index(*, prefix: list[str], env: dict[str, str], project: TaskProject) -> None:
     """Fail seeding unless every file in the project is indexed.
 
@@ -338,7 +353,7 @@ def verify_seeded_index(*, prefix: list[str], env: dict[str, str], project: Task
         }
         <= readiness.keys()
     ):
-        raise RuntimeError(
+        raise IncompatibleCheckoutError(
             f"`bm status --json` for {project.name} reports no index readiness; the "
             f"agent-task eval seeds through `project add`, which indexes only from "
             f"basic-memory {INDEXING_PROJECT_ADD_REVISION} (#1414). Point --bm-local-path "
@@ -347,7 +362,7 @@ def verify_seeded_index(*, prefix: list[str], env: dict[str, str], project: Task
     files_on_disk = int(readiness["files_on_disk"])
     indexed = int(readiness["indexed_entities"])
     if readiness["phase"] != "idle" or files_on_disk == 0 or indexed != files_on_disk:
-        raise RuntimeError(
+        raise SeedingError(
             f"seeded project {project.name} indexed {indexed} of {files_on_disk} files "
             f"(phase {readiness['phase']!r}); every task would run against an incomplete "
             "index and score on it."
@@ -389,7 +404,7 @@ def verify_seeded_recency(*, prefix: list[str], env: dict[str, str], project: Ta
     recent = {row["file_path"] for row in json.loads(result.stdout)}
     mismatch = recency_mismatch(recent, set(TIMESTAMPS))
     if mismatch is not None:
-        raise RuntimeError(
+        raise SeedingError(
             f"seeded project {project.name} does not reflect the corpus's aged mtimes "
             f"within {SEEDED_RECENCY_WINDOW}: {mismatch}. The index pass read mtimes "
             "after a rewrite; seed with exactly one index pass after copy_corpus."
@@ -804,12 +819,24 @@ def run_agent_tasks(
             tool_defs = [by_name[name] for name in surface.tool_allowlist]
 
             prepared_groups: dict[str, TaskProject] = {}
+            failed_groups: dict[str, str] = {}
             session_error: str | None = None
             for task in tasks:
                 if session_error is not None:
                     results.append(
                         _errored_result(
                             surface.name, task, f"mcp session terminated: {session_error}"
+                        )
+                    )
+                    continue
+                # Trigger: an earlier task in this group already failed to seed.
+                # Why: the group shares one project, so re-seeding would fail the
+                #   same way (and `project add` would refuse the existing name).
+                # Outcome: the task is errored with the group's reason, no bm calls.
+                if task.group is not None and task.group in failed_groups:
+                    results.append(
+                        _errored_result(
+                            surface.name, task, f"seeding failed: {failed_groups[task.group]}"
                         )
                     )
                     continue
@@ -825,6 +852,19 @@ def run_agent_tasks(
                         settle_timeout_seconds=config.settle_timeout_seconds,
                         prepared_groups=prepared_groups,
                     )
+                except (SeedingError, subprocess.CalledProcessError, TimeoutError) as exc:
+                    # A project that failed to seed (guard, bm command, or settle
+                    # timeout) is a recorded, excluded-from-means task result; the
+                    # rest of the run keeps its spend. IncompatibleCheckoutError is
+                    # deliberately not here: it aborts, because every project
+                    # would fail identically.
+                    reason = str(exc)
+                    if task.group is not None:
+                        failed_groups[task.group] = reason
+                    console.print(f"  [{surface.name}] [red]seeding failed[/red]: {reason}")
+                    results.append(_errored_result(surface.name, task, f"seeding failed: {reason}"))
+                    continue
+                try:
                     result = _run_one_task(
                         surface=surface,
                         task=task,

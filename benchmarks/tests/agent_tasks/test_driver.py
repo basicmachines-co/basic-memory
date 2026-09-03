@@ -1026,14 +1026,14 @@ def test_recency_mismatch_names_extra_and_missing_files() -> None:
     assert recency_mismatch({"a.md", "c.md"}, {"a.md", "b.md"}) == "extra=['c.md'] missing=['b.md']"
 
 
-def test_seeding_aborts_when_the_index_lost_the_aged_mtimes(
+def test_seeding_records_a_project_that_lost_its_aged_mtimes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Every note reading as recent is a seeding failure, not a task result.
 
     That state produced a plausible 10/12 in run at-1d26c0609808 before it was
-    traced to the seed sequence; the guard turns it into an abort that names
-    the files outside the gold set.
+    traced to the seed sequence. The guard records it against the task, naming
+    the files outside the gold set, and the run keeps the other projects' spend.
     """
     _stub_bm(monkeypatch)
     whole_corpus = json.dumps([{"file_path": relpath} for relpath in corpus_files(CORPUS_DIR)])
@@ -1046,18 +1046,24 @@ def test_seeding_aborts_when_the_index_lost_the_aged_mtimes(
     )
     monkeypatch.chdir(tmp_path)
 
-    with pytest.raises(RuntimeError, match="aged mtimes") as excinfo:
-        run_agent_tasks(
-            _config(tmp_path),
-            model_factory=lambda spec: _orphan_agent(),
-            session_factory=lambda runtime: FakeSession(RICH_SURFACE.tool_allowlist),
-        )
+    run_dir = run_agent_tasks(
+        _config(tmp_path),
+        model_factory=lambda spec: _orphan_agent(),
+        session_factory=lambda runtime: FakeSession(RICH_SURFACE.tool_allowlist),
+    )
 
-    assert "notes/feature-x.md" in str(excinfo.value)
-    assert "missing=[]" in str(excinfo.value)
+    rows = [
+        json.loads(line) for line in (run_dir / "per-task-agent.jsonl").read_text().splitlines()
+    ]
+    assert len(rows) == 1
+    assert rows[0]["passed"] is False
+    assert "seeding failed" in rows[0]["error"]
+    assert "aged mtimes" in rows[0]["error"]
+    assert "notes/feature-x.md" in rows[0]["error"]
+    assert "missing=[]" in rows[0]["error"]
 
 
-def _run_with_bm_stdout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stdout_for: Any) -> None:
+def _run_with_bm_stdout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stdout_for: Any) -> Path:
     _stub_bm(monkeypatch)
     monkeypatch.setattr(
         driver,
@@ -1065,7 +1071,7 @@ def _run_with_bm_stdout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stdout_
         lambda command, **kwargs: SimpleNamespace(stdout=stdout_for(command), stderr=""),
     )
     monkeypatch.chdir(tmp_path)
-    run_agent_tasks(
+    return run_agent_tasks(
         _config(tmp_path),
         model_factory=lambda spec: _orphan_agent(),
         session_factory=lambda runtime: FakeSession(RICH_SURFACE.tool_allowlist),
@@ -1086,16 +1092,64 @@ def test_seeding_rejects_a_checkout_whose_status_has_no_readiness(
         )
 
 
-def test_seeding_aborts_when_the_project_is_not_fully_indexed(
+def test_seeding_records_a_partially_indexed_project_against_its_task(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    with pytest.raises(RuntimeError, match=r"indexed 0 of 25 files \(phase 'never_indexed'\)"):
-        _run_with_bm_stdout(
-            tmp_path,
-            monkeypatch,
-            lambda command: (
-                _seeded_status(indexed=0, files=25, phase="never_indexed")
-                if "status" in command
-                else _bm_stdout(command)
-            ),
-        )
+    run_dir = _run_with_bm_stdout(
+        tmp_path,
+        monkeypatch,
+        lambda command: (
+            _seeded_status(indexed=0, files=25, phase="never_indexed")
+            if "status" in command
+            else _bm_stdout(command)
+        ),
+    )
+
+    rows = [
+        json.loads(line) for line in (run_dir / "per-task-agent.jsonl").read_text().splitlines()
+    ]
+    assert len(rows) == 1
+    assert "seeding failed" in rows[0]["error"]
+    assert "indexed 0 of 25 files (phase 'never_indexed')" in rows[0]["error"]
+
+
+def test_a_grouped_seeding_failure_errors_the_whole_group_and_seeds_it_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One persona whose corpus will not fully index must cost exactly its own
+    questions: every task in that group is errored with the same reason, the
+    group is seeded once (no retry that would hit the existing project name),
+    and the other persona runs normally."""
+    config = _manifest_config(tmp_path)
+    commands, settles = _stub_bm_recording(monkeypatch)
+    monkeypatch.setattr(driver, "snapshot_baseline", _forbid_baseline)
+
+    def failing_dp001_status(command: list[str], **kwargs: Any) -> SimpleNamespace:
+        commands.append(list(command))
+        if "status" in command and command[command.index("status") + 2].endswith("xafs-dp001"):
+            return SimpleNamespace(stdout=_seeded_status(indexed=4, files=5), stderr="")
+        return SimpleNamespace(stdout=_bm_stdout(command), stderr="")
+
+    monkeypatch.setattr(driver, "run_command", failing_dp001_status)
+    monkeypatch.chdir(tmp_path)
+    session = FakeSession(RICH_SURFACE.tool_allowlist)
+
+    run_dir = run_agent_tasks(
+        config,
+        model_factory=lambda spec: _xafs_agent(),
+        session_factory=lambda runtime: session,
+        judge_factory=lambda spec: _StubJudgeRunner(),
+    )
+
+    rows = [
+        json.loads(line) for line in (run_dir / "per-task-agent.jsonl").read_text().splitlines()
+    ]
+    by_group: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_group.setdefault(row["group"], []).append(row)
+    assert all("seeding failed" in row["error"] for row in by_group["xafs-dp001"])
+    assert all("indexed 4 of 5 files" in row["error"] for row in by_group["xafs-dp001"])
+    assert all(row["error"] is None for row in by_group["xafs-dp002"])
+    adds = [cmd[cmd.index("add") + 1] for cmd in commands if "project" in cmd and "add" in cmd]
+    assert adds.count("xafs-run-xafs-dp001") == 1
+    assert adds.count("xafs-run-xafs-dp002") == 1
