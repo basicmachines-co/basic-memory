@@ -13,6 +13,8 @@ wrong there in turn:
 So the remedy has to follow the step that failed and the project's mode.
 """
 
+import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -22,10 +24,27 @@ from typer.testing import CliRunner
 
 import basic_memory.cli.commands.project as project_cmd
 from basic_memory.cli.main import app as cli_app
+from basic_memory.config import ProjectMode
 
 runner = CliRunner()
 
 WIDE_TERMINAL_ENV = {"COLUMNS": "240", "LINES": "60"}
+
+
+def _reset_config_cache() -> None:
+    """Forget the cached config, the way a fresh CLI process would."""
+    from basic_memory import config as config_module
+
+    config_module._CONFIG_CACHE = None
+    config_module._CONFIG_MTIME = None
+    config_module._CONFIG_SIZE = None
+
+
+def _persisted_projects(config_file: Path) -> dict[str, Any]:
+    """Read projects straight from the config file, ignoring any in-memory state."""
+    if not config_file.exists():
+        return {}
+    return json.loads(config_file.read_text(encoding="utf-8")).get("projects", {})
 
 
 def flat(output: str) -> str:
@@ -147,42 +166,146 @@ def test_a_step_that_exits_on_its_own_still_gets_the_remedy(tmp_path, monkeypatc
 # --- Cloud projects ---
 
 
-def test_a_failed_cloud_config_save_gets_a_cloud_remedy(tmp_path, monkeypatch, cloud_add):
-    """`bm project index` is refused for cloud projects, so it must not be advised.
+class _Resolved:
+    """Stand-in for a resolve of a project that already exists remotely."""
 
-    The remote project exists; only this machine's routing entry is missing, so
-    recovery is local config plus `set-cloud` — not an index pass that the
-    local-only reindex path would reject for this project outright.
+    path = "/app/data/research"
+
+
+@pytest.fixture
+def remote_projects(monkeypatch, cloud_add):
+    """A fake remote store, so `add` can be run twice and see its own first run.
+
+    The command creates a distinctly named coroutine per step, which is what
+    lets one stub serve both the create call and the existence probe.
+    """
+    created: set[str] = set()
+
+    def _run(coro: Any) -> Any:
+        step = coro.__name__
+        coro.close()
+        if step == "_add_project":
+            if "research" in created:
+                # What a server says when the project is already there. The
+                # command must not depend on this wording.
+                raise RuntimeError(
+                    "Project 'research' already exists with different path. "
+                    "Existing: /app/data/research, Requested: research"
+                )
+            created.add("research")
+            return _Created()
+        if step == "_resolve":
+            if "research" in created:
+                return _Resolved()
+            raise RuntimeError("Project not found")
+        raise AssertionError(f"unexpected step: {step}")
+
+    monkeypatch.setattr(project_cmd, "run_with_cleanup", _run)
+    return created
+
+
+def _printed_remedy_command(output: str) -> list[str]:
+    """Pull the runnable `bm ...` the output told the user to run.
+
+    The test runs what was printed rather than a command it chose itself; a
+    remedy that only looks right is exactly what shipped twice before. The
+    prose also names `'bm project add'` in quotes when telling the user not to
+    re-run it blindly, so only a candidate carrying flags is a command.
+    """
+    candidates = re.findall(r"bm ((?:project|cloud) [^.']+)", flat(output))
+    runnable = [candidate.strip() for candidate in candidates if "--" in candidate]
+    assert runnable, f"no runnable remedy command in output: {output}"
+    return runnable[0].split()
+
+
+def test_a_failed_cloud_config_save_prints_a_remedy_that_actually_works(
+    tmp_path, monkeypatch, remote_projects
+):
+    """The recovery must be a command that succeeds, not a better-worded dead end.
+
+    `save_config` failing on a previously absent project used to leave a state
+    with no way out: `set-cloud` refuses a name missing from config, and
+    re-running `add` refused because the remote project existed. So this test
+    runs the printed remedy and asserts it recovers.
     """
     real_config_manager = project_cmd.ConfigManager
+    writes_fail = {"now": True}
 
-    class _FailingSave:
+    class _MaybeFailingSave:
         def __init__(self) -> None:
             self._real = real_config_manager()
             self.config = self._real.config
-            self.config_file = Path("/etc/basic-memory/config.json")
+            self.config_file = self._real.config_file
 
-        def save_config(self, _config: Any) -> None:
-            raise PermissionError("read-only file system")
+        def save_config(self, config: Any) -> None:
+            if writes_fail["now"]:
+                raise PermissionError("read-only file system")
+            self._real.save_config(config)
 
-    monkeypatch.setattr(project_cmd, "ConfigManager", _FailingSave)
+    monkeypatch.setattr(project_cmd, "ConfigManager", _MaybeFailingSave)
+
+    first = runner.invoke(cli_app, ["project", "add", "research", "--cloud"], env=WIDE_TERMINAL_ENV)
+
+    assert first.exit_code == 1
+    assert "was created, but saving its cloud routing to local config failed" in flat(first.output)
+    # The remote project exists now, and nothing was persisted for it here.
+    assert "research" in remote_projects
+    assert "research" not in _persisted_projects(real_config_manager().config_file)
+    # The command that cannot work in this state must not be advised.
+    assert "bm project set-cloud" not in flat(first.output)
+
+    # The user fixes what the message told them to fix...
+    writes_fail["now"] = False
+    # ...and runs the command again, which in real use is a new process. Drop the
+    # config cache so the retry re-reads the file, as that process would: a failed
+    # save leaves its in-memory mutation behind, and the retry must not see it.
+    _reset_config_cache()
+
+    # ...and runs exactly what the output printed.
+    remedy = _printed_remedy_command(first.output)
+    assert remedy[:3] == ["project", "add", "research"]
+    second = runner.invoke(cli_app, remedy, env=WIDE_TERMINAL_ENV)
+
+    assert second.exit_code == 0, second.output
+    # It adopted the existing project rather than failing on it or creating a second.
+    assert "already exists" in flat(second.output)
+    assert "adopting it into this machine's config" in flat(second.output)
+
+    _reset_config_cache()
+    persisted = _persisted_projects(real_config_manager().config_file)
+    assert "research" in persisted
+    assert persisted["research"]["mode"] == ProjectMode.CLOUD.value
+
+
+def test_a_genuinely_configured_project_is_not_adopted_over(tmp_path, monkeypatch, cloud_add):
+    """Adoption is only for "remote exists, config missing".
+
+    A name already in this machine's config is genuinely added, so a creation
+    failure there is a real conflict — a local re-add under a different path,
+    say — and adopting would silently ignore the path the caller asked for.
+    """
+    resolved: list[str] = []
+
+    def _run(coro: Any) -> Any:
+        step = coro.__name__
+        coro.close()
+        if step == "_resolve":  # pragma: no cover - must never be reached
+            resolved.append("probed")
+            return _Resolved()
+        raise RuntimeError("Project 'test-project' already exists with different path")
+
+    monkeypatch.setattr(project_cmd, "run_with_cleanup", _run)
+    existing_name = next(iter(project_cmd.ConfigManager().config.projects))
 
     result = runner.invoke(
-        cli_app,
-        ["project", "add", "research", "--cloud", "--local-path", str(tmp_path / "sync")],
-        env=WIDE_TERMINAL_ENV,
+        cli_app, ["project", "add", existing_name, str(tmp_path)], env=WIDE_TERMINAL_ENV
     )
 
     assert result.exit_code == 1
-    assert "added successfully" in flat(result.output)
-    assert "was created, but saving its cloud routing to local config failed" in flat(result.output)
-    assert "read-only file system" in flat(result.output)
-    # The regression: a cloud project must never be sent to the local-only reindex.
-    assert "bm project index" not in flat(result.output)
-    # It gets a remedy that is valid for its mode, naming the file that failed.
-    assert "/etc/basic-memory/config.json" in flat(result.output)
-    assert "bm project set-cloud research --workspace ws-123" in flat(result.output)
-    assert "Do not re-run 'bm project add'" in flat(result.output)
+    assert "Error adding project" in flat(result.output)
+    assert "adopting" not in flat(result.output)
+    # The probe is not even attempted: config already answers the question.
+    assert resolved == []
 
 
 def test_a_failed_local_sync_mkdir_gets_a_sync_remedy(tmp_path, monkeypatch, cloud_add):
