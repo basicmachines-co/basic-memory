@@ -404,9 +404,30 @@ async def invalidate_workspace_project_index(context: Optional[Context] = None) 
 
 
 async def invalidate_project_caches(context: Optional[Context] = None) -> None:
-    """Invalidate project identity caches after a project lifecycle change."""
+    """Invalidate project identity caches after a project lifecycle change.
+
+    The one place that answers "a project changed in this session", so every
+    session-scoped cache whose contents are *projects* is cleared here — a
+    fourth one belongs on this list too. Today that is three: the active
+    project (with the default-project name it carries), the account-wide
+    workspace/project index, and the session's own project listing.
+
+    The session listing is the one that decides which first path segment names a
+    project (``addressable_projects``), so leaving it behind made a project
+    created mid-session unaddressable by name and a deleted one keep routing to
+    its dead external_id — for ``ls "/"`` and the posix resolver, and, once
+    identifier detection started reading the same mount table, for ``read_note``
+    and ``search_notes`` as well (#1432 review).
+
+    Deliberately NOT cleared: ``active_workspace`` and ``available_workspaces``
+    hold workspace metadata — tenant id, slug, type — which no project
+    lifecycle change touches, and no MCP tool creates or deletes a workspace.
+    """
     await _clear_cached_active_project(context)
     await invalidate_workspace_project_index(context)
+    # Defined beside the cache it clears, in the project-qualified routing
+    # section below.
+    await invalidate_session_project_list(context)
 
 
 async def _fetch_workspace_project_entries(
@@ -1263,6 +1284,17 @@ def _session_routes_to_cloud() -> bool:
     )
 
     return is_factory_mode() or (_explicit_routing() and not _force_local_mode())
+
+
+async def invalidate_session_project_list(context: Optional[Context] = None) -> None:
+    """Invalidate the cached listing of this session's own reachable projects.
+
+    Lives beside the cache it clears, and is called from
+    ``invalidate_project_caches`` — the one function that answers "a project
+    changed in this session".
+    """
+    if context:
+        await context.set_state(_SESSION_PROJECT_LIST_STATE_KEY, None)
 
 
 async def _session_project_list(context: Optional[Context] = None) -> ProjectList:
