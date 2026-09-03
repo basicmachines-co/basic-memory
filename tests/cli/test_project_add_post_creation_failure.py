@@ -24,6 +24,7 @@ import typer
 from typer.testing import CliRunner
 
 import basic_memory.cli.commands.project as project_cmd
+from basic_memory import config as config_module
 from basic_memory.cli.main import app as cli_app
 from basic_memory.config import ProjectMode
 
@@ -55,6 +56,11 @@ def flat(output: str) -> str:
     runner cannot widen it and a long remedy wraps mid-sentence.
     """
     return " ".join(output.split())
+
+
+def _refuse_replace(*_args: Any, **_kwargs: Any) -> None:
+    """Stand in for a full disk or a read-only mount at the atomic rename."""
+    raise OSError("read-only file system")
 
 
 class _Created:
@@ -242,10 +248,16 @@ def test_a_failed_cloud_config_save_prints_a_remedy_that_actually_works(
             self.config = self._real.config
             self.config_file = self._real.config_file
 
-        def save_config(self, config: Any) -> None:
+        def save_config(self, config: Any) -> Any:
+            # Fail inside the atomic replace, not by raising from save_config.
+            # `save_basic_memory_config` swallows every exception, so a stub that
+            # raises here would exercise a path production can never take -- the
+            # false coverage that hid this bug (#1440 review).
             if writes_fail["now"]:
-                raise PermissionError("read-only file system")
-            self._real.save_config(config)
+                with pytest.MonkeyPatch.context() as inner:
+                    inner.setattr(config_module.os, "replace", _refuse_replace)
+                    return self._real.save_config(config)
+            return self._real.save_config(config)
 
     monkeypatch.setattr(project_cmd, "ConfigManager", _MaybeFailingSave)
 
@@ -374,10 +386,16 @@ def test_the_remedy_survives_a_project_name_with_a_space(tmp_path, monkeypatch, 
             self.config = self._real.config
             self.config_file = self._real.config_file
 
-        def save_config(self, config: Any) -> None:
+        def save_config(self, config: Any) -> Any:
+            # Fail inside the atomic replace, not by raising from save_config.
+            # `save_basic_memory_config` swallows every exception, so a stub that
+            # raises here would exercise a path production can never take -- the
+            # false coverage that hid this bug (#1440 review).
             if writes_fail["now"]:
-                raise PermissionError("read-only file system")
-            self._real.save_config(config)
+                with pytest.MonkeyPatch.context() as inner:
+                    inner.setattr(config_module.os, "replace", _refuse_replace)
+                    return self._real.save_config(config)
+            return self._real.save_config(config)
 
     monkeypatch.setattr(project_cmd, "ConfigManager", _MaybeFailingSave)
 
@@ -402,3 +420,37 @@ def test_the_remedy_survives_a_project_name_with_a_space(tmp_path, monkeypatch, 
     persisted = _persisted_projects(real_config_manager().config_file)
     assert "My Notes" in persisted
     assert persisted["My Notes"]["mode"] == ProjectMode.CLOUD.value
+
+
+def test_no_wait_does_not_scan_the_project(tmp_path, monkeypatch, created_project):
+    """`--no-wait` must not compute readiness, because computing it walks the project.
+
+    The status route's observer walks every file and, on a project with no
+    indexed stats to reuse, reads each one through `compute_checksum`. That is
+    precisely the scan `--no-wait` exists to avoid, and it would land on the
+    large directories the flag is for. Asserted on the work not happening rather
+    than on elapsed time.
+    """
+    scans: list[str] = []
+
+    def _record_scan(*args: Any, **kwargs: Any) -> None:  # pragma: no cover - must not run
+        scans.append("scanned")
+        raise AssertionError("--no-wait walked the project")
+
+    monkeypatch.setattr(project_cmd, "report_project_readiness", _record_scan, raising=False)
+    monkeypatch.setattr(
+        project_cmd, "index_project_and_report_readiness", _record_scan, raising=False
+    )
+
+    result = runner.invoke(
+        cli_app,
+        ["project", "add", "research", str(tmp_path), "--no-wait"],
+        env=WIDE_TERMINAL_ENV,
+    )
+
+    assert result.exit_code == 0, result.output
+    assert scans == []
+    # It still names the state and how to check later.
+    assert "Skipped indexing" in flat(result.output)
+    assert "bm project index research" in flat(result.output)
+    assert "bm status --project research --json" in flat(result.output)

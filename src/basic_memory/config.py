@@ -153,13 +153,20 @@ class ConfigManager:
         self.save_config(config)
         return config
 
-    def save_config(self, config: BasicMemoryConfig) -> None:
-        """Save configuration to file and invalidate the process cache."""
+    def save_config(self, config: BasicMemoryConfig) -> Exception | None:
+        """Save configuration to file and invalidate the process cache.
+
+        Returns the error the write swallowed, or None on success; see
+        `save_basic_memory_config` for why it is a return rather than a raise.
+        The cache is cleared either way, so a later read re-reads the file
+        instead of serving a value that was never persisted.
+        """
         global _CONFIG_CACHE, _CONFIG_MTIME, _CONFIG_SIZE
-        save_basic_memory_config(self.config_file, config)
+        write_error = save_basic_memory_config(self.config_file, config)
         _CONFIG_CACHE = None
         _CONFIG_MTIME = None
         _CONFIG_SIZE = None
+        return write_error
 
     @property
     def projects(self) -> Dict[str, str]:
@@ -247,8 +254,19 @@ def has_cloud_credentials(config: BasicMemoryConfig) -> bool:
     return auth.load_tokens() is not None
 
 
-def save_basic_memory_config(file_path: Path, config: BasicMemoryConfig) -> None:
-    """Atomically save configuration so concurrent readers see complete JSON."""
+def save_basic_memory_config(file_path: Path, config: BasicMemoryConfig) -> Exception | None:
+    """Atomically save configuration so concurrent readers see complete JSON.
+
+    Returns the error it swallowed, or None when the write landed.
+
+    The swallow stays because most callers are genuinely best effort -- recording
+    that a promo was shown, stamping an auto-update check -- and failing their
+    command over a config write would be worse than the missing write. But it
+    also turned a failed write into a silent success for callers that must know:
+    `bm project add` builds a recovery path for exactly this failure, and could
+    never reach it (#1440 review). Returning the error is how a caller that
+    cares finds out, without changing what happens to the ones that do not.
+    """
     try:
         file_path.parent.mkdir(parents=True, exist_ok=True)
         _secure_config_dir(file_path.parent)
@@ -260,8 +278,10 @@ def save_basic_memory_config(file_path: Path, config: BasicMemoryConfig) -> None
             os.replace(temp_path, file_path)
         finally:
             temp_path.unlink(missing_ok=True)
-    except Exception as error:  # pragma: no cover
+        return None
+    except Exception as error:
         logger.error(f"Failed to save config: {error}")
+        return error
 
 
 def _configure_logfire_for_entrypoint(entrypoint: str) -> None:
