@@ -94,6 +94,20 @@ VECTOR_FILTER_SCAN_LIMIT = 50000
 # candidate keys. Both engines cap bind parameters (asyncpg at 32767), so every such
 # list — manifest hydration and the filter intersection alike — is split at this size.
 VECTOR_HYDRATION_BATCH_SIZE = 250
+
+# The manifest conditions under which semantic retrieval will use a stored vector.
+# Vector hydration (_hydrate_vector_matches) admits exactly these rows, so anything
+# failing them is invisible to search: a chunk left behind by an embedding-model or
+# vector-index change, or one still pending. Readiness reporting must apply the same
+# predicate — calling such a row "embedded" would report an index settled that
+# retrieval cannot answer from, which is the class of lie #1414 exists to remove.
+# Both callers bind :project_id, :vector_index, and :embedding_model.
+CURRENT_VECTOR_MANIFEST_PREDICATE = (
+    "project_id = :project_id "
+    "AND vector_index = :vector_index "
+    "AND embedding_model = :embedding_model "
+    "AND embedding_status = 'ready'"
+)
 # Over-fetch factor for the rerank candidate chunk pool: chunks collapse to unique
 # (type, id) rows before reranking, so fetch several times reranker_candidates chunks
 # to keep enough unique documents in the rerank window.
@@ -670,10 +684,7 @@ class SearchRepositoryBase(ABC):
             result = await session.execute(
                 text(
                     "SELECT entity_id, chunk_key, chunk_text FROM search_vector_chunks "
-                    "WHERE project_id = :project_id "
-                    "AND vector_index = :vector_index "
-                    "AND embedding_model = :embedding_model "
-                    "AND embedding_status = 'ready' "
+                    "WHERE " + CURRENT_VECTOR_MANIFEST_PREDICATE + " "
                     "AND (" + " OR ".join(predicates) + ")"
                 ),
                 params,
