@@ -105,11 +105,15 @@ class ProjectReadinessService:
 
         async with db.scoped_session(self.session_maker) as session:
             indexed_checksums = await self._indexed_checksums(session, project.id)
-            unresolvable_now = await self._resolvable_unresolved_relations(session, project.id)
+            relations_pending = await self._resolvable_unresolved_relations(session, project.id)
             total_relations = await self._total_relations(session, project.id)
             embeddable, embedded = await self._embedding_counts(session, project.id)
 
         files_total, files_pending = file_stage_counts(observed_files, indexed_checksums)
+        # An entity can hold a ready embedding the current pass no longer counts
+        # as embeddable (its file became non-markdown), so clamp rather than
+        # report negative outstanding work.
+        embeddings_pending = max(0, embeddable - embedded)
         stages = (
             ProjectIndexStage(
                 name=ProjectIndexStageName.FILES,
@@ -119,14 +123,14 @@ class ProjectReadinessService:
             ),
             ProjectIndexStage(
                 name=ProjectIndexStageName.RELATIONS,
-                phase=_phase_for(indexed=indexed, pending=unresolvable_now),
-                pending=unresolvable_now,
+                phase=_phase_for(indexed=indexed, pending=relations_pending),
+                pending=relations_pending,
                 total=total_relations,
             ),
             ProjectIndexStage(
                 name=ProjectIndexStageName.EMBEDDINGS,
-                phase=_phase_for(indexed=indexed, pending=max(0, embeddable - embedded)),
-                pending=max(0, embeddable - embedded),
+                phase=_phase_for(indexed=indexed, pending=embeddings_pending),
+                pending=embeddings_pending,
                 total=embeddable,
             ),
         )
