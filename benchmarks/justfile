@@ -17,6 +17,12 @@ beam_100k_output_dir := "benchmarks/generated/beam-100k"
 beam_500k_output_dir := "benchmarks/generated/beam-500k"
 xafs_root := "benchmarks/datasets/xafs/upstream"
 xafs_output_dir := "benchmarks/generated/xafs"
+xafs_corrections := "benchmarks/datasets/xafs/corrections.json"
+# Judge for judge-graded agent tasks. Opus 4.6 over the OpenAI-compatible route:
+# on a replayed xAFS verdict Sonnet 4.6 marked a verbatim-matching answer
+# INCORRECT 3/3 times and Opus 4.6 marked it CORRECT 3/3 (docs/benchmarks.md 6d).
+# Claude 5 models reject the runner's fixed temperature, so they cannot judge here.
+agent_judge := "openai-compat:claude-opus-4-6@https://api.anthropic.com/v1"
 
 # --- Repo maintenance ---
 
@@ -117,13 +123,13 @@ bench-fetch-xafs personas="dp_001,dp_002":
 
 # Cheap two-persona smoke by default; personas="all" converts every downloaded persona
 bench-convert-xafs personas="dp_001,dp_002":
-    uv run bm-bench convert xafs --dataset-root {{xafs_root}} --output-dir {{xafs_output_dir}} --personas "{{personas}}"
+    uv run bm-bench convert xafs --dataset-root {{xafs_root}} --output-dir {{xafs_output_dir}} --personas "{{personas}}" --corrections {{xafs_corrections}}
 
 bench-prepare-xafs: bench-fetch-xafs bench-convert-xafs
 
 # xAFS agent-task run: grouped per-persona corpora, read-only surfaces,
 # tokens-per-correct-answer headline judged semantically (docs/benchmarks.md 6d)
-bench-run-xafs-agent surfaces="rich,posix" model="openai-compat:qwen3@http://localhost:11434/v1" judge="claude:claude-sonnet-4-6":
+bench-run-xafs-agent surfaces="rich,posix" model="openai-compat:qwen3@http://localhost:11434/v1" judge=agent_judge:
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ -z "{{bm_local_path}}" ]]; then
