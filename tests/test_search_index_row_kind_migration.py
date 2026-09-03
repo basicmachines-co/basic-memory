@@ -27,8 +27,9 @@ def test_upgrade_widens_the_unique_index_to_include_the_row_kind(monkeypatch) ->
     assert len(statements) == 2
     # The wide index is created before the narrow one is dropped, so the table is never
     # momentarily unconstrained.
-    assert "CREATE UNIQUE INDEX IF NOT EXISTS uix_search_index_permalink_type_project" in (
-        statements[0]
+    assert (
+        "CREATE UNIQUE INDEX IF NOT EXISTS uix_search_index_permalink_type_project"
+        in (statements[0])
     )
     assert "ON search_index (permalink, type, project_id)" in statements[0]
     assert "WHERE permalink IS NOT NULL" in statements[0]
