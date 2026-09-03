@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig
+from basic_memory.models.search import SEARCH_INDEX_ROW_KEY_PREDICATE
 from basic_memory.repository import semantic_vector_sync
 from basic_memory.repository.embedding_provider import (
     EmbeddingProvider,
@@ -1097,12 +1098,17 @@ class SearchRepositoryBase(ABC):
         """
 
         async with db.scoped_session(self.session_maker) as session:
-            # Delete existing record if any
+            # Replace only the row this address owns *for this kind*. Keying the
+            # replacement on the permalink alone let a relation whose authored type
+            # spells an observation's address evict that observation -- silently on
+            # SQLite, whose FTS5 table carries no unique index to object (#1437).
             await session.execute(
-                text(
-                    "DELETE FROM search_index WHERE permalink = :permalink AND project_id = :project_id"
-                ),
-                {"permalink": search_index_row.permalink, "project_id": self.project_id},
+                text(f"DELETE FROM search_index WHERE {SEARCH_INDEX_ROW_KEY_PREDICATE}"),
+                {
+                    "permalink": search_index_row.permalink,
+                    "type": search_index_row.type,
+                    "project_id": self.project_id,
+                },
             )
 
             # When using text() raw SQL, always serialize JSON to string
@@ -1256,17 +1262,24 @@ class SearchRepositoryBase(ABC):
             )
             await session.commit()
 
-    async def delete_by_permalink(self, permalink: str) -> None:
-        """Delete a search index entry by permalink.
+    async def delete_by_permalink(self, permalink: str, search_item_type: SearchItemType) -> None:
+        """Delete the one search row an address owns for the given row kind.
 
         This implementation is shared across backends as it uses standard SQL DELETE.
+
+        The kind is required rather than optional because an address can be shared by
+        two kinds (#1437): deleting one note's relation row by permalink alone also
+        removed another note's observation row, and nothing restores a projection whose
+        source row still exists -- the orphan sweep only removes, it never rebuilds.
         """
         async with db.scoped_session(self.session_maker) as session:
             await session.execute(
-                text(
-                    "DELETE FROM search_index WHERE permalink = :permalink AND project_id = :project_id"
-                ),
-                {"permalink": permalink, "project_id": self.project_id},
+                text(f"DELETE FROM search_index WHERE {SEARCH_INDEX_ROW_KEY_PREDICATE}"),
+                {
+                    "permalink": permalink,
+                    "type": search_item_type.value,
+                    "project_id": self.project_id,
+                },
             )
             await session.commit()
 

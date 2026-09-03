@@ -8,6 +8,7 @@ from datetime import datetime
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from basic_memory.models.search import SEARCH_INDEX_ROW_KEY_COLUMNS
 from basic_memory.repository.accepted_note_search_row import AcceptedNoteSearchRow
 from basic_memory.repository.accepted_note_vector_cleanup import (
     ProjectIndexExternalVectorCleaner,
@@ -48,7 +49,7 @@ INSERT_ACCEPTED_NOTE_SEARCH_SQL = text(
 )
 
 UPSERT_ACCEPTED_NOTE_SEARCH_SQL = text(
-    """
+    f"""
     INSERT INTO search_index (
         id, title, content_stems, content_snippet, script_ngrams,
         permalink, file_path, type, metadata,
@@ -64,14 +65,13 @@ UPSERT_ACCEPTED_NOTE_SEARCH_SQL = text(
         :created_at, :updated_at,
         :project_id
     )
-    ON CONFLICT (permalink, project_id) WHERE permalink IS NOT NULL DO UPDATE SET
+    ON CONFLICT ({SEARCH_INDEX_ROW_KEY_COLUMNS}) WHERE permalink IS NOT NULL DO UPDATE SET
         id = EXCLUDED.id,
         title = EXCLUDED.title,
         content_stems = EXCLUDED.content_stems,
         content_snippet = EXCLUDED.content_snippet,
         script_ngrams = EXCLUDED.script_ngrams,
         file_path = EXCLUDED.file_path,
-        type = EXCLUDED.type,
         metadata = EXCLUDED.metadata,
         from_id = EXCLUDED.from_id,
         to_id = EXCLUDED.to_id,

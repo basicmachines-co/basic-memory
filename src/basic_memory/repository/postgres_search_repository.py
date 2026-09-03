@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ConfigManager, DatabaseBackend
+from basic_memory.models.search import SEARCH_INDEX_ROW_KEY_COLUMNS
 from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.embedding_provider_factory import create_embedding_provider
 from basic_memory.repository.rerank_provider import RerankProvider
@@ -182,8 +183,8 @@ class PostgresSearchRepository(SearchRepositoryBase):
 
     Note: This implementation uses UPSERT patterns (INSERT ... ON CONFLICT) instead of
     delete-then-insert to handle race conditions during parallel entity indexing.
-    The partial unique index uix_search_index_permalink_project prevents duplicate
-    permalinks per project.
+    The partial unique index uix_search_index_permalink_type_project prevents a second
+    row of the same kind from claiming an address that kind already owns.
     """
 
     def __init__(
@@ -264,13 +265,13 @@ class PostgresSearchRepository(SearchRepositoryBase):
         """Index or update a single item using UPSERT.
 
         Uses INSERT ... ON CONFLICT to handle race conditions during parallel
-        entity indexing. The partial unique index uix_search_index_permalink_project
-        on (permalink, project_id) WHERE permalink IS NOT NULL prevents duplicate
-        permalinks.
+        entity indexing. The partial unique index uix_search_index_permalink_type_project
+        on (permalink, type, project_id) WHERE permalink IS NOT NULL prevents a second
+        row of the same kind from claiming an address that kind already owns.
 
-        For rows with non-null permalinks (entities), conflicts are resolved by
-        updating the existing row. For rows with null permalinks, no conflict
-        occurs on this index.
+        For rows with non-null permalinks, a conflict against the same kind is resolved
+        by updating the existing row. For rows with null permalinks, no conflict occurs
+        on this partial index.
         """
         async with db.scoped_session(self.session_maker) as session:
             # Serialize JSON for raw SQL
@@ -282,12 +283,12 @@ class PostgresSearchRepository(SearchRepositoryBase):
             )
             insert_data = _strip_nul_from_row(insert_data)
 
-            # Use upsert to handle race conditions during parallel indexing
-            # ON CONFLICT (permalink, project_id) matches the partial unique index
-            # uix_search_index_permalink_project WHERE permalink IS NOT NULL
-            # For rows with NULL permalinks, no conflict occurs (partial index doesn't apply)
+            # Use upsert to handle race conditions during parallel indexing.
+            # The conflict target matches uix_search_index_permalink_type_project, the
+            # partial unique index over SEARCH_INDEX_ROW_KEY. For rows with NULL
+            # permalinks no conflict occurs (the partial index doesn't apply).
             await session.execute(
-                text("""
+                text(f"""
                     INSERT INTO search_index (
                         id, title, content_stems, content_snippet, script_ngrams, permalink, file_path, type, metadata,
                         from_id, to_id, relation_type,
@@ -301,14 +302,13 @@ class PostgresSearchRepository(SearchRepositoryBase):
                         :created_at, :updated_at,
                         :project_id
                     )
-                    ON CONFLICT (permalink, project_id) WHERE permalink IS NOT NULL DO UPDATE SET
+                    ON CONFLICT ({SEARCH_INDEX_ROW_KEY_COLUMNS}) WHERE permalink IS NOT NULL DO UPDATE SET
                         id = EXCLUDED.id,
                         title = EXCLUDED.title,
                         content_stems = EXCLUDED.content_stems,
                         content_snippet = EXCLUDED.content_snippet,
                         script_ngrams = EXCLUDED.script_ngrams,
                         file_path = EXCLUDED.file_path,
-                        type = EXCLUDED.type,
                         metadata = EXCLUDED.metadata,
                         from_id = EXCLUDED.from_id,
                         to_id = EXCLUDED.to_id,
@@ -881,13 +881,13 @@ class PostgresSearchRepository(SearchRepositoryBase):
         """Index multiple items in a single batch operation using UPSERT.
 
         Uses INSERT ... ON CONFLICT to handle race conditions during parallel
-        entity indexing. The partial unique index uix_search_index_permalink_project
-        on (permalink, project_id) WHERE permalink IS NOT NULL prevents duplicate
-        permalinks.
+        entity indexing. The partial unique index uix_search_index_permalink_type_project
+        on (permalink, type, project_id) WHERE permalink IS NOT NULL prevents a second
+        row of the same kind from claiming an address that kind already owns.
 
-        For rows with non-null permalinks (entities), conflicts are resolved by
-        updating the existing row. For rows with null permalinks (observations,
-        relations), the partial index doesn't apply and they are inserted directly.
+        For rows with non-null permalinks, a conflict against the same kind is resolved
+        by updating the existing row. For rows with null permalinks, the partial index
+        doesn't apply and they are inserted directly.
 
         Args:
             search_index_rows: List of SearchIndexRow objects to index
@@ -910,12 +910,12 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 )
                 insert_data_list.append(_strip_nul_from_row(insert_data))
 
-            # Use upsert to handle race conditions during parallel indexing
-            # ON CONFLICT (permalink, project_id) matches the partial unique index
-            # uix_search_index_permalink_project WHERE permalink IS NOT NULL
-            # For rows with NULL permalinks (observations, relations), no conflict occurs
+            # Use upsert to handle race conditions during parallel indexing.
+            # The conflict target matches uix_search_index_permalink_type_project, the
+            # partial unique index over SEARCH_INDEX_ROW_KEY. For rows with NULL
+            # permalinks no conflict occurs (the partial index doesn't apply).
             await session.execute(
-                text("""
+                text(f"""
                     INSERT INTO search_index (
                         id, title, content_stems, content_snippet, script_ngrams, permalink, file_path, type, metadata,
                         from_id, to_id, relation_type,
@@ -929,14 +929,13 @@ class PostgresSearchRepository(SearchRepositoryBase):
                         :created_at, :updated_at,
                         :project_id
                     )
-                    ON CONFLICT (permalink, project_id) WHERE permalink IS NOT NULL DO UPDATE SET
+                    ON CONFLICT ({SEARCH_INDEX_ROW_KEY_COLUMNS}) WHERE permalink IS NOT NULL DO UPDATE SET
                         id = EXCLUDED.id,
                         title = EXCLUDED.title,
                         content_stems = EXCLUDED.content_stems,
                         content_snippet = EXCLUDED.content_snippet,
                         script_ngrams = EXCLUDED.script_ngrams,
                         file_path = EXCLUDED.file_path,
-                        type = EXCLUDED.type,
                         metadata = EXCLUDED.metadata,
                         from_id = EXCLUDED.from_id,
                         to_id = EXCLUDED.to_id,

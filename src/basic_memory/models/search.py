@@ -6,7 +6,34 @@ The search_index table is created via raw DDL, not ORM models, because:
 - Both backends use raw SQL for all search operations via SearchIndexRow dataclass
 """
 
+from typing import Final
+
 from sqlalchemy import DDL
+
+
+# --- Search index row identity ---
+
+# What makes one search_index row distinct from another, stated once because the two
+# backends, three write paths, and the Alembic migration all have to agree on it.
+#
+# A permalink alone is not an identity. A relation's permalink is `from/type/to` with the
+# relation type authored by the user, so a note that says
+#
+#     - [decision] redis
+#     - observations [[decision/redis]]
+#
+# hands its observation and its relation the same string, and no reserved path segment
+# closes that: the colliding segment is the author's own text (#1437). The row kind is
+# already half of this table's primary key, `(id, type, project_id)`; uniqueness keyed on
+# the permalink alone was the outlier, narrower than the table's own notion of identity.
+SEARCH_INDEX_ROW_KEY: Final = ("permalink", "type", "project_id")
+
+# The same key rendered for the two SQL shapes that need it: an index/conflict-target
+# column list, and an equality predicate over bound parameters of the same names.
+SEARCH_INDEX_ROW_KEY_COLUMNS: Final = ", ".join(SEARCH_INDEX_ROW_KEY)
+SEARCH_INDEX_ROW_KEY_PREDICATE: Final = " AND ".join(
+    f"{column} = :{column}" for column in SEARCH_INDEX_ROW_KEY
+)
 
 
 # Define Postgres search_index table with composite primary key and tsvector
@@ -94,12 +121,13 @@ CREATE_POSTGRES_SEARCH_INDEX_METADATA = DDL("""
 CREATE INDEX IF NOT EXISTS idx_search_index_metadata_gin ON search_index USING gin(metadata jsonb_path_ops)
 """)
 
-# Partial unique index on (permalink, project_id) for non-null permalinks
-# This prevents duplicate permalinks per project and is used by upsert operations
-# in PostgresSearchRepository to handle race conditions during parallel indexing
-CREATE_POSTGRES_SEARCH_INDEX_PERMALINK = DDL("""
-CREATE UNIQUE INDEX IF NOT EXISTS uix_search_index_permalink_project
-ON search_index (permalink, project_id)
+# Partial unique index on the row key for non-null permalinks. This prevents a second
+# row of the same kind from claiming an address that kind already owns, and is the
+# conflict target the Postgres upserts use to resolve races during parallel indexing.
+# See SEARCH_INDEX_ROW_KEY for why the row kind belongs in the key.
+CREATE_POSTGRES_SEARCH_INDEX_PERMALINK = DDL(f"""
+CREATE UNIQUE INDEX IF NOT EXISTS uix_search_index_permalink_type_project
+ON search_index ({SEARCH_INDEX_ROW_KEY_COLUMNS})
 WHERE permalink IS NOT NULL
 """)
 

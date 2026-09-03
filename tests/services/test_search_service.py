@@ -1842,3 +1842,76 @@ async def test_reindex_all_preserves_sibling_project_search_rows(
 
     own_results = await search_service.repository.search(search_text="stalemarker")
     assert own_results == []
+
+
+@pytest.mark.asyncio
+async def test_note_whose_relation_spells_an_observation_address_indexes_both(
+    search_service,
+    entity_repository,
+    session_maker,
+    test_project,
+):
+    """The #1437 reproduction, indexed end to end from one note's own markdown.
+
+    A note containing
+
+        - [decision] redis
+        - observations [[decision/redis]]
+
+    gives its observation and its relation the identical permalink, because a relation's
+    address is `from/type/to` and the type is the author's text. On `main` this raised an
+    IntegrityError on Postgres -- the upsert overwrote the observation row and broke the
+    FTS-chunk foreign key still pointing at it -- while SQLite kept both under one address
+    with no way to tell them apart.
+    """
+    from basic_memory.models.knowledge import Entity, Observation, Relation
+
+    now = datetime.now(timezone.utc)
+    async with db.scoped_session(session_maker) as session:
+        entity = Entity(
+            project_id=test_project.id,
+            title="Redis Decision",
+            note_type="note",
+            permalink="test/redis-decision",
+            file_path="test/redis_decision.md",
+            content_type="text/markdown",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(entity)
+        await session.flush()
+        session.add(
+            Observation(
+                project_id=test_project.id,
+                entity_id=entity.id,
+                category="decision",
+                content="redis",
+            )
+        )
+        session.add(
+            Relation(
+                project_id=test_project.id,
+                from_id=entity.id,
+                to_id=None,
+                to_name="decision/redis",
+                relation_type="observations",
+            )
+        )
+        await session.flush()
+
+    async with db.scoped_session(session_maker) as session:
+        entity = await entity_repository.get_by_permalink(session, "test/redis-decision")
+    assert entity is not None
+
+    shared_address = entity.observations[0].permalink
+    assert entity.outgoing_relations[0].permalink == shared_address, (
+        "the reproduction requires the two permalinks to actually collide"
+    )
+
+    await search_service.index_entity_markdown(entity, content="We chose redis.")
+
+    results = await search_service.search(SearchQuery(permalink=shared_address))
+    assert sorted(row.type for row in results) == [
+        SearchItemType.OBSERVATION.value,
+        SearchItemType.RELATION.value,
+    ]

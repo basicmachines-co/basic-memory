@@ -505,7 +505,7 @@ async def test_delete_by_permalink(search_repository, search_entity):
     assert len(results) == 1
 
     # Delete by permalink
-    await search_repository.delete_by_permalink(search_entity.permalink)
+    await search_repository.delete_by_permalink(search_entity.permalink, SearchItemType.ENTITY)
 
     # Verify it's gone
     results_after = await search_repository.search(search_text="content to delete")
@@ -1319,3 +1319,156 @@ async def test_cjk_compound_query_matches_with_or_without_relaxation(
 
     total = await search_repository.count(search_text="季度 报告", allow_relaxed=True)
     assert total == 1
+
+
+# --- Row-kind uniqueness (#1437) ---
+
+# One address, two kinds. A relation's permalink is `from/type/to` with the relation type
+# authored by the user, so the note
+#
+#     - [decision] redis
+#     - observations [[decision/redis]]
+#
+# gives its observation and its relation this identical string.
+_SHARED_ADDRESS = "test/search-test-entity/observations/decision/redis"
+
+
+def _row_at_shared_address(search_repository, search_entity, *, row_id: int, item_type: str):
+    """Build one indexable row occupying the address both kinds can spell."""
+    return SearchIndexRow(
+        project_id=search_repository.project_id,
+        id=row_id,
+        type=item_type,
+        title=f"{item_type} at the shared address",
+        content_stems=f"{item_type} stems",
+        content_snippet=f"{item_type} body",
+        permalink=_SHARED_ADDRESS,
+        file_path=search_entity.file_path,
+        entity_id=search_entity.id,
+        created_at=search_entity.created_at,
+        updated_at=search_entity.updated_at,
+    )
+
+
+async def _rows_at_shared_address(session_maker, search_repository):
+    """Return (type, id) for every stored row holding the shared address."""
+    async with db.scoped_session(session_maker) as session:
+        result = await session.execute(
+            text(
+                "SELECT type, id FROM search_index "
+                "WHERE permalink = :permalink AND project_id = :project_id"
+            ),
+            {"permalink": _SHARED_ADDRESS, "project_id": search_repository.project_id},
+        )
+        return sorted((row[0], row[1]) for row in result.fetchall())
+
+
+@pytest.mark.asyncio
+async def test_observation_and_relation_sharing_an_address_keep_separate_rows(
+    search_repository, search_entity, session_maker
+):
+    """An observation and a relation at one address are two rows, not one.
+
+    Keyed on the permalink alone this destroyed data in two different ways: Postgres
+    upserted the relation into the observation's row and then broke the FTS-chunk
+    foreign key still pointing at the kind it had overwritten, and SQLite -- whose
+    FTS5 table has no unique index to object -- silently dropped the observation.
+    """
+    await search_repository.index_item(
+        _row_at_shared_address(
+            search_repository,
+            search_entity,
+            row_id=11,
+            item_type=SearchItemType.OBSERVATION.value,
+        )
+    )
+    await search_repository.index_item(
+        _row_at_shared_address(
+            search_repository,
+            search_entity,
+            row_id=22,
+            item_type=SearchItemType.RELATION.value,
+        )
+    )
+
+    assert await _rows_at_shared_address(session_maker, search_repository) == [
+        (SearchItemType.OBSERVATION.value, 11),
+        (SearchItemType.RELATION.value, 22),
+    ]
+
+    found = await search_repository.search(permalink=_SHARED_ADDRESS)
+    assert sorted((row.type, row.id) for row in found) == [
+        (SearchItemType.OBSERVATION.value, 11),
+        (SearchItemType.RELATION.value, 22),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_reindexing_one_kind_replaces_only_its_own_row(
+    search_repository, search_entity, session_maker
+):
+    """Uniqueness still binds *within* a kind: a second write replaces, never duplicates."""
+    await search_repository.index_item(
+        _row_at_shared_address(
+            search_repository,
+            search_entity,
+            row_id=11,
+            item_type=SearchItemType.OBSERVATION.value,
+        )
+    )
+    await search_repository.index_item(
+        _row_at_shared_address(
+            search_repository,
+            search_entity,
+            row_id=22,
+            item_type=SearchItemType.RELATION.value,
+        )
+    )
+
+    # Re-index the observation under a new row id, as a re-parse of the note does.
+    await search_repository.index_item(
+        _row_at_shared_address(
+            search_repository,
+            search_entity,
+            row_id=33,
+            item_type=SearchItemType.OBSERVATION.value,
+        )
+    )
+
+    assert await _rows_at_shared_address(session_maker, search_repository) == [
+        (SearchItemType.OBSERVATION.value, 33),
+        (SearchItemType.RELATION.value, 22),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_delete_by_permalink_leaves_the_other_kind_at_that_address(
+    search_repository, search_entity, session_maker
+):
+    """Deleting one note's relation row must not take another note's observation row.
+
+    Nothing rebuilds a projection whose source row still exists -- the orphan sweep only
+    removes -- so an over-broad delete here does not converge.
+    """
+    await search_repository.index_item(
+        _row_at_shared_address(
+            search_repository,
+            search_entity,
+            row_id=11,
+            item_type=SearchItemType.OBSERVATION.value,
+        )
+    )
+    await search_repository.index_item(
+        _row_at_shared_address(
+            search_repository,
+            search_entity,
+            row_id=22,
+            item_type=SearchItemType.RELATION.value,
+        )
+    )
+
+    await search_repository.delete_by_permalink(_SHARED_ADDRESS, SearchItemType.RELATION)
+
+    assert await _rows_at_shared_address(session_maker, search_repository) == [
+        (SearchItemType.OBSERVATION.value, 11),
+    ]

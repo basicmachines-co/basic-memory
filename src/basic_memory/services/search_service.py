@@ -1004,9 +1004,9 @@ class SearchService:
 
             await self.repository.bulk_index_items(rows_to_index)
 
-    async def delete_by_permalink(self, permalink: str):
-        """Delete an item from the search index."""
-        await self.repository.delete_by_permalink(permalink)
+    async def delete_by_permalink(self, permalink: str, search_item_type: SearchItemType):
+        """Delete the search row one permalink owns for the given row kind."""
+        await self.repository.delete_by_permalink(permalink, search_item_type)
 
     async def delete_by_entity_id(self, entity_id: int):
         """Delete an item from the search index."""
@@ -1024,20 +1024,23 @@ class SearchService:
         )
 
         # Clean up search index - same logic as sync_service.handle_delete()
-        permalinks = (
-            [entity.permalink]
-            + [o.permalink for o in entity.observations]
-            + [r.permalink for r in entity.outgoing_relations]
+        # Each address is paired with the kind that owns it: one permalink can be shared
+        # by two kinds, so deleting by address alone took another note's row with it
+        # (#1437), and nothing rebuilds a projection whose source row still exists.
+        addressed_rows = (
+            [(entity.permalink, SearchItemType.ENTITY)]
+            + [(o.permalink, SearchItemType.OBSERVATION) for o in entity.observations]
+            + [(r.permalink, SearchItemType.RELATION) for r in entity.outgoing_relations]
         )
 
         logger.debug(
             f"Deleting search index entries for entity_id={entity.id}, "
-            f"index_entries={len(permalinks)}"
+            f"index_entries={len(addressed_rows)}"
         )
 
-        for permalink in permalinks:
+        for permalink, search_item_type in addressed_rows:
             if permalink:
-                await self.delete_by_permalink(permalink)
+                await self.delete_by_permalink(permalink, search_item_type)
             else:
                 await self.delete_by_entity_id(entity.id)
 
