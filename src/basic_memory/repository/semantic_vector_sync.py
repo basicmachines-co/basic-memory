@@ -73,6 +73,8 @@ class _VectorSyncBatchAccumulator:
             entities_deferred=len(deferred_entity_ids),
             entities_skipped=self.entities_skipped,
             failed_entity_ids=tuple(sorted(failed_entity_ids)),
+            deferred_entity_ids=tuple(sorted(deferred_entity_ids)),
+            synced_entity_ids=tuple(sorted(synced_entity_ids)),
             sample_errors=tuple(self.sample_errors),
             vector_index=vector_index,
             embedding_model=embedding_model,

@@ -28,6 +28,22 @@ from basic_memory.repository.semantic_errors import (
 from basic_memory.repository.semantic_vector_sync import PendingEmbeddingJob
 
 
+@pytest.fixture(autouse=True)
+def _skip_vector_deferral_writes(monkeypatch):
+    """These tests mock session_maker, so the deferral write has nothing to talk to.
+
+    `sync_entity_vectors_batch` records which entities it deferred, which needs a
+    real session; the doubles here patch `scoped_session` only for the paths they
+    exercise. The write itself is covered against a database in
+    tests/services/test_project_readiness.py.
+    """
+
+    async def _noop(self, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(PostgresSearchRepository, "record_entity_vector_deferrals", _noop)
+
+
 # --- Helpers ---------------------------------------------------------------
 
 

@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Literal, Optional, cast
 
 import logfire as logfire
@@ -590,6 +590,47 @@ class SearchRepositoryBase(ABC):
             # Outcome: retry from the same ranked prefix with bounded geometric
             # overfetch until enough live rows survive or the adapter is exhausted.
             scan_limit = min(scan_limit * 2, VECTOR_FILTER_SCAN_LIMIT)
+
+    async def record_entity_vector_deferrals(
+        self,
+        *,
+        deferred_entity_ids: set[int],
+        completed_entity_ids: set[int],
+    ) -> None:
+        """Persist which entities a sharded vector sync left unfinished.
+
+        The single writer of `entity.vector_sync_deferred_at`, called from the one
+        place that decides deferral. Readiness reads the column instead of trying
+        to infer completeness from the manifest, which cannot show it: the chunks
+        a shard did not schedule have no row, so an entity looks fully embedded
+        after its first shard (#1440 review).
+        """
+        if not deferred_entity_ids and not completed_entity_ids:
+            return
+
+        async with db.scoped_session(self.session_maker) as session:
+            for entity_ids, deferred_at in (
+                (sorted(deferred_entity_ids), datetime.now(timezone.utc)),
+                (sorted(completed_entity_ids), None),
+            ):
+                if not entity_ids:
+                    continue
+                placeholders = ", ".join(f":entity_id_{index}" for index in range(len(entity_ids)))
+                params: dict[str, object] = {
+                    "project_id": self.project_id,
+                    "deferred_at": deferred_at,
+                }
+                params.update(
+                    {f"entity_id_{index}": entity_id for index, entity_id in enumerate(entity_ids)}
+                )
+                await session.execute(
+                    text(
+                        "UPDATE entity SET vector_sync_deferred_at = :deferred_at "
+                        f"WHERE project_id = :project_id AND id IN ({placeholders})"
+                    ),
+                    params,
+                )
+            await session.commit()
 
     async def _hydrate_vector_matches(
         self,
@@ -1798,11 +1839,20 @@ class SearchRepositoryBase(ABC):
         progress_callback: Optional[Callable[[int, int, int], Any]] = None,
     ) -> VectorSyncBatchResult:
         """Sync semantic chunk rows + embeddings for a batch of entities."""
-        return await self._sync_entity_vectors_internal(
+        result = await self._sync_entity_vectors_internal(
             entity_ids,
             progress_callback=progress_callback,
             continue_on_error=True,
         )
+        # Recorded here rather than inside the portable sync helper: this is the
+        # boundary that owns a database session, and the helper is also driven by
+        # test doubles that have none. The terminal states it reports are the
+        # sharding rule's own, so readiness still cannot drift from it.
+        await self.record_entity_vector_deferrals(
+            deferred_entity_ids=set(result.deferred_entity_ids),
+            completed_entity_ids=set(result.synced_entity_ids),
+        )
+        return result
 
     async def _sync_entity_vectors_internal(
         self,

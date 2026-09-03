@@ -12,6 +12,7 @@ from sqlalchemy import text
 
 from basic_memory import db
 from basic_memory.models import Project
+from basic_memory.repository.search_repository import create_search_repository
 from basic_memory.repository.embedding_provider_factory import (
     configured_embedding_provider_identity,
 )
@@ -499,3 +500,96 @@ async def test_a_missing_vector_manifest_reports_nothing_embedded(
 
     assert embeddings.total == 1
     assert embeddings.pending == 1
+
+
+@pytest.mark.asyncio
+async def test_a_deferred_entity_is_not_settled(
+    readiness_service, test_project, sample_entity, app_config, engine_factory
+):
+    """One shard of a large note is not the whole note.
+
+    An entity producing more chunks than a shard is processed a shard at a time.
+    The chunks that were not scheduled have no manifest row at all, so its
+    written rows satisfy the retrieval predicate and it looked fully embedded --
+    letting `status --wait` return with the note's later chunks unsearchable.
+    """
+    _, session_maker = engine_factory
+    app_config.semantic_search_enabled = True
+    await _insert_chunk(
+        session_maker,
+        entity_id=sample_entity.id,
+        project_id=test_project.id,
+        app_config=app_config,
+    )
+    # What the sharded sync records when it defers the rest of the entity.
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(
+            text("UPDATE entity SET vector_sync_deferred_at = :now WHERE id = :id"),
+            {"now": datetime.now(UTC), "id": sample_entity.id},
+        )
+
+    readiness = await readiness_service.readiness_for(test_project, ())
+    embeddings = readiness.stage(ProjectIndexStageName.EMBEDDINGS)
+
+    assert embeddings.total == 1
+    assert embeddings.pending == 1
+    assert readiness.phase is not ProjectIndexPhase.IDLE
+
+
+@pytest.mark.asyncio
+async def test_clearing_the_deferral_settles_the_entity(
+    readiness_service, test_project, sample_entity, app_config, engine_factory
+):
+    """The marker is cleared when a later pass finishes the entity."""
+    _, session_maker = engine_factory
+    app_config.semantic_search_enabled = True
+    await _insert_chunk(
+        session_maker,
+        entity_id=sample_entity.id,
+        project_id=test_project.id,
+        app_config=app_config,
+    )
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(
+            text("UPDATE entity SET vector_sync_deferred_at = NULL WHERE id = :id"),
+            {"id": sample_entity.id},
+        )
+
+    readiness = await readiness_service.readiness_for(test_project, ())
+
+    assert readiness.stage(ProjectIndexStageName.EMBEDDINGS).pending == 0
+
+
+@pytest.mark.asyncio
+async def test_the_sharded_sync_is_the_writer_of_the_deferral_marker(
+    test_project, sample_entity, app_config, engine_factory
+):
+    """Readiness and the sharding rule share one writer, so they cannot drift."""
+    _, session_maker = engine_factory
+    repository = create_search_repository(
+        session_maker, project_id=test_project.id, app_config=app_config
+    )
+
+    await repository.record_entity_vector_deferrals(
+        deferred_entity_ids={sample_entity.id}, completed_entity_ids=set()
+    )
+    async with db.scoped_session(session_maker) as session:
+        deferred_at = (
+            await session.execute(
+                text("SELECT vector_sync_deferred_at FROM entity WHERE id = :id"),
+                {"id": sample_entity.id},
+            )
+        ).scalar()
+    assert deferred_at is not None
+
+    await repository.record_entity_vector_deferrals(
+        deferred_entity_ids=set(), completed_entity_ids={sample_entity.id}
+    )
+    async with db.scoped_session(session_maker) as session:
+        cleared = (
+            await session.execute(
+                text("SELECT vector_sync_deferred_at FROM entity WHERE id = :id"),
+                {"id": sample_entity.id},
+            )
+        ).scalar()
+    assert cleared is None
