@@ -65,6 +65,12 @@ class SearchRepository(Protocol):
         physical storage is not inspectable."""
         ...
 
+    async def record_entity_vector_deferrals(
+        self, *, deferred_entity_ids: set[int], completed_entity_ids: set[int]
+    ) -> None:
+        """Record which entities a sharded vector sync left unfinished."""
+        ...
+
     async def semantic_effectively_enabled(self) -> bool:
         """Return whether semantic retrieval can actually run right now."""
         ...

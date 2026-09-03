@@ -282,10 +282,22 @@ class ProjectReadinessService:
         # provider, and building one here would load the embedding model. The
         # config forms are defined to produce the same strings, and
         # get_embedding_status compares the same way.
+        # `vector_sync_deferred_at` excludes an entity whose later shards were
+        # never scheduled. Its written chunks satisfy the manifest predicate, so
+        # without this an entity one shard into a large note counts as fully
+        # embedded -- the third time a count and the thing it measures disagreed
+        # (#1440 review). The marker is written by the sharded sync itself, in
+        # `record_entity_vector_deferrals`, so the two cannot drift.
         usable_result = await session.execute(
             text(
                 "SELECT DISTINCT entity_id FROM search_vector_chunks "
-                "WHERE " + CURRENT_VECTOR_MANIFEST_PREDICATE
+                "WHERE " + CURRENT_VECTOR_MANIFEST_PREDICATE + " "
+                # Applied as a subquery so the shared predicate is used verbatim
+                # rather than rewritten to carry a table alias.
+                "AND entity_id NOT IN ("
+                "  SELECT id FROM entity WHERE project_id = :project_id "
+                "  AND vector_sync_deferred_at IS NOT NULL"
+                ")"
             ),
             {
                 "project_id": project_id,

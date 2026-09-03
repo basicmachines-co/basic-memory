@@ -1061,23 +1061,39 @@ def add_project(
             except Exception as e:
                 # Cloud project and routing are both saved; only the local folder
                 # is missing, so recovery is filesystem-side then a resync.
+                # `bisync` is Personal-workspace-only -- `_require_personal_workspace`
+                # rejects it outright for a Team workspace, and the workspace type is
+                # not knowable here. `pull`/`push` are additive and Team-safe, and
+                # work on Personal too, so they are the remedy for both (#1440
+                # review). Same wording `bm cloud sync-setup` already prints.
                 _abort_after_project_created(
                     name,
                     step=f"creating the local sync directory {local_sync_path}",
                     remedy=(
-                        f"Create it yourself (or fix its permissions), then run "
-                        f"[green]{command_hint('bm', 'cloud', 'bisync', '--name', name, '--resync')}[/green]."
+                        f"Create it yourself (or fix its permissions), then fetch with "
+                        f"[green]{command_hint('bm', 'cloud', 'pull', '--name', name)}[/green]."
                     ),
                     error=e,
                 )
 
             console.print(f"\n[green]Local sync path configured: {local_sync_path}[/green]")
+            # Lead with the Team-safe additive commands (they work on any
+            # workspace); the bisync mirror is Personal-only, so it is an aside
+            # rather than the instruction. Mirrors `bm cloud sync-setup`.
             console.print("\nNext steps:")
             console.print(
-                f"  1. Preview: {command_hint('bm', 'cloud', 'bisync', '--name', name, '--resync', '--dry-run')}"
+                f"  1. Preview a pull: "
+                f"{command_hint('bm', 'cloud', 'pull', '--name', name, '--dry-run')}"
             )
             console.print(
-                f"  2. Sync: {command_hint('bm', 'cloud', 'bisync', '--name', name, '--resync')}"
+                f"  2. Fetch from cloud: {command_hint('bm', 'cloud', 'pull', '--name', name)}"
+            )
+            console.print(
+                f"  3. Upload local changes: {command_hint('bm', 'cloud', 'push', '--name', name)}"
+            )
+            console.print(
+                f"  Personal workspaces can also mirror with: "
+                f"{command_hint('bm', 'cloud', 'bisync', '--name', name, '--resync')}"
             )
 
 

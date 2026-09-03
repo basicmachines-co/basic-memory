@@ -90,6 +90,15 @@ class Entity(Base):
     # size: file size in bytes for quick change detection
     size: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
+    # Set when a vector-sync pass processed one shard of this entity and left the
+    # rest for a later run. Written only by the batch sync that makes that call,
+    # so readiness cannot disagree with the sharding rule about whether the entity
+    # still owes embedding work: its manifest rows look complete after shard one,
+    # and nothing else in the schema records the chunks that were never written.
+    vector_sync_deferred_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+
     # Metadata and tracking
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now().astimezone()

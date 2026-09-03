@@ -206,18 +206,20 @@ def remote_projects(monkeypatch, cloud_add):
 
 
 def _printed_remedy_command(output: str) -> list[str]:
-    """Pull the runnable `bm ...` the output told the user to run.
+    """Pull the first runnable `bm ...` the output told the user to run.
 
-    The test runs what was printed rather than a command it chose itself; a
-    remedy that only looks right is exactly what shipped twice before. The
-    prose also names `'bm project add'` in quotes when telling the user not to
-    re-run it blindly, so only a candidate carrying flags is a command.
+    Bounded at a comma or a sentence-ending period, because one sentence can
+    name two commands ("Index it with X, then check with Y"). The negative
+    lookbehind drops the prose mention of `'bm project add'` in the "do not
+    re-run" line, which is quoted; a real printed command is not.
     """
-    candidates = re.findall(r"bm ((?:project|cloud) [^.]+?)(?:\.\s|\.$|$)", flat(output))
-    runnable = [candidate.strip() for candidate in candidates if "--" in candidate]
+    candidates = re.findall(
+        r"(?<!')bm ((?:project|cloud|status) [^,]*?)(?:,|\.\s|\.$|$)", flat(output)
+    )
+    runnable = [candidate.strip() for candidate in candidates if candidate.strip()]
     assert runnable, f"no runnable remedy command in output: {output}"
-    # shlex.split, not str.split: the printed command is shell-quoted, and a name
-    # with a space must come back as one argument -- which is the whole point.
+    # shlex.split, not str.split: the printed command is shell-quoted, so a name
+    # with a space has to come back as one argument.
     return shlex.split(runnable[0])
 
 
@@ -328,7 +330,11 @@ def test_a_failed_local_sync_mkdir_gets_a_sync_remedy(tmp_path, monkeypatch, clo
     assert "added successfully" in flat(result.output)
     assert "was created, but creating the local sync directory" in flat(result.output)
     assert "bm project index" not in flat(result.output)
-    assert "bm cloud bisync --name research --resync" in flat(result.output)
+    # `bisync` is Personal-only; `pull` works on Team workspaces too, so it is
+    # the remedy for both. The full mode x step matrix lives in
+    # tests/cli/test_project_add_remedy_matrix.py.
+    assert "bm cloud pull --name research" in flat(result.output)
+    assert "bm cloud bisync" not in flat(result.output)
     assert "Do not re-run 'bm project add'" in flat(result.output)
 
 
