@@ -12,8 +12,10 @@ import pytest
 from mcp.types import CallToolResult, TextContent
 
 import basic_memory_benchmarks.agent_tasks.driver as driver
+from basic_memory_benchmarks.agent_tasks.corpus import TIMESTAMPS, corpus_files
 import basic_memory_benchmarks.llm.tool_agent as tool_agent
 from basic_memory_benchmarks.agent_tasks.driver import (
+    recency_mismatch,
     SessionTerminatedError,
     SurfaceRuntime,
     build_surface_summary,
@@ -90,10 +92,19 @@ class FakeSession:
         self.stopped = True
 
 
+def _bm_stdout(command: list[str]) -> str:
+    """What the stubbed bm prints: the recency guard's `tail --json` sees the gold set."""
+    if "tail" in command:
+        return json.dumps([{"file_path": relpath} for relpath in TIMESTAMPS])
+    return ""
+
+
 def _stub_bm(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(driver, "resolve_clean_checkout_sha", lambda checkout: "deadbeef")
     monkeypatch.setattr(
-        driver, "run_command", lambda *args, **kwargs: SimpleNamespace(stdout="", stderr="")
+        driver,
+        "run_command",
+        lambda command, **kwargs: SimpleNamespace(stdout=_bm_stdout(command), stderr=""),
     )
     monkeypatch.setattr(
         driver,
@@ -278,12 +289,30 @@ def test_state_graded_task_reindexes_before_grading(
     )
 
     project = "test-run-tasks-complete"
+    # Seeding is one index pass, the one `project add` runs (#1414). A seed-time
+    # `reindex --full` after it would read the mtimes that pass rewrote and make
+    # every note look recent (run at-1d26c0609808).
+    adds = [cmd[cmd.index("add") :] for cmd in commands if "project" in cmd and "add" in cmd]
+    assert adds == [["add", project, str(run_dir_project(commands, project))]]
     reindexes = [cmd[cmd.index("reindex") + 1 :] for cmd in commands if "reindex" in cmd]
     assert reindexes == [
-        ["-p", project, "--full", "--search"],  # seed indexing before the loop
-        ["-p", project, "--search"],  # post-loop: resolve the agent's writes
+        ["-p", project, "--search"],  # post-loop only: resolve the agent's writes
     ]
-    # Settle follows BOTH passes: seed settle, then the pre-grading settle.
+    # The guard reads the recency window back from the seeded project.
+    tails = [cmd[cmd.index("tail") :] for cmd in commands if "tail" in cmd]
+    assert tails == [
+        [
+            "tail",
+            "--project",
+            project,
+            "--timeframe",
+            driver.SEEDED_RECENCY_WINDOW,
+            "-n",
+            "100",
+            "--json",
+        ]
+    ]
+    # Settle follows both passes: seed settle, then the pre-grading settle.
     assert settles == [project, project]
 
 
@@ -577,7 +606,7 @@ def _stub_bm_recording(
 
     def record_command(command: list[str], **kwargs: Any) -> SimpleNamespace:
         commands.append(list(command))
-        return SimpleNamespace(stdout="", stderr="")
+        return SimpleNamespace(stdout=_bm_stdout(command), stderr="")
 
     monkeypatch.setattr(driver, "run_command", record_command)
 
@@ -675,6 +704,9 @@ def test_grouped_manifest_run_shares_projects_and_reports_groups(
     assert added_projects == ["xafs-run-xafs-dp001", "xafs-run-xafs-dp002"]
     assert sorted(settles) == added_projects
     assert len(settles) == 2
+    # Grouped corpora carry no aged-mtime contract, so the recency guard is
+    # specific to the shipped corpus and must not run here.
+    assert not [cmd for cmd in commands if "tail" in cmd]
 
     manifest = json.loads((run_dir / "manifest.json").read_text())
     assert manifest["task_ids"] == MANIFEST_TASK_IDS  # (group, id) order
@@ -960,3 +992,47 @@ def test_transport_refusal_text_never_reaches_the_saved_error_artifact(
     # The operator still learns what the transport refused, and where.
     assert "Illegal header value" in saved_error
     assert "http://localhost/v1" in saved_error
+
+
+def run_dir_project(commands: list[list[str]], project: str) -> Path:
+    """The directory `project add` was given for this project, from the recorded commands."""
+    for cmd in commands:
+        if "add" in cmd and cmd[cmd.index("add") + 1] == project:
+            return Path(cmd[cmd.index("add") + 2])
+    raise AssertionError(f"no project add recorded for {project}")
+
+
+def test_recency_mismatch_names_extra_and_missing_files() -> None:
+    assert recency_mismatch({"a.md", "b.md"}, {"a.md", "b.md"}) is None
+    assert recency_mismatch({"a.md", "c.md"}, {"a.md", "b.md"}) == "extra=['c.md'] missing=['b.md']"
+
+
+def test_seeding_aborts_when_the_index_lost_the_aged_mtimes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every note reading as recent is a seeding failure, not a task result.
+
+    That state produced a plausible 10/12 in run at-1d26c0609808 before it was
+    traced to the seed sequence; the guard turns it into an abort that names
+    the files outside the gold set.
+    """
+    _stub_bm(monkeypatch)
+    whole_corpus = json.dumps([{"file_path": relpath} for relpath in corpus_files(CORPUS_DIR)])
+    monkeypatch.setattr(
+        driver,
+        "run_command",
+        lambda command, **kwargs: SimpleNamespace(
+            stdout=whole_corpus if "tail" in command else "", stderr=""
+        ),
+    )
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(RuntimeError, match="aged mtimes") as excinfo:
+        run_agent_tasks(
+            _config(tmp_path),
+            model_factory=lambda spec: _orphan_agent(),
+            session_factory=lambda runtime: FakeSession(RICH_SURFACE.tool_allowlist),
+        )
+
+    assert "notes/feature-x.md" in str(excinfo.value)
+    assert "missing=[]" in str(excinfo.value)
