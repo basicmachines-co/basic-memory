@@ -4,7 +4,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import typer
 from loguru import logger
@@ -738,6 +738,34 @@ def list_projects(
         raise typer.Exit(1)
 
 
+def _abort_after_project_created(
+    name: str,
+    *,
+    step: str,
+    remedy: str,
+    error: Exception,
+) -> NoReturn:
+    """Report a failure that happened after the project row became durable.
+
+    Two things are always true here and stated once: the project was created, and
+    re-running `bm project add` will refuse with "already exists". What must vary
+    is the remedy — it has to name a command that both fits the project's mode and
+    can actually repair the step that failed. A single fixed remedy pointed cloud
+    projects at `bm project index`, which the local-only reindex path rejects
+    outright (#1440 review).
+
+    The project is deliberately not rolled back: the row is the user's, and
+    deleting it to tidy up an error message would discard what they asked for.
+    """
+    # A typer.Exit carries no message of its own -- the failing step already
+    # printed one (run_project_index does) -- so only the state and remedy are
+    # missing. Anything else still needs its message shown.
+    detail = "" if isinstance(error, typer.Exit) else f": {error}"
+    console.print(f"[yellow]Project '{name}' was created, but {step} failed{detail}[/yellow]")
+    console.print(f"Do not re-run 'bm project add' — '{name}' already exists. {remedy}")
+    raise typer.Exit(1)
+
+
 @project_app.command("add")
 def add_project(
     name: str = typer.Argument(..., help="Name of the project"),
@@ -854,22 +882,21 @@ def add_project(
     console.print(f"[green]{result.message}[/green]")
 
     # --- Post-creation steps ---
-    # Trigger: any step below fails once the project row is durable.
-    # Why: reporting that as "Error adding project" sends the user back to a
-    #   command that now refuses with "already exists", stranding them in a
-    #   partial-success state nobody named. Creation and the follow-up work are
-    #   separate outcomes and have to be reported separately.
-    # Outcome: creation stays reported as done, and the remedy printed is one
-    #   that works from here -- index the project, do not add it again.
-    try:
-        with force_routing(local=local, cloud=cloud):
-            # Trigger: a local project was registered and the caller did not opt out.
-            # Why: registration alone leaves every read surface reporting an empty
-            #   project while the notes sit unindexed on disk, and there is no
-            #   daemon-reachability probe to delegate to -- so index inline, the
-            #   same way MCP's create_memory_project already does (#1414).
-            # Outcome: the project's existing notes are queryable when this returns.
-            if not effective_cloud_mode:
+    # Each step below runs after the project row is durable, so each carries its
+    # own remedy: a fixed one sent cloud projects to `bm project index`, which the
+    # local-only reindex path refuses outright and which could not have repaired a
+    # config write or a mkdir anyway (#1440 review). Local and cloud steps are
+    # mutually exclusive on `effective_cloud_mode`, so a local add can only ever
+    # reach the indexing remedy.
+    if not effective_cloud_mode:
+        # Trigger: a local project was registered and the caller did not opt out.
+        # Why: registration alone leaves every read surface reporting an empty
+        #   project while the notes sit unindexed on disk, and there is no
+        #   daemon-reachability probe to delegate to -- so index inline, the
+        #   same way MCP's create_memory_project already does (#1414).
+        # Outcome: the project's existing notes are queryable when this returns.
+        try:
+            with force_routing(local=local, cloud=cloud):
                 if no_wait:
                     console.print(
                         "[yellow]Skipped indexing (--no-wait).[/yellow] "
@@ -880,53 +907,84 @@ def add_project(
                     run_with_cleanup(report_project_readiness(name))
                 else:
                     run_with_cleanup(index_project_and_report_readiness(name))
-
+        except Exception as e:
+            _abort_after_project_created(
+                name,
+                step="indexing it",
+                remedy=(
+                    f"Index it with [green]bm project index {name}[/green], "
+                    f"then check with [green]bm status --project {name} --json[/green]."
+                ),
+                error=e,
+            )
+    else:
         # Trigger: local config needs enough metadata to route future commands back to cloud.
         # Why: explicit workspace selection and local sync state should persist across CLI sessions.
         # Outcome: cloud-backed projects keep cloud mode, workspace_id, and optional local sync path.
-        if effective_cloud_mode and (local_sync_path or resolved_workspace_id):
-            entry = config.projects.get(name)
-            if entry:
-                entry.mode = ProjectMode.CLOUD
-                if local_sync_path:
-                    entry.path = local_sync_path
-                    entry.local_sync_path = local_sync_path
-                if resolved_workspace_id:
-                    entry.workspace_id = resolved_workspace_id
-            else:
-                # Project may not be in local config yet (cloud-only add)
-                config.projects[name] = ProjectEntry(
-                    path=local_sync_path or "",
-                    mode=ProjectMode.CLOUD,
-                    local_sync_path=local_sync_path,
-                    workspace_id=resolved_workspace_id,
+        if local_sync_path or resolved_workspace_id:
+            try:
+                entry = config.projects.get(name)
+                if entry:
+                    entry.mode = ProjectMode.CLOUD
+                    if local_sync_path:
+                        entry.path = local_sync_path
+                        entry.local_sync_path = local_sync_path
+                    if resolved_workspace_id:
+                        entry.workspace_id = resolved_workspace_id
+                else:
+                    # Project may not be in local config yet (cloud-only add)
+                    config.projects[name] = ProjectEntry(
+                        path=local_sync_path or "",
+                        mode=ProjectMode.CLOUD,
+                        local_sync_path=local_sync_path,
+                        workspace_id=resolved_workspace_id,
+                    )
+                ConfigManager().save_config(config)
+            except Exception as e:
+                # The remote project exists; only this machine's routing entry is
+                # missing, so recovery is local config, not anything server-side.
+                workspace_flag = (
+                    f" --workspace {resolved_workspace_id}" if resolved_workspace_id else ""
                 )
-            ConfigManager().save_config(config)
+                remedy = (
+                    f"The project exists in the cloud — only this machine's config "
+                    f"({ConfigManager().config_file}) could not be written. Fix that file, "
+                    f"then route this machine to it with "
+                    f"[green]bm project set-cloud {name}{workspace_flag}[/green]."
+                )
+                if local_sync_path:
+                    remedy += (
+                        f" Re-add the sync path afterwards with "
+                        f"[green]bm project add {name} --cloud --local-path {local_sync_path}[/green] "
+                        f"only if 'bm project list' still shows no local path."
+                    )
+                _abort_after_project_created(
+                    name, step="saving its cloud routing to local config", remedy=remedy, error=e
+                )
 
         # Save local sync path to config if in cloud mode
-        if effective_cloud_mode and local_sync_path:
-            # Create local directory if it doesn't exist
-            local_dir = Path(local_sync_path)
-            local_dir.mkdir(parents=True, exist_ok=True)
+        if local_sync_path:
+            try:
+                # Create local directory if it doesn't exist
+                local_dir = Path(local_sync_path)
+                local_dir.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                # Cloud project and routing are both saved; only the local folder
+                # is missing, so recovery is filesystem-side then a resync.
+                _abort_after_project_created(
+                    name,
+                    step=f"creating the local sync directory {local_sync_path}",
+                    remedy=(
+                        f"Create it yourself (or fix its permissions), then run "
+                        f"[green]bm cloud bisync --name {name} --resync[/green]."
+                    ),
+                    error=e,
+                )
 
             console.print(f"\n[green]Local sync path configured: {local_sync_path}[/green]")
             console.print("\nNext steps:")
             console.print(f"  1. Preview: bm cloud bisync --name {name} --resync --dry-run")
             console.print(f"  2. Sync: bm cloud bisync --name {name} --resync")
-    except Exception as e:
-        # A typer.Exit reaching here came from a step that already printed its own
-        # error (run_project_index does), so only the state and the remedy are
-        # missing; anything else still needs its message shown.
-        detail = "" if isinstance(e, typer.Exit) else f": {e}"
-        console.print(
-            f"[yellow]Project '{name}' was created, but a follow-up step failed{detail}[/yellow]"
-        )
-        console.print(
-            f"Do not re-run 'bm project add' — '{name}' already exists. "
-            f"Index it with [green]bm project index {name}[/green], "
-            f"then check with [green]bm status --project {name} --json[/green]."
-        )
-        raise typer.Exit(1)
 
 
 @project_app.command("index")
