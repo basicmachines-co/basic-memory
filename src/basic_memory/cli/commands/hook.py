@@ -50,6 +50,7 @@ from loguru import logger
 
 import basic_memory
 from basic_memory.cli.app import app
+from basic_memory.utils import shell_command
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.hooks.adapters import NormalizedHookEvent, for_harness
 
@@ -831,7 +832,7 @@ def _required_git_value(directory: str, *args: str) -> str:
             timeout=5,
         )
     except (OSError, subprocess.SubprocessError) as exc:
-        raise RuntimeError(f"could not read Git context: git {' '.join(args)}") from exc
+        raise RuntimeError(f"could not read Git context: {shell_command('git', *args)}") from exc
     value = result.stdout.strip()
     if result.returncode != 0 or not value:
         raise RuntimeError(f"could not read Git context: git {' '.join(args)}")

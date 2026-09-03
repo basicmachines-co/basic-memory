@@ -671,3 +671,52 @@ def test_remove_frontmatter_strip_false_preserves_body_exactly():
 def test_remove_frontmatter_strip_false_without_frontmatter_returns_content_unchanged():
     text = "  leading spaces and trailing newline\n"
     assert remove_frontmatter(text, strip=False) == text
+
+
+@skip_on_windows
+@pytest.mark.asyncio
+async def test_format_file_handles_a_path_containing_a_space(tmp_path: Path):
+    """A note whose path contains a space must reach the formatter as one argument.
+
+    The template used to be substituted into the command string and split
+    afterwards, so `sh -c '...' {file}` with `~/My Notes/a.md` split the path in
+    two and the formatter ran against neither. Nothing raised — it silently
+    formatted the wrong thing (#1440 review).
+    """
+    spaced_dir = tmp_path / "My Notes"
+    spaced_dir.mkdir()
+    test_file = spaced_dir / "test.md"
+    test_file.write_text("# Test\n")
+
+    # Records the argv it was handed, so the assertion is on argument boundaries
+    # rather than on the formatter's output.
+    argv_log = tmp_path / "argv.txt"
+    config = BasicMemoryConfig(
+        format_on_save=True,
+        formatter_command=f'sh -c \'printf "%s" "$1" > {argv_log}\' _ {{file}}',
+    )
+
+    await format_file(test_file, config)
+
+    assert argv_log.read_text() == str(test_file)
+
+
+@skip_on_windows
+@pytest.mark.asyncio
+async def test_format_file_handles_a_path_containing_a_quote(tmp_path: Path):
+    """A quote in the path must not make the whole command unparseable.
+
+    Substituting first meant `shlex.split` saw the quote as an opening one and
+    raised `ValueError: No closing quotation` for a perfectly legal filename.
+    """
+    quoted_dir = tmp_path / "it's notes"
+    quoted_dir.mkdir()
+    test_file = quoted_dir / "test.md"
+    original_content = "# Test\n"
+    test_file.write_text(original_content)
+
+    config = BasicMemoryConfig(format_on_save=True, formatter_command="cat {file}")
+
+    result = await format_file(test_file, config)
+
+    assert result == original_content

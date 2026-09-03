@@ -6,6 +6,7 @@ they are cloud-specific operations.
 """
 
 import os
+import shlex
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -28,6 +29,7 @@ from basic_memory.cli.commands.cloud.rclone_commands import (
     project_sync,
     project_transfer,
 )
+from basic_memory.utils import shell_command
 from basic_memory.cli.commands.cloud.rclone_config import (
     DEFAULT_RCLONE_REMOTE,
     rclone_remote_exists,
@@ -196,7 +198,9 @@ def _require_personal_workspace(
         raise typer.Exit(1)
 
     if workspace.workspace_type != "personal":
-        console.print(f"[red]{unsupported_message.format(name=name)}[/red]")
+        # The templates below embed `--name {name}`; quote it before rendering so a
+        # name with a space stays one argument in the command they print.
+        console.print(f"[red]{unsupported_message.format(name=shlex.quote(name))}[/red]")
         raise typer.Exit(1)
 
     return workspace
@@ -230,7 +234,10 @@ def _require_local_sync_path(name: str, config: BasicMemoryConfig) -> str:
 
     if not local_sync_path or not os.path.isabs(local_sync_path):
         console.print(f"[red]Error: Project '{name}' has no local sync path configured[/red]")
-        console.print(f"\nConfigure sync with: bm cloud sync-setup {name} ~/path/to/local")
+        console.print(
+            f"\nConfigure sync with: "
+            f"{shell_command('bm', 'cloud', 'sync-setup', name, '~/path/to/local')}"
+        )
         raise typer.Exit(1)
 
     return local_sync_path
@@ -644,11 +651,11 @@ def _run_directional_transfer(
         # (no surprise key generation); push/pull only transfer.
         # Outcome: stop with the exact setup command for this workspace.
         if not rclone_remote_exists(remote_name):
-            setup_target = (
-                "" if target_workspace.is_default else f" --workspace {target_workspace.slug}"
-            )
+            setup_parts = ["bm", "cloud", "setup"]
+            if not target_workspace.is_default:
+                setup_parts += ["--workspace", target_workspace.slug]
             console.print(f"[red]Workspace '{target_workspace.slug}' is not set up for sync.[/red]")
-            console.print(f"\nRun: bm cloud setup{setup_target}")
+            console.print(f"\nRun: {shell_command(*setup_parts)}")
             raise typer.Exit(1)
 
         # Get tenant info for bucket name, scoped to the resolved workspace
@@ -921,8 +928,13 @@ def bisync_reset(
         shutil.rmtree(state_path)
         console.print(f"[green]Cleared bisync state for project '{name}'[/green]")
         console.print("\nNext steps:")
-        console.print(f"  1. Preview: bm cloud bisync --name {name} --resync --dry-run")
-        console.print(f"  2. Sync: bm cloud bisync --name {name} --resync")
+        console.print(
+            f"  1. Preview: "
+            f"{shell_command('bm', 'cloud', 'bisync', '--name', name, '--resync', '--dry-run')}"
+        )
+        console.print(
+            f"  2. Sync: {shell_command('bm', 'cloud', 'bisync', '--name', name, '--resync')}"
+        )
 
     except Exception as e:
         console.print(f"[red]Error clearing bisync state: {str(e)}[/red]")
@@ -995,11 +1007,18 @@ def setup_project_sync(
         # Lead with the Team-safe additive commands (work on any workspace); the
         # `sync`/`bisync` mirrors are Personal-workspace-only.
         console.print("\nNext steps:")
-        console.print(f"  1. Preview a pull: bm cloud pull --name {name} --dry-run")
-        console.print(f"  2. Fetch from cloud: bm cloud pull --name {name}")
-        console.print(f"  3. Upload local changes: bm cloud push --name {name}")
         console.print(
-            f"  Personal workspaces can also mirror with: bm cloud bisync --name {name} --resync"
+            f"  1. Preview a pull: {shell_command('bm', 'cloud', 'pull', '--name', name, '--dry-run')}"
+        )
+        console.print(
+            f"  2. Fetch from cloud: {shell_command('bm', 'cloud', 'pull', '--name', name)}"
+        )
+        console.print(
+            f"  3. Upload local changes: {shell_command('bm', 'cloud', 'push', '--name', name)}"
+        )
+        console.print(
+            f"  Personal workspaces can also mirror with: "
+            f"{shell_command('bm', 'cloud', 'bisync', '--name', name, '--resync')}"
         )
     except Exception as e:
         console.print(f"[red]Error configuring sync: {str(e)}[/red]")

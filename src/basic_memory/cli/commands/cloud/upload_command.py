@@ -6,6 +6,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from basic_memory.utils import shell_command
 from basic_memory.cli.app import cloud_app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
 from basic_memory.cli.commands.cloud.cloud_utils import (
@@ -100,7 +101,7 @@ def upload(
                 console.print(
                     f"[red]Project '{project}' does not exist.[/red]\n"
                     f"[yellow]Options:[/yellow]\n"
-                    f"  1. Create it first: bm project add {project} --cloud\n"
+                    f"  1. Create it first: {shell_command('bm', 'project', 'add', project, '--cloud')}\n"
                     f"  2. Use --create-project flag to create automatically"
                 )
                 raise typer.Exit(1)
