@@ -25,6 +25,7 @@ import json
 import shutil
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -94,6 +95,9 @@ class CurationConfig:
     max_notes_per_session: int = 8
     settle_timeout_seconds: float = 180.0
     tool_timeout_seconds: float = 120.0
+    # Conversations are independent (own home, project, MCP session), so they
+    # curate in parallel; one conversation is ~80 serial model calls.
+    workers: int = 1
 
 
 @dataclass(frozen=True)
@@ -483,8 +487,8 @@ def curate_beam(
     curator = runner or create_runner(config.model_spec, temperature=config.model_temperature)
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
-    stats_by_group: list[ConversationCurationStats] = []
-    for conversation in conversations:
+
+    def curate_one(conversation: BeamConversation) -> ConversationCurationStats:
         # Same group ids as the raw dataset, so query ids line up row for row.
         group_id = f"{raw_dataset_id}-c{int(conversation.conversation_id):02d}"
         progress(f"curating {group_id} ({len(conversation.batches)} batches)")
@@ -496,13 +500,20 @@ def curate_beam(
             runner=curator,
             writer_factory=writer_factory,
         )
-        stats_by_group.append(stats)
         progress(
             f"  {group_id}: sessions={stats.sessions} notes={stats.notes_created}+{stats.notes_appended} "
             f"tokens={stats.input_tokens}+{stats.output_tokens} "
-            f"malformed={stats.malformed_responses} tool_errors={stats.tool_errors}"
-            + (f" ERROR: {stats.error}" if stats.error else "")
+            f"malformed={stats.malformed_responses} tool_errors={stats.tool_errors} "
+            f"wall={stats.wall_seconds}s" + (f" ERROR: {stats.error}" if stats.error else "")
         )
+        return stats
+
+    # Manifest order is dataset order whatever the completion order was.
+    if config.workers > 1:
+        with ThreadPoolExecutor(max_workers=config.workers) as pool:
+            stats_by_group = list(pool.map(curate_one, conversations))
+    else:
+        stats_by_group = [curate_one(conversation) for conversation in conversations]
 
     curated_groups = {stats.group_id for stats in stats_by_group if stats.error is None}
     queries = curated_queries(raw_queries, curated_groups)
@@ -525,6 +536,7 @@ def curate_beam(
             "max_notes_per_session": config.max_notes_per_session,
             "conversations": list(config.conversations) or None,
             "max_conversations": config.max_conversations,
+            "workers": config.workers,
         },
         "created_at_utc": utc_now_iso(),
         "conversations": [asdict(stats) for stats in stats_by_group],
