@@ -388,6 +388,14 @@ def curate_beam_command(
     workers: int = typer.Option(
         1, "--workers", min=1, help="Conversations curated concurrently (each has its own bm mcp)"
     ),
+    startup_timeout: float = typer.Option(
+        180.0, "--startup-timeout", help="Seconds to wait for each bm mcp server to come up"
+    ),
+    resume: bool = typer.Option(
+        False,
+        "--resume",
+        help="Reuse groups already curated with this curator and prompt (per-group curation.json)",
+    ),
 ) -> None:
     """Curate a raw BEAM tier into knowledge notes through the write path.
 
@@ -421,6 +429,8 @@ def curate_beam_command(
         settle_timeout_seconds=settle_timeout,
         tool_timeout_seconds=tool_timeout,
         workers=workers,
+        startup_timeout_seconds=startup_timeout,
+        resume=resume,
     )
     output = curate_beam(config, runner=runner, progress=console.print)
     manifest = json.loads((output / "conversion.json").read_text(encoding="utf-8"))

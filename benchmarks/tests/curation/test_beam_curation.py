@@ -373,3 +373,64 @@ def test_workers_curate_in_parallel_and_keep_dataset_order(
     assert manifest["converter"]["workers"] == 2
     assert manifest["totals"]["conversations"] == 2
     assert len(seen_threads) == 2
+
+
+def test_a_server_that_fails_to_start_excludes_that_conversation_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The first full run died on `Timed out starting bm mcp session` from one
+    conversation on a loaded machine; the whole run aborted with no manifest."""
+    _raw_dataset(tmp_path)
+    _stub_bm(monkeypatch)
+
+    class DeadWriter(FileWriter):
+        def start(self) -> None:
+            raise TimeoutError("Timed out starting bm mcp session")
+
+    def writer_factory(prefix: list[str], env: dict[str, str], project_dir: Path) -> FileWriter:
+        return (
+            DeadWriter(project_dir)
+            if project_dir.parent.name.endswith("c02")
+            else FileWriter(project_dir)
+        )
+
+    output = curate_beam(
+        _config(tmp_path), runner=ScriptedRunner([]), writer_factory=writer_factory
+    )
+
+    manifest = json.loads((output / "conversion.json").read_text())
+    assert [row["group_id"] for row in manifest["excluded_conversations"]] == ["beam-100k-c02"]
+    assert "bm setup failed" in manifest["excluded_conversations"][0]["error"]
+    assert manifest["totals"]["conversations"] == 1
+    assert (output / "groups" / "beam-100k-c01" / "curation.json").exists()
+    assert not (output / "groups" / "beam-100k-c02" / "curation.json").exists()
+
+
+def test_resume_reuses_finished_groups_and_recurates_on_prompt_or_model_change(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _raw_dataset(tmp_path)
+    _stub_bm(monkeypatch)
+    first = ScriptedRunner([])
+    curate_beam(_config(tmp_path), runner=first, writer_factory=lambda p, e, d: FileWriter(d))
+    calls_first = len(first.prompts)
+    assert calls_first > 0
+
+    # Same curator and prompt: nothing is re-run, the manifest is rebuilt from records.
+    second = ScriptedRunner([])
+    output = curate_beam(
+        _config(tmp_path, resume=True), runner=second, writer_factory=lambda p, e, d: FileWriter(d)
+    )
+    assert second.prompts == []
+    manifest = json.loads((output / "conversion.json").read_text())
+    assert manifest["totals"]["conversations"] == 2
+    assert manifest["converter"]["resume"] is True
+
+    # A different curator spec invalidates the records: everything is curated again.
+    third = ScriptedRunner([])
+    curate_beam(
+        _config(tmp_path, resume=True, model_spec="scripted:other"),
+        runner=third,
+        writer_factory=lambda p, e, d: FileWriter(d),
+    )
+    assert len(third.prompts) == calls_first

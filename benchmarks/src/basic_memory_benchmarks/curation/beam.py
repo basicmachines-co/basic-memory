@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import subprocess
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -98,6 +99,11 @@ class CurationConfig:
     # Conversations are independent (own home, project, MCP session), so they
     # curate in parallel; one conversation is ~80 serial model calls.
     workers: int = 1
+    # `bm mcp` loads the embedding model at startup; with several servers
+    # starting on a loaded machine that took over 30s and aborted a whole run.
+    startup_timeout_seconds: float = 180.0
+    # Reuse a group's curation.json when its curator spec and prompt match.
+    resume: bool = False
 
 
 @dataclass(frozen=True)
@@ -146,13 +152,23 @@ class NoteWriter(Protocol):
 WriterFactory = Callable[[list[str], dict[str, str], Path], NoteWriter]
 
 
-def default_writer_factory(prefix: list[str], env: dict[str, str], project_dir: Path) -> NoteWriter:
-    return WarmMcpClient(
-        command=prefix[0],
-        args=prefix[1:] + ["mcp"],
-        env=env,
-        required_tool="write_note",
-    )
+def make_writer_factory(config: CurationConfig) -> WriterFactory:
+    def factory(prefix: list[str], env: dict[str, str], project_dir: Path) -> NoteWriter:
+        return WarmMcpClient(
+            command=prefix[0],
+            args=prefix[1:] + ["mcp"],
+            env=env,
+            startup_timeout_seconds=config.startup_timeout_seconds,
+            request_timeout_seconds=config.tool_timeout_seconds,
+            required_tool="write_note",
+        )
+
+    return factory
+
+
+# The per-group record a finished conversation leaves beside its docs, so a
+# relaunch can resume instead of paying for the conversation again.
+CURATION_RECORD = "curation.json"
 
 
 # --- Prompt assembly ---
@@ -367,10 +383,17 @@ def curate_conversation(
     project_dir.mkdir(parents=True)
     (home / "default-home").mkdir(parents=True)
     env = isolated_bm_env(home)
-    run_command(prefix + ["project", "add", group_id, str(project_dir)], env=env)
-
     writer = writer_factory(prefix, env, project_dir)
-    writer.start()
+    try:
+        run_command(prefix + ["project", "add", group_id, str(project_dir)], env=env)
+        writer.start()
+    except (subprocess.CalledProcessError, TimeoutError, RuntimeError) as exc:
+        # The project could not be registered or the server did not come up
+        # (a loaded machine starting several servers at once). One
+        # conversation is lost and recorded; the others keep running.
+        stats.error = f"bm setup failed: {exc}"
+        stats.wall_seconds = round(time.monotonic() - started, 2)
+        return stats
     index: dict[str, NoteIndexEntry] = {}
     current_anchor: str | None = None
     try:
@@ -419,6 +442,40 @@ def curate_conversation(
             stats.docs_sha256[relative.as_posix()] = sha256_file(target)
         stats.doc_count = len(stats.docs_sha256)
     stats.wall_seconds = round(time.monotonic() - started, 2)
+    if stats.error is None:
+        write_curation_record(config, stats)
+    return stats
+
+
+def write_curation_record(config: CurationConfig, stats: ConversationCurationStats) -> None:
+    record = {
+        "curator_model_spec": config.model_spec,
+        "curator_prompt_sha256": prompt_sha256(),
+        "max_notes_per_session": config.max_notes_per_session,
+        "stats": asdict(stats),
+    }
+    path = config.output_dir / "groups" / stats.group_id / CURATION_RECORD
+    path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+
+
+def load_curation_record(config: CurationConfig, group_id: str) -> ConversationCurationStats | None:
+    """A finished group's stats, only when it was curated with this curator and prompt."""
+    path = config.output_dir / "groups" / group_id / CURATION_RECORD
+    if not path.exists():
+        return None
+    record = json.loads(path.read_text(encoding="utf-8"))
+    if (
+        record.get("curator_model_spec") != config.model_spec
+        or record.get("curator_prompt_sha256") != prompt_sha256()
+        or record.get("max_notes_per_session") != config.max_notes_per_session
+    ):
+        return None
+    docs_dir = config.output_dir / "groups" / group_id / "docs"
+    stats = ConversationCurationStats(**record["stats"])
+    for relative, digest in stats.docs_sha256.items():
+        doc = docs_dir / relative
+        if not doc.exists() or sha256_file(doc) != digest:
+            return None
     return stats
 
 
@@ -471,7 +528,7 @@ def curate_beam(
     config: CurationConfig,
     *,
     runner: LLMRunner | None = None,
-    writer_factory: WriterFactory = default_writer_factory,
+    writer_factory: WriterFactory | None = None,
     progress: Callable[[str], None] = lambda line: None,
 ) -> Path:
     """Curate a raw-converted BEAM tier into a sibling curated dataset. Returns output_dir."""
@@ -485,12 +542,18 @@ def curate_beam(
     conversations = _select_conversations(load_beam_tier(dataset_root, tier), config)
     prefix = resolve_bm_command_prefix(config.bm_local_path)
     curator = runner or create_runner(config.model_spec, temperature=config.model_temperature)
+    factory = writer_factory or make_writer_factory(config)
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
 
     def curate_one(conversation: BeamConversation) -> ConversationCurationStats:
         # Same group ids as the raw dataset, so query ids line up row for row.
         group_id = f"{raw_dataset_id}-c{int(conversation.conversation_id):02d}"
+        if config.resume:
+            finished = load_curation_record(config, group_id)
+            if finished is not None:
+                progress(f"resuming {group_id}: {finished.doc_count} docs already curated")
+                return finished
         progress(f"curating {group_id} ({len(conversation.batches)} batches)")
         stats = curate_conversation(
             conversation,
@@ -498,7 +561,7 @@ def curate_beam(
             config=config,
             prefix=prefix,
             runner=curator,
-            writer_factory=writer_factory,
+            writer_factory=factory,
         )
         progress(
             f"  {group_id}: sessions={stats.sessions} notes={stats.notes_created}+{stats.notes_appended} "
@@ -537,6 +600,8 @@ def curate_beam(
             "conversations": list(config.conversations) or None,
             "max_conversations": config.max_conversations,
             "workers": config.workers,
+            "startup_timeout_seconds": config.startup_timeout_seconds,
+            "resume": config.resume,
         },
         "created_at_utc": utc_now_iso(),
         "conversations": [asdict(stats) for stats in stats_by_group],
