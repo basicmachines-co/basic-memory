@@ -204,3 +204,91 @@ async def test_every_terminal_state_that_owes_work_is_recorded(
     else:
         assert sample_entity.id in completed
         assert sample_entity.id not in unfinished
+
+
+# --- Domain: every code path that can leave work undone ---
+#
+# The terminal-state rows above cover what a pass *returns*. A pass can also
+# *raise*: the per-entity scheduler calls the helper with continue_on_error=False,
+# so a prepare or flush failure escapes instead of being collected. The domain of
+# this matrix is therefore both axes -- how the caller set continue_on_error, and
+# how the pass ended -- because the property is about work left undone, not about
+# the shape the outcome happened to arrive in.
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("continue_on_error", [True, False])
+@pytest.mark.parametrize("entry_point", ["sync_entity_vectors", "sync_entity_vectors_batch"])
+async def test_a_raising_pass_still_records_unfinished_work(
+    entry_point,
+    continue_on_error,
+    test_project,
+    sample_entity,
+    app_config,
+    engine_factory,
+    monkeypatch,
+):
+    """A pass that raises has still left the entity unfinished.
+
+    `sync_entity_vectors` passes continue_on_error=False, so this is the normal
+    editing path, not an edge case. Before, the exception escaped before the
+    recorder ran and an entity with one ready chunk read as fully embedded.
+    """
+    _, session_maker = engine_factory
+    repository = create_search_repository(
+        session_maker, project_id=test_project.id, app_config=app_config
+    )
+
+    async def _raising_sync(
+        _repository, _entity_ids, _progress, _continue
+    ) -> VectorSyncBatchResult:
+        raise RuntimeError("embedding flush failed")
+
+    monkeypatch.setattr(
+        search_repository_base.semantic_vector_sync,
+        "sync_entity_vectors_internal",
+        _raising_sync,
+    )
+
+    recorded: list[dict[str, Any]] = []
+
+    async def _capture(**kwargs: Any) -> None:
+        recorded.append(kwargs)
+
+    monkeypatch.setattr(repository, RECORDER_METHOD, _capture)
+
+    with pytest.raises(RuntimeError, match="embedding flush failed"):
+        if entry_point == "sync_entity_vectors":
+            await repository.sync_entity_vectors(sample_entity.id)
+        else:
+            await repository.sync_entity_vectors_batch([sample_entity.id])
+
+    assert recorded, f"{entry_point} raised and recorded nothing; the entity looks finished"
+    assert recorded[0]["unfinished_entity_ids"] == {sample_entity.id}
+    assert recorded[0]["completed_entity_ids"] == set()
+
+
+def test_the_recording_is_reached_on_both_the_returning_and_raising_paths():
+    """Structural: the recorder must be reachable however the helper ends.
+
+    Enumerated from the source so a future refactor that records only after a
+    successful return -- the exact regression above -- fails here rather than in
+    production.
+    """
+    source = Path(inspect.getfile(SearchRepositoryBase)).read_text(encoding="utf-8")
+    class_node = _class_body(source, "SearchRepositoryBase")
+    convergence = next(
+        node
+        for node in class_node.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == CONVERGENCE_METHOD
+    )
+
+    handlers = [node for node in ast.walk(convergence) if isinstance(node, ast.ExceptHandler)]
+    assert handlers, (
+        f"{CONVERGENCE_METHOD} has no exception handler, so a pass that raises "
+        "records nothing about the work it left undone"
+    )
+    assert any(RECORDER_METHOD in _calls_in(handler) for handler in handlers), (
+        f"{CONVERGENCE_METHOD} does not call {RECORDER_METHOD} when the pass raises"
+    )

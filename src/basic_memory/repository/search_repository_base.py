@@ -1958,12 +1958,32 @@ class SearchRepositoryBase(ABC):
         class owns a database session, and the helper is also driven by test
         doubles that have none.
         """
-        result = await semantic_vector_sync.sync_entity_vectors_internal(
-            self,
-            entity_ids,
-            progress_callback,
-            continue_on_error,
-        )
+        try:
+            result = await semantic_vector_sync.sync_entity_vectors_internal(
+                self,
+                entity_ids,
+                progress_callback,
+                continue_on_error,
+            )
+        except BaseException:
+            # Trigger: the pass raised instead of returning terminal states. The
+            #   per-entity scheduler calls this with continue_on_error=False, so
+            #   a prepare or flush failure escapes rather than being collected.
+            # Why: recording only what the pass *returns* leaves that path
+            #   unmarked, and an edited multi-chunk note keeps its earlier ready
+            #   chunks -- enough to read as fully embedded (#1440 review).
+            #   Whatever a pass leaves behind must be recorded whether it
+            #   returned it or raised it.
+            # Outcome: mark every entity in the batch unfinished. We cannot know
+            #   which ones completed, and over-marking is the safe direction: the
+            #   next pass clears the ones that are actually current, whereas an
+            #   unmarked incomplete entity is never revisited.
+            await self.record_entity_vector_deferrals(
+                unfinished_entity_ids=set(entity_ids),
+                completed_entity_ids=set(),
+            )
+            raise
+
         # Deferred *and* failed both leave the entity owing work; only synced is
         # finished. Enumerating the pass's terminal states here is what keeps
         # readiness agreeing with it, rather than tracking the one state that

@@ -38,6 +38,12 @@ from basic_memory.services.project_readiness import (
 )
 
 
+# The command a *local* project's readiness can be advanced with. A cloud project
+# gets None instead, because `bm project index` runs the local reindex and it
+# refuses cloud projects (#1440 review).
+LOCAL_INDEX_COMMAND = "bm project index research"
+
+
 def _stage(
     name: ProjectIndexStageName,
     phase: ProjectIndexPhase,
@@ -109,7 +115,7 @@ def test_never_indexed_with_files_names_the_count_and_the_remedy():
         ProjectIndexPhase.NEVER_INDEXED, files_on_disk=25, files_pending=25, files_total=25
     )
 
-    described = readiness.describe("research")
+    described = readiness.describe("research", index_command=LOCAL_INDEX_COMMAND)
 
     assert "25 files present, not yet indexed" in described
     assert "bm project index research" in described
@@ -118,7 +124,7 @@ def test_never_indexed_with_files_names_the_count_and_the_remedy():
 def test_never_indexed_with_no_files_does_not_claim_files_are_waiting():
     readiness = _readiness(ProjectIndexPhase.NEVER_INDEXED, files_on_disk=0)
 
-    described = readiness.describe("research")
+    described = readiness.describe("research", index_command=LOCAL_INDEX_COMMAND)
 
     assert "no files present" in described
     assert "0 files present" not in described
@@ -129,7 +135,9 @@ def test_a_single_file_is_described_in_the_singular():
         ProjectIndexPhase.NEVER_INDEXED, files_on_disk=1, files_pending=1, files_total=1
     )
 
-    assert "1 file present, not yet indexed" in readiness.describe("research")
+    assert "1 file present, not yet indexed" in readiness.describe(
+        "research", index_command=LOCAL_INDEX_COMMAND
+    )
 
 
 def test_pending_names_which_stages_are_outstanding():
@@ -145,7 +153,7 @@ def test_pending_names_which_stages_are_outstanding():
         ),
     )
 
-    described = readiness.describe("research")
+    described = readiness.describe("research", index_command=LOCAL_INDEX_COMMAND)
 
     assert "4/4 files current" in described
     assert "relations 2" in described
@@ -158,8 +166,12 @@ def test_idle_reports_what_was_indexed():
         ProjectIndexPhase.IDLE, files_on_disk=2, indexed_entities=2, files_total=2
     )
 
-    assert "indexed and settled" in readiness.describe("research")
-    assert "2 notes from 2 files" in readiness.describe("research")
+    assert "indexed and settled" in readiness.describe(
+        "research", index_command=LOCAL_INDEX_COMMAND
+    )
+    assert "2 notes from 2 files" in readiness.describe(
+        "research", index_command=LOCAL_INDEX_COMMAND
+    )
 
 
 def test_stage_lookup_returns_the_named_stage():
@@ -954,3 +966,29 @@ def test_the_matrix_covers_every_terminal_state_a_sync_pass_reports():
         f"vector sync now reports terminal states {reported_states}; add a row to the "
         "embeddings drainability matrix for any that leaves work owed."
     )
+
+
+def test_a_cloud_project_is_not_told_to_run_the_local_index():
+    """`bm status --cloud` renders this formatter too.
+
+    `bm project index` runs the local reindex, which refuses a cloud project, so
+    naming it would print a remedy that cannot advance the readiness on screen.
+    """
+    readiness = _readiness(
+        ProjectIndexPhase.NEVER_INDEXED, files_on_disk=3, files_pending=3, files_total=3
+    )
+
+    described = readiness.describe("research", index_command=None)
+
+    assert "bm project index" not in described
+    assert "3 files present, not yet indexed" in described
+    assert "indexed on the server" in described
+
+
+def test_a_cloud_project_with_no_files_still_reads_sensibly():
+    readiness = _readiness(ProjectIndexPhase.NEVER_INDEXED, files_on_disk=0)
+
+    described = readiness.describe("research", index_command=None)
+
+    assert "bm project index" not in described
+    assert "no files present" in described
