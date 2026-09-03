@@ -293,6 +293,7 @@ def _prepare_task_project(
         project_name=project.name,
         timeout_seconds=settle_timeout_seconds,
     )
+    verify_seeded_index(prefix=prefix, env=env, project=project)
     if task.group is None:
         verify_seeded_recency(prefix=prefix, env=env, project=project)
     if task.group is not None:
@@ -304,6 +305,53 @@ def _prepare_task_project(
 # gold files RECENT_AGE_DAYS old and everything else DEFAULT_AGE_DAYS old, so
 # any window strictly between the two sees exactly the gold set.
 SEEDED_RECENCY_WINDOW = f"{RECENT_AGE_DAYS + 1}d"
+
+
+# `project add` has indexed since this revision (#1414). Before it, add only
+# registered the project, and the index pass had to be explicit.
+INDEXING_PROJECT_ADD_REVISION = "370ab5b"
+
+
+def verify_seeded_index(*, prefix: list[str], env: dict[str, str], project: TaskProject) -> None:
+    """Fail seeding unless every file in the project is indexed.
+
+    Seeding relies on the `project add` that indexes (#1414). A checkout under
+    test from before that revision registers the project and stops, and the
+    readiness it reports is either absent or vacuous; a settle then returns at
+    once and every retrieval tool sees an empty project. That is what turned an
+    earlier real-model run into 24 empty projects with plausible-looking
+    scores. Reading the count back rejects such a checkout before any task
+    runs, and catches any later cause of the same empty state, grouped corpora
+    included.
+    """
+    completed = run_command(
+        prefix + ["status", "--project", project.name, "--json", "--local"], env=env
+    )
+    payload = json.loads(completed.stdout.strip() or "{}")
+    readiness = payload.get("readiness") if isinstance(payload, dict) else None
+    if (
+        not isinstance(readiness, dict)
+        or not {
+            "phase",
+            "files_on_disk",
+            "indexed_entities",
+        }
+        <= readiness.keys()
+    ):
+        raise RuntimeError(
+            f"`bm status --json` for {project.name} reports no index readiness; the "
+            f"agent-task eval seeds through `project add`, which indexes only from "
+            f"basic-memory {INDEXING_PROJECT_ADD_REVISION} (#1414). Point --bm-local-path "
+            "at that revision or later."
+        )
+    files_on_disk = int(readiness["files_on_disk"])
+    indexed = int(readiness["indexed_entities"])
+    if readiness["phase"] != "idle" or files_on_disk == 0 or indexed != files_on_disk:
+        raise RuntimeError(
+            f"seeded project {project.name} indexed {indexed} of {files_on_disk} files "
+            f"(phase {readiness['phase']!r}); every task would run against an incomplete "
+            "index and score on it."
+        )
 
 
 def recency_mismatch(recent_relpaths: set[str], expected_relpaths: set[str]) -> str | None:

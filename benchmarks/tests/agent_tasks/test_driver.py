@@ -92,8 +92,20 @@ class FakeSession:
         self.stopped = True
 
 
+def _seeded_status(*, indexed: int, files: int, phase: str = "idle") -> str:
+    return json.dumps(
+        {"readiness": {"phase": phase, "files_on_disk": files, "indexed_entities": indexed}}
+    )
+
+
 def _bm_stdout(command: list[str]) -> str:
-    """What the stubbed bm prints: the recency guard's `tail --json` sees the gold set."""
+    """What the stubbed bm prints for the seed guards.
+
+    `status --json` reports a fully indexed project and `tail --json` the aged
+    gold set, so the guards pass unless a test overrides one of them.
+    """
+    if "status" in command:
+        return _seeded_status(indexed=25, files=25)
     if "tail" in command:
         return json.dumps([{"file_path": relpath} for relpath in TIMESTAMPS])
     return ""
@@ -298,7 +310,10 @@ def test_state_graded_task_reindexes_before_grading(
     assert reindexes == [
         ["-p", project, "--search"],  # post-loop only: resolve the agent's writes
     ]
-    # The guard reads the recency window back from the seeded project.
+    # The guards read the index count and the recency window back from the
+    # seeded project (settle_index is stubbed, so these are the only status calls).
+    statuses = [cmd[cmd.index("status") :] for cmd in commands if "status" in cmd]
+    assert statuses == [["status", "--project", project, "--json", "--local"]]
     tails = [cmd[cmd.index("tail") :] for cmd in commands if "tail" in cmd]
     assert tails == [
         [
@@ -705,8 +720,12 @@ def test_grouped_manifest_run_shares_projects_and_reports_groups(
     assert sorted(settles) == added_projects
     assert len(settles) == 2
     # Grouped corpora carry no aged-mtime contract, so the recency guard is
-    # specific to the shipped corpus and must not run here.
+    # specific to the shipped corpus and must not run here; the index-count
+    # guard runs for every seeded project, once per persona.
     assert not [cmd for cmd in commands if "tail" in cmd]
+    # Slice from the verb: the uv prefix carries its own `--project <checkout>`.
+    statuses = sorted(cmd[cmd.index("status") + 2] for cmd in commands if "status" in cmd)
+    assert statuses == added_projects
 
     manifest = json.loads((run_dir / "manifest.json").read_text())
     assert manifest["task_ids"] == MANIFEST_TASK_IDS  # (group, id) order
@@ -1022,7 +1041,7 @@ def test_seeding_aborts_when_the_index_lost_the_aged_mtimes(
         driver,
         "run_command",
         lambda command, **kwargs: SimpleNamespace(
-            stdout=whole_corpus if "tail" in command else "", stderr=""
+            stdout=whole_corpus if "tail" in command else _bm_stdout(command), stderr=""
         ),
     )
     monkeypatch.chdir(tmp_path)
@@ -1036,3 +1055,47 @@ def test_seeding_aborts_when_the_index_lost_the_aged_mtimes(
 
     assert "notes/feature-x.md" in str(excinfo.value)
     assert "missing=[]" in str(excinfo.value)
+
+
+def _run_with_bm_stdout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stdout_for: Any) -> None:
+    _stub_bm(monkeypatch)
+    monkeypatch.setattr(
+        driver,
+        "run_command",
+        lambda command, **kwargs: SimpleNamespace(stdout=stdout_for(command), stderr=""),
+    )
+    monkeypatch.chdir(tmp_path)
+    run_agent_tasks(
+        _config(tmp_path),
+        model_factory=lambda spec: _orphan_agent(),
+        session_factory=lambda runtime: FakeSession(RICH_SURFACE.tool_allowlist),
+    )
+
+
+def test_seeding_rejects_a_checkout_whose_status_has_no_readiness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pre-#1414 checkout: `project add` registers without indexing and its
+    status carries no readiness. The run must stop naming the revision, not
+    grade an empty index."""
+    with pytest.raises(RuntimeError, match=driver.INDEXING_PROJECT_ADD_REVISION):
+        _run_with_bm_stdout(
+            tmp_path,
+            monkeypatch,
+            lambda command: json.dumps({"total_files": 25}) if "status" in command else "",
+        )
+
+
+def test_seeding_aborts_when_the_project_is_not_fully_indexed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    with pytest.raises(RuntimeError, match=r"indexed 0 of 25 files \(phase 'never_indexed'\)"):
+        _run_with_bm_stdout(
+            tmp_path,
+            monkeypatch,
+            lambda command: (
+                _seeded_status(indexed=0, files=25, phase="never_indexed")
+                if "status" in command
+                else _bm_stdout(command)
+            ),
+        )
