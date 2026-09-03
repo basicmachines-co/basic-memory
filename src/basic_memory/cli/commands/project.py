@@ -843,11 +843,26 @@ def add_project(
                 data = {"name": name, "path": resolved_path, "set_default": set_default}
                 return await ProjectClient(client).create_project(data)
 
+    # --- Create the project ---
     try:
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(_add_project())
-            console.print(f"[green]{result.message}[/green]")
+    except Exception as e:
+        console.print(f"[red]Error adding project: {str(e)}[/red]")
+        raise typer.Exit(1)
 
+    console.print(f"[green]{result.message}[/green]")
+
+    # --- Post-creation steps ---
+    # Trigger: any step below fails once the project row is durable.
+    # Why: reporting that as "Error adding project" sends the user back to a
+    #   command that now refuses with "already exists", stranding them in a
+    #   partial-success state nobody named. Creation and the follow-up work are
+    #   separate outcomes and have to be reported separately.
+    # Outcome: creation stays reported as done, and the remedy printed is one
+    #   that works from here -- index the project, do not add it again.
+    try:
+        with force_routing(local=local, cloud=cloud):
             # Trigger: a local project was registered and the caller did not opt out.
             # Why: registration alone leaves every read surface reporting an empty
             #   project while the notes sit unindexed on disk, and there is no
@@ -898,13 +913,19 @@ def add_project(
             console.print("\nNext steps:")
             console.print(f"  1. Preview: bm cloud bisync --name {name} --resync --dry-run")
             console.print(f"  2. Sync: bm cloud bisync --name {name} --resync")
-    except typer.Exit:
-        # run_project_index reports its own failure and exits; re-raise before the
-        # catch-all below rewrites it as "Error adding project", which would blame
-        # the wrong step (the project was created).
-        raise
     except Exception as e:
-        console.print(f"[red]Error adding project: {str(e)}[/red]")
+        # A typer.Exit reaching here came from a step that already printed its own
+        # error (run_project_index does), so only the state and the remedy are
+        # missing; anything else still needs its message shown.
+        detail = "" if isinstance(e, typer.Exit) else f": {e}"
+        console.print(
+            f"[yellow]Project '{name}' was created, but a follow-up step failed{detail}[/yellow]"
+        )
+        console.print(
+            f"Do not re-run 'bm project add' — '{name}' already exists. "
+            f"Index it with [green]bm project index {name}[/green], "
+            f"then check with [green]bm status --project {name} --json[/green]."
+        )
         raise typer.Exit(1)
 
 

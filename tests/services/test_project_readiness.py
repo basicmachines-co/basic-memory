@@ -12,6 +12,12 @@ from sqlalchemy import text
 
 from basic_memory import db
 from basic_memory.models import Project
+from basic_memory.repository.embedding_provider_factory import (
+    configured_embedding_provider_identity,
+)
+from basic_memory.repository.semantic_vector_index_factory import (
+    resolve_semantic_vector_index_name,
+)
 from basic_memory.runtime.jobs import RuntimeObservedIndexFile
 from basic_memory.schemas.project_readiness import (
     ProjectIndexPhase,
@@ -313,27 +319,163 @@ async def test_an_unembedded_markdown_note_is_pending_embedding_work(
     assert embeddings.pending == 1
 
 
-@pytest.mark.asyncio
-async def test_a_ready_chunk_settles_the_embedding_stage(
-    readiness_service, test_project, sample_entity, app_config, engine_factory
-):
-    _, session_maker = engine_factory
-    app_config.semantic_search_enabled = True
+async def _insert_chunk(
+    session_maker,
+    *,
+    entity_id: int,
+    project_id: int,
+    app_config,
+    embedding_model: str | None = None,
+    vector_index: str | None = None,
+    embedding_status: str = "ready",
+) -> None:
+    """Insert one manifest row, defaulting to the configured retrieval identity."""
     async with db.scoped_session(session_maker) as session:
         await session.execute(
             text(
                 "INSERT INTO search_vector_chunks "
                 "(entity_id, project_id, chunk_key, chunk_text, source_hash, "
                 " entity_fingerprint, embedding_model, vector_index, embedding_status) "
-                "VALUES (:entity_id, :project_id, 'k', 't', 'h', 'f', 'm', 'i', 'ready')"
+                "VALUES (:entity_id, :project_id, 'k', 't', 'h', 'f', "
+                " :embedding_model, :vector_index, :embedding_status)"
             ),
-            {"entity_id": sample_entity.id, "project_id": test_project.id},
+            {
+                "entity_id": entity_id,
+                "project_id": project_id,
+                "embedding_model": (
+                    embedding_model
+                    if embedding_model is not None
+                    else configured_embedding_provider_identity(app_config)
+                ),
+                "vector_index": (
+                    vector_index
+                    if vector_index is not None
+                    else resolve_semantic_vector_index_name(app_config, app_config.database_backend)
+                ),
+                "embedding_status": embedding_status,
+            },
         )
+
+
+@pytest.mark.asyncio
+async def test_a_ready_chunk_under_the_configured_identity_settles_the_stage(
+    readiness_service, test_project, sample_entity, app_config, engine_factory
+):
+    _, session_maker = engine_factory
+    app_config.semantic_search_enabled = True
+    await _insert_chunk(
+        session_maker,
+        entity_id=sample_entity.id,
+        project_id=test_project.id,
+        app_config=app_config,
+    )
 
     readiness = await readiness_service.readiness_for(test_project, ())
     embeddings = readiness.stage(ProjectIndexStageName.EMBEDDINGS)
 
     assert embeddings.total == 1
+    assert embeddings.pending == 0
+
+
+@pytest.mark.asyncio
+async def test_a_chunk_from_a_previous_embedding_model_is_not_settled(
+    readiness_service, test_project, sample_entity, app_config, engine_factory
+):
+    """A row retrieval will skip must not be counted as embedded.
+
+    Changing the embedding model leaves every chunk `ready` under the old
+    identity. Vector hydration admits only the configured one, so counting these
+    would report IDLE while semantic search returns nothing — a count that is
+    unambiguous and wrong, which is the failure this PR exists to remove.
+    """
+    _, session_maker = engine_factory
+    app_config.semantic_search_enabled = True
+    await _insert_chunk(
+        session_maker,
+        entity_id=sample_entity.id,
+        project_id=test_project.id,
+        app_config=app_config,
+        embedding_model="SomeOtherProvider:retired-model:384",
+    )
+
+    readiness = await readiness_service.readiness_for(test_project, ())
+    embeddings = readiness.stage(ProjectIndexStageName.EMBEDDINGS)
+
+    assert embeddings.total == 1
+    assert embeddings.pending == 1
+
+
+@pytest.mark.asyncio
+async def test_a_chunk_from_a_previous_vector_index_is_not_settled(
+    readiness_service, test_project, sample_entity, app_config, engine_factory
+):
+    """The same rule for the other half of the retrieval identity."""
+    _, session_maker = engine_factory
+    app_config.semantic_search_enabled = True
+    await _insert_chunk(
+        session_maker,
+        entity_id=sample_entity.id,
+        project_id=test_project.id,
+        app_config=app_config,
+        vector_index="some-retired-index",
+    )
+
+    readiness = await readiness_service.readiness_for(test_project, ())
+
+    assert readiness.stage(ProjectIndexStageName.EMBEDDINGS).pending == 1
+
+
+@pytest.mark.asyncio
+async def test_a_pending_chunk_is_not_settled(
+    readiness_service, test_project, sample_entity, app_config, engine_factory
+):
+    """Retrieval admits only `ready`; so does readiness."""
+    _, session_maker = engine_factory
+    app_config.semantic_search_enabled = True
+    await _insert_chunk(
+        session_maker,
+        entity_id=sample_entity.id,
+        project_id=test_project.id,
+        app_config=app_config,
+        embedding_status="pending",
+    )
+
+    readiness = await readiness_service.readiness_for(test_project, ())
+
+    assert readiness.stage(ProjectIndexStageName.EMBEDDINGS).pending == 1
+
+
+@pytest.mark.asyncio
+async def test_an_embed_false_note_owes_no_embedding_work(
+    readiness_service, test_project, app_config, entity_repository, session_maker
+):
+    """A note that opts out is never owed a vector, so the stage can settle.
+
+    `sync_entity_vectors_batch` clears and skips these. Counting one as owed
+    would leave the stage PENDING forever and hang `bm status --wait` on work no
+    pass will ever do.
+    """
+    app_config.semantic_search_enabled = True
+    async with db.scoped_session(session_maker) as session:
+        await entity_repository.create(
+            session,
+            {
+                "project_id": entity_repository.project_id,
+                "title": "Opted Out",
+                "note_type": "test",
+                "permalink": "test/opted-out",
+                "file_path": "test/opted_out.md",
+                "content_type": "text/markdown",
+                "entity_metadata": {"embed": "false"},
+                "created_at": datetime.now(UTC),
+                "updated_at": datetime.now(UTC),
+            },
+        )
+
+    readiness = await readiness_service.readiness_for(test_project, ())
+    embeddings = readiness.stage(ProjectIndexStageName.EMBEDDINGS)
+
+    assert embeddings.total == 0
     assert embeddings.pending == 0
 
 

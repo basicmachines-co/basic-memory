@@ -14,14 +14,22 @@ one poll, which is exactly what a waiter is polling to observe.
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig
 from basic_memory.config_models import DatabaseBackend
-from basic_memory.models import Project
+from basic_memory.models import Entity, Project
+from basic_memory.repository.embedding_provider_factory import (
+    configured_embedding_provider_identity,
+)
+from basic_memory.repository.search_repository_base import CURRENT_VECTOR_MANIFEST_PREDICATE
+from basic_memory.repository.semantic_vector_index_factory import (
+    resolve_semantic_vector_index_name,
+)
 from basic_memory.runtime.jobs import RuntimeObservedIndexFile
+from basic_memory.services.search_service import entity_embeddings_enabled
 from basic_memory.schemas.project_readiness import (
     ProjectIndexPhase,
     ProjectIndexReadiness,
@@ -110,10 +118,9 @@ class ProjectReadinessService:
             embeddable, embedded = await self._embedding_counts(session, project.id)
 
         files_total, files_pending = file_stage_counts(observed_files, indexed_checksums)
-        # An entity can hold a ready embedding the current pass no longer counts
-        # as embeddable (its file became non-markdown), so clamp rather than
-        # report negative outstanding work.
-        embeddings_pending = max(0, embeddable - embedded)
+        # No clamp: `embedded` is counted within the owed set, so it can never
+        # exceed it (see _embedding_counts).
+        embeddings_pending = embeddable - embedded
         stages = (
             ProjectIndexStage(
                 name=ProjectIndexStageName.FILES,
@@ -212,7 +219,30 @@ class ProjectReadinessService:
         session: AsyncSession,
         project_id: int,
     ) -> tuple[int, int]:
-        """Return (embeddable entities, entities with a ready embedding).
+        """Return (entities owed an embedding, those whose embedding is usable).
+
+        Both sides are defined by what semantic retrieval actually does, because
+        a definition that merely resembles retrieval drifts from it in both
+        directions at once (#1414 review):
+
+        - Owed is ``entity_embeddings_enabled``, the shared opt-out policy in
+          ``search_service`` that ``sync_entity_vectors_batch`` uses to clear and
+          skip a note. Counting an ``embed: false`` note as owed would leave the
+          stage PENDING forever, since no pass will ever embed it.
+        - Usable is ``CURRENT_VECTOR_MANIFEST_PREDICATE``, the literal predicate
+          vector hydration applies. Counting a chunk left behind by an
+          embedding-model or vector-index change as done would report IDLE while
+          retrieval returns nothing for that note.
+
+        Reported as a set difference rather than a subtraction of counts: an
+        entity can hold a usable vector and no longer be owed one (its note took
+        ``embed: false``), and only sets get that right without a clamp.
+
+        One thing this deliberately does not verify is that a ready manifest row
+        still has its physical vector. The only portable way to check is a
+        search repository, and building one loads the embedding model — a cost a
+        polled status route must not pay. ``bm project info`` verifies it, via
+        ``ProjectService.get_embedding_status``, and recommends a rebuild.
 
         With semantic search off there is no embedding work to wait for, so the
         stage reports zero of zero and settles immediately rather than parking
@@ -221,33 +251,53 @@ class ProjectReadinessService:
         if not self.app_config.semantic_search_enabled:
             return 0, 0
 
-        embeddable_result = await session.execute(
-            text(
-                "SELECT COUNT(*) FROM entity "
-                "WHERE project_id = :project_id AND content_type = 'text/markdown'"
-            ),
-            {"project_id": project_id},
+        # The opt-out policy reads a JSON metadata field, so the rows are loaded
+        # and filtered in Python. Restating it as SQL would be a second copy of a
+        # rule that already has an owner in search_service.
+        result = await session.execute(
+            select(Entity).where(
+                Entity.project_id == project_id,
+                Entity.content_type == "text/markdown",
+            )
         )
-        embeddable = int(embeddable_result.scalar() or 0)
+        owed_entity_ids = {
+            entity.id for entity in result.scalars().all() if entity_embeddings_enabled(entity)
+        }
+        if not owed_entity_ids:
+            return 0, 0
 
-        # Trigger: semantic search is enabled but the vector manifest table is
-        # absent (a database created before the vector migrations, or a build
-        # without the sqlite-vec extension).
-        # Why: querying a missing table raises, which would take down the one
-        # call a waiter polls.
-        # Outcome: report nothing embedded, which is true -- the stage stays
-        # PENDING and `bm reindex --embeddings` is the documented remedy.
+        # Trigger: semantic search is on but the vector manifest table is absent
+        # (a database predating the vector migrations, or a build without
+        # sqlite-vec).
+        # Why: querying a missing table raises, taking down the one call a waiter
+        # polls.
+        # Outcome: nothing is usable, which is true — the stage stays PENDING and
+        # `bm reindex --embeddings` is the documented remedy.
         if not await self._vector_manifest_exists(session):
-            return embeddable, 0
+            return len(owed_entity_ids), 0
 
-        embedded_result = await session.execute(
+        # The identity comes from config rather than from a live repository's
+        # `_semantic_vector_index_name` / `_embedding_model_key()`: those are only
+        # populated once an instance has ensured its vector tables and loaded a
+        # provider, and building one here would load the embedding model. The
+        # config forms are defined to produce the same strings, and
+        # get_embedding_status compares the same way.
+        usable_result = await session.execute(
             text(
-                "SELECT COUNT(DISTINCT entity_id) FROM search_vector_chunks "
-                "WHERE project_id = :project_id AND embedding_status = 'ready'"
+                "SELECT DISTINCT entity_id FROM search_vector_chunks "
+                "WHERE " + CURRENT_VECTOR_MANIFEST_PREDICATE
             ),
-            {"project_id": project_id},
+            {
+                "project_id": project_id,
+                "vector_index": resolve_semantic_vector_index_name(
+                    self.app_config,
+                    self.app_config.database_backend,
+                ),
+                "embedding_model": configured_embedding_provider_identity(self.app_config),
+            },
         )
-        return embeddable, int(embedded_result.scalar() or 0)
+        usable_entity_ids = {int(entity_id) for entity_id in usable_result.scalars().all()}
+        return len(owed_entity_ids), len(owed_entity_ids & usable_entity_ids)
 
     async def _vector_manifest_exists(self, session: AsyncSession) -> bool:
         """Report whether the vector chunk manifest table is present."""
