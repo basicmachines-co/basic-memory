@@ -89,6 +89,13 @@ class TurnRecord(BaseModel):
     arguments_chars: int = 0
     result_chars: int = 0
     is_error: bool = False
+    # Set only on error turns: the arguments that provoked the error and the
+    # text the model was told. Success payloads stay out of the artifact (large,
+    # and reproducible from the corpus); an error that recurs run after run is
+    # not diagnosable from lengths alone, which is what the posix `find` error
+    # in continue-spec9 was across three runs.
+    arguments_excerpt: str | None = None
+    error_excerpt: str | None = None
 
 
 class PredicateResult(BaseModel):

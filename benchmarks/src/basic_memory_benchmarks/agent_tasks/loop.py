@@ -12,6 +12,7 @@ spent on real model calls.
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -74,6 +75,21 @@ def _truncate_result(text: str) -> str:
     if len(text) <= TOOL_RESULT_MAX_CHARS:
         return text
     return text[:TOOL_RESULT_MAX_CHARS] + TRUNCATION_SUFFIX
+
+
+# Enough of an error and its arguments to diagnose it from the artifact, small
+# enough that a task with dozens of failing calls does not bloat per-turn.jsonl.
+ERROR_EXCERPT_MAX_CHARS = 400
+
+
+def _excerpt(text: str) -> str:
+    if len(text) <= ERROR_EXCERPT_MAX_CHARS:
+        return text
+    return text[:ERROR_EXCERPT_MAX_CHARS] + TRUNCATION_SUFFIX
+
+
+def _arguments_excerpt(arguments: dict[str, Any]) -> str:
+    return _excerpt(json.dumps(arguments, default=str, sort_keys=True))
 
 
 def run_agent_loop(
@@ -174,11 +190,17 @@ def run_agent_loop(
                             tool_name=call.name,
                             arguments_chars=len(str(call.arguments)),
                             is_error=True,
+                            arguments_excerpt=_arguments_excerpt(call.arguments),
+                            error_excerpt=_excerpt(str(exc)),
                         )
                     )
                     raise AgentLoopError(exc, stop("error", None)) from exc
                 latency_ms = (time.perf_counter() - dispatch_started) * 1000.0
             fed_back = _truncate_result(outcome.text)
+            # Only failures keep their text: that is what makes a recurring
+            # tool error diagnosable from the artifact without a transcript.
+            arguments_excerpt = _arguments_excerpt(call.arguments) if outcome.is_error else None
+            error_excerpt = _excerpt(fed_back) if outcome.is_error else None
             turn_records.append(
                 TurnRecord(
                     turn_index=len(turn_records),
@@ -188,6 +210,8 @@ def run_agent_loop(
                     arguments_chars=len(str(call.arguments)),
                     result_chars=len(fed_back),
                     is_error=outcome.is_error,
+                    arguments_excerpt=arguments_excerpt,
+                    error_excerpt=error_excerpt,
                 )
             )
             transcript.append(
