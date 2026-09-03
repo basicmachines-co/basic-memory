@@ -24,8 +24,10 @@ from basic_memory.repository.search_query import relaxed_query_words, relaxation
 from basic_memory.repository.script_ngrams import analyze_script_query, build_script_ngrams
 from basic_memory.repository.semantic_chunking import VectorChunkRecord
 from basic_memory.repository.search_repository_base import (
+    SearchIndexKey,
     SearchRepositoryBase,
     VectorChunkState,
+    candidate_key_restriction_condition,
     file_path_prefix_condition,
     metadata_contains_like_condition,
     metadata_filter_content_type_condition,
@@ -980,6 +982,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         file_path_prefix: Optional[str] = None,
         temporal: Optional[TemporalFilter] = None,
         allow_relaxed: bool = False,
+        candidate_keys: Sequence[SearchIndexKey] | None = None,
     ) -> tuple[str, str, dict[str, Any], str, str]:
         """Build Postgres FTS FROM/WHERE params shared by search and count."""
         conditions = []
@@ -1147,6 +1150,13 @@ class PostgresSearchRepository(SearchRepositoryBase):
         subtree_condition = file_path_prefix_condition(file_path_prefix, params)
         if subtree_condition is not None:
             conditions.append(subtree_condition)
+
+        # Handle an explicit candidate-row restriction. Built by the shared helper so
+        # both backends restrict by the identical rule; see
+        # candidate_key_restriction_condition for why the vector filter pass asks about
+        # its candidates rather than paging the filter's whole match set (#1431).
+        if candidate_keys is not None:
+            conditions.append(candidate_key_restriction_condition(candidate_keys, params))
 
         # Handle search item type filter (parameterized for defense-in-depth)
         if search_item_types:
@@ -1394,6 +1404,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         allow_relaxed: bool = False,
         session: AsyncSession | None = None,
         *,
+        candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
     ) -> List[SearchIndexRow]:
         """Search across all indexed content using PostgreSQL tsvector."""
@@ -1439,6 +1450,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             file_path_prefix=file_path_prefix,
             temporal=temporal,
             allow_relaxed=allow_relaxed,
+            candidate_keys=candidate_keys,
         )
 
         # set limit and offset

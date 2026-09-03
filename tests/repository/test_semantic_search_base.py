@@ -15,6 +15,7 @@ import basic_memory.repository.search_repository_base as search_repository_base_
 from basic_memory.repository.fastembed_provider import FastEmbedEmbeddingProvider
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_repository_base import (
+    SearchIndexKey,
     SearchRepositoryBase,
     _PreparedEntityVectorSync,
 )
@@ -96,6 +97,7 @@ class _ConcreteRepo(SearchRepositoryBase):
         offset: int = 0,
         allow_relaxed: bool = False,
         *,
+        candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
     ) -> list[SearchIndexRow]:
         return []

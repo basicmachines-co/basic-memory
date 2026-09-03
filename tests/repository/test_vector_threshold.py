@@ -1,5 +1,6 @@
 """Tests for semantic_min_similarity threshold filtering in vector search."""
 
+from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -13,6 +14,7 @@ from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_repository_base import (
     SMALL_NOTE_CONTENT_LIMIT,
     TOP_CHUNKS_PER_RESULT,
+    SearchIndexKey,
     SearchRepositoryBase,
 )
 from basic_memory.repository.search_trace import SearchTraceCollector
@@ -79,6 +81,7 @@ class ConcreteSearchRepo(SearchRepositoryBase):
         offset: int = 0,
         allow_relaxed: bool = False,
         *,
+        candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
     ) -> list[SearchIndexRow]:
         return []  # pragma: no cover

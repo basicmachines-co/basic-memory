@@ -6,6 +6,7 @@ Verifies that the fusion formula (max + FUSION_BONUS * min):
 3. Produces zero fused score when the source score is zero
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import override, Any, Optional, cast
@@ -15,7 +16,11 @@ import pytest
 
 from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.search_index_row import SearchIndexRow
-from basic_memory.repository.search_repository_base import FUSION_BONUS, SearchRepositoryBase
+from basic_memory.repository.search_repository_base import (
+    FUSION_BONUS,
+    SearchIndexKey,
+    SearchRepositoryBase,
+)
 from basic_memory.repository.search_trace import SearchTraceCollector
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 from basic_memory.temporal import TemporalFilter
@@ -90,6 +95,7 @@ class ConcreteSearchRepo(SearchRepositoryBase):
         offset: int = 0,
         allow_relaxed: bool = False,
         *,
+        candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
     ) -> list[SearchIndexRow]:
         return []  # pragma: no cover

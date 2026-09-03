@@ -29,7 +29,9 @@ from basic_memory.repository.rerank_provider_factory import create_rerank_provid
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_query import relaxed_query_words
 from basic_memory.repository.search_repository_base import (
+    SearchIndexKey,
     SearchRepositoryBase,
+    candidate_key_restriction_condition,
     file_path_prefix_condition,
     metadata_contains_like_condition,
     metadata_filter_content_type_condition,
@@ -795,6 +797,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         metadata_filters: Optional[dict[str, Any]] = None,
         file_path_prefix: Optional[str] = None,
         temporal: Optional[TemporalFilter] = None,
+        candidate_keys: Sequence[SearchIndexKey] | None = None,
     ) -> tuple[str, str, dict[str, Any], str, str]:
         """Build SQLite FTS FROM/WHERE params shared by search and count."""
         conditions = []
@@ -887,6 +890,13 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         subtree_condition = file_path_prefix_condition(file_path_prefix, params)
         if subtree_condition is not None:
             conditions.append(subtree_condition)
+
+        # Handle an explicit candidate-row restriction. Built by the shared helper so
+        # both backends restrict by the identical rule; see
+        # candidate_key_restriction_condition for why the vector filter pass asks about
+        # its candidates rather than paging the filter's whole match set (#1431).
+        if candidate_keys is not None:
+            conditions.append(candidate_key_restriction_condition(candidate_keys, params))
 
         # Handle entity type filter (parameterized for defense-in-depth)
         if search_item_types:
@@ -1110,6 +1120,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         allow_relaxed: bool = False,
         session: AsyncSession | None = None,
         *,
+        candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
     ) -> List[SearchIndexRow]:
         """Search across all indexed content using SQLite FTS5.
@@ -1160,6 +1171,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             metadata_filters=metadata_filters,
             file_path_prefix=file_path_prefix,
             temporal=temporal,
+            candidate_keys=candidate_keys,
         )
 
         # set limit on search query
