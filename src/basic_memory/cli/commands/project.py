@@ -46,6 +46,7 @@ from basic_memory.schemas.cloud import (
     workspace_matches_identifier,
 )
 from basic_memory.schemas.project_info import ProjectItem, ProjectList
+from basic_memory.schemas.v2 import ProjectResolveResponse
 from basic_memory.utils import generate_permalink, normalize_project_path
 
 console = Console()
@@ -738,6 +739,51 @@ def list_projects(
         raise typer.Exit(1)
 
 
+def _add_command_hint(name: str, local_sync_path: str | None, workspace: str | None) -> str:
+    """Rebuild the `bm project add` invocation that recovers this cloud project.
+
+    Printed as a remedy, so it has to be the command that actually re-runs the
+    failed step -- including the flags whose absence would change what it does.
+    """
+    hint = f"bm project add {name} --cloud"
+    if workspace:
+        hint += f" --workspace {workspace}"
+    if local_sync_path:
+        hint += f" --local-path {local_sync_path}"
+    return hint
+
+
+def _resolve_existing_project(
+    name: str,
+    *,
+    local: bool,
+    cloud: bool,
+    workspace: str | None,
+) -> ProjectResolveResponse | None:
+    """Return the project if it already exists and is visible, else None.
+
+    Asked as an explicit resolve rather than by matching the creation error's
+    text: whether the project exists is a question only the server can answer,
+    and its phrasing of a conflict is not a contract.
+    """
+
+    async def _resolve() -> ProjectResolveResponse:
+        async with get_client(workspace=workspace) as client:
+            return await ProjectClient(client).resolve_project(name)
+
+    try:
+        with force_routing(local=local, cloud=cloud):
+            return run_with_cleanup(_resolve())
+    except Exception as probe_error:
+        # Trigger: the probe itself could not answer (404, auth, network).
+        # Why: it exists only to decide whether adoption is safe, and a failed
+        #   probe is not evidence that the project exists.
+        # Outcome: report no match; the caller then surfaces the original
+        #   creation error, so nothing is masked by this swallow.
+        logger.debug(f"Existence probe for '{name}' failed: {probe_error}")
+        return None
+
+
 def _abort_after_project_created(
     name: str,
     *,
@@ -871,15 +917,44 @@ def add_project(
                 data = {"name": name, "path": resolved_path, "set_default": set_default}
                 return await ProjectClient(client).create_project(data)
 
-    # --- Create the project ---
+    # --- Create the project, or adopt one that already exists remotely ---
+    # Trigger: creation fails, and the project already exists where it was being
+    #   created while this machine's config has no entry for it.
+    # Why: that is precisely the state a failed `save_config` leaves behind, and
+    #   every route out of it was closed -- `set-cloud` refuses a name absent from
+    #   config, and re-running `add` refused because the remote project existed
+    #   (#1440 review). Two rounds of picking a better remedy string could not fix
+    #   that, because the problem was a state with no recovery, not the wording.
+    # Outcome: re-running the command the user already ran finishes whatever did
+    #   not complete, so any failure after remote creation but before the config
+    #   write self-heals on a retry, including steps added later.
     try:
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(_add_project())
-    except Exception as e:
-        console.print(f"[red]Error adding project: {str(e)}[/red]")
-        raise typer.Exit(1)
-
-    console.print(f"[green]{result.message}[/green]")
+        console.print(f"[green]{result.message}[/green]")
+    except Exception as create_error:
+        # Only "remote exists, config missing" may proceed. A name already in
+        # this machine's config is genuinely added, so a creation failure there
+        # is a real conflict -- a local re-add under a different path, say --
+        # and adopting would silently ignore the path the caller asked for.
+        # Read from the snapshot taken before this command touched anything:
+        # ConfigManager caches by file mtime, so a failed save leaves its
+        # in-memory mutation visible to a later read within the same process.
+        already_configured = name in config.projects
+        existing = (
+            None
+            if already_configured
+            else _resolve_existing_project(
+                name, local=local, cloud=cloud, workspace=resolved_workspace_id
+            )
+        )
+        if existing is None:
+            console.print(f"[red]Error adding project: {str(create_error)}[/red]")
+            raise typer.Exit(1)
+        console.print(
+            f"[green]Project '{name}' already exists at {existing.path}; "
+            f"adopting it into this machine's config.[/green]"
+        )
 
     # --- Post-creation steps ---
     # Each step below runs after the project row is durable, so each carries its
@@ -942,24 +1017,22 @@ def add_project(
                 ConfigManager().save_config(config)
             except Exception as e:
                 # The remote project exists; only this machine's routing entry is
-                # missing, so recovery is local config, not anything server-side.
-                workspace_flag = (
-                    f" --workspace {resolved_workspace_id}" if resolved_workspace_id else ""
-                )
-                remedy = (
-                    f"The project exists in the cloud — only this machine's config "
-                    f"({ConfigManager().config_file}) could not be written. Fix that file, "
-                    f"then route this machine to it with "
-                    f"[green]bm project set-cloud {name}{workspace_flag}[/green]."
-                )
-                if local_sync_path:
-                    remedy += (
-                        f" Re-add the sync path afterwards with "
-                        f"[green]bm project add {name} --cloud --local-path {local_sync_path}[/green] "
-                        f"only if 'bm project list' still shows no local path."
-                    )
+                # missing. `set-cloud` cannot repair that — it refuses a name that
+                # is absent from config, which is exactly this state — so the
+                # remedy is to fix the write and re-run this command, which now
+                # adopts the existing project instead of failing on it.
                 _abort_after_project_created(
-                    name, step="saving its cloud routing to local config", remedy=remedy, error=e
+                    name,
+                    step="saving its cloud routing to local config",
+                    remedy=(
+                        f"The project exists in the cloud — only this machine's config "
+                        f"({ConfigManager().config_file}) could not be written. Fix that file "
+                        f"(permissions or disk space), then run this same command again: "
+                        f"[green]{_add_command_hint(name, local_sync_path, workspace)}[/green]. "
+                        f"It will adopt the project that already exists rather than create a "
+                        f"second one."
+                    ),
+                    error=e,
                 )
 
         # Save local sync path to config if in cloud mode
