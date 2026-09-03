@@ -348,14 +348,16 @@ re-reading the whole book into context:
 
 ```bash
 grep -n '^CHAPTER ' ~/basic-memory/moby-dick/moby-dick.txt   # heading -> line number
-bm cat moby-dick.txt --lines 4200-4890 --plain               # returns one chapter, not the whole text
+bm cat moby-dick/moby-dick.txt --lines 4200-4890 --plain   # one chapter, not the whole text
 ```
 
 `grep -n` here is the shell's grep on a filesystem path (this is the map-building step, and
-it needs the file). `bm cat` then takes the *note identifier* — `moby-dick.txt`, the file's
-path within the project — and returns exactly that slice plus a `lines 4200-4890 of N`
-footer. `bm head moby-dick.txt -n 40` is the cheap way to eyeball the heading format before
-writing the grep pattern.
+it needs the file). `bm cat` then takes the *note identifier* and returns exactly that slice plus a
+`lines 4200-4890 of N` footer. **Spell the identifier project-qualified:**
+`<work>/<work>.txt`. The bare `moby-dick.txt` fails with `names a project, not a note`,
+because the prefix check drops the extension and the stem then equals the project name —
+which this layout guarantees (#1458). `bm head moby-dick/moby-dick.txt -n 40` is the cheap
+way to eyeball the heading format before writing the grep pattern.
 
 Store the map in the project (a note or a small JSON file) so later batches — and a resumed
 run after context compaction — do not have to rediscover it. On a long work this is the
@@ -430,6 +432,18 @@ edit_note(
 - [quote] "<Attributed quote>" (Ch.<N>)"""
 )
 ```
+
+**3b. After the first batch, check where the enrichment landed.** On a 206-note graph built
+with this pipeline, every character's `append` under `heading="Observations"` had gone under
+`## Relations`, and the prose prepends had landed above the H1, so `cat <note> --section
+Observations` returned the seed stub for every major character. One check catches it:
+
+```bash
+bm cat characters/major/<slug> --section Observations --project <work>   # the new lines, or the stub?
+bm cat characters/major/<slug> --section Relations --project <work>      # the lines that should not be here
+```
+
+Fix the heading discipline before batch two; a section read is only as good as the headings.
 
 **4. Track progress** using the memory-tasks skill to create a processing task that survives context compaction.
 
@@ -578,9 +592,12 @@ boundary: `/characters` admits `characters/major/ahab.md` but never `characters-
 not a permalink match, so a note that pins its own `permalink:` is still found where its file
 lives.
 
-Read the count off the footer, not off the rows you can see. Every `find` result reports
-`page 1 • total 138`, and appends `• more available (--page)` when the page truncated the
-answer — that suffix appearing is the check *failing*, whatever the visible rows say.
+Read the count off the footer, not off the rows you can see. In a terminal every `find`
+result reports `page 1 • total 138`, and appends `• more available (--page)` when the page
+truncated the answer — that suffix appearing is the check *failing*, whatever the visible
+rows say. **The footer is a TTY feature.** Piped output without `--plain` is JSON, which
+carries `total` and `has_more`; `--plain` prints the rows and nothing else (#1457). An agent
+should read `has_more` from `--json` rather than look for a footer it will not get.
 
 For the sequence gap — the failure that a count alone cannot catch — take the numbers from
 `--json`, which carries `total`, `total_is_exact`, and `has_more`:
@@ -609,6 +626,10 @@ The loop is not ceremony. `--page-size` caps at 200, so a single call cannot inv
 with more than 200 chapters — and rerunning it with `--page 2` *replaces* the numbers rather
 than accumulating them, which reports chapters 1-200 as missing on a corpus that is complete.
 Walk until `has_more` is false and check the union.
+
+`--fields` returns every value as a string — `chapter_number: 63` comes back as `"63"`
+(#1456) — while `--meta` predicates compare numerically. The `tostring | test(...) |
+tonumber` handling above is load-bearing, not defensive; drop it and the check breaks.
 
 Pass the work's **actual** chapter count as `$expected` — deriving the range from the highest
 number found lets an incomplete graph pass. With 138 rows numbered 1..137 plus one duplicate,
@@ -640,6 +661,13 @@ either genuinely isolated or was never linked back into the graph:
 bm orphans          # entities with no relations in the graph
 ```
 
+`orphans` finds notes with no relations. It does not find a `[[target]]` that resolves to
+nothing — a misspelled or renamed entity name — and on this graph `[[Moby Dick (White
+Whale)]]` was unresolved in ten chapters while the symbol note lived under another title.
+Check a chapter's links with `bm tool build-context memory://chapters/<slug> --depth 1
+--project <work> --json` and look for relations whose `to_entity_id` is `null`; fix the
+spelling or add the alias, then re-run the chapter.
+
 Graph quality is relation *density*, not note count. A pass that adds notes while leaving
 orphans behind has made the graph worse.
 
@@ -648,17 +676,29 @@ orphans behind has made the graph worse.
 With the graph complete, traverse it to find what the chapter-by-chapter pass could not see:
 
 ```bash
-bm tool build-context 'memory://characters/major/*' --depth 2         # the character web
+bm grep -F "features [[" --page-size 200 --project <work> --json   # every chapter's cast, one call
 bm find --meta 'note_type=theme' --fields prevalence --page-size 200  # thematic weight
 bm grep -F "doubloon" --page-size 100 --project <work>                # every mention of a symbol
 ```
 
+"Which characters share the most chapters" is the first line plus a local parse of each
+row's `content` for `features [[...]]` — on a 138-chapter graph that one call replaced 136
+reads. Do not reach for `bm tool build-context 'memory://characters/major/*'` here: a
+wildcard context is capped at 100 related rows across all primaries and returns one primary
+row per indexed observation, so it neither enumerates the cast nor walks the web.
+`build-context` on a *single* note is the right tool for a different question, below.
 `build-context` takes its URL as a positional argument — there is no `--url` option.
 
 `grep` defaults to semantic ranking and a page of 10, which answers "what is this about?" but
 quietly truncates "where does this appear?" — a symbol in 40 chapters comes back as 10. For
 symbol tracing, pass `-F` for literal matching and raise `--page-size`; the meaning shifts you
 are hunting are usually in the later occurrences, which the default would have dropped.
+
+Two more facts about `grep` rows. Matching is case-insensitive and note-level: a hit is a
+note, not a line, and there is no `-n` or context. And each row's `content` is the note body
+cut at 4000 characters with no marker (#1455), so a long note's tail — on this graph, the
+final chapter's `follows`/`precedes` relations — is silently absent from a grep-driven scan.
+When a parse depends on the end of a note, `cat` that note.
 
 `--page-size` raises the ceiling, it does not remove it. A symbol in a long work can exceed
 even 100, so check whether the last page was full and walk `--page 2`, `--page 3` until it is
