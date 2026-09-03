@@ -281,8 +281,10 @@ async def delete_note(
             ConfigManager().config,
             context=context,
         )
-        if detected:
-            project = detected
+        if detected is not None:
+            # The id rides along so the name is never re-resolved against a
+            # different accessible workspace holding the same permalink (#1432).
+            project, project_id = detected.project, detected.project_id
 
     async with get_project_client(project, context=context, project_id=project_id) as (
         client,

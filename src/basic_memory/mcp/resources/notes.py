@@ -11,6 +11,7 @@ from fastmcp.exceptions import ResourceError, ToolError
 
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.project_context import (
+    DetectedProjectRoute,
     detect_project_from_memory_url_prefix,
     get_project_client,
     resolve_project_and_path,
@@ -33,7 +34,7 @@ class NoteNotFoundError(ResourceError):
     """
 
 
-async def _route_for(identifier: str, context: Context | None) -> str | None:
+async def _route_for(identifier: str, context: Context | None) -> DetectedProjectRoute | None:
     """The project route the URI's prefix names, or None for the default client.
 
     The canonical prefix detection decides, covering configured local projects
@@ -51,7 +52,7 @@ async def _route_for(identifier: str, context: Context | None) -> str | None:
     )
     if route is None or config.permalinks_include_project:
         return route
-    requested = generate_permalink(route)
+    requested = generate_permalink(route.project)
     for configured_name in config.projects:
         if generate_permalink(configured_name) == requested:
             return None
@@ -69,7 +70,13 @@ async def read_note_markdown(identifier: str, context: Context | None) -> str:
     """
     try:
         route = await _route_for(identifier, context)
-        async with get_project_client(route, context) as (client, active_project):
+        # Both routing fields, the way every tool forwards them: the id is what
+        # keeps a cloud route bound to the workspace that answered for it (#1432).
+        async with get_project_client(
+            route.project if route else None,
+            context,
+            project_id=route.project_id if route else None,
+        ) as (client, active_project):
             target, entity_path, _ = await resolve_project_and_path(
                 client, f"memory://{identifier}", active_project.name, context
             )

@@ -1216,8 +1216,10 @@ async def search_notes(
             ConfigManager().config,
             context=context,
         )
-        if detected:
-            project = detected
+        if detected is not None:
+            # The id rides along so the name is never re-resolved against a
+            # different accessible workspace holding the same permalink (#1432).
+            project, project_id = detected.project, detected.project_id
 
     # Trigger: caller explicitly requests account/workspace-wide search and did not
     # already provide a concrete project route.

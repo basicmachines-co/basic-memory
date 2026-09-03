@@ -522,15 +522,21 @@ async def edit_note(
     if project is None and project_id is None:
         config = ConfigManager().config
         if identifier.strip().startswith("memory://"):
-            detected = await detect_project_from_memory_url_prefix(
+            route = await detect_project_from_memory_url_prefix(
                 identifier,
                 config,
                 context=context,
             )
+            if route is not None:
+                # The id rides along so the name is never re-resolved against a
+                # different accessible workspace holding the same permalink (#1432).
+                project, project_id = route.project, route.project_id
         elif _workspace_identifier_discovery_available(
             identifier,
             config,
         ) and is_workspace_qualified_plain_identifier(identifier):
+            # A refusal, not a route: this names the project the ambiguous
+            # identifier *would* have edited, for the message only.
             detected = await detect_project_from_workspace_identifier_prefix(
                 identifier,
                 config,
@@ -552,10 +558,6 @@ async def edit_note(
                     identifier=identifier,
                     detected_project=detected,
                 )
-        else:
-            detected = None
-        if detected:
-            project = detected
 
     with logfire.span(
         "mcp.tool.edit_note",

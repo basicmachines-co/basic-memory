@@ -212,7 +212,10 @@ async def test_read_content_workspace_memory_url_routes_with_local_config(
     @asynccontextmanager
     async def fake_get_project_client(project=None, context=None, project_id=None):
         assert project == "personal/main"
-        assert project_id is None
+        # The workspace-qualified route hands on the entry's id too, so the name
+        # is never re-resolved against a workspace holding a project literally
+        # named 'personal/main' (#1432).
+        assert project_id == "11111111-1111-1111-1111-111111111111"
         yield (
             object(),
             SimpleNamespace(

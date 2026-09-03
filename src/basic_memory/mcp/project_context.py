@@ -848,22 +848,38 @@ async def resolve_project_and_path(
                 )
                 return active_project, resolved_path, True
 
-        project_prefix, remainder = _split_project_prefix(normalized_path)
         include_project = config.permalinks_include_project
-        # Trigger: memory URL begins with a potential project segment
-        # Why: allow project-scoped memory URLs without requiring a separate project parameter
-        # Outcome: attempt to resolve the prefix as a project and route to it
-        if project_prefix:
-            # Deferred: ToolError lives in FastMCP's runtime, which must not load at CLI startup (#886).
-            from fastmcp.exceptions import ToolError
 
-            if cached_project and _project_matches_identifier(cached_project, project_prefix):
-                resolved_project = await resolve_project_parameter(project_prefix, context=context)
-                if resolved_project and generate_permalink(resolved_project) != generate_permalink(
-                    project_prefix
-                ):
+        # --- The routed project claims its own prefix, with no lookup at all ---
+        # Trigger: the URL's leading segments spell the project this call is
+        #   already routed to.
+        # Why: a project name may contain '/', so how many segments its prefix
+        #   spans is a fact about that project, not about the string.
+        #   _split_project_prefix guesses one segment, so
+        #   'memory://research/2026/notes/x' offered 'research' to the resolver
+        #   below — which, in a config that also holds a project named
+        #   'research', answered with that one, returned it as the active
+        #   project, and cached it over the project the client was opened for
+        #   (#1432). The identity needed to settle this is already in hand, so
+        #   claim it with the same splitter every other project set uses.
+        # Outcome: the remainder is what is left after the segments the project
+        #   really spans, and no /v2/projects/resolve round trip is spent.
+        if cached_project is not None:
+            claimed = _split_project_permalink_prefix(
+                normalized_path,
+                # Both spellings _project_matches_identifier accepted, so the
+                # widening is in how many segments match, not in which names do.
+                (generate_permalink(cached_project.name), cached_project.permalink),
+            )
+            # A prefix with no remainder names the project itself, not a path in
+            # it: 'memory://main' stays a note called 'main' in the active
+            # project, exactly as _split_project_prefix's shape check required.
+            if claimed is not None and claimed[1]:
+                claimed_prefix, remainder = claimed
+                resolved_project = await resolve_project_parameter(claimed_prefix, context=context)
+                if resolved_project and generate_permalink(resolved_project) != claimed_prefix:
                     raise ValueError(
-                        f"Project is constrained to '{resolved_project}', cannot use '{project_prefix}'."
+                        f"Project is constrained to '{resolved_project}', cannot use '{claimed_prefix}'."
                     )
 
                 resolved_path = _canonical_memory_path_for_active_route(
@@ -873,6 +889,22 @@ async def resolve_project_and_path(
                     cached_workspace=cached_workspace,
                 )
                 return cached_project, resolved_path, True
+
+        project_prefix, remainder = _split_project_prefix(normalized_path)
+        # Trigger: memory URL begins with a potential project segment that is not
+        #   the routed project's own.
+        # Why: allow project-scoped memory URLs without requiring a separate project parameter
+        # Outcome: attempt to resolve the prefix as a project and route to it.
+        #   No set in hand names this project, so this branch resolves a *name*
+        #   through the API and keeps the single-segment guess: a project whose
+        #   permalink spans several segments is reachable through every caller
+        #   that detects its prefix first (all of them do), and buying the
+        #   multi-segment reading here too would mean a project-list fetch on
+        #   every cross-project memory:// read, on top of the resolve it already
+        #   costs.
+        if project_prefix:
+            # Deferred: ToolError lives in FastMCP's runtime, which must not load at CLI startup (#886).
+            from fastmcp.exceptions import ToolError
 
             try:
                 from basic_memory.mcp.tools.utils import call_post
@@ -943,11 +975,29 @@ async def resolve_project_and_path(
         return active_project, resolved_path, True
 
 
+@dataclass(frozen=True)
+class DetectedProjectRoute:
+    """The project an identifier's leading segments name, plus the id that pins it.
+
+    ``project`` is the routing identifier callers hand to ``get_project_client``;
+    ``project_id`` is the external_id of the exact project that claimed the
+    segments, or None for a locally routed session, whose config holds no UUIDs
+    and which has no second workspace to be confused with. Callers pass both,
+    the way the posix verbs pass ``ProjectPathRoute``'s pair: a project name is
+    unique only inside one workspace, so handing on the name alone lets it be
+    re-resolved against a different accessible workspace that happens to hold
+    the same permalink (#1432).
+    """
+
+    project: str
+    project_id: Optional[str] = None
+
+
 async def detect_project_from_memory_url_prefix(
     identifier: str,
     config: BasicMemoryConfig,
     context: Optional[Context] = None,
-) -> Optional[str]:
+) -> Optional[DetectedProjectRoute]:
     """Resolve a project from a memory URL prefix, including workspace-qualified URLs."""
     if not identifier.strip().startswith("memory://"):
         return None
@@ -970,11 +1020,51 @@ async def detect_project_from_identifier_prefix(
     identifier: str,
     config: BasicMemoryConfig,
     context: Optional[Context] = None,
-) -> Optional[str]:
-    """Resolve a project from a plain permalink, memory URL, or workspace route prefix."""
+) -> Optional[DetectedProjectRoute]:
+    """Resolve a project from a plain permalink, memory URL, or workspace route prefix.
+
+    Detection, not resolution. A leading segment that names no project is the
+    normal case on this surface — 'specs/search-spec' is an ordinary permalink,
+    and a search query is arbitrary text — so the answer for it is None and the
+    caller's active/default project applies. That is why these tools do not
+    adopt the posix verbs' refusal rule (#1421): there a first segment naming
+    nothing is an error, here it is the common input.
+
+    What they do adopt is the *set*, and its precedence. A path-shaped
+    identifier names a project only when a project set the session already holds
+    claims its leading segments, and every set is claimed by the same
+    ``split_project_permalink_prefix``, so how many segments a project spans
+    stays a fact about the known projects rather than a guess about the string:
+
+    1. the local config (``detect_project_from_url_prefix``), free to read;
+    2. ``addressable_projects`` — the session's own mount table, the same set
+       ``ls /`` advertises and ``resolve_project_path_route`` routes by. In a
+       hosted session that listing comes from the session's own tenant route, so
+       it is exactly the projects of the workspace this session is bound to;
+    3. then, and only then, an explicitly workspace-qualified
+       '<workspace>/<project>/<path>' route, for projects in workspaces this
+       session's own route does not list.
+
+    Mounts before workspace routes is ``resolve_project_path_route``'s order,
+    for its reason: only one reading of '<name>/...' can win, and a name ``ls
+    /`` advertises must address that mount or we advertise an address that
+    resolves somewhere else. Reading it the other way here meant `ls team/docs`
+    and `read_note("team/docs/x")` disagreed about what 'team' named. It is also
+    the cheaper order — a mount hit never builds the account-wide workspace
+    index at all.
+
+    Nothing is resolved by *searching* for a name. The deleted fallback did: it
+    split one leading segment off and handed it to the account-wide workspace
+    index, which answered with a project in whichever accessible workspace held
+    that permalink — preferring the ``is_default`` workspace when several did.
+    An ordinary project-relative path therefore read another workspace's
+    same-named project, silently (#1432), and a project whose permalink spans
+    two segments ('Research/2026') was unreachable, because one segment was all
+    the split ever offered.
+    """
     local_project = detect_project_from_url_prefix(identifier, config)
     if local_project is not None:
-        return local_project
+        return DetectedProjectRoute(project=local_project)
 
     normalized_identifier = normalize_project_reference(_identifier_path(identifier)).strip("/")
     if "/" not in normalized_identifier:
@@ -984,39 +1074,56 @@ async def detect_project_from_identifier_prefix(
         # Outcome: keep unqualified search/title input on the active/default project route.
         return None
 
-    if _workspace_identifier_discovery_available(identifier, config):
-        try:
-            workspace_resolution = await resolve_workspace_qualified_identifier(
-                identifier,
-                context=context,
-            )
-        except ValueError as exc:
-            message = str(exc).lower()
-            if any(error in message for error in _WORKSPACE_DISCOVERY_FALLBACK_ERRORS):
-                return None
-            raise
+    # --- Rule 2: the session's own mount table, when it is not the local config ---
+    # Trigger: this session's own project-less route is a tenant, so its mounts
+    #   live in that tenant's project listing rather than in local config.
+    # Why: a locally routed session's mount table IS ``config.projects``, which
+    #   rule 1 just claimed against with this same splitter, so asking again
+    #   there is provably the same answer for no reason. A cloud session's local
+    #   config holds at most a placeholder, so rule 1 saw nothing and this is the
+    #   first set that can speak for it.
+    # Outcome: leading segments naming an addressable project route there, with
+    #   the mount's id so the name is never re-resolved elsewhere. One
+    #   per-request memoized listing, and no workspace discovery at all.
+    # ``addressable_projects``/``_claim_mount_prefix`` are defined in the
+    # project-qualified routing section below; one mount table serves both.
+    if _session_routes_to_cloud():
+        claimed = _claim_mount_prefix(
+            normalized_identifier,
+            await addressable_projects(context=context),
+        )
+        # A claim with no remainder names the project itself, not a path in it —
+        # a bare project name is a title to look up, not a route.
+        # ``detect_project_from_url_prefix`` holds the same line for rule 1.
+        if claimed is not None and claimed[1]:
+            mount, _ = claimed
+            return DetectedProjectRoute(project=mount.name, project_id=mount.external_id)
 
-        if workspace_resolution is not None:
-            return workspace_resolution.project_identifier
+    # --- Rule 3: an explicitly workspace-qualified route ---
+    if not _workspace_identifier_discovery_available(identifier, config):
+        return None
 
-        project_prefix, _ = _split_project_prefix(normalized_identifier)
-        if project_prefix is None:
+    try:
+        workspace_resolution = await resolve_workspace_qualified_identifier(
+            identifier,
+            context=context,
+        )
+    except ValueError as exc:
+        message = str(exc).lower()
+        if any(error in message for error in _WORKSPACE_DISCOVERY_FALLBACK_ERRORS):
             return None
+        raise
 
-        try:
-            project_resolution = await resolve_workspace_project_identifier(
-                project_prefix,
-                context=context,
-            )
-        except ValueError as exc:
-            message = str(exc).lower()
-            if any(error in message for error in _WORKSPACE_DISCOVERY_FALLBACK_ERRORS):
-                return None
-            raise
-
-        return project_resolution.qualified_name
-
-    return None
+    if workspace_resolution is None:
+        return None
+    # The entry is already in hand, so the external_id rides along for the same
+    # reason the mount table's does: the qualified *name* alone could be
+    # re-resolved against a workspace holding a project literally named
+    # '<workspace>/<project>'.
+    return DetectedProjectRoute(
+        project=workspace_resolution.project_identifier,
+        project_id=workspace_resolution.entry.project.external_id,
+    )
 
 
 # --- Project-qualified path routing (POSIX tools, #1415) ---

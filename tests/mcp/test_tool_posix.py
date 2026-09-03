@@ -2177,8 +2177,12 @@ def _path_accepting_posix_verbs() -> set[str]:
 
 def test_path_accepting_verbs_are_the_ones_covered_below():
     """Pins the set the round-trip tests cover. Adding a path-accepting verb
-    fails here, which is the prompt to give it the same guarantee — the class is
-    closed by this enumeration, not by every author remembering."""
+    fails here, which is the prompt to give it the same guarantee.
+
+    One axis only, and #1435 is what showed the second: this guard passed while
+    `find`'s metadata arm skipped the rule, because `find` was already in the
+    set. ``test_every_response_qualifier_is_exercised_by_a_routed_call`` guards
+    the other axis — the response shapes those verbs answer with."""
     assert _path_accepting_posix_verbs() == {"cat", "ls", "find"}
 
 
@@ -2227,6 +2231,125 @@ async def test_find_returned_paths_route_back_to_the_same_project(
 
     assert (await cat(file_node["file_path"]))["title"] == "Second Root Note"
     assert (await ls(dir_node["directory_path"]))["total"] >= 1
+
+
+@pytest.mark.asyncio
+async def test_find_meta_returned_paths_route_back_to_the_same_project(
+    client, test_project, second_project, no_project_constraint
+):
+    """find's metadata arm answers with search hits, and those paths must
+    round-trip exactly like the listing arm's (#1435).
+
+    The two arms of one verb shipped with different answers: `find --meta`
+    returned the API's project-relative 'notes/…', which `cat` then refused as
+    unqualified — or, where another project is mounted as 'notes', opened that
+    one instead.
+    """
+    await write_note(
+        title="Second Meta Note",
+        directory="notes",
+        content="# Second Meta Note",
+        project="second-project",
+        metadata={"status": "active"},
+    )
+
+    found = await find("second-project/notes", meta=["status=active"])
+    row = next(item for item in found["results"] if item["title"] == "Second Meta Note")
+
+    assert row["file_path"] == "second-project/notes/Second Meta Note.md"
+    assert (await cat(row["file_path"]))["title"] == "Second Meta Note"
+
+    # The projection narrows the row but not its address: `fields` hydrates from
+    # the already-re-qualified payload, so both shapes of the metadata response
+    # hand back the same spelling.
+    projected = await find("second-project/notes", meta=["status=active"], fields=["status"])
+    projected_row = next(
+        item for item in projected["results"] if item["title"] == "Second Meta Note"
+    )
+    assert projected_row["file_path"] == row["file_path"]
+    assert projected_row["fields"] == {"status": "active"}
+    assert (await cat(projected_row["file_path"]))["title"] == "Second Meta Note"
+
+
+@pytest.mark.asyncio
+async def test_unrouted_find_meta_keeps_project_relative_paths(
+    client, test_project, second_project, no_project_constraint
+):
+    """The prefix goes back only when the call put it in the path — the same
+    rule the listing arm follows, so an explicit project param keeps its own
+    addressing frame."""
+    await write_note(
+        title="Second Meta Note",
+        directory="notes",
+        content="# Second Meta Note",
+        project="second-project",
+        metadata={"status": "active"},
+    )
+
+    found = await find("notes", meta=["status=active"], project="second-project")
+
+    assert [row["file_path"] for row in found["results"]] == ["notes/Second Meta Note.md"]
+
+
+def _response_qualifiers() -> set[str]:
+    """The module's re-qualification helpers — one per routed response shape."""
+    return {name for name in vars(posix_tools) if name.startswith("qualify_")}
+
+
+@pytest.mark.asyncio
+async def test_every_response_qualifier_is_exercised_by_a_routed_call(
+    client, test_project, second_project, no_project_constraint, monkeypatch
+):
+    """The guard's second axis: response shapes, not verbs (#1435).
+
+    ``test_path_accepting_verbs_are_the_ones_covered_below`` could not catch the
+    metadata arm — `find` was already in its set, and the gap was one arm inside
+    it answering with a *different* response shape. So this drives one routed
+    call per shape and asserts every qualifier the module defines actually
+    fired, and that every path those calls returned routes back.
+
+    What that does and does not close, precisely: a new response shape needs a
+    new ``qualify_*`` helper, and this fails until a routed call here exercises
+    it; a new path-accepting verb fails the verb guard. Neither can force a new
+    arm to re-qualify at all — what covers that is that every shape a routed
+    verb can answer with already has a qualifier, so a new arm either reuses one
+    (and inherits the rule) or introduces one this test then reports.
+    """
+    await write_note(
+        title="Second Round Trip Note",
+        directory="notes",
+        content="# Second Round Trip Note",
+        project="second-project",
+        metadata={"status": "active"},
+    )
+
+    fired: set[str] = set()
+    for name in _response_qualifiers():
+        original = getattr(posix_tools, name)
+
+        def recorder(payload, route, *, _name=name, _original=original):
+            fired.add(_name)
+            return _original(payload, route)
+
+        monkeypatch.setattr(posix_tools, name, recorder)
+
+    listing = await ls("second-project/notes")
+    tree = await find("second-project/notes")
+    hits = await find("second-project/notes", meta=["status=active"])
+    note = await cat("second-project/notes/second-round-trip-note")
+
+    assert fired == _response_qualifiers()
+
+    returned_paths = {note["file_path"]}
+    for payload in (listing, tree):
+        returned_paths.update(
+            node["file_path"] for node in payload["nodes"] if node["type"] == "file"
+        )
+    returned_paths.update(row["file_path"] for row in hits["results"])
+
+    assert returned_paths == {"second-project/notes/Second Round Trip Note.md"}
+    for path in returned_paths:
+        assert (await cat(path))["title"] == "Second Round Trip Note"
 
 
 @pytest.mark.asyncio

@@ -272,7 +272,10 @@ async def test_search_workspace_memory_url_routes_with_local_config(monkeypatch,
     )
 
     assert captured["project"] == "personal/main"
-    assert captured["project_id"] is None
+    # The workspace-qualified route hands on the entry's id too, so the name is
+    # never re-resolved against a workspace holding a project literally named
+    # 'personal/main' (#1432).
+    assert captured["project_id"] == "11111111-1111-1111-1111-111111111111"
     assert captured["search_project_id"] == "11111111-1111-1111-1111-111111111111"
     payload = cast(dict[str, object], captured["payload"])
     assert payload["permalink"] == "personal/main/tests/search-note"
