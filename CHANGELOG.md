@@ -77,6 +77,17 @@
   relations it declares. Rows already lost to the old behavior stay lost; re-index
   the affected notes to bring them back as unresolved.
 
+### Fixes
+
+- **#1451**: A markdown file whose leading `---` block is not YAML (a letterhead between
+  horizontal rules) is now indexed as plain markdown instead of being dropped. The parser
+  already treated such a block as body; the indexer separately saw fences, tried to write
+  a permalink into them, hit the "refusing to update malformed frontmatter" guard, and
+  excluded the file while readiness reported idle. The guard stands: the file is never
+  rewritten. Frontmatter is now classified once, by the parser, as present, absent, or
+  malformed, and only the first two are ever written to.
+
+
 ## v0.23.2 (2026-08-25)
 
 Patch release fixing case-duplicate folder creation.

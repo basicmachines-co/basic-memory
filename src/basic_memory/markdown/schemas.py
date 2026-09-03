@@ -1,7 +1,7 @@
 """Schema models for entity markdown files."""
 
 from datetime import datetime
-from typing import override, TYPE_CHECKING, Any, List, Optional
+from typing import Literal, override, TYPE_CHECKING, Any, List, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -99,10 +99,21 @@ class EntityFrontmatter(BaseModel):
         return permalink if isinstance(permalink, str) else None
 
 
+# What the parser found at the top of the file. "present" is a fenced block
+# that parsed as YAML and can be rewritten field by field; "absent" means no
+# fences, so frontmatter may be injected; "malformed" is a fenced block that is
+# not YAML (a letterhead between horizontal rules, a broken document). The
+# indexer must never rewrite a malformed block, because it cannot know which
+# bytes the author meant as metadata, and must still index the file (#1451).
+type FrontmatterState = Literal["present", "absent", "malformed"]
+
+
 class EntityMarkdown(BaseModel):
     """Complete entity combining frontmatter, content, and metadata."""
 
     frontmatter: EntityFrontmatter
+    # The parser always sets this; the default only serves hand-built values.
+    frontmatter_state: FrontmatterState = "present"
     content: Optional[str] = None
     observations: List[Observation] = []
     relations: List[Relation] = []

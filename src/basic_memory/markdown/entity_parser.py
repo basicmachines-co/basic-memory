@@ -18,6 +18,7 @@ from basic_memory.markdown.plugins import observation_plugin, relation_plugin
 from basic_memory.markdown.schemas import (
     EntityFrontmatter,
     EntityMarkdown,
+    FrontmatterState,
     Observation,
     Relation,
 )
@@ -273,7 +274,7 @@ class EntityParser:
         """
         # Strip BOM before parsing (can be present in files from Windows or certain sources)
         # See issue #452
-        from basic_memory.file_utils import strip_bom
+        from basic_memory.file_utils import has_frontmatter, strip_bom
 
         content = strip_bom(content)
 
@@ -286,6 +287,7 @@ class EntityParser:
         # loads() does Post(content, handler, **metadata), which crashes when
         # the YAML contains reserved keys like 'content' or 'handler'.
         # See basic-memory-cloud#375.
+        frontmatter_state: FrontmatterState = "present" if has_frontmatter(content) else "absent"
         try:
             fm_metadata, fm_content = frontmatter.parse(content)
             post = frontmatter.Post(fm_content)
@@ -298,6 +300,7 @@ class EntityParser:
             # Use Post(content) not Post(content, metadata={})
             # The latter creates {"metadata": {}} in the metadata dict (issue #528)
             post = frontmatter.Post(content)
+            frontmatter_state = "malformed"
 
         # Normalize frontmatter values
         metadata = normalize_frontmatter_metadata(post.metadata)
@@ -379,6 +382,7 @@ class EntityParser:
 
         return EntityMarkdown(
             frontmatter=entity_frontmatter,
+            frontmatter_state=frontmatter_state,
             content=post.content,
             observations=entity_content.observations,
             relations=entity_content.relations,
