@@ -30,7 +30,8 @@ bash benchmarks/datasets/xafs/download.sh
 ```
 
 This downloads into `benchmarks/datasets/xafs/upstream/` (gitignored) using
-the `hf` CLI (`pip install -U huggingface_hub`).
+the `hf` CLI, which ships with the package's `huggingface_hub` dependency; run the
+script through `uv run bash …` (as the just target does) so the venv is on PATH.
 
 ## Layout
 
