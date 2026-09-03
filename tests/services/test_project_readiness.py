@@ -12,7 +12,10 @@ from sqlalchemy import text
 
 from basic_memory import db
 from basic_memory.models import Project
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from basic_memory.repository.search_repository import create_search_repository
+from basic_memory.repository.search_repository_base import VECTOR_HYDRATION_BATCH_SIZE
 from basic_memory.repository.embedding_provider_factory import (
     configured_embedding_provider_identity,
 )
@@ -593,3 +596,118 @@ async def test_the_sharded_sync_is_the_writer_of_the_deferral_marker(
             )
         ).scalar()
     assert cleared is None
+
+
+# --- Bind-parameter bounds ---
+
+# Above asyncpg's 32767 parameter cap, so this is a genuinely over-limit list on
+# Postgres rather than a mocked limit. SQLite builds vary (this one allows
+# 250000), which is why the structural assertion below covers both backends.
+OVER_LIMIT_ENTITY_COUNT = 40_000
+
+
+@pytest.mark.asyncio
+async def test_deferral_markers_survive_an_over_limit_entity_list(
+    test_project, app_config, engine_factory
+):
+    """`reindex_vectors` hands every entity in the project to one batch.
+
+    Built as one `IN (...)`, that is one bind per entity, and the statement
+    raises past the driver's cap -- after the embedding work has already
+    succeeded, so `bm reindex` fails and the markers roll back. The ids need not
+    exist; the parameter count is what breaks.
+    """
+    _, session_maker = engine_factory
+    repository = create_search_repository(
+        session_maker, project_id=test_project.id, app_config=app_config
+    )
+
+    await repository.record_entity_vector_deferrals(
+        deferred_entity_ids=set(range(1, OVER_LIMIT_ENTITY_COUNT + 1)),
+        completed_entity_ids=set(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_no_marker_statement_exceeds_the_hydration_bound(
+    test_project, app_config, engine_factory, monkeypatch
+):
+    """Each statement stays within the bound the vector path already uses.
+
+    Asserted structurally because the cap is per driver: a list that is fatal on
+    asyncpg is comfortable on some SQLite builds, so counting binds is what makes
+    this regression provable on either backend.
+    """
+    _, session_maker = engine_factory
+    repository = create_search_repository(
+        session_maker, project_id=test_project.id, app_config=app_config
+    )
+
+    bind_counts: list[int] = []
+    real_execute = AsyncSession.execute
+
+    async def counting_execute(self, statement, params=None, *args, **kwargs):
+        if isinstance(params, dict) and "deferred_at" in params:
+            bind_counts.append(len(params))
+        return await real_execute(self, statement, params, *args, **kwargs)
+
+    monkeypatch.setattr(AsyncSession, "execute", counting_execute)
+
+    await repository.record_entity_vector_deferrals(
+        deferred_entity_ids=set(range(1, 601)),
+        completed_entity_ids=set(range(601, 1001)),
+    )
+
+    assert bind_counts, "no marker statements were executed"
+    # Each statement also carries :project_id and :deferred_at.
+    assert max(bind_counts) <= VECTOR_HYDRATION_BATCH_SIZE + 2, bind_counts
+    # 600 deferred + 400 completed at 250 per statement.
+    assert len(bind_counts) == 3 + 2
+
+
+@pytest.mark.asyncio
+async def test_marker_updates_are_one_transaction(
+    test_project, sample_entity, app_config, engine_factory, monkeypatch
+):
+    """A failure part-way through must not leave some entities marked.
+
+    The markers are derived state, so losing the whole update is safe -- the next
+    sync pass rewrites them. A half-applied update is not: readiness would carry
+    a mix of stale and current markers with nothing to reconcile them.
+    """
+    _, session_maker = engine_factory
+    repository = create_search_repository(
+        session_maker, project_id=test_project.id, app_config=app_config
+    )
+
+    real_execute = AsyncSession.execute
+    seen: list[int] = []
+
+    async def failing_execute(self, statement, params=None, *args, **kwargs):
+        if isinstance(params, dict) and "deferred_at" in params:
+            seen.append(1)
+            if len(seen) == 2:
+                raise RuntimeError("driver gave up mid-update")
+        return await real_execute(self, statement, params, *args, **kwargs)
+
+    monkeypatch.setattr(AsyncSession, "execute", failing_execute)
+
+    with pytest.raises(RuntimeError, match="gave up"):
+        await repository.record_entity_vector_deferrals(
+            deferred_entity_ids=set(range(1, 601)),
+            completed_entity_ids=set(),
+        )
+
+    monkeypatch.undo()
+    async with db.scoped_session(session_maker) as session:
+        marked = (
+            await session.execute(
+                text(
+                    "SELECT COUNT(*) FROM entity "
+                    "WHERE project_id = :project_id AND vector_sync_deferred_at IS NOT NULL"
+                ),
+                {"project_id": test_project.id},
+            )
+        ).scalar()
+
+    assert marked == 0
