@@ -340,3 +340,36 @@ def test_unknown_conversation_ids_fail_fast(
             runner=ScriptedRunner([]),
             writer_factory=lambda p, e, d: FileWriter(d),
         )
+
+
+def test_workers_curate_in_parallel_and_keep_dataset_order(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two conversations, two workers: same manifest as serial, in dataset order."""
+    _raw_dataset(tmp_path)
+    _stub_bm(monkeypatch)
+    import threading
+
+    lock = threading.Lock()
+    seen_threads: set[int] = set()
+
+    class ThreadAwareRunner(ScriptedRunner):
+        def complete(self, prompt: str) -> LLMResult:
+            with lock:
+                seen_threads.add(threading.get_ident())
+            return super().complete(prompt)
+
+    output = curate_beam(
+        _config(tmp_path, workers=2),
+        runner=ThreadAwareRunner([]),
+        writer_factory=lambda p, e, d: FileWriter(d),
+    )
+
+    manifest = json.loads((output / "conversion.json").read_text())
+    assert [row["group_id"] for row in manifest["conversations"]] == [
+        "beam-100k-c01",
+        "beam-100k-c02",
+    ]
+    assert manifest["converter"]["workers"] == 2
+    assert manifest["totals"]["conversations"] == 2
+    assert len(seen_threads) == 2

@@ -385,6 +385,9 @@ def curate_beam_command(
     max_notes_per_session: int = typer.Option(8, "--max-notes-per-session"),
     settle_timeout: float = typer.Option(180.0, "--settle-timeout"),
     tool_timeout: float = typer.Option(120.0, "--tool-timeout"),
+    workers: int = typer.Option(
+        1, "--workers", min=1, help="Conversations curated concurrently (each has its own bm mcp)"
+    ),
 ) -> None:
     """Curate a raw BEAM tier into knowledge notes through the write path.
 
@@ -417,6 +420,7 @@ def curate_beam_command(
         max_notes_per_session=max_notes_per_session,
         settle_timeout_seconds=settle_timeout,
         tool_timeout_seconds=tool_timeout,
+        workers=workers,
     )
     output = curate_beam(config, runner=runner, progress=console.print)
     manifest = json.loads((output / "conversion.json").read_text(encoding="utf-8"))
