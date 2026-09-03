@@ -143,7 +143,16 @@ class ProjectReadinessService:
         session: AsyncSession,
         project_id: int,
     ) -> dict[str, str | None]:
-        """Load every indexed file path and its checksum for the project."""
+        """Load every indexed file path and its checksum for the project.
+
+        The observer loads the same rows for its own checksum reuse
+        (``RepositoryLocalProjectIndexedFileStatSource``), so this repeats one
+        projection query. Sharing them would mean widening
+        ``ProjectIndexObservation``, a runtime-neutral contract the cloud
+        runtime also implements, to carry indexed state -- not worth it for a
+        second read of a two-column projection on a route whose cost is already
+        dominated by the full directory walk that produced the observation.
+        """
         result = await session.execute(
             text("SELECT file_path, checksum FROM entity WHERE project_id = :project_id"),
             {"project_id": project_id},
