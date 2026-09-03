@@ -74,7 +74,7 @@ class _ConcreteRepo(SearchRepositoryBase):
 
     @override
     async def record_entity_vector_deferrals(
-        self, *, deferred_entity_ids: set[int], completed_entity_ids: set[int]
+        self, *, unfinished_entity_ids: set[int], completed_entity_ids: set[int]
     ) -> None:
         return None  # no session_maker in this double; the real write is covered
         # in tests/services/test_project_readiness.py

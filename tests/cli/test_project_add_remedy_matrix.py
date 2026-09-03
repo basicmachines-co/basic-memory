@@ -399,3 +399,66 @@ def test_a_team_workspace_really_does_refuse_the_personal_only_mirror(
 
     assert result.exit_code == 1
     assert "only supported on Personal workspaces" in flat(result.output)
+
+
+# --- Convergence ---
+#
+# "Exits 0" is not enough: a command can succeed forever and never finish the
+# job. `bm project index` passed `--full`, which clears every project vector
+# before the sync runs, so a note with more chunks than one shard had its
+# completed shard deleted and was deferred again on every run -- each run left
+# the user further from IDLE than before (#1440 review). The earlier `--search`
+# choice failed the same property from the other side, leaving embeddings
+# unbuilt. So the remedy has to be run until readiness settles, not once.
+
+MAX_REMEDY_ATTEMPTS = 5
+
+
+def test_project_index_does_not_force_a_full_rebuild():
+    """The alias must not clear vectors it is meant to complete.
+
+    `_reindex` clears every project vector when `full` is set, which throws away
+    the shard the previous run finished. Asserted on the call rather than by
+    running a 256-chunk note, because the destruction is unconditional and the
+    flag is the whole mechanism.
+    """
+    calls: list[dict[str, Any]] = []
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(project_cmd, "run_reindex_command", lambda **kwargs: calls.append(kwargs))
+        result = runner.invoke(cli_app, ["project", "index", PROJECT], env=WIDE_TERMINAL_ENV)
+
+    assert result.exit_code == 0, result.output
+    assert calls == [{"embeddings": True, "search": True, "full": False, "project": PROJECT}], (
+        "the advertised remedy must be incremental, or repeated runs cannot converge"
+    )
+
+
+def test_repeating_the_remedy_converges_on_a_partially_embedded_project():
+    """Run the remedy until readiness settles, with a bounded number of attempts.
+
+    A sharded entity needs one run per shard, so the property is not "one run
+    finishes it" but "repeated runs get there". A remedy that discards progress
+    never terminates this loop, which is exactly what `--full` did.
+    """
+    remaining_shards = {"count": 3}
+    attempts = 0
+
+    def fake_reindex(**kwargs: Any) -> None:
+        # Models the sharding contract: an incremental pass finishes one more
+        # shard, a full pass throws the finished ones away first.
+        if kwargs["full"]:
+            remaining_shards["count"] = 3
+        remaining_shards["count"] = max(0, remaining_shards["count"] - 1)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(project_cmd, "run_reindex_command", fake_reindex)
+        while remaining_shards["count"] > 0 and attempts < MAX_REMEDY_ATTEMPTS:
+            attempts += 1
+            result = runner.invoke(cli_app, ["project", "index", PROJECT], env=WIDE_TERMINAL_ENV)
+            assert result.exit_code == 0, result.output
+
+    assert remaining_shards["count"] == 0, (
+        f"the remedy did not converge in {MAX_REMEDY_ATTEMPTS} runs; "
+        "a command that succeeds without finishing the job is not a remedy"
+    )

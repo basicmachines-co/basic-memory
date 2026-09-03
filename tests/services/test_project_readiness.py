@@ -24,6 +24,7 @@ from basic_memory.repository.semantic_vector_index_factory import (
     resolve_semantic_vector_index_name,
 )
 from basic_memory.runtime.jobs import RuntimeObservedIndexFile
+from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.schemas.project_readiness import (
     ProjectIndexPhase,
     ProjectIndexReadiness,
@@ -575,7 +576,7 @@ async def test_the_sharded_sync_is_the_writer_of_the_deferral_marker(
     )
 
     await repository.record_entity_vector_deferrals(
-        deferred_entity_ids={sample_entity.id}, completed_entity_ids=set()
+        unfinished_entity_ids={sample_entity.id}, completed_entity_ids=set()
     )
     async with db.scoped_session(session_maker) as session:
         deferred_at = (
@@ -587,7 +588,7 @@ async def test_the_sharded_sync_is_the_writer_of_the_deferral_marker(
     assert deferred_at is not None
 
     await repository.record_entity_vector_deferrals(
-        deferred_entity_ids=set(), completed_entity_ids={sample_entity.id}
+        unfinished_entity_ids=set(), completed_entity_ids={sample_entity.id}
     )
     async with db.scoped_session(session_maker) as session:
         cleared = (
@@ -624,7 +625,7 @@ async def test_deferral_markers_survive_an_over_limit_entity_list(
     )
 
     await repository.record_entity_vector_deferrals(
-        deferred_entity_ids=set(range(1, OVER_LIMIT_ENTITY_COUNT + 1)),
+        unfinished_entity_ids=set(range(1, OVER_LIMIT_ENTITY_COUNT + 1)),
         completed_entity_ids=set(),
     )
 
@@ -655,7 +656,7 @@ async def test_no_marker_statement_exceeds_the_hydration_bound(
     monkeypatch.setattr(AsyncSession, "execute", counting_execute)
 
     await repository.record_entity_vector_deferrals(
-        deferred_entity_ids=set(range(1, 601)),
+        unfinished_entity_ids=set(range(1, 601)),
         completed_entity_ids=set(range(601, 1001)),
     )
 
@@ -695,7 +696,7 @@ async def test_marker_updates_are_one_transaction(
 
     with pytest.raises(RuntimeError, match="gave up"):
         await repository.record_entity_vector_deferrals(
-            deferred_entity_ids=set(range(1, 601)),
+            unfinished_entity_ids=set(range(1, 601)),
             completed_entity_ids=set(),
         )
 
@@ -872,7 +873,11 @@ async def test_relations_counted_pending_are_exactly_the_drainable_ones(
         ("no_chunks", DRAINS),
         ("stale_model", DRAINS),
         ("pending_status", DRAINS),
+        # The three terminal states a sync pass can leave an entity in. Two of
+        # them owe work; enumerating them is what stops readiness tracking only
+        # the one that happened to be found first.
         ("deferred", DRAINS),
+        ("failed", DRAINS),
         ("current", NEVER_DRAINS),
         ("embed_false", NEVER_DRAINS),
     ],
@@ -904,7 +909,7 @@ async def test_embeddings_counted_pending_are_exactly_the_drainable_ones(
             embedding_model="RetiredProvider:old:384" if shape == "stale_model" else None,
             embedding_status="pending" if shape == "pending_status" else "ready",
         )
-    if shape == "deferred":
+    if shape in {"deferred", "failed"}:
         async with db.scoped_session(maker) as session:
             await session.execute(
                 text("UPDATE entity SET vector_sync_deferred_at = :now WHERE id = :id"),
@@ -928,3 +933,24 @@ async def test_embeddings_counted_pending_are_exactly_the_drainable_ones(
         assert embeddings.pending == 0, (
             f"{shape}: nothing drains this, so a waiter would never finish"
         )
+
+
+def test_the_matrix_covers_every_terminal_state_a_sync_pass_reports():
+    """The embeddings rows are driven by the pass's outcomes, not by found bugs.
+
+    `VectorSyncBatchResult` reports three per-entity terminal states. Readiness
+    has to agree with each: synced owes nothing, deferred and failed both owe
+    work. A new terminal state added to that result needs a row here, which is
+    what makes this an enumeration rather than a list of the shapes we happen to
+    have hit.
+    """
+    reported_states = {
+        name.removesuffix("_entity_ids")
+        for name in VectorSyncBatchResult.__dataclass_fields__
+        if name.endswith("_entity_ids")
+    }
+
+    assert reported_states == {"synced", "deferred", "failed"}, (
+        f"vector sync now reports terminal states {reported_states}; add a row to the "
+        "embeddings drainability matrix for any that leaves work owed."
+    )
