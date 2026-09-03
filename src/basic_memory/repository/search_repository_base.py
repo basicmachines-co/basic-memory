@@ -1852,20 +1852,11 @@ class SearchRepositoryBase(ABC):
         progress_callback: Optional[Callable[[int, int, int], Any]] = None,
     ) -> VectorSyncBatchResult:
         """Sync semantic chunk rows + embeddings for a batch of entities."""
-        result = await self._sync_entity_vectors_internal(
+        return await self._sync_entity_vectors_internal(
             entity_ids,
             progress_callback=progress_callback,
             continue_on_error=True,
         )
-        # Recorded here rather than inside the portable sync helper: this is the
-        # boundary that owns a database session, and the helper is also driven by
-        # test doubles that have none. The terminal states it reports are the
-        # sharding rule's own, so readiness still cannot drift from it.
-        await self.record_entity_vector_deferrals(
-            deferred_entity_ids=set(result.deferred_entity_ids),
-            completed_entity_ids=set(result.synced_entity_ids),
-        )
-        return result
 
     async def _sync_entity_vectors_internal(
         self,
@@ -1873,13 +1864,31 @@ class SearchRepositoryBase(ABC):
         progress_callback: Optional[Callable[[int, int, int], Any]],
         continue_on_error: bool,
     ) -> VectorSyncBatchResult:
-        """Run shared vector sync orchestration for one or many entities."""
-        return await semantic_vector_sync.sync_entity_vectors_internal(
+        """Run shared vector sync orchestration for one or many entities.
+
+        Every public entry point converges here, which is why the deferral marker
+        is written here too. It first sat on the batch method, and the per-entity
+        scheduler -- the path normal editing actually takes -- reached the same
+        sharding decision and recorded nothing (#1440 review). Producing a
+        deferral and recording it cannot come apart if there is one place that
+        does both. `tests/repository/test_vector_sync_deferral_paths.py` fails if
+        a third entry point appears that does not delegate here.
+
+        Recorded at this boundary rather than inside the portable helper: this
+        class owns a database session, and the helper is also driven by test
+        doubles that have none.
+        """
+        result = await semantic_vector_sync.sync_entity_vectors_internal(
             self,
             entity_ids,
             progress_callback,
             continue_on_error,
         )
+        await self.record_entity_vector_deferrals(
+            deferred_entity_ids=set(result.deferred_entity_ids),
+            completed_entity_ids=set(result.synced_entity_ids),
+        )
+        return result
 
     def _vector_prepare_window_size(self) -> int:
         """Return the number of entities to prepare in one orchestration window."""
