@@ -6,6 +6,7 @@ from typing import Optional, TypeVar, Coroutine, Any
 import typer
 
 from rich.console import Console
+from rich.markup import escape
 
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.async_client import get_client
@@ -119,7 +120,8 @@ async def report_project_readiness(project: str) -> None:
         # Outcome: say so and leave the caller's exit status alone.
         console.print(f"[yellow]Could not read index status: {e}[/yellow]")
         return
-    console.print(f"[dim]{project_item.name}: {status.readiness.describe(project_item.name)}[/dim]")
+    summary = escape(status.readiness.describe(project_item.name))
+    console.print(f"[dim]{escape(project_item.name)}: {summary}[/dim]")
 
 
 async def index_project_and_report_readiness(project: str) -> None:

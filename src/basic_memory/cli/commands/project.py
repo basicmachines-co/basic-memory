@@ -9,6 +9,7 @@ from typing import Any, NoReturn
 import typer
 from loguru import logger
 from rich.console import Console, Group
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -47,7 +48,7 @@ from basic_memory.schemas.cloud import (
 )
 from basic_memory.schemas.project_info import ProjectItem, ProjectList
 from basic_memory.schemas.v2 import ProjectResolveResponse
-from basic_memory.utils import generate_permalink, normalize_project_path
+from basic_memory.utils import generate_permalink, normalize_project_path, shell_command
 
 console = Console()
 
@@ -739,18 +740,33 @@ def list_projects(
         raise typer.Exit(1)
 
 
+def command_hint(*parts: str) -> str:
+    """Render a runnable command for display inside Rich markup.
+
+    The single place CLI output builds a copy-pasteable command. Two things have
+    to happen and neither is optional: `shell_command` quotes each argument so a
+    value containing a space survives being pasted back, and `escape` keeps a
+    value containing `[` from being read as Rich markup. Interpolating a command
+    by hand skips both.
+    """
+    return escape(shell_command(*parts))
+
+
 def _add_command_hint(name: str, local_sync_path: str | None, workspace: str | None) -> str:
     """Rebuild the `bm project add` invocation that recovers this cloud project.
 
     Printed as a remedy, so it has to be the command that actually re-runs the
     failed step -- including the flags whose absence would change what it does.
+    The workspace is the *resolved* id rather than whatever the caller typed: it
+    may have been auto-selected, and pinning it makes the retry land on the same
+    workspace even if the default moves in between.
     """
-    hint = f"bm project add {name} --cloud"
+    parts = ["bm", "project", "add", name, "--cloud"]
     if workspace:
-        hint += f" --workspace {workspace}"
+        parts += ["--workspace", workspace]
     if local_sync_path:
-        hint += f" --local-path {local_sync_path}"
-    return hint
+        parts += ["--local-path", local_sync_path]
+    return command_hint(*parts)
 
 
 def _resolve_existing_project(
@@ -976,8 +992,8 @@ def add_project(
                     console.print(
                         "[yellow]Skipped indexing (--no-wait).[/yellow] "
                         f"Files on disk are not searchable yet — run "
-                        f"[green]bm project index {name}[/green], and check with "
-                        f"[green]bm status --project {name} --json[/green]."
+                        f"[green]{command_hint('bm', 'project', 'index', name)}[/green], and check with "
+                        f"[green]{command_hint('bm', 'status', '--project', name, '--json')}[/green]."
                     )
                     run_with_cleanup(report_project_readiness(name))
                 else:
@@ -987,8 +1003,9 @@ def add_project(
                 name,
                 step="indexing it",
                 remedy=(
-                    f"Index it with [green]bm project index {name}[/green], "
-                    f"then check with [green]bm status --project {name} --json[/green]."
+                    f"Index it with [green]{command_hint('bm', 'project', 'index', name)}[/green], "
+                    f"then check with "
+                    f"[green]{command_hint('bm', 'status', '--project', name, '--json')}[/green]."
                 ),
                 error=e,
             )
@@ -1028,7 +1045,7 @@ def add_project(
                         f"The project exists in the cloud — only this machine's config "
                         f"({ConfigManager().config_file}) could not be written. Fix that file "
                         f"(permissions or disk space), then run this same command again: "
-                        f"[green]{_add_command_hint(name, local_sync_path, workspace)}[/green]. "
+                        f"[green]{_add_command_hint(name, local_sync_path, resolved_workspace_id)}[/green]. "
                         f"It will adopt the project that already exists rather than create a "
                         f"second one."
                     ),
@@ -1049,15 +1066,19 @@ def add_project(
                     step=f"creating the local sync directory {local_sync_path}",
                     remedy=(
                         f"Create it yourself (or fix its permissions), then run "
-                        f"[green]bm cloud bisync --name {name} --resync[/green]."
+                        f"[green]{command_hint('bm', 'cloud', 'bisync', '--name', name, '--resync')}[/green]."
                     ),
                     error=e,
                 )
 
             console.print(f"\n[green]Local sync path configured: {local_sync_path}[/green]")
             console.print("\nNext steps:")
-            console.print(f"  1. Preview: bm cloud bisync --name {name} --resync --dry-run")
-            console.print(f"  2. Sync: bm cloud bisync --name {name} --resync")
+            console.print(
+                f"  1. Preview: {command_hint('bm', 'cloud', 'bisync', '--name', name, '--resync', '--dry-run')}"
+            )
+            console.print(
+                f"  2. Sync: {command_hint('bm', 'cloud', 'bisync', '--name', name, '--resync')}"
+            )
 
 
 @project_app.command("index")
@@ -1177,7 +1198,7 @@ def remove_project(
                 console.print(
                     f"[yellow]'{entry_name}' is still the default project in local config. "
                     "Choose another with `bm project default <name> --local`, then run "
-                    f"`bm project remove {entry_name} --local` to drop this entry.[/yellow]"
+                    f"`{command_hint('bm', 'project', 'remove', entry_name, '--local')}` to drop this entry.[/yellow]"
                 )
             else:
                 del config.projects[entry_name]

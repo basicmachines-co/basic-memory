@@ -288,12 +288,14 @@ async def format_file(
             return None
 
     # Use external formatter
-    # Replace {file} placeholder with the actual path
-    cmd = formatter.replace("{file}", str(path))
-
     try:
-        # Parse command into args list for safer execution (no shell=True)
-        args = shlex.split(cmd)
+        # Split the configured template first, then substitute into each token.
+        # Substituting into the command string and splitting afterwards makes the
+        # path's own spaces into argument boundaries: with the documented
+        # `npx prettier --write {file}`, a note at `~/My Notes/a.md` would run
+        # against `~/My` and `Notes/a.md` and format neither. A path containing a
+        # quote would also make shlex.split raise on the whole command.
+        args = [token.replace("{file}", str(path)) for token in shlex.split(formatter)]
 
         proc = await asyncio.create_subprocess_exec(
             *args,
@@ -341,7 +343,7 @@ async def format_file(
         # Formatter executable not found
         logger.warning(
             "Formatter executable not found",
-            command=cmd.split()[0] if cmd else "",
+            command=shlex.split(formatter)[0] if formatter.strip() else "",
             path=str(path),
         )
         return None

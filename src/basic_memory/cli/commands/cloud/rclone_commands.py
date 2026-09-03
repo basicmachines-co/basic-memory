@@ -29,6 +29,7 @@ from basic_memory.cli.commands.cloud.transfer import (
     conflict_copy_name,
     strategy_overwrites_dest,
 )
+from basic_memory.utils import shell_command
 from basic_memory.config import resolve_data_dir
 from basic_memory.utils import normalize_project_path
 
@@ -786,7 +787,7 @@ def project_bisync(
     if not resync and not is_initialized(project.name) and not dry_run:
         raise RcloneError(
             f"First bisync for {project.name} requires --resync to establish baseline.\n"
-            f"Run: bm project bisync --name {project.name} --resync"
+            f"Run: {shell_command('bm', 'project', 'bisync', '--name', project.name, '--resync')}"
         )
 
     result = run(cmd, text=True)

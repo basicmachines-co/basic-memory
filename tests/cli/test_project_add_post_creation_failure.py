@@ -15,6 +15,7 @@ So the remedy has to follow the step that failed and the project's mode.
 
 import json
 import re
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -212,10 +213,12 @@ def _printed_remedy_command(output: str) -> list[str]:
     prose also names `'bm project add'` in quotes when telling the user not to
     re-run it blindly, so only a candidate carrying flags is a command.
     """
-    candidates = re.findall(r"bm ((?:project|cloud) [^.']+)", flat(output))
+    candidates = re.findall(r"bm ((?:project|cloud) [^.]+?)(?:\.\s|\.$|$)", flat(output))
     runnable = [candidate.strip() for candidate in candidates if "--" in candidate]
     assert runnable, f"no runnable remedy command in output: {output}"
-    return runnable[0].split()
+    # shlex.split, not str.split: the printed command is shell-quoted, and a name
+    # with a space must come back as one argument -- which is the whole point.
+    return shlex.split(runnable[0])
 
 
 def test_a_failed_cloud_config_save_prints_a_remedy_that_actually_works(
@@ -327,3 +330,69 @@ def test_a_failed_local_sync_mkdir_gets_a_sync_remedy(tmp_path, monkeypatch, clo
     assert "bm project index" not in flat(result.output)
     assert "bm cloud bisync --name research --resync" in flat(result.output)
     assert "Do not re-run 'bm project add'" in flat(result.output)
+
+
+def test_the_remedy_survives_a_project_name_with_a_space(tmp_path, monkeypatch, cloud_add):
+    """A name with a space must round-trip through the printed command.
+
+    Unquoted, `bm project add My Notes --cloud` parses as project "My" with
+    positional path "Notes" -- so the remedy runs, succeeds, and acts on a
+    project the user never named. With adoption in place it could adopt the
+    wrong one, which is why this asserts on what the command *did*, not on the
+    text that was printed.
+    """
+    created: list[str] = []
+    adopted: list[str] = []
+
+    def _run(coro: Any) -> Any:
+        step = coro.__name__
+        coro.close()
+        if step == "_add_project":
+            if "My Notes" in created:
+                raise RuntimeError("Project 'My Notes' already exists with different path")
+            created.append("My Notes")
+            return _Created()
+        if step == "_resolve":
+            adopted.append("My Notes")
+            return _Resolved()
+        raise AssertionError(f"unexpected step: {step}")
+
+    monkeypatch.setattr(project_cmd, "run_with_cleanup", _run)
+
+    real_config_manager = project_cmd.ConfigManager
+    writes_fail = {"now": True}
+
+    class _MaybeFailingSave:
+        def __init__(self) -> None:
+            self._real = real_config_manager()
+            self.config = self._real.config
+            self.config_file = self._real.config_file
+
+        def save_config(self, config: Any) -> None:
+            if writes_fail["now"]:
+                raise PermissionError("read-only file system")
+            self._real.save_config(config)
+
+    monkeypatch.setattr(project_cmd, "ConfigManager", _MaybeFailingSave)
+
+    first = runner.invoke(cli_app, ["project", "add", "My Notes", "--cloud"], env=WIDE_TERMINAL_ENV)
+    assert first.exit_code == 1
+
+    writes_fail["now"] = False
+    _reset_config_cache()
+
+    remedy = _printed_remedy_command(first.output)
+    # The name survived as a single argument rather than splitting into two.
+    assert remedy == ["project", "add", "My Notes", "--cloud", "--workspace", "ws-123"]
+
+    second = runner.invoke(cli_app, remedy, env=WIDE_TERMINAL_ENV)
+
+    assert second.exit_code == 0, second.output
+    # It adopted the project the user actually named, and created no second one.
+    assert adopted == ["My Notes"]
+    assert created == ["My Notes"]
+
+    _reset_config_cache()
+    persisted = _persisted_projects(real_config_manager().config_file)
+    assert "My Notes" in persisted
+    assert persisted["My Notes"]["mode"] == ProjectMode.CLOUD.value

@@ -5,6 +5,7 @@ import os
 
 import logging
 import re
+import shlex
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -906,3 +907,20 @@ def ensure_timezone_aware(dt: datetime, cloud_mode: bool | None = None) -> datet
     else:
         # Already timezone-aware
         return dt
+
+
+def shell_command(*parts: str) -> str:
+    """Render a command line for display, with every argument shell-quoted.
+
+    Printed commands are copy-pasted and run, so an argument holding a space or a
+    shell metacharacter has to survive that round trip. Built by interpolation, a
+    project named ``My Notes`` renders as ``bm project add My Notes --cloud``,
+    which the CLI parses as project ``My`` with positional path ``Notes`` -- so
+    the remedy runs, succeeds, and acts on a project the user never named. That
+    is worse than a remedy that fails, because nothing signals the mistake.
+
+    Quoting is POSIX (``shlex``), which is also what the repo's own docs and
+    examples assume; a cmd.exe user pasting this may need to adjust quoting, but
+    unquoted output is wrong on every platform.
+    """
+    return shlex.join(parts)

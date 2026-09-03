@@ -8,6 +8,7 @@ from typing import Annotated, Optional
 import typer
 from loguru import logger
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.tree import Tree
 
@@ -62,7 +63,8 @@ def display_project_index_status(
     # A file count alone is what let a never-indexed project look finished
     # (#1414). Lead with the phase, then the per-stage numbers a caller waits on.
     phase_color = "red" if readiness.phase is ProjectIndexPhase.NEVER_INDEXED else "green"
-    tree.add(f"[{phase_color}]{readiness.describe(project_name)}[/{phase_color}]")
+    # describe() carries a project name and a command; escape before it meets markup.
+    tree.add(f"[{phase_color}]{escape(readiness.describe(project_name))}[/{phase_color}]")
 
     stages_branch = tree.add("[cyan]Stages[/cyan]")
     for stage in readiness.stages:

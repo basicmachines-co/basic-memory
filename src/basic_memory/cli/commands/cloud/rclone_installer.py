@@ -6,6 +6,9 @@ import shutil
 import subprocess
 from typing import Any, Optional, cast
 
+from rich.markup import escape
+
+from basic_memory.utils import shell_command
 from rich.console import Console
 
 console = Console()
@@ -38,7 +41,7 @@ def get_platform() -> str:
 def run_command(command: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
     """Run a command with proper error handling."""
     try:
-        console.print(f"[dim]Running: {' '.join(command)}[/dim]")
+        console.print(f"[dim]Running: {escape(shell_command(*command))}[/dim]")
         result = subprocess.run(command, capture_output=True, text=True, check=check)
         if result.stdout:
             console.print(f"[dim]Output: {result.stdout.strip()}[/dim]")
@@ -49,7 +52,7 @@ def run_command(command: list[str], check: bool = True) -> subprocess.CompletedP
             console.print(f"[red]Error output: {e.stderr}[/red]")
         raise RcloneInstallError(f"Command failed: {e}") from e
     except FileNotFoundError as e:
-        raise RcloneInstallError(f"Command not found: {' '.join(command)}") from e
+        raise RcloneInstallError(f"Command not found: {shell_command(*command)}") from e
 
 
 def install_rclone_macos() -> None:

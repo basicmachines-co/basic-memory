@@ -15,6 +15,8 @@ from typing import assert_never
 
 from pydantic import BaseModel, Field
 
+from basic_memory.utils import shell_command
+
 
 class ProjectIndexPhase(StrEnum):
     """What a caller may conclude about a project's index right now.
@@ -116,16 +118,19 @@ class ProjectIndexReadiness(BaseModel):
         into describing the same project differently (#1414).
         """
         files = self.stage(ProjectIndexStageName.FILES)
+        # Quoted so a name with a space stays one argument when this is pasted
+        # back. Callers rendering through Rich must escape the result; both do.
+        index_command = shell_command("bm", "project", "index", project_name)
         match self.phase:
             case ProjectIndexPhase.NEVER_INDEXED:
                 if self.files_on_disk == 0:
                     return (
                         f"not yet indexed, no files present — "
-                        f"run 'bm project index {project_name}' after adding notes"
+                        f"run '{index_command}' after adding notes"
                     )
                 return (
                     f"{self.files_on_disk} file{'s' if self.files_on_disk != 1 else ''} present, "
-                    f"not yet indexed — run 'bm project index {project_name}'"
+                    f"not yet indexed — run '{index_command}'"
                 )
             case ProjectIndexPhase.PENDING:
                 pending_stages = ", ".join(
