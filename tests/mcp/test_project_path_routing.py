@@ -11,6 +11,7 @@ where the project list comes from the tenant instead.
 """
 
 import re
+import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import AsyncIterator, Optional
@@ -640,6 +641,111 @@ def cloud_session(monkeypatch, config_manager):
 # `ls "/"`, then create_memory_project, then addresses the new project. That
 # snapshot decides which first segment names a project, so it has to be part of
 # what "a project changed" invalidates (#1432 review).
+
+
+# --- out-of-band project changes ---
+# Invalidation covers what this session did; the age bound covers what it did
+# not. `session_project_list` is session state — fastmcp keys set_state by
+# session id and persists it across tool calls — so without a bound a project a
+# teammate or the CLI created stayed invisible until the session ended.
+
+
+async def _age_out_session_project_list(context: ContextState) -> None:
+    """Make the stored snapshot older than the bound, without touching clocks.
+
+    The bound is read off a stored fetch time, so moving that timestamp is the
+    honest way to simulate elapsed time: it exercises the real comparison rather
+    than a patched clock.
+    """
+    await context.set_state(
+        project_context._SESSION_PROJECT_LIST_FETCHED_AT_STATE_KEY,
+        time.time() - project_context._SESSION_PROJECT_LIST_MAX_AGE_SECONDS - 1,
+    )
+
+
+@pytest.mark.asyncio
+async def test_out_of_band_project_becomes_addressable_when_the_snapshot_ages_out(
+    cloud_session,
+):
+    """A project this session did not create is reachable without a restart.
+
+    Nothing calls invalidate_project_caches here — that is the point. The
+    snapshot simply ages out, and the mount view, the posix resolver and
+    identifier detection all pick the project up together, because the bound
+    lives in the loader they share.
+    """
+    session = cloud_session("research", default="research")
+    context = ContextState()
+    config = ConfigManager().config
+
+    advertised = await ls("/", context=ctx(context))
+    assert {node["name"] for node in advertised["nodes"]} == {"research"}
+
+    session.tenant.append(
+        ProjectItem(
+            id=len(session.tenant) + 1,
+            external_id="new-project-external-id",
+            name="new-project",
+            path="/app/data/new-project",
+            is_default=False,
+        )
+    )
+
+    # Still inside the bound: the snapshot is authoritative and nothing refetches.
+    assert (
+        await detect_project_from_identifier_prefix(
+            "new-project/notes/x", config, context=ctx(context)
+        )
+        is None
+    )
+
+    await _age_out_session_project_list(context)
+
+    advertised = await ls("/", context=ctx(context))
+    assert {node["name"] for node in advertised["nodes"]} == {"new-project", "research"}
+    assert await detect_project_from_identifier_prefix(
+        "new-project/notes/x", config, context=ctx(context)
+    ) == DetectedProjectRoute(project="new-project", project_id="new-project-external-id")
+    route = await resolve_project_path_route(
+        "new-project/notes/x", project=None, project_id=None, context=ctx(context)
+    )
+    assert route.project == "new-project"
+
+
+@pytest.mark.asyncio
+async def test_a_non_project_identifier_costs_one_listing_per_interval(cloud_session):
+    """The bound the age gate buys: misses cannot drive the refetch rate.
+
+    A miss is the ordinary answer for a path-shaped identifier that is not a
+    project reference, so a refresh triggered by misses would spend a listing
+    per lookup on the hottest path in the tool surface. Age cannot be influenced
+    by what the caller asks for: five identical misses across an expired
+    snapshot cost exactly one refetch.
+    """
+    session = cloud_session("research", default="research")
+    context = ContextState()
+    config = ConfigManager().config
+
+    # Warm both snapshots, so what is counted below is the session listing only
+    # and not the workspace index the rule-3 fall-through builds once.
+    assert (
+        await detect_project_from_identifier_prefix(
+            "specs/search-spec", config, context=ctx(context)
+        )
+        is None
+    )
+    session.listings.clear()
+
+    await _age_out_session_project_list(context)
+    for _ in range(5):
+        assert (
+            await detect_project_from_identifier_prefix(
+                "specs/search-spec", config, context=ctx(context)
+            )
+            is None
+        )
+
+    assert len(session.listings) == 1
 
 
 @pytest.mark.asyncio

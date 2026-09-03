@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from contextlib import asynccontextmanager, nullcontext
 from dataclasses import dataclass
 from typing import (
@@ -1262,9 +1263,43 @@ class AddressableProject:
     external_id: Optional[str] = None
 
 
-# The session's own project listing, memoized for one MCP request: routing and
-# the mount view ask the same question, so a request pays for it at most once.
+# The session's own project listing. Routing and the mount view ask the same
+# question, so it is memoized — but in *session* state, which fastmcp keys by
+# session id and persists across tool calls, not for one request as this comment
+# used to claim. That is the whole finding: a project created out of band — by a
+# teammate, or by the CLI — stayed invisible for the life of the session,
+# because in-session invalidation only covers changes this session caused.
 _SESSION_PROJECT_LIST_STATE_KEY = "session_project_list"
+# Written whenever the listing above is fetched, so its age is a fact rather
+# than an assumption. A separate key on purpose: folding a timestamp into the
+# stored ProjectList would break a live session whose state was written by the
+# previous deploy.
+_SESSION_PROJECT_LIST_FETCHED_AT_STATE_KEY = "session_project_list_fetched_at"
+
+# How long a session may answer from that snapshot before a read refetches it.
+#
+# Age is the trigger, deliberately, and not a lookup miss. The sibling snapshot
+# does refresh on a miss (resolve_workspace_project_identifier, #956) because
+# its miss is terminal: an explicitly named project that must resolve or raise,
+# so the retry costs one listing per *failing* call. A miss against the mount
+# table is the ordinary answer instead — most path-shaped identifiers
+# ('specs/search-spec') are not project references at all, which is exactly why
+# detection returns None for them rather than refusing — so a miss-triggered
+# refresh would put a fetch on the hottest path in the tool surface and let one
+# non-existent identifier drive a listing per lookup.
+#
+# An age bound cannot be influenced by what the caller asks for. Whatever
+# arrives, a session spends at most one extra project listing per interval, and
+# a session that never reads spends none. It is also strictly less than this
+# code path used to cost: before #1432 an unqualified prefix rebuilt the whole
+# account-wide workspace index — a control-plane call plus one listing per
+# accessible workspace — on *every* miss.
+#
+# Applied in the loader rather than at a call site, so identifier detection, the
+# posix path resolver, and the `ls "/"` mount view get the same freshness from
+# one place. A miss-triggered refresh could not have covered `ls "/"` at all:
+# listing the mounts has no miss to trigger on.
+_SESSION_PROJECT_LIST_MAX_AGE_SECONDS = 60.0
 
 
 def _session_routes_to_cloud() -> bool:
@@ -1291,17 +1326,41 @@ async def invalidate_session_project_list(context: Optional[Context] = None) -> 
 
     Lives beside the cache it clears, and is called from
     ``invalidate_project_caches`` — the one function that answers "a project
-    changed in this session".
+    changed in this session". Invalidation covers the changes this session
+    caused; the age bound below covers the ones it did not.
     """
     if context:
         await context.set_state(_SESSION_PROJECT_LIST_STATE_KEY, None)
+        await context.set_state(_SESSION_PROJECT_LIST_FETCHED_AT_STATE_KEY, None)
+
+
+def _session_project_list_is_fresh(fetched_at: object) -> bool:
+    """True when a stored fetch time is present and inside the age bound.
+
+    A missing or non-numeric timestamp reads as stale: state written before this
+    bound existed carries none, and one listing is the right price for not
+    trusting a snapshot of unknown age. A timestamp in the future reads as stale
+    too — hosted workers do not share a clock, and skew must expire a snapshot
+    early rather than pin it forever.
+    """
+    if not isinstance(fetched_at, (int, float)):
+        return False
+    age = time.time() - fetched_at
+    return 0 <= age <= _SESSION_PROJECT_LIST_MAX_AGE_SECONDS
 
 
 async def _session_project_list(context: Optional[Context] = None) -> ProjectList:
-    """List the projects reachable through this session's own route."""
+    """List the projects reachable through this session's own route.
+
+    Answers from session state while the snapshot is inside
+    ``_SESSION_PROJECT_LIST_MAX_AGE_SECONDS``, and refetches once it is not, so
+    every consumer of ``addressable_projects`` inherits the same bounded
+    freshness without any of them holding a retry of its own.
+    """
     if context:
         cached_raw = await context.get_state(_SESSION_PROJECT_LIST_STATE_KEY)
-        if isinstance(cached_raw, dict):
+        fetched_at = await context.get_state(_SESSION_PROJECT_LIST_FETCHED_AT_STATE_KEY)
+        if isinstance(cached_raw, dict) and _session_project_list_is_fresh(fetched_at):
             return ProjectList.model_validate(cached_raw)
 
     # Deferred imports to avoid circular dependency with the client modules.
@@ -1313,6 +1372,10 @@ async def _session_project_list(context: Optional[Context] = None) -> ProjectLis
 
     if context:
         await context.set_state(_SESSION_PROJECT_LIST_STATE_KEY, project_list.model_dump())
+        # Stamped on every fetch, including a refetch that found nothing changed,
+        # so a run of misses against a genuinely absent project costs one listing
+        # per interval rather than one per lookup.
+        await context.set_state(_SESSION_PROJECT_LIST_FETCHED_AT_STATE_KEY, time.time())
     return project_list
 
 
