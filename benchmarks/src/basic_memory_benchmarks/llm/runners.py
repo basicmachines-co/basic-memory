@@ -19,6 +19,7 @@ import json
 import os
 import subprocess
 import time
+from typing import Any
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
@@ -49,6 +50,28 @@ class LLMRunner(ABC):
 
     def describe(self) -> dict[str, str]:
         return {"spec": self.spec}
+
+
+def _claude_result_event(payload: object) -> dict[str, Any]:
+    """The `result` record of a `claude -p --output-format json` run.
+
+    Claude Code 2.1 prints a JSON array of session events (system, assistant,
+    rate_limit_event, result); earlier releases printed the result object
+    alone. Anything else is a runner error rather than a crash, so the caller
+    records the judge failure against the task instead of losing the run.
+    """
+    if isinstance(payload, dict):
+        return payload
+    if isinstance(payload, list):
+        results = [
+            item for item in payload if isinstance(item, dict) and item.get("type") == "result"
+        ]
+        if len(results) == 1:
+            return results[0]
+        raise LLMRunnerError(
+            f"claude -p emitted {len(results)} result events in {len(payload)} records; expected 1"
+        )
+    raise LLMRunnerError(f"claude -p emitted {type(payload).__name__}, expected an object or array")
 
 
 class ClaudeCLIRunner(LLMRunner):
@@ -97,7 +120,7 @@ class ClaudeCLIRunner(LLMRunner):
                     timeout=self._timeout_seconds,
                     check=False,
                 )
-                payload = json.loads(completed.stdout)
+                payload = _claude_result_event(json.loads(completed.stdout))
                 if completed.returncode != 0 or payload.get("is_error"):
                     raise LLMRunnerError(
                         f"claude -p failed (rc={completed.returncode}): "
