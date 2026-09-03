@@ -69,6 +69,7 @@ async def test_parse_file_with_completely_invalid_yaml(tmp_path):
     # Parse the file - should not raise exception
     parser = EntityParser(tmp_path)
     result = await parser.parse_file(test_file)
+    assert result.frontmatter_state == "malformed"
 
     # Should successfully parse with defaults
     assert result is not None
@@ -152,6 +153,7 @@ async def test_parse_file_without_frontmatter(tmp_path):
     # Parse the file
     parser = EntityParser(tmp_path)
     result = await parser.parse_file(test_file)
+    assert result.frontmatter_state == "absent"
 
     # Should have defaults
     assert result is not None
@@ -287,6 +289,7 @@ async def test_parse_valid_file_still_works(tmp_path):
     # Parse the file
     parser = EntityParser(tmp_path)
     result = await parser.parse_file(test_file)
+    assert result.frontmatter_state == "present"
 
     # Should parse correctly with all values
     assert result is not None

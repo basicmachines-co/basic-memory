@@ -19,10 +19,9 @@ from basic_memory.config import BasicMemoryConfig
 from basic_memory.file_utils import (
     ParseError,
     compute_checksum,
-    has_frontmatter,
     remove_frontmatter,
 )
-from basic_memory.markdown.schemas import EntityMarkdown
+from basic_memory.markdown.schemas import FrontmatterState, EntityMarkdown
 from basic_memory.indexing.models import (
     IndexEntitySearchWriter,
     IndexedEntity,
@@ -116,7 +115,7 @@ class _PreparedMarkdownFile:
     content: str
     final_checksum: str
     markdown: EntityMarkdown
-    file_contains_frontmatter: bool
+    frontmatter_state: FrontmatterState
 
 
 @dataclass(slots=True)
@@ -372,7 +371,6 @@ class BatchIndexer:
             raise ValueError(f"Missing content for markdown file: {file.path}")
 
         content = file.content.decode("utf-8")
-        file_contains_frontmatter = has_frontmatter(content)
         final_checksum = await self._resolve_checksum(file)
         entity_markdown = await self.entity_service.entity_parser.parse_markdown_content(
             file_path=Path(file.path),
@@ -386,7 +384,9 @@ class BatchIndexer:
             content=content,
             final_checksum=final_checksum,
             markdown=entity_markdown,
-            file_contains_frontmatter=file_contains_frontmatter,
+            # The parser's classification, not a fence check: a fenced block that is
+            # not YAML must be indexed without ever being rewritten (#1451).
+            frontmatter_state=entity_markdown.frontmatter_state,
         )
 
     async def _normalize_markdown_batch(
@@ -436,7 +436,9 @@ class BatchIndexer:
         # Trigger: markdown file has no frontmatter and sync enforcement is enabled.
         # Why: downstream indexing relies on normalized metadata and stable permalinks.
         # Outcome: write derived metadata back through the storage-agnostic writer.
-        if not prepared.file_contains_frontmatter and self.app_config.ensure_frontmatter_on_sync:
+        #   A "malformed" file matches neither branch: its fenced block is not YAML,
+        #   so no rewrite can know which bytes were metadata; it is indexed as-is.
+        if prepared.frontmatter_state == "absent" and self.app_config.ensure_frontmatter_on_sync:
             frontmatter_updates = {
                 "title": prepared.markdown.frontmatter.title,
                 "type": prepared.markdown.frontmatter.type,
@@ -453,7 +455,7 @@ class BatchIndexer:
         # Why: batch sync keeps permalinks stable without forcing a full rewrite when unchanged.
         # Outcome: only the permalink field is updated when it actually differs.
         elif (
-            prepared.file_contains_frontmatter
+            prepared.frontmatter_state == "present"
             and not self.app_config.disable_permalinks
             and final_permalink != prepared.markdown.frontmatter.permalink
         ):
@@ -472,7 +474,7 @@ class BatchIndexer:
             content=final_content,
             final_checksum=final_checksum,
             markdown=prepared.markdown,
-            file_contains_frontmatter=prepared.file_contains_frontmatter,
+            frontmatter_state=prepared.frontmatter_state,
         )
 
     async def _resolve_batch_permalink(
@@ -481,8 +483,8 @@ class BatchIndexer:
         reserved_permalinks: set[str],
     ) -> str | None:
         should_resolve_permalink = (
-            not prepared.file_contains_frontmatter and self.app_config.ensure_frontmatter_on_sync
-        ) or (prepared.file_contains_frontmatter and not self.app_config.disable_permalinks)
+            prepared.frontmatter_state == "absent" and self.app_config.ensure_frontmatter_on_sync
+        ) or (prepared.frontmatter_state == "present" and not self.app_config.disable_permalinks)
         if not should_resolve_permalink:
             permalink = prepared.markdown.frontmatter.permalink
             if permalink:
@@ -1054,12 +1056,14 @@ class BatchIndexer:
         #          to leave frontmatterless files alone.
         # Why: upsert may still assign a DB permalink even when disk content should stay untouched.
         # Outcome: skip reconciliation writes that would silently inject frontmatter.
+        rewrite_allowed = (
+            self.app_config.ensure_frontmatter_on_sync
+            if prepared.frontmatter_state == "absent"
+            else prepared.frontmatter_state == "present"
+        )
         if (
             self.app_config.disable_permalinks
-            or (
-                not prepared.file_contains_frontmatter
-                and not self.app_config.ensure_frontmatter_on_sync
-            )
+            or not rewrite_allowed
             or entity.permalink is None
             or entity.permalink == prepared.markdown.frontmatter.permalink
         ):
@@ -1083,7 +1087,7 @@ class BatchIndexer:
             content=write_result.content,
             final_checksum=write_result.checksum,
             markdown=prepared.markdown,
-            file_contains_frontmatter=prepared.file_contains_frontmatter,
+            frontmatter_state=prepared.frontmatter_state,
         )
 
     async def _build_prepared_entity(

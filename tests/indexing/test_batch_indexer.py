@@ -796,7 +796,7 @@ async def test_batch_indexer_uses_parsed_markdown_body_for_malformed_frontmatter
 
 
 @pytest.mark.asyncio
-async def test_batch_indexer_reports_malformed_yaml_without_rewriting_source(
+async def test_batch_indexer_indexes_malformed_yaml_without_rewriting_source(
     app_config,
     entity_service,
     entity_repository,
@@ -835,16 +835,74 @@ async def test_batch_indexer_reports_malformed_yaml_without_rewriting_source(
         parse_max_concurrent=1,
     )
 
-    assert result.indexed == []
-    assert len(result.errors) == 1
-    error_path, error = result.errors[0]
-    assert error_path == path
-    assert "Refusing to update malformed frontmatter" in error
+    # The source stays byte-identical: a fenced block that is not YAML cannot be
+    # rewritten field by field. Before #1451 the indexer also dropped the file
+    # ("Refusing to update malformed frontmatter"), so the note was invisible to
+    # every retrieval tool while readiness reported idle.
+    assert result.errors == []
+    assert len(result.indexed) == 1
     assert (project_config.home / path).read_text(encoding="utf-8") == original_content
-
     async with db.scoped_session(search_service.session_maker) as session:
         entity = await entity_repository.get_by_file_path(session, path)
-    assert entity is None
+    assert entity is not None
+    indexed_content = result.indexed[0].markdown_content
+    assert indexed_content is not None
+    assert "The source file must remain authoritative." in indexed_content
+
+
+@pytest.mark.asyncio
+async def test_batch_indexer_indexes_a_letterhead_between_rules_as_body(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+):
+    """A letter that opens with a horizontal-rule-delimited letterhead has fences
+    but no YAML (`**Bold**` reads as an alias). With permalinks and frontmatter
+    enforcement on, the default configuration, the file must be indexed as-is
+    and never rewritten (#1451, found by the xAFS eval's seed guard)."""
+    path = "pleadings/demand-letter.md"
+    original_content = dedent(
+        """\
+        ---
+        **OSTROWSKI LEGAL PLLC**
+        Carmen Ostrowski, Esq.
+        280 Garfield Place, Brooklyn NY 11215
+        ---
+
+        February 19, 2026
+
+        Re: Demand for repair costs, HIC #0892461.
+        """
+    )
+    await _create_file(project_config.home / path, original_content)
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+    result = await batch_indexer.index_files(
+        {path: await _load_input(file_service, path)},
+        max_concurrent=1,
+        parse_max_concurrent=1,
+    )
+
+    assert result.errors == []
+    assert len(result.indexed) == 1
+    assert (project_config.home / path).read_text(encoding="utf-8") == original_content
+    async with db.scoped_session(search_service.session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, path)
+    assert entity is not None
+    assert entity.title == "demand-letter"
+    indexed_content = result.indexed[0].markdown_content
+    assert indexed_content is not None
+    assert "HIC #0892461" in indexed_content
 
 
 @pytest.mark.asyncio
