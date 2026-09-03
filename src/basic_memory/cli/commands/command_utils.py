@@ -12,6 +12,7 @@ from basic_memory.config import ConfigManager
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.clients import ProjectClient
 from basic_memory.mcp.project_context import get_active_project
+from basic_memory.utils import shell_command
 
 console = Console()
 
@@ -120,7 +121,14 @@ async def report_project_readiness(project: str) -> None:
         # Outcome: say so and leave the caller's exit status alone.
         console.print(f"[yellow]Could not read index status: {e}[/yellow]")
         return
-    summary = escape(status.readiness.describe(project_item.name))
+    # This path only runs after a local index pass, so the local command is the
+    # one that can advance it.
+    summary = escape(
+        status.readiness.describe(
+            project_item.name,
+            index_command=shell_command("bm", "project", "index", project_item.name),
+        )
+    )
     console.print(f"[dim]{escape(project_item.name)}: {summary}[/dim]")
 
 

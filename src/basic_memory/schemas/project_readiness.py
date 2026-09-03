@@ -15,8 +15,6 @@ from typing import assert_never
 
 from pydantic import BaseModel, Field
 
-from basic_memory.utils import shell_command
-
 
 class ProjectIndexPhase(StrEnum):
     """What a caller may conclude about a project's index right now.
@@ -111,26 +109,38 @@ class ProjectIndexReadiness(BaseModel):
                 return stage
         raise KeyError(f"readiness is missing the {name} stage")  # pragma: no cover
 
-    def describe(self, project_name: str) -> str:
+    def describe(self, project_name: str, *, index_command: str | None) -> str:
         """Name the state honestly, in the words a human or agent can act on.
 
-        Stated once here so ``bm project add`` and ``bm status`` cannot drift
-        into describing the same project differently (#1414).
+        The sentence is stated once here so ``bm project add`` and ``bm status``
+        cannot drift into describing the same project differently (#1414). The
+        command is not, because it cannot be: ``bm project index`` runs the
+        local reindex, which refuses a cloud project outright, so a shared
+        formatter that hardcoded it printed an impossible remedy whenever
+        ``bm status --cloud`` reported a never-indexed project (#1440 review).
+
+        Pass ``None`` when no local command can advance this project's
+        readiness -- a cloud project indexes server-side -- and the sentence
+        says that instead of naming something that cannot work. Callers build
+        the command through ``shell_command`` so a name with a space survives
+        being pasted back, and escape the result before it meets Rich markup.
         """
         files = self.stage(ProjectIndexStageName.FILES)
-        # Quoted so a name with a space stays one argument when this is pasted
-        # back. Callers rendering through Rich must escape the result; both do.
-        index_command = shell_command("bm", "project", "index", project_name)
         match self.phase:
             case ProjectIndexPhase.NEVER_INDEXED:
+                remedy = (
+                    "it is indexed on the server"
+                    if index_command is None
+                    else f"run '{index_command}'"
+                )
                 if self.files_on_disk == 0:
-                    return (
-                        f"not yet indexed, no files present — "
-                        f"run '{index_command}' after adding notes"
+                    after = (
+                        " after adding notes" if index_command is not None else "; add notes first"
                     )
+                    return f"not yet indexed, no files present — {remedy}{after}"
                 return (
                     f"{self.files_on_disk} file{'s' if self.files_on_disk != 1 else ''} present, "
-                    f"not yet indexed — run '{index_command}'"
+                    f"not yet indexed — {remedy}"
                 )
             case ProjectIndexPhase.PENDING:
                 pending_stages = ", ".join(

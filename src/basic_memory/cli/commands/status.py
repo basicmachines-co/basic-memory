@@ -20,6 +20,7 @@ from basic_memory.mcp.clients import ProjectClient
 from basic_memory.schemas import ProjectIndexStatusResponse
 from basic_memory.schemas.project_readiness import ProjectIndexPhase
 from basic_memory.mcp.project_context import get_active_project
+from basic_memory.utils import shell_command
 
 # Create rich console
 console = Console()
@@ -54,8 +55,16 @@ def display_project_index_status(
     title: str,
     status: ProjectIndexStatusResponse,
     verbose: bool = False,
+    *,
+    index_command: str | None = None,
 ) -> None:
-    """Display project-index observation status using Rich."""
+    """Display project-index observation status using Rich.
+
+    ``index_command`` is the command that can advance *this* project's
+    readiness, or None when no local command can -- a cloud project is indexed
+    on the server, and `bm project index` runs the local reindex, which refuses
+    it (#1440 review).
+    """
     readiness = status.readiness
     tree = Tree(f"{project_name}: {title}")
     tree.add(f"{status.total_files} observed file{'s' if status.total_files != 1 else ''}")
@@ -64,7 +73,8 @@ def display_project_index_status(
     # (#1414). Lead with the phase, then the per-stage numbers a caller waits on.
     phase_color = "red" if readiness.phase is ProjectIndexPhase.NEVER_INDEXED else "green"
     # describe() carries a project name and a command; escape before it meets markup.
-    tree.add(f"[{phase_color}]{escape(readiness.describe(project_name))}[/{phase_color}]")
+    described = readiness.describe(project_name, index_command=index_command)
+    tree.add(f"[{phase_color}]{escape(described)}[/{phase_color}]")
 
     stages_branch = tree.add("[cyan]Stages[/cyan]")
     for stage in readiness.stages:
@@ -194,11 +204,19 @@ def status(
                 )
             )
         else:
+            # Trigger: the project being reported is routed to the cloud.
+            # Why: `bm project index` runs the local reindex, which rejects a
+            #   cloud project, so naming it would print a remedy that cannot run.
+            # Outcome: cloud projects get no local command and the sentence says
+            #   the server indexes them.
             display_project_index_status(
                 project_name,
                 "Project Index",
                 project_index_status,
                 verbose,
+                index_command=(
+                    None if cloud else shell_command("bm", "project", "index", project_name)
+                ),
             )
     except (ValueError, ToolError) as e:
         if json_output:
