@@ -24,6 +24,7 @@ from basic_memory.deps import (
     ProjectConfigV2ExternalDep,
     ProjectIndexCommandDep,
     ProjectIndexObserverDep,
+    ProjectReadinessServiceDep,
     ProjectExternalIdPathDep,
     ReadCacheDep,
     SessionDep,
@@ -282,17 +283,24 @@ async def index_project(
 @router.post("/{project_id}/status", response_model=ProjectIndexStatusResponse)
 async def get_project_status(
     project_index_observer: ProjectIndexObserverDep,
+    project_readiness: ProjectReadinessServiceDep,
     project_internal_id: ProjectExternalIdPathDep,
     project_id: str = Path(..., description="Project external ID (UUID)"),
     force_full: bool = Query(False, description="Accepted for compatibility; ignored"),
 ) -> ProjectIndexStatusResponse:
-    """Observe current project-index files for a project."""
+    """Observe current project-index files and readiness for a project."""
     logger.info(
         f"API v2 request: get_project_status for project_id={project_id} "
         f"(force_full ignored={force_full})"
     )
     observation = await project_index_observer.observe_project(project_internal_id)
-    return ProjectIndexStatusResponse.from_observation(observation)
+    # The observation is handed to the readiness reader rather than re-derived:
+    # it already cost a full project walk, and a waiter polls this route.
+    readiness = await project_readiness.readiness_for_project_id(
+        project_internal_id,
+        observation.observed_files,
+    )
+    return ProjectIndexStatusResponse.from_observation(observation, readiness)
 
 
 @router.post("/resolve", response_model=ProjectResolveResponse)

@@ -7,11 +7,12 @@ import os
 from collections.abc import Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, override, Protocol
 
 from loguru import logger
-from sqlalchemy import Select
+from sqlalchemy import Select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -451,6 +452,35 @@ class LocalProjectIndexDeletePathVerifier(ProjectIndexDeletePathVerifier):
         return frozenset(confirmed_paths)
 
 
+class ProjectIndexCompletionRecorder(Protocol):
+    """Capability that durably records a completed project-index pass."""
+
+    async def record_index_completion(self) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class RepositoryProjectIndexCompletionRecorder(ProjectIndexCompletionRecorder):
+    """Stamp ``project.last_indexed_at`` once a pass finishes.
+
+    This is the only writer of the marker that lets a caller tell "never
+    indexed" from "indexed and idle" (#1414), so it lives on the single
+    innermost path every local index run goes through rather than at each
+    command that starts one.
+    """
+
+    session_maker: async_sessionmaker[AsyncSession]
+    project_id: int
+
+    @override
+    async def record_index_completion(self) -> None:
+        async with db.scoped_session(self.session_maker) as session:
+            await session.execute(
+                update(Project)
+                .where(Project.id == self.project_id)
+                .values(last_indexed_at=datetime.now(UTC))
+            )
+
+
 @dataclass(frozen=True, slots=True)
 class LocalProjectIndexRuntime:
     """Dependencies for running project-wide local indexing through core fanout."""
@@ -464,6 +494,7 @@ class LocalProjectIndexRuntime:
     fanout_failure_recorder: ProjectIndexFanoutFailureRecorder | None = None
     completion_relation_runtime: RelationResolutionRuntime | None = None
     embedding_vector_sync: EmbeddingBatchVectorSync | None = None
+    index_completion_recorder: ProjectIndexCompletionRecorder | None = None
     batch_size: int = 100
     coordinator_job_id: RuntimeJobId | None = None
     read_cache: ReadCache | None = None
@@ -683,6 +714,10 @@ class LocalProjectIndexRuntimeFactory:
                 entity_indexer=dependencies.search_service,
             ),
             embedding_vector_sync=local_project_embedding_vector_sync(dependencies),
+            index_completion_recorder=RepositoryProjectIndexCompletionRecorder(
+                session_maker=dependencies.session_maker,
+                project_id=dependencies.project_id,
+            ),
             batch_size=self.batch_size,
             read_cache=self.read_cache,
         )
@@ -841,4 +876,10 @@ async def run_local_project_index(
                 ),
                 runtime.completion_relation_runtime,
             )
+    # Stamped last, after relation resolution, so the marker means "this project
+    # has a complete index" rather than "a scan started". Anything that raises
+    # above leaves it unset, and the project keeps reporting NEVER_INDEXED --
+    # which is the honest answer for a pass that never finished.
+    if runtime.index_completion_recorder is not None:
+        await runtime.index_completion_recorder.record_index_completion()
     return result

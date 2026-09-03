@@ -1,4 +1,5 @@
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -9,6 +10,43 @@ from httpx import AsyncClient, ASGITransport
 
 from basic_memory.api.app import app as fastapi_app
 from basic_memory.deps import get_engine_factory, get_app_config
+from basic_memory.schemas.project_readiness import (
+    ProjectIndexPhase,
+    ProjectIndexReadiness,
+    ProjectIndexStage,
+    ProjectIndexStageName,
+)
+
+
+def make_readiness(
+    phase: ProjectIndexPhase = ProjectIndexPhase.IDLE,
+    *,
+    files_on_disk: int = 0,
+    indexed_entities: int = 0,
+    files_pending: int = 0,
+    files_total: int = 0,
+) -> ProjectIndexReadiness:
+    """Build a readiness value for tests that stub the status route's response."""
+    return ProjectIndexReadiness(
+        phase=phase,
+        last_indexed_at=None if phase is ProjectIndexPhase.NEVER_INDEXED else datetime.now(UTC),
+        files_on_disk=files_on_disk,
+        indexed_entities=indexed_entities,
+        stages=(
+            ProjectIndexStage(
+                name=ProjectIndexStageName.FILES,
+                phase=phase,
+                pending=files_pending,
+                total=files_total,
+            ),
+            ProjectIndexStage(
+                name=ProjectIndexStageName.RELATIONS, phase=phase, pending=0, total=0
+            ),
+            ProjectIndexStage(
+                name=ProjectIndexStageName.EMBEDDINGS, phase=phase, pending=0, total=0
+            ),
+        ),
+    )
 
 
 @pytest.fixture(autouse=True)

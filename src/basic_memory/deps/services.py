@@ -34,6 +34,7 @@ from basic_memory.indexing.relation_resolution import RepositoryRelationResoluti
 from basic_memory.index.note_content_materialization import LocalNoteContentMaterializationProvider
 from basic_memory.services.directory_deletes import DirectoryDeleteService
 from basic_memory.services.note_content_reads import NoteContentQueryService
+from basic_memory.services.project_readiness import ProjectReadinessService
 from basic_memory.services.note_content_writes import NoteContentMutationService
 from basic_memory.index.local_dependencies import build_local_markdown_file_indexer
 from basic_memory.index.local_notes import (
@@ -393,10 +394,22 @@ async def get_project_index_observer(
     )
 
 
+async def get_project_readiness_service(
+    session_maker: SessionMakerDep,
+    app_config: AppConfigDep,
+) -> ProjectReadinessService:
+    """Create the readiness reader that turns an observation into a waitable contract."""
+    return ProjectReadinessService(session_maker=session_maker, app_config=app_config)
+
+
 ProjectIndexRunnerDep = Annotated[ProjectIndexRunner, Depends(get_project_index_runner)]
 ProjectIndexObserverDep = Annotated[
     ProjectIndexObserver,
     Depends(get_project_index_observer),
+]
+ProjectReadinessServiceDep = Annotated[
+    ProjectReadinessService,
+    Depends(get_project_readiness_service),
 ]
 
 

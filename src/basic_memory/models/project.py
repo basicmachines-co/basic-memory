@@ -73,6 +73,14 @@ class Project(Base):
     last_scan_timestamp: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     last_file_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
+    # The one durable bit that separates "never indexed" from "indexed and idle".
+    # Every other readiness signal is a count, and a count of zero cannot tell
+    # "nothing to do" from "nothing was ever started" -- the vacuous-ready bug
+    # in #1414. NULL means no index pass has ever completed for this project.
+    last_indexed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # Strict, project-local ordering for accepted durable changes. This is the
     # generic partition head that future event-journal projectors can reuse; it
     # is deliberately not derived from timestamps, webhooks, or scan activity.
