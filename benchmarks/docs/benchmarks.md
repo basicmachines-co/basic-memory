@@ -441,7 +441,9 @@ dataset-driven runs — a corrections re-run changes gold answers without
 touching the corpus — full surface echoes),
 `surface-status.json` (ok/skipped/error per surface, explicit reasons),
 `per-turn.jsonl` (per model turn and tool dispatch: tokens, tool name,
-latency, result size), `per-task-agent.jsonl`, `agent-tasks-summary.json`,
+latency, result size; on error turns also an excerpt of the arguments and of
+the error text the model saw, so a recurring tool error is diagnosable from
+the artifact), `per-task-agent.jsonl`, `agent-tasks-summary.json`,
 `summary.md` (which repeats any skipped surface so the report cannot be
 misread as a completed A/B). `validate-artifacts` remains retrieval-only for now (as for
 concurrent-write); a kind-aware variant is a follow-up.

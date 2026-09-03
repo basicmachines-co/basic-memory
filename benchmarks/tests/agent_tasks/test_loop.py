@@ -166,6 +166,8 @@ def test_off_allowlist_call_never_reaches_dispatch() -> None:
     assert tool_record.kind == "tool"
     assert tool_record.tool_name == "made_up_tool"
     assert tool_record.is_error is True
+    assert tool_record.arguments_excerpt == "{}"
+    assert tool_record.error_excerpt == "tool 'made_up_tool' is not available on this surface"
 
 
 def test_tool_result_truncated_at_fixed_cap() -> None:
@@ -260,6 +262,8 @@ def test_dispatch_error_is_wrapped_and_records_the_dying_call() -> None:
     assert tool_record.kind == "tool"
     assert tool_record.tool_name == "search_notes"
     assert tool_record.is_error is True
+    assert tool_record.arguments_excerpt == '{"q": "x"}'
+    assert tool_record.error_excerpt == str(excinfo.value.cause)
 
 
 def test_wall_clock_gate_between_tool_dispatches() -> None:
@@ -301,3 +305,39 @@ def test_per_turn_records_account_tokens_and_counts() -> None:
     assert tool_record.tool_name == "search_notes"
     assert tool_record.result_chars == len("ok")
     assert result.tool_call_count == 1
+
+
+def test_successful_tool_turns_carry_no_excerpts() -> None:
+    """Excerpts are for diagnosis of failures; success payloads stay out of the artifact."""
+    model = _scripted(
+        [
+            {"tool_calls": [{"name": "search_notes", "arguments": {"q": "x"}}]},
+            {"text": "done"},
+        ]
+    )
+    result = _run(model, RecordingDispatch(ToolOutcome(text="fine", is_error=False)))
+
+    tool_record = result.turn_records[1]
+    assert tool_record.is_error is False
+    assert tool_record.arguments_excerpt is None
+    assert tool_record.error_excerpt is None
+
+
+def test_error_excerpts_are_capped() -> None:
+    from basic_memory_benchmarks.agent_tasks.loop import ERROR_EXCERPT_MAX_CHARS, TRUNCATION_SUFFIX
+
+    long_error = "e" * (ERROR_EXCERPT_MAX_CHARS * 3)
+    long_argument = {"identifier": "a" * (ERROR_EXCERPT_MAX_CHARS * 3)}
+    model = _scripted(
+        [
+            {"tool_calls": [{"name": "search_notes", "arguments": long_argument}]},
+            {"text": "done"},
+        ]
+    )
+    result = _run(model, RecordingDispatch(ToolOutcome(text=long_error, is_error=True)))
+
+    tool_record = result.turn_records[1]
+    assert tool_record.error_excerpt == "e" * ERROR_EXCERPT_MAX_CHARS + TRUNCATION_SUFFIX
+    assert tool_record.arguments_excerpt is not None
+    assert tool_record.arguments_excerpt.endswith(TRUNCATION_SUFFIX)
+    assert len(tool_record.arguments_excerpt) == ERROR_EXCERPT_MAX_CHARS + len(TRUNCATION_SUFFIX)
