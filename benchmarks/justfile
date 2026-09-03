@@ -111,7 +111,9 @@ bench-convert-locomo-corrected: bench-fetch-locomo bench-fetch-locomo-audit
 # xAFS data is never vendored: pinned hf download, persona-subset by default
 # (the full dataset is ~837MB). personas="" fetches everything.
 bench-fetch-xafs personas="dp_001,dp_002":
-    XAFS_PERSONAS="{{personas}}" bash benchmarks/datasets/xafs/download.sh
+    # `uv run` puts the package venv (which carries the `hf` CLI) on PATH;
+    # a bare `bash` only works when huggingface_hub is installed globally.
+    XAFS_PERSONAS="{{personas}}" uv run bash benchmarks/datasets/xafs/download.sh
 
 # Cheap two-persona smoke by default; personas="all" converts every downloaded persona
 bench-convert-xafs personas="dp_001,dp_002":
