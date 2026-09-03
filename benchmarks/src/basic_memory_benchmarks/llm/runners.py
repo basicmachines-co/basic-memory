@@ -152,6 +152,7 @@ class OpenAICompatRunner(LLMRunner):
         api_key: str | None = None,
         timeout_seconds: float = 300.0,
         max_retries: int = 2,
+        temperature: float | None = 0.0,
     ) -> None:
         self.model = model
         self.base_url = base_url.rstrip("/")
@@ -159,16 +160,21 @@ class OpenAICompatRunner(LLMRunner):
         self._api_key = api_key
         self._timeout_seconds = timeout_seconds
         self._max_retries = max_retries
+        # None omits the parameter: Claude 5 models reject any temperature
+        # ("`temperature` is deprecated for this model"); local servers default
+        # to nonzero sampling unless pinned, so 0 stays the default.
+        self._temperature = temperature
 
     def complete(self, prompt: str) -> LLMResult:
         headers = {"Content-Type": "application/json"}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
-        body = {
+        body: dict[str, Any] = {
             "model": self.model,
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0,
         }
+        if self._temperature is not None:
+            body["temperature"] = self._temperature
         last_error: Exception | None = None
         for _ in range(self._max_retries + 1):
             started = time.perf_counter()
@@ -197,7 +203,9 @@ class OpenAICompatRunner(LLMRunner):
         )
 
 
-def create_runner(spec: str, *, api_key: str | None = None) -> LLMRunner:
+def create_runner(
+    spec: str, *, api_key: str | None = None, temperature: float | None = 0.0
+) -> LLMRunner:
     """Build a runner from a spec string.
 
     Formats: ``claude:<model>`` or ``openai-compat:<model>@<base_url>``.
@@ -212,7 +220,9 @@ def create_runner(spec: str, *, api_key: str | None = None) -> LLMRunner:
                 f"openai-compat spec must be 'openai-compat:<model>@<base_url>', got: {spec}"
             )
         resolved_api_key = api_key if api_key is not None else os.getenv("OPENAI_API_KEY")
-        return OpenAICompatRunner(model=model, base_url=base_url, api_key=resolved_api_key)
+        return OpenAICompatRunner(
+            model=model, base_url=base_url, api_key=resolved_api_key, temperature=temperature
+        )
     raise ValueError(
         f"Unknown runner spec '{spec}'. Expected 'claude:<model>' or "
         f"'openai-compat:<model>@<base_url>'."

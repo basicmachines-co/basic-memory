@@ -63,7 +63,7 @@ class RenderedGroup:
     doc_id_for_message: dict[int, str]  # global message id -> owning source_doc_id
 
 
-def _clean_message_content(content: str) -> str:
+def clean_message_content(content: str) -> str:
     # Strip the leakage marker first, then collapse whitespace so each turn
     # stays on one line and bullet-level chunking stays intact.
     stripped = _INDEX_MARKER_PATTERN.sub("", content)
@@ -79,7 +79,7 @@ def _clean_message_content(content: str) -> str:
     return " ".join(stripped.split())
 
 
-def _batch_anchor(batch_messages: list[BeamMessage], batch_time_anchor: str | None) -> str | None:
+def batch_anchor(batch_messages: list[BeamMessage], batch_time_anchor: str | None) -> str | None:
     if batch_time_anchor:
         return batch_time_anchor
     for message in batch_messages:
@@ -105,7 +105,7 @@ def render_raw_group(
 
     for batch in conversation.batches:
         batch_messages = [message for session in batch.turns for message in session]
-        anchor = _batch_anchor(batch_messages, batch.time_anchor)
+        anchor = batch_anchor(batch_messages, batch.time_anchor)
         if anchor:
             current_anchor = anchor
 
@@ -132,7 +132,7 @@ def render_raw_group(
             ]
             for message in session:
                 doc_id_for_message[message.id] = doc_id
-                content = _clean_message_content(message.content)
+                content = clean_message_content(message.content)
                 if not content:
                     continue
                 speaker = "User" if message.role == "user" else "Assistant"

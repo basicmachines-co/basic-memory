@@ -282,6 +282,49 @@ chat/probing file there, so the run manifest's dataset checksum pins the exact
 converted inputs. Tiers 100K/500K/1M share a layout and are supported; the
 10M tier's combined plan-N layout is rejected in v1.
 
+### Curated ingestion mode
+
+Raw mode stores each chat session as a note. Curated mode is the product
+path: a curator model reads the same sessions in order and writes knowledge
+notes through Basic Memory's canonical write path (`write_note` /
+`edit_note` on a warm `bm mcp` session), one fresh project per conversation.
+The project's notes are then copied out as the group's docs, in the raw
+layout, so retrieval, QA, and BEAM scoring run on the curated dataset with
+no changes. The per-ability delta between the two datasets is the result.
+
+```bash
+BM_LOCAL_PATH=.. just bench-curate-beam-100k            # -> benchmarks/generated/beam-100k-curated
+BM_LOCAL_PATH=.. just bench-run-beam-100k-curated       # grouped retrieval, bm-local only
+just bench-qa benchmarks/runs/<run-id>                  # same answerer/judge as the raw run
+just bench-beam-score benchmarks/runs/<run-id>
+```
+
+The curator is blind. Each call sees one session's transcript, the running
+date anchor (carried forward as in raw mode), and an index of the notes
+written so far (title, directory, one-line gist; the oldest entries are
+elided past `MAX_INDEX_CHARS`). It never sees the probe questions or the
+ability names; the prompt template is fixed and its sha256 is recorded in
+`conversion.json`. The reply is a JSON list of at most
+`--max-notes-per-session` operations, `create` (a full note) or `append`
+(new observation and relation lines under an existing title). An append to
+an unknown title creates; a create for a known title appends, so earlier
+sessions' facts are never overwritten. A malformed reply costs that
+session's facts, counted per conversation. A curator transport failure
+excludes the conversation (recorded under `excluded_conversations`, its
+queries dropped) and the run continues.
+
+Provenance: `conversion.json` carries the raw input's manifest sha256, the
+curator spec and temperature, the prompt sha256, per-conversation token
+and note counts, and per-file sha256 of every doc. Group ids and query ids
+are the raw dataset's, so rows compare one to one.
+
+Retrieval ground truth is a message-to-doc mapping, which curated notes do
+not have. The curated `queries.json` carries empty `ground_truth`
+(`metadata.raw_ground_truth` keeps the raw ids) and
+`metadata.ingestion_mode: curated`; recall columns read n/a for this
+dataset. The comparison is the nugget score per ability, raw versus
+curated, answered and judged by the same models on the same day.
+
 ### Scoring definition
 
 - Every probe's reference answer is pre-decomposed upstream into atomic

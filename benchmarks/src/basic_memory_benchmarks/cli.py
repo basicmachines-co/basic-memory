@@ -66,6 +66,31 @@ app.add_typer(datasets_app, name="datasets")
 app.add_typer(convert_app, name="convert")
 app.add_typer(run_app, name="run")
 app.add_typer(sample_app, name="sample")
+curate_app = typer.Typer(
+    help="Agent-curated ingestion: a curator model writes notes from raw transcripts"
+)
+app.add_typer(curate_app, name="curate")
+
+
+def parse_model_temperature(value: str) -> float | None:
+    """'omit'/'none' -> None (parameter not sent); otherwise a finite float."""
+    if value.strip().lower() in {"omit", "none"}:
+        return None
+    try:
+        temperature = float(value)
+    except ValueError:
+        raise typer.BadParameter(
+            f"--model-temperature must be a number or 'omit', got {value!r}"
+        ) from None
+    # nan/inf parse cleanly and pass config validation, but JSON has no
+    # encoding for them: httpx raises a bare ValueError when it serializes
+    # the request body. That escapes the handled transports, so a run
+    # dies mid-flight after setup with no artifacts written.
+    if not math.isfinite(temperature):
+        raise typer.BadParameter(
+            f"--model-temperature must be a finite number or 'omit', got {value!r}"
+        )
+    return temperature
 
 
 @datasets_app.command("fetch")
@@ -336,6 +361,76 @@ def sample_xafs(
     console.print(f"Readable form + gold files: [cyan]{output / 'sample.md'}[/cyan]")
 
 
+@curate_app.command("beam")
+def curate_beam_command(
+    input_dir: Path = typer.Option(
+        Path("benchmarks/generated/beam-100k"),
+        "--input-dir",
+        help="A raw `convert beam` output dir (conversion.json + queries.json)",
+    ),
+    output_dir: Path = typer.Option(Path("benchmarks/generated/beam-100k-curated"), "--output-dir"),
+    model: str = typer.Option(
+        ..., "--model", help="Curator: openai-compat:<model>@<base_url> or claude:<model>"
+    ),
+    model_temperature: str = typer.Option(
+        "omit",
+        "--model-temperature",
+        help="Sampling temperature for the curator, or 'omit' (Claude 5 rejects the parameter)",
+    ),
+    bm_local_path: str | None = typer.Option(None, "--bm-local-path"),
+    conversations: str | None = typer.Option(
+        None, "--conversations", help="Comma-separated BEAM conversation ids, e.g. 1,2"
+    ),
+    max_conversations: int | None = typer.Option(None, "--max-conversations"),
+    max_notes_per_session: int = typer.Option(8, "--max-notes-per-session"),
+    settle_timeout: float = typer.Option(180.0, "--settle-timeout"),
+    tool_timeout: float = typer.Option(120.0, "--tool-timeout"),
+) -> None:
+    """Curate a raw BEAM tier into knowledge notes through the write path.
+
+    The curator sees each chat session, the running date, and the notes it
+    has written; never the probes. Output has the raw layout, so
+    `run retrieval`, `run qa`, and `run beam-score` run on it unchanged
+    (docs/benchmarks.md 6b, curated mode).
+    """
+    from basic_memory_benchmarks.curation.beam import CurationConfig, curate_beam
+    from basic_memory_benchmarks.llm.runners import create_runner
+
+    temperature = parse_model_temperature(model_temperature)
+    try:
+        runner = create_runner(model, temperature=temperature)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    selected = (
+        tuple(part.strip() for part in conversations.split(",") if part.strip())
+        if conversations
+        else ()
+    )
+    config = CurationConfig(
+        input_dir=input_dir,
+        output_dir=output_dir,
+        model_spec=model,
+        model_temperature=temperature,
+        bm_local_path=bm_local_path,
+        conversations=selected,
+        max_conversations=max_conversations,
+        max_notes_per_session=max_notes_per_session,
+        settle_timeout_seconds=settle_timeout,
+        tool_timeout_seconds=tool_timeout,
+    )
+    output = curate_beam(config, runner=runner, progress=console.print)
+    manifest = json.loads((output / "conversion.json").read_text(encoding="utf-8"))
+    totals = manifest["totals"]
+    console.print(
+        f"Curated {totals['conversations']} conversations: {totals['docs']} docs, "
+        f"{totals['queries']} queries, tokens {totals['input_tokens']}+{totals['output_tokens']}"
+    )
+    excluded = manifest["excluded_conversations"]
+    if excluded:
+        console.print(f"[yellow]Excluded {len(excluded)} conversation(s)[/yellow]: {excluded}")
+    console.print(f"Conversion manifest: [cyan]{output / 'conversion.json'}[/cyan]")
+
+
 @run_app.command("retrieval")
 def run_retrieval_command(
     providers: str = typer.Option("bm-local,mem0-local", "--providers"),
@@ -563,23 +658,7 @@ def run_agent_tasks_command(
             raise typer.BadParameter(f"--model-header must be 'Name=value', got {raw_header!r}")
         header_pairs[name.strip()] = value.strip()
 
-    if model_temperature.strip().lower() in {"omit", "none"}:
-        temperature: float | None = None
-    else:
-        try:
-            temperature = float(model_temperature)
-        except ValueError:
-            raise typer.BadParameter(
-                f"--model-temperature must be a number or 'omit', got {model_temperature!r}"
-            ) from None
-        # nan/inf parse cleanly and pass config validation, but JSON has no
-        # encoding for them: httpx raises a bare ValueError when it serializes
-        # the request body. That escapes _post's handled transports, so the run
-        # dies mid-flight after surface setup with no artifacts written.
-        if not math.isfinite(temperature):
-            raise typer.BadParameter(
-                f"--model-temperature must be a finite number or 'omit', got {model_temperature!r}"
-            )
+    temperature = parse_model_temperature(model_temperature)
 
     # Fail fast at parse time: a bad model spec (including claude:) and a
     # missing judge for judge-graded tasks must not survive to mid-run.
