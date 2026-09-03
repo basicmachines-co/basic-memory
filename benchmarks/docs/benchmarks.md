@@ -544,9 +544,14 @@ xAFS's central claim — read alongside per-family (skill) accuracy.
 ### Runner provenance (divergences from supermemory's published setup)
 
 1. Judge model is operator-chosen (`--judge`; the just target defaults to
-   `claude:claude-sonnet-4-6`), not Gemini 3.1 Pro Preview — the dataset card
-   itself allows an equivalently-capable judge; `judge_spec` is pinned in
-   `manifest.json`.
+   `openai-compat:claude-opus-4-6@https://api.anthropic.com/v1`), not Gemini
+   3.1 Pro Preview — the dataset card itself allows an equivalently-capable
+   judge; `judge_spec` is pinned in `manifest.json`. Opus 4.6 rather than
+   Sonnet 4.6 because, on a replayed dp_001/q05 verdict where the agent's
+   answer contained the gold phrase nearly verbatim, Sonnet 4.6 returned
+   INCORRECT 3/3 and Opus 4.6 CORRECT 3/3 (2026-09-03). Claude 5 models
+   reject the runner's fixed `temperature: 0`, so they cannot serve as judge
+   through this runner today.
 2. Upstream ships no judge prompt; ours is the fixed package template with a
    rubric built deterministically from the upstream prompt + gold answer,
    mirroring the card's semantic-equivalence criteria (paraphrase/format
@@ -564,6 +569,18 @@ xAFS's central claim — read alongside per-family (skill) accuracy.
    the headline, pending the question-quality audit.
 
 ### Audit sampling and corrections
+
+Audit of 2026-09-03 (`benchmarks/datasets/xafs/audit-2026-09-03.md`): 20 of
+45 questions across dp_001–dp_005, read against every gold file in full. 16
+keep, 4 corrected gold answers, 0 exclusions. Every gold answer carried the
+correct core value; the corrections remove over-specification (a computed
+vs documented total, a gloss the source does not contain, a time of day the
+sources contradict) and one false premise in a prompt. Observations: the
+tasks are closer to file-and-line lookup than memory recall (4/4 dp_004
+prompts embed file paths; 6/20 hinge on verbatim quotes; 5/20 have a
+`memory/` pre-summary file as gold), and distractor density is high and
+deliberate. Verdict: usable as a secondary dataset with corrections applied;
+treat few-point differences as noise.
 
 `bm-bench sample xafs --n 20 --seed 42` writes a seeded, family-stratified
 sample to `benchmarks/generated/xafs-audit/`: `audit-sample.json`,
