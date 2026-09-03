@@ -10,6 +10,7 @@ from loguru import logger
 from basic_memory import __version__ as version
 from basic_memory.api.container import ApiContainer, set_container
 from basic_memory.api.v2.routers import (
+    accepted_content_router as v2_accepted_content,
     knowledge_router as v2_knowledge,
     project_router as v2_project,
     memory_router as v2_memory,
@@ -124,6 +125,7 @@ async def workspace_permalink_context_middleware(request: Request, call_next):
 
 
 # Include v2 routers FIRST (more specific paths must match before /{project} catch-all)
+app.include_router(v2_accepted_content, prefix="/v2/projects/{project_id}")
 app.include_router(v2_knowledge, prefix="/v2/projects/{project_id}")
 app.include_router(v2_memory, prefix="/v2/projects/{project_id}")
 app.include_router(v2_search, prefix="/v2/projects/{project_id}")
