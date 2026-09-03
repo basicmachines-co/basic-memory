@@ -107,7 +107,7 @@ async def test_post_and_query_share_canonical_real_redis_entry(
     ]
     assert len(search_keys) == 1
     search_ttl = await redis_cache.client.ttl(search_keys[0])
-    assert 0 < search_ttl <= 30
+    assert 0 < search_ttl <= 1800
 
     await redis_cache.cache.invalidate_project(project_external_id)
     refreshed_response = await client.request(

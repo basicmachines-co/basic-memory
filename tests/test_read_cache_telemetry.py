@@ -33,9 +33,9 @@ class CachedValue(BaseModel):
     title: str
 
 
-def test_production_ttls_keep_search_shorter_than_ordinary_reads() -> None:
+def test_production_ttls_keep_search_results_for_thirty_minutes() -> None:
     assert READ_CACHE_TTL_SECONDS == 300
-    assert SEARCH_READ_CACHE_TTL_SECONDS == 30
+    assert SEARCH_READ_CACHE_TTL_SECONDS == 1800
 
 
 @dataclass(slots=True)
