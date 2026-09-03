@@ -136,8 +136,11 @@ def test_no_wait_leaves_a_never_indexed_project_that_status_reports_honestly(tmp
     assert "Skipped indexing" in add.stdout
     assert "bm project index deferred" in add.stdout
     assert "bm status --project deferred --json" in add.stdout
-    # Names the state instead of showing silent emptiness.
-    assert "2 files present, not yet indexed" in add.stdout
+    # It names the state without measuring it: computing a readiness line walks
+    # the project and checksums every file, which is the scan --no-wait exists to
+    # avoid (#1440 review). `bm status` reports the counts when asked.
+    assert "not searchable yet" in add.stdout
+    assert "files present, not yet indexed" not in add.stdout
 
     never_indexed = _readiness(_bm(["status", "--project", "deferred", "--json"], env))
     assert never_indexed["phase"] == ProjectIndexPhase.NEVER_INDEXED

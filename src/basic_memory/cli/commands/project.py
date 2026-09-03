@@ -29,7 +29,6 @@ from basic_memory.cli.commands.cloud.rclone_commands import (
 from basic_memory.cli.commands.command_utils import (
     get_project_info,
     index_project_and_report_readiness,
-    report_project_readiness,
     run_with_cleanup,
 )
 from basic_memory.cli.commands.db import run_reindex_command
@@ -989,13 +988,20 @@ def add_project(
         try:
             with force_routing(local=local, cloud=cloud):
                 if no_wait:
+                    # Trigger: the caller asked not to wait.
+                    # Why: readiness comes from the status route, whose observer
+                    #   walks the project and checksums every file -- and a brand
+                    #   new project has no indexed stats to reuse, so every byte
+                    #   is read. That is the scan `--no-wait` exists to avoid, on
+                    #   exactly the large directories it exists for (#1440 review).
+                    # Outcome: name the state from what registering already knows,
+                    #   and leave measuring it to the command that is asked for it.
                     console.print(
                         "[yellow]Skipped indexing (--no-wait).[/yellow] "
                         f"Files on disk are not searchable yet — run "
                         f"[green]{command_hint('bm', 'project', 'index', name)}[/green], and check with "
                         f"[green]{command_hint('bm', 'status', '--project', name, '--json')}[/green]."
                     )
-                    run_with_cleanup(report_project_readiness(name))
                 else:
                     run_with_cleanup(index_project_and_report_readiness(name))
         except Exception as e:
@@ -1031,7 +1037,12 @@ def add_project(
                         local_sync_path=local_sync_path,
                         workspace_id=resolved_workspace_id,
                     )
-                ConfigManager().save_config(config)
+                # `save_config` swallows write failures for its best-effort
+                # callers and reports them by return value, so this has to look
+                # rather than wait to be raised at (#1440 review).
+                write_error = ConfigManager().save_config(config)
+                if write_error is not None:
+                    raise write_error
             except Exception as e:
                 # The remote project exists; only this machine's routing entry is
                 # missing. `set-cloud` cannot repair that — it refuses a name that
