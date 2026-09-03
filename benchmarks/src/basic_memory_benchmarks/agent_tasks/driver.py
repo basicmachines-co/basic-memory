@@ -21,6 +21,8 @@ from mcp.types import CallToolResult
 from rich.console import Console
 
 from basic_memory_benchmarks.agent_tasks.corpus import (
+    RECENT_AGE_DAYS,
+    TIMESTAMPS,
     copy_corpus,
     corpus_checksum,
     snapshot_baseline,
@@ -274,22 +276,76 @@ def _prepare_task_project(
         )
         source_dir = corpus_dir / task.group / "docs"
     copy_corpus(source_dir, project.directory)
+    # `project add` indexes the directory before returning (#1414), and that
+    # index pass rewrites every note (permalink into frontmatter, YAML
+    # normalization), which resets the mtimes copy_corpus just aged. Once is
+    # fine: the pass reads the aged mtime into updated_at, then writes. The
+    # explicit `reindex --full` that used to follow was the workaround for the
+    # pre-#1414 `project add` that did not index at all; kept after the fix it
+    # became a second full pass that read the rewritten mtimes, so every note
+    # looked edited today and the recency task's three-note window returned
+    # the whole corpus (run at-1d26c0609808). One pass, then verify the window
+    # rather than trusting the sequence.
     run_command(prefix + ["project", "add", project.name, str(project.directory)], env=env)
-    # `project add` registers but does not index: without an explicit index
-    # pass the DB stays empty, `status` reports ready vacuously (zero pending
-    # work was ever queued), and every retrieval tool sees an empty project.
-    # The scripted smoke masked this — its canned answers never needed the
-    # index — so the first real-model run surfaced it as 24 empty projects.
-    run_command(prefix + ["reindex", "-p", project.name, "--full", "--search"], env=env)
     settle_index(
         prefix=prefix,
         env=env,
         project_name=project.name,
         timeout_seconds=settle_timeout_seconds,
     )
+    if task.group is None:
+        verify_seeded_recency(prefix=prefix, env=env, project=project)
     if task.group is not None:
         prepared_groups[task.group] = project
     return project
+
+
+# The recency task grades on "the last three days"; the aged corpus puts its
+# gold files RECENT_AGE_DAYS old and everything else DEFAULT_AGE_DAYS old, so
+# any window strictly between the two sees exactly the gold set.
+SEEDED_RECENCY_WINDOW = f"{RECENT_AGE_DAYS + 1}d"
+
+
+def recency_mismatch(recent_relpaths: set[str], expected_relpaths: set[str]) -> str | None:
+    """Describe how the indexed recency window differs from the aged corpus, or None."""
+    if recent_relpaths == expected_relpaths:
+        return None
+    extra = sorted(recent_relpaths - expected_relpaths)
+    missing = sorted(expected_relpaths - recent_relpaths)
+    return f"extra={extra} missing={missing}"
+
+
+def verify_seeded_recency(*, prefix: list[str], env: dict[str, str], project: TaskProject) -> None:
+    """Fail seeding unless the index kept the corpus's aged mtimes.
+
+    The recency task's gold set is TIMESTAMPS. If the index read mtimes after a
+    rewrite, every note is "recent", and the task then fails for a reason that
+    has nothing to do with the surface under test. Checking here turns that
+    into a seeding error with the offending files named, instead of a plausible
+    looking 10/12.
+    """
+    result = run_command(
+        prefix
+        + [
+            "tail",
+            "--project",
+            project.name,
+            "--timeframe",
+            SEEDED_RECENCY_WINDOW,
+            "-n",
+            "100",
+            "--json",
+        ],
+        env=env,
+    )
+    recent = {row["file_path"] for row in json.loads(result.stdout)}
+    mismatch = recency_mismatch(recent, set(TIMESTAMPS))
+    if mismatch is not None:
+        raise RuntimeError(
+            f"seeded project {project.name} does not reflect the corpus's aged mtimes "
+            f"within {SEEDED_RECENCY_WINDOW}: {mismatch}. The index pass read mtimes "
+            "after a rewrite; seed with exactly one index pass after copy_corpus."
+        )
 
 
 def _run_one_task(
