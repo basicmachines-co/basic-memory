@@ -20,6 +20,7 @@ from basic_memory.schemas.response import (
 )
 from basic_memory.schemas.v2.graph import GraphNode, OrphanEntitiesResponse
 from basic_memory.schemas.v2.entity import EntityResolveResponse, EntityResponseV2
+from basic_memory.schemas.v2.accepted_content import AcceptedNoteContentBatchResponse
 
 
 class KnowledgeClient:
@@ -161,6 +162,29 @@ class KnowledgeClient:
                 params=params or None,
             )
         return EntityResponseV2.model_validate(response.json())
+
+    async def get_accepted_note_contents(
+        self,
+        entity_ids: list[str],
+    ) -> AcceptedNoteContentBatchResponse:
+        """Get accepted Markdown for one bounded note batch."""
+        from basic_memory.mcp.tools.utils import call_query
+
+        with logfire.span(
+            "mcp.client.knowledge.get_accepted_note_contents",
+            client_name="knowledge",
+            operation="get_accepted_note_contents",
+            batch_size=len(entity_ids),
+        ):
+            response = await call_query(
+                self.http_client,
+                f"{self._base_path}/entities/batch",
+                json={"entity_ids": entity_ids},
+                client_name="knowledge",
+                operation="get_accepted_note_contents",
+                path_template="/v2/projects/{project_id}/knowledge/entities/batch",
+            )
+        return AcceptedNoteContentBatchResponse.model_validate(response.json())
 
     async def patch_entity(
         self,

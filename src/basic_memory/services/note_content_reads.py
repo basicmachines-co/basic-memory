@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from contextlib import nullcontext
+from dataclasses import dataclass
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -25,6 +28,14 @@ from basic_memory.runtime.note_content import (
     RuntimeNoteContentResource,
     RuntimeNoteContentResponsePayload,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptedNoteContent:
+    """Current accepted Markdown for one project note."""
+
+    external_id: str
+    content: str
 
 
 async def load_note_content_query_view(
@@ -89,6 +100,28 @@ class NoteContentQueryService:
                 entity_external_id=entity_external_id,
             )
         return note_content_response_payload_from_read_view(note_view)
+
+    async def get_accepted_note_content_batch(
+        self,
+        *,
+        project_id: int,
+        entity_external_ids: Sequence[str],
+        session: AsyncSession | None = None,
+    ) -> list[AcceptedNoteContent]:
+        """Load accepted Markdown for several project notes in one database query."""
+        statement = select(NoteContent.external_id, NoteContent.markdown_content).where(
+            NoteContent.project_id == project_id,
+            NoteContent.external_id.in_(entity_external_ids),
+        )
+        if session is None:
+            async with db.scoped_session(self.session_maker) as active_session:
+                rows = (await active_session.execute(statement)).all()
+        else:
+            rows = (await session.execute(statement)).all()
+        return [
+            AcceptedNoteContent(external_id=external_id, content=content)
+            for external_id, content in rows
+        ]
 
     async def get_note_entity_payload_with_read_repair(
         self,
