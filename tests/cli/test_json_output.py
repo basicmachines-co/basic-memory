@@ -23,6 +23,7 @@ from basic_memory.schemas.project_index import (
 
 # Importing registers subcommands on the shared app instance.
 import basic_memory.cli.commands.project as project_cmd  # noqa: F401
+from tests.cli.conftest import make_readiness
 from typing import Any
 
 runner = CliRunner()
@@ -66,11 +67,13 @@ PROJECT_INDEX_STATUS_WITH_FILES = ProjectIndexStatusResponse(
             size=456,
         ),
     ),
+    readiness=make_readiness(files_on_disk=2, indexed_entities=2, files_total=2),
 )
 
 PROJECT_INDEX_STATUS_EMPTY = ProjectIndexStatusResponse(
     total_files=0,
     observed_files=(),
+    readiness=make_readiness(),
 )
 
 VALIDATE_REPORT = {

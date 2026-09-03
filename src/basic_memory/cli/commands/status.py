@@ -1,6 +1,8 @@
 """Status command for basic-memory CLI."""
 
+import asyncio
 import json
+import time
 from typing import Annotated, Optional
 
 import typer
@@ -15,6 +17,7 @@ from basic_memory.config import ConfigManager
 from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.clients import ProjectClient
 from basic_memory.schemas import ProjectIndexStatusResponse
+from basic_memory.schemas.project_readiness import ProjectIndexPhase
 from basic_memory.mcp.project_context import get_active_project
 
 # Create rich console
@@ -52,8 +55,21 @@ def display_project_index_status(
     verbose: bool = False,
 ) -> None:
     """Display project-index observation status using Rich."""
+    readiness = status.readiness
     tree = Tree(f"{project_name}: {title}")
     tree.add(f"{status.total_files} observed file{'s' if status.total_files != 1 else ''}")
+
+    # A file count alone is what let a never-indexed project look finished
+    # (#1414). Lead with the phase, then the per-stage numbers a caller waits on.
+    phase_color = "red" if readiness.phase is ProjectIndexPhase.NEVER_INDEXED else "green"
+    tree.add(f"[{phase_color}]{readiness.describe(project_name)}[/{phase_color}]")
+
+    stages_branch = tree.add("[cyan]Stages[/cyan]")
+    for stage in readiness.stages:
+        stages_branch.add(
+            f"{stage.name}: [bold]{stage.phase}[/bold] "
+            f"({stage.completed}/{stage.total} done, {stage.pending} pending)"
+        )
 
     if verbose and status.observed_files:
         files_branch = tree.add("[cyan]Observed Files[/cyan]")
@@ -68,12 +84,15 @@ async def run_status(
     timeout: float = 30.0,
     poll_interval: float = 0.5,
 ) -> tuple[str, ProjectIndexStatusResponse]:
-    """Fetch current project-index observation status.
+    """Fetch current project-index observation and readiness.
 
-    The event-index flow no longer exposes a pending-change counter. The watcher
-    is the incremental path, and explicit project indexing is a full fanout.
-    ``wait`` is accepted as a compatibility flag and returns the current
-    observation immediately.
+    ``wait`` polls until every readiness stage settles, or until ``timeout``
+    elapses. It used to be a documented no-op because the only signal available
+    was a pending count, which reads zero both when work has drained and when
+    none was ever queued (#1414); the readiness phase now separates those, so
+    waiting can mean something. A never-indexed project will keep the loop
+    running until the timeout, which is the honest answer -- nothing is coming
+    unless something starts an index pass.
 
     Returns (project_name, project_index_status) for the caller to render.
 
@@ -93,13 +112,19 @@ async def run_status(
             project_index_status = await project_client.get_status(project_item.external_id)
             return project_item.name, project_index_status
 
-        logger.debug(
-            "status --wait is a compatibility no-op for event-based project indexing",
-            timeout=timeout,
-            poll_interval=poll_interval,
-        )
-        project_index_status = await project_client.get_status(project_item.external_id)
-        return project_item.name, project_index_status
+        deadline = time.monotonic() + timeout
+        while True:
+            project_index_status = await project_client.get_status(project_item.external_id)
+            if project_index_status.readiness.phase is ProjectIndexPhase.IDLE:
+                return project_item.name, project_index_status
+            if time.monotonic() >= deadline:
+                logger.debug(
+                    "status --wait timed out before the project index settled",
+                    phase=project_index_status.readiness.phase,
+                    timeout=timeout,
+                )
+                return project_item.name, project_index_status
+            await asyncio.sleep(poll_interval)
 
 
 @app.command()
@@ -113,19 +138,21 @@ def status(
     wait: bool = typer.Option(
         False,
         "--wait",
-        help="Compatibility flag; returns the current project-index observation",
+        help="Poll until every readiness stage settles (or --timeout elapses)",
     ),
-    timeout: float = typer.Option(30.0, "--timeout", help="Compatibility option for --wait"),
+    timeout: float = typer.Option(30.0, "--timeout", help="Seconds to wait when --wait is set"),
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
     ),
     cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
 ):
-    """Show current project-index observation status.
+    """Show current project-index observation status and readiness.
 
-    Use --json for machine-readable output.
-    The --wait flag is accepted for compatibility and returns the current
-    project-index observation immediately.
+    Use --json for machine-readable output; `readiness.phase` distinguishes a
+    project that was never indexed from one that is indexed and idle, and
+    `readiness.stages` reports file indexing, relation resolution, and
+    embeddings separately.
+    Use --wait to block until every stage settles.
     Use --local to force local routing when cloud mode is enabled.
     Use --cloud to force cloud routing when cloud mode is disabled.
     """

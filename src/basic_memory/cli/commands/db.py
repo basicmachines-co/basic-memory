@@ -269,6 +269,41 @@ def reset(
                 console.print("[green]Reindex complete[/green]")
 
 
+def run_reindex_command(
+    *,
+    embeddings: bool,
+    search: bool,
+    full: bool,
+    project: str | None,
+) -> None:
+    """Run one reindex invocation, flag resolution included.
+
+    This is the single implementation behind both `bm reindex` and its
+    project-scoped alias `bm project index` (#1414). The alias supplies fixed
+    flags rather than restating what they mean, so the two names cannot drift.
+    """
+    # If neither flag is set, do both
+    if not embeddings and not search:
+        embeddings = True
+        search = True
+
+    config_manager = ConfigManager()
+    app_config = config_manager.config
+
+    if embeddings and not app_config.semantic_search_enabled:
+        console.print(
+            "[yellow]Semantic search is not enabled.[/yellow] "
+            "Set [cyan]semantic_search_enabled: true[/cyan] in config to use embeddings."
+        )
+        embeddings = False
+        if not search:
+            raise typer.Exit(0)
+
+    run_with_cleanup(
+        _reindex(app_config, search=search, embeddings=embeddings, full=full, project=project)
+    )
+
+
 @app.command()
 def reindex(
     embeddings: bool = typer.Option(
@@ -299,26 +334,7 @@ def reindex(
         bm reindex --full --embeddings  # Full re-embed only
         bm reindex -p claw --full   # Full reindex for only the 'claw' project
     """
-    # If neither flag is set, do both
-    if not embeddings and not search:
-        embeddings = True
-        search = True
-
-    config_manager = ConfigManager()
-    app_config = config_manager.config
-
-    if embeddings and not app_config.semantic_search_enabled:
-        console.print(
-            "[yellow]Semantic search is not enabled.[/yellow] "
-            "Set [cyan]semantic_search_enabled: true[/cyan] in config to use embeddings."
-        )
-        embeddings = False
-        if not search:
-            raise typer.Exit(0)
-
-    run_with_cleanup(
-        _reindex(app_config, search=search, embeddings=embeddings, full=full, project=project)
-    )
+    run_reindex_command(embeddings=embeddings, search=search, full=full, project=project)
 
 
 async def _reindex(

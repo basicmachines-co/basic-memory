@@ -25,7 +25,13 @@ from basic_memory.cli.commands.cloud.rclone_commands import (
     SyncProject,
     project_ls,
 )
-from basic_memory.cli.commands.command_utils import get_project_info, run_with_cleanup
+from basic_memory.cli.commands.command_utils import (
+    get_project_info,
+    index_project_and_report_readiness,
+    report_project_readiness,
+    run_with_cleanup,
+)
+from basic_memory.cli.commands.db import run_reindex_command
 from basic_memory.cli.commands.routing import force_routing, validate_routing_flags
 from basic_memory.config import BasicMemoryConfig, ConfigManager, ProjectEntry, ProjectMode
 from basic_memory.mcp.async_client import get_client, resolve_configured_workspace
@@ -752,12 +758,21 @@ def add_project(
         help="Cloud project visibility: workspace (everyone in the workspace) or shared (invite-only)",
     ),
     set_default: bool = typer.Option(False, "--default", help="Set as default project"),
+    no_wait: bool = typer.Option(
+        False,
+        "--no-wait",
+        help="Register the project without indexing it; reads stay empty until you index",
+    ),
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
     ),
     cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
 ) -> None:
-    """Add a new project.
+    """Add a new project, indexing its existing files.
+
+    A local project is indexed before this command returns, so its notes are
+    searchable immediately. Pass --no-wait to skip that for a large directory
+    you would rather index later.
 
     Use --local to force local routing when cloud mode is enabled.
     Use --cloud to force cloud routing when cloud mode is disabled.
@@ -831,7 +846,25 @@ def add_project(
     try:
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(_add_project())
-        console.print(f"[green]{result.message}[/green]")
+            console.print(f"[green]{result.message}[/green]")
+
+            # Trigger: a local project was registered and the caller did not opt out.
+            # Why: registration alone leaves every read surface reporting an empty
+            #   project while the notes sit unindexed on disk, and there is no
+            #   daemon-reachability probe to delegate to -- so index inline, the
+            #   same way MCP's create_memory_project already does (#1414).
+            # Outcome: the project's existing notes are queryable when this returns.
+            if not effective_cloud_mode:
+                if no_wait:
+                    console.print(
+                        "[yellow]Skipped indexing (--no-wait).[/yellow] "
+                        f"Files on disk are not searchable yet — run "
+                        f"[green]bm project index {name}[/green], and check with "
+                        f"[green]bm status --project {name} --json[/green]."
+                    )
+                    run_with_cleanup(report_project_readiness(name))
+                else:
+                    run_with_cleanup(index_project_and_report_readiness(name))
 
         # Trigger: local config needs enough metadata to route future commands back to cloud.
         # Why: explicit workspace selection and local sync state should persist across CLI sessions.
@@ -865,9 +898,33 @@ def add_project(
             console.print("\nNext steps:")
             console.print(f"  1. Preview: bm cloud bisync --name {name} --resync --dry-run")
             console.print(f"  2. Sync: bm cloud bisync --name {name} --resync")
+    except typer.Exit:
+        # run_project_index reports its own failure and exits; re-raise before the
+        # catch-all below rewrites it as "Error adding project", which would blame
+        # the wrong step (the project was created).
+        raise
     except Exception as e:
         console.print(f"[red]Error adding project: {str(e)}[/red]")
         raise typer.Exit(1)
+
+
+@project_app.command("index")
+def index_project_command(
+    name: str = typer.Argument(..., help="Name of the project to index"),
+) -> None:
+    """Index a project's files so its notes become searchable.
+
+    A named alias for `bm reindex --project <name> --full`, calling the same
+    implementation rather than restating its flags (#1414). It covers embeddings
+    as well as the search index: this is the command that `project add` and
+    `bm status` name as the remedy for a not-yet-indexed project, so it has to
+    reach the ready state they promise. A search-only pass would leave the
+    embeddings stage pending and the advice self-defeating.
+
+    `run_reindex_command` still drops embeddings with an explanation when
+    semantic search is disabled, exactly as a bare `bm reindex` does.
+    """
+    run_reindex_command(embeddings=True, search=True, full=True, project=name)
 
 
 @project_app.command("remove")

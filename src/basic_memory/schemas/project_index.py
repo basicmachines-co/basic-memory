@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
+from basic_memory.schemas.project_readiness import ProjectIndexReadiness
+
 if TYPE_CHECKING:
     from basic_memory.index.project_indexing import ProjectIndexObservation
     from basic_memory.indexing.project_index_coordinator import ProjectIndexCoordinatorResult
@@ -18,17 +20,25 @@ class ProjectIndexObservedFileResponse(BaseModel):
 
 
 class ProjectIndexStatusResponse(BaseModel):
-    """Current project-index observation for a local project."""
+    """Current project-index observation for a local project.
+
+    ``total_files`` is a live filesystem count and says nothing about what was
+    indexed; ``readiness`` is the part a caller waits on (#1414).
+    """
 
     total_files: int = Field(description="Number of files observed for project indexing")
     observed_files: tuple[ProjectIndexObservedFileResponse, ...] = Field(
         description="Files observed by the project-index runtime"
+    )
+    readiness: ProjectIndexReadiness = Field(
+        description="Whether the index can be trusted, and what each stage still owes"
     )
 
     @classmethod
     def from_observation(
         cls,
         observation: "ProjectIndexObservation",
+        readiness: ProjectIndexReadiness,
     ) -> "ProjectIndexStatusResponse":
         return cls(
             total_files=observation.total_files,
@@ -40,6 +50,7 @@ class ProjectIndexStatusResponse(BaseModel):
                 )
                 for file in observation.observed_files
             ),
+            readiness=readiness,
         )
 
 

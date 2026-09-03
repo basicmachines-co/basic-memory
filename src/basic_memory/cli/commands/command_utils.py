@@ -97,6 +97,42 @@ async def run_project_index(
         raise typer.Exit(1)
 
 
+async def report_project_readiness(project: str) -> None:
+    """Print the honest one-line index state for a project.
+
+    Silent emptiness was the original failure (#1414): an agent read a project
+    that looked finished and concluded it held nothing. A read that cannot be
+    trusted has to say so, so this prints the state rather than nothing. The
+    wording comes from `ProjectIndexReadiness.describe`, the same method
+    `bm status` renders, so the two cannot drift.
+    """
+    # Deferred: ToolError lives in FastMCP's runtime, which must not load at CLI startup (#886).
+    from fastmcp.exceptions import ToolError
+
+    try:
+        async with get_client(project_name=project) as client:
+            project_item = await get_active_project(client, project, None)
+            status = await ProjectClient(client).get_status(project_item.external_id)
+    except (ToolError, ValueError) as e:
+        # Trigger: readiness could not be read (project vanished, routing error).
+        # Why: this is a reporting courtesy after work that already succeeded.
+        # Outcome: say so and leave the caller's exit status alone.
+        console.print(f"[yellow]Could not read index status: {e}[/yellow]")
+        return
+    console.print(f"[dim]{project_item.name}: {status.readiness.describe(project_item.name)}[/dim]")
+
+
+async def index_project_and_report_readiness(project: str) -> None:
+    """Index a project, then say what state that left it in.
+
+    One coroutine so the caller opens the database once for both steps:
+    `run_with_cleanup` shuts the engine down on exit, so a second call would pay
+    the reconnect and the migration check over again.
+    """
+    await run_project_index(project, force_full=True, run_in_background=False)
+    await report_project_readiness(project)
+
+
 async def get_project_info(project: str):
     """Get project information via API endpoint."""
     # Deferred: ToolError lives in FastMCP's runtime, which must not load at CLI startup (#886).
