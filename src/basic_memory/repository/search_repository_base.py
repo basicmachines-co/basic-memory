@@ -668,28 +668,41 @@ class SearchRepositoryBase(ABC):
         if not deferred_entity_ids and not completed_entity_ids:
             return
 
+        # Chunked at the same bound vector hydration uses. `reindex_vectors`
+        # hands every entity in the project to one batch, so an unchunked IN list
+        # is one bind per entity and blows the driver's parameter cap on a large
+        # project -- asyncpg stops at 32767. That would raise *after* the
+        # embedding work succeeded, failing the `bm reindex` that #1414 tells
+        # users to run, on exactly the projects indexing matters most for.
+        #
+        # Every chunk shares one transaction, so a failure part-way through rolls
+        # back all of them rather than leaving some entities marked and others
+        # not. Losing the whole update is safe: the markers are derived state, so
+        # the next sync pass recomputes and rewrites them. A half-applied update
+        # would not be -- readiness would report a mix of stale and current
+        # markers with nothing to reconcile them.
         async with db.scoped_session(self.session_maker) as session:
             for entity_ids, deferred_at in (
                 (sorted(deferred_entity_ids), datetime.now(timezone.utc)),
                 (sorted(completed_entity_ids), None),
             ):
-                if not entity_ids:
-                    continue
-                placeholders = ", ".join(f":entity_id_{index}" for index in range(len(entity_ids)))
-                params: dict[str, object] = {
-                    "project_id": self.project_id,
-                    "deferred_at": deferred_at,
-                }
-                params.update(
-                    {f"entity_id_{index}": entity_id for index, entity_id in enumerate(entity_ids)}
-                )
-                await session.execute(
-                    text(
-                        "UPDATE entity SET vector_sync_deferred_at = :deferred_at "
-                        f"WHERE project_id = :project_id AND id IN ({placeholders})"
-                    ),
-                    params,
-                )
+                for start in range(0, len(entity_ids), VECTOR_HYDRATION_BATCH_SIZE):
+                    chunk = entity_ids[start : start + VECTOR_HYDRATION_BATCH_SIZE]
+                    placeholders = ", ".join(f":entity_id_{index}" for index in range(len(chunk)))
+                    params: dict[str, object] = {
+                        "project_id": self.project_id,
+                        "deferred_at": deferred_at,
+                    }
+                    params.update(
+                        {f"entity_id_{index}": entity_id for index, entity_id in enumerate(chunk)}
+                    )
+                    await session.execute(
+                        text(
+                            "UPDATE entity SET vector_sync_deferred_at = :deferred_at "
+                            f"WHERE project_id = :project_id AND id IN ({placeholders})"
+                        ),
+                        params,
+                    )
             await session.commit()
 
     async def _hydrate_vector_matches(
