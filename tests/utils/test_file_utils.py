@@ -720,3 +720,18 @@ async def test_format_file_handles_a_path_containing_a_quote(tmp_path: Path):
     result = await format_file(test_file, config)
 
     assert result == original_content
+
+
+def test_remove_frontmatter_keeps_a_fenced_block_that_is_not_a_yaml_mapping():
+    """A letterhead between horizontal rules, a bare scalar, or a list is body, not
+    frontmatter; no frontmatter reader accepts it, so search must not lose it (#1451)."""
+    letterhead = "---\n**ACME LEGAL PLLC**\n123 Main St\n---\n\nDear counsel,\n"
+    scalar = "---\nACME LEGAL PLLC\n---\n\nDear counsel,\n"
+    listing = "---\n- one\n- two\n---\n\nDear counsel,\n"
+
+    assert remove_frontmatter(letterhead) == letterhead.strip()
+    assert remove_frontmatter(scalar) == scalar.strip()
+    assert remove_frontmatter(listing) == listing.strip()
+    assert remove_frontmatter(scalar, strip=False) == scalar
+    # An empty block is still frontmatter: every reader accepts it as {}.
+    assert remove_frontmatter("---\n---\n\nbody\n") == "body"
