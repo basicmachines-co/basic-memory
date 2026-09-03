@@ -366,6 +366,7 @@ def curate_conversation(
     conversation: BeamConversation,
     *,
     group_id: str,
+    chat_sha256: str,
     config: CurationConfig,
     prefix: list[str],
     runner: LLMRunner,
@@ -443,32 +444,44 @@ def curate_conversation(
         stats.doc_count = len(stats.docs_sha256)
     stats.wall_seconds = round(time.monotonic() - started, 2)
     if stats.error is None:
-        write_curation_record(config, stats)
+        write_curation_record(config, stats, chat_sha256=chat_sha256)
     return stats
 
 
-def write_curation_record(config: CurationConfig, stats: ConversationCurationStats) -> None:
-    record = {
+def resume_key(config: CurationConfig, chat_sha256: str) -> dict[str, Any]:
+    """Every input that changes a group's curated output.
+
+    A record is reusable only when all of these match the current run: the
+    curator and its sampling temperature, the prompt, the note cap, and the
+    exact source chat the conversation was curated from. Anything else would
+    let a rebuilt manifest advertise settings its docs were not produced under.
+    """
+    return {
         "curator_model_spec": config.model_spec,
+        "curator_temperature": config.model_temperature,
         "curator_prompt_sha256": prompt_sha256(),
         "max_notes_per_session": config.max_notes_per_session,
-        "stats": asdict(stats),
+        "chat_sha256": chat_sha256,
     }
+
+
+def write_curation_record(
+    config: CurationConfig, stats: ConversationCurationStats, *, chat_sha256: str
+) -> None:
+    record = {"key": resume_key(config, chat_sha256), "stats": asdict(stats)}
     path = config.output_dir / "groups" / stats.group_id / CURATION_RECORD
     path.write_text(json.dumps(record, indent=2), encoding="utf-8")
 
 
-def load_curation_record(config: CurationConfig, group_id: str) -> ConversationCurationStats | None:
-    """A finished group's stats, only when it was curated with this curator and prompt."""
+def load_curation_record(
+    config: CurationConfig, group_id: str, *, chat_sha256: str
+) -> ConversationCurationStats | None:
+    """A finished group's stats, only when its resume key matches this run exactly."""
     path = config.output_dir / "groups" / group_id / CURATION_RECORD
     if not path.exists():
         return None
     record = json.loads(path.read_text(encoding="utf-8"))
-    if (
-        record.get("curator_model_spec") != config.model_spec
-        or record.get("curator_prompt_sha256") != prompt_sha256()
-        or record.get("max_notes_per_session") != config.max_notes_per_session
-    ):
+    if record.get("key") != resume_key(config, chat_sha256):
         return None
     docs_dir = config.output_dir / "groups" / group_id / "docs"
     stats = ConversationCurationStats(**record["stats"])
@@ -538,6 +551,9 @@ def curate_beam(
     raw_dataset_id = str(manifest["dataset_id"])
     dataset_id = f"{raw_dataset_id}-curated"
     raw_queries = json.loads((config.input_dir / "queries.json").read_text(encoding="utf-8"))
+    chat_sha_by_conversation = {
+        str(row["conversation_id"]): str(row["chat_sha256"]) for row in manifest["conversations"]
+    }
 
     conversations = _select_conversations(load_beam_tier(dataset_root, tier), config)
     prefix = resolve_bm_command_prefix(config.bm_local_path)
@@ -549,8 +565,9 @@ def curate_beam(
     def curate_one(conversation: BeamConversation) -> ConversationCurationStats:
         # Same group ids as the raw dataset, so query ids line up row for row.
         group_id = f"{raw_dataset_id}-c{int(conversation.conversation_id):02d}"
+        chat_sha256 = chat_sha_by_conversation[conversation.conversation_id]
         if config.resume:
-            finished = load_curation_record(config, group_id)
+            finished = load_curation_record(config, group_id, chat_sha256=chat_sha256)
             if finished is not None:
                 progress(f"resuming {group_id}: {finished.doc_count} docs already curated")
                 return finished
@@ -558,6 +575,7 @@ def curate_beam(
         stats = curate_conversation(
             conversation,
             group_id=group_id,
+            chat_sha256=chat_sha256,
             config=config,
             prefix=prefix,
             runner=curator,

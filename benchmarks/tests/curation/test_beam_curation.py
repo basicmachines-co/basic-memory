@@ -12,6 +12,7 @@ from mcp.types import CallToolResult
 
 import basic_memory_benchmarks.curation.beam as curation
 from basic_memory_benchmarks.converters.beam_to_corpus import convert_beam_to_corpus
+from basic_memory_benchmarks.datasets.beam import load_beam_tier
 from basic_memory_benchmarks.curation.beam import (
     CURATOR_PROMPT_TEMPLATE,
     MAX_INDEX_CHARS,
@@ -266,8 +267,6 @@ def test_a_curator_transport_failure_excludes_that_conversation_only(
     replies: list[str | Callable[[], str]] = []
     raw_manifest = json.loads((tmp_path / "raw" / "conversion.json").read_text())
     assert [row["conversation_id"] for row in raw_manifest["conversations"]] == ["1", "2"]
-    from basic_memory_benchmarks.datasets.beam import load_beam_tier
-
     sessions_one = sum(len(b.turns) for b in load_beam_tier(tmp_path / "chats", "100K")[0].batches)
     replies.extend(['{"notes": []}'] * sessions_one)
     replies.append(boom)
@@ -432,11 +431,36 @@ def test_resume_reuses_finished_groups_and_recurates_on_prompt_or_model_change(
     assert manifest["totals"]["conversations"] == 2
     assert manifest["converter"]["resume"] is True
 
-    # A different curator spec invalidates the records: everything is curated again.
-    third = ScriptedRunner([])
+    # Any input that changes the output invalidates the records: curator spec,
+    # temperature, note cap, and the source chat itself. Each one alone
+    # curates everything again.
+    for overrides in (
+        {"model_spec": "scripted:other"},
+        {"model_temperature": 0.3},
+        {"max_notes_per_session": 3},
+    ):
+        runner = ScriptedRunner([])
+        curate_beam(
+            _config(tmp_path, resume=True, **overrides),
+            runner=runner,
+            writer_factory=lambda p, e, d: FileWriter(d),
+        )
+        assert len(runner.prompts) == calls_first, overrides
+        # restore the baseline records for the next case
+        curate_beam(
+            _config(tmp_path),
+            runner=ScriptedRunner([]),
+            writer_factory=lambda p, e, d: FileWriter(d),
+        )
+
+    # A regenerated raw input with different chat content is a different source.
+    raw_manifest_path = tmp_path / "raw" / "conversion.json"
+    raw_manifest = json.loads(raw_manifest_path.read_text())
+    raw_manifest["conversations"][0]["chat_sha256"] = "0" * 64
+    raw_manifest_path.write_text(json.dumps(raw_manifest))
+    fourth = ScriptedRunner([])
     curate_beam(
-        _config(tmp_path, resume=True, model_spec="scripted:other"),
-        runner=third,
-        writer_factory=lambda p, e, d: FileWriter(d),
+        _config(tmp_path, resume=True), runner=fourth, writer_factory=lambda p, e, d: FileWriter(d)
     )
-    assert len(third.prompts) == calls_first
+    sessions_one = sum(len(b.turns) for b in load_beam_tier(tmp_path / "chats", "100K")[0].batches)
+    assert len(fourth.prompts) == sessions_one
