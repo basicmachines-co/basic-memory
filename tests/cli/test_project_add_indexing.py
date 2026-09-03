@@ -53,6 +53,17 @@ def _pristine_env(home: Path) -> dict[str, str]:
         BASIC_MEMORY_HOME=str(home / "basic-memory"),
         BASIC_MEMORY_CONFIG_DIR=str(home / ".basic-memory"),
         BASIC_MEMORY_NO_PROMOS="1",
+        # Rich falls back to 80 columns with no tty and would wrap the guidance
+        # lines these tests match on. Pin a wide terminal so the assertions
+        # describe the message rather than the runner's window.
+        COLUMNS="240",
+        LINES="60",
+        # fastembed is a core dependency, so semantic search is on by default and
+        # an index pass would download an embedding model onto the runner. These
+        # tests are about index-on-add and the readiness phases, not embeddings;
+        # the embeddings stage settles at 0/0 with this off, and the stage's own
+        # counting is covered in tests/services/test_project_readiness.py.
+        BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED="false",
     )
     return env
 
