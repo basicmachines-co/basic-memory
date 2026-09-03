@@ -19,14 +19,18 @@ import pytest
 
 import basic_memory.mcp.async_client as async_client
 import basic_memory.mcp.project_context as project_context
+from basic_memory.config import ConfigManager
 from basic_memory.config_models import ProjectEntry
 from basic_memory.mcp.project_context import (
     AddressableProject,
+    DetectedProjectRoute,
     ProjectPathRoute,
     ProjectPrefixConflictError,
     AmbiguousMountError,
     UnqualifiedPathRefusedError,
     _agreed_route_project,
+    detect_project_from_identifier_prefix,
+    invalidate_project_caches,
     resolve_project_path_route,
     resolve_workspace_project_identifier,
     resolve_workspace_qualified_identifier,
@@ -535,10 +539,16 @@ async def test_env_constraint_prevents_refusal_for_empty_input(multi_project_con
 
 @dataclass
 class _CloudSession:
-    """What a stood-up cloud session exposes to a test."""
+    """What a stood-up cloud session exposes to a test.
+
+    ``tenant`` is the live listing the fake client serves, so a test can add or
+    remove a project the way create_memory_project/delete_project do and then
+    assert what the session sees next. ``projects`` is the set it started with.
+    """
 
     projects: tuple[ProjectItem, ...]
     listings: list[ProjectList]
+    tenant: list[ProjectItem]
 
 
 def _routes_to_project(route: ProjectPathRoute, permalink: str) -> bool:
@@ -584,7 +594,7 @@ def cloud_session(monkeypatch, config_manager):
             )
             for index, name in enumerate(names)
         )
-        project_list = ProjectList(projects=list(projects), default_project=default)
+        tenant = list(projects)
         workspace = WorkspaceInfo(
             tenant_id="team-tenant",
             workspace_type="organization",
@@ -601,6 +611,7 @@ def cloud_session(monkeypatch, config_manager):
             yield object()
 
         async def fake_list_projects(self) -> ProjectList:
+            project_list = ProjectList(projects=list(tenant), default_project=default)
             listings.append(project_list)
             return project_list
 
@@ -618,9 +629,126 @@ def cloud_session(monkeypatch, config_manager):
             "get_available_workspaces",
             fake_get_available_workspaces,
         )
-        return _CloudSession(projects=projects, listings=listings)
+        return _CloudSession(projects=projects, listings=listings, tenant=tenant)
 
     return build
+
+
+# --- project lifecycle inside one session ---
+# The session's project listing is memoized per MCP request, and a hosted
+# session's request can outlive a project lifecycle change: an agent calls
+# `ls "/"`, then create_memory_project, then addresses the new project. That
+# snapshot decides which first segment names a project, so it has to be part of
+# what "a project changed" invalidates (#1432 review).
+
+
+@pytest.mark.asyncio
+async def test_project_created_mid_session_is_addressable_without_a_restart(cloud_session):
+    """A project created after the mount snapshot is addressable immediately.
+
+    invalidate_project_caches cleared the active project and the workspace
+    index, but not the session listing, so `ls "/"` kept advertising the old
+    mount table and a plain '<new-project>/path' prefix went undetected —
+    falling through to the default project instead.
+    """
+    session = cloud_session("research", default="research")
+    context = ContextState()
+    config = ConfigManager().config
+
+    advertised = await ls("/", context=ctx(context))
+    assert {node["name"] for node in advertised["nodes"]} == {"research"}
+
+    # What create_memory_project does: the tenant serves the new project, and
+    # the tool invalidates this session's project caches.
+    session.tenant.append(
+        ProjectItem(
+            id=len(session.tenant) + 1,
+            external_id="new-project-external-id",
+            name="new-project",
+            path="/app/data/new-project",
+            is_default=False,
+        )
+    )
+    await invalidate_project_caches(ctx(context))
+
+    advertised = await ls("/", context=ctx(context))
+    assert {node["name"] for node in advertised["nodes"]} == {"new-project", "research"}
+
+    route = await resolve_project_path_route(
+        "new-project/notes/x", project=None, project_id=None, context=ctx(context)
+    )
+    assert route == ProjectPathRoute(
+        project="new-project",
+        path="notes/x",
+        stripped=True,
+        project_id="new-project-external-id",
+    )
+
+    detected = await detect_project_from_identifier_prefix(
+        "new-project/notes/x", config, context=ctx(context)
+    )
+    assert detected == DetectedProjectRoute(
+        project="new-project", project_id="new-project-external-id"
+    )
+
+
+@pytest.mark.asyncio
+async def test_project_deleted_mid_session_stops_resolving(cloud_session):
+    """A deleted project stops being a route rather than keeping its dead id.
+
+    The stale snapshot kept answering with the removed project's external_id,
+    so a plain prefix routed to a UUID the tenant no longer serves.
+    """
+    session = cloud_session("research", "doomed", default="research")
+    context = ContextState()
+    config = ConfigManager().config
+
+    assert await detect_project_from_identifier_prefix(
+        "doomed/notes/x", config, context=ctx(context)
+    ) == DetectedProjectRoute(project="doomed", project_id="doomed-external-id")
+
+    session.tenant[:] = [item for item in session.tenant if item.name != "doomed"]
+    await invalidate_project_caches(ctx(context))
+
+    assert (
+        await detect_project_from_identifier_prefix("doomed/notes/x", config, context=ctx(context))
+        is None
+    )
+    advertised = await ls("/", context=ctx(context))
+    assert {node["name"] for node in advertised["nodes"]} == {"research"}
+
+
+@pytest.mark.asyncio
+async def test_workspace_metadata_survives_a_project_lifecycle_change(cloud_session):
+    """Only project-shaped caches are cleared.
+
+    ``active_workspace`` and ``available_workspaces`` hold tenant id, slug and
+    type — which no project create or delete changes, and which no MCP tool can
+    change at all, since none creates or deletes a workspace. Dropping them
+    would cost a control-plane round trip per project change for nothing.
+    """
+    cloud_session("research", default="research")
+    context = ContextState()
+    workspace = WorkspaceInfo(
+        tenant_id="team-tenant",
+        workspace_type="organization",
+        slug="team",
+        name="Team",
+        role="editor",
+        is_default=True,
+    )
+    await context.set_state("active_workspace", workspace.model_dump())
+    await context.set_state("available_workspaces", [workspace.model_dump()])
+
+    await invalidate_project_caches(ctx(context))
+
+    assert await context.get_state("active_workspace") == workspace.model_dump()
+    assert await context.get_state("available_workspaces") == [workspace.model_dump()]
+    # ...while every cache that holds projects is gone.
+    assert await context.get_state("active_project") is None
+    assert await context.get_state("default_project_name") is None
+    assert await context.get_state("workspace_project_index") is None
+    assert await context.get_state("session_project_list") is None
 
 
 @pytest.mark.asyncio
