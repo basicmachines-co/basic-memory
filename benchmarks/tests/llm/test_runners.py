@@ -50,7 +50,7 @@ class TestCreateRunner:
 
 
 class TestClaudeCLIRunner:
-    def _completed(self, payload: dict, returncode: int = 0) -> subprocess.CompletedProcess:
+    def _completed(self, payload: object, returncode: int = 0) -> subprocess.CompletedProcess:
         return subprocess.CompletedProcess(
             args=[], returncode=returncode, stdout=json.dumps(payload), stderr=""
         )
@@ -78,6 +78,44 @@ class TestClaudeCLIRunner:
         assert captured["input"] == "What is the capital of France?"
         assert "--max-turns" in captured["command"]
         assert "claude-haiku-4-5" in captured["command"]
+
+    def test_parses_the_event_array_claude_code_2_1_prints(self, monkeypatch):
+        """`--output-format json` became an array of session events; the result
+        record is the one that carries the answer and usage. The earlier object
+        shape (above) must keep working alongside."""
+        events = [
+            {"type": "system", "cwd": "/tmp"},
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "Paris"}]}},
+            {"type": "rate_limit_event", "rate_limit_info": {}},
+            {
+                "type": "result",
+                "is_error": False,
+                "result": "Paris",
+                "usage": {"input_tokens": 9, "output_tokens": 23},
+            },
+        ]
+        monkeypatch.setattr(subprocess, "run", lambda command, **kwargs: self._completed(events))
+        result = ClaudeCLIRunner(model="claude-sonnet-4-6").complete("capital?")
+
+        assert result.text == "Paris"
+        assert result.input_tokens == 9
+        assert result.output_tokens == 23
+
+    def test_unexpected_output_shape_is_a_runner_error_not_a_crash(self, monkeypatch):
+        """A judge that cannot be parsed must surface as LLMRunnerError, which the
+        harness records against the task; an AttributeError escaped and aborted a
+        whole xAFS run."""
+        monkeypatch.setattr(
+            subprocess,
+            "run",
+            lambda command, **kwargs: self._completed([{"type": "system"}, {"type": "assistant"}]),
+        )
+        with pytest.raises(LLMRunnerError, match="0 result events"):
+            ClaudeCLIRunner(model="claude-sonnet-4-6", max_retries=0).complete("hello")
+
+        monkeypatch.setattr(subprocess, "run", lambda command, **kwargs: self._completed(42))
+        with pytest.raises(LLMRunnerError, match="expected an object or array"):
+            ClaudeCLIRunner(model="claude-sonnet-4-6", max_retries=0).complete("hello")
 
     def test_error_payload_raises_after_retries(self, monkeypatch):
         attempts = {"count": 0}
