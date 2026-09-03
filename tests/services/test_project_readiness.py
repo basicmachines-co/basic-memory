@@ -6,6 +6,7 @@ the honest state wording, and the per-stage counts against a real database.
 """
 
 from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 from sqlalchemy import text
@@ -711,3 +712,219 @@ async def test_marker_updates_are_one_transaction(
         ).scalar()
 
     assert marked == 0
+
+
+# --- Drainability: nothing is counted that no pass will act on ---
+
+
+async def _create_entity(entity_repository, session_maker, *, title: str, slug: str) -> Any:
+    async with db.scoped_session(session_maker) as session:
+        return await entity_repository.create(
+            session,
+            {
+                "project_id": entity_repository.project_id,
+                "title": title,
+                "note_type": "test",
+                "permalink": f"test/{slug}",
+                "file_path": f"test/{slug}.md",
+                "content_type": "text/markdown",
+                "created_at": datetime.now(UTC),
+                "updated_at": datetime.now(UTC),
+            },
+        )
+
+
+async def _create_unresolved_relation(
+    session_maker, *, project_id: int, from_id: int, to_name: str
+) -> None:
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(
+            text(
+                "INSERT INTO relation (project_id, from_id, to_id, to_name, relation_type) "
+                "VALUES (:project_id, :from_id, NULL, :to_name, 'relates_to')"
+            ),
+            {"project_id": project_id, "from_id": from_id, "to_name": to_name},
+        )
+
+
+@pytest.mark.asyncio
+async def test_an_ambiguous_title_link_is_not_counted_as_pending(
+    readiness_service, test_project, entity_repository, session_maker
+):
+    """A link no pass will ever wire up is not pending work.
+
+    `BulkLinkResolver.resolve_strict` refuses a title matching more than one
+    note, so nothing drains this count. Counting it left the project PENDING
+    forever and `status --wait` timing out on work that would never happen --
+    the same shape as counting an `embed: false` note as owed.
+    """
+    source = await _create_entity(entity_repository, session_maker, title="Source", slug="source")
+    # Two notes share a title, so the title is ambiguous and unresolvable.
+    await _create_entity(entity_repository, session_maker, title="Twin", slug="twin-one")
+    await _create_entity(entity_repository, session_maker, title="Twin", slug="twin-two")
+    await _create_unresolved_relation(
+        session_maker, project_id=test_project.id, from_id=source.id, to_name="Twin"
+    )
+
+    readiness = await readiness_service.readiness_for(test_project, ())
+
+    assert readiness.stage(ProjectIndexStageName.RELATIONS).pending == 0
+
+
+@pytest.mark.asyncio
+async def test_an_unambiguous_title_link_is_still_counted_as_pending(
+    readiness_service, test_project, entity_repository, session_maker
+):
+    """The exclusion must not swallow the case the feature exists for."""
+    source = await _create_entity(entity_repository, session_maker, title="Source", slug="source")
+    await _create_entity(entity_repository, session_maker, title="Only One", slug="only-one")
+    await _create_unresolved_relation(
+        session_maker, project_id=test_project.id, from_id=source.id, to_name="Only One"
+    )
+
+    readiness = await readiness_service.readiness_for(test_project, ())
+
+    assert readiness.stage(ProjectIndexStageName.RELATIONS).pending == 1
+
+
+@pytest.mark.asyncio
+async def test_a_permalink_link_is_counted_even_when_titles_collide(
+    readiness_service, test_project, entity_repository, session_maker
+):
+    """Permalinks are unique, so a permalink match is never ambiguous."""
+    source = await _create_entity(entity_repository, session_maker, title="Source", slug="source")
+    await _create_entity(entity_repository, session_maker, title="Twin", slug="twin-one")
+    await _create_entity(entity_repository, session_maker, title="Twin", slug="twin-two")
+    await _create_unresolved_relation(
+        session_maker, project_id=test_project.id, from_id=source.id, to_name="test/twin-one"
+    )
+
+    readiness = await readiness_service.readiness_for(test_project, ())
+
+    assert readiness.stage(ProjectIndexStageName.RELATIONS).pending == 1
+
+
+# --- The drainability matrix ---
+#
+# One property, stated once and checked over every shape these reviews found:
+#
+#   Something counted as pending must be drainable by a pass, and something no
+#   pass will act on must not be counted.
+#
+# Both halves have failed in this PR. Stale-identity chunks and a deferred entity
+# were *not* counted though a pass would fix them, so readiness said IDLE while
+# retrieval returned nothing. An `embed: false` note and an ambiguous-title link
+# *were* counted though nothing would ever act on them, so the project could not
+# leave PENDING and `status --wait` timed out. A new shape needs a row here.
+
+DRAINS = "a pass will act on it"
+NEVER_DRAINS = "no pass will ever act on it"
+
+
+async def _seed_relation_shape(shape: str, entity_repository, session_maker, project_id: int):
+    source = await _create_entity(entity_repository, session_maker, title="Source", slug="source")
+    if shape == "dangling":
+        target_name = "Nothing Named This"
+    elif shape == "ambiguous_title":
+        await _create_entity(entity_repository, session_maker, title="Twin", slug="twin-one")
+        await _create_entity(entity_repository, session_maker, title="Twin", slug="twin-two")
+        target_name = "Twin"
+    elif shape == "unique_title":
+        await _create_entity(entity_repository, session_maker, title="Only One", slug="only-one")
+        target_name = "Only One"
+    else:
+        assert shape == "permalink"
+        await _create_entity(entity_repository, session_maker, title="Target", slug="target")
+        target_name = "test/target"
+    await _create_unresolved_relation(
+        session_maker, project_id=project_id, from_id=source.id, to_name=target_name
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("shape", "drainability"),
+    [
+        ("dangling", NEVER_DRAINS),
+        ("ambiguous_title", NEVER_DRAINS),
+        ("unique_title", DRAINS),
+        ("permalink", DRAINS),
+    ],
+)
+async def test_relations_counted_pending_are_exactly_the_drainable_ones(
+    shape, drainability, readiness_service, test_project, entity_repository, session_maker
+):
+    await _seed_relation_shape(shape, entity_repository, session_maker, test_project.id)
+
+    readiness = await readiness_service.readiness_for(test_project, ())
+    pending = readiness.stage(ProjectIndexStageName.RELATIONS).pending
+
+    if drainability is DRAINS:
+        assert pending == 1, f"{shape}: a pass would resolve this and it was not counted"
+    else:
+        assert pending == 0, f"{shape}: nothing drains this, so a waiter would never finish"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("shape", "drainability"),
+    [
+        ("no_chunks", DRAINS),
+        ("stale_model", DRAINS),
+        ("pending_status", DRAINS),
+        ("deferred", DRAINS),
+        ("current", NEVER_DRAINS),
+        ("embed_false", NEVER_DRAINS),
+    ],
+)
+async def test_embeddings_counted_pending_are_exactly_the_drainable_ones(
+    shape,
+    drainability,
+    readiness_service,
+    test_project,
+    sample_entity,
+    app_config,
+    engine_factory,
+    session_maker,
+):
+    """`current` and `embed_false` are "never drains" in the sense that matters here.
+
+    Neither has outstanding work: one is finished, the other opted out. Counting
+    either would park the stage in PENDING with nothing able to clear it.
+    """
+    _, maker = engine_factory
+    app_config.semantic_search_enabled = True
+
+    if shape in {"stale_model", "pending_status", "deferred", "current"}:
+        await _insert_chunk(
+            maker,
+            entity_id=sample_entity.id,
+            project_id=test_project.id,
+            app_config=app_config,
+            embedding_model="RetiredProvider:old:384" if shape == "stale_model" else None,
+            embedding_status="pending" if shape == "pending_status" else "ready",
+        )
+    if shape == "deferred":
+        async with db.scoped_session(maker) as session:
+            await session.execute(
+                text("UPDATE entity SET vector_sync_deferred_at = :now WHERE id = :id"),
+                {"now": datetime.now(UTC), "id": sample_entity.id},
+            )
+    if shape == "embed_false":
+        async with db.scoped_session(maker) as session:
+            await session.execute(
+                text("UPDATE entity SET entity_metadata = :meta WHERE id = :id"),
+                {"meta": '{"embed": "false"}', "id": sample_entity.id},
+            )
+
+    readiness = await readiness_service.readiness_for(test_project, ())
+    embeddings = readiness.stage(ProjectIndexStageName.EMBEDDINGS)
+
+    if drainability is DRAINS:
+        assert embeddings.pending == 1, (
+            f"{shape}: a sync pass would fix this and it was not counted"
+        )
+    else:
+        assert embeddings.pending == 0, (
+            f"{shape}: nothing drains this, so a waiter would never finish"
+        )

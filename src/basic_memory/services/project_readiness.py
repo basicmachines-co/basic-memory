@@ -177,26 +177,48 @@ class ProjectReadinessService:
     ) -> int:
         """Count forward references a resolution pass would still wire up.
 
-        A wikilink whose target does not exist is deliberately excluded. No pass
-        will ever resolve it, so counting it would leave every ordinary
-        knowledge base permanently PENDING and make IDLE unreachable -- the
-        vacuous-ready bug inverted. What remains is the state the #1414 report
-        actually hit: a link to a note that *does* exist, written moments ago,
-        whose resolution has not run yet.
+        The invariant, which every count in this file has to satisfy: **anything
+        reported as pending must be drainable by some pass.** A number no pass
+        can reduce is not pending work -- it is a fact about the graph -- and a
+        waiter that blocks on it waits forever. This predicate therefore has to
+        ask the question the resolver asks, not a question that merely resembles
+        it.
 
-        Targets are matched on title or permalink, the two forms a wikilink is
-        authored in. The resolver's own matching is broader, so this is a lower
-        bound on resolvable references; a link that only the fuzzy matcher would
-        catch settles one pass later than this reports.
+        Two kinds of unresolved link are excluded for that reason:
+
+        - A link whose target does not exist. No pass creates the target, so
+          counting it would leave every ordinary knowledge base permanently
+          PENDING and make IDLE unreachable.
+        - A link whose title matches more than one note.
+          `BulkLinkResolver.resolve_strict` deliberately refuses an ambiguous
+          title (`ambiguous_title = len(title_matches) > 1`, and the title branch
+          only returns when exactly one matches), so no pass will ever wire it
+          up either.
+
+        What remains is the state the #1414 report hit: a link to a note that
+        does exist and resolves unambiguously, written moments ago, whose
+        resolution has not run yet.
+
+        Permalinks are unique, so a permalink match is never ambiguous. The
+        resolver's matching is broader than these two forms, so this stays a
+        lower bound: a link only its fuzzy path would catch settles one pass
+        later than reported, which errs toward IDLE rather than toward a wait
+        that cannot end.
         """
         result = await session.execute(
             text(
                 "SELECT COUNT(*) FROM relation r "
                 "JOIN entity e ON r.from_id = e.id "
                 "WHERE e.project_id = :project_id AND r.to_id IS NULL "
-                "AND EXISTS ("
-                "  SELECT 1 FROM entity t WHERE t.project_id = :project_id "
-                "  AND (t.title = r.to_name OR t.permalink = r.to_name)"
+                "AND ("
+                "  EXISTS ("
+                "    SELECT 1 FROM entity t WHERE t.project_id = :project_id "
+                "    AND t.permalink = r.to_name"
+                "  )"
+                "  OR ("
+                "    SELECT COUNT(*) FROM entity t WHERE t.project_id = :project_id "
+                "    AND t.title = r.to_name"
+                "  ) = 1"
                 ")"
             ),
             {"project_id": project_id},
