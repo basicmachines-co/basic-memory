@@ -906,6 +906,65 @@ async def test_batch_indexer_indexes_a_letterhead_between_rules_as_body(
 
 
 @pytest.mark.asyncio
+async def test_batch_indexer_keeps_a_scalar_preamble_in_search_content(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+    monkeypatch,
+):
+    """`---\nACME LEGAL PLLC\n---` is valid YAML but not a mapping. It must be indexed
+    (the writer would refuse it as "must be a YAML dictionary"), and its text must
+    reach the search row on the initial write and survive the deferred refresh,
+    which strips frontmatter through the same `remove_frontmatter` (#1451)."""
+    path = "pleadings/letter.md"
+    original_content = "---\nACME LEGAL PLLC\n123 Main St\n---\n\nDear counsel, HIC #0892461.\n"
+    await _create_file(project_config.home / path, original_content)
+    index_entity_data = AsyncMock()
+    monkeypatch.setattr(search_service, "index_entity_data", index_entity_data)
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+
+    result = await batch_indexer.index_files(
+        {path: await _load_input(file_service, path)},
+        max_concurrent=1,
+        parse_max_concurrent=1,
+    )
+    await _claim_and_publish_relations(
+        batch_indexer,
+        result,
+        entity_repository=entity_repository,
+        relation_repository=relation_repository,
+        session_maker=search_service.session_maker,
+        max_concurrent=1,
+    )
+
+    assert result.errors == []
+    assert (project_config.home / path).read_text(encoding="utf-8") == original_content
+    # The initial write and the deferred refresh both pass explicit content; the
+    # relation-generation step passes None and lets the writer read the stored
+    # body. Every explicit content must still carry the preamble.
+    contents = [
+        call.kwargs["content"]
+        for call in index_entity_data.await_args_list
+        if call.kwargs["content"] is not None
+    ]
+    assert len(contents) >= 2
+    for content in contents:
+        assert "ACME LEGAL PLLC" in content
+        assert "HIC #0892461" in content
+
+
+@pytest.mark.asyncio
 async def test_batch_indexer_re_raises_fatal_sync_errors(
     app_config,
     entity_service,

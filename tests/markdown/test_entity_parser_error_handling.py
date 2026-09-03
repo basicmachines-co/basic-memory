@@ -424,3 +424,21 @@ async def test_schema_to_markdown_empty_metadata_no_metadata_key():
     assert "title: Empty Metadata Test" in output
     assert "type: note" in output
     assert "permalink: empty-metadata-test" in output
+
+
+@pytest.mark.asyncio
+async def test_parse_file_with_a_scalar_preamble_keeps_it_as_body(tmp_path):
+    """`---\nACME LEGAL PLLC\n---` is valid YAML but not a mapping. python-frontmatter
+    would strip it silently; the parser must classify it malformed and keep the
+    text in the body, or a letterhead vanishes from every read (#1451)."""
+    test_file = tmp_path / "letter.md"
+    test_file.write_text("---\nACME LEGAL PLLC\n---\n\nDear counsel, HIC #0892461.\n")
+
+    parser = EntityParser(tmp_path)
+    result = await parser.parse_file(test_file)
+
+    assert result.frontmatter_state == "malformed"
+    assert result.frontmatter.title == "letter"
+    assert result.content is not None
+    assert "ACME LEGAL PLLC" in result.content
+    assert "HIC #0892461" in result.content

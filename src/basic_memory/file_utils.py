@@ -480,23 +480,36 @@ def remove_frontmatter(content: str, *, strip: bool = True) -> str:
             reflow the note body (issue #1090 review).
 
     Returns:
-        Content with frontmatter removed, or original content if no frontmatter
+        Content with frontmatter removed, or the original content when there is
+        no frontmatter: no fences, or a fenced block that is not a YAML mapping.
 
     Raises:
-        ParseError: If content starts with frontmatter marker but is malformed
+        ParseError: If content opens with a fence that is never closed
     """
     # Strip BOM before processing
     content = strip_bom(content)
-
     split = _split_frontmatter(content)
-    # Trigger: content does not open with a line-anchored fence
-    # Why: inline `---` is ordinary content, not frontmatter (issue #972)
+    # Trigger: content does not open with a line-anchored fence, or the fenced
+    #   block is not a YAML mapping (a letterhead between horizontal rules, a
+    #   bare scalar, a list).
+    # Why: inline `---` is ordinary content, not frontmatter (issue #972), and a
+    #   fenced block that no frontmatter parser would accept is body text; the
+    #   indexer treats it that way and search must not strip it (#1451).
     # Outcome: return the content untouched (stripped to preserve prior behavior)
-    if split is None:
+    if split is None or not _is_frontmatter_mapping(split[0]):
         return content.strip() if strip else content
-
     _, body = split
     return body.strip() if strip else body
+
+
+def _is_frontmatter_mapping(yaml_block: str) -> bool:
+    """Whether a fenced block is what every frontmatter reader here accepts: a YAML
+    mapping, or empty. The same rule `parse_frontmatter` enforces by raising."""
+    try:
+        loaded = yaml.safe_load(yaml_block)
+    except yaml.YAMLError:
+        return False
+    return loaded is None or isinstance(loaded, dict)
 
 
 def dump_frontmatter(post: frontmatter.Post) -> str:

@@ -10,7 +10,6 @@ from typing import Any, Optional
 
 import dateparser
 import frontmatter
-import yaml
 from loguru import logger
 from markdown_it import MarkdownIt
 
@@ -274,7 +273,12 @@ class EntityParser:
         """
         # Strip BOM before parsing (can be present in files from Windows or certain sources)
         # See issue #452
-        from basic_memory.file_utils import has_frontmatter, strip_bom
+        from basic_memory.file_utils import (
+            ParseError,
+            has_frontmatter,
+            parse_frontmatter,
+            strip_bom,
+        )
 
         content = strip_bom(content)
 
@@ -287,20 +291,29 @@ class EntityParser:
         # loads() does Post(content, handler, **metadata), which crashes when
         # the YAML contains reserved keys like 'content' or 'handler'.
         # See basic-memory-cloud#375.
-        frontmatter_state: FrontmatterState = "present" if has_frontmatter(content) else "absent"
-        try:
+        # Classify before splitting. python-frontmatter strips a fenced block that
+        # is valid YAML but not a mapping (a bare scalar, a list) as if it were
+        # metadata, silently discarding its text; parse_frontmatter applies the
+        # rule every writer here enforces, so a block it rejects is body (#1451).
+        frontmatter_state: FrontmatterState = "absent"
+        if has_frontmatter(content):
+            try:
+                parse_frontmatter(content)
+                frontmatter_state = "present"
+            except ParseError as e:
+                logger.warning(
+                    f"Failed to parse YAML frontmatter in {file_path}: {e}. "
+                    f"Treating file as plain markdown without frontmatter."
+                )
+                frontmatter_state = "malformed"
+        if frontmatter_state == "present":
             fm_metadata, fm_content = frontmatter.parse(content)
             post = frontmatter.Post(fm_content)
             post.metadata.update(fm_metadata)
-        except yaml.YAMLError as e:
-            logger.warning(
-                f"Failed to parse YAML frontmatter in {file_path}: {e}. "
-                f"Treating file as plain markdown without frontmatter."
-            )
+        else:
             # Use Post(content) not Post(content, metadata={})
             # The latter creates {"metadata": {}} in the metadata dict (issue #528)
             post = frontmatter.Post(content)
-            frontmatter_state = "malformed"
 
         # Normalize frontmatter values
         metadata = normalize_frontmatter_metadata(post.metadata)
