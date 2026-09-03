@@ -10,7 +10,10 @@ from contextlib import asynccontextmanager
 from typing import Any, AsyncIterator, cast
 
 import pytest
+import pytest_asyncio
 
+from basic_memory import db
+from basic_memory.mcp.project_context import DetectedProjectRoute
 from tests.mcp.conftest import ContextState, ctx
 
 
@@ -51,6 +54,26 @@ def _project(
         path=f"/{name}",
         is_default=is_default,
     )
+
+
+def _session_listing(*projects):
+    """Fake the session's own project listing — what ``get_client()`` answers.
+
+    In a hosted session the project-less client IS the session's tenant route,
+    so this listing is exactly the projects of the workspace the session is
+    bound to. That is what makes ``addressable_projects`` able to answer "the
+    session's own workspace" at all, which the account-wide workspace index
+    cannot (#1432).
+    """
+    from basic_memory.schemas.project_info import ProjectList
+
+    async def fake_session_project_list(context=None):
+        return ProjectList(
+            projects=list(projects),
+            default_project=projects[0].name if projects else None,
+        )
+
+    return fake_session_project_list
 
 
 @pytest.mark.asyncio
@@ -899,6 +922,9 @@ async def test_detect_project_from_memory_url_prefix_resolves_workspace_slug(mon
         return index
 
     monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
+    # The session's own route lists no project named 'team-paul', so the mount
+    # table declines and the workspace-qualified reading is the one left.
+    monkeypatch.setattr(project_context, "_session_project_list", _session_listing())
     monkeypatch.setattr("basic_memory.mcp.async_client.is_factory_mode", lambda: True)
 
     resolved = await detect_project_from_memory_url_prefix(
@@ -906,7 +932,10 @@ async def test_detect_project_from_memory_url_prefix_resolves_workspace_slug(mon
         BasicMemoryConfig(projects={}),
     )
 
-    assert resolved == "team-paul/main"
+    # The id pins the route to the workspace that answered for it: 'main' names
+    # a project in BOTH workspaces here, so the qualified name alone would be
+    # re-resolved and could land on the other one (#1432).
+    assert resolved == DetectedProjectRoute(project="team-paul/main", project_id="team-main-id")
 
 
 @pytest.mark.asyncio
@@ -930,7 +959,9 @@ async def test_detect_project_from_memory_url_prefix_prefers_local_project_prefi
         ),
     )
 
-    assert resolved == "main"
+    # A locally routed session's config holds no UUIDs and has no second
+    # workspace to be confused with, so the name is the whole identity.
+    assert resolved == DetectedProjectRoute(project="main")
 
 
 @pytest.mark.asyncio
@@ -1039,35 +1070,33 @@ async def test_detect_project_from_identifier_prefix_resolves_workspace_with_loc
         cloud_api_key="bmc_test123",
     )
 
+    expected = DetectedProjectRoute(project="personal/main", project_id="personal-main-id")
     assert (
         await detect_project_from_identifier_prefix(
             "memory://personal/main/main-to-do-list",
             config,
         )
-        == "personal/main"
+        == expected
     )
     assert (
         await detect_project_from_identifier_prefix(
             "personal/main/main-to-do-list",
             config,
         )
-        == "personal/main"
+        == expected
     )
 
 
 @pytest.mark.asyncio
-async def test_detect_project_from_identifier_prefix_falls_back_to_bare_project_name(
-    monkeypatch,
-):
-    """An identifier that is not workspace-qualified still resolves its first
-    segment by searching every accessible workspace for a project of that name.
+async def test_detect_project_prefix_stays_inside_the_sessions_own_workspace(monkeypatch):
+    """A bare first segment never reaches a project in another workspace (#1432).
 
-    This is the legacy detector read_note and search share. The posix path
-    resolver deliberately does NOT use it: a bare first segment that names no
-    addressable mount must refuse rather than reach another workspace's
-    same-named project (#1421), so its rule 4 parses only fully qualified
-    '<workspace>/<project>[/<path>]' routes. Pinned here so the behavior these
-    two tools still depend on is exercised on its own terms.
+    The deleted fallback searched the account-wide index for the segment and
+    answered with whichever workspace held that permalink — preferring the
+    is_default one — so an ordinary project-relative path in a session bound to
+    'beta' read 'acme's same-named project instead. The session's own mount
+    table is now the only set consulted, and it names no 'notes', so the
+    identifier stays unrouted and the caller's active project applies.
     """
     import basic_memory.mcp.project_context as project_context
     from basic_memory.config import BasicMemoryConfig
@@ -1077,21 +1106,28 @@ async def test_detect_project_from_identifier_prefix_falls_back_to_bare_project_
         detect_project_from_identifier_prefix,
     )
 
-    personal = _workspace(
-        tenant_id="personal-tenant",
+    beta = _workspace(
+        tenant_id="beta-tenant",
+        workspace_type="organization",
+        slug="beta",
+        name="Beta",
+        role="editor",
+    )
+    acme = _workspace(
+        tenant_id="acme-tenant",
         workspace_type="personal",
-        slug="personal",
-        name="Personal",
+        slug="acme",
+        name="Acme",
         role="owner",
         is_default=True,
     )
+    session_project = _project("research", id=1, external_id="beta-research-id")
+    other_project = _project("notes", id=2, external_id="acme-notes-id")
     index = _build_workspace_project_index(
-        (personal,),
+        (beta, acme),
         (
-            WorkspaceProjectEntry(
-                workspace=personal,
-                project=_project("notes", id=1, external_id="personal-notes-id"),
-            ),
+            WorkspaceProjectEntry(workspace=beta, project=session_project),
+            WorkspaceProjectEntry(workspace=acme, project=other_project),
         ),
     )
 
@@ -1099,24 +1135,214 @@ async def test_detect_project_from_identifier_prefix_falls_back_to_bare_project_
         return index
 
     monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
-    # A hosted (factory) session is what makes workspace discovery available to
-    # an identifier that is not itself workspace-qualified.
+    monkeypatch.setattr(project_context, "_session_project_list", _session_listing(session_project))
     monkeypatch.setattr("basic_memory.mcp.async_client.is_factory_mode", lambda: True)
 
-    # BasicMemoryConfig always materializes a placeholder 'main' entry, so the
-    # local-prefix check ahead of the fallback sees a config that names no 'notes'.
+    # BasicMemoryConfig always materializes a placeholder 'main' entry, so an
+    # empty projects dict is what a hosted session's config really looks like.
     config = BasicMemoryConfig(projects={}, cloud_api_key="bmc_test123")
+    context = ContextState()
 
-    # 'notes/...' names no workspace, so the qualified parse declines and the
-    # bare first segment is resolved across workspaces instead.
     assert (
-        await detect_project_from_identifier_prefix("notes/to-do-list", config) == "personal/notes"
+        await detect_project_from_identifier_prefix("notes/foo", config, context=ctx(context))
+        is None
     )
 
-    # A first segment that names no project anywhere is an ordinary path, not a
-    # route: the lookup miss stays best-effort and leaves the identifier unrouted
-    # rather than becoming the caller's error.
-    assert await detect_project_from_identifier_prefix("absent/to-do-list", config) is None
+    # The session's own mount still routes, and carries the id that pins it.
+    assert await detect_project_from_identifier_prefix(
+        "research/foo", config, context=ctx(context)
+    ) == DetectedProjectRoute(project="research", project_id="beta-research-id")
+
+    # The addressable spelling reaches the other workspace, as it always did.
+    assert await detect_project_from_identifier_prefix(
+        "acme/notes/foo", config, context=ctx(context)
+    ) == DetectedProjectRoute(project="acme/notes", project_id="acme-notes-id")
+
+
+@pytest.mark.asyncio
+async def test_detect_project_prefix_prefers_a_mount_over_a_same_named_workspace(monkeypatch):
+    """A name the session mounts addresses that mount, not a workspace slug.
+
+    ``resolve_project_path_route`` settled this precedence for the posix verbs:
+    only one reading of '<name>/...' can win, and a name ``ls /`` advertises has
+    to address that mount or the advertised address resolves somewhere else.
+    Reading the workspace first here is what made `ls team/docs/x` and
+    `read_note("team/docs/x")` disagree about what 'team' named.
+    """
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.config import BasicMemoryConfig
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        _build_workspace_project_index,
+        detect_project_from_identifier_prefix,
+    )
+
+    beta = _workspace(
+        tenant_id="beta-tenant",
+        workspace_type="organization",
+        slug="beta",
+        name="Beta",
+        role="editor",
+    )
+    team = _workspace(
+        tenant_id="team-tenant",
+        workspace_type="organization",
+        slug="team",
+        name="Team",
+        role="editor",
+    )
+    mount = _project("team", id=1, external_id="beta-team-id")
+    other = _project("docs", id=2, external_id="team-docs-id")
+    index = _build_workspace_project_index(
+        (beta, team),
+        (
+            WorkspaceProjectEntry(workspace=beta, project=mount),
+            WorkspaceProjectEntry(workspace=team, project=other),
+        ),
+    )
+
+    async def fake_index(context=None, force_refresh=False):
+        raise AssertionError("a mount hit must not build the account-wide workspace index")
+
+    monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
+    monkeypatch.setattr(project_context, "_session_project_list", _session_listing(mount))
+    monkeypatch.setattr("basic_memory.mcp.async_client.is_factory_mode", lambda: True)
+
+    config = BasicMemoryConfig(projects={}, cloud_api_key="bmc_test123")
+    context = ContextState()
+
+    assert await detect_project_from_identifier_prefix(
+        "team/docs/x", config, context=ctx(context)
+    ) == DetectedProjectRoute(project="team", project_id="beta-team-id")
+    assert index.entries  # the index exists; the mount hit simply never asked for it
+
+
+@pytest.mark.asyncio
+async def test_detect_project_prefix_claims_a_multi_segment_project(monkeypatch):
+    """A project whose permalink spans several segments is addressable (#1432).
+
+    ``split_project_permalink_prefix`` claims as many leading segments as the
+    known project actually spans, so 'Research/2026' consumes two. The deleted
+    fallback split exactly one segment off and looked up 'research', which named
+    no project and left the identifier unrouted.
+    """
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.config import BasicMemoryConfig
+    from basic_memory.mcp.project_context import (
+        WorkspaceProjectEntry,
+        _build_workspace_project_index,
+        detect_project_from_identifier_prefix,
+    )
+
+    beta = _workspace(
+        tenant_id="beta-tenant",
+        workspace_type="organization",
+        slug="beta",
+        name="Beta",
+        role="editor",
+    )
+    nested = _project("Research/2026", id=1, external_id="beta-research-2026-id")
+    index = _build_workspace_project_index(
+        (beta,), (WorkspaceProjectEntry(workspace=beta, project=nested),)
+    )
+
+    async def fake_index(context=None, force_refresh=False):
+        return index
+
+    monkeypatch.setattr(project_context, "_ensure_workspace_project_index", fake_index)
+    monkeypatch.setattr(project_context, "_session_project_list", _session_listing(nested))
+    monkeypatch.setattr("basic_memory.mcp.async_client.is_factory_mode", lambda: True)
+
+    config = BasicMemoryConfig(projects={}, cloud_api_key="bmc_test123")
+    context = ContextState()
+
+    assert await detect_project_from_identifier_prefix(
+        "research/2026/notes/x", config, context=ctx(context)
+    ) == DetectedProjectRoute(project="Research/2026", project_id="beta-research-2026-id")
+
+    # The project's own name is a title to look up, not a route: a claim with no
+    # remainder leaves the identifier unrouted, exactly as the local set does.
+    assert (
+        await detect_project_from_identifier_prefix("research/2026", config, context=ctx(context))
+        is None
+    )
+
+
+@pytest_asyncio.fixture
+async def shadowed_nested_projects(config_manager, engine_factory, tmp_path_factory):
+    """Two projects whose permalinks prefix one another: 'research', 'research/2026'.
+
+    The pair is what makes the single-segment guess visibly wrong rather than
+    merely lossy — the shorter name is a real project, so splitting one segment
+    off 'research/2026/notes/x' resolves, and resolves to the wrong one.
+    """
+    from basic_memory.config_models import ProjectEntry
+    from basic_memory.repository.project_repository import ProjectRepository
+
+    _, session_maker = engine_factory
+    created = []
+    for name in ("research", "Research/2026"):
+        path = tmp_path_factory.mktemp("nested-project-home")
+        async with db.scoped_session(session_maker) as session:
+            created.append(
+                await ProjectRepository().create(
+                    session,
+                    {
+                        "name": name,
+                        "description": name,
+                        "path": str(path),
+                        "is_active": True,
+                        "is_default": False,
+                    },
+                )
+            )
+        config = config_manager.load_config()
+        config.projects[name] = ProjectEntry(path=str(path))
+        config_manager.save_config(config)
+    return created
+
+
+@pytest.mark.asyncio
+async def test_memory_url_prefix_is_claimed_by_the_routed_projects_own_permalink(
+    client, test_project, shadowed_nested_projects, monkeypatch
+):
+    """A memory URL routes to the project its prefix names, however many segments
+    that project spans (#1432).
+
+    The prefix split guessed one segment, so 'memory://research/2026/notes/x'
+    offered 'research' to /v2/projects/resolve — a real, different project —
+    which then came back as the active project and was cached over the project
+    the client had been opened for. The identity is already in hand here, so the
+    routed project claims its own permalink instead and no lookup runs at all.
+    """
+    monkeypatch.delenv("BASIC_MEMORY_MCP_PROJECT", raising=False)
+    from basic_memory.config import ConfigManager
+    from basic_memory.mcp.project_context import (
+        detect_project_from_identifier_prefix,
+        get_project_client,
+        resolve_project_and_path,
+    )
+
+    identifier = "memory://research/2026/notes/x"
+    detected = await detect_project_from_identifier_prefix(identifier, ConfigManager().config)
+    assert detected == DetectedProjectRoute(project="Research/2026")
+
+    context = ContextState()
+    async with get_project_client(
+        detected.project, ctx(context), project_id=detected.project_id
+    ) as (routed_client, active_project):
+        resolved_project, entity_path, is_memory_url = await resolve_project_and_path(
+            routed_client, identifier, active_project.name, ctx(context)
+        )
+
+    assert is_memory_url
+    # The project the URL names, not the one a single leading segment spells.
+    assert resolved_project.name == "Research/2026"
+    assert entity_path == "research/2026/notes/x"
+    # ...and the request's cached active project still points at it, rather than
+    # at the shorter project the resolve round trip used to substitute.
+    cached = await context.get_state("active_project")
+    assert cached["name"] == "Research/2026"
 
 
 @pytest.mark.asyncio

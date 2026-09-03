@@ -140,6 +140,31 @@ def qualify_listing_paths(payload: dict[str, Any], route: ProjectPathRoute) -> d
     }
 
 
+def qualify_search_paths(payload: dict[str, Any], route: ProjectPathRoute) -> dict[str, Any]:
+    """Re-qualify a search response's per-hit transport paths.
+
+    The third response shape a routed verb can answer with. `find --meta` returns
+    search hits rather than listing nodes, and the rule is per response shape,
+    not per verb: the metadata arm shipped without it and handed back
+    project-relative paths that `cat` then refused — or, worse, opened in a
+    different project mounted under that name (#1435).
+
+    ``file_path`` is the hit's address, the same field the listing nodes carry;
+    ``permalink`` is an identity with its own canonical form and is left alone,
+    exactly as in ``qualify_note_paths``.
+    """
+    prefix = _route_prefix(route)
+    if prefix is None:
+        return payload
+    return {
+        **payload,
+        "results": [
+            {**row, "file_path": _requalified_path(row["file_path"], prefix)}
+            for row in payload["results"]
+        ],
+    }
+
+
 # The manual project holds the non-bundled manual pages as ordinary notes;
 # `man` falls back to it for page reads and searches it in query mode.
 _MANUAL_PROJECT = "manual"
@@ -997,22 +1022,16 @@ async def find(
         route = await resolve_project_path_route(
             path, project=project, project_id=project_id, context=context
         )
+        # The whole route travels, not three fields pulled off it: the arm needs
+        # the project and its id to open the client, route.path to scope the
+        # search, and — the part #1435 missed — the same route again to
+        # re-qualify the paths it answers with.
         return await _find_by_metadata(
-            route_project=route.project,
-            # route.path is the caller's input verbatim when no project prefix
-            # was recognized, so one value covers both routed and raw spellings.
-            # SearchQuery.file_path_prefix is the boundary parser for it: it
-            # reads "./specs" the way the directory listing does, and collapses
-            # every root spelling — including the "" a bare '<project>' routes
-            # to, a mount point rather than a subtree — onto "no scope".
-            scope=route.path,
+            route=route,
             metadata_filters=metadata_filters,
             fields=projected_fields,
             page=page,
             page_size=page_size,
-            # The route's id, not the caller's raw param: it is what keeps a
-            # cloud mount bound to the workspace whose listing advertised it.
-            project_id=route.project_id,
             context=context,
         )
 
@@ -1031,13 +1050,11 @@ async def find(
 
 async def _find_by_metadata(
     *,
-    route_project: Optional[str],
-    scope: str,
+    route: ProjectPathRoute,
     metadata_filters: dict[str, Any],
     fields: Optional[list[MetadataPath]],
     page: int,
     page_size: int,
-    project_id: Optional[str],
     context: Context | None,
 ) -> dict[str, Any]:
     """find's metadata arm: one search call, plus per-hit field projection.
@@ -1045,15 +1062,23 @@ async def _find_by_metadata(
     The listing arm's counterpart to ``find_listing``; `find` has already bounded
     the pagination and refused `name` and `depth` against `meta`.
 
-    The path scope composes server-side as a file-path prefix — the indexed
-    `file_path`, which is where the note actually lives, not its permalink,
-    which stops mirroring that path once a note pins one in frontmatter or is
-    moved with update_permalinks_on_move disabled (the default). It ANDs with
-    the metadata filters in the same WHERE, so the total the server reports is
-    the real match count for the scope that ran, and every page of it is
-    reachable.
+    ``route.project_id`` opens the client, not the caller's raw param: it is what
+    keeps a cloud mount bound to the workspace whose listing advertised it.
+
+    The path scope is ``route.path`` — the caller's input verbatim when no
+    project prefix was recognized, so one value covers both routed and raw
+    spellings. ``SearchQuery.file_path_prefix`` is the boundary parser for it: it
+    reads "./specs" the way the directory listing does, and collapses every root
+    spelling — including the "" a bare '<project>' routes to, a mount point
+    rather than a subtree — onto "no scope". It composes server-side as a
+    file-path prefix — the indexed `file_path`, which is where the note actually
+    lives, not its permalink, which stops mirroring that path once a note pins
+    one in frontmatter or is moved with update_permalinks_on_move disabled (the
+    default). It ANDs with the metadata filters in the same WHERE, so the total
+    the server reports is the real match count for the scope that ran, and every
+    page of it is reachable.
     """
-    async with get_project_client(route_project, context=context, project_id=project_id) as (
+    async with get_project_client(route.project, context=context, project_id=route.project_id) as (
         client,
         active_project,
     ):
@@ -1063,13 +1088,16 @@ async def _find_by_metadata(
         query = SearchQuery(
             # Normalized by the field validator, which maps every root spelling
             # onto None: the predicates are then the whole WHERE.
-            file_path_prefix=scope,
+            file_path_prefix=route.path,
             metadata_filters=metadata_filters,
             entity_types=[SearchItemType.ENTITY],
         )
         search_client = SearchClient(client, active_project.external_id)
         response = await search_client.search(query.model_dump(), page=page, page_size=page_size)
-        payload = response.model_dump(mode="json", exclude_none=True)
+        # Re-qualified before anything reads the rows, so the projection below
+        # carries the same addresses the unprojected response does — the two arms
+        # of one response shape cannot answer with different spellings.
+        payload = qualify_search_paths(response.model_dump(mode="json", exclude_none=True), route)
         if not fields:
             return payload
 

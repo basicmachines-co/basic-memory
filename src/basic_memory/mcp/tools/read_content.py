@@ -235,8 +235,10 @@ async def read_content(
             ConfigManager().config,
             context=context,
         )
-        if detected:
-            project = detected
+        if detected is not None:
+            # The id rides along so the name is never re-resolved against a
+            # different accessible workspace holding the same permalink (#1432).
+            project, project_id = detected.project, detected.project_id
 
     logger.info(f"MCP tool call tool=read_content project={project} path={path}")
 

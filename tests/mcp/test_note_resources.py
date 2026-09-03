@@ -10,6 +10,7 @@ from fastmcp import Client
 from fastmcp.exceptions import ResourceError, ToolError
 
 import basic_memory.mcp.resources.notes as notes_module
+from basic_memory.mcp.project_context import DetectedProjectRoute
 from basic_memory.mcp.resources.notes import NOTE_TEMPLATE, note_resource
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools import write_note
@@ -235,7 +236,7 @@ async def test_workspace_qualified_uris_route_through_their_project(
     # with its failures surfacing, not falling back to the default project.
     async def detected(identifier, config, context=None):
         assert identifier == "memory://personal/main/docs/report"
-        return "personal/main"
+        return DetectedProjectRoute(project="personal/main")
 
     monkeypatch.setattr(notes_module, "detect_project_from_memory_url_prefix", detected)
     routes: list[str | None] = []
@@ -269,7 +270,7 @@ async def test_workspace_routes_survive_disabled_project_prefixes(
     monkeypatch.setattr(notes_module, "ConfigManager", StubConfigManager)
 
     async def detected(identifier, config, context=None):
-        return "team-paul/main"
+        return DetectedProjectRoute(project="team-paul/main")
 
     monkeypatch.setattr(notes_module, "detect_project_from_memory_url_prefix", detected)
     routes: list[str | None] = []
