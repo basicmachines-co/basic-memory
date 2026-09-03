@@ -1103,17 +1103,30 @@ def index_project_command(
 ) -> None:
     """Index a project's files so its notes become searchable.
 
-    A named alias for `bm reindex --project <name> --full`, calling the same
+    A named alias for `bm reindex --project <name>`, calling the same
     implementation rather than restating its flags (#1414). It covers embeddings
     as well as the search index: this is the command that `project add` and
     `bm status` name as the remedy for a not-yet-indexed project, so it has to
     reach the ready state they promise. A search-only pass would leave the
     embeddings stage pending and the advice self-defeating.
 
+    It deliberately does **not** pass `--full`. Running the advertised remedy
+    repeatedly has to converge, and `--full` cannot: it clears every project
+    vector before the sync runs, so a note with more chunks than one shard has
+    its completed shard deleted and is deferred again on every run, leaving the
+    embeddings stage permanently short of IDLE (#1440 review). The incremental
+    path is what the sharding design expects -- it skips chunks that are already
+    current and picks up where the last pass stopped, so repeated runs finish the
+    note. A never-indexed project still gets everything indexed, because change
+    detection sees every file as new.
+
+    `bm reindex --full` remains available for the case `--full` is actually for:
+    rebuilding derived state that is believed corrupt.
+
     `run_reindex_command` still drops embeddings with an explanation when
     semantic search is disabled, exactly as a bare `bm reindex` does.
     """
-    run_reindex_command(embeddings=True, search=True, full=True, project=name)
+    run_reindex_command(embeddings=True, search=True, full=False, project=name)
 
 
 @project_app.command("remove")

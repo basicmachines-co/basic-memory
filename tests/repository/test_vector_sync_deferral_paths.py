@@ -141,4 +141,66 @@ async def test_both_entry_points_record_deferrals(
         await repository.sync_entity_vectors_batch([sample_entity.id])
 
     assert recorded, f"{entry_point} produced a deferral and recorded nothing"
-    assert recorded[0]["deferred_entity_ids"] == {sample_entity.id}
+    assert recorded[0]["unfinished_entity_ids"] == {sample_entity.id}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("terminal_state", "owes_work"),
+    [("deferred_entity_ids", True), ("failed_entity_ids", True), ("synced_entity_ids", False)],
+)
+async def test_every_terminal_state_that_owes_work_is_recorded(
+    terminal_state,
+    owes_work,
+    test_project,
+    sample_entity,
+    app_config,
+    engine_factory,
+    monkeypatch,
+):
+    """Deferred and failed both leave work owed; only synced is finished.
+
+    A failed entity is dropped from *both* the synced and deferred sets, so
+    nothing marked it -- and a multi-chunk note whose later flush failed keeps
+    its earlier `ready` rows, which satisfies the retrieval predicate and reads
+    as fully embedded. Tracking only deferral would have kept that invisible.
+    """
+    _, session_maker = engine_factory
+    repository = create_search_repository(
+        session_maker, project_id=test_project.id, app_config=app_config
+    )
+
+    async def _sync(_repository, entity_ids, _progress, _continue) -> VectorSyncBatchResult:
+        ids = tuple(entity_ids)
+        return VectorSyncBatchResult(
+            entities_total=len(ids),
+            entities_synced=len(ids) if terminal_state == "synced_entity_ids" else 0,
+            entities_failed=len(ids) if terminal_state == "failed_entity_ids" else 0,
+            entities_deferred=len(ids) if terminal_state == "deferred_entity_ids" else 0,
+            deferred_entity_ids=ids if terminal_state == "deferred_entity_ids" else (),
+            failed_entity_ids=ids if terminal_state == "failed_entity_ids" else (),
+            synced_entity_ids=ids if terminal_state == "synced_entity_ids" else (),
+        )
+
+    monkeypatch.setattr(
+        search_repository_base.semantic_vector_sync, "sync_entity_vectors_internal", _sync
+    )
+
+    recorded: list[dict[str, Any]] = []
+
+    async def _capture(**kwargs: Any) -> None:
+        recorded.append(kwargs)
+
+    monkeypatch.setattr(repository, RECORDER_METHOD, _capture)
+
+    await repository.sync_entity_vectors_batch([sample_entity.id])
+
+    assert recorded, "no terminal state was recorded"
+    unfinished = recorded[0]["unfinished_entity_ids"]
+    completed = recorded[0]["completed_entity_ids"]
+    if owes_work:
+        assert sample_entity.id in unfinished, f"{terminal_state} left work owed and was not marked"
+        assert sample_entity.id not in completed
+    else:
+        assert sample_entity.id in completed
+        assert sample_entity.id not in unfinished

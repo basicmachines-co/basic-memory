@@ -654,10 +654,18 @@ class SearchRepositoryBase(ABC):
     async def record_entity_vector_deferrals(
         self,
         *,
-        deferred_entity_ids: set[int],
+        unfinished_entity_ids: set[int],
         completed_entity_ids: set[int],
     ) -> None:
-        """Persist which entities a sharded vector sync left unfinished.
+        """Persist which entities a vector sync pass left unfinished.
+
+        "Unfinished" covers every terminal state that leaves work owed, not just
+        a deferred shard. A failed entity is dropped from both the synced and the
+        deferred set, so nothing marked it -- and a multi-chunk note whose later
+        flush failed keeps its earlier `ready` rows, which is enough to satisfy
+        the retrieval predicate and read as fully embedded (#1440 review). The
+        column keeps its `deferred` name; its meaning is "the last pass did not
+        finish this entity".
 
         The single writer of `entity.vector_sync_deferred_at`, called from the one
         place that decides deferral. Readiness reads the column instead of trying
@@ -665,7 +673,7 @@ class SearchRepositoryBase(ABC):
         a shard did not schedule have no row, so an entity looks fully embedded
         after its first shard (#1440 review).
         """
-        if not deferred_entity_ids and not completed_entity_ids:
+        if not unfinished_entity_ids and not completed_entity_ids:
             return
 
         # Chunked at the same bound vector hydration uses. `reindex_vectors`
@@ -683,7 +691,7 @@ class SearchRepositoryBase(ABC):
         # markers with nothing to reconcile them.
         async with db.scoped_session(self.session_maker) as session:
             for entity_ids, deferred_at in (
-                (sorted(deferred_entity_ids), datetime.now(timezone.utc)),
+                (sorted(unfinished_entity_ids), datetime.now(timezone.utc)),
                 (sorted(completed_entity_ids), None),
             ):
                 for start in range(0, len(entity_ids), VECTOR_HYDRATION_BATCH_SIZE):
@@ -1956,8 +1964,12 @@ class SearchRepositoryBase(ABC):
             progress_callback,
             continue_on_error,
         )
+        # Deferred *and* failed both leave the entity owing work; only synced is
+        # finished. Enumerating the pass's terminal states here is what keeps
+        # readiness agreeing with it, rather than tracking the one state that
+        # happened to be found first.
         await self.record_entity_vector_deferrals(
-            deferred_entity_ids=set(result.deferred_entity_ids),
+            unfinished_entity_ids=set(result.deferred_entity_ids) | set(result.failed_entity_ids),
             completed_entity_ids=set(result.synced_entity_ids),
         )
         return result

@@ -66,9 +66,9 @@ class SearchRepository(Protocol):
         ...
 
     async def record_entity_vector_deferrals(
-        self, *, deferred_entity_ids: set[int], completed_entity_ids: set[int]
+        self, *, unfinished_entity_ids: set[int], completed_entity_ids: set[int]
     ) -> None:
-        """Record which entities a sharded vector sync left unfinished."""
+        """Record which entities a vector sync pass left unfinished."""
         ...
 
     async def semantic_effectively_enabled(self) -> bool:
