@@ -4,6 +4,7 @@ Verifies that page 1 results always have scores >= page 2 results,
 which requires a sufficiently large candidate_limit multiplier.
 """
 
+from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,7 +13,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from basic_memory.repository.search_repository_base import SearchRepositoryBase
+from basic_memory.repository.search_repository_base import (
+    SearchIndexKey,
+    SearchRepositoryBase,
+)
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_trace import SearchTraceCollector
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
@@ -75,6 +79,7 @@ class ConcreteSearchRepo(SearchRepositoryBase):
         offset: int = 0,
         allow_relaxed: bool = False,
         *,
+        candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
     ) -> list[SearchIndexRow]:
         return []  # pragma: no cover

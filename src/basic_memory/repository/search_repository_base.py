@@ -89,6 +89,9 @@ from basic_memory.utils import ensure_timezone_aware
 # --- Semantic search constants ---
 
 VECTOR_FILTER_SCAN_LIMIT = 50000
+# The shared bind-parameter bound for any statement that carries a list of vector
+# candidate keys. Both engines cap bind parameters (asyncpg at 32767), so every such
+# list — manifest hydration and the filter intersection alike — is split at this size.
 VECTOR_HYDRATION_BATCH_SIZE = 250
 # Over-fetch factor for the rerank candidate chunk pool: chunks collapse to unique
 # (type, id) rows before reranking, so fetch several times reranker_candidates chunks
@@ -258,6 +261,56 @@ def metadata_contains_like_condition(
     )
 
 
+def candidate_key_restriction_condition(
+    candidate_keys: Sequence[SearchIndexKey],
+    params: Dict[str, Any],
+) -> str:
+    """Build the SQL restricting a filter query to an explicit set of search rows.
+
+    This is what turns the vector/hybrid filter pass from "give me a page of everything
+    the filter admits" into "of *these* candidates, which does the filter admit". The
+    first question has an answer the size of the project and had to be capped, and every
+    candidate outside the cap was then read as disallowed (#1431). The second question's
+    answer is bounded by the candidate set itself, so no cap is needed and none of the
+    candidates can fall off the end.
+
+    Keys are grouped by row type rather than emitted as one ``(type, id)`` pair per
+    branch: entity, observation, and relation ids come from independent sequences, so the
+    type is part of the identity, but a handful of type-scoped ``IN`` lists binds one
+    parameter per key instead of two and leaves the id list in the shape both planners
+    can drive an index from. PostgreSQL's ``search_index`` primary key is
+    ``(id, type, project_id)``.
+
+    An empty candidate set is a real state, not a caller error — a vector search whose
+    every hit was already dropped — and it admits nothing, so it yields a false
+    predicate rather than the vacuous truth an empty ``OR`` would collapse to.
+
+    Shared verbatim by both backends for the same reason the subtree scope is: a
+    restriction that admitted different rows per dialect would give semantic search a
+    different candidate set depending on which database happened to be underneath.
+    """
+    ids_by_type: dict[str, list[int]] = {}
+    for row_type, row_id in candidate_keys:
+        ids_by_type.setdefault(row_type, []).append(row_id)
+
+    branches: list[str] = []
+    for type_index, (row_type, row_ids) in enumerate(ids_by_type.items()):
+        type_param = f"candidate_type_{type_index}"
+        params[type_param] = row_type
+        id_params: list[str] = []
+        for id_index, row_id in enumerate(dict.fromkeys(row_ids)):
+            id_param = f"candidate_id_{type_index}_{id_index}"
+            params[id_param] = row_id
+            id_params.append(f":{id_param}")
+        branches.append(
+            f"(search_index.type = :{type_param} AND search_index.id IN ({', '.join(id_params)}))"
+        )
+
+    if not branches:
+        return "1 = 0"
+    return f"({' OR '.join(branches)})"
+
+
 async def purge_stale_search_index_rows(
     session_maker: async_sessionmaker[AsyncSession],
     project_id: int,
@@ -424,6 +477,7 @@ class SearchRepositoryBase(ABC):
         offset: int = 0,
         allow_relaxed: bool = False,
         *,
+        candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
     ) -> List[SearchIndexRow]:
         """Search across all indexed content.
@@ -444,6 +498,11 @@ class SearchRepositoryBase(ABC):
                 be true of the world. Sources without such a claim are excluded.
             limit: Maximum results to return
             offset: Number of results to skip
+            candidate_keys: Restrict results to these ``(type, id)`` search rows. ``None``
+                searches the whole project; an empty sequence matches nothing. Honored by
+                the full-text pass, which is where vector and hybrid retrieval evaluate
+                their structured filters: that pass asks which of a known candidate set a
+                filter admits instead of paging the filter's whole match set (#1431).
 
         Returns:
             List of SearchIndexRow results with relevance scores
@@ -2454,8 +2513,8 @@ class SearchRepositoryBase(ABC):
         )
 
         if filter_requested:
-            filtered_rows = await self.search(
-                search_text=None,
+            allowed_keys = await self._filter_candidate_keys(
+                list(search_index_rows),
                 permalink=permalink,
                 permalink_match=permalink_match,
                 title=title,
@@ -2466,13 +2525,7 @@ class SearchRepositoryBase(ABC):
                 metadata_filters=metadata_filters,
                 file_path_prefix=file_path_prefix,
                 temporal=temporal,
-                retrieval_mode=SearchRetrievalMode.FTS,
-                limit=VECTOR_FILTER_SCAN_LIMIT,
-                offset=0,
             )
-            # Use (type, id) tuples to avoid collisions between different
-            # search_index row types that share the same auto-increment id.
-            allowed_keys = {(row.type, row.id) for row in filtered_rows if row.id is not None}
             if trace is not None:
                 trace.vector = build_vector_stage(
                     previous=trace.vector,
@@ -2554,6 +2607,59 @@ class SearchRepositoryBase(ABC):
         # the slow-query warning entirely.
         _log_vector_summary()
         return output
+
+    async def _filter_candidate_keys(
+        self,
+        candidate_keys: Sequence[SearchIndexKey],
+        *,
+        permalink: Optional[str],
+        permalink_match: Optional[str],
+        title: Optional[str],
+        note_types: Optional[List[str]],
+        after_date: Optional[datetime],
+        search_item_types: Optional[List[SearchItemType]],
+        categories: Optional[List[str]],
+        metadata_filters: Optional[dict[str, Any]],
+        file_path_prefix: Optional[str],
+        temporal: Optional[TemporalFilter],
+    ) -> set[SearchIndexKey]:
+        """Return which of ``candidate_keys`` the structured filters admit.
+
+        Vector retrieval scores embeddings and cannot evaluate a structured filter, so
+        the surviving candidates are decided by an FTS-mode pass carrying every filter.
+        Asking that pass for a *page of the filter's whole match set* and intersecting
+        client-side silently lost any candidate that sorted past the page (#1431); asking
+        it about the candidates themselves cannot, because the answer is bounded by the
+        question.
+
+        The candidate list is split at the shared bind-parameter bound, so a deep page
+        whose candidate pool runs to thousands of rows costs a few small indexed lookups
+        instead of one unbounded scan.
+        """
+        allowed_keys: set[SearchIndexKey] = set()
+        for batch_start in range(0, len(candidate_keys), VECTOR_HYDRATION_BATCH_SIZE):
+            batch = candidate_keys[batch_start : batch_start + VECTOR_HYDRATION_BATCH_SIZE]
+            filtered_rows = await self.search(
+                search_text=None,
+                permalink=permalink,
+                permalink_match=permalink_match,
+                title=title,
+                note_types=note_types,
+                after_date=after_date,
+                search_item_types=search_item_types,
+                categories=categories,
+                metadata_filters=metadata_filters,
+                file_path_prefix=file_path_prefix,
+                temporal=temporal,
+                retrieval_mode=SearchRetrievalMode.FTS,
+                # The restriction, not this limit, is what bounds the result: one row per
+                # requested key, since (id, type, project_id) identifies a search row.
+                limit=len(batch),
+                offset=0,
+                candidate_keys=batch,
+            )
+            allowed_keys.update((row.type, row.id) for row in filtered_rows if row.id is not None)
+        return allowed_keys
 
     async def _fetch_search_index_rows_by_ids(
         self, row_ids: list[int]

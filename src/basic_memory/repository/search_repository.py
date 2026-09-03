@@ -18,7 +18,7 @@ from basic_memory.repository.embedding_provider_factory import create_embedding_
 from basic_memory.repository.rerank_provider_factory import create_rerank_provider
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.search_index_row import SearchIndexRow
-from basic_memory.repository.search_repository_base import ChunkManifestRow
+from basic_memory.repository.search_repository_base import ChunkManifestRow, SearchIndexKey
 from basic_memory.repository.search_trace import SearchTraceCollector
 from basic_memory.repository.semantic_vector_index_factory import (
     create_semantic_vector_index,
@@ -89,6 +89,7 @@ class SearchRepository(Protocol):
         allow_relaxed: bool = False,
         session: AsyncSession | None = None,
         *,
+        candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
     ) -> List[SearchIndexRow]:
         """Search across indexed content."""

@@ -1,6 +1,7 @@
 """Focused edge-case coverage for shared semantic vector synchronization."""
 
 import hashlib
+from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
 from types import SimpleNamespace
@@ -12,7 +13,10 @@ import pytest
 from basic_memory.repository import semantic_vector_sync
 from basic_memory.repository import search_repository_base as search_repository_base_module
 from basic_memory.repository.search_index_row import SearchIndexRow
-from basic_memory.repository.search_repository_base import SearchRepositoryBase
+from basic_memory.repository.search_repository_base import (
+    SearchIndexKey,
+    SearchRepositoryBase,
+)
 from basic_memory.repository.search_trace import SearchTraceCollector
 from basic_memory.repository.semantic_chunking import VectorChunkRecord
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
@@ -65,6 +69,7 @@ class _TestRepository(SearchRepositoryBase):
         offset: int = 0,
         allow_relaxed: bool = False,
         *,
+        candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
     ) -> list[SearchIndexRow]:
         return []
