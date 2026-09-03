@@ -345,23 +345,30 @@ def test_unknown_conversation_ids_fail_fast(
 def test_workers_curate_in_parallel_and_keep_dataset_order(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Two conversations, two workers: same manifest as serial, in dataset order."""
+    """Two conversations, two workers: both are in flight at once (each
+    conversation's first curator call waits for the other's, which only
+    resolves with two workers), and the manifest keeps dataset order."""
     _raw_dataset(tmp_path)
     _stub_bm(monkeypatch)
     import threading
 
+    barrier = threading.Barrier(2)
     lock = threading.Lock()
-    seen_threads: set[int] = set()
+    first_calls = 0
 
-    class ThreadAwareRunner(ScriptedRunner):
+    class BarrierRunner(ScriptedRunner):
         def complete(self, prompt: str) -> LLMResult:
+            nonlocal first_calls
             with lock:
-                seen_threads.add(threading.get_ident())
+                first_calls += 1
+                is_first_of_two = first_calls <= 2
+            if is_first_of_two:
+                barrier.wait(timeout=10)
             return super().complete(prompt)
 
     output = curate_beam(
         _config(tmp_path, workers=2),
-        runner=ThreadAwareRunner([]),
+        runner=BarrierRunner([]),
         writer_factory=lambda p, e, d: FileWriter(d),
     )
 
@@ -372,7 +379,6 @@ def test_workers_curate_in_parallel_and_keep_dataset_order(
     ]
     assert manifest["converter"]["workers"] == 2
     assert manifest["totals"]["conversations"] == 2
-    assert len(seen_threads) == 2
 
 
 def test_a_server_that_fails_to_start_excludes_that_conversation_only(
