@@ -131,8 +131,8 @@ class SearchRepository(Protocol):
         """Return the stored vector-chunk manifest for one entity."""
         ...
 
-    async def delete_by_permalink(self, permalink: str) -> None:
-        """Delete item by permalink."""
+    async def delete_by_permalink(self, permalink: str, search_item_type: SearchItemType) -> None:
+        """Delete the row one permalink owns for the given row kind."""
         ...
 
     async def delete_project_search_rows(self) -> None:

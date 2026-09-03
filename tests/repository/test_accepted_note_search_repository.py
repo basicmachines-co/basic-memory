@@ -65,7 +65,7 @@ async def test_refresh_entity_replaces_project_scoped_hot_search_row() -> None:
     assert "DELETE FROM search_index" in delete_sql
     assert delete_params == {"entity_id": 42, "project_id": 7}
     assert "CAST(:metadata AS jsonb)" in insert_sql
-    assert "ON CONFLICT (permalink, project_id)" in insert_sql
+    assert "ON CONFLICT (permalink, type, project_id)" in insert_sql
     assert "script_ngrams = EXCLUDED.script_ngrams" in insert_sql
     assert insert_params == {
         "id": 42,

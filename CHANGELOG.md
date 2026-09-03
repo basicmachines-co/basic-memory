@@ -45,6 +45,19 @@
 
 ### Bug Fixes
 
+- **#1437**: An observation and a relation can no longer collide in the search index.
+  A relation's permalink is `from/type/to` with the type authored by the user, so a
+  note that says `- [decision] redis` and `- observations [[decision/redis]]` gives
+  both rows the identical address; Postgres raised an `IntegrityError` on write, and
+  SQLite -- whose FTS5 table has no unique index to object -- kept both under one
+  address, then dropped one of them on the next single-row index pass. Nothing
+  surfaced either way. The search index's uniqueness now includes
+  the row kind, which the table's own primary key already carried, so the two rows
+  stay separately addressable. **This ships an Alembic migration** replacing
+  `uix_search_index_permalink_project` with `uix_search_index_permalink_type_project`
+  on Postgres; no permalink changes and no data is dropped on upgrade, and SQLite's
+  FTS5 index needs no schema change.
+
 - The `memory://{workspace}/{project}/info` resource is now actually readable over
   `resources/read`: it returned a Pydantic model, which the resource runtime rejects
   (`contents must be str, bytes, or list[ResourceContent]`), so every served read
