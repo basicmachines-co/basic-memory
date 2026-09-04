@@ -18,7 +18,9 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
 import time
+from pathlib import Path
 from typing import Any
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -74,6 +76,14 @@ def _claude_result_event(payload: object) -> dict[str, Any]:
     raise LLMRunnerError(f"claude -p emitted {type(payload).__name__}, expected an object or array")
 
 
+def empty_mcp_config_path() -> Path:
+    """A persistent empty MCP config for `claude -p --strict-mcp-config`."""
+    path = Path(tempfile.gettempdir()) / "bm-bench-empty-mcp.json"
+    if not path.exists():
+        path.write_text('{"mcpServers": {}}\n', encoding="utf-8")
+    return path
+
+
 class ClaudeCLIRunner(LLMRunner):
     """Run prompts through ``claude -p`` (plan-billed, no API key required).
 
@@ -107,6 +117,15 @@ class ClaudeCLIRunner(LLMRunner):
             "json",
             "--max-turns",
             "1",
+            # A plain `claude -p` boots the operator's whole Claude Code
+            # configuration: every configured MCP server (npx-launched browser
+            # tooling among them) starts for one answer, per call. Four hundred
+            # judge calls did that to a laptop. An empty strict MCP config keeps
+            # the OAuth login and drops the servers; --bare would drop them too
+            # but forces API-key auth, which is not the account these runs bill.
+            "--strict-mcp-config",
+            "--mcp-config",
+            str(empty_mcp_config_path()),
         ]
         last_error: Exception | None = None
         for _ in range(self._max_retries + 1):
