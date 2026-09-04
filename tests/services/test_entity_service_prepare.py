@@ -734,12 +734,12 @@ async def test_prepare_edit_entity_content_metadata_sets_note_type(
         current_content,
         operation="append",
         content="",
-        metadata={"type": "decision"},
+        metadata={"type": "Decision Log"},
     )
 
     prepared_frontmatter = parse_frontmatter(prepared.markdown_content)
-    assert prepared_frontmatter["type"] == "decision"
-    assert prepared.entity_fields.note_type == "decision"
+    assert prepared_frontmatter["type"] == "decision_log"
+    assert prepared.entity_fields.note_type == "decision_log"
     # Setting the type is not a license to move the note.
     assert prepared.entity_fields.title == "Metadata Type Change"
     assert prepared.entity_fields.permalink == created.permalink

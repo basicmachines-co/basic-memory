@@ -11,6 +11,7 @@ from typing import Any
 import frontmatter
 import yaml
 from loguru import logger
+from pydantic import TypeAdapter
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -39,7 +40,7 @@ from basic_memory.repository.entity_repository import EntityMetadata, EntityRepo
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.runtime.note_move import normalize_note_move_destination_path
 from basic_memory.schemas import Entity as EntitySchema
-from basic_memory.schemas.base import Permalink
+from basic_memory.schemas.base import NoteType, Permalink
 from basic_memory.services.exceptions import EntityAlreadyExistsError
 from basic_memory.services.file_service import FileService
 from basic_memory.utils import build_canonical_permalink
@@ -696,6 +697,7 @@ def apply_edit_operation(
 # be silently reverted. `type` has no such second opinion: prepare_edit_entity_content
 # just reads it back out of the frontmatter, so writing it there is how you set it.
 _METADATA_IDENTITY_FIELDS = frozenset({"title", "permalink"})
+_NOTE_TYPE_ADAPTER = TypeAdapter(NoteType)
 
 
 def _merge_metadata_into_markdown(markdown_content: str, metadata: dict[str, Any]) -> str:
@@ -716,6 +718,13 @@ def _merge_metadata_into_markdown(markdown_content: str, metadata: dict[str, Any
     sanitized = {k: v for k, v in metadata.items() if k not in _METADATA_IDENTITY_FIELDS}
     if not sanitized:
         return markdown_content
+    if "type" in sanitized:
+        raw_note_type = sanitized["type"]
+        if not isinstance(raw_note_type, str):
+            raise ValueError("metadata type must be a string")
+        # `type` now changes the note's classification, so it must cross the
+        # same normalization and length boundary as write_note's note_type.
+        sanitized["type"] = _NOTE_TYPE_ADAPTER.validate_python(raw_note_type)
 
     had_separator = True
     if has_frontmatter(markdown_content):
