@@ -195,6 +195,14 @@ class OpenAICompatRunner(LLMRunner):
                     output_tokens=int(usage.get("completion_tokens") or 0),
                     latency_ms=(time.perf_counter() - started) * 1000.0,
                 )
+            except httpx.HTTPStatusError as exc:
+                # The status alone ("400 Bad Request") cannot tell a spent
+                # credit balance from a rejected parameter; the body can. Six
+                # BEAM conversations were excluded as bare 400s before this.
+                error_body = exc.response.text.strip().replace("\n", " ")[:300]
+                last_error = LLMRunnerError(
+                    f"HTTP {exc.response.status_code} from {exc.request.url}: {error_body}"
+                )
             except (httpx.HTTPError, KeyError, IndexError, json.JSONDecodeError) as exc:
                 last_error = exc
         raise LLMRunnerError(
