@@ -141,6 +141,20 @@ async def test_extension_bearing_project_name_names_project_root(config_manager,
 
 
 @pytest.mark.asyncio
+async def test_extension_bearing_project_name_root_accepts_normalized_spelling(
+    config_manager, tmp_path_factory
+):
+    config = config_manager.load_config()
+    config.projects["My Docs.txt"] = ProjectEntry(path=str(tmp_path_factory.mktemp("my-docs-txt")))
+    config.projects["Research"] = ProjectEntry(path=str(tmp_path_factory.mktemp("research")))
+    config_manager.save_config(config)
+
+    route = await resolve_project_path_route("my-docs.txt", project=None, project_id=None)
+
+    assert route == ProjectPathRoute(project="My Docs.txt", path="", stripped=True)
+
+
+@pytest.mark.asyncio
 async def test_memory_url_prefix_routes(multi_project_config):
     route = await resolve_project_path_route(
         "memory://second-project/notes/foo", project=None, project_id=None
@@ -1058,6 +1072,30 @@ async def test_cross_workspace_extension_bearing_project_name_routes_root(cloud_
     assert route == ProjectPathRoute(
         project="team/docs", path="", stripped=True, project_id="docs-external-id"
     )
+
+
+@pytest.mark.asyncio
+async def test_cross_workspace_extension_project_root_accepts_normalized_spelling(cloud_session):
+    """Workspace display-name matching retains the usual case and spacing normalization."""
+    cloud_session("research", "engineering", "My Docs.txt")
+
+    route = await resolve_project_path_route("team/my-docs.txt", project=None, project_id=None)
+
+    assert route == ProjectPathRoute(
+        project="team/my-docs", path="", stripped=True, project_id="my-docs-external-id"
+    )
+
+
+@pytest.mark.asyncio
+async def test_explicit_cross_workspace_extension_project_name_routes_root(cloud_session):
+    """An explicit qualified display name makes its extension-bearing root unambiguous."""
+    cloud_session("research", "engineering", "docs.txt")
+
+    route = await resolve_project_path_route(
+        "team/docs.txt", project="team/docs.txt", project_id=None
+    )
+
+    assert route == ProjectPathRoute(project="team/docs.txt", path="", stripped=True)
 
 
 @pytest.mark.asyncio

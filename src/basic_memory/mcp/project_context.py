@@ -339,8 +339,13 @@ async def _resolve_workspace_route(
     #   carries the identity needed to distinguish the real project case.
     # Outcome: retain the exact display-name route to that project root, while
     #   every non-exact spelling continues through the note-safe parser.
+    normalized_rest = generate_permalink(rest, split_extension=False)
     exact_entry = next(
-        (entry for entry in entries_by_permalink.values() if entry.project.name == rest),
+        (
+            entry
+            for entry in entries_by_permalink.values()
+            if generate_permalink(entry.project.name, split_extension=False) == normalized_rest
+        ),
         None,
     )
     claimed = (
@@ -1453,7 +1458,15 @@ def _claim_mount_prefix(
     #   extension-free permalink.
     # Outcome: retain the established exact-name route to that project root;
     #   non-exact names continue through the note-safe permalink matcher.
-    exact = next((project for project in projects if project.name == candidate), None)
+    normalized_candidate = generate_permalink(candidate, split_extension=False)
+    exact = next(
+        (
+            project
+            for project in projects
+            if generate_permalink(project.name, split_extension=False) == normalized_candidate
+        ),
+        None,
+    )
     if exact is not None:
         return exact, ""
 
@@ -1699,7 +1712,21 @@ async def resolve_project_path_route(
     # Outcome: cat("acme/docs/foo", project="acme/docs") reads 'foo', and a path
     #   from a routed ls("acme/docs") round-trips with the project param set.
     if detected is None and explicit is not None:
-        explicit_claim = _split_project_permalink_prefix(candidate, (generate_permalink(explicit),))
+        # Trigger: the candidate is exactly the explicit display-name spelling,
+        #   normalized without discarding its extension.
+        # Why: the permalink parser must preserve a terminal extension to keep a
+        #   same-named note from becoming a root claim, while the explicit
+        #   project supplies the identity that makes this root unambiguous.
+        # Outcome: project="team/docs.txt" plus path="team/docs.txt" names that
+        #   root; a relative "docs.txt" still remains a note inside it.
+        explicit_root = generate_permalink(candidate, split_extension=False) == generate_permalink(
+            explicit, split_extension=False
+        )
+        explicit_claim = (
+            (generate_permalink(explicit), "")
+            if explicit_root
+            else _split_project_permalink_prefix(candidate, (generate_permalink(explicit),))
+        )
         if explicit_claim is not None:
             detected, remainder = explicit, explicit_claim[1]
 
