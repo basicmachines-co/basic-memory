@@ -2169,30 +2169,47 @@ def test_claude_config_dir_still_loses_to_project_settings(
     assert merged["recallTimeframe"] == "9d"
 
 
-@pytest.mark.parametrize("value", ["", "   "])
-def test_claude_config_dir_blank_falls_back_to_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str
+def test_install_claude_preserves_empty_config_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _write_user_block(Path.home() / ".claude", {"primaryProject": "home-default"})
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", value)
-    project = tmp_path / "proj"
-    project.mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "")
 
-    merged, found = hook_module.load_claude_settings(project)
+    result = runner.invoke(cli_app, ["hook", "install"])
 
-    assert found is True
-    assert merged["primaryProject"] == "home-default"
+    assert result.exit_code == 0
+    assert _read_json(tmp_path / "settings.json")["hooks"]["SessionStart"]
+    assert not (Path.home() / ".claude" / "settings.json").exists()
 
 
-def test_claude_config_dir_expands_user(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _write_user_block(Path.home() / ".claude-profile", {"primaryProject": "expanded"})
+def test_install_claude_preserves_whitespace_config_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    literal_profile = tmp_path / "   "
+    literal_profile.mkdir()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "   ")
+
+    result = runner.invoke(cli_app, ["hook", "install"])
+
+    assert result.exit_code == 0
+    assert _read_json(literal_profile / "settings.json")["hooks"]["SessionStart"]
+    assert not (tmp_path / "settings.json").exists()
+
+
+def test_install_claude_preserves_literal_tilde_config_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    literal_profile = tmp_path / "~" / ".claude-profile"
+    literal_profile.mkdir(parents=True)
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", "~/.claude-profile")
-    project = tmp_path / "proj"
-    project.mkdir()
 
-    merged, _ = hook_module.load_claude_settings(project)
+    result = runner.invoke(cli_app, ["hook", "install"])
 
-    assert merged["primaryProject"] == "expanded"
+    assert result.exit_code == 0
+    assert _read_json(literal_profile / "settings.json")["hooks"]["SessionStart"]
+    assert not (Path.home() / ".claude-profile" / "settings.json").exists()
 
 
 def test_install_claude_writes_hooks_into_config_dir(
