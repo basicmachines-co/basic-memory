@@ -600,11 +600,6 @@ class BasicMemoryConfig(BaseSettings):
         description="Format for generated filenames. False preserves spaces and special chars, True converts them to hyphens for consistency with permalinks",
     )
 
-    disable_permalinks: bool = Field(
-        default=False,
-        description="Disable automatic permalink generation in frontmatter. When enabled, new notes won't have permalinks added and sync won't update permalinks. Existing permalinks will still work for reading.",
-    )
-
     write_note_overwrite_default: bool = Field(
         default=False,
         description=(
@@ -637,7 +632,7 @@ class BasicMemoryConfig(BaseSettings):
 
     ensure_frontmatter_on_sync: bool = Field(
         default=True,
-        description="Ensure markdown files have frontmatter during sync by adding derived title/type/permalink when missing. When combined with disable_permalinks=True, this setting takes precedence for missing-frontmatter files and still writes permalinks.",
+        description="Ensure markdown files have complete frontmatter during sync by adding derived title and type when missing. Canonical permalinks are always added.",
     )
 
     permalinks_include_project: bool = Field(
@@ -742,6 +737,32 @@ class BasicMemoryConfig(BaseSettings):
         "index_changes": "sync_changes",
         "index_delay": "sync_delay",
     }
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_disabled_permalinks(cls, data: Any) -> Any:
+        """Reject the removed identity regime while accepting its old false default.
+
+        Older versions serialized every default field, so most existing config files
+        contain ``disable_permalinks: false``. That inert value is safe to discard.
+        A true file or environment setting is different: silently ignoring it would
+        change the user's Markdown on the next index without explaining why.
+        """
+        configured_value = data.get("disable_permalinks") if isinstance(data, dict) else None
+        environment_value = os.getenv("BASIC_MEMORY_DISABLE_PERMALINKS")
+        enabled_values = {"1", "true", "t", "yes", "y", "on"}
+        if configured_value == 1 or (
+            isinstance(configured_value, str) and configured_value.strip().lower() in enabled_values
+        ):
+            raise ValueError(
+                "disable_permalinks has been removed; Markdown note permalinks are mandatory"
+            )
+        if environment_value and environment_value.strip().lower() in enabled_values:
+            raise ValueError(
+                "BASIC_MEMORY_DISABLE_PERMALINKS has been removed; "
+                "Markdown note permalinks are mandatory"
+            )
+        return data
 
     @model_validator(mode="before")
     @classmethod

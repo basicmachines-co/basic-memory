@@ -157,10 +157,7 @@ class EntityService(BaseService[EntityModel]):
         source_schema.content_type = prepared.entity_fields.content_type
         source_schema.entity_metadata = prepared.entity_fields.entity_metadata
 
-        if self.app_config and self.app_config.disable_permalinks:
-            source_schema._permalink = ""
-        else:
-            source_schema._permalink = prepared.entity_fields.permalink
+        source_schema._permalink = prepared.entity_fields.permalink
 
     async def _read_persisted_write_snapshot(
         self,
@@ -687,6 +684,8 @@ class EntityService(BaseService[EntityModel]):
         Uses UPSERT approach to handle permalink/file_path conflicts cleanly.
         """
         logger.debug(f"Creating entity: {markdown.frontmatter.title} file_path: {file_path}")
+        if markdown.frontmatter.permalink is None:
+            raise ValueError(f"Markdown note is missing a canonical permalink: {file_path}")
         model = entity_model_from_markdown(
             file_path, markdown, project_id=self.repository.project_id
         )
@@ -764,8 +763,9 @@ class EntityService(BaseService[EntityModel]):
 
         entity.title = markdown.frontmatter.title
         entity.note_type = markdown.frontmatter.type
-        if markdown.frontmatter.permalink is not None:
-            entity.permalink = markdown.frontmatter.permalink
+        if markdown.frontmatter.permalink is None:
+            raise ValueError(f"Markdown note is missing a canonical permalink: {file_path}")
+        entity.permalink = markdown.frontmatter.permalink
         entity.file_path = file_path.as_posix()
         entity.content_type = "text/markdown"
         entity.created_at = markdown.created
@@ -1020,10 +1020,8 @@ class EntityService(BaseService[EntityModel]):
             # 6. Prepare database updates
             updates = {"file_path": destination_path}
 
-            # 7. Update permalink if configured or if entity has null permalink (unless disabled)
-            if not app_config.disable_permalinks and (
-                app_config.update_permalinks_on_move or old_permalink is None
-            ):
+            # 7. Update permalink if configured or repair a legacy null permalink.
+            if app_config.update_permalinks_on_move or old_permalink is None:
                 # Generate new permalink from destination path
                 new_permalink = await self.resolve_permalink(destination_path)
 

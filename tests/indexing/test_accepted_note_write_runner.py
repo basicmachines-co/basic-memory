@@ -1154,6 +1154,7 @@ async def test_persist_accepted_note_snapshot_emits_relation_generation() -> Non
 async def test_persist_accepted_note_move_emits_relation_generation() -> None:
     session = cast(AsyncSession, _FlushSession())
     entity = _entity()
+    assert entity.permalink is not None
     entity.file_path = "notes/new.md"
     current_note_content = _note_content()
     current_note_content.file_path = "notes/old.md"

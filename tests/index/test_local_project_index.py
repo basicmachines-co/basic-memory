@@ -2399,14 +2399,14 @@ This file has hyphens in the name.
     assert f"permalink: {hyphen_entity.permalink}" in hyphen_note_content.markdown_content
 
 
-async def test_local_project_index_does_not_add_frontmatter_when_disabled(
+async def test_local_project_index_adds_required_permalink_when_optional_fields_disabled(
     test_project: Project,
     project_config,
     app_config,
     config_manager,
     monkeypatch,
 ) -> None:
-    """Plain markdown files stay plain when missing-frontmatter rewrites are disabled."""
+    """The opt-out suppresses optional fields, not canonical note identity."""
     app_config.ensure_frontmatter_on_sync = False
     config_manager.save_config(app_config)
 
@@ -2421,11 +2421,12 @@ async def test_local_project_index_does_not_add_frontmatter_when_disabled(
 
     assert result.enqueued_files == 1
     indexed_content = plain_path.read_text(encoding="utf-8")
-    assert "permalink:" not in indexed_content
+    assert f"permalink: {test_project.permalink}/plain" in indexed_content
+    assert "title:" not in indexed_content
     assert "type:" not in indexed_content
 
 
-async def test_local_project_index_indexes_thematic_break_content_without_frontmatter(
+async def test_local_project_index_preserves_thematic_break_body_after_permalink_injection(
     test_project: Project,
     project_config,
     entity_repository,
@@ -2435,7 +2436,7 @@ async def test_local_project_index_indexes_thematic_break_content_without_frontm
     config_manager,
     monkeypatch,
 ) -> None:
-    """Leading thematic-break markdown stays raw and searchable without frontmatter."""
+    """A leading thematic break remains body content after required identity is added."""
     app_config.ensure_frontmatter_on_sync = False
     config_manager.save_config(app_config)
 
@@ -2452,7 +2453,8 @@ async def test_local_project_index_indexes_thematic_break_content_without_frontm
 
     assert result.enqueued_files == 1
     persisted_content = thematic_path.read_text(encoding="utf-8")
-    assert persisted_content == original_content
+    assert f"permalink: {test_project.permalink}/notes/thematic-break" in persisted_content
+    assert persisted_content.endswith(original_content.rstrip())
 
     async with db.scoped_session(session_maker) as session:
         entity = await entity_repository.get_by_file_path(session, "notes/thematic-break.md")
@@ -2470,7 +2472,7 @@ async def test_local_project_index_indexes_thematic_break_content_without_frontm
     assert results[0].file_path == "notes/thematic-break.md"
 
 
-async def test_local_project_index_writes_frontmatter_when_enabled_even_if_permalinks_disabled(
+async def test_local_project_index_writes_required_identity_frontmatter(
     test_project: Project,
     project_config,
     entity_repository,
@@ -2481,7 +2483,6 @@ async def test_local_project_index_writes_frontmatter_when_enabled_even_if_perma
 ) -> None:
     """Missing-frontmatter project indexing writes identity metadata when configured."""
     app_config.ensure_frontmatter_on_sync = True
-    app_config.disable_permalinks = True
     config_manager.save_config(app_config)
 
     note_path = project_config.home / "override.md"

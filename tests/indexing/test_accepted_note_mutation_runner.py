@@ -791,7 +791,6 @@ def _dependencies(
         ),
         move_policy=move_policy
         or AcceptedNoteMutationMovePolicy(
-            disable_permalinks=False,
             update_permalinks_on_move=False,
         ),
         verify_storage_absent_on_create=verify_storage_absent_on_create,
@@ -1794,7 +1793,6 @@ async def test_run_accepted_note_move_carries_previous_path_and_materialized_cle
             note_content_accept_repository=note_content_accept_repository,
             search_repository=search_repository,
             move_policy=AcceptedNoteMutationMovePolicy(
-                disable_permalinks=False,
                 update_permalinks_on_move=True,
             ),
         ),

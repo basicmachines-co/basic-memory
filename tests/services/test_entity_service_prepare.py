@@ -569,7 +569,7 @@ async def test_prepare_edit_entity_content_prepend_fails_for_malformed_frontmatt
 
 
 @pytest.mark.asyncio
-async def test_prepare_edit_entity_content_prepend_without_frontmatter_uses_simple_prepend(
+async def test_prepare_edit_entity_content_prepend_without_frontmatter_restores_permalink(
     entity_service,
 ) -> None:
     created = await entity_service.create_entity(
@@ -588,7 +588,8 @@ async def test_prepare_edit_entity_content_prepend_without_frontmatter_uses_simp
         content="Prepended line",
     )
 
-    assert prepared.markdown_content == "Prepended line\nOriginal body"
+    assert parse_frontmatter(prepared.markdown_content)["permalink"] == created.permalink
+    assert remove_frontmatter(prepared.markdown_content) == "Prepended line\nOriginal body"
 
 
 @pytest.mark.asyncio

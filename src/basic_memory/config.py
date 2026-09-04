@@ -90,6 +90,7 @@ class ConfigManager:
                     "project_modes",
                     "cloud_projects",
                     "cloud_mode",
+                    "disable_permalinks",
                 }
                 needs_resave = bool(stale_keys & file_data.keys())
 

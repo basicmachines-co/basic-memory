@@ -72,7 +72,7 @@ class PreparedEntityFields:
     note_type: str
     entity_metadata: EntityMetadata
     content_type: str
-    permalink: str | None
+    permalink: str
     file_path: str
     created_at: datetime
     updated_at: datetime
@@ -124,7 +124,7 @@ class PreparedEntityMove:
     file_path: Path
     markdown_content: str
     search_content: str
-    permalink: str | None
+    permalink: str
     observations: tuple[AcceptedObservationWrite, ...] = ()
     sections: tuple[AcceptedSectionWrite, ...] = ()
     relations: tuple[AcceptedRelationWrite, ...] = ()
@@ -307,10 +307,7 @@ async def _resolve_schema_permalink(
     content_markdown: EntityMarkdown | None = None,
     skip_conflict_check: bool = False,
     session: AsyncSession | None = None,
-) -> str | None:
-    if dependencies.app_config and dependencies.app_config.disable_permalinks:
-        schema._permalink = current_permalink or ""
-        return current_permalink
+) -> str:
     if current_permalink and not (content_markdown and content_markdown.frontmatter.permalink):
         schema._permalink = current_permalink
         return current_permalink
@@ -329,7 +326,7 @@ def _build_entity_fields(
     *,
     file_path: Path,
     content_type: str,
-    permalink: str | None,
+    permalink: str,
     entity_markdown: EntityMarkdown,
 ) -> PreparedEntityFields:
     if entity_markdown.created is None or entity_markdown.modified is None:  # pragma: no cover
@@ -357,7 +354,7 @@ async def _build_prepared_write(
     file_path: Path,
     markdown_content: str,
     content_type: str,
-    permalink: str | None,
+    permalink: str,
     preserved_created_at: datetime | None = None,
 ) -> PreparedEntityWrite:
     entity_markdown = await dependencies.entity_parser.parse_markdown_content(
@@ -806,22 +803,30 @@ async def prepare_edit_entity_content(
             title = _coerce_to_string(content_frontmatter["title"])
         if "type" in content_frontmatter:
             note_type = _coerce_to_string(content_frontmatter["type"])
-        if dependencies.app_config and dependencies.app_config.disable_permalinks:
-            permalink = entity.permalink
-        else:
-            content_permalink = _frontmatter_permalink(content_frontmatter.get("permalink"))
-            if content_permalink is not None:
-                permalink = await resolve_permalink(
-                    dependencies,
-                    file_path,
-                    _build_frontmatter_markdown(title, note_type, content_permalink),
-                    skip_conflict_check=skip_conflict_check,
-                    session=session,
-                )
+        content_permalink = _frontmatter_permalink(content_frontmatter.get("permalink"))
+        if content_permalink is not None:
+            permalink = await resolve_permalink(
+                dependencies,
+                file_path,
+                _build_frontmatter_markdown(title, note_type, content_permalink),
+                skip_conflict_check=skip_conflict_check,
+                session=session,
+            )
         normalized_metadata = normalize_frontmatter_metadata(content_frontmatter or {})
         metadata = {
             key: value for key, value in normalized_metadata.items() if value is not None
         } or None
+    if permalink is None:
+        permalink = await resolve_permalink(
+            dependencies,
+            file_path,
+            skip_conflict_check=skip_conflict_check,
+            session=session,
+        )
+    post = frontmatter.loads(markdown_content)
+    if post.metadata.get("permalink") != permalink:
+        post.metadata["permalink"] = permalink
+        markdown_content = dump_frontmatter(post)
     reconciliation = reconcile_prepared_edit_title_from_h1(
         original_markdown=current_content,
         markdown_content=markdown_content,
@@ -853,29 +858,36 @@ async def prepare_move_entity_content(
     file_path = Path(normalize_note_move_destination_path(destination_path))
     markdown_content = current_content
     permalink = entity.permalink
-    update_permalink = should_update_permalink
-    if update_permalink is None:
-        disable_permalinks = bool(
-            dependencies.app_config and dependencies.app_config.disable_permalinks
-        )
-        update_permalinks_on_move = bool(
-            dependencies.app_config and dependencies.app_config.update_permalinks_on_move
-        )
-        update_permalink = not disable_permalinks and (
-            update_permalinks_on_move or entity.permalink is None
-        )
-    if update_permalink:
-        permalink = await resolve_permalink(
-            dependencies, file_path, current_file_path=entity.file_path, session=session
-        )
-        post = frontmatter.loads(markdown_content)
-        post.metadata["permalink"] = permalink
-        markdown_content = dump_frontmatter(post)
     entity_markdown = await dependencies.entity_parser.parse_markdown_content(
         file_path=file_path,
         content=markdown_content,
         ctime=entity.created_at.timestamp() if entity.created_at is not None else None,
     )
+    update_permalink = should_update_permalink
+    if update_permalink is None:
+        update_permalinks_on_move = bool(
+            dependencies.app_config and dependencies.app_config.update_permalinks_on_move
+        )
+        update_permalink = update_permalinks_on_move or entity.permalink is None
+    # A malformed leading fence is canonical body content, not writable metadata.
+    # Preserve its established semantic identity across moves; legacy null rows still
+    # receive a database permalink so every indexed Markdown note has an identity.
+    if update_permalink and (entity_markdown.frontmatter_state != "malformed" or permalink is None):
+        permalink = await resolve_permalink(
+            dependencies, file_path, current_file_path=entity.file_path, session=session
+        )
+    if permalink is None:  # pragma: no cover - update_permalink repairs legacy null rows
+        raise ValueError(f"Markdown note is missing a canonical permalink: {entity.file_path}")
+    if entity_markdown.frontmatter_state != "malformed":
+        post = frontmatter.loads(markdown_content)
+        if post.metadata.get("permalink") != permalink:
+            post.metadata["permalink"] = permalink
+            markdown_content = dump_frontmatter(post)
+            entity_markdown = await dependencies.entity_parser.parse_markdown_content(
+                file_path=file_path,
+                content=markdown_content,
+                ctime=entity.created_at.timestamp() if entity.created_at is not None else None,
+            )
     return PreparedEntityMove(
         file_path=file_path,
         markdown_content=markdown_content,

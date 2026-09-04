@@ -49,9 +49,8 @@ which graph and search projections attach.
 - `external_id` is the stable external/API identity and must survive ordinary updates and moves.
 - `file_path` is the current project-relative storage location. It is unique within a project and
   may change when the resource moves.
-- `permalink` is the human/agent-facing semantic address for Markdown content. It is
-  project-scoped, may be absent when permalinks are disabled or inapplicable, and changes only
-  according to the configured move and permalink policies.
+- `permalink` is the required human/agent-facing semantic address for Markdown content. It is
+  project-scoped and changes only according to the configured move and permalink policies.
 - Non-Markdown entities always have `permalink=None`. `external_id` is their stable API identity,
   and `file_path` locates the stored resource; a database-only permalink would not round-trip
   through the source file.

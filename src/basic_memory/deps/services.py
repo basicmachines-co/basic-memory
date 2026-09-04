@@ -344,7 +344,6 @@ async def get_note_content_mutation_service(
             ),
             write_repositories=accepted_note_repositories,
             move_policy=AcceptedNoteMutationMovePolicy(
-                disable_permalinks=app_config.disable_permalinks,
                 update_permalinks_on_move=app_config.update_permalinks_on_move,
             ),
             # Local filesystem is the source of truth: reject a create when the

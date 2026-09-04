@@ -367,16 +367,6 @@ async def initialize_app(
     Args:
         app_config: The Basic Memory project configuration
     """
-    # Trigger: frontmatter enforcement is enabled while permalink generation is disabled
-    # Why: missing-frontmatter indexing needs canonical permalinks for deterministic output
-    # Outcome: log startup precedence so behavior is explicit to operators
-    if app_config.ensure_frontmatter_on_sync and app_config.disable_permalinks:
-        logger.warning(
-            "Config precedence: ensure_frontmatter_on_sync=True overrides "
-            "disable_permalinks=True for markdown files missing frontmatter during indexing; "
-            "permalinks will be written."
-        )
-
     # Trigger: cloud/stateless deployment (skip_local_initialization — either
     # for_cloud_tenant's skip_initialization_sync or BASIC_MEMORY_CLOUD_MODE).
     # Why: cloud manages its own schema and per-tenant projects from the database.
