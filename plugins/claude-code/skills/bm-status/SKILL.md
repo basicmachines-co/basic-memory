@@ -16,10 +16,13 @@ This is a quick diagnostic — gather the facts and lay them out; don't over-inv
    unavailable and continue with MCP/config checks. The plugin hooks can still use
    their uv-managed environment.
 
-2. **Configuration.** Read the `basicMemory` block with the hooks' precedence —
-   user-level `~/.claude/settings.json` as the base, then the project's
-   `.claude/settings.json` and `.claude/settings.local.json` overriding per key —
-   and report (note when a value comes from the user-level block vs. the project):
+2. **Configuration.** Read the `basicMemory` block with the hooks' precedence.
+   For the user-level base, append `settings.json` to the literal value of
+   `CLAUDE_CONFIG_DIR` when that environment variable is present; do not trim it,
+   expand `~`, or treat an empty value as unset. Use `~/.claude/settings.json` only
+   when the variable is absent. Then the project's `.claude/settings.json` and
+   `.claude/settings.local.json` override per key. Report the result, noting when
+   a value comes from the user-level block versus the project:
    - From the `basicMemory` block: `primaryProject` (or note none is pinned — the
      default project is used), `secondaryProjects` (team/shared read sources),
      `teamProjects` (share targets for `/basic-memory:bm-share`), `captureFolder`

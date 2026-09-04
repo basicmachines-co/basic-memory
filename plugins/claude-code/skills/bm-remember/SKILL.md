@@ -11,9 +11,12 @@ Capture `$ARGUMENTS` into Basic Memory as a quick note, keeping the user's words
 ## Steps
 
 1. **Resolve config.** Read the `basicMemory` block with the same precedence the
-   hooks use: user-level `~/.claude/settings.json` as the base, then the project's
-   `.claude/settings.json` and `.claude/settings.local.json` override it per key. A
-   user-level block alone is enough; a project can still pin its own values:
+   hooks use. For the user-level base, append `settings.json` to the literal value
+   of `CLAUDE_CONFIG_DIR` when that environment variable is present; do not trim
+   it, expand `~`, or treat an empty value as unset. Use `~/.claude/settings.json`
+   only when the variable is absent. Then the project's `.claude/settings.json`
+   and `.claude/settings.local.json` override it per key. A user-level block alone
+   is enough; a project can still pin its own values:
    - `rememberFolder` — folder for quick captures (default: `bm-remember`)
    - `primaryProject` — project to write to (default: omit the `project` argument so
      Basic Memory uses its default project)

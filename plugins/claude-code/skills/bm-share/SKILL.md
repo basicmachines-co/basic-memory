@@ -12,9 +12,12 @@ project — session checkpoints and `/basic-memory:bm-remember` always stay pers
 
 ## Steps
 
-1. **Resolve config.** Read the `basicMemory` block with the hooks' precedence:
-   user-level `~/.claude/settings.json` as the base, then the project's
-   `.claude/settings.json` and `.claude/settings.local.json` override per key:
+1. **Resolve config.** Read the `basicMemory` block with the hooks' precedence.
+   For the user-level base, append `settings.json` to the literal value of
+   `CLAUDE_CONFIG_DIR` when that environment variable is present; do not trim it,
+   expand `~`, or treat an empty value as unset. Use `~/.claude/settings.json` only
+   when the variable is absent. Then the project's `.claude/settings.json` and
+   `.claude/settings.local.json` override per key:
    - `teamProjects` — a map of `<project-ref>` → `{ "promoteFolder": "shared" }`.
      These are the allowed share targets. `<project-ref>` is a workspace-qualified
      name (e.g. `my-team-2/notes`) or an `external_id` UUID.

@@ -13,13 +13,16 @@ of a session; this is the deliberate mid-session version with deeper reads.
 ## Steps
 
 1. Resolve config: read the `basicMemory` block with the same precedence the
-   hooks use — user-level `~/.claude/settings.json` as the base, then the
-   project's `.claude/settings.json` and `.claude/settings.local.json` override
-   it per key. Use `primaryProject`, `secondaryProjects`, `recallTimeframe`,
-   `sessionProfile`, `repository`, and `placementConventions`. If no config is
-   present, continue against the default Basic Memory project and mention that
-   setup has not been run. Scope queries to `primaryProject` by passing it as
-   `project`, or as `project_id` if it's an `external_id` UUID.
+   hooks use. For the user-level base, append `settings.json` to the literal value
+   of `CLAUDE_CONFIG_DIR` when that environment variable is present; do not trim
+   it, expand `~`, or treat an empty value as unset. Use `~/.claude/settings.json`
+   only when the variable is absent. Then the project's `.claude/settings.json`
+   and `.claude/settings.local.json` override it per key. Use `primaryProject`,
+   `secondaryProjects`, `recallTimeframe`, `sessionProfile`, `repository`, and
+   `placementConventions`. If no config is present, continue against the default
+   Basic Memory project and mention that setup has not been run. Scope queries to
+   `primaryProject` by passing it as `project`, or as `project_id` if it's an
+   `external_id` UUID.
 
 2. Query the primary project with `search_notes`:
    - active tasks: `metadata_filters={"type": "task", "status": "active"}`

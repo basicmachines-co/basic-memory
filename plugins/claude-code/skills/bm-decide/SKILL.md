@@ -14,9 +14,11 @@ it works whether or not that style is enabled.
 ## Steps
 
 1. Resolve config: read the `basicMemory` block with the same precedence the
-   hooks use — user-level `~/.claude/settings.json` as the base, then the
-   project's `.claude/settings.json` and `.claude/settings.local.json` override
-   it per key:
+   hooks use. For the user-level base, append `settings.json` to the literal value
+   of `CLAUDE_CONFIG_DIR` when that environment variable is present; do not trim
+   it, expand `~`, or treat an empty value as unset. Use `~/.claude/settings.json`
+   only when the variable is absent. Then the project's `.claude/settings.json`
+   and `.claude/settings.local.json` override it per key:
    - write to `primaryProject` when set (pass it as `project`, or as
      `project_id` if it's an `external_id` UUID)
    - follow `placementConventions` for the directory when they are specific

@@ -38,6 +38,14 @@ REQUIRED_SKILLS = (
     "bm-share",
     "bm-writing",
 )
+PROFILE_AWARE_SKILLS = (
+    "bm-orient",
+    "bm-checkpoint",
+    "bm-decide",
+    "bm-remember",
+    "bm-status",
+    "bm-share",
+)
 REQUIRED_SKILL_TEXT: dict[str, tuple[str, ...]] = {
     "bm-setup": (
         "captureEvents",
@@ -214,6 +222,12 @@ def validate_claude_plugin(plugin_dir: Path) -> None:
         for required_text in REQUIRED_SKILL_TEXT.get(skill_dir.name, ()):
             if required_text not in skill_text:
                 raise SystemExit(f"{skill_md}: missing plugin contract text {required_text!r}")
+
+        # These workflows resolve the same merged config as lifecycle hooks. If
+        # one falls back to a fixed home path, manual and automatic writes can
+        # silently cross Basic Memory project boundaries for Claude profiles.
+        if skill_dir.name in PROFILE_AWARE_SKILLS and "CLAUDE_CONFIG_DIR" not in skill_text:
+            raise SystemExit(f"{skill_md}: must honor CLAUDE_CONFIG_DIR")
 
     readme = (plugin_dir / "README.md").read_text(encoding="utf-8")
     for required_text in (
