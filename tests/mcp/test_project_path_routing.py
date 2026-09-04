@@ -295,6 +295,21 @@ async def test_colliding_mounts_only_fail_the_paths_that_name_them(
 
 
 @pytest.mark.asyncio
+async def test_colliding_mount_exact_root_prefers_raw_display_name(
+    config_manager, tmp_path_factory
+):
+    """An exact raw name remains the root escape hatch when normalized names collide."""
+    config = config_manager.load_config()
+    config.projects["My Docs"] = ProjectEntry(path=str(tmp_path_factory.mktemp("root-dup-a")))
+    config.projects["my-docs"] = ProjectEntry(path=str(tmp_path_factory.mktemp("root-dup-b")))
+    config_manager.save_config(config)
+
+    route = await resolve_project_path_route("my-docs", project=None, project_id=None)
+
+    assert route == ProjectPathRoute(project="my-docs", path="", stripped=True)
+
+
+@pytest.mark.asyncio
 async def test_sibling_slash_bearing_project_conflicts_with_its_prefix(
     config_manager, tmp_path_factory
 ):
