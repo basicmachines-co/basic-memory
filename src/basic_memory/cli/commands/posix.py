@@ -127,6 +127,7 @@ def _write_plain_page_footer(result: dict[str, Any], *, search: bool = False) ->
     if result.get("has_more") is not True:
         return
     summary = _search_page_summary(result) if search else _directory_page_summary(result)
+    sys.stdout.flush()
     print(summary, file=sys.stderr)
 
 

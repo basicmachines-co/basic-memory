@@ -10,14 +10,17 @@ verify three things per verb:
 - CLI flags pass through to the tool call unchanged.
 """
 
+import io
 import json
 import os
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from fastmcp.exceptions import ToolError
 from typer.testing import CliRunner
 
+import basic_memory.cli.commands.posix as posix_commands
 from basic_memory.cli.main import app as cli_app
 from basic_memory.config_models import ProjectEntry
 from basic_memory.mcp.project_context import (
@@ -322,6 +325,17 @@ def _flattened(output: str) -> str:
 def _assert_not_json(output: str) -> None:
     with pytest.raises((json.JSONDecodeError, ValueError)):
         json.loads(output)
+
+
+def test_plain_page_footer_flushes_rows_before_stderr(monkeypatch):
+    stdout = Mock()
+    stderr = io.StringIO()
+    monkeypatch.setattr(posix_commands, "sys", SimpleNamespace(stdout=stdout, stderr=stderr))
+
+    posix_commands._write_plain_page_footer(LS_RESULT_MORE)
+
+    stdout.flush.assert_called_once_with()
+    assert stderr.getvalue().endswith("more available (--page)\n")
 
 
 # Every verb with its patch target, the payload it must print, and what the
