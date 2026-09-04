@@ -126,6 +126,21 @@ async def test_single_segment_project_names_project_root(multi_project_config):
 
 
 @pytest.mark.asyncio
+async def test_extension_bearing_project_name_names_project_root(config_manager, tmp_path_factory):
+    """An exact display name remains a project-root escape hatch even when its
+    extension would be stripped from the project's permalink."""
+    config = config_manager.load_config()
+    config.projects["docs.txt"] = ProjectEntry(
+        path=str(tmp_path_factory.mktemp("extension-project"))
+    )
+    config_manager.save_config(config)
+
+    route = await resolve_project_path_route("docs.txt", project=None, project_id=None)
+
+    assert route == ProjectPathRoute(project="docs.txt", path="", stripped=True)
+
+
+@pytest.mark.asyncio
 async def test_memory_url_prefix_routes(multi_project_config):
     route = await resolve_project_path_route(
         "memory://second-project/notes/foo", project=None, project_id=None

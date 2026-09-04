@@ -1425,10 +1425,22 @@ def _claim_mount_prefix(
 ) -> tuple[AddressableProject, str] | None:
     """Return the mount whose permalink claims the candidate's leading segments.
 
-    The mount table is one candidate set among several, so the matching itself
-    lives in ``split_project_permalink_prefix``; this only maps the winning
-    permalink back to the project that owns it.
+    The mount table is one candidate set among several, so permalink matching
+    lives in ``split_project_permalink_prefix``. The table also preserves the
+    exact display name, which is the only evidence that distinguishes a project
+    literally named ``docs.txt`` from a note named ``docs.txt`` in project
+    ``docs``.
     """
+    # Trigger: the whole candidate exactly spells an addressable display name.
+    # Why: generic permalink parsing cannot distinguish an extension-bearing
+    #   project name from a same-named note because both normalize to the same
+    #   extension-free permalink.
+    # Outcome: retain the established exact-name route to that project root;
+    #   non-exact names continue through the note-safe permalink matcher.
+    exact = next((project for project in projects if project.name == candidate), None)
+    if exact is not None:
+        return exact, ""
+
     # Two addressable projects can share a permalink ('My Docs' beside
     # 'my-docs'). add_project refuses that now, so only a config written before
     # the check, or edited by hand, still holds one. Record the pair rather than

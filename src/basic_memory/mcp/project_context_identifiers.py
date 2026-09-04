@@ -126,11 +126,10 @@ def split_project_permalink_prefix(
     extension included. Dropping an extension only when a match would swallow
     the whole path stops a same-named note ('moby-dick.txt' in project
     'moby-dick') from being misread as the project itself with nothing after
-    it — the project's own name never has a real extension, so this costs
-    nothing when the leading segments genuinely are the bare project name,
-    and is exactly the case where extension-stripping ordinarily helps: a
-    remainder still follows, so what the leading segments spell before their
-    own extension is irrelevant (#1458).
+    it. Callers that also know project display names may recover an exact-name
+    project-root match before calling this permalink-only parser; a remainder
+    still permits extension stripping because the leading segments
+    unambiguously form a prefix (#1458).
     """
     segments = normalize_project_reference(identifier_path(path)).strip("/").split("/")
     # An empty interior segment ('a//b') names nothing. Matching around it would
