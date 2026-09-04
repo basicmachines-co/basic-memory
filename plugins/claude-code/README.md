@@ -128,9 +128,13 @@ your project's `.claude/settings.json`. Copy
 }
 ```
 
-The block can also live in your **user-level** `~/.claude/settings.json` — one
-block there covers every project, no per-repo setup. Precedence, lowest to
-highest: user-level `settings.json` → project `settings.json` → project
+The block can also live in your **user-level** settings. When
+`CLAUDE_CONFIG_DIR` is present, its literal value is the user configuration
+directory and `settings.json` is read below it. An empty, whitespace, relative,
+or tilde-prefixed value is preserved exactly, matching Claude Code. When the
+variable is absent, the user settings path is `~/.claude/settings.json`. One
+user-level block covers every project, with no per-repo setup. Precedence, lowest
+to highest: user-level `settings.json` → project `settings.json` → project
 `settings.local.json`, merged per key — so a project that pins its own
 `primaryProject` wins over the user-level default. (This mirrors Claude Code's
 own sources: `settings.local.json` is project-scoped only, so there is no

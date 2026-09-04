@@ -14,8 +14,11 @@ automatic PreCompact checkpoint.
 ## Gather
 
 Resolve config: read the `basicMemory` block with the same precedence the hooks
-use — user-level `~/.claude/settings.json` as the base, then the project's
-`.claude/settings.json` and `.claude/settings.local.json` override it per key:
+use. For the user-level base, append `settings.json` to the literal value of
+`CLAUDE_CONFIG_DIR` when that environment variable is present; do not trim it,
+expand `~`, or treat an empty value as unset. Use `~/.claude/settings.json` only
+when the variable is absent. Then the project's `.claude/settings.json` and
+`.claude/settings.local.json` override it per key:
 
 - `primaryProject`, default omitted (Basic Memory's default project)
 - `captureFolder`, default `sessions`
