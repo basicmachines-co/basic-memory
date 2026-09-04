@@ -200,6 +200,33 @@ def test_project_add_local_path_creates_nested_directories(
     assert nested_path.is_dir()
 
 
+def test_project_add_invalid_local_path_keeps_config_loadable(
+    runner, mock_config, mock_api_client, tmp_path
+):
+    """A mkdir failure must not persist a path that bricks later CLI commands."""
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory")
+    invalid_path = blocker / "sync"
+
+    result = runner.invoke(
+        app,
+        ["project", "add", "test-project", "--cloud", "--local-path", str(invalid_path)],
+    )
+
+    assert result.exit_code == 1
+    config_data = json.loads(mock_config.read_text())
+    assert "test-project" not in config_data["projects"]
+
+    from basic_memory import config as config_module
+
+    config_module._CONFIG_CACHE = None
+    config_module._CONFIG_MTIME = None
+    config_module._CONFIG_SIZE = None
+
+    follow_up = runner.invoke(app, ["config", "list"])
+    assert follow_up.exit_code == 0, follow_up.stdout
+
+
 def test_project_add_cloud_visibility_passes_payload(runner, mock_config, mock_api_client):
     """Cloud project creation should forward visibility to the API payload."""
     result = runner.invoke(

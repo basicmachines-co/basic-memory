@@ -325,8 +325,8 @@ def test_a_genuinely_configured_project_is_not_adopted_over(tmp_path, monkeypatc
     assert resolved == []
 
 
-def test_a_failed_local_sync_mkdir_gets_a_sync_remedy(tmp_path, monkeypatch, cloud_add):
-    """A directory that cannot be created is repaired on the filesystem, then resynced."""
+def test_a_failed_local_sync_mkdir_gets_an_add_retry_remedy(tmp_path, monkeypatch, cloud_add):
+    """A directory failure is repaired before add adopts and configures the project."""
     # A real mkdir failure: the parent is a file, so creating a child raises.
     blocker = tmp_path / "blocker"
     blocker.write_text("not a directory")
@@ -342,12 +342,12 @@ def test_a_failed_local_sync_mkdir_gets_a_sync_remedy(tmp_path, monkeypatch, clo
     assert "added successfully" in flat(result.output)
     assert "was created, but creating the local sync directory" in flat(result.output)
     assert "bm project index" not in flat(result.output)
-    # `bisync` is Personal-only; `pull` works on Team workspaces too, so it is
-    # the remedy for both. The full mode x step matrix lives in
-    # tests/cli/test_project_add_remedy_matrix.py.
-    assert "bm cloud pull --name research" in flat(result.output)
+    remedy = _printed_remedy_command(result.output)
+    assert remedy[:3] == ["project", "add", "research"]
+    assert "--local-path" in remedy
+    assert "bm cloud pull" not in flat(result.output)
     assert "bm cloud bisync" not in flat(result.output)
-    assert "Do not re-run 'bm project add'" in flat(result.output)
+    assert "Fix the failed step before re-running 'bm project add'" in flat(result.output)
 
 
 def test_the_remedy_survives_a_project_name_with_a_space(tmp_path, monkeypatch, cloud_add):
