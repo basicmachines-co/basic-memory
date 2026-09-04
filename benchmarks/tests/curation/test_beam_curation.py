@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -100,8 +101,10 @@ def _stub_bm(monkeypatch: pytest.MonkeyPatch) -> tuple[list[list[str]], list[str
     settles: list[str] = []
     monkeypatch.setattr(curation, "resolve_bm_command_prefix", lambda bm_local_path: ["bm"])
 
-    def record_command(command: list[str], **kwargs: Any) -> None:
+    def record_command(command: list[str], **kwargs: Any) -> SimpleNamespace:
         commands.append(list(command))
+        stdout = "Basic Memory version: test" if "--version" in command else ""
+        return SimpleNamespace(stdout=stdout, stderr="")
 
     def record_settle(
         *, prefix: list[str], env: dict[str, str], project_name: str, timeout_seconds: float
@@ -453,14 +456,86 @@ def test_resume_reuses_finished_groups_and_recurates_on_prompt_or_model_change(
             writer_factory=lambda p, e, d: FileWriter(d),
         )
 
-    # A regenerated raw input with different chat content is a different source.
-    raw_manifest_path = tmp_path / "raw" / "conversion.json"
-    raw_manifest = json.loads(raw_manifest_path.read_text())
-    raw_manifest["conversations"][0]["chat_sha256"] = "0" * 64
-    raw_manifest_path.write_text(json.dumps(raw_manifest))
+    # A regenerated raw input with different chat content is a different source
+    # for that conversation only: it is curated again, the other is resumed.
+    chat = tmp_path / "chats" / "100K" / "1" / "chat.json"
+    chat.write_text(chat.read_text().replace("}", "} ", 1))
+    convert_beam_to_corpus(
+        dataset_root=tmp_path / "chats", output_dir=tmp_path / "raw", tier="100K"
+    )
     fourth = ScriptedRunner([])
     curate_beam(
         _config(tmp_path, resume=True), runner=fourth, writer_factory=lambda p, e, d: FileWriter(d)
     )
     sessions_one = sum(len(b.turns) for b in load_beam_tier(tmp_path / "chats", "100K")[0].batches)
     assert len(fourth.prompts) == sessions_one
+
+
+def test_curation_servers_run_with_semantic_search_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _raw_dataset(tmp_path)
+    _stub_bm(monkeypatch)
+    envs: list[dict[str, str]] = []
+
+    def writer_factory(prefix: list[str], env: dict[str, str], project_dir: Path) -> FileWriter:
+        envs.append(env)
+        return FileWriter(project_dir)
+
+    curate_beam(_config(tmp_path), runner=ScriptedRunner([]), writer_factory=writer_factory)
+
+    assert envs and all(env["BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED"] == "false" for env in envs)
+
+
+def test_resume_is_keyed_on_the_bm_that_wrote_the_notes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _raw_dataset(tmp_path)
+    _stub_bm(monkeypatch)
+    curate_beam(
+        _config(tmp_path), runner=ScriptedRunner([]), writer_factory=lambda p, e, d: FileWriter(d)
+    )
+    manifest = json.loads((tmp_path / "curated" / "conversion.json").read_text())
+    assert manifest["converter"]["bm_identity"] == "installed:Basic Memory version: test"
+
+    monkeypatch.setattr(curation, "resolve_bm_identity", lambda config, prefix: "installed:other")
+    runner = ScriptedRunner([])
+    curate_beam(
+        _config(tmp_path, resume=True), runner=runner, writer_factory=lambda p, e, d: FileWriter(d)
+    )
+    assert runner.prompts, "a different Basic Memory must not reuse the records"
+
+
+def test_a_live_chat_that_differs_from_the_manifest_fails_fast(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _raw_dataset(tmp_path)
+    _stub_bm(monkeypatch)
+    chat = tmp_path / "chats" / "100K" / "1" / "chat.json"
+    chat.write_text(chat.read_text().replace("}", "} ", 1))
+    runner = ScriptedRunner([])
+    with pytest.raises(ValueError, match="differs from the raw conversion manifest"):
+        curate_beam(_config(tmp_path), runner=runner, writer_factory=lambda p, e, d: FileWriter(d))
+    assert runner.prompts == []
+
+
+def test_a_stray_doc_invalidates_the_resume_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _raw_dataset(tmp_path)
+    _stub_bm(monkeypatch)
+    curate_beam(
+        _config(tmp_path), runner=ScriptedRunner([]), writer_factory=lambda p, e, d: FileWriter(d)
+    )
+    stray = tmp_path / "curated" / "groups" / "beam-100k-c01" / "docs" / "topics" / "Stray.md"
+    stray.parent.mkdir(parents=True, exist_ok=True)
+    stray.write_text("# Stray\n")
+
+    runner = ScriptedRunner([])
+    curate_beam(
+        _config(tmp_path, resume=True), runner=runner, writer_factory=lambda p, e, d: FileWriter(d)
+    )
+
+    sessions_one = sum(len(b.turns) for b in load_beam_tier(tmp_path / "chats", "100K")[0].batches)
+    assert len(runner.prompts) == sessions_one
+    assert not stray.exists()

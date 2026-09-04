@@ -39,6 +39,7 @@ from basic_memory_benchmarks.bm_runtime import (
     resolve_bm_command_prefix,
     settle_index,
 )
+from basic_memory_benchmarks.concurrent_write import resolve_clean_checkout_sha
 from basic_memory_benchmarks.converters.beam_to_corpus import batch_anchor, clean_message_content
 from basic_memory_benchmarks.datasets.beam import BeamConversation, BeamMessage, load_beam_tier
 from basic_memory_benchmarks.llm.runners import LLMRunner, LLMRunnerError, create_runner
@@ -367,6 +368,7 @@ def curate_conversation(
     *,
     group_id: str,
     chat_sha256: str,
+    bm_identity: str,
     config: CurationConfig,
     prefix: list[str],
     runner: LLMRunner,
@@ -383,7 +385,7 @@ def curate_conversation(
     project_dir = home / "project"
     project_dir.mkdir(parents=True)
     (home / "default-home").mkdir(parents=True)
-    env = isolated_bm_env(home)
+    env = {**isolated_bm_env(home), **CURATION_ENV_OVERRIDES}
     writer = writer_factory(prefix, env, project_dir)
     try:
         run_command(prefix + ["project", "add", group_id, str(project_dir)], env=env)
@@ -444,17 +446,41 @@ def curate_conversation(
         stats.doc_count = len(stats.docs_sha256)
     stats.wall_seconds = round(time.monotonic() - started, 2)
     if stats.error is None:
-        write_curation_record(config, stats, chat_sha256=chat_sha256)
+        write_curation_record(config, stats, chat_sha256=chat_sha256, bm_identity=bm_identity)
     return stats
 
 
-def resume_key(config: CurationConfig, chat_sha256: str) -> dict[str, Any]:
+# Curation servers never embed: the curator only writes notes, and the eval
+# ingest embeds the copied docs anyway. Loading the embedding model in every
+# curator server and embedding every note as it lands is what made four
+# workers grind a laptop to a halt.
+CURATION_ENV_OVERRIDES: dict[str, str] = {"BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED": "false"}
+
+
+def resolve_bm_identity(config: CurationConfig, prefix: list[str]) -> str:
+    """The Basic Memory that writes the notes: a clean checkout SHA, or the installed version.
+
+    write_note and edit_note decide the resulting paths and bytes, so a record
+    from one BM is not a record for another.
+    """
+    if config.bm_local_path:
+        return f"checkout:{resolve_clean_checkout_sha(Path(config.bm_local_path))}"
+    version = run_command(prefix + ["--version"]).stdout.strip()
+    if not version:
+        raise ValueError(
+            "`bm --version` printed nothing; cannot identify the installed Basic Memory"
+        )
+    return f"installed:{version}"
+
+
+def resume_key(config: CurationConfig, chat_sha256: str, bm_identity: str) -> dict[str, Any]:
     """Every input that changes a group's curated output.
 
     A record is reusable only when all of these match the current run: the
-    curator and its sampling temperature, the prompt, the note cap, and the
-    exact source chat the conversation was curated from. Anything else would
-    let a rebuilt manifest advertise settings its docs were not produced under.
+    curator and its sampling temperature, the prompt, the note cap, the exact
+    source chat the conversation was curated from, and the Basic Memory that
+    wrote the notes. Anything else would let a rebuilt manifest advertise
+    settings its docs were not produced under.
     """
     return {
         "curator_model_spec": config.model_spec,
@@ -462,32 +488,43 @@ def resume_key(config: CurationConfig, chat_sha256: str) -> dict[str, Any]:
         "curator_prompt_sha256": prompt_sha256(),
         "max_notes_per_session": config.max_notes_per_session,
         "chat_sha256": chat_sha256,
+        "bm_identity": bm_identity,
+        "env_overrides": dict(CURATION_ENV_OVERRIDES),
     }
 
 
 def write_curation_record(
-    config: CurationConfig, stats: ConversationCurationStats, *, chat_sha256: str
+    config: CurationConfig,
+    stats: ConversationCurationStats,
+    *,
+    chat_sha256: str,
+    bm_identity: str,
 ) -> None:
-    record = {"key": resume_key(config, chat_sha256), "stats": asdict(stats)}
+    record = {"key": resume_key(config, chat_sha256, bm_identity), "stats": asdict(stats)}
     path = config.output_dir / "groups" / stats.group_id / CURATION_RECORD
     path.write_text(json.dumps(record, indent=2), encoding="utf-8")
 
 
 def load_curation_record(
-    config: CurationConfig, group_id: str, *, chat_sha256: str
+    config: CurationConfig, group_id: str, *, chat_sha256: str, bm_identity: str
 ) -> ConversationCurationStats | None:
-    """A finished group's stats, only when its resume key matches this run exactly."""
+    """A finished group's stats, only when its resume key matches this run exactly
+    and the docs on disk are exactly the recorded set."""
     path = config.output_dir / "groups" / group_id / CURATION_RECORD
     if not path.exists():
         return None
     record = json.loads(path.read_text(encoding="utf-8"))
-    if record.get("key") != resume_key(config, chat_sha256):
+    if record.get("key") != resume_key(config, chat_sha256, bm_identity):
         return None
     docs_dir = config.output_dir / "groups" / group_id / "docs"
     stats = ConversationCurationStats(**record["stats"])
+    on_disk = {doc.relative_to(docs_dir).as_posix() for doc in docs_dir.rglob("*.md")}
+    # A stray file (an interrupted re-curation copied it before the record was
+    # replaced) would be ingested by every provider; the set must match exactly.
+    if on_disk != set(stats.docs_sha256):
+        return None
     for relative, digest in stats.docs_sha256.items():
-        doc = docs_dir / relative
-        if not doc.exists() or sha256_file(doc) != digest:
+        if sha256_file(docs_dir / relative) != digest:
             return None
     return stats
 
@@ -556,7 +593,20 @@ def curate_beam(
     }
 
     conversations = _select_conversations(load_beam_tier(dataset_root, tier), config)
+    # The manifest's checksums are what provenance pins; the loader reads the
+    # live files. A chat edited since `convert beam` would be curated under the
+    # old checksum, so the two must agree before any curator call is paid for.
+    for conversation in conversations:
+        live_sha = sha256_file(
+            dataset_root / tier / conversation.conversation_id / conversation.source_chat_file
+        )
+        if live_sha != chat_sha_by_conversation[conversation.conversation_id]:
+            raise ValueError(
+                f"BEAM conversation {conversation.conversation_id}: {conversation.source_chat_file} "
+                f"differs from the raw conversion manifest; rerun `convert beam` first"
+            )
     prefix = resolve_bm_command_prefix(config.bm_local_path)
+    bm_identity = resolve_bm_identity(config, prefix)
     curator = runner or create_runner(config.model_spec, temperature=config.model_temperature)
     factory = writer_factory or make_writer_factory(config)
 
@@ -567,7 +617,9 @@ def curate_beam(
         group_id = f"{raw_dataset_id}-c{int(conversation.conversation_id):02d}"
         chat_sha256 = chat_sha_by_conversation[conversation.conversation_id]
         if config.resume:
-            finished = load_curation_record(config, group_id, chat_sha256=chat_sha256)
+            finished = load_curation_record(
+                config, group_id, chat_sha256=chat_sha256, bm_identity=bm_identity
+            )
             if finished is not None:
                 progress(f"resuming {group_id}: {finished.doc_count} docs already curated")
                 return finished
@@ -576,6 +628,7 @@ def curate_beam(
             conversation,
             group_id=group_id,
             chat_sha256=chat_sha256,
+            bm_identity=bm_identity,
             config=config,
             prefix=prefix,
             runner=curator,
@@ -614,6 +667,8 @@ def curate_beam(
             "curator_model_spec": config.model_spec,
             "curator_temperature": config.model_temperature,
             "curator_prompt_sha256": prompt_sha256(),
+            "bm_identity": bm_identity,
+            "env_overrides": dict(CURATION_ENV_OVERRIDES),
             "max_notes_per_session": config.max_notes_per_session,
             "conversations": list(config.conversations) or None,
             "max_conversations": config.max_conversations,
