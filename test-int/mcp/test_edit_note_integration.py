@@ -423,6 +423,90 @@ async def test_edit_note_prepend_creates_nonexistent_note(mcp_server, app, test_
 
 
 @pytest.mark.asyncio
+async def test_edit_note_append_metadata_type_applies_when_auto_creating_note(
+    mcp_server, app, test_project
+):
+    """Append auto-create must honor type metadata and normalize it."""
+    async with Client(mcp_server) as client:
+        edit_result = await client.call_tool(
+            "edit_note",
+            {
+                "project": test_project.name,
+                "identifier": "notes/append-decision",
+                "operation": "append",
+                "content": "# Append Decision\n\nDecision body.",
+                "metadata": {"type": "Decision Log"},
+            },
+        )
+
+        assert "Created note (append)" in edit_result.content[0].text
+        read_result = await client.call_tool(
+            "read_note",
+            {"project": test_project.name, "identifier": "notes/append-decision"},
+        )
+        assert parse_frontmatter(read_result.content[0].text)["type"] == "decision_log"
+
+
+@pytest.mark.asyncio
+async def test_edit_note_prepend_metadata_type_applies_when_auto_creating_note(
+    mcp_server, app, test_project
+):
+    """Prepend auto-create must follow the same type path as append."""
+    async with Client(mcp_server) as client:
+        edit_result = await client.call_tool(
+            "edit_note",
+            {
+                "project": test_project.name,
+                "identifier": "notes/prepend-decision",
+                "operation": "prepend",
+                "content": "# Prepend Decision\n\nDecision body.",
+                "metadata": {"type": "decision"},
+            },
+        )
+
+        assert "Created note (prepend)" in edit_result.content[0].text
+        read_result = await client.call_tool(
+            "read_note",
+            {"project": test_project.name, "identifier": "notes/prepend-decision"},
+        )
+        assert parse_frontmatter(read_result.content[0].text)["type"] == "decision"
+
+
+@pytest.mark.asyncio
+async def test_edit_note_rejects_blank_metadata_type(mcp_server, app, test_project):
+    """A writable type field must reject an empty note classification."""
+    async with Client(mcp_server) as client:
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Type Validation Note",
+                "directory": "notes",
+                "content": "Original body.",
+            },
+        )
+
+        edit_result = await client.call_tool(
+            "edit_note",
+            {
+                "project": test_project.name,
+                "identifier": "notes/type-validation-note",
+                "operation": "append",
+                "content": "",
+                "metadata": {"type": ""},
+            },
+        )
+
+        assert "Edit Failed" in edit_result.content[0].text
+        assert "at least 1 item" in edit_result.content[0].text
+        read_result = await client.call_tool(
+            "read_note",
+            {"project": test_project.name, "identifier": "notes/type-validation-note"},
+        )
+        assert parse_frontmatter(read_result.content[0].text)["type"] == "note"
+
+
+@pytest.mark.asyncio
 async def test_edit_note_error_handling_text_not_found(mcp_server, app, test_project):
     """Test error handling when find_text is not found in the note."""
 

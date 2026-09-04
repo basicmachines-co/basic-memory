@@ -720,6 +720,7 @@ async def edit_note(
                         entity = Entity(
                             title=title,
                             directory=directory,
+                            note_type=metadata.get("type", "note") if metadata else "note",
                             content_type="text/markdown",
                             content=content,
                             entity_metadata=metadata,
