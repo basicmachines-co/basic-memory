@@ -473,6 +473,32 @@ async def test_edit_note_prepend_metadata_type_applies_when_auto_creating_note(
 
 
 @pytest.mark.asyncio
+async def test_edit_note_auto_create_metadata_type_overrides_content_frontmatter(
+    mcp_server, app, test_project
+):
+    """Explicit edit metadata must win over embedded frontmatter during creation."""
+    async with Client(mcp_server) as client:
+        edit_result = await client.call_tool(
+            "edit_note",
+            {
+                "project": test_project.name,
+                "identifier": "notes/frontmatter-conflict",
+                "operation": "append",
+                "content": "---\ntype: incident\n---\n# Frontmatter Conflict\n\nDecision body.",
+                "metadata": {"type": "Decision Log"},
+            },
+        )
+
+        assert "Created note (append)" in edit_result.content[0].text
+        read_result = await client.call_tool(
+            "read_note",
+            {"project": test_project.name, "identifier": "notes/frontmatter-conflict"},
+        )
+        assert parse_frontmatter(read_result.content[0].text)["type"] == "decision_log"
+        assert "Decision body." in read_result.content[0].text
+
+
+@pytest.mark.asyncio
 async def test_edit_note_rejects_blank_metadata_type(mcp_server, app, test_project):
     """A writable type field must reject an empty note classification."""
     async with Client(mcp_server) as client:
