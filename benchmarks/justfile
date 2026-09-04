@@ -104,33 +104,6 @@ bench-run-beam-100k:
       {{bm_local_path_flag}} \
       --allow-provider-skip
 
-# Agent-curated ingestion of the raw BEAM 100K tier (docs/benchmarks.md 6b, curated mode).
-# The curator writes knowledge notes through `bm mcp`; output has the raw layout.
-bench-curate-beam-100k model="openai-compat:claude-sonnet-5@https://api.anthropic.com/v1" *args:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if [[ -z "{{bm_local_path}}" ]]; then
-        echo "BM_LOCAL_PATH must point to the Basic Memory git checkout under test" >&2
-        exit 2
-    fi
-    uv run bm-bench curate beam \
-      --input-dir {{beam_100k_output_dir}} \
-      --output-dir {{beam_100k_output_dir}}-curated \
-      --model "{{model}}" \
-      --model-temperature omit \
-      --bm-local-path "{{bm_local_path}}" {{args}}
-
-# Grouped retrieval over the curated BEAM 100K dataset (bm-local only: mem0 has no curated notes)
-bench-run-beam-100k-curated:
-    uv run bm-bench run retrieval \
-      --dataset-id beam-100k-curated \
-      --dataset-path {{beam_100k_output_dir}}-curated/conversion.json \
-      --corpus-dir {{beam_100k_output_dir}}-curated/groups \
-      --queries-path {{beam_100k_output_dir}}-curated/queries.json \
-      --providers bm-local \
-      {{bm_local_path_flag}} \
-      --strict-providers
-
 # BEAM nugget/ordering scoring over a run's stored QA answers
 bench-beam-score run_dir judge="claude:claude-sonnet-4-6":
     uv run bm-bench run beam-score --run-dir "{{run_dir}}" --judge "{{judge}}"
