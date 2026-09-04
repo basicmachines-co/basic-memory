@@ -499,6 +499,34 @@ async def test_edit_note_auto_create_metadata_type_overrides_content_frontmatter
 
 
 @pytest.mark.asyncio
+async def test_edit_note_auto_create_type_preserves_bom_frontmatter(mcp_server, app, test_project):
+    """Type precedence must not turn BOM-prefixed frontmatter into note body text."""
+    async with Client(mcp_server) as client:
+        edit_result = await client.call_tool(
+            "edit_note",
+            {
+                "project": test_project.name,
+                "identifier": "notes/bom-frontmatter",
+                "operation": "append",
+                "content": "\ufeff---\ntype: incident\nstatus: draft\n---\n# BOM Note\n\nBody.",
+                "metadata": {"type": "decision"},
+            },
+        )
+
+        assert "Created note (append)" in edit_result.content[0].text
+        read_result = await client.call_tool(
+            "read_note",
+            {"project": test_project.name, "identifier": "notes/bom-frontmatter"},
+        )
+        persisted = read_result.content[0].text
+        persisted_metadata = parse_frontmatter(persisted)
+        assert persisted_metadata["type"] == "decision"
+        assert persisted_metadata["status"] == "draft"
+        assert persisted.count("---") == 2
+        assert "# BOM Note\n\nBody." in persisted
+
+
+@pytest.mark.asyncio
 async def test_edit_note_rejects_blank_metadata_type(mcp_server, app, test_project):
     """A writable type field must reject an empty note classification."""
     async with Client(mcp_server) as client:
