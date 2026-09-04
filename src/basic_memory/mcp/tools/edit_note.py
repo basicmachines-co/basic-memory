@@ -14,7 +14,12 @@ if TYPE_CHECKING:  # pragma: no cover
     from basic_memory.mcp.clients import KnowledgeClient
 
 from basic_memory.config import ConfigManager
-from basic_memory.file_utils import dump_frontmatter, has_frontmatter
+from basic_memory.file_utils import (
+    dump_frontmatter,
+    has_frontmatter,
+    parse_frontmatter,
+    remove_frontmatter,
+)
 from basic_memory.ignore_utils import IGNORED_PATH_REJECTION_DETAIL
 from basic_memory.mcp.project_context import (
     UnresolvedProjectRouteError,
@@ -733,8 +738,10 @@ async def edit_note(
                         # content frontmatter that create preparation reads back into note_type.
                         # Outcome: the canonical create path sees the validated metadata type.
                         if metadata and "type" in metadata and has_frontmatter(content):
-                            post = frontmatter.loads(content)
-                            post.metadata["type"] = entity.note_type
+                            content_metadata = parse_frontmatter(content)
+                            content_metadata["type"] = entity.note_type
+                            post = frontmatter.Post(remove_frontmatter(content, strip=False))
+                            post.metadata.update(content_metadata)
                             entity.content = dump_frontmatter(post)
 
                         logger.info(
