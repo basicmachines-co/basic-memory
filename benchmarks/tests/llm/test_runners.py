@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import httpx
 import subprocess
@@ -80,6 +81,13 @@ class TestClaudeCLIRunner:
         assert captured["input"] == "What is the capital of France?"
         assert "--max-turns" in captured["command"]
         assert "claude-haiku-4-5" in captured["command"]
+        # No MCP servers per call: the operator's browser tooling must not boot
+        # for a one-line judgment, and OAuth login must still apply (no --bare).
+        command = captured["command"]
+        assert "--strict-mcp-config" in command
+        assert "--bare" not in command
+        config_path = Path(command[command.index("--mcp-config") + 1])
+        assert json.loads(config_path.read_text()) == {"mcpServers": {}}
 
     def test_parses_the_event_array_claude_code_2_1_prints(self, monkeypatch):
         """`--output-format json` became an array of session events; the result
