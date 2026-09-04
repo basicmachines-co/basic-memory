@@ -331,7 +331,23 @@ async def _resolve_workspace_route(
                 f"Matches: {details}"
             )
 
-    claimed = _split_project_permalink_prefix(rest, entries_by_permalink)
+    # Trigger: the whole project half exactly spells a display name whose
+    #   extension is absent from its stored permalink (for example `docs.txt`
+    #   and `docs`).
+    # Why: the permalink-only parser must preserve that extension to keep a
+    #   same-named note from becoming a project-root claim; this workspace set
+    #   carries the identity needed to distinguish the real project case.
+    # Outcome: retain the exact display-name route to that project root, while
+    #   every non-exact spelling continues through the note-safe parser.
+    exact_entry = next(
+        (entry for entry in entries_by_permalink.values() if entry.project.name == rest),
+        None,
+    )
+    claimed = (
+        (exact_entry.project.permalink, "")
+        if exact_entry is not None
+        else _split_project_permalink_prefix(rest, entries_by_permalink)
+    )
     if claimed is None:
         if any(
             failed_workspace.tenant_id == workspace.tenant_id
