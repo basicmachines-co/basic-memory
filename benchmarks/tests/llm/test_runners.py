@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+
+import httpx
 import subprocess
 
 import pytest
@@ -146,3 +148,23 @@ class TestClaudeCLIRunner:
         runner = ClaudeCLIRunner(model="claude-haiku-4-5", max_retries=1)
         assert runner.complete("hello").text == "ok"
         assert attempts["count"] == 2
+
+
+def test_openai_compat_error_includes_the_response_body(monkeypatch):
+    """A 400 with a JSON error body must surface the body: it is what says
+    "credit balance too low" versus "temperature is deprecated"."""
+    request = httpx.Request("POST", "https://api.example.test/v1/chat/completions")
+
+    def fake_post(url, **kwargs):
+        return httpx.Response(
+            400,
+            json={"error": {"message": "Your credit balance is too low to access the API."}},
+            request=request,
+        )
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    runner = OpenAICompatRunner(model="m", base_url="https://api.example.test/v1", max_retries=0)
+    with pytest.raises(LLMRunnerError) as excinfo:
+        runner.complete("hello")
+    assert "HTTP 400" in str(excinfo.value)
+    assert "credit balance is too low" in str(excinfo.value)
