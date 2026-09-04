@@ -373,6 +373,8 @@ async def to_search_results(
                         # because each row carries its owning entity's id (#1423).
                         external_id=parent_entity.external_id if parent_entity else None,
                         content=result.content,
+                        content_length=result.content_length,
+                        content_truncated=result.content_truncated,
                         matched_chunk=result.matched_chunk_text,
                         file_path=_required_str(result.file_path, "file_path"),
                         updated_at=result.updated_at,

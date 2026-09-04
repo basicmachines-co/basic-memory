@@ -10,14 +10,17 @@ verify three things per verb:
 - CLI flags pass through to the tool call unchanged.
 """
 
+import io
 import json
 import os
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from fastmcp.exceptions import ToolError
 from typer.testing import CliRunner
 
+import basic_memory.cli.commands.posix as posix_commands
 from basic_memory.cli.main import app as cli_app
 from basic_memory.config_models import ProjectEntry
 from basic_memory.mcp.project_context import (
@@ -179,6 +182,7 @@ FIND_RESULT = {
 }
 
 FIND_RESULT_EMPTY = {"nodes": [], "page": 1, "page_size": 10, "total": 0, "has_more": False}
+FIND_RESULT_MORE = {**FIND_RESULT, "has_more": True}
 
 # --meta flips find's payload to the search response shape (the same contract
 # grep returns). --fields then *projects* each hit: the row is the note's
@@ -187,6 +191,7 @@ FIND_RESULT_EMPTY = {"nodes": [], "page": 1, "page_size": 10, "total": 0, "has_m
 # key — spelled out here rather than spread from GREP_RESULT so this mock cannot
 # drift back into promising the CLI content the tool no longer sends.
 FIND_META_RESULT = GREP_RESULT
+FIND_META_RESULT_MORE = {**FIND_META_RESULT, "has_more": True}
 
 FIND_META_FIELDS_RESULT = {
     **GREP_RESULT,
@@ -320,6 +325,17 @@ def _flattened(output: str) -> str:
 def _assert_not_json(output: str) -> None:
     with pytest.raises((json.JSONDecodeError, ValueError)):
         json.loads(output)
+
+
+def test_plain_page_footer_flushes_rows_before_stderr(monkeypatch):
+    stdout = Mock()
+    stderr = io.StringIO()
+    monkeypatch.setattr(posix_commands, "sys", SimpleNamespace(stdout=stdout, stderr=stderr))
+
+    posix_commands._write_plain_page_footer(LS_RESULT_MORE)
+
+    stdout.flush.assert_called_once_with()
+    assert stderr.getvalue().endswith("more available (--page)\n")
 
 
 # Every verb with its patch target, the payload it must print, and what the
@@ -671,6 +687,17 @@ def test_ls_plain_is_one_path_per_line(mock_ls):
     assert result.stdout == "/specs/\n/specs/Search Spec.md\n"
 
 
+@patch("basic_memory.mcp.tools.ls", new_callable=AsyncMock, return_value=LS_RESULT_MORE)
+def test_ls_plain_reports_more_pages_on_stderr(mock_ls):
+    result = _tty_invoke(["ls", "/specs", "--plain"])
+
+    assert result.exit_code == 0, result.output
+    assert "more available" not in result.stdout
+    assert "page 1" in result.stderr
+    assert "total 2" in result.stderr
+    assert "more available (--page)" in result.stderr
+
+
 @patch("basic_memory.mcp.tools.ls", new_callable=AsyncMock, return_value=LS_RESULT)
 def test_ls_defaults_and_paging_passthrough(mock_ls):
     result = _invoke(["ls", "--page", "2", "--page-size", "50"])
@@ -738,6 +765,17 @@ def test_find_plain_is_one_path_per_line(mock_find):
 
     assert result.exit_code == 0, result.output
     assert result.stdout == "/specs\nspecs/search.md\n"
+
+
+@patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=FIND_RESULT_MORE)
+def test_find_plain_reports_more_pages_on_stderr(mock_find):
+    result = _tty_invoke(["find", "/specs", "--plain"])
+
+    assert result.exit_code == 0, result.output
+    assert "more available" not in result.stdout
+    assert "page 1" in result.stderr
+    assert "total 2" in result.stderr
+    assert "more available (--page)" in result.stderr
 
 
 @patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=FIND_RESULT)
@@ -808,6 +846,17 @@ def test_find_meta_without_fields_uses_the_search_renderers(mock_find):
     assert "1. Spec [draft] v2" in result.stdout
 
 
+@patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=FIND_META_RESULT_MORE)
+def test_find_meta_plain_reports_more_pages_on_stderr(mock_find):
+    result = _tty_invoke(["find", "--meta", "status=active", "--plain"])
+
+    assert result.exit_code == 0, result.output
+    assert "more available" not in result.stdout
+    assert "page 1" in result.stderr
+    assert "total 2" in result.stderr
+    assert "more available (--page)" in result.stderr
+
+
 @patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=FIND_META_RESULT)
 def test_find_meta_rich_without_fields_shows_the_predicates(mock_find):
     result = _tty_invoke(["find", "--meta", "status=active"])
@@ -841,6 +890,17 @@ def test_find_meta_fields_plain_is_path_tab_json(mock_find):
         'notes/Another Note.md\t{"title":"Another Note","priority":null,'
         '"approved":false,"missing":null}\n'
     )
+
+
+@patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=FIND_META_FIELDS_MORE)
+def test_find_meta_fields_plain_reports_more_pages_on_stderr(mock_find):
+    result = _tty_invoke(["find", "--meta", "status=active", "--fields", "title", "--plain"])
+
+    assert result.exit_code == 0, result.output
+    assert "more available" not in result.stdout
+    assert "page 1" in result.stderr
+    assert "total 2" in result.stderr
+    assert "more available (--page)" in result.stderr
 
 
 @patch("basic_memory.mcp.tools.find", new_callable=AsyncMock, return_value=FIND_META_FIELDS_RESULT)

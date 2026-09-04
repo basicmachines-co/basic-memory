@@ -85,11 +85,24 @@ class SearchIndexRow:
         self.updated_at = ensure_timezone_aware(self.updated_at)
 
     @property
-    def content(self):
+    def content(self) -> Optional[str]:
         """Return truncated content for display. Full content in content_snippet."""
         if self.content_snippet and len(self.content_snippet) > self.CONTENT_DISPLAY_LIMIT:
             return self.content_snippet[: self.CONTENT_DISPLAY_LIMIT]
         return self.content_snippet
+
+    @property
+    def content_length(self) -> int | None:
+        """Return the full indexed content length before display truncation."""
+        return len(self.content_snippet) if self.content_snippet is not None else None
+
+    @property
+    def content_truncated(self) -> bool:
+        """Whether the transported content omits characters from the indexed value."""
+        return bool(
+            self.content_snippet is not None
+            and len(self.content_snippet) > self.CONTENT_DISPLAY_LIMIT
+        )
 
     @property
     def directory(self) -> str:

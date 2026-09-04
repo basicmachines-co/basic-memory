@@ -7,12 +7,10 @@ conversation (``groups/<group_id>/docs``) plus a single ``queries.json`` whose
 entries name their group, so the existing grouped runner ingests and queries
 each conversation in isolation with zero orchestration changes.
 
-Ingestion-mode seam: loading (``datasets.beam``) is mode-independent; rendering
-is a function from a ``BeamConversation`` to docs plus a message-id→doc-id map
-(``RenderedGroup``). Ground truth is derived from that map, never from raw
-layout assumptions, so a future agent-curated renderer can return its own
-mapping and queries/ground truth/scoring stay valid unchanged. v1 ships only
-the ``raw`` transcript-as-notes mode.
+Rendering is a function from a ``BeamConversation`` to docs plus a
+message-id→doc-id map (``RenderedGroup``). Ground truth is derived from that
+map rather than raw layout assumptions. The converter supports the ``raw``
+transcript-as-notes mode.
 
 Anti-leakage: upstream message content carries a trailing ``->-> <b>,<q>``
 index marker (``<q>`` is sometimes non-numeric, e.g. ``N/A``) linking
@@ -63,7 +61,7 @@ class RenderedGroup:
     doc_id_for_message: dict[int, str]  # global message id -> owning source_doc_id
 
 
-def clean_message_content(content: str) -> str:
+def _clean_message_content(content: str) -> str:
     # Strip the leakage marker first, then collapse whitespace so each turn
     # stays on one line and bullet-level chunking stays intact.
     stripped = _INDEX_MARKER_PATTERN.sub("", content)
@@ -79,7 +77,7 @@ def clean_message_content(content: str) -> str:
     return " ".join(stripped.split())
 
 
-def batch_anchor(batch_messages: list[BeamMessage], batch_time_anchor: str | None) -> str | None:
+def _batch_anchor(batch_messages: list[BeamMessage], batch_time_anchor: str | None) -> str | None:
     if batch_time_anchor:
         return batch_time_anchor
     for message in batch_messages:
@@ -105,7 +103,7 @@ def render_raw_group(
 
     for batch in conversation.batches:
         batch_messages = [message for session in batch.turns for message in session]
-        anchor = batch_anchor(batch_messages, batch.time_anchor)
+        anchor = _batch_anchor(batch_messages, batch.time_anchor)
         if anchor:
             current_anchor = anchor
 
@@ -132,7 +130,7 @@ def render_raw_group(
             ]
             for message in session:
                 doc_id_for_message[message.id] = doc_id
-                content = clean_message_content(message.content)
+                content = _clean_message_content(message.content)
                 if not content:
                     continue
                 speaker = "User" if message.role == "user" else "Assistant"
@@ -210,7 +208,7 @@ def convert_beam_to_corpus(
     if mode != "raw":
         raise ValueError(
             f"Unsupported BEAM ingestion mode {mode!r}; v1 supports only 'raw' "
-            "(agent-curated ingestion is a future renderer behind the same seam)"
+            "(only raw transcript ingestion is supported)"
         )
 
     conversations = load_beam_tier(dataset_root, tier, max_conversations=max_conversations)

@@ -89,6 +89,21 @@ async def test_no_db_call_for_empty_results():
     assert search_results == []
 
 
+@pytest.mark.asyncio
+async def test_search_result_reports_content_truncation():
+    """Transport truncation is explicit and carries the original content length."""
+    service = SpyEntityService({1: _make_entity(1, "notes/long")})
+    content = "x" * (SearchIndexRow.CONTENT_DISPLAY_LIMIT + 1)
+    results = [_make_row(type="entity", id=1, entity_id=1, content_snippet=content)]
+
+    search_results = await to_search_results(service, results)
+
+    result = search_results[0]
+    assert result.content == "x" * SearchIndexRow.CONTENT_DISPLAY_LIMIT
+    assert result.content_length == len(content)
+    assert result.content_truncated is True
+
+
 # --- ID deduplication ---
 
 

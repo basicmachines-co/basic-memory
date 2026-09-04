@@ -122,6 +122,15 @@ def _directory_page_summary(result: dict[str, Any]) -> str:
     return summary
 
 
+def _write_plain_page_footer(result: dict[str, Any], *, search: bool = False) -> None:
+    """Report omitted rows on stderr without contaminating pipe-friendly stdout."""
+    if result.get("has_more") is not True:
+        return
+    summary = _search_page_summary(result) if search else _directory_page_summary(result)
+    sys.stdout.flush()
+    print(summary, file=sys.stderr)
+
+
 # --- cat / head rendering ---
 
 
@@ -714,6 +723,7 @@ def ls(
             _print_json(result)
         elif mode == "plain":
             _plain_ls(result)
+            _write_plain_page_footer(result)
         else:
             _display_ls(result, path)
     except (ValueError, ToolError) as e:
@@ -812,14 +822,17 @@ def find(
             if field_list:
                 if mode == "plain":
                     _plain_find_fields(result)
+                    _write_plain_page_footer(result, search=True)
                 else:
                     _display_find_fields(result, path, meta or [], field_list)
             elif mode == "plain":
                 _plain_search_results(result, query=" AND ".join(meta or []))
+                _write_plain_page_footer(result, search=True)
             else:
                 _display_search_results(result, query=" AND ".join(meta or []))
         elif mode == "plain":
             _plain_find(result)
+            _write_plain_page_footer(result)
         else:
             _display_find(result, path, name)
     except (ValueError, ToolError) as e:

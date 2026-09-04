@@ -37,9 +37,10 @@ from typing import Annotated, Any, Optional
 
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
-from pydantic import BeforeValidator
+from pydantic import BeforeValidator, TypeAdapter
 
 from basic_memory.config import ConfigManager
+from basic_memory.file_utils import ParseError, has_frontmatter, parse_frontmatter
 from basic_memory.man import bundled_pages, find_page, parse_page_ref, render_index
 from basic_memory.mcp.container import get_container
 from basic_memory.mcp.note_reads import read_note_json_by_external_id
@@ -590,6 +591,7 @@ _OPERATOR_VALUE_PREFIXES = frozenset("=<>")
 # Mirrors search_notes' alias: "note_type" (the entity model column) means the
 # frontmatter "type" key, so the two surfaces accept the same spelling.
 _METADATA_KEY_ALIASES = {"note_type": "type"}
+_FRONTMATTER_JSON_ADAPTER = TypeAdapter(dict[str, Any])
 
 
 def _opens_an_unterminated_quote(text: str) -> bool:
@@ -811,6 +813,36 @@ def _project_metadata_fields(
             value = value.get(part)
         projected[field.key] = value
     return projected
+
+
+def _projection_metadata(
+    content: str | None, normalized_metadata: dict[str, Any] | None
+) -> dict[str, Any] | None:
+    """Return frontmatter values with their YAML scalar and collection types intact.
+
+    ``entity_metadata`` is the searchable projection and intentionally stores
+    scalar values as strings for compatibility. Field projection is a read of
+    the canonical note, so parse its frontmatter instead. Pydantic's JSON-mode
+    dump keeps numbers, booleans, lists, and mappings typed while spelling YAML
+    dates as ISO strings, which are the only representation JSON can carry.
+
+    Start from indexed metadata so parser-supplied defaults and malformed or
+    frontmatter-free notes retain their normal representation. Valid authored
+    fields then replace those normalized values with their YAML-native types.
+    """
+    if content is None or not has_frontmatter(content):
+        return normalized_metadata
+    try:
+        authored_metadata = parse_frontmatter(content)
+    except ParseError:
+        return normalized_metadata
+
+    projection_metadata = dict(normalized_metadata or {})
+    projection_metadata.update(authored_metadata)
+    for required_string_field in ("title", "type"):
+        if normalized_metadata and required_string_field in normalized_metadata:
+            projection_metadata[required_string_field] = normalized_metadata[required_string_field]
+    return _FRONTMATTER_JSON_ADAPTER.dump_python(projection_metadata, mode="json")
 
 
 # --- What a projected row carries ---
@@ -1101,9 +1133,10 @@ async def _find_by_metadata(
         if not fields:
             return payload
 
-        # Field projection hydrates from the entity's full normalized
-        # frontmatter — the search hit's own `metadata` is index-row metadata,
-        # not the canonical projection source. One GET per hit is unavoidable
+        # Field projection hydrates from the entity's canonical Markdown,
+        # because its searchable entity_metadata intentionally normalizes
+        # scalar values to strings. The search hit's own `metadata` is index-row
+        # metadata, not the canonical projection source. One GET per hit is unavoidable
         # (the knowledge API has no bulk entity read), so the cost that matters
         # is whether they serialize: page_size is capped at
         # MAX_DIRECTORY_PAGE_SIZE, and under per-project cloud routing that
@@ -1124,7 +1157,7 @@ async def _find_by_metadata(
         async def entity_metadata(entity_external_id: str) -> dict[str, Any] | None:
             async with limiter:
                 entity = await knowledge_client.get_entity(entity_external_id)
-            return entity.entity_metadata
+            return _projection_metadata(entity.content, entity.entity_metadata)
 
         # Trigger: any one projection read fails — a hit deleted between the
         #          search and its hydration, or a cloud-routed GET erroring.
