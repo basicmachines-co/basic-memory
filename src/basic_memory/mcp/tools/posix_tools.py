@@ -35,12 +35,12 @@ import os
 import re
 from typing import Annotated, Any, Optional
 
-import frontmatter
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import BeforeValidator, TypeAdapter
 
 from basic_memory.config import ConfigManager
+from basic_memory.file_utils import ParseError, has_frontmatter, parse_frontmatter
 from basic_memory.man import bundled_pages, find_page, parse_page_ref, render_index
 from basic_memory.mcp.container import get_container
 from basic_memory.mcp.note_reads import read_note_json_by_external_id
@@ -826,13 +826,23 @@ def _projection_metadata(
     dump keeps numbers, booleans, lists, and mappings typed while spelling YAML
     dates as ISO strings, which are the only representation JSON can carry.
 
-    Legacy non-note entities can lack content; retain their existing metadata
-    behavior rather than manufacturing an empty projection.
+    Start from indexed metadata so parser-supplied defaults and malformed or
+    frontmatter-free notes retain their normal representation. Valid authored
+    fields then replace those normalized values with their YAML-native types.
     """
-    if content is None:
+    if content is None or not has_frontmatter(content):
         return normalized_metadata
-    parsed_metadata, _ = frontmatter.parse(content)
-    return _FRONTMATTER_JSON_ADAPTER.dump_python(parsed_metadata, mode="json")
+    try:
+        authored_metadata = parse_frontmatter(content)
+    except ParseError:
+        return normalized_metadata
+
+    projection_metadata = dict(normalized_metadata or {})
+    projection_metadata.update(authored_metadata)
+    for required_string_field in ("title", "type"):
+        if normalized_metadata and required_string_field in normalized_metadata:
+            projection_metadata[required_string_field] = normalized_metadata[required_string_field]
+    return _FRONTMATTER_JSON_ADAPTER.dump_python(projection_metadata, mode="json")
 
 
 # --- What a projected row carries ---

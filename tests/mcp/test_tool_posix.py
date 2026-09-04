@@ -1244,6 +1244,19 @@ async def test_find_meta_projects_requested_fields(client, test_project, meta_no
     }
 
 
+def test_projection_metadata_preserves_indexed_defaults_without_frontmatter():
+    normalized = {"title": "Plain Note", "type": "note"}
+
+    assert posix_tools._projection_metadata("# Plain Note\n\nBody", normalized) == normalized
+
+
+def test_projection_metadata_preserves_indexed_defaults_for_malformed_frontmatter():
+    normalized = {"title": "Malformed Note", "type": "note"}
+    malformed = "---\ntags: [unterminated\n---\n# Malformed Note"
+
+    assert posix_tools._projection_metadata(malformed, normalized) == normalized
+
+
 @pytest.mark.asyncio
 async def test_find_meta_fields_returns_identity_and_projection_only(
     client, test_project, meta_notes
