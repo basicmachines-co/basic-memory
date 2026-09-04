@@ -1458,15 +1458,15 @@ def _claim_mount_prefix(
     #   extension-free permalink.
     # Outcome: retain the established exact-name route to that project root;
     #   non-exact names continue through the note-safe permalink matcher.
-    normalized_candidate = generate_permalink(candidate, split_extension=False)
-    exact = next(
-        (
+    exact = next((project for project in projects if project.name == candidate), None)
+    if exact is None:
+        normalized_candidate = generate_permalink(candidate, split_extension=False)
+        normalized_matches = [
             project
             for project in projects
             if generate_permalink(project.name, split_extension=False) == normalized_candidate
-        ),
-        None,
-    )
+        ]
+        exact = normalized_matches[0] if len(normalized_matches) == 1 else None
     if exact is not None:
         return exact, ""
 
