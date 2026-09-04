@@ -772,7 +772,7 @@ async def test_update_with_content(
 
 
 @pytest.mark.asyncio
-async def test_create_with_no_frontmatter(
+async def test_create_from_markdown_rejects_missing_canonical_permalink(
     project_config: ProjectConfig,
     entity_parser: EntityParser,
     entity_service: EntityService,
@@ -786,15 +786,13 @@ async def test_create_with_no_frontmatter(
     await file_service.write_file(Path(full_path), content)
 
     entity_markdown = await entity_parser.parse_file(full_path)
-    created = await entity_service.create_entity_from_markdown(file_path, entity_markdown)
-    file_content, _ = await file_service.read_file(created.file_path)
+    with pytest.raises(
+        ValueError,
+        match="Markdown note is missing a canonical permalink: test/Git Workflow Guide.md",
+    ):
+        await entity_service.create_entity_from_markdown(file_path, entity_markdown)
 
-    assert file_path.as_posix() == created.file_path
-    assert created.title == "Git Workflow Guide"
-    assert created.note_type == "note"
-    assert created.permalink is None
-
-    # assert file
+    file_content, _ = await file_service.read_file(file_path)
     expected = dedent("""
         # Git Workflow Guide
         """).strip()
@@ -1080,7 +1078,9 @@ async def test_create_entity_from_markdown_with_upsert(
     )
     from datetime import datetime, timezone
 
-    frontmatter = EntityFrontmatter(metadata={"title": "UPSERT Test", "type": "test"})
+    frontmatter = EntityFrontmatter(
+        metadata={"title": "UPSERT Test", "type": "test", "permalink": "test/upsert-test"}
+    )
     markdown = RealEntityMarkdown(
         frontmatter=frontmatter,
         observations=[],
@@ -1116,7 +1116,9 @@ async def test_create_entity_from_markdown_error_handling(
     )
     from datetime import datetime, timezone
 
-    frontmatter = EntityFrontmatter(metadata={"title": "Error Test", "type": "test"})
+    frontmatter = EntityFrontmatter(
+        metadata={"title": "Error Test", "type": "test", "permalink": "test/error-test"}
+    )
     markdown = RealEntityMarkdown(
         frontmatter=frontmatter,
         observations=[],

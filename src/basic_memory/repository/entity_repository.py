@@ -397,8 +397,17 @@ class EntityRepository(Repository[Entity]):
             Relation.from_id == Entity.id,
             Relation.generation == 0,
         )
+        # A pre-v0.24 Markdown row may have a current checksum but no canonical
+        # permalink. Mask its checksum so the normal scan reads the unchanged file
+        # once and writes the required identity into both Markdown and indexed state.
+        legacy_markdown_identity = (Entity.content_type == "text/markdown") & Entity.permalink.is_(
+            None
+        )
         indexed_checksum = case(
-            (or_(publication_pending, legacy_relation_pending), None),
+            (
+                or_(publication_pending, legacy_relation_pending, legacy_markdown_identity),
+                None,
+            ),
             else_=Entity.checksum,
         ).label("checksum")
         query = select(Entity.file_path, indexed_checksum).where(  # pragma: no cover

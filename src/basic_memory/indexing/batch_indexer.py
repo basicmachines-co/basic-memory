@@ -306,7 +306,11 @@ class BatchIndexer:
             if path != file.path and permalink
         }
         with logfire.span("index.markdown_file.normalize", path=file.path):
-            prepared = await self._normalize_markdown_file(prepared, reserved_permalinks)
+            prepared = await self._normalize_markdown_file(
+                prepared,
+                reserved_permalinks,
+                existing_permalink=existing_permalink_by_path.get(file.path),
+            )
         existing_permalink_by_path[file.path] = prepared.markdown.frontmatter.permalink
 
         with logfire.span("index.markdown_file.persist", path=file.path, is_new=new):
@@ -416,6 +420,7 @@ class BatchIndexer:
                 normalized[path] = await self._normalize_markdown_file(
                     prepared_markdown[path],
                     reserved_permalinks,
+                    existing_permalink=existing_permalink_by_path.get(path),
                 )
                 existing_permalink_by_path[path] = normalized[path].markdown.frontmatter.permalink
             except Exception as exc:
@@ -428,22 +433,29 @@ class BatchIndexer:
         self,
         prepared: _PreparedMarkdownFile,
         reserved_permalinks: set[str],
+        *,
+        existing_permalink: str | None = None,
     ) -> _PreparedMarkdownFile:
         final_checksum = prepared.final_checksum
         final_content = prepared.content
-        final_permalink = await self._resolve_batch_permalink(prepared, reserved_permalinks)
+        final_permalink = await self._resolve_batch_permalink(
+            prepared,
+            reserved_permalinks,
+            existing_permalink=existing_permalink,
+        )
 
         # Trigger: markdown file has no frontmatter and sync enforcement is enabled.
         # Why: downstream indexing relies on normalized metadata and stable permalinks.
         # Outcome: write derived metadata back through the storage-agnostic writer.
         #   A "malformed" file matches neither branch: its fenced block is not YAML,
         #   so no rewrite can know which bytes were metadata; it is indexed as-is.
-        if prepared.frontmatter_state == "absent" and self.app_config.ensure_frontmatter_on_sync:
-            frontmatter_updates = {
-                "title": prepared.markdown.frontmatter.title,
-                "type": prepared.markdown.frontmatter.type,
-                "permalink": final_permalink,
-            }
+        if prepared.frontmatter_state == "absent":
+            frontmatter_updates = {"permalink": final_permalink}
+            if self.app_config.ensure_frontmatter_on_sync:
+                frontmatter_updates.update(
+                    title=prepared.markdown.frontmatter.title,
+                    type=prepared.markdown.frontmatter.type,
+                )
             write_result = await self.file_writer.write_frontmatter(
                 IndexFrontmatterUpdate(path=prepared.file.path, metadata=frontmatter_updates)
             )
@@ -456,7 +468,6 @@ class BatchIndexer:
         # Outcome: only the permalink field is updated when it actually differs.
         elif (
             prepared.frontmatter_state == "present"
-            and not self.app_config.disable_permalinks
             and final_permalink != prepared.markdown.frontmatter.permalink
         ):
             prepared.markdown.frontmatter.metadata["permalink"] = final_permalink
@@ -468,6 +479,10 @@ class BatchIndexer:
             )
             final_checksum = write_result.checksum
             final_content = write_result.content
+        elif prepared.frontmatter_state == "malformed":
+            # A leading non-YAML fence is authored body content (#1451), so it is
+            # never rewritten. Its indexed Markdown identity is still mandatory.
+            prepared.markdown.frontmatter.metadata["permalink"] = final_permalink
 
         return _PreparedMarkdownFile(
             file=prepared.file,
@@ -481,20 +496,19 @@ class BatchIndexer:
         self,
         prepared: _PreparedMarkdownFile,
         reserved_permalinks: set[str],
-    ) -> str | None:
-        should_resolve_permalink = (
-            prepared.frontmatter_state == "absent" and self.app_config.ensure_frontmatter_on_sync
-        ) or (prepared.frontmatter_state == "present" and not self.app_config.disable_permalinks)
-        if not should_resolve_permalink:
-            permalink = prepared.markdown.frontmatter.permalink
-            if permalink:
-                reserved_permalinks.add(permalink)
-            return permalink
-
-        desired_permalink = await self.entity_service.resolve_permalink(
-            prepared.file.path,
-            markdown=prepared.markdown,
-            skip_conflict_check=True,
+        *,
+        existing_permalink: str | None,
+    ) -> str:
+        # Malformed frontmatter cannot carry canonical identity on disk. Preserve the
+        # indexed permalink across moves unless the source becomes safely rewriteable.
+        desired_permalink = (
+            existing_permalink
+            if prepared.frontmatter_state == "malformed" and existing_permalink is not None
+            else await self.entity_service.resolve_permalink(
+                prepared.file.path,
+                markdown=prepared.markdown,
+                skip_conflict_check=True,
+            )
         )
         return self._reserve_batch_permalink(desired_permalink, reserved_permalinks)
 
@@ -1052,18 +1066,11 @@ class BatchIndexer:
         prepared: _PreparedMarkdownFile,
         entity: Entity,
     ) -> _PreparedMarkdownFile:
-        # Trigger: the source file started without frontmatter and sync is configured
-        #          to leave frontmatterless files alone.
-        # Why: upsert may still assign a DB permalink even when disk content should stay untouched.
-        # Outcome: skip reconciliation writes that would silently inject frontmatter.
-        rewrite_allowed = (
-            self.app_config.ensure_frontmatter_on_sync
-            if prepared.frontmatter_state == "absent"
-            else prepared.frontmatter_state == "present"
-        )
+        # Malformed frontmatter cannot be rewritten safely because the leading fence may be
+        # authored body content. Valid and absent frontmatter have already accepted canonical
+        # permalink management, so conflict suffixes must be reconciled back to the file.
         if (
-            self.app_config.disable_permalinks
-            or not rewrite_allowed
+            prepared.frontmatter_state == "malformed"
             or entity.permalink is None
             or entity.permalink == prepared.markdown.frontmatter.permalink
         ):

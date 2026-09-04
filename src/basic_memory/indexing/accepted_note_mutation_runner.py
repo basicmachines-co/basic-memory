@@ -198,13 +198,10 @@ class AcceptedNoteDeleteMutation:
 class AcceptedNoteMutationMovePolicy:
     """Permalink policy for DB-first accepted note moves."""
 
-    disable_permalinks: bool
     update_permalinks_on_move: bool
 
     def should_update_permalink(self, entity: Entity) -> bool:
-        return not self.disable_permalinks and (
-            self.update_permalinks_on_move or entity.permalink is None
-        )
+        return self.update_permalinks_on_move or entity.permalink is None
 
 
 def accepted_note_mutation_utc_now() -> datetime:

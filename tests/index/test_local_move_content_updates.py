@@ -22,7 +22,6 @@ from basic_memory.services import FileService
 class MovePermalinkConfig:
     """Just the permalink policy flags the move content planner reads."""
 
-    disable_permalinks: bool = False
     update_permalinks_on_move: bool = True
 
 
@@ -105,13 +104,7 @@ async def test_plan_moved_file_content_requires_app_config(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
-async def test_plan_moved_file_content_respects_permalink_policy(tmp_path: Path) -> None:
-    disabled = _updater(
-        tmp_path,
-        StaticMoveEntityService(app_config=MovePermalinkConfig(disable_permalinks=True)),
-    )
-    assert await disabled.plan_moved_file_content(_session(), _moved_file()) is None
-
+async def test_plan_moved_file_content_respects_move_permalink_policy(tmp_path: Path) -> None:
     no_move_updates = _updater(
         tmp_path,
         StaticMoveEntityService(app_config=MovePermalinkConfig(update_permalinks_on_move=False)),

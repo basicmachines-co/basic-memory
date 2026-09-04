@@ -208,6 +208,5 @@ $bm-orient "<exact returned resume identifier>"
 ```
 
 Choose the first non-empty returned value in this order: `permalink`,
-`file_path`, then `title`. This preserves a direct resume cursor when the Basic
-Memory project has permalinks disabled. Use the returned value verbatim; never
-construct or guess a permalink or file path.
+`file_path`, then `title`. Use the returned value verbatim; never construct or
+guess a permalink or file path.

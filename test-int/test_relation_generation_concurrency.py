@@ -391,7 +391,6 @@ async def test_mutual_relation_generations_complete_under_concurrent_persistence
     if engine.dialect.name != "postgresql":
         pytest.skip("row-lock deadlock regression requires PostgreSQL")
 
-    app_config.disable_permalinks = True
     entity_repository = EntityRepository(project_id=test_project.id)
     observation_repository = ObservationRepository(project_id=test_project.id)
     relation_repository = RelationRepository(project_id=test_project.id)

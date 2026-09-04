@@ -405,8 +405,6 @@ async def test_batch_indexer_returns_original_markdown_content_when_no_frontmatt
     file_service,
     project_config,
 ):
-    app_config.disable_permalinks = True
-
     path = "notes/original.md"
     original_content = dedent(
         """
@@ -741,7 +739,6 @@ async def test_batch_indexer_uses_parsed_markdown_body_for_malformed_frontmatter
     file_service,
     project_config,
 ):
-    app_config.disable_permalinks = True
     app_config.ensure_frontmatter_on_sync = False
 
     path = "notes/malformed.md"
@@ -1598,7 +1595,7 @@ async def test_batch_indexer_strips_frontmatter_from_search_content_when_body_is
 
 
 @pytest.mark.asyncio
-async def test_batch_indexer_does_not_inject_frontmatter_when_sync_enforcement_is_disabled(
+async def test_batch_indexer_repairs_missing_permalink_when_optional_frontmatter_is_disabled(
     app_config,
     entity_service,
     entity_repository,
@@ -1643,14 +1640,14 @@ async def test_batch_indexer_does_not_inject_frontmatter_when_sync_enforcement_i
         index_search=False,
     )
 
-    # Trigger: Windows persists CRLF for text files even when the test literal uses LF.
-    # Why: this assertion cares about preserving a frontmatterless file, not about newline style.
-    # Outcome: compare against the exact content stored on disk after sync.
     persisted_content = (project_config.home / path).read_bytes().decode("utf-8")
     async with db.scoped_session(search_service.session_maker) as session:
         entity = await entity_repository.get_by_file_path(session, path)
     assert entity is not None
     assert entity.permalink == existing_permalink
-    assert frontmatter_writer.await_count == 0
+    assert frontmatter_writer.await_count == 1
+    assert f"permalink: {existing_permalink}" in persisted_content
+    assert "title:" not in persisted_content
+    assert "type:" not in persisted_content
     assert indexed.markdown_content == persisted_content
     assert (await file_service.read_file_bytes(path)).decode("utf-8") == persisted_content

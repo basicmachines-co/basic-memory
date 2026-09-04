@@ -118,7 +118,7 @@ class LocalProjectIndexMoveContentUpdater(ProjectIndexMoveContentUpdater):
         app_config = self.entity_service.app_config
         if app_config is None:
             raise RuntimeError("local move content updates require app_config")
-        if app_config.disable_permalinks or not app_config.update_permalinks_on_move:
+        if not app_config.update_permalinks_on_move:
             return None
         if not self.file_service.is_markdown(moved_file.new_path):
             return None

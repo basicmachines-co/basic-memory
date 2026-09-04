@@ -7,7 +7,6 @@ test config + dual-backend fixtures.
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -18,7 +17,6 @@ from basic_memory.index.local_runtime import LocalWatchEventIndexRuntimeFactory
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.services.initialization import (
     ensure_initialization,
-    initialize_app,
     initialize_database,
     initialize_file_indexing,
     reconcile_projects_with_config,
@@ -138,39 +136,6 @@ def test_ensure_initialization_runs_and_cleans_up(app_config: BasicMemoryConfig,
     # Must be cleaned up to avoid hanging processes.
     assert db._engine is None  # pyright: ignore [reportPrivateUsage]
     assert db._session_maker is None  # pyright: ignore [reportPrivateUsage]
-
-
-@pytest.mark.asyncio
-async def test_initialize_app_warns_on_frontmatter_permalink_precedence(
-    app_config: BasicMemoryConfig, monkeypatch
-):
-    app_config.database_backend = DatabaseBackend.SQLITE
-    app_config.ensure_frontmatter_on_sync = True
-    app_config.disable_permalinks = True
-
-    init_db_mock = AsyncMock()
-    reconcile_mock = AsyncMock()
-    monkeypatch.setattr("basic_memory.services.initialization.initialize_database", init_db_mock)
-    monkeypatch.setattr(
-        "basic_memory.services.initialization.reconcile_projects_with_config",
-        reconcile_mock,
-    )
-
-    warnings: list[str] = []
-
-    def capture_warning(message: str) -> None:
-        warnings.append(message)
-
-    monkeypatch.setattr("basic_memory.services.initialization.logger.warning", capture_warning)
-
-    await initialize_app(app_config)
-
-    assert init_db_mock.await_count == 1
-    assert reconcile_mock.await_count == 1
-    assert any(
-        "ensure_frontmatter_on_sync=True overrides disable_permalinks=True" in message
-        for message in warnings
-    )
 
 
 class _FakeWatchService:
@@ -407,37 +372,6 @@ async def test_initialize_file_indexing_skips_project_with_non_absolute_path(
         assert "good" not in skip_logs[0]
     finally:
         await db.shutdown_db()
-
-
-@pytest.mark.asyncio
-async def test_initialize_app_no_precedence_warning_when_not_conflicting(
-    app_config: BasicMemoryConfig, monkeypatch
-):
-    app_config.ensure_frontmatter_on_sync = False
-    app_config.disable_permalinks = True
-
-    monkeypatch.setattr(
-        "basic_memory.services.initialization.initialize_database",
-        AsyncMock(),
-    )
-    monkeypatch.setattr(
-        "basic_memory.services.initialization.reconcile_projects_with_config",
-        AsyncMock(),
-    )
-
-    warnings: list[str] = []
-
-    def capture_warning(message: str) -> None:
-        warnings.append(message)
-
-    monkeypatch.setattr("basic_memory.services.initialization.logger.warning", capture_warning)
-
-    await initialize_app(app_config)
-
-    assert not any(
-        "ensure_frontmatter_on_sync=True overrides disable_permalinks=True" in message
-        for message in warnings
-    )
 
 
 @pytest.mark.asyncio

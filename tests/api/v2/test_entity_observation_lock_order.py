@@ -24,10 +24,12 @@ from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services.entity_service import EntityService
 
 
-def _indexed_markdown(*, title: str, created: datetime) -> EntityMarkdown:
+def _indexed_markdown(*, title: str, permalink: str, created: datetime) -> EntityMarkdown:
     """Build the file snapshot shared by the publication regressions."""
     return EntityMarkdown(
-        frontmatter=EntityFrontmatter(metadata={"title": title, "type": "note"}),
+        frontmatter=EntityFrontmatter(
+            metadata={"title": title, "type": "note", "permalink": permalink}
+        ),
         observations=[
             MarkdownObservation(content="Initial observation", category="fact"),
             MarkdownObservation(content="Accepted edit observation", category="fact"),
@@ -89,9 +91,11 @@ async def test_markdown_update_defers_observations_to_generation_publication(
             content="# Deferred observation publication\n\n- [fact] Initial observation",
         )
     )
+    assert created.permalink is not None
     anchor = await entity_service._capture_note_content_anchor(created.id)
     markdown = _indexed_markdown(
         title="Deferred observation publication",
+        permalink=created.permalink,
         created=created.created_at,
     )
     publication_calls: list[tuple[int, int, tuple[str, ...]]] = []
