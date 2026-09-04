@@ -938,6 +938,7 @@ async def meta_notes(client, test_project):
             "status": "active",
             "priority": "high",
             "confidence": 0.9,
+            "chapter_number": 63,
             "tags": ["security", "oauth"],
             "review": {"approved": True},
         },
@@ -1216,11 +1217,11 @@ async def test_find_meta_paginates_with_exact_totals(client, test_project, meta_
 
 @pytest.mark.asyncio
 async def test_find_meta_projects_requested_fields(client, test_project, meta_notes):
-    """Projection reads the entity's normalized frontmatter; a field a hit does
+    """Projection reads the canonical typed frontmatter; a field a hit does
     not carry renders as null instead of dropping the row."""
     result = await find(
         meta=["status=active"],
-        fields=["title", "priority", "review.approved", "missing_field"],
+        fields=["title", "priority", "chapter_number", "review.approved", "tags", "missing_field"],
         project=test_project.name,
     )
 
@@ -1228,14 +1229,17 @@ async def test_find_meta_projects_requested_fields(client, test_project, meta_no
     assert projected["Alpha Spec"] == {
         "title": "Alpha Spec",
         "priority": "high",
-        # Frontmatter round-trips the nested boolean as its stored string form.
-        "review.approved": "True",
+        "chapter_number": 63,
+        "review.approved": True,
+        "tags": ["security", "oauth"],
         "missing_field": None,
     }
     assert projected["Gamma Note"] == {
         "title": "Gamma Note",
         "priority": "critical",
+        "chapter_number": None,
         "review.approved": None,
+        "tags": ["oauth"],
         "missing_field": None,
     }
 
@@ -1364,7 +1368,7 @@ async def test_find_meta_nested_field_path_still_projects(client, test_project, 
     )
 
     projected = {row["title"]: row["fields"] for row in result["results"]}
-    assert projected["Alpha Spec"] == {"review.approved": "True"}
+    assert projected["Alpha Spec"] == {"review.approved": True}
     assert projected["Gamma Note"] == {"review.approved": None}
 
 

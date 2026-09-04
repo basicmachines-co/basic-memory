@@ -47,8 +47,12 @@ def test_content_truncates_at_display_limit():
         updated_at=datetime.now(),
         content_snippet=long_text,
     )
-    assert len(row.content) == 4000
-    assert row.content == long_text[:4000]
+    content = row.content
+    assert content is not None
+    assert len(content) == 4000
+    assert content == long_text[:4000]
+    assert row.content_length == len(long_text)
+    assert row.content_truncated is True
 
 
 def test_content_returns_full_snippet_when_under_limit():
@@ -64,3 +68,21 @@ def test_content_returns_full_snippet_when_under_limit():
         content_snippet=short_text,
     )
     assert row.content == short_text
+    assert row.content_length == len(short_text)
+    assert row.content_truncated is False
+
+
+def test_missing_content_has_no_length_and_is_not_truncated():
+    row = SearchIndexRow(
+        project_id=1,
+        id=1,
+        type="entity",
+        file_path="test.md",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        content_snippet=None,
+    )
+
+    assert row.content is None
+    assert row.content_length is None
+    assert row.content_truncated is False

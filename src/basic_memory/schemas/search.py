@@ -275,6 +275,8 @@ class SearchResult(BaseModel):
     external_id: Optional[str] = None
     permalink: Optional[str]
     content: Optional[str] = None
+    content_length: Optional[int] = None
+    content_truncated: bool = False
     matched_chunk: Optional[str] = None
     file_path: str
     updated_at: Optional[datetime] = None
