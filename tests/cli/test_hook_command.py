@@ -2182,13 +2182,13 @@ def test_install_claude_preserves_empty_config_dir(
     assert not (Path.home() / ".claude" / "settings.json").exists()
 
 
-def test_install_claude_preserves_whitespace_config_dir(
+def test_install_claude_preserves_leading_whitespace_config_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    literal_profile = tmp_path / "   "
+    literal_profile = tmp_path / " profile"
     literal_profile.mkdir()
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("CLAUDE_CONFIG_DIR", "   ")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", " profile")
 
     result = runner.invoke(cli_app, ["hook", "install"])
 
