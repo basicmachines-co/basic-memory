@@ -1048,6 +1048,19 @@ async def test_cloud_workspace_qualified_project_root_routes(cloud_session):
 
 
 @pytest.mark.asyncio
+async def test_cross_workspace_extension_bearing_project_name_routes_root(cloud_session):
+    """Workspace discovery preserves exact display names whose extension is
+    absent from the stored permalink."""
+    cloud_session("research", "engineering", "docs.txt")
+
+    route = await resolve_project_path_route("team/docs.txt", project=None, project_id=None)
+
+    assert route == ProjectPathRoute(
+        project="team/docs", path="", stripped=True, project_id="docs-external-id"
+    )
+
+
+@pytest.mark.asyncio
 async def test_cloud_workspace_route_matches_multi_segment_project_permalink(cloud_session):
     """A workspace route splits project from path by matching that workspace's
     project permalinks, not by taking one segment. The mount table learned this
