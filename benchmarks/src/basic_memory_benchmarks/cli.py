@@ -837,6 +837,11 @@ def run_beam_score_command(
     ),
     source: str = typer.Option("auto", "--source", help="qa | rejudge | auto"),
     max_workers: int = typer.Option(4, "--max-workers"),
+    resume: bool = typer.Option(
+        False,
+        "--resume",
+        help="Keep cases already scored by this judge without error; judge only the rest",
+    ),
 ) -> None:
     """Score a BEAM run's stored QA answers with the nugget methodology.
 
@@ -845,7 +850,7 @@ def run_beam_score_command(
     per-ability scores (never just an overall average).
     """
     out = run_beam_score_stage(
-        run_dir=run_dir, judge_spec=judge, source=source, max_workers=max_workers
+        run_dir=run_dir, judge_spec=judge, source=source, max_workers=max_workers, resume=resume
     )
     console.print(f"BEAM scoring complete: [green]{out}[/green]")
     console.print(f"See [cyan]{out / 'beam-summary.md'}[/cyan]")

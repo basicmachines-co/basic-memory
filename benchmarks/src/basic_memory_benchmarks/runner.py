@@ -10,6 +10,7 @@ from pathlib import Path
 from basic_memory_benchmarks.exceptions import ProviderSkippedError
 from basic_memory_benchmarks.fairness import validate_fairness
 from basic_memory_benchmarks.models import (
+    BeamCaseScore,
     DatasetProvenance,
     PerQueryRetrievalResult,
     ProviderStatus,
@@ -430,12 +431,34 @@ def run_diagnose_stage(
     return out_path
 
 
+def _reusable_beam_scores(run_dir: Path, judge_spec: str) -> list[BeamCaseScore]:
+    """Cases already judged by this judge without error, from a prior scoring pass.
+
+    The judge is part of the key: a different judge re-scores everything, so
+    one summary never mixes verdicts from two judges.
+    """
+    summary_path = run_dir / "beam-summary.json"
+    beam_jsonl = run_dir / "per-query-beam.jsonl"
+    if not summary_path.exists() or not beam_jsonl.exists():
+        return []
+    previous = json.loads(summary_path.read_text(encoding="utf-8"))
+    if previous.get("judge") != judge_spec:
+        return []
+    rows = [
+        BeamCaseScore.model_validate(json.loads(line))
+        for line in beam_jsonl.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    return [row for row in rows if row.error is None]
+
+
 def run_beam_score_stage(
     *,
     run_dir: Path,
     judge_spec: str,
     source: str = "auto",
     max_workers: int = 4,
+    resume: bool = False,
 ) -> Path:
     """Apply BEAM nugget/ordering scoring to a run's stored QA answers.
 
@@ -449,6 +472,7 @@ def run_beam_score_stage(
     from basic_memory_benchmarks.scoring.beam import (
         build_beam_summary_markdown,
         score_beam_cases,
+        summarize_beam_cases,
     )
 
     qa_cases, chosen = _load_qa_cases(run_dir, source)
@@ -469,9 +493,29 @@ def run_beam_score_stage(
         )
 
     judge = create_runner(judge_spec)
-    case_scores, summaries = score_beam_cases(
-        qa_cases, retrieval_rows, judge=judge, max_workers=max_workers
-    )
+    # Trigger: --resume after an interrupted pass (a judge transport failing
+    #   part way, e.g. the claude CLI's session limit after 130 of 400 cases).
+    # Why: every scored case cost a judge call; re-judging them pays again and
+    #   can hit the same limit before reaching the cases that still need it.
+    # Outcome: cases this judge already scored are kept, only the rest are
+    #   judged, and the summary is rebuilt over the whole set.
+    reused = _reusable_beam_scores(run_dir, judge_spec) if resume else []
+    reused_keys = {(case.provider, case.query_id) for case in reused}
+    pending = [case for case in qa_cases if (case.provider, case.query_id) not in reused_keys]
+    new_scores, _ = score_beam_cases(pending, retrieval_rows, judge=judge, max_workers=max_workers)
+    by_key = {(case.provider, case.query_id): case for case in [*reused, *new_scores]}
+    case_scores = [by_key[(case.provider, case.query_id)] for case in qa_cases]
+    providers: list[str] = []
+    cases_by_provider: dict[str, list[BeamCaseScore]] = {}
+    for case in case_scores:
+        if case.provider not in cases_by_provider:
+            providers.append(case.provider)
+            cases_by_provider[case.provider] = []
+        cases_by_provider[case.provider].append(case)
+    summaries = [
+        summarize_beam_cases(provider, cases_by_provider[provider], judge.spec)
+        for provider in providers
+    ]
 
     beam_jsonl = run_dir / "per-query-beam.jsonl"
     with beam_jsonl.open("w", encoding="utf-8") as file:

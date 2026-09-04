@@ -546,6 +546,76 @@ class TestBeamScoreStage:
             )
         assert not (tmp_path / "per-query-beam.jsonl").exists()
 
+    def test_resume_judges_only_the_cases_the_last_pass_could_not(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """The claude CLI judge hit its session limit after 130 of 400 raw cases;
+        a re-run without resume would re-pay for those 130 and could hit the
+        limit again before reaching the 270 that still needed a verdict."""
+        from basic_memory_benchmarks import runner as runner_module
+        from basic_memory_benchmarks.llm.runners import LLMResult, LLMRunner, LLMRunnerError
+
+        self._write_rows(
+            tmp_path,
+            [
+                _retrieval_row("q1", "information_extraction", ["States March 29"]),
+                _retrieval_row("q2", "preference_following", ["Prefers tea"]),
+            ],
+        )
+        self._write_qa(
+            tmp_path / "per-query-qa.jsonl",
+            [_qa_case("q1", "March 29"), _qa_case("q2", "tea, always")],
+        )
+
+        class LimitedJudge(LLMRunner):
+            spec = "fake:test"
+
+            def __init__(self) -> None:
+                self.calls = 0
+                self.failing = True
+
+            def complete(self, prompt: str) -> LLMResult:
+                self.calls += 1
+                if self.failing and "tea" in prompt:
+                    raise LLMRunnerError("session limit")
+                return LLMResult(
+                    text='{"score": 1.0, "reason": "stated"}',
+                    model="fake",
+                    input_tokens=1,
+                    output_tokens=1,
+                    latency_ms=0.0,
+                )
+
+        judge = LimitedJudge()
+        monkeypatch.setattr("basic_memory_benchmarks.llm.runners.create_runner", lambda spec: judge)
+
+        runner_module.run_beam_score_stage(run_dir=tmp_path, judge_spec="fake:test", max_workers=1)
+        first = json.loads((tmp_path / "beam-summary.json").read_text())["providers"][0]
+        assert first["error_count"] == 1
+        calls_first = judge.calls
+
+        judge.failing = False
+        runner_module.run_beam_score_stage(
+            run_dir=tmp_path, judge_spec="fake:test", max_workers=1, resume=True
+        )
+        assert judge.calls == calls_first + 1, "only the errored case was judged again"
+        second = json.loads((tmp_path / "beam-summary.json").read_text())["providers"][0]
+        assert second["error_count"] == 0
+        rows = [
+            BeamCaseScore.model_validate(json.loads(line))
+            for line in (tmp_path / "per-query-beam.jsonl").read_text().splitlines()
+        ]
+        assert [row.query_id for row in rows] == ["q1", "q2"]
+        assert all(row.error is None for row in rows)
+
+        # A different judge re-scores everything: verdicts from two judges never mix.
+        judge.spec = "fake:other"
+        judge.calls = 0
+        runner_module.run_beam_score_stage(
+            run_dir=tmp_path, judge_spec="fake:other", max_workers=1, resume=True
+        )
+        assert judge.calls == 2
+
     def test_source_rejudge_selects_rejudged_answers(self, tmp_path: Path, monkeypatch) -> None:
         from basic_memory_benchmarks import runner as runner_module
 
