@@ -242,13 +242,13 @@ def _claude_project_dir(directory: Path) -> Path:
 def _claude_user_dir() -> Path:
     """User-level Claude config directory.
 
-    Claude Code treats ``CLAUDE_CONFIG_DIR`` as a full replacement for
-    ``~/.claude``, so profile wrappers point it at a per-account directory.
-    Honouring it keeps each profile's settings and hook wiring separate;
-    falling back to ``~/.claude`` leaves single-profile setups unchanged.
+    Claude Code treats ``CLAUDE_CONFIG_DIR`` as a literal full replacement for
+    ``~/.claude``. Preserve that path exactly — including relative, empty,
+    whitespace, and tilde-prefixed values — so hook wiring targets the same
+    directory as Claude. Only an unset variable selects the default profile.
     """
-    override = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
-    return Path(override).expanduser() if override else Path.home() / ".claude"
+    override = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(override) if override is not None else Path.home() / ".claude"
 
 
 def load_claude_settings(directory: Path) -> tuple[dict[str, Any], bool]:
