@@ -47,15 +47,23 @@ class BasicMemoryLocalProvider(BenchmarkProvider):
         # The directory is FRESH per provider instance: a persistent shared
         # home rots across basic-memory versions (alembic migrations from a
         # newer dev build brick older binaries) and leaks projects between
-        # runs. BASIC_MEMORY_HOME is dropped for the same reason.
+        # runs.
+        #
+        # BASIC_MEMORY_HOME must point inside the sandbox too. Unset, Basic
+        # Memory registers its default project at ~/basic-memory, so every
+        # provider instance indexed the operator's personal notes (485 of them
+        # on 2026-09-03, embedded per run) into the benchmark database. Same
+        # rule as bm_runtime.isolated_bm_env.
         if self._config_dir is None:
             root = Path("benchmarks/.bm-homes")
             root.mkdir(parents=True, exist_ok=True)
             self._config_dir = Path(tempfile.mkdtemp(prefix="bm-home-", dir=root))
+        default_home = self._config_dir / "default-home"
+        default_home.mkdir(exist_ok=True)
         env = dict(os.environ)
         env.pop("BASIC_MEMORY_CLOUD_MODE", None)
-        env.pop("BASIC_MEMORY_HOME", None)
         env["BASIC_MEMORY_CONFIG_DIR"] = str(self._config_dir)
+        env["BASIC_MEMORY_HOME"] = str(default_home)
         return env
 
     def _project_name(self, run_config: RunConfig) -> str:

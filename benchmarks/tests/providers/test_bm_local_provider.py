@@ -179,3 +179,20 @@ def test_row_to_hit_without_title_omits_key() -> None:
         {"entity_id": 1, "matched_chunk": "text", "file_path": "doc.md"}
     )
     assert "title" not in hit.metadata
+
+
+def test_isolated_env_sandboxes_the_default_project_home(monkeypatch, tmp_path: Path) -> None:
+    """Unset, Basic Memory registers its default project at ~/basic-memory and
+    every provider instance indexed the operator's personal notes."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("BASIC_MEMORY_HOME", "/Users/someone/basic-memory")
+    monkeypatch.setenv("BASIC_MEMORY_CLOUD_MODE", "true")
+    provider = BasicMemoryLocalProvider()
+
+    env = provider._isolated_bm_env()
+
+    config_dir = Path(env["BASIC_MEMORY_CONFIG_DIR"])
+    assert config_dir.is_relative_to(tmp_path / "benchmarks" / ".bm-homes")
+    assert env["BASIC_MEMORY_HOME"] == str(config_dir / "default-home")
+    assert (config_dir / "default-home").is_dir()
+    assert "BASIC_MEMORY_CLOUD_MODE" not in env
