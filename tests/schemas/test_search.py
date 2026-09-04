@@ -75,6 +75,24 @@ def test_search_result():
     assert result.type == SearchItemType.ENTITY
     assert result.score == 0.8
     assert result.metadata == {"note_type": "component"}
+    assert result.content_truncated is None
+    assert "content_truncated" not in result.model_dump(exclude_none=True)
+
+
+def test_search_result_preserves_explicit_truncation_state():
+    """Current servers distinguish complete content from old-server unknown state."""
+    result = SearchResult(
+        title="test",
+        type=SearchItemType.ENTITY,
+        entity="some_entity",
+        score=0.8,
+        metadata={},
+        permalink="specs/search",
+        file_path="specs/search.md",
+        content_truncated=False,
+    )
+
+    assert result.model_dump(exclude_none=True)["content_truncated"] is False
 
 
 def test_observation_result():
