@@ -805,15 +805,16 @@ def _abort_after_project_created(
     step: str,
     remedy: str,
     error: Exception,
+    retry_add_after_repair: bool = False,
 ) -> NoReturn:
     """Report a failure that happened after the project row became durable.
 
-    Two things are always true here and stated once: the project was created, and
-    re-running `bm project add` will refuse with "already exists". What must vary
-    is the remedy — it has to name a command that both fits the project's mode and
-    can actually repair the step that failed. A single fixed remedy pointed cloud
-    projects at `bm project index`, which the local-only reindex path rejects
-    outright (#1440 review).
+    The default contract states that the project was created and a blind re-run
+    will refuse with "already exists". When ``retry_add_after_repair`` is true,
+    the failed step prevented local registration, so repairing it makes re-running
+    the command safe: the existing adoption path finishes registration instead of
+    creating a second project. In either case, the remedy must fit the project's
+    mode and repair the step that actually failed (#1440 review).
 
     The project is deliberately not rolled back: the row is the user's, and
     deleting it to tidy up an error message would discard what they asked for.
@@ -823,7 +824,10 @@ def _abort_after_project_created(
     # missing. Anything else still needs its message shown.
     detail = "" if isinstance(error, typer.Exit) else f": {error}"
     console.print(f"[yellow]Project '{name}' was created, but {step} failed{detail}[/yellow]")
-    console.print(f"Do not re-run 'bm project add' — '{name}' already exists. {remedy}")
+    if retry_add_after_repair:
+        console.print(f"Fix the failed step before re-running 'bm project add'. {remedy}")
+    else:
+        console.print(f"Do not re-run 'bm project add' — '{name}' already exists. {remedy}")
     raise typer.Exit(1)
 
 
@@ -1016,6 +1020,27 @@ def add_project(
                 error=e,
             )
     else:
+        if local_sync_path:
+            try:
+                Path(local_sync_path).mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                # The routing entry must not name a path that failed validation:
+                # config loading creates every absolute project path, so saving
+                # this value would make every later CLI command fail (#1441).
+                _abort_after_project_created(
+                    name,
+                    step=f"creating the local sync directory {local_sync_path}",
+                    remedy=(
+                        f"Create it yourself (or fix its permissions), then run this same "
+                        f"command again: "
+                        f"[green]{_add_command_hint(name, local_sync_path, resolved_workspace_id)}[/green]. "
+                        f"It will adopt the project that already exists rather than create a "
+                        f"second one."
+                    ),
+                    error=e,
+                    retry_add_after_repair=True,
+                )
+
         # Trigger: local config needs enough metadata to route future commands back to cloud.
         # Why: explicit workspace selection and local sync state should persist across CLI sessions.
         # Outcome: cloud-backed projects keep cloud mode, workspace_id, and optional local sync path.
@@ -1065,28 +1090,6 @@ def add_project(
 
         # Save local sync path to config if in cloud mode
         if local_sync_path:
-            try:
-                # Create local directory if it doesn't exist
-                local_dir = Path(local_sync_path)
-                local_dir.mkdir(parents=True, exist_ok=True)
-            except Exception as e:
-                # Cloud project and routing are both saved; only the local folder
-                # is missing, so recovery is filesystem-side then a resync.
-                # `bisync` is Personal-workspace-only -- `_require_personal_workspace`
-                # rejects it outright for a Team workspace, and the workspace type is
-                # not knowable here. `pull`/`push` are additive and Team-safe, and
-                # work on Personal too, so they are the remedy for both (#1440
-                # review). Same wording `bm cloud sync-setup` already prints.
-                _abort_after_project_created(
-                    name,
-                    step=f"creating the local sync directory {local_sync_path}",
-                    remedy=(
-                        f"Create it yourself (or fix its permissions), then fetch with "
-                        f"[green]{command_hint('bm', 'cloud', 'pull', '--name', name)}[/green]."
-                    ),
-                    error=e,
-                )
-
             console.print(f"\n[green]Local sync path configured: {local_sync_path}[/green]")
             # Lead with the Team-safe additive commands (they work on any
             # workspace); the bisync mirror is Personal-only, so it is an aside

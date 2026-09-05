@@ -353,7 +353,10 @@ def test_the_printed_remedy_actually_works(
 
     assert result.exit_code == 1
     assert f"but {step}" in flat(result.output)
-    assert "Do not re-run 'bm project add'" in flat(result.output)
+    if step == SYNC_DIR:
+        assert "Fix the failed step before re-running 'bm project add'" in flat(result.output)
+    else:
+        assert "Do not re-run 'bm project add'" in flat(result.output)
 
     remedy = _printed_remedy_command(result.output)
 
