@@ -1,5 +1,7 @@
 """Integration coverage for mandatory Markdown note permalinks."""
 
+import json
+
 import pytest
 
 from basic_memory import db
@@ -62,10 +64,17 @@ async def test_project_index_adds_permalink_when_optional_frontmatter_is_disable
     engine_factory,
     app_config,
     config_manager,
+    monkeypatch,
 ) -> None:
-    """The real index flow persists identity even when title/type injection is disabled."""
+    """Legacy opt-outs cannot disable identity or block the real config/index flow."""
     app_config.ensure_frontmatter_on_sync = False
     config_manager.save_config(app_config)
+    legacy_config = json.loads(config_manager.config_file.read_text(encoding="utf-8"))
+    legacy_config["disable_permalinks"] = True
+    config_manager.config_file.write_text(json.dumps(legacy_config), encoding="utf-8")
+    monkeypatch.setenv("BASIC_MEMORY_DISABLE_PERMALINKS", "true")
+    loaded_config = config_manager.load_config()
+    assert "disable_permalinks" not in loaded_config.model_dump()
 
     note_path = project_config.home / "legacy-note.md"
     note_path.write_text("# Legacy Note\n\nExisting body.\n", encoding="utf-8")

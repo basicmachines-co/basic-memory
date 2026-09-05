@@ -644,47 +644,16 @@ class TestConfigManager:
         assert "disable_permalinks" not in BasicMemoryConfig.model_fields
         assert "disable_permalinks" not in config.model_dump(mode="json")
 
-    def test_removed_disable_permalinks_true_is_rejected(self):
-        """A former opt-out must fail instead of silently changing note identity."""
-        with pytest.raises(
-            ValueError,
-            match="disable_permalinks has been removed; Markdown note permalinks are mandatory",
-        ):
-            BasicMemoryConfig(disable_permalinks=True)
+    def test_removed_disable_permalinks_true_is_ignored(self):
+        """The retired setting is an unknown key, regardless of its former value."""
+        config = BasicMemoryConfig(disable_permalinks=True)
+        assert "disable_permalinks" not in config.model_dump(mode="json")
 
-    def test_removed_disable_permalinks_numeric_true_is_rejected(self):
-        """Legacy JSON numeric booleans retain the former validation semantics."""
-        with pytest.raises(
-            ValueError,
-            match="disable_permalinks has been removed; Markdown note permalinks are mandatory",
-        ):
-            BasicMemoryConfig(disable_permalinks=1)
-
-    def test_removed_disable_permalinks_environment_override_is_rejected(self, monkeypatch):
-        """The removed environment opt-out follows the same fail-fast contract."""
+    def test_removed_disable_permalinks_environment_is_ignored(self, monkeypatch):
+        """The retired environment variable cannot block startup."""
         monkeypatch.setenv("BASIC_MEMORY_DISABLE_PERMALINKS", "true")
-
-        with pytest.raises(
-            ValueError,
-            match=(
-                "BASIC_MEMORY_DISABLE_PERMALINKS has been removed; "
-                "Markdown note permalinks are mandatory"
-            ),
-        ):
-            BasicMemoryConfig()
-
-    def test_removed_disable_permalinks_short_environment_true_is_rejected(self, monkeypatch):
-        """All truthy spellings accepted by the former boolean field fail fast."""
-        monkeypatch.setenv("BASIC_MEMORY_DISABLE_PERMALINKS", "y")
-
-        with pytest.raises(
-            ValueError,
-            match=(
-                "BASIC_MEMORY_DISABLE_PERMALINKS has been removed; "
-                "Markdown note permalinks are mandatory"
-            ),
-        ):
-            BasicMemoryConfig()
+        config = BasicMemoryConfig()
+        assert "disable_permalinks" not in config.model_dump(mode="json")
 
     def test_ensure_frontmatter_on_sync_flag_default(self):
         """Test that ensure_frontmatter_on_sync defaults to True."""
@@ -975,8 +944,8 @@ class TestConfigManager:
             raw = json.loads(config_manager.config_file.read_text(encoding="utf-8"))
             assert "cloud_mode" not in raw
 
-    def test_removed_disable_permalinks_false_is_stripped_on_normalization_save(self):
-        """Loading an old default config removes the retired setting without disruption."""
+    def test_removed_disable_permalinks_true_is_stripped_on_normalization_save(self):
+        """Loading an old opt-out config removes the retired setting without disruption."""
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             config_manager = ConfigManager()
@@ -989,7 +958,7 @@ class TestConfigManager:
             legacy_config = {
                 "projects": {"main": {"path": str(temp_path / "main"), "mode": "local"}},
                 "default_project": "main",
-                "disable_permalinks": False,
+                "disable_permalinks": True,
             }
             config_manager.config_file.write_text(json.dumps(legacy_config, indent=2))
 
