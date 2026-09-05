@@ -41,6 +41,11 @@ jobs:
           python-version: '3.12'
       - run: pip install uv
       - run: uv venv
+        if: runner.os != 'macOS'
+      # setup-python's macOS build lacks SQLite extension loading. Use the
+      # supported uv-managed build so sqlite-vec actually runs, without mocks.
+      - run: uv venv --managed-python
+        if: runner.os == 'macOS'
       - run: uv pip install -e ".[dev,pdf]"
       - name: Verify actual interpreter and SQLite
         run: uv run python -c "import sys, sqlite3; print(sys.version); print(sqlite3.sqlite_version); assert sys.version_info[:2] == (3, 12)"
