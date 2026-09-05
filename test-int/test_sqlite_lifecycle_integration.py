@@ -135,7 +135,7 @@ def test_semantic_reindex_subprocess_exits_after_full_and_incremental_runs(tmp_p
         summary = " ".join(result.stdout.split())
         assert "15 entities embedded" in summary
         expected_skipped = 0 if "--full" in arguments else 14
-        assert f"{expected_skipped} skipped" in summary
+        assert f" {expected_skipped} skipped" in summary
         assert "Reindex complete!" in result.stdout
         # Make incremental reindex perform inference too, rather than passing
         # by skipping every unchanged note without loading the ONNX model.
