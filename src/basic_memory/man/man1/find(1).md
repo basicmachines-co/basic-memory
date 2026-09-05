@@ -122,6 +122,13 @@ mis-spelled multi-character operator: `status==active`, `status=>active` and
 and `>3`. An unquoted value may therefore not begin with `=`, `<` or `>`;
 quote one that genuinely does, as in `range=">=5"`.
 
+String equality and `in` predicates on `type` or `note_type` use the same
+normalization as note-type search: `Chapter` and `chapter` match the same
+notes, as do `LiteraryDevice` and `literary_device`. A `metadata.note_type`
+value returned by find can be reused in its next `--meta` predicate.
+Other metadata keys remain case-sensitive; null, numeric, range, and array
+predicates keep their existing frontmatter comparison behavior.
+
 ## OPTIONS
 
 - **--name** — file-name glob, e.g. `"*.md"`; omitted matches everything.

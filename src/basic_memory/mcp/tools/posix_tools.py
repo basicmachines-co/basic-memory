@@ -949,6 +949,9 @@ async def find(
             with "=" — the other operators compare against the value, and a
             comparison with null is never true. Keys accept dot-paths
             ("review.approved"); "note_type" aliases the frontmatter "type" key.
+            String equality and "in" on either type spelling use normalized
+            note-type matching ("LiteraryDevice" matches "literary_device").
+            Other metadata keys and operators retain their usual comparisons.
             Any other operator fails fast naming the supported set.
         fields: Frontmatter fields to return per hit (dot-paths allowed), e.g.
             ["title", "priority"]. Requires `meta`. A field missing on a hit
@@ -1117,11 +1120,28 @@ async def _find_by_metadata(
         # Import here to avoid circular import
         from basic_memory.mcp.clients import KnowledgeClient, SearchClient
 
+        # Type equality/membership must use the same normalization as the type
+        # displayed in search hits. Raw frontmatter comparisons made those
+        # displayed values fail when fed back into find (#1428).
+        note_types: list[str] | None = None
+        type_filter = metadata_filters.get("type")
+        if isinstance(type_filter, str):
+            note_types = [type_filter]
+        elif isinstance(type_filter, dict) and "$in" in type_filter:
+            values = type_filter["$in"]
+            if isinstance(values, list) and values and all(isinstance(v, str) for v in values):
+                note_types = values
+        if note_types is not None:
+            metadata_filters = {
+                key: value for key, value in metadata_filters.items() if key != "type"
+            }
+
         query = SearchQuery(
             # Normalized by the field validator, which maps every root spelling
             # onto None: the predicates are then the whole WHERE.
             file_path_prefix=route.path,
             metadata_filters=metadata_filters,
+            note_types=note_types,
             entity_types=[SearchItemType.ENTITY],
         )
         search_client = SearchClient(client, active_project.external_id)
