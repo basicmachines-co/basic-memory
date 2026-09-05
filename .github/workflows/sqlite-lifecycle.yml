@@ -1,0 +1,42 @@
+name: SQLite lifecycle probes
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/sqlite-lifecycle.yml'
+      - 'test-int/test_sqlite_lifecycle_integration.py'
+      - 'src/basic_memory/db.py'
+      - 'src/basic_memory/cli/commands/command_utils.py'
+
+permissions:
+  contents: read
+
+jobs:
+  lifecycle:
+    name: SQLite lifecycle (${{ matrix.os }}, Python 3.12)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      UV_PYTHON: '3.12'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install uv
+      - run: uv venv
+      - run: uv pip install -e ".[dev,pdf]"
+      - name: Verify actual interpreter and SQLite
+        run: uv run python -c "import sys, sqlite3; print(sys.version); print(sqlite3.sqlite_version); assert sys.version_info[:2] == (3, 12)"
+      - name: Run real SQLite probes without test selection caching
+        run: uv run pytest test-int/test_sqlite_lifecycle_integration.py -v -s --no-cov --timeout=240 --junitxml=sqlite-lifecycle.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sqlite-lifecycle-${{ matrix.os }}
+          path: sqlite-lifecycle.xml
