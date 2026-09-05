@@ -353,6 +353,27 @@ def replace_parameters(page_text: str, parameters: str) -> str:
     raise ValueError("page has nowhere to place PARAMETERS")
 
 
+def remove_parameters(page_text: str) -> str:
+    """Return the page with any ## PARAMETERS section stripped; unchanged if none.
+
+    A tool that loses its last parameter must lose its section too, so a page can
+    never keep advertising removed arguments. The whole section — heading, body,
+    and one blank-line separator — comes out, leaving exactly one blank line
+    between the surrounding sections (or a clean single trailing newline when the
+    section sat at end of file). A page with no PARAMETERS block is returned as is.
+    """
+    match = _PARAMETERS_RE.search(page_text)
+    if match is None:
+        return page_text
+    # The heading's leading separator lives in the preceding section's trailing
+    # newlines, and the lookahead leaves the following separator out of the match;
+    # strip both sides to a single blank line so no double gap or dangling section
+    # heading is left behind.
+    before = page_text[: match.start()].rstrip("\n")
+    after = page_text[match.end() :].lstrip("\n")
+    return f"{before}\n\n{after}" if after else f"{before}\n"
+
+
 def declare_registry_ownership(page_text: str) -> str:
     """Flip ``generated: hand`` to ``registry`` — in the frontmatter only.
 

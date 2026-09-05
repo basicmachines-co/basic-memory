@@ -15,6 +15,7 @@ from basic_memory.man import (
     extract_parameters,
     find_page,
     parse_page_ref,
+    remove_parameters,
     render_index,
     render_parameters,
     render_synopsis,
@@ -23,6 +24,17 @@ from basic_memory.man import (
 )
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools import __all__ as registered_tools
+
+from scripts.update_man_pages import regenerate_page
+
+
+def _has_parameters_block(page_text: str) -> bool:
+    """True when the page carries a ## PARAMETERS section."""
+    try:
+        extract_parameters(page_text)
+    except ValueError:
+        return False
+    return True
 
 
 @pytest.mark.parametrize(
@@ -256,6 +268,50 @@ def test_replace_parameters_touches_only_the_parameters_block() -> None:
         extract_parameters("# t\n\n## DESCRIPTION\n")
 
 
+def test_remove_parameters_strips_the_whole_section() -> None:
+    # A tool that loses its last parameter must lose its section too: the whole
+    # block comes out, leaving one blank line between the surrounding sections and
+    # every other section byte-identical.
+    with_block = (
+        "# t\n\n## SYNOPSIS\n\n```\nt()\n```\n\n"
+        "## PARAMETERS\n\n- **a** (string, required)\n\n"
+        "## DESCRIPTION\n\nprose\n"
+    )
+    stripped = remove_parameters(with_block)
+    assert stripped == "# t\n\n## SYNOPSIS\n\n```\nt()\n```\n\n## DESCRIPTION\n\nprose\n"
+    assert "## PARAMETERS" not in stripped
+    assert "\n\n\n" not in stripped  # exactly one blank line between headings
+
+    # A page with no PARAMETERS block is returned unchanged.
+    without = "# t\n\n## SYNOPSIS\n\n```\nt()\n```\n\n## DESCRIPTION\n\nprose\n"
+    assert remove_parameters(without) == without
+
+    # A block at end of file (no following heading) is removed cleanly, leaving a
+    # single trailing newline and no dangling blank line.
+    at_end = "# t\n\n## SYNOPSIS\n\n```\nt()\n```\n\n## PARAMETERS\n\n- **a** (string, required)\n"
+    assert remove_parameters(at_end) == "# t\n\n## SYNOPSIS\n\n```\nt()\n```\n"
+
+
+@pytest.mark.parametrize("empty_schema", [{"properties": {}}, {}])
+def test_regenerate_page_drops_stale_parameters_when_tool_becomes_parameterless(
+    empty_schema: dict[str, object],
+) -> None:
+    # Transition: a tool that once had parameters now has none. Running the real
+    # regeneration path over the old page must strip the generated PARAMETERS block
+    # so the page never keeps advertising the removed argument.
+    page = (
+        "---\ntitle: demo(3)\ngenerated: registry\ntool: demo\n---\n\n"
+        "# demo(3)\n\n## SYNOPSIS\n\n```\ndemo(old_arg)\n```\n\n"
+        "## PARAMETERS\n\n- **old_arg** (string, required) — soon to be removed\n\n"
+        "## DESCRIPTION\n\nprose\n"
+    )
+    regenerated = regenerate_page(page, "demo", empty_schema)
+    assert "## PARAMETERS" not in regenerated
+    assert "old_arg" not in regenerated  # the stale bullet text is gone entirely
+    assert extract_mcp_synopsis(regenerated) == "demo()"  # SYNOPSIS still rewritten
+    assert "## DESCRIPTION\n\nprose\n" in regenerated  # curated section untouched
+
+
 @pytest.mark.asyncio
 async def test_section_3_parameters_is_exactly_the_registry_rendering() -> None:
     # PARAMETERS is registry-owned wherever a tool has parameters: byte-equal to the
@@ -267,12 +323,19 @@ async def test_section_3_parameters_is_exactly_the_registry_rendering() -> None:
         if page.section != 3 or page.tool not in tools:
             continue
         schema = tools[page.tool].parameters
-        if not schema.get("properties"):
-            continue
-        expected = render_parameters(page.tool, schema)
-        assert extract_parameters(page.read()) == expected, (
-            f"{page.title} PARAMETERS is stale; run `just man-regen` and commit the result"
-        )
+        page_text = page.read()
+        if schema.get("properties"):
+            expected = render_parameters(page.tool, schema)
+            assert extract_parameters(page_text) == expected, (
+                f"{page.title} PARAMETERS is stale; run `just man-regen` and commit the result"
+            )
+        else:
+            # A parameterless tool (basic_memory_diagnostics) owns no PARAMETERS
+            # section; a leftover block would keep advertising removed arguments.
+            assert not _has_parameters_block(page_text), (
+                f"{page.title} still carries a PARAMETERS block but {page.tool} has no "
+                "parameters; run `just man-regen` and commit the result"
+            )
 
 
 def test_declare_registry_ownership_touches_frontmatter_only() -> None:
