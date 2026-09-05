@@ -13,6 +13,49 @@ from basic_memory.repository.entity_repository import EntityRepository
 
 
 @pytest.mark.asyncio
+async def test_reindex_reserves_existing_malformed_identity_before_new_colliding_note(
+    test_project: Project,
+    project_config,
+    engine_factory,
+) -> None:
+    malformed_path = project_config.home / "same-note.md"
+    original_bytes = b"---\ntitle: [unclosed\n---\n\n# Existing note\n"
+    malformed_path.write_bytes(original_bytes)
+    await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    _, session_maker = engine_factory
+    repository = EntityRepository(project_id=test_project.id)
+    async with db.scoped_session(session_maker) as session:
+        original = await repository.get_by_file_path(session, "same-note.md")
+    assert original is not None
+    original_permalink = original.permalink
+    assert original_permalink is not None
+
+    # The new path sorts first but must not take the established semantic address.
+    new_path = project_config.home / "same note.md"
+    new_path.write_text("# New note\n", encoding="utf-8")
+    original_bytes += b"\nAn edit to the existing note.\n"
+    malformed_path.write_bytes(original_bytes)
+    await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    async with db.scoped_session(session_maker) as session:
+        existing = await repository.get_by_file_path(session, "same-note.md")
+        new = await repository.get_by_file_path(session, "same note.md")
+    assert existing is not None
+    assert new is not None
+    assert existing.permalink == original_permalink
+    assert new.permalink == f"{original_permalink}-1"
+    assert malformed_path.read_bytes() == original_bytes
+    assert f"permalink: {new.permalink}" in new_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
 async def test_project_index_adds_permalink_when_optional_frontmatter_is_disabled(
     test_project: Project,
     project_config,
