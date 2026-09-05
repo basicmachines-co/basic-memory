@@ -154,10 +154,10 @@ async def test_windows_locking_mode_when_on_windows(tmp_path, monkeypatch, confi
 @pytest.mark.skipif(
     __import__("os").name != "nt", reason="Windows-specific test - only runs on Windows platform"
 )
-async def test_null_pool_on_windows(tmp_path, monkeypatch):
-    """Test that NullPool is used on Windows to avoid connection pooling issues."""
+async def test_bounded_pool_on_windows(tmp_path, monkeypatch):
+    """Windows queues excess callers instead of opening competing SQLite writers."""
     from basic_memory.db import engine_session_factory, DatabaseType
-    from sqlalchemy.pool import NullPool
+    from sqlalchemy.pool import AsyncAdaptedQueuePool
 
     # Set HOME environment variable
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -166,8 +166,9 @@ async def test_null_pool_on_windows(tmp_path, monkeypatch):
     db_path = tmp_path / "test_windows_pool.db"
 
     async with engine_session_factory(db_path, DatabaseType.FILESYSTEM) as (engine, _):
-        # Engine should be using NullPool on Windows
-        assert isinstance(engine.pool, NullPool)
+        assert isinstance(engine.pool, AsyncAdaptedQueuePool)
+        assert engine.pool.size() == 5
+        assert engine.pool._max_overflow == 0
 
 
 @pytest.mark.asyncio

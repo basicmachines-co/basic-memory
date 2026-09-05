@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     async_scoped_session,
 )
-from sqlalchemy.pool import AsyncAdaptedQueuePool, NullPool
+from sqlalchemy.pool import AsyncAdaptedQueuePool
 
 
 # -----------------------------------------------------------------------------
@@ -297,12 +297,15 @@ def _create_sqlite_engine(
             max_overflow=0,
         )
     elif os.name == "nt":
-        # Use NullPool for Windows filesystem databases to avoid connection pooling issues
+        # Windows NullPool storms SQLite with connections, while the default
+        # pool's overflow still reproduced lock starvation in native CI (#1430).
+        # Queue excess callers before SQLite instead of adding competing writers.
         engine = create_async_engine(
             db_url,
             connect_args=connect_args,
-            poolclass=NullPool,  # Disable connection pooling on Windows
-            echo=False,
+            poolclass=AsyncAdaptedQueuePool,
+            pool_size=5,
+            max_overflow=0,
         )
     else:
         engine = create_async_engine(db_url, connect_args=connect_args)
