@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     async_scoped_session,
 )
-from sqlalchemy.pool import AsyncAdaptedQueuePool, NullPool
+from sqlalchemy.pool import AsyncAdaptedQueuePool
 
 
 # -----------------------------------------------------------------------------
@@ -296,15 +296,10 @@ def _create_sqlite_engine(
             pool_size=1,
             max_overflow=0,
         )
-    elif os.name == "nt":
-        # Use NullPool for Windows filesystem databases to avoid connection pooling issues
-        engine = create_async_engine(
-            db_url,
-            connect_args=connect_args,
-            poolclass=NullPool,  # Disable connection pooling on Windows
-            echo=False,
-        )
     else:
+        # Reuse the bounded file-backed pool on every platform. Windows NullPool
+        # opened a connection per transaction and reproduced lock failures under
+        # concurrent writes (#1430); queueing bounds contention without retries.
         engine = create_async_engine(db_url, connect_args=connect_args)
 
     # Enable WAL mode for better concurrency and reliability
