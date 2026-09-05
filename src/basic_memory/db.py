@@ -296,10 +296,18 @@ def _create_sqlite_engine(
             pool_size=1,
             max_overflow=0,
         )
+    elif os.name == "nt":
+        # Windows NullPool storms SQLite with connections, while the default
+        # pool's overflow still reproduced lock starvation in native CI (#1430).
+        # Queue excess callers before SQLite instead of adding competing writers.
+        engine = create_async_engine(
+            db_url,
+            connect_args=connect_args,
+            poolclass=AsyncAdaptedQueuePool,
+            pool_size=5,
+            max_overflow=0,
+        )
     else:
-        # Reuse the bounded file-backed pool on every platform. Windows NullPool
-        # opened a connection per transaction and reproduced lock failures under
-        # concurrent writes (#1430); queueing bounds contention without retries.
         engine = create_async_engine(db_url, connect_args=connect_args)
 
     # Enable WAL mode for better concurrency and reliability

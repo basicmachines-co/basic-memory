@@ -40,15 +40,18 @@ jobs:
       - name: Verify actual interpreter and SQLite
         run: uv run python -c "import sys, sqlite3; print(sys.version); print(sqlite3.sqlite_version); assert sys.version_info[:2] == (3, 12)"
       - name: Run real SQLite probes without test selection caching
-        run: uv run pytest test-int/test_sqlite_lifecycle_integration.py -v -s --no-cov --timeout=240 --junitxml=sqlite-lifecycle.xml
+        shell: bash
+        run: uv run pytest test-int/test_sqlite_lifecycle_integration.py -v -s --no-cov --timeout=240 --junitxml=sqlite-lifecycle.xml 2>&1 | tee sqlite-lifecycle.log
       - name: Reproduce reported MCP pagination and high-volume writes
         if: always() && !cancelled()
+        shell: bash
         run: >-
           uv run pytest
           test-int/mcp/test_chatgpt_tools_integration.py::test_chatgpt_search_pagination_default
           test-int/mcp/test_concurrent_write_integration.py::test_concurrent_write_high_volume
           -v -s --no-cov --timeout=120 --timeout-method=thread
           -o faulthandler_timeout=60 --junitxml=sqlite-mcp.xml
+          2>&1 | tee sqlite-mcp.log
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -56,3 +59,5 @@ jobs:
           path: |
             sqlite-lifecycle.xml
             sqlite-mcp.xml
+            sqlite-lifecycle.log
+            sqlite-mcp.log
