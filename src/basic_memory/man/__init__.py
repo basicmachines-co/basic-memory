@@ -160,6 +160,11 @@ SYNOPSIS_WIDTH = 76
 # label the MCP block "MCP:"; MCP-only pages have a single unlabelled block.
 _MCP_SYNOPSIS_RE = re.compile(r"(## SYNOPSIS\n\n(?:MCP:\n\n)?```\n)(.*?)(\n```)", re.S)
 
+# Matches the body under ## PARAMETERS. Unlike SYNOPSIS there is no fenced code to
+# anchor on, so a lookahead stops the match at the blank line before the next
+# `## ` heading (or EOF), leaving that separator out of the captured body.
+_PARAMETERS_RE = re.compile(r"(## PARAMETERS\n\n)(.*?)(?=\n+## |\n*\Z)", re.S)
+
 
 def _default_literal(value: object) -> str:
     """Render a schema default the way the call would be written in Python."""
@@ -209,6 +214,90 @@ def render_synopsis(tool_name: str, parameters: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _normalise_description(description: object) -> str:
+    """Collapse a schema description to one line for a PARAMETERS bullet.
+
+    Tool descriptions come from the tools' docstring ``Args:`` blocks, so they
+    carry the source's line breaks and hanging indentation. A bullet is a single
+    line, so runs of whitespace (newlines and indentation included) collapse to
+    single spaces; the renderer never reflows or reinterprets the prose beyond that.
+    """
+    if not description:
+        return ""
+    return " ".join(str(description).split())
+
+
+def _schema_type(prop: Mapping[str, Any], defs: Mapping[str, Any] | None = None) -> str:
+    """A readable type name for a property's schema, or "" when unknown.
+
+    A plain ``type`` passes through; a list type or a union schema
+    (``anyOf``/``oneOf``) joins its member names with `` | `` so a nullable
+    string reads ``string | null``. A union member may be a ``$ref`` into the
+    schema's ``$defs`` (how Pydantic emits an enum): it resolves to the enum's
+    underlying JSON type, so a ``$ref`` enum + null reads ``string | null`` like
+    any other nullable union rather than a bare ``null``.
+    """
+    type_field = prop.get("type")
+    if isinstance(type_field, str):
+        return type_field
+    if isinstance(type_field, list):
+        return " | ".join(str(member) for member in type_field)
+    for key in ("anyOf", "oneOf"):
+        members = prop.get(key)
+        if members:
+            names: list[str] = []
+            for member in members:
+                member_type = member.get("type")
+                if isinstance(member_type, str):
+                    names.append(member_type)
+                    continue
+                ref = member.get("$ref")
+                if isinstance(ref, str) and defs is not None:
+                    target = defs.get(ref.rsplit("/", 1)[-1], {})
+                    target_type = target.get("type")
+                    if isinstance(target_type, str):
+                        names.append(target_type)
+            if names:
+                return " | ".join(names)
+    return ""
+
+
+def render_parameters(tool_name: str, parameters: Mapping[str, Any]) -> str:
+    """Render a tool's ## PARAMETERS body from the JSON schema clients receive.
+
+    Required parameters come first, then optional ones, each group in schema order
+    (the order clients see) — mirroring render_synopsis. Each bullet names the
+    parameter, its type when the schema gives one, whether it is required or
+    optional (with the default for optionals that carry one), and its description.
+    Returns "" when the schema has no properties, so tools like
+    basic_memory_diagnostics get no section.
+    """
+    required: list[str] = parameters.get("required") or []
+    properties: Mapping[str, Any] = parameters.get("properties") or {}
+    if not properties:
+        return ""
+
+    ordered = [name for name in properties if name in required]
+    ordered += [name for name in properties if name not in required]
+
+    bullets: list[str] = []
+    for name in ordered:
+        prop = properties[name]
+        type_name = _schema_type(prop, parameters.get("$defs"))
+        if name in required:
+            qualifiers = f"{type_name}, required" if type_name else "required"
+        else:
+            qualifiers = f"{type_name}, optional" if type_name else "optional"
+            # A default factory leaves no `default` in the schema; render just
+            # `optional`, since there is no literal value to show.
+            if "default" in prop:
+                qualifiers += f", default: {_default_literal(prop['default'])}"
+        head = f"- **{name}** ({qualifiers})"
+        description = _normalise_description(prop.get("description"))
+        bullets.append(f"{head} — {description}" if description else head)
+    return "\n".join(bullets)
+
+
 def extract_mcp_synopsis(page_text: str) -> str:
     """The MCP call block a page currently shows under ## SYNOPSIS."""
     match = _MCP_SYNOPSIS_RE.search(page_text)
@@ -223,6 +312,45 @@ def replace_mcp_synopsis(page_text: str, synopsis: str) -> str:
     if match is None:
         raise ValueError("page has no MCP SYNOPSIS block")
     return f"{page_text[: match.start()]}{match.group(1)}{synopsis}{match.group(3)}{page_text[match.end() :]}"
+
+
+def extract_parameters(page_text: str) -> str:
+    """The bullet body a page currently shows under ## PARAMETERS."""
+    match = _PARAMETERS_RE.search(page_text)
+    if match is None:
+        raise ValueError("page has no PARAMETERS block")
+    return match.group(2)
+
+
+def replace_parameters(page_text: str, parameters: str) -> str:
+    """Return the page with its ## PARAMETERS body replaced, inserting the section
+    if the page has none.
+
+    An existing block is rewritten in place. Otherwise the section is placed just
+    before ## DESCRIPTION if present, else right after the SYNOPSIS block (before
+    the next `## ` heading following ## SYNOPSIS). Other blocks are untouched.
+    """
+    match = _PARAMETERS_RE.search(page_text)
+    if match is not None:
+        # The lookahead leaves the trailing heading out of the match, so append
+        # the rest of the page from match.end() unchanged.
+        return f"{page_text[: match.start()]}{match.group(1)}{parameters}{page_text[match.end() :]}"
+
+    block = f"## PARAMETERS\n\n{parameters}\n\n"
+    description = page_text.find("## DESCRIPTION")
+    if description != -1:
+        return f"{page_text[:description]}{block}{page_text[description:]}"
+
+    # No DESCRIPTION anchor: land the section after the SYNOPSIS block, at the
+    # next `## ` heading that follows ## SYNOPSIS.
+    synopsis = page_text.find("## SYNOPSIS")
+    if synopsis != -1:
+        following = page_text.find("\n## ", synopsis + len("## SYNOPSIS"))
+        if following != -1:
+            insert = following + 1  # after the newline, at the `## ` heading
+            return f"{page_text[:insert]}{block}{page_text[insert:]}"
+
+    raise ValueError("page has nowhere to place PARAMETERS")
 
 
 def declare_registry_ownership(page_text: str) -> str:

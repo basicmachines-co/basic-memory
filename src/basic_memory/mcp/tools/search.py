@@ -1025,8 +1025,10 @@ async def search_notes(
                 workspaces. Takes precedence over `project`. Get from list_memory_projects().
         search_all_projects: Optional opt-in to search every accessible project. Ignored when
                 `project` or `project_id` is supplied.
-        page: The page number of results to return (default 1)
-        page_size: The number of results to return per page (default 10)
+        page: The page number of results to return (default 1).
+            Aliases: page_number.
+        page_size: The number of results to return per page (default 10).
+            Aliases: limit, per_page.
         search_type: Type of search to perform, one of:
                     "text", "title", "permalink", "vector", "semantic", "hybrid".
                     Default is dynamic: "hybrid" when semantic search is enabled, otherwise "text".
@@ -1039,6 +1041,7 @@ async def search_notes(
                    observations whose category matches exactly.
         after_date: Optional date filter for recent content (e.g., "1 week", "2d", "2024-01-01")
         metadata_filters: Optional structured frontmatter filters (e.g., {"status": "in-progress"}).
+                Integer values match integer YAML fields ({"section": 3} works).
                 A None value is an is-null match: notes where the key is absent or explicitly
                 null. None inside $in/$between/a contains list/a comparison is refused —
                 those compare against the value, and a comparison with null is never true.
@@ -1052,11 +1055,13 @@ async def search_notes(
         valid_at: Optional date ("2026-07-28") or RFC 3339 instant ("2026-07-28T09:00:00Z";
                  a timestamp with no offset is read as UTC). Returns sources whose authored
                  valid range contains it. Sources with no temporal qualifier are excluded.
+                 Aliases: as_of, valid_on.
         valid_overlaps: Optional PostgreSQL-style range literal ("[2026-06-10,2026-07-27)",
                  "(,2026-07-27]", "[2026-06-10,)"). Returns sources whose authored valid range
                  overlaps it. Mutually exclusive with valid_at; also excludes undated sources.
+                 Aliases: overlaps, valid_during.
         time_kind: Optional kind of valid time to narrow to: "effective", "valid",
-                 "occurred", "due", or "mentioned". Valid on its own.
+                 "occurred", "due", or "mentioned". Valid on its own. Alias: kind.
         context: Optional FastMCP context for performance caching.
 
     Returns:

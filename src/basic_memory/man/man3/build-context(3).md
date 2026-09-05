@@ -45,13 +45,15 @@ costs two depth levels internally (relation, then entity).
 
 ## PARAMETERS
 
-- **url** — memory:// URI or bare permalink path
-- **depth** — relation hops (1–3 recommended; higher gets slow)
-- **timeframe** — recency filter on traversed items; natural language
-  accepted (`"last week"`, `"2 days ago"`, `"7d"`)
-- **max_related** — cap on related results per primary note
-- **output_format** — `json` (structured, default) or `text` (compact
-  markdown for LLM consumption)
+- **url** (string, required) — memory:// URI pointing to discussion content (e.g. memory://specs/search), or a bare permalink path.
+- **project** (string | null, optional, default: None) — Project name to build context from. Optional - server will resolve using hierarchy. If unknown, use list_memory_projects() to discover available projects.
+- **project_id** (string | null, optional, default: None) — Project external_id (UUID). Prefer this over `project` when known — it routes to the exact project regardless of name collisions across cloud workspaces. Takes precedence over `project`. Get from list_memory_projects().
+- **depth** (string | integer | null, optional, default: 1) — How many relation hops to traverse (1-3 recommended for performance)
+- **timeframe** (string | null, optional, default: "7d") — How far back to look. Supports natural language like "2 days ago", "last week"
+- **page** (integer, optional, default: 1) — Page number of results to return (default: 1)
+- **page_size** (integer, optional, default: 10) — Number of primary results to return per page (default: 10, maximum: 50)
+- **max_related** (integer, optional, default: 10) — Maximum total related results to return (default: 10, maximum: 100)
+- **output_format** (string, optional, default: "json") — Response format - "json" for structured JSON dict, "text" for compact markdown text
 
 ## MCP USAGE
 

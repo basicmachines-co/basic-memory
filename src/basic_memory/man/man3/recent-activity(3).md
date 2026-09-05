@@ -48,15 +48,14 @@ that project's activity — not a cross-project view.
 
 ## PARAMETERS
 
-- **type** — filter by item type: `entity` (default), `observation`,
-  `relation`, or a list combining them; case-insensitive
-- **depth** — relation hops to include around recent items (1–3 recommended)
-- **timeframe** — how far back to look (aliases: `since`, `time_range`,
-  `lookback`)
-- **project** / **project_id** — target project; omitted, the active or
-  default project is used, and discovery mode only when neither resolves
-- **output_format** — `text` (human summary grouped by kind) or `json`
-  (flat item list)
+- **type** (string | array, optional, default: "") — Filter by content type(s). Can be a string or list of strings. Valid options: - "entity" or ["entity"] for knowledge entities - "relation" or ["relation"] for connections between entities - "observation" or ["observation"] for notes and observations Multiple types can be combined: ["entity", "relation"] Case-insensitive: "ENTITY" and "entity" are treated the same. Default is entity-only. Specify other types explicitly to include observations and relations.
+- **depth** (integer, optional, default: 1) — How many relation hops to traverse (1-3 recommended)
+- **timeframe** (string, optional, default: "7d") — Time window to search. Supports natural language: - Relative: "2 days ago", "last week", "yesterday" - Points in time: "2024-01-01", "January 1st" - Standard format: "7d", "24h" Aliases: since, time_range, lookback.
+- **page** (integer, optional, default: 1) — Page number for pagination (default 1)
+- **page_size** (integer, optional, default: 10) — Number of items per page (default 10)
+- **project** (string | null, optional, default: None) — Project name to query. Optional - server will resolve using the hierarchy above: omitted, the active or default project is used, and discovery mode across all projects applies only when neither resolves. If unknown, use list_memory_projects() to discover available projects.
+- **project_id** (string | null, optional, default: None) — Project external_id (UUID). Prefer this over `project` when known — it routes to the exact project regardless of name collisions across cloud workspaces. Takes precedence over `project`. Get from list_memory_projects().
+- **output_format** (string, optional, default: "text") — "text" returns human-readable summary text. "json" returns a flat list of recent items.
 
 ## MCP USAGE
 

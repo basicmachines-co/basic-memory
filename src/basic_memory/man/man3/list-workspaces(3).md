@@ -29,6 +29,10 @@ CLI:
 bm tool list-workspaces
 ```
 
+## PARAMETERS
+
+- **output_format** (string, optional, default: "text") — "text" returns human-readable workspace list. "json" returns structured workspace metadata.
+
 ## DESCRIPTION
 
 Returns the cloud tenants the current user belongs to: `tenant_id`, `slug`,

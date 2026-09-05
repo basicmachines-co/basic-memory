@@ -12,11 +12,14 @@ from basic_memory.man import (
     bundled_pages,
     declare_registry_ownership,
     extract_mcp_synopsis,
+    extract_parameters,
     find_page,
     parse_page_ref,
     render_index,
+    render_parameters,
     render_synopsis,
     replace_mcp_synopsis,
+    replace_parameters,
 )
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools import __all__ as registered_tools
@@ -40,6 +43,11 @@ from basic_memory.mcp.tools import __all__ as registered_tools
 )
 def test_parse_page_ref_accepts_every_common_spelling(text: str, expected: PageRef) -> None:
     assert parse_page_ref(text) == expected
+
+
+def test_page_ref_display_shows_section_when_present() -> None:
+    assert PageRef("search-notes", 3).display == "search-notes(3)"
+    assert PageRef("search-notes", None).display == "search-notes"
 
 
 @pytest.mark.parametrize("text", ["", "/", "docs/search-notes"])
@@ -162,6 +170,108 @@ async def test_section_3_synopsis_is_exactly_the_registry_rendering() -> None:
         expected = render_synopsis(page.tool, tools[page.tool].parameters)
         assert extract_mcp_synopsis(page.read()) == expected, (
             f"{page.title} SYNOPSIS is stale; run `just man-regen` and commit the result"
+        )
+
+
+def test_render_parameters_formats_required_first_and_shows_types() -> None:
+    parameters = {
+        "required": ["query"],
+        "properties": {
+            "alpha": {"anyOf": [{"type": "string"}, {"type": "null"}], "description": "a union"},
+            "query": {"type": "string", "description": "what to search for"},
+            "page": {"type": "integer", "default": 1},
+            "tags": {"type": "array"},
+        },
+    }
+    assert render_parameters("demo", parameters) == (
+        "- **query** (string, required) — what to search for\n"
+        "- **alpha** (string | null, optional) — a union\n"
+        "- **page** (integer, optional, default: 1)\n"
+        "- **tags** (array, optional)"
+    )
+    assert render_parameters("bare", {"properties": {}}) == ""
+    # A property with no type info renders without a type name.
+    typeless = {"required": ["x"], "properties": {"x": {}}}
+    assert render_parameters("demo", typeless) == "- **x** (required)"
+    # A list `type` field joins its members, and a multi-line description collapses
+    # to a single bullet line (no raw docstring indentation reaches the page).
+    list_type = {
+        "properties": {
+            "kind": {"type": ["string", "null"], "description": "one of\n    a\n    b"},
+        }
+    }
+    assert (
+        render_parameters("demo", list_type) == "- **kind** (string | null, optional) — one of a b"
+    )
+    # A $ref enum + null (how Pydantic emits an optional Enum) resolves the $ref to
+    # the enum's underlying JSON type, so it reads `string | null`, not a bare `null`.
+    ref_enum = {
+        "$defs": {"SortOrder": {"enum": ["asc", "desc"], "type": "string"}},
+        "properties": {
+            "sort": {
+                "anyOf": [{"$ref": "#/$defs/SortOrder"}, {"type": "null"}],
+                "default": None,
+                "description": "ordering",
+            }
+        },
+    }
+    assert (
+        render_parameters("demo", ref_enum)
+        == "- **sort** (string | null, optional, default: None) — ordering"
+    )
+    # A $ref that resolves to nothing (no $defs) contributes no type name; the null
+    # member still renders, so the union degrades to `null` rather than crashing.
+    unresolved_ref = {
+        "properties": {"sort": {"anyOf": [{"$ref": "#/$defs/Missing"}, {"type": "null"}]}}
+    }
+    assert render_parameters("demo", unresolved_ref) == "- **sort** (null, optional)"
+
+
+def test_replace_parameters_touches_only_the_parameters_block() -> None:
+    with_block = (
+        "# t\n\n## SYNOPSIS\n\n```\nt()\n```\n\n"
+        "## PARAMETERS\n\n- **a** (string, required)\n\n"
+        "## DESCRIPTION\n\nprose\n"
+    )
+    replaced = replace_parameters(with_block, "- **b** (integer, optional)")
+    assert extract_parameters(replaced) == "- **b** (integer, optional)"
+    assert "```\nt()\n```" in replaced  # SYNOPSIS untouched
+    assert "## DESCRIPTION\n\nprose\n" in replaced  # DESCRIPTION untouched
+
+    # A page with no PARAMETERS: the section is inserted before DESCRIPTION.
+    without = "# t\n\n## SYNOPSIS\n\n```\nt()\n```\n\n## DESCRIPTION\n\nprose\n"
+    inserted = replace_parameters(without, "- **c** (string, required)")
+    assert extract_parameters(inserted) == "- **c** (string, required)"
+    assert "## PARAMETERS\n\n- **c** (string, required)\n\n## DESCRIPTION" in inserted
+
+    # No DESCRIPTION: the section lands after the SYNOPSIS block.
+    no_desc = "# t\n\n## SYNOPSIS\n\n```\nt()\n```\n\n## EXAMPLES\n\nx\n"
+    after = replace_parameters(no_desc, "- **d** (string, required)")
+    assert extract_parameters(after) == "- **d** (string, required)"
+    assert "```\n\n## PARAMETERS\n\n- **d** (string, required)\n\n## EXAMPLES" in after
+
+    with pytest.raises(ValueError, match="nowhere to place PARAMETERS"):
+        replace_parameters("# t\n\nno anchors here\n", "- **e** (required)")
+    with pytest.raises(ValueError, match="no PARAMETERS block"):
+        extract_parameters("# t\n\n## DESCRIPTION\n")
+
+
+@pytest.mark.asyncio
+async def test_section_3_parameters_is_exactly_the_registry_rendering() -> None:
+    # PARAMETERS is registry-owned wherever a tool has parameters: byte-equal to the
+    # rendering of the schema clients receive. A tool change without regenerating the
+    # pages fails here, pointing at the fix. Tools with no parameters get no section.
+    tools = {tool.name: tool for tool in await mcp.list_tools(run_middleware=False)}
+
+    for page in bundled_pages():
+        if page.section != 3 or page.tool not in tools:
+            continue
+        schema = tools[page.tool].parameters
+        if not schema.get("properties"):
+            continue
+        expected = render_parameters(page.tool, schema)
+        assert extract_parameters(page.read()) == expected, (
+            f"{page.title} PARAMETERS is stale; run `just man-regen` and commit the result"
         )
 
 

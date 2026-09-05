@@ -21,6 +21,13 @@ verified: 0.21.6 mcp
 schema_diff(note_type, project=None, project_id=None, output_format="text")
 ```
 
+## PARAMETERS
+
+- **note_type** (string, required) — The note type to check for drift (e.g., "person").
+- **project** (string | null, optional, default: None) — Project name. Optional -- server will resolve.
+- **project_id** (string | null, optional, default: None) — Project external_id (UUID). Prefer this over `project` when known — it routes to the exact project regardless of name collisions across cloud workspaces. Takes precedence over `project`. Get from list_memory_projects().
+- **output_format** (string, optional, default: "text")
+
 ## DESCRIPTION
 
 Compares the declared schema for a type against how notes of that type are

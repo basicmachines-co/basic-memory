@@ -55,23 +55,18 @@ permalink, or memory:// URL — there is no fuzzy fallback for edits.
 
 ## PARAMETERS
 
-- **identifier** — exact title, permalink, or memory:// URL (CLI: positional)
-- **operation** — one of the six operations above
-- **content** — the content to add or substitute
-- **section** — heading for the section operations (e.g. `"## Observations"`)
-- **find_text** — target text for find_replace
-- **expected_replacements** — if set, the edit fails unless the occurrence
-  count matches exactly
-- **replace_subsections** — for replace_section. Default (true): the section
-  runs to the next heading of the same or higher level, so replacing
-  `## Section` replaces its `###` subsections too. `False` stops at the next
-  heading of any level and preserves subsections
-- **metadata** — dict of frontmatter fields merged in alongside any operation;
-  given keys overwrite or add, other keys and the body are untouched.
-  `title` and `permalink` are ignored; `type` is applied like any other
-  frontmatter field; keys cannot be deleted
-- **project** / **project_id** / **workspace** — routing; same semantics as
-  [[write-note(3)]]
+- **identifier** (string, required) — The exact title, permalink, or memory:// URL of the note to edit. Must be an exact match - fuzzy matching is not supported for edit operations. Use search_notes() or read_note() first to find the correct identifier if uncertain. From the CLI this is a positional argument, not a flag.
+- **operation** (string, required) — The editing operation to perform: - "append": Add content to the end of the note (creates the note if it doesn't exist) - "prepend": Add content to the beginning of the note (creates the note if it doesn't exist) - "find_replace": Replace occurrences of find_text with content (note must exist) - "replace_section": Replace a markdown section identified by its header (note must exist). By default the section spans through the next heading of the same or higher level, so its subsections are replaced too; see replace_subsections. - "insert_before_section": Insert content before a section heading without consuming it (note must exist) - "insert_after_section": Insert content after a section heading without consuming it (note must exist)
+- **content** (string, required) — The content to add or use for replacement
+- **project** (string | null, optional, default: None) — Project name to edit in. Optional - server will resolve using hierarchy. Use "workspace/project" to route to a project in a specific cloud workspace. If unknown, use list_memory_projects() to discover available projects.
+- **workspace** (string | null, optional, default: None) — Workspace slug, name, or tenant_id. When provided with `project`, routes as `workspace/project`. Cannot be combined with `project_id`.
+- **project_id** (string | null, optional, default: None) — Project external_id (UUID). Prefer this over `project` when known — it routes to the exact project regardless of name collisions across cloud workspaces. Takes precedence over `project`. Get from list_memory_projects().
+- **section** (string | null, optional, default: None) — For replace_section operation - the markdown header to replace content under (e.g., "## Notes", "### Implementation")
+- **find_text** (string | null, optional, default: None) — For find_replace operation - the text to find and replace
+- **expected_replacements** (integer | null, optional, default: None) — For find_replace operation - the expected number of replacements (validation will fail if actual doesn't match)
+- **replace_subsections** (boolean | null, optional, default: None) — For replace_section operation. Default (true): the section spans everything through the next heading of the same or higher level in the original note, so replacing "## Section" also replaces its "###" subsections — the replacement content may freely introduce new headings. Set to false to replace only the immediate content under the header, stopping at the next heading of any level and preserving subsections.
+- **metadata** (object | null, optional, default: None) — Optional dict of frontmatter fields to merge, independent of `operation`. Provided keys overwrite existing frontmatter values (or are added if new); unrelated frontmatter keys and the note body are left untouched. Can be combined with any operation in the same call. `title` and `permalink` are ignored since those have their own dedicated handling; `type` is applied like any other frontmatter field. Key deletion is not supported.
+- **output_format** (string, optional, default: "text") — "text" returns the existing markdown summary. "json" returns machine-readable edit metadata.
 
 ## MCP USAGE
 

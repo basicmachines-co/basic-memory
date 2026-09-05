@@ -1,11 +1,11 @@
 """Regenerate the registry-owned sections of the bundled manual.
 
-The MCP SYNOPSIS block on every section-3 page whose tool this build registers is
-mechanical: it must show exactly the call the tool schema advertises. This script
-renders those blocks from the live registry (``mcp.list_tools()``) and rewrites
-them in place, flipping the page's ``generated:`` field to ``registry`` so the
-ownership split is declared. Curated sections — DESCRIPTION, PARAMETERS,
-EXAMPLES, GOTCHAS, SEE ALSO — are never touched.
+The MCP SYNOPSIS and PARAMETERS blocks on every section-3 page whose tool this
+build registers are mechanical: they must show exactly what the tool schema
+advertises. This script renders those blocks from the live registry
+(``mcp.list_tools()``) and rewrites them in place, flipping the page's
+``generated:`` field to ``registry`` so the ownership split is declared. Curated
+sections — DESCRIPTION, EXAMPLES, GOTCHAS, SEE ALSO — are never touched.
 
 Run after changing any MCP tool signature:
 
@@ -22,8 +22,10 @@ import asyncio
 from basic_memory.man import (
     bundled_pages,
     declare_registry_ownership,
+    render_parameters,
     render_synopsis,
     replace_mcp_synopsis,
+    replace_parameters,
 )
 from basic_memory.mcp.server import mcp
 import basic_memory.mcp.tools  # noqa: F401  (importing registers the tools)
@@ -38,9 +40,12 @@ async def main() -> None:
         if page.section != 3 or page.tool not in tools:
             continue
         text = page.read()
-        updated = replace_mcp_synopsis(
-            text, render_synopsis(page.tool, tools[page.tool].parameters)
-        )
+        schema = tools[page.tool].parameters
+        updated = replace_mcp_synopsis(text, render_synopsis(page.tool, schema))
+        # Tools with no parameters (basic_memory_diagnostics) get no PARAMETERS
+        # section; the generator only owns a block where there is one to render.
+        if schema.get("properties"):
+            updated = replace_parameters(updated, render_parameters(page.tool, schema))
         updated = declare_registry_ownership(updated)
         if updated != text:
             page.path.write_text(updated, encoding="utf-8")

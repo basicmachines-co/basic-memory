@@ -22,6 +22,14 @@ schema_infer(note_type, threshold=0.25, project=None, project_id=None,
              output_format="text")
 ```
 
+## PARAMETERS
+
+- **note_type** (string, required) — The note type to analyze (e.g., "person", "meeting").
+- **threshold** (number, optional, default: 0.25) — Minimum frequency (0-1) for a field to be suggested as optional. Default 0.25 (25%). Fields above 95% become required.
+- **project** (string | null, optional, default: None) — Project name. Optional -- server will resolve.
+- **project_id** (string | null, optional, default: None) — Project external_id (UUID). Prefer this over `project` when known — it routes to the exact project regardless of name collisions across cloud workspaces. Takes precedence over `project`. Get from list_memory_projects().
+- **output_format** (string, optional, default: "text")
+
 ## DESCRIPTION
 
 Analyzes every note of a type and proposes a schema from observed usage:

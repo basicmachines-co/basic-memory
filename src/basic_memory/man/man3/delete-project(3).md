@@ -29,6 +29,12 @@ CLI:
 bm project remove NAME
 ```
 
+## PARAMETERS
+
+- **project_name** (string, required) — Name of the project to delete
+- **delete_notes** (boolean, optional, default: False) — Also delete the project's note files (from local disk for local projects, from cloud storage for cloud projects). Defaults to False, which only stops tracking the project.
+- **workspace** (string | null, optional, default: None) — Optional cloud workspace selector to delete the project from. Slug is preferred for AI callers, but tenant_id and unique name are also accepted. When omitted, the connection's default workspace is used. A workspace selector implies cloud routing: without cloud credentials the call fails fast, matching create_memory_project behavior (#954).
+
 ## DESCRIPTION
 
 Unregisters a project from Basic Memory's configuration and database. By

@@ -262,18 +262,26 @@ async def write_note(
         `- This feature extends [[Base Design]] and uses [[Core Utils]]`
 
     Args:
-        title: The title of the note
-        content: Markdown content for the note, can include observations and relations
+        title: The title of the note; written to frontmatter and drives the permalink.
+            No H1 is added for you: content is saved as given, so include a
+            "# Title" heading yourself if the note should open with one.
+        content: Markdown content for the note, can include observations and relations.
+            May carry its own frontmatter; a `type:` in content frontmatter takes
+            precedence over the note_type parameter.
         directory: Directory path relative to project root where the file should be saved.
                    Use forward slashes (/) as separators. Use "/" or "" to write to project root.
-                   Examples: "notes", "projects/2025", "research/ml", "/" (root)
+                   Examples: "notes", "projects/2025", "research/ml", "/" (root).
+                   MCP accepts the aliases folder, dir, and path; the CLI flag is --folder.
         project: Project name to write to. Optional - server will resolve using the
-                hierarchy above. Use "workspace/project" to route to a project in a
-                specific cloud workspace. A bare name that exists in multiple
-                workspaces resolves to the default workspace, so use the qualified
-                form (or project_id) to disambiguate. If unknown, use
-                list_memory_projects() to discover available projects and their
-                qualified names.
+                hierarchy above. Omitting both project and project_id writes to the
+                session's active project (the last one this session touched), and only
+                falls back to the configured default project when there is none — so
+                after working in another project, pass project explicitly. Use
+                "workspace/project" to route to a project in a specific cloud workspace.
+                A bare name that exists in multiple workspaces resolves to the default
+                workspace, so use the qualified form (or project_id) to disambiguate. If
+                unknown, use list_memory_projects() to discover available projects and
+                their qualified names.
         workspace: Workspace slug, name, or tenant_id. When provided with `project`,
                 routes as `workspace/project`. Cannot be combined with `project_id`.
         project_id: Project external_id (UUID). Prefer this over `project` when known —
@@ -281,15 +289,18 @@ async def write_note(
                 workspaces. Takes precedence over `project`. Get from list_memory_projects().
         tags: Tags to categorize the note. Can be a list of strings, a comma-separated string, or None.
               Note: If passing from external MCP clients, use a string format (e.g. "tag1,tag2,tag3")
-        note_type: Type of note to create (stored in frontmatter). Defaults to "note".
-                   Can be "guide", "report", "config", "person", etc.
+        note_type: Type of note to create (stored in frontmatter `type:`). Defaults to "note".
+                   Can be "guide", "report", "config", "person", etc. The CLI flag is --type.
+                   A `type:` in content frontmatter takes precedence over this parameter, and
+                   this is what schema validation keys on.
         metadata: Optional dict of extra frontmatter fields merged into entity_metadata.
                   Useful for schema notes or any note that needs custom YAML frontmatter
-                  beyond title/type/tags. Nested dicts are supported.
+                  beyond title/type/tags. Nested dicts are supported. Not available from the CLI.
         overwrite: If True, replace existing note on conflict. If False, error on conflict.
                    If None (default), consult write_note_overwrite_default config setting.
         output_format: "text" returns the existing markdown summary. "json" returns
-                       machine-readable metadata.
+                       machine-readable metadata; on conflict it returns action: "conflict"
+                       with an error code instead of raising.
         context: Optional FastMCP context for performance caching.
 
     Returns:
