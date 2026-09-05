@@ -740,32 +740,6 @@ class BasicMemoryConfig(BaseSettings):
 
     @model_validator(mode="before")
     @classmethod
-    def reject_disabled_permalinks(cls, data: Any) -> Any:
-        """Reject the removed identity regime while accepting its old false default.
-
-        Older versions serialized every default field, so most existing config files
-        contain ``disable_permalinks: false``. That inert value is safe to discard.
-        A true file or environment setting is different: silently ignoring it would
-        change the user's Markdown on the next index without explaining why.
-        """
-        configured_value = data.get("disable_permalinks") if isinstance(data, dict) else None
-        environment_value = os.getenv("BASIC_MEMORY_DISABLE_PERMALINKS")
-        enabled_values = {"1", "true", "t", "yes", "y", "on"}
-        if configured_value == 1 or (
-            isinstance(configured_value, str) and configured_value.strip().lower() in enabled_values
-        ):
-            raise ValueError(
-                "disable_permalinks has been removed; Markdown note permalinks are mandatory"
-            )
-        if environment_value and environment_value.strip().lower() in enabled_values:
-            raise ValueError(
-                "BASIC_MEMORY_DISABLE_PERMALINKS has been removed; "
-                "Markdown note permalinks are mandatory"
-            )
-        return data
-
-    @model_validator(mode="before")
-    @classmethod
     def migrate_legacy_sync_fields(cls, data: Any) -> Any:
         """Honor legacy ``sync_changes``/``sync_delay`` after their rename to
         ``index_changes``/``index_delay``.
