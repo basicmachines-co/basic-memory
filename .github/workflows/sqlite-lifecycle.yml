@@ -33,7 +33,7 @@ jobs:
     timeout-minutes: 15
     env:
       UV_PYTHON: '3.12'
-      FASTEMBED_CACHE_PATH: ${{ runner.temp }}/fastembed-cache
+      FASTEMBED_CACHE_PATH: ${{ github.workspace }}/.cache/fastembed
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
