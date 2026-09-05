@@ -2452,9 +2452,10 @@ async def test_local_project_index_preserves_thematic_break_body_after_permalink
     )
 
     assert result.enqueued_files == 1
-    persisted_content = thematic_path.read_text(encoding="utf-8")
+    persisted_content = thematic_path.read_bytes().decode("utf-8")
+    normalized_content = persisted_content.replace("\r\n", "\n")
     assert f"permalink: {test_project.permalink}/notes/thematic-break" in persisted_content
-    assert persisted_content.endswith(original_content.rstrip())
+    assert normalized_content.endswith(original_content.rstrip())
 
     async with db.scoped_session(session_maker) as session:
         entity = await entity_repository.get_by_file_path(session, "notes/thematic-break.md")
