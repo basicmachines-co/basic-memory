@@ -8,6 +8,8 @@ on:
       - 'test-int/test_sqlite_lifecycle_integration.py'
       - 'test-int/test_db_wal_mode.py'
       - 'src/basic_memory/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
       - 'test-int/mcp/test_chatgpt_tools_integration.py'
       - 'test-int/mcp/test_concurrent_write_integration.py'
 
