@@ -1,5 +1,6 @@
 """Tests for EntityService."""
 
+import re
 import uuid
 from pathlib import Path
 from textwrap import dedent
@@ -788,7 +789,7 @@ async def test_create_from_markdown_rejects_missing_canonical_permalink(
     entity_markdown = await entity_parser.parse_file(full_path)
     with pytest.raises(
         ValueError,
-        match="Markdown note is missing a canonical permalink: test/Git Workflow Guide.md",
+        match=(f"Markdown note is missing a canonical permalink: {re.escape(str(file_path))}"),
     ):
         await entity_service.create_entity_from_markdown(file_path, entity_markdown)
 
