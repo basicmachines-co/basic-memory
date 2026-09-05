@@ -1,7 +1,7 @@
 """Real file-backed SQLite contention and CLI-exit probes for #1430/#1322.
 
 No platform simulation: Windows CI selects the production Windows engine path.
-The CLI probe disables embeddings to isolate database lifecycle from ONNX work.
+The CLI probe uses real FastEmbed inference to cover semantic reindex shutdown.
 """
 
 import asyncio
@@ -76,7 +76,8 @@ async def test_file_sqlite_concurrent_writes_commit_and_dispose(tmp_path: Path) 
         )
 
 
-def test_reindex_subprocess_exits_after_full_and_incremental_sqlite_runs(tmp_path: Path) -> None:
+@pytest.mark.semantic
+def test_semantic_reindex_subprocess_exits_after_full_and_incremental_runs(tmp_path: Path) -> None:
     project = tmp_path / "notes"
     project.mkdir()
     for index in range(15):
@@ -90,7 +91,9 @@ def test_reindex_subprocess_exits_after_full_and_incremental_sqlite_runs(tmp_pat
             {
                 "projects": {"probe": {"path": str(project), "mode": "local"}},
                 "default_project": "probe",
-                "semantic_search_enabled": False,
+                "semantic_search_enabled": True,
+                "semantic_embedding_provider": "fastembed",
+                "semantic_embedding_model": "BAAI/bge-small-en-v1.5",
                 "auto_update": False,
             }
         ),
@@ -123,4 +126,20 @@ def test_reindex_subprocess_exits_after_full_and_incremental_sqlite_runs(tmp_pat
         print(result.stdout)
         print(result.stderr)
         assert result.returncode == 0, result.stdout + result.stderr
+        assert "Embeddings complete" in result.stdout
+        assert "BAAI/bge-small-en-v1.5" in result.stdout
+        assert "index=sqlite-vec" in result.stdout
+        assert "0 errors" in result.stdout
+        # The CLI's embedded total includes unchanged entities; skipped tells
+        # us whether the incremental run actually had new inference to do.
+        summary = " ".join(result.stdout.split())
+        assert "15 entities embedded" in summary
+        expected_skipped = 0 if "--full" in arguments else 14
+        assert f"{expected_skipped} skipped" in summary
         assert "Reindex complete!" in result.stdout
+        # Make incremental reindex perform inference too, rather than passing
+        # by skipping every unchanged note without loading the ONNX model.
+        if "--full" in arguments:
+            (project / "note-0.md").write_text(
+                "# Note 0\n\n- [fact] updated semantic lifecycle probe\n", encoding="utf-8"
+            )
