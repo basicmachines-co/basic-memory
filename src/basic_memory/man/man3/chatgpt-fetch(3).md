@@ -21,6 +21,10 @@ verified: 0.21.6 mcp
 fetch(id)
 ```
 
+## PARAMETERS
+
+- **id** (string, required) — Document identifier (permalink, title, or memory URL)
+
 ## DESCRIPTION
 
 **Availability:** `fetch` answers only OpenAI clients (ChatGPT connectors).

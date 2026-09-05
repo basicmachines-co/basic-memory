@@ -31,6 +31,14 @@ bm tool schema-validate [TARGET] [--project NAME]
 # TARGET: a note type ("manpage"), a note path, or omitted for everything
 ```
 
+## PARAMETERS
+
+- **note_type** (string | null, optional, default: None) — Note type to batch-validate (e.g., "person", "meeting"). If provided, validates all notes of this type.
+- **identifier** (string | null, optional, default: None) — Specific note to validate (permalink, title, or path). If provided, validates only this note.
+- **project** (string | null, optional, default: None) — Project name. Optional -- server will resolve.
+- **project_id** (string | null, optional, default: None) — Project external_id (UUID). Prefer this over `project` when known — it routes to the exact project regardless of name collisions across cloud workspaces. Takes precedence over `project`. Get from list_memory_projects().
+- **output_format** (string, optional, default: "text")
+
 ## DESCRIPTION
 
 Checks notes against the schema resolved for their type (see

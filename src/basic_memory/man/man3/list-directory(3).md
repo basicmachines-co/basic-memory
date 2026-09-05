@@ -25,6 +25,18 @@ list_directory(dir_name="/", depth=1, file_name_glob=None, sort=None,
                project_id=None)
 ```
 
+## PARAMETERS
+
+- **dir_name** (string, optional, default: "/") — Directory path to list (default: root "/") Examples: "/", "/projects", "/research/ml"
+- **depth** (integer, optional, default: 1) — Recursion depth (1-10, default: 1 for immediate children only) Higher values show subdirectory contents recursively
+- **file_name_glob** (string | null, optional, default: None) — Optional glob pattern for filtering file names Examples: "*.md", "*meeting*", "project_*"
+- **sort** (string | null, optional, default: None) — Optional file ordering: "title_asc", "title_desc", "updated_asc", or "updated_desc". Directories remain first.
+- **page** (integer, optional, default: 1) — One-indexed result page (default: 1)
+- **page_size** (integer, optional, default: 10) — Number of nodes per page (default: 10, maximum: 200)
+- **output_format** (string, optional, default: "text") — "text" for a readable listing or "json" for structured pagination data
+- **project** (string | null, optional, default: None) — Project name to list directory from. Optional - server will resolve using hierarchy. If unknown, use list_memory_projects() to discover available projects.
+- **project_id** (string | null, optional, default: None) — Project external_id (UUID). Prefer this over `project` when known — it routes to the exact project regardless of name collisions across cloud workspaces. Takes precedence over `project`. Get from list_memory_projects().
+
 ## DESCRIPTION
 
 Returns a tree-style listing of a project directory: subfolders with paths,

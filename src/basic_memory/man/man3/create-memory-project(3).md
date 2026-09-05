@@ -31,6 +31,14 @@ bm project add NAME [PATH] [--cloud] [--workspace SELECTOR]
                [--visibility shared|private] [--local-path PATH]
 ```
 
+## PARAMETERS
+
+- **project_name** (string, required) — Name for the new project (must be unique)
+- **project_path** (string, required) — File system path where the project will be stored
+- **set_default** (boolean, optional, default: False) — Whether to set this project as the default (optional, defaults to False)
+- **workspace** (string | null, optional, default: None) — Optional cloud workspace selector to create the project in. Slug is preferred for AI callers, but tenant_id and unique name are also accepted. When omitted, the connection's default workspace is used. Discover values via `list_workspaces`. A workspace selector implies cloud routing: without cloud credentials the call fails fast instead of silently creating a local project (#954).
+- **output_format** (string, optional, default: "text") — "text" returns the existing human-readable result text. "json" returns structured project creation metadata.
+
 ## DESCRIPTION
 
 Creates and registers a project. Local projects take a filesystem path;
