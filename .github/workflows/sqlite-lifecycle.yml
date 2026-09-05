@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/sqlite-lifecycle.yml'
       - 'test-int/test_sqlite_lifecycle_integration.py'
+      - 'test-int/test_db_wal_mode.py'
       - 'src/basic_memory/db.py'
       - 'src/basic_memory/cli/commands/command_utils.py'
       - 'src/basic_memory/cli/commands/db.py'
@@ -41,7 +42,7 @@ jobs:
         run: uv run python -c "import sys, sqlite3; print(sys.version); print(sqlite3.sqlite_version); assert sys.version_info[:2] == (3, 12)"
       - name: Run real SQLite probes without test selection caching
         shell: bash
-        run: uv run pytest test-int/test_sqlite_lifecycle_integration.py -v -s --no-cov --timeout=240 --junitxml=sqlite-lifecycle.xml 2>&1 | tee sqlite-lifecycle.log
+        run: uv run pytest test-int/test_sqlite_lifecycle_integration.py test-int/test_db_wal_mode.py -v -s --no-cov --timeout=240 --junitxml=sqlite-lifecycle.xml 2>&1 | tee sqlite-lifecycle.log
       - name: Reproduce reported MCP pagination and high-volume writes
         if: always() && !cancelled()
         shell: bash
