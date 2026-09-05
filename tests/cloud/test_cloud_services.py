@@ -13,6 +13,7 @@ from basic_memory.indexing.accepted_note_mutation_runner import (
     AcceptedNoteDeleteMutation,
     AcceptedNoteEditMutation,
     AcceptedNoteMoveMutation,
+    AcceptedNoteMutationChange,
     AcceptedNoteMutationDependencies,
     AcceptedNoteMutationRejectKind,
     AcceptedNoteMutationRejected,
@@ -47,6 +48,7 @@ from basic_memory.services.directory_deletes import (
 from basic_memory.services.note_content_reads import NoteContentQueryService
 from basic_memory.services.note_content_writes import (
     NoteContentMutationActorContext,
+    NoteContentMutationKind,
     NoteContentMutationService,
     NoteContentMutationServiceError,
 )
@@ -1087,6 +1089,7 @@ async def test_on_accepted_mutation_runs_inside_the_accept_transaction(monkeypat
     order: list[str] = []
 
     class RecordingSession(FakeSession):
+        @override
         async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
             order.append("transaction_closed")
             return None
@@ -1105,11 +1108,18 @@ async def test_on_accepted_mutation_runs_inside_the_accept_transaction(monkeypat
 
     monkeypatch.setattr(note_content_writes, "run_accepted_note_create", fake_runner)
 
-    seen: list[tuple[object, str]] = []
+    seen: list[tuple[str, object, str, str]] = []
 
     class HookedService(NoteContentMutationService):
+        @override
         async def on_accepted_mutation(
-            self, session, *, project_external_id, change, mutation_kind, source
+            self,
+            session: AsyncSession,
+            *,
+            project_external_id: str,
+            change: AcceptedNoteMutationChange,
+            mutation_kind: NoteContentMutationKind,
+            source: str,
         ) -> None:
             order.append("hook")
             seen.append((project_external_id, change, mutation_kind, source))
