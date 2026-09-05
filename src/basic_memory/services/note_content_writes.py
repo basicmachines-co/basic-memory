@@ -163,8 +163,10 @@ class NoteContentMutationService:
         self,
         session: AsyncSession,
         *,
+        project_external_id: str,
         change: AcceptedNoteMutationChange,
         mutation_kind: NoteContentMutationKind,
+        source: str,
     ) -> None:
         """Contribute to the accept transaction, before it commits.
 
@@ -174,6 +176,11 @@ class NoteContentMutationService:
         note -- a hosted deployment recording a durable marker, say -- otherwise
         has to re-implement the whole method body to reach inside the
         transaction, and then silently owns a copy of it.
+
+        The mutation's own identifying context is passed in rather than left for
+        the subclass to re-derive: the project is addressed by external id here,
+        while the accepted change carries only the tenant-internal integer, and
+        the source has already been through the actor resolver.
 
         Raising rolls the accepted mutation back with it, which is the intended
         behaviour: a marker that cannot be written must not leave a note
@@ -362,8 +369,10 @@ class NoteContentMutationService:
                     )
                     await self.on_accepted_mutation(
                         session,
+                        project_external_id=project_external_id,
                         change=result.change,
                         mutation_kind="create",
+                        source=actor_context.source,
                     )
                 accepted = await self._finish_mutation(result)
             return accepted
@@ -427,8 +436,10 @@ class NoteContentMutationService:
                     )
                     await self.on_accepted_mutation(
                         session,
+                        project_external_id=project_external_id,
                         change=result.change,
                         mutation_kind="update",
+                        source=actor_context.source,
                     )
                 accepted = await self._finish_mutation(result)
         except AcceptedNoteMutationRejected as error:
@@ -506,8 +517,10 @@ class NoteContentMutationService:
                     )
                     await self.on_accepted_mutation(
                         session,
+                        project_external_id=project_external_id,
                         change=result.change,
                         mutation_kind="edit",
+                        source=actor_context.source,
                     )
                 accepted = await self._finish_mutation(result)
         except AcceptedNoteMutationRejected as error:

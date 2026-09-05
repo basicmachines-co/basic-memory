@@ -1108,9 +1108,11 @@ async def test_on_accepted_mutation_runs_inside_the_accept_transaction(monkeypat
     seen: list[tuple[object, str]] = []
 
     class HookedService(NoteContentMutationService):
-        async def on_accepted_mutation(self, session, *, change, mutation_kind) -> None:
+        async def on_accepted_mutation(
+            self, session, *, project_external_id, change, mutation_kind, source
+        ) -> None:
             order.append("hook")
-            seen.append((change, mutation_kind))
+            seen.append((project_external_id, change, mutation_kind, source))
 
     service = HookedService(
         session_maker=tenant_session_maker,
@@ -1128,7 +1130,7 @@ async def test_on_accepted_mutation_runs_inside_the_accept_transaction(monkeypat
     assert order.index("hook") < order.index("transaction_closed"), (
         "the hook must write inside the transaction that accepted the note"
     )
-    assert seen == [(returned, "create")]
+    assert seen == [("project-123", returned, "create", "api")]
 
 
 @pytest.mark.asyncio
