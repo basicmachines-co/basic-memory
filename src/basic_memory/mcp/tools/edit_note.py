@@ -414,6 +414,7 @@ async def edit_note(
         identifier: The exact title, permalink, or memory:// URL of the note to edit.
                    Must be an exact match - fuzzy matching is not supported for edit operations.
                    Use search_notes() or read_note() first to find the correct identifier if uncertain.
+                   From the CLI this is a positional argument, not a flag.
         operation: The editing operation to perform:
                   - "append": Add content to the end of the note (creates the note if it doesn't exist)
                   - "prepend": Add content to the beginning of the note (creates the note if it doesn't exist)

@@ -74,29 +74,25 @@ matched.
 
 ## PARAMETERS
 
-- **query** — search string; optional. Omit it for filter-only searches
-- **search_type** — see modes above; default is dynamic (`hybrid` if semantic
-  search is enabled, else `text`)
-- **metadata_filters** — dict of frontmatter field → value; integer values
-  match integer YAML fields (`{"section": 3}` works). A `None` value is an
-  is-null match — notes where the key is absent or explicitly null. `None`
-  inside `$in`, `$between`, a contains list, or a comparison is refused: those
-  compare against the value, and a comparison with null is never true
-- **tags** — list or comma string, same convention as [[write-note(3)]]
-- **min_similarity** — float override for vector/hybrid threshold; `0.0`
-  shows everything, `0.8` is high precision
-- **valid_at** — date (`2026-07-28`) or RFC 3339 instant
-  (`2026-07-28T09:00:00Z`) that the authored range must contain; a timestamp
-  written without an offset is read as UTC (aliases: `as_of`, `valid_on`)
-- **valid_overlaps** — range literal the authored range must overlap:
-  `[2026-06-10,2026-07-27)`, `(,2026-07-27]`, `[2026-06-10,)`. Mutually
-  exclusive with `valid_at` (aliases: `overlaps`, `valid_during`)
-- **time_kind** — kind of valid time: `effective`, `valid`, `occurred`, `due`,
-  or `mentioned`; usable on its own (alias: `kind`)
-- **search_all_projects** — opt-in cross-project search; ignored when
-  `project`/`project_id` is given
-- **page**, **page_size** — pagination (aliases: `page_number`, `limit`,
-  `per_page`)
+- **query** (string | null, optional, default: None) — Optional search query string (supports boolean operators, phrases, patterns). Omit or pass None for filter-only searches using metadata_filters, tags, or status.
+- **project** (string | null, optional, default: None) — Project name to search in. Optional - server will resolve using hierarchy. If unknown, use list_memory_projects() to discover available projects.
+- **project_id** (string | null, optional, default: None) — Project external_id (UUID). Prefer this over `project` when known — it routes to the exact project regardless of name collisions across cloud workspaces. Takes precedence over `project`. Get from list_memory_projects().
+- **search_all_projects** (boolean, optional, default: False) — Optional opt-in to search every accessible project. Ignored when `project` or `project_id` is supplied.
+- **page** (integer, optional, default: 1) — The page number of results to return (default 1). Aliases: page_number.
+- **page_size** (integer, optional, default: 10) — The number of results to return per page (default 10). Aliases: limit, per_page.
+- **search_type** (string | null, optional, default: None) — Type of search to perform, one of: "text", "title", "permalink", "vector", "semantic", "hybrid". Default is dynamic: "hybrid" when semantic search is enabled, otherwise "text".
+- **output_format** (string, optional, default: "text") — "text" preserves existing structured search response behavior. "json" returns a machine-readable dictionary payload.
+- **note_types** (array | null, optional, default: None) — Optional list of note types to search (e.g., ["note", "person"])
+- **entity_types** (array | null, optional, default: None) — Optional list of entity types to filter by (e.g., ["entity", "observation"])
+- **categories** (array | null, optional, default: None) — Optional list of observation categories for exact matching (e.g., ["requirement"]). Pair with entity_types=["observation"] to return only observations whose category matches exactly.
+- **after_date** (string | null, optional, default: None) — Optional date filter for recent content (e.g., "1 week", "2d", "2024-01-01")
+- **metadata_filters** (object | null, optional, default: None) — Optional structured frontmatter filters (e.g., {"status": "in-progress"}). Integer values match integer YAML fields ({"section": 3} works). A None value is an is-null match: notes where the key is absent or explicitly null. None inside $in/$between/a contains list/a comparison is refused — those compare against the value, and a comparison with null is never true.
+- **tags** (array | null, optional, default: None) — Optional tag filter (frontmatter tags); shorthand for metadata_filters["tags"]. Accepts a list (["a", "b"]) or a comma-separated string ("a,b"), matching the write_note tags convention and the tag: query shorthand.
+- **status** (string | null, optional, default: None) — Optional status filter (frontmatter status); shorthand for metadata_filters["status"]
+- **min_similarity** (number | null, optional, default: None) — Optional float to override the global semantic_min_similarity threshold for this query. E.g., 0.0 to see all vector results, or 0.8 for high precision. Only applies to vector and hybrid search types.
+- **valid_at** (string | null, optional, default: None) — Optional date ("2026-07-28") or RFC 3339 instant ("2026-07-28T09:00:00Z"; a timestamp with no offset is read as UTC). Returns sources whose authored valid range contains it. Sources with no temporal qualifier are excluded. Aliases: as_of, valid_on.
+- **valid_overlaps** (string | null, optional, default: None) — Optional PostgreSQL-style range literal ("[2026-06-10,2026-07-27)", "(,2026-07-27]", "[2026-06-10,)"). Returns sources whose authored valid range overlaps it. Mutually exclusive with valid_at; also excludes undated sources. Aliases: overlaps, valid_during.
+- **time_kind** (string | null, optional, default: None) — Optional kind of valid time to narrow to: "effective", "valid", "occurred", "due", or "mentioned". Valid on its own. Alias: kind.
 
 ## MCP USAGE
 

@@ -25,6 +25,16 @@ move_note(identifier, destination_path="", destination_folder=None,
           output_format="text")
 ```
 
+## PARAMETERS
+
+- **identifier** (string, required) — For files: exact entity identifier (title, permalink, or memory:// URL). For directories: the directory path (e.g., "docs", "projects/2025"). Must be an exact match - fuzzy matching is not supported for move operations. Use search_notes() or list_directory() first to find the correct path if uncertain.
+- **destination_path** (string, optional, default: "") — For files: new path relative to project root (e.g., "work/meetings/note.md") For directories: new directory path (e.g., "archive/docs") Mutually exclusive with destination_folder.
+- **destination_folder** (string | null, optional, default: None) — Move the note into this folder, preserving the original filename. Mutually exclusive with destination_path. Only for single-file moves.
+- **is_directory** (boolean, optional, default: False) — If True, moves an entire directory and all its contents. When True, identifier and destination_path should be directory paths (without file extensions). Defaults to False.
+- **project** (string | null, optional, default: None) — Project name to move within. Optional - server will resolve using hierarchy. If unknown, use list_memory_projects() to discover available projects.
+- **project_id** (string | null, optional, default: None) — Project external_id (UUID). Prefer this over `project` when known — it routes to the exact project regardless of name collisions across cloud workspaces. Takes precedence over `project`. Get from list_memory_projects().
+- **output_format** (string, optional, default: "text") — "text" returns existing markdown guidance/success text. "json" returns machine-readable move metadata.
+
 ## DESCRIPTION
 
 Relocates a note (or, with `is_directory=True`, a whole directory tree) and

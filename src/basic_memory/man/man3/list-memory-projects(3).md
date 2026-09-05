@@ -30,6 +30,10 @@ bm tool list-projects
 bm project list        # richer table, includes routing and sync columns
 ```
 
+## PARAMETERS
+
+- **output_format** (string, optional, default: "text") — "text" returns the existing human-readable project list. "json" returns structured project metadata.
+
 ## DESCRIPTION
 
 Returns a unified view of every reachable project: local projects from

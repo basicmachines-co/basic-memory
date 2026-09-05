@@ -21,6 +21,12 @@ verified: 0.21.6 mcp
 read_content(path, project=None, project_id=None)
 ```
 
+## PARAMETERS
+
+- **path** (string, required) — The path or permalink to the file. Can be: - A regular file path (docs/example.md) - A memory URL (memory://docs/example) - A permalink (docs/example)
+- **project** (string | null, optional, default: None) — Project name to read from. Optional - server will resolve using hierarchy. If unknown, use list_memory_projects() to discover available projects.
+- **project_id** (string | null, optional, default: None) — Project external_id (UUID). Prefer this over `project` when known — it routes to the exact project regardless of name collisions across cloud workspaces. Takes precedence over `project`. Get from list_memory_projects().
+
 ## DESCRIPTION
 
 Returns a file's content with no identifier cascade, no miss suggestions,

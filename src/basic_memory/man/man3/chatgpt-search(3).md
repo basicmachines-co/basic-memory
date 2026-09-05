@@ -21,6 +21,10 @@ verified: 0.21.6 mcp
 search(query)
 ```
 
+## PARAMETERS
+
+- **query** (string, required) — Search query (full-text syntax supported by `search_notes`)
+
 ## DESCRIPTION
 
 **Availability:** `search` answers only OpenAI clients (ChatGPT connectors).

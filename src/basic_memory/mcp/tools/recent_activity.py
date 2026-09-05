@@ -108,9 +108,11 @@ async def recent_activity(
             - Relative: "2 days ago", "last week", "yesterday"
             - Points in time: "2024-01-01", "January 1st"
             - Standard format: "7d", "24h"
+            Aliases: since, time_range, lookback.
         project: Project name to query. Optional - server will resolve using the
-                hierarchy above. If unknown, use list_memory_projects() to discover
-                available projects.
+                hierarchy above: omitted, the active or default project is used, and
+                discovery mode across all projects applies only when neither resolves.
+                If unknown, use list_memory_projects() to discover available projects.
         project_id: Project external_id (UUID). Prefer this over `project` when known —
                 it routes to the exact project regardless of name collisions across cloud
                 workspaces. Takes precedence over `project`. Get from list_memory_projects().

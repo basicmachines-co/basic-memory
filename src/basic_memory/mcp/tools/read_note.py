@@ -113,20 +113,23 @@ async def read_note(
         project_id: Project external_id (UUID). Prefer this over `project` when known —
                 it routes to the exact project regardless of name collisions across cloud
                 workspaces. Takes precedence over `project`. Get from list_memory_projects().
-        identifier: The title or permalink of the note to read
-                   Can be a full memory:// URL, a permalink, a title, or search text
+        identifier: The title or permalink of the note to read.
+                   Can be a full memory:// URL, a permalink, a title, or search text.
+                   From the CLI this is a positional argument, not a flag.
         page: Page of fallback-search results to use when the identifier does not
             resolve to a note directly (default: 1). A direct or exact-title match
             always returns the full note content — page/page_size never chunk the
             note itself, and the title-match lookup pages through fixed-size pages
             of title results until an exact match is found or results are
-            exhausted, regardless of page or page_size.
+            exhausted, regardless of page or page_size. Aliases: page_number.
         page_size: Number of fallback-search results per page (default: 10). When no
             match is found, this caps how many related-note suggestions are listed.
+            Aliases: limit, per_page.
         output_format: "text" returns markdown content or guidance text.
             "json" returns a structured object with title/permalink/file_path/content/frontmatter.
         include_frontmatter: When output_format="json", whether content should include the
-            opening YAML frontmatter block.
+            opening YAML frontmatter block; the parsed frontmatter object is returned either
+            way. The CLI flag is --frontmatter (--include-frontmatter is a deprecated alias).
         context: Optional FastMCP context for performance caching.
 
     Returns:
