@@ -40,8 +40,8 @@ async def test_file_sqlite_concurrent_writes_commit_and_dispose(tmp_path: Path) 
             await connection.execute(text("CREATE VIRTUAL TABLE notes_fts USING fts5(body)"))
 
         async def write_notes(writer: int) -> None:
-            for index in range(20):
-                note_id = writer * 20 + index
+            for index in range(40):
+                note_id = writer * 40 + index
                 async with engine.begin() as connection:
                     await connection.execute(
                         text("INSERT INTO notes VALUES (:id, :body)"),
@@ -58,15 +58,15 @@ async def test_file_sqlite_concurrent_writes_commit_and_dispose(tmp_path: Path) 
                     ).scalar_one() == "searchable note"
 
         async with asyncio.timeout(90), asyncio.TaskGroup() as writers:
-            for writer in range(32):
+            for writer in range(64):
                 writers.create_task(write_notes(writer))
         async with engine.connect() as connection:
-            assert (await connection.execute(text("SELECT count(*) FROM notes"))).scalar() == 640
+            assert (await connection.execute(text("SELECT count(*) FROM notes"))).scalar() == 2560
             assert (
                 await connection.execute(
                     text("SELECT count(*) FROM notes_fts WHERE notes_fts MATCH 'searchable'")
                 )
-            ).scalar() == 640
+            ).scalar() == 2560
             assert (await connection.execute(text("PRAGMA integrity_check"))).scalar() == "ok"
     finally:
         await asyncio.wait_for(engine.dispose(), 15)

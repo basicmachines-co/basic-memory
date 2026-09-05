@@ -8,17 +8,23 @@ on:
       - 'test-int/test_sqlite_lifecycle_integration.py'
       - 'src/basic_memory/db.py'
       - 'src/basic_memory/cli/commands/command_utils.py'
+      - 'src/basic_memory/cli/commands/db.py'
+      - 'src/basic_memory/index/local_schedulers.py'
+      - 'src/basic_memory/index/note_content_materialization.py'
+      - 'test-int/mcp/test_chatgpt_tools_integration.py'
+      - 'test-int/mcp/test_concurrent_write_integration.py'
 
 permissions:
   contents: read
 
 jobs:
   lifecycle:
-    name: SQLite lifecycle (${{ matrix.os }}, Python 3.12)
+    name: SQLite lifecycle (${{ matrix.os }}, Python 3.12, run ${{ matrix.repetition }})
     strategy:
       fail-fast: false
       matrix:
         os: [windows-latest, ubuntu-latest]
+        repetition: [1, 2, 3]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     env:
@@ -35,8 +41,18 @@ jobs:
         run: uv run python -c "import sys, sqlite3; print(sys.version); print(sqlite3.sqlite_version); assert sys.version_info[:2] == (3, 12)"
       - name: Run real SQLite probes without test selection caching
         run: uv run pytest test-int/test_sqlite_lifecycle_integration.py -v -s --no-cov --timeout=240 --junitxml=sqlite-lifecycle.xml
+      - name: Reproduce reported MCP pagination and high-volume writes
+        if: always() && !cancelled()
+        run: >-
+          uv run pytest
+          test-int/mcp/test_chatgpt_tools_integration.py::test_chatgpt_search_pagination_default
+          test-int/mcp/test_concurrent_write_integration.py::test_concurrent_write_high_volume
+          -v -s --no-cov --timeout=120 --timeout-method=thread
+          -o faulthandler_timeout=60 --junitxml=sqlite-mcp.xml
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: sqlite-lifecycle-${{ matrix.os }}
-          path: sqlite-lifecycle.xml
+          name: sqlite-lifecycle-${{ matrix.os }}-${{ matrix.repetition }}
+          path: |
+            sqlite-lifecycle.xml
+            sqlite-mcp.xml
