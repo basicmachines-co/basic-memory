@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import importlib.util
 import re
+from pathlib import Path
 
 import pytest
 
@@ -25,7 +27,16 @@ from basic_memory.man import (
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools import __all__ as registered_tools
 
-from scripts.update_man_pages import regenerate_page
+# scripts/ is not a package (no __init__.py) and CI runs pytest with
+# --import-mode=importlib, so `from scripts...` fails collection. Load the file
+# directly, matching the convention in tests/test_update_versions.py.
+MODULE_PATH = Path(__file__).resolve().parents[1] / "scripts" / "update_man_pages.py"
+SPEC = importlib.util.spec_from_file_location("update_man_pages", MODULE_PATH)
+assert SPEC is not None
+assert SPEC.loader is not None
+update_man_pages = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(update_man_pages)
+regenerate_page = update_man_pages.regenerate_page
 
 
 def _has_parameters_block(page_text: str) -> bool:
