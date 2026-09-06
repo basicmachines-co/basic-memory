@@ -16,6 +16,7 @@ from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory.deps import (
+    SchemaValidationObserverDep,
     EntityRepositoryV2ExternalDep,
     FileServiceV2ExternalDep,
     LinkResolverV2ExternalDep,
@@ -36,6 +37,10 @@ from basic_memory.schemas.schema import (
 from basic_memory.picoschema.resolver import SchemaSearchFn, resolve_schema
 from basic_memory.picoschema.parser import SchemaDefinition
 from basic_memory.picoschema.validator import validate_note
+from basic_memory.services.schema_validation_hooks import (
+    SchemaValidationObserver,
+    ValidatedNoteOutcome,
+)
 from basic_memory.picoschema.inference import infer_schema, NoteData, ObservationData, RelationData
 from basic_memory.picoschema.diff import diff_schema
 from basic_memory.utils import generate_permalink
@@ -152,6 +157,7 @@ async def validate_schema(
     file_service: FileServiceV2ExternalDep,
     link_resolver: LinkResolverV2ExternalDep,
     session: SessionDep,
+    validation_observer: SchemaValidationObserverDep,
     project_id: str = Path(..., description="Project external UUID"),
     note_type: str | None = Query(None, description="Note type to validate"),
     identifier: str | None = Query(None, description="Specific note identifier"),
@@ -168,6 +174,7 @@ async def validate_schema(
     even when file changes haven't been synced to the database yet.
     """
     results: list[NoteValidationResponse] = []
+    outcomes: list[ValidatedNoteOutcome] = []
 
     # --- Single note validation ---
     if identifier:
@@ -175,7 +182,16 @@ async def validate_schema(
         # to match how read_note and other tools resolve identifiers
         entity = await link_resolver.resolve_link(identifier, session=session)
         if not entity:
-            return ValidationReport(note_type=note_type, total_notes=0, total_entities=0)
+            # A request that resolved to nothing still validated nothing, which
+            # is the same report the note-type branch produces for an empty
+            # type. Returning it without telling the observer would make the
+            # once-per-request contract depend on how the request was scoped.
+            return await _observed(
+                validation_observer,
+                project_external_id=project_id,
+                outcomes=outcomes,
+                report=ValidationReport(note_type=note_type, total_notes=0, total_entities=0),
+            )
 
         frontmatter = _entity_frontmatter(entity)
         schema_ref = frontmatter.get("schema")
@@ -198,31 +214,52 @@ async def validate_schema(
                 _entity_relations(entity),
                 frontmatter=frontmatter,
             )
-            results.append(_to_note_validation_response(result))
+            response = _to_note_validation_response(result)
+            results.append(response)
+            outcomes.append(
+                ValidatedNoteOutcome(
+                    note_external_id=entity.external_id,
+                    schema_entity=response.schema_entity,
+                    schema_reference=schema_ref if isinstance(schema_ref, str) else None,
+                    passed=response.passed,
+                )
+            )
 
-        return ValidationReport(
-            note_type=note_type or entity.note_type,
-            total_notes=len(results),
-            total_entities=1,
-            valid_count=1 if (results and results[0].passed) else 0,
-            warning_count=sum(len(r.warnings) for r in results),
-            error_count=sum(len(r.errors) for r in results),
-            results=results,
+        return await _observed(
+            validation_observer,
+            project_external_id=project_id,
+            outcomes=outcomes,
+            report=ValidationReport(
+                note_type=note_type or entity.note_type,
+                total_notes=len(results),
+                total_entities=1,
+                valid_count=1 if (results and results[0].passed) else 0,
+                warning_count=sum(len(r.warnings) for r in results),
+                error_count=sum(len(r.errors) for r in results),
+                results=results,
+            ),
         )
 
     # --- Batch validation by note type ---
     if note_type:
         canonical_note_type = normalize_note_type(note_type)
         entities = await _find_by_note_type(session, entity_repository, canonical_note_type)
-        results = await _validate_note_entities(session, entity_repository, file_service, entities)
-        return ValidationReport(
-            note_type=canonical_note_type,
-            total_notes=len(results),
-            total_entities=len(entities),
-            valid_count=sum(1 for r in results if r.passed),
-            warning_count=sum(len(r.warnings) for r in results),
-            error_count=sum(len(r.errors) for r in results),
-            results=results,
+        results = await _validate_note_entities(
+            session, entity_repository, file_service, entities, outcomes
+        )
+        return await _observed(
+            validation_observer,
+            project_external_id=project_id,
+            outcomes=outcomes,
+            report=ValidationReport(
+                note_type=canonical_note_type,
+                total_notes=len(results),
+                total_entities=len(entities),
+                valid_count=sum(1 for r in results if r.passed),
+                warning_count=sum(len(r.warnings) for r in results),
+                error_count=sum(len(r.errors) for r in results),
+                results=results,
+            ),
         )
 
     # --- All-types validation ---
@@ -237,7 +274,7 @@ async def validate_schema(
     for target_type in covered_types:
         entities = await _find_by_note_type(session, entity_repository, target_type)
         type_results = await _validate_note_entities(
-            session, entity_repository, file_service, entities
+            session, entity_repository, file_service, entities, outcomes
         )
         type_summaries.append(
             TypeValidationSummary(
@@ -252,16 +289,41 @@ async def validate_schema(
         results.extend(type_results)
         total_entities += len(entities)
 
-    return ValidationReport(
-        note_type=None,
-        total_notes=len(results),
-        total_entities=total_entities,
-        valid_count=sum(1 for r in results if r.passed),
-        warning_count=sum(len(r.warnings) for r in results),
-        error_count=sum(len(r.errors) for r in results),
-        results=results,
-        type_summaries=type_summaries,
+    return await _observed(
+        validation_observer,
+        project_external_id=project_id,
+        outcomes=outcomes,
+        report=ValidationReport(
+            note_type=None,
+            total_notes=len(results),
+            total_entities=total_entities,
+            valid_count=sum(1 for r in results if r.passed),
+            warning_count=sum(len(r.warnings) for r in results),
+            error_count=sum(len(r.errors) for r in results),
+            results=results,
+            type_summaries=type_summaries,
+        ),
     )
+
+
+async def _observed(
+    observer: SchemaValidationObserver,
+    *,
+    project_external_id: str,
+    outcomes: list[ValidatedNoteOutcome],
+    report: ValidationReport,
+) -> ValidationReport:
+    """Tell the observer what was validated, then return the report unchanged.
+
+    Every exit from `validate_schema` goes through here, so an observer sees a
+    validation exactly once however the request was scoped -- one note, one
+    type, or every schema-covered type.
+    """
+    await observer.on_notes_validated(
+        project_external_id=project_external_id,
+        outcomes=outcomes,
+    )
+    return report
 
 
 # --- Inference ---
@@ -379,6 +441,7 @@ async def _validate_note_entities(
     entity_repository: EntityRepositoryV2ExternalDep,
     file_service: FileServiceV2ExternalDep,
     entities: list[Entity],
+    outcomes: list[ValidatedNoteOutcome] | None = None,
 ) -> list[NoteValidationResponse]:
     """Validate a batch of note entities against their resolved schemas.
 
@@ -409,7 +472,17 @@ async def _validate_note_entities(
                 _entity_relations(entity),
                 frontmatter=frontmatter,
             )
-            results.append(_to_note_validation_response(result))
+            response = _to_note_validation_response(result)
+            results.append(response)
+            if outcomes is not None:
+                outcomes.append(
+                    ValidatedNoteOutcome(
+                        note_external_id=entity.external_id,
+                        schema_entity=response.schema_entity,
+                        schema_reference=schema_ref if isinstance(schema_ref, str) else None,
+                        passed=response.passed,
+                    )
+                )
 
     return results
 

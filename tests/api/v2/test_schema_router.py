@@ -7,8 +7,10 @@ Note types use one snake_case identity at write and query boundaries. Legacy sto
 spellings remain part of the same logical population.
 """
 
+from collections.abc import Generator
 from pathlib import Path
 from textwrap import dedent
+from typing import override
 
 import pytest
 from httpx import AsyncClient
@@ -16,7 +18,12 @@ from sqlalchemy import update
 
 from basic_memory.models import Entity, Project
 from basic_memory.schemas.base import Entity as EntitySchema
+from basic_memory.deps.services import get_schema_validation_observer
 from basic_memory.services.file_service import FileService
+from basic_memory.services.schema_validation_hooks import (
+    SchemaValidationObserver,
+    ValidatedNoteOutcome,
+)
 
 
 # --- Helpers ---
@@ -1250,3 +1257,321 @@ async def test_diff_falls_back_to_db_on_missing_file(
     assert response.status_code == 200
     data = response.json()
     assert data["note_type"] == "diff_missing_type"
+
+
+# --- Validation observer seam ---
+
+
+class RecordingValidationObserver(SchemaValidationObserver):
+    """Captures what a deployment overriding the seam would actually see."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[ValidatedNoteOutcome, ...]]] = []
+
+    @override
+    async def on_notes_validated(
+        self,
+        *,
+        project_external_id: str,
+        outcomes,
+    ) -> None:
+        self.calls.append((project_external_id, tuple(outcomes)))
+
+
+@pytest.fixture
+def validation_observer(app) -> Generator[RecordingValidationObserver, None, None]:
+    observer = RecordingValidationObserver()
+    app.dependency_overrides[get_schema_validation_observer] = lambda: observer
+    yield observer
+    app.dependency_overrides.pop(get_schema_validation_observer, None)
+
+
+@pytest.mark.asyncio
+async def test_validation_observer_sees_a_passing_note_by_external_id(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_service,
+    search_service,
+    validation_observer: RecordingValidationObserver,
+):
+    """The seam reports which schema was satisfied, and by which note."""
+    entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Dave",
+            directory="people",
+            note_type="person",
+            entity_metadata={"schema": {"name": "string", "role": "string"}},
+            content=dedent("""\
+                ## Observations
+                - [name] Dave Wilson
+                - [role] Architect
+            """),
+        )
+    )
+    await search_service.index_entity(entity)
+
+    response = await client.post(
+        f"{v2_project_url}/schema/validate",
+        params={"note_type": "person"},
+    )
+    assert response.status_code == 200
+
+    assert len(validation_observer.calls) == 1
+    project_external_id, outcomes = validation_observer.calls[0]
+    assert project_external_id == test_project.external_id
+    assert len(outcomes) == 1
+    outcome = outcomes[0]
+    assert outcome.note_external_id == entity.external_id
+    assert outcome.schema_entity == "person"
+    assert outcome.passed is True
+
+
+@pytest.mark.asyncio
+async def test_validation_observer_reports_a_failing_note_as_failing(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_service,
+    search_service,
+    validation_observer: RecordingValidationObserver,
+):
+    """A note that misses a required field must not look like a pass.
+
+    Awarding on this seam is only safe if `passed` tracks the report.
+    """
+    entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Erin",
+            directory="people",
+            note_type="person",
+            entity_metadata={
+                "schema": {"name": "string", "role": "string"},
+                # Strict, so the missing field is an error rather than a
+                # warning; `passed` only goes false on errors.
+                "settings": {"validation": "strict"},
+            },
+            content=dedent("""\
+                ## Observations
+                - [name] Erin Only
+            """),
+        )
+    )
+    await search_service.index_entity(entity)
+
+    response = await client.post(
+        f"{v2_project_url}/schema/validate",
+        params={"identifier": "Erin"},
+    )
+    assert response.status_code == 200
+
+    assert len(validation_observer.calls) == 1
+    _, outcomes = validation_observer.calls[0]
+    assert [o.passed for o in outcomes] == [response.json()["results"][0]["passed"]]
+    assert outcomes[0].passed is False
+
+
+@pytest.mark.asyncio
+async def test_validation_observer_is_told_once_when_nothing_was_validated(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    validation_observer: RecordingValidationObserver,
+):
+    """An empty validation is still a validation, and reports no outcomes.
+
+    Entities whose frontmatter resolves to no schema are skipped in the report,
+    and they are skipped here too rather than arriving as unvalidated passes.
+    """
+    response = await client.post(
+        f"{v2_project_url}/schema/validate",
+        params={"note_type": "person"},
+    )
+    assert response.status_code == 200
+
+    assert len(validation_observer.calls) == 1
+    _, outcomes = validation_observer.calls[0]
+    assert outcomes == ()
+
+
+@pytest.mark.asyncio
+async def test_validation_observer_sees_every_scope_exactly_once(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_service,
+    search_service,
+    validation_observer: RecordingValidationObserver,
+):
+    """All three exits from the endpoint report, and none reports twice.
+
+    The endpoint returns from three separate branches -- one note, one type,
+    every schema-covered type -- and a seam that only covered some of them
+    would award on one scope and silently miss the others.
+    """
+    entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Dave",
+            directory="people",
+            note_type="person",
+            entity_metadata={"schema": {"name": "string"}},
+            content=dedent("""\
+                ## Observations
+                - [name] Dave Wilson
+            """),
+        )
+    )
+    await search_service.index_entity(entity)
+
+    for params in ({"identifier": "Dave"}, {"note_type": "person"}, {}):
+        response = await client.post(f"{v2_project_url}/schema/validate", params=params)
+        assert response.status_code == 200
+
+    assert len(validation_observer.calls) == 3, "one report per request, whatever its scope"
+    for _, outcomes in validation_observer.calls:
+        assert [o.note_external_id for o in outcomes] == [entity.external_id]
+        assert all(o.passed for o in outcomes)
+
+
+@pytest.mark.asyncio
+async def test_core_ships_a_no_op_observer(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_service,
+    search_service,
+):
+    """Without an override, validation behaves exactly as it did before."""
+    entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Dave",
+            directory="people",
+            note_type="person",
+            entity_metadata={"schema": {"name": "string"}},
+            content="## Observations\n- [name] Dave Wilson\n",
+        )
+    )
+    await search_service.index_entity(entity)
+
+    response = await client.post(
+        f"{v2_project_url}/schema/validate",
+        params={"note_type": "person"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["results"][0]["passed"] is True
+
+
+@pytest.mark.asyncio
+async def test_validation_observer_is_told_when_the_identifier_resolves_to_nothing(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    validation_observer: RecordingValidationObserver,
+):
+    """The fourth exit reports too, or the contract depends on request shape.
+
+    An unresolvable identifier returns the same empty report an empty note type
+    returns. If only one of them notified, "once per request" would quietly mean
+    "once per request, unless you asked by identifier".
+    """
+    response = await client.post(
+        f"{v2_project_url}/schema/validate",
+        params={"identifier": "no-such-note-anywhere"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total_notes"] == 0
+    assert len(validation_observer.calls) == 1
+    _, outcomes = validation_observer.calls[0]
+    assert outcomes == ()
+
+
+@pytest.mark.asyncio
+async def test_validation_outcome_names_the_schema_the_note_pointed_at(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_service,
+    search_service,
+    validation_observer: RecordingValidationObserver,
+):
+    """Two schema notes can cover one entity, so the entity cannot identify one.
+
+    `schema_entity` comes from the schema's own `entity:` frontmatter, so both
+    of these report `person`. Only the reference the note carried says which
+    schema actually produced the result.
+    """
+    schema_note, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="strict-person-v2",
+            directory="schemas",
+            note_type="schema",
+            entity_metadata={
+                "entity": "person",
+                "version": 2,
+                "schema": {"name": "string"},
+            },
+            content="Strict person schema.\n",
+        )
+    )
+    await search_service.index_entity(schema_note)
+
+    entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Fran",
+            directory="people",
+            note_type="person",
+            entity_metadata={"schema": "strict-person-v2"},
+            content=dedent("""\
+                ## Observations
+                - [name] Fran Baker
+            """),
+        )
+    )
+    await search_service.index_entity(entity)
+
+    response = await client.post(
+        f"{v2_project_url}/schema/validate",
+        params={"identifier": "Fran"},
+    )
+    assert response.status_code == 200
+
+    _, outcomes = validation_observer.calls[0]
+    assert len(outcomes) == 1
+    outcome = outcomes[0]
+    assert outcome.schema_entity == "person", "the covered type, shared by every person schema"
+    assert outcome.schema_reference == "strict-person-v2", "the schema this note actually used"
+
+
+@pytest.mark.asyncio
+async def test_an_inline_schema_has_no_reference_to_report(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_service,
+    search_service,
+    validation_observer: RecordingValidationObserver,
+):
+    """Nothing was pointed at, so None is the honest answer rather than a guess."""
+    entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Gus",
+            directory="people",
+            note_type="person",
+            entity_metadata={"schema": {"name": "string"}},
+            content="## Observations\n- [name] Gus Inline\n",
+        )
+    )
+    await search_service.index_entity(entity)
+
+    response = await client.post(
+        f"{v2_project_url}/schema/validate",
+        params={"note_type": "person"},
+    )
+    assert response.status_code == 200
+
+    _, outcomes = validation_observer.calls[0]
+    assert len(outcomes) == 1
+    assert outcomes[0].schema_entity == "person"
+    assert outcomes[0].schema_reference is None

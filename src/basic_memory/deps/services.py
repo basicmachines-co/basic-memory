@@ -37,6 +37,7 @@ from basic_memory.services.directory_deletes import DirectoryDeleteService
 from basic_memory.services.note_content_reads import NoteContentQueryService
 from basic_memory.services.project_readiness import ProjectReadinessService
 from basic_memory.services.note_content_writes import NoteContentMutationService
+from basic_memory.services.schema_validation_hooks import SchemaValidationObserver
 from basic_memory.index.local_dependencies import build_local_markdown_file_indexer
 from basic_memory.index.local_notes import (
     LocalAcceptedNotePreparerFactory,
@@ -366,6 +367,16 @@ async def get_note_content_mutation_service(
 
 NoteContentMutationServiceDep = Annotated[
     NoteContentMutationService, Depends(get_note_content_mutation_service)
+]
+
+
+async def get_schema_validation_observer() -> SchemaValidationObserver:
+    """Provide the no-op validation observer a deployment can override."""
+    return SchemaValidationObserver()
+
+
+SchemaValidationObserverDep = Annotated[
+    SchemaValidationObserver, Depends(get_schema_validation_observer)
 ]
 
 
