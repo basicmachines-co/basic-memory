@@ -7,11 +7,9 @@ on:
       - '.github/workflows/sqlite-lifecycle.yml'
       - 'test-int/test_sqlite_lifecycle_integration.py'
       - 'test-int/test_db_wal_mode.py'
-      - 'src/basic_memory/db.py'
-      - 'src/basic_memory/cli/commands/command_utils.py'
-      - 'src/basic_memory/cli/commands/db.py'
-      - 'src/basic_memory/index/local_schedulers.py'
-      - 'src/basic_memory/index/note_content_materialization.py'
+      - 'src/basic_memory/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
       - 'test-int/mcp/test_chatgpt_tools_integration.py'
       - 'test-int/mcp/test_concurrent_write_integration.py'
 
@@ -24,12 +22,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        os: [windows-latest, ubuntu-latest, macos-latest]
         repetition: [1, 2, 3]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     env:
       UV_PYTHON: '3.12'
+      FASTEMBED_CACHE_PATH: ${{ github.workspace }}/.cache/fastembed
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -37,9 +36,17 @@ jobs:
           python-version: '3.12'
       - run: pip install uv
       - run: uv venv
+        if: runner.os != 'macOS'
+      # setup-python's macOS build lacks SQLite extension loading. Use the
+      # supported uv-managed build so sqlite-vec actually runs, without mocks.
+      - run: uv venv --managed-python
+        if: runner.os == 'macOS'
       - run: uv pip install -e ".[dev,pdf]"
       - name: Verify actual interpreter and SQLite
         run: uv run python -c "import sys, sqlite3; print(sys.version); print(sqlite3.sqlite_version); assert sys.version_info[:2] == (3, 12)"
+      - name: Download real embedding model before the timed shutdown probe
+        timeout-minutes: 3
+        run: uv run python -c "import faulthandler; faulthandler.dump_traceback_later(120); from fastembed import TextEmbedding; TextEmbedding('BAAI/bge-small-en-v1.5')"
       - name: Run real SQLite probes without test selection caching
         shell: bash
         run: uv run pytest test-int/test_sqlite_lifecycle_integration.py test-int/test_db_wal_mode.py -v -s --no-cov --timeout=240 --junitxml=sqlite-lifecycle.xml 2>&1 | tee sqlite-lifecycle.log
