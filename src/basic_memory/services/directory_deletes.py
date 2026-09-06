@@ -83,6 +83,7 @@ class DirectoryDeleteService:
                     session,
                     request=request,
                     store=self.runtime.store,
+                    check_file_locks=self.runtime.check_file_locks,
                 )
                 delete_may_have_committed = bool(accepted.files)
         except DirectoryDeleteRejected as error:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal, NotRequired, Protocol, TypedDict
@@ -11,6 +11,7 @@ from sqlalchemy import bindparam, delete, exists, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory.models import Entity, NoteContent, Project, Relation
+from basic_memory.markdown.note_lock import LOCKED_NOTE_MESSAGE, note_is_locked
 from basic_memory.repository.accepted_note_vector_cleanup import (
     ProjectIndexExternalVectorCleaner,
     delete_project_index_vector_rows,
@@ -30,6 +31,7 @@ from basic_memory.runtime.storage import ProjectExternalId, ProjectId, RuntimeFi
 from basic_memory.utils import valid_project_path_value
 
 type DirectoryDeleteFileStatus = Literal["complete", "pending", "failed"]
+type DirectoryFileLockCheck = Callable[[Sequence[RuntimeDirectoryFileSnapshot]], Awaitable[None]]
 
 
 class DirectoryDeleteRejectKind(StrEnum):
@@ -37,6 +39,7 @@ class DirectoryDeleteRejectKind(StrEnum):
 
     bad_request = "bad_request"
     not_found = "not_found"
+    locked = "locked"
 
     @property
     def http_status_code(self) -> int:
@@ -46,6 +49,8 @@ class DirectoryDeleteRejectKind(StrEnum):
                 return 400
             case DirectoryDeleteRejectKind.not_found:
                 return 404
+            case DirectoryDeleteRejectKind.locked:
+                return 423
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,6 +158,7 @@ class DirectoryDeleteRuntime:
     # None means this runtime has no inline reindex path; the surviving source ids
     # are still surfaced on the accepted result for deferred (queued) consumers.
     relation_cleanup_refresher: DirectoryDeleteRelationCleanupRefresher | None = None
+    check_file_locks: DirectoryFileLockCheck | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,6 +263,21 @@ class RepositoryDirectoryDeleteAcceptanceStore:
         )
         if not current_directory_entity_ids:
             return DirectoryEntityDeleteResult()
+
+        # A bulk delete must not bypass a note's lock or partially delete its siblings.
+        # Read accepted Markdown under the existing mutation fence, before any deletes.
+        note_contents = await session.execute(
+            select(NoteContent.markdown_content).where(
+                NoteContent.entity_id.in_(current_directory_entity_ids)
+            )
+        )
+        if any(note_is_locked(content) for content in note_contents.scalars()):
+            raise DirectoryDeleteRejected(
+                DirectoryDeleteRejection(
+                    kind=DirectoryDeleteRejectKind.locked,
+                    detail=LOCKED_NOTE_MESSAGE,
+                )
+            )
 
         # Capture surviving sources before the delete: Relation.to_id CASCADE will drop
         # the relation table rows for incoming links from entities outside the directory,
@@ -545,6 +566,7 @@ async def accept_directory_delete(
     *,
     request: DirectoryDeleteAcceptanceRequest,
     store: DirectoryDeleteAcceptanceStore,
+    check_file_locks: DirectoryFileLockCheck | None = None,
 ) -> DirectoryDeleteAcceptance:
     """Accept a directory delete into DB state before post-commit cleanup jobs."""
     try:
@@ -575,6 +597,11 @@ async def accept_directory_delete(
     )
     if not file_snapshots:
         return DirectoryDeleteAcceptance(project_id=project_id, files=())
+
+    # Local files may have acquired a lock since the last index pass. Check them
+    # before accepting any deletion; hosted runtimes use accepted Markdown below.
+    if check_file_locks is not None:
+        await check_file_locks(file_snapshots)
 
     delete_result = await store.delete_directory_entities(
         session,
@@ -639,6 +666,7 @@ async def run_directory_delete(
         session,
         request=request,
         store=runtime.store,
+        check_file_locks=runtime.check_file_locks,
     )
     return await finish_directory_delete_acceptance(
         request=request,

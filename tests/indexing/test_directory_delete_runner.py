@@ -474,6 +474,7 @@ async def test_repository_directory_delete_store_captures_relation_sources() -> 
             [
                 FakeExecuteResult(),  # sorted note_content lock fence
                 FakeExecuteResult(scalar_values=[7, 8]),  # current directory members
+                FakeExecuteResult(scalar_values=[]),  # canonical lock check
                 FakeExecuteResult(rows=[(101, 7, 42), (102, 8, 99)]),
                 FakeExecuteResult(scalar_values=[7, 8]),  # guarded entity delete
                 FakeExecuteResult(),  # search_index delete
@@ -541,6 +542,7 @@ async def test_repository_directory_delete_store_maps_note_content_snapshots() -
                 ),
                 FakeExecuteResult(),  # sorted note_content lock fence
                 FakeExecuteResult(scalar_values=[7]),  # current directory members
+                FakeExecuteResult(scalar_values=[]),  # canonical lock check
                 FakeExecuteResult(rows=[]),  # incoming relation snapshot
                 FakeExecuteResult(scalar_values=[7]),  # guarded entity delete
                 FakeExecuteResult(),  # search_index delete
@@ -580,11 +582,11 @@ async def test_repository_directory_delete_store_maps_note_content_snapshots() -
     assert delete_result == DirectoryEntityDeleteResult(
         deleted_entity_ids=frozenset({7}),
     )
-    assert len(fake_session.queries) == 8
+    assert len(fake_session.queries) == 9
     assert "FOR UPDATE" not in str(fake_session.queries[1][0])
     assert "ORDER BY note_content.entity_id" in str(fake_session.queries[2][0])
     assert "entity.file_path LIKE" in str(fake_session.queries[3][0])
-    guarded_entity_delete = str(fake_session.queries[5][0])
+    guarded_entity_delete = str(fake_session.queries[6][0])
     assert "entity.id IN" in guarded_entity_delete
     assert "entity.project_id" in guarded_entity_delete
     assert "entity.file_path LIKE" in guarded_entity_delete
@@ -601,6 +603,7 @@ async def test_repository_directory_delete_store_clears_vectors_for_deleted_enti
             [
                 FakeExecuteResult(),  # sorted note_content lock fence
                 FakeExecuteResult(scalar_values=[7, 8]),  # current directory members
+                FakeExecuteResult(scalar_values=[]),  # canonical lock check
                 FakeExecuteResult(rows=[]),  # incoming relation snapshot
                 FakeExecuteResult(scalar_values=[7, 8]),  # guarded entity delete
                 FakeExecuteResult(),  # search_index delete
@@ -642,11 +645,11 @@ async def test_repository_directory_delete_store_clears_vectors_for_deleted_enti
     )
 
     # Projection cleanup uses only ids returned by the guarded Entity mutation.
-    assert vector_calls == [(session, 3, (7, 8), 5)]
+    assert vector_calls == [(session, 3, (7, 8), 6)]
     statements = [str(query) for query, _ in fake_session.queries]
     assert "ORDER BY note_content.entity_id" in statements[0]
-    assert "DELETE FROM entity" in statements[3]
-    assert "DELETE FROM search_index" in statements[4]
+    assert "DELETE FROM entity" in statements[4]
+    assert "DELETE FROM search_index" in statements[5]
 
 
 @pytest.mark.asyncio
