@@ -49,18 +49,18 @@ implementations. Switching transport must not require migrating notes.
 
 ## Phase 3 — lifecycle continuity
 
-- [ ] Bounded recall at session entry / first relevant prompt, including note identifiers
+- [x] Bounded recall at session entry / first relevant prompt, including note identifiers
       and source provenance; avoid repeatedly injecting the same context.
-- [ ] Capture important decisions during work; support explicit remember/recall commands.
+- [x] Capture important decisions during work; support explicit remember/recall commands.
 - [ ] Add compaction-aware durable checkpoints without replacing native compaction.
       Settle checkpoint timing using Pi lifecycle tests, not assumptions about reentrant turns.
-- [ ] Restore state on reload/resume and track forks/tree navigation without merging
+- [x] Restore state on reload/resume and track forks/tree navigation without merging
       contradictory branches or duplicating captures.
-- [ ] Choose and document automatic capture defaults and destinations. Raw transcript
+- [x] Choose and document automatic capture defaults and destinations. Raw transcript
       capture is a separate opt-in decision, not an implied prerequisite for continuity.
-- [ ] Treat recalled notes as source material, not privileged instructions. Respect project
+- [x] Treat recalled notes as source material, not privileged instructions. Respect project
       trust and never route private session traces into shared projects implicitly.
-- [ ] Bound subprocess/request duration, propagate cancellation, and clean up owned resources.
+- [x] Bound subprocess/request duration, propagate cancellation, and clean up owned resources.
       Never blindly retry non-idempotent writes after an ambiguous transport failure.
 
 ## Phase 4 — compare CLI and MCP
@@ -103,9 +103,10 @@ observed results while keeping both modes supported.
 - [x] README with CLI and MCP installation, explicit mode switching, project routing,
       privacy defaults, failure recovery, and supported version matrix.
 - [ ] Add the Pi integration page to `docs.basicmemory.com` in a separate docs change.
-- [ ] Wire release metadata/publishing consistently with existing integration packages.
-      Version bump wiring is in place; npm publishing workflow is still open.
-      See `docs/PI_MEMORY_SHIPPING.md`.
+- [x] Wire release metadata consistently with existing integration packages.
+      Version bump wiring is in place; see `docs/PI_MEMORY_SHIPPING.md`.
+- [ ] Add npm publishing workflow wiring for the Pi package.
+      Publishing remains open until the release workflow includes `integrations/pi`.
 
 ## Development workflow
 
