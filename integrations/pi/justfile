@@ -1,0 +1,21 @@
+# Basic Memory Pi package
+
+install:
+    npm ci --ignore-scripts
+
+fetch-skills:
+    npm run fetch-skills
+
+verify-skills-clean:
+    test -z "$(git status --porcelain -- skill-references)"
+
+check-types:
+    npm run check-types
+
+test:
+    npm test
+
+pack:
+    npm pack --dry-run
+
+check: install fetch-skills verify-skills-clean check-types test pack

@@ -609,14 +609,14 @@ check: lint format typecheck
 # Run all code quality checks and all test suites, including semantic benchmarks
 check-all: lint format typecheck test test-semantic
 
-# Validate every consolidated agent package (Claude Code, Codex, skills, Hermes, OpenClaw, Tau)
-package-check: package-check-claude-code package-check-codex package-check-skills package-check-hermes package-check-openclaw package-check-tau
+# Validate every consolidated agent package (Claude Code, Codex, skills, Hermes, OpenClaw, Tau, Pi)
+package-check: package-check-claude-code package-check-codex package-check-skills package-check-hermes package-check-openclaw package-check-tau package-check-pi
 
 # Alias for plugin/package validation during consolidation work
 plugins-check: package-check
 
 # Validate the host-native agent harnesses
-agent-harness-check: package-check-claude-code package-check-hermes package-check-openclaw package-check-tau
+agent-harness-check: package-check-claude-code package-check-hermes package-check-openclaw package-check-tau package-check-pi
 
 # Claude Code plugin: manifests, bundled skills, bundled agent, and strict plugin validation
 package-check-claude-code:
@@ -642,6 +642,10 @@ package-check-openclaw:
 # Tau extension: real MCP transport, runtime loading, and lifecycle checks
 package-check-tau:
     just --justfile integrations/tau/justfile --working-directory integrations/tau check
+
+# Pi package: install deps, copy skills, typecheck, test, and npm pack dry-run
+package-check-pi:
+    just --justfile integrations/pi/justfile --working-directory integrations/pi check
 
 # Generate Alembic migration with descriptive message
 migration message:
@@ -744,7 +748,9 @@ release version:
         plugins/codex/hooks/pre_compact.py \
         integrations/hermes/plugin.yaml \
         integrations/hermes/__init__.py \
-        integrations/openclaw/package.json
+        integrations/openclaw/package.json \
+        integrations/pi/package.json \
+        integrations/pi/package-lock.json
     git commit -s -m "$COMMIT_SUBJECT"
 
     echo "📤 Opening release PR..."
@@ -879,7 +885,9 @@ beta version:
         plugins/codex/hooks/pre_compact.py \
         integrations/hermes/plugin.yaml \
         integrations/hermes/__init__.py \
-        integrations/openclaw/package.json
+        integrations/openclaw/package.json \
+        integrations/pi/package.json \
+        integrations/pi/package-lock.json
     git commit -s -m "$COMMIT_SUBJECT"
 
     echo "📤 Opening release PR..."

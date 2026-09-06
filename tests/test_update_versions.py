@@ -50,6 +50,14 @@ def _bumped_script(version: str) -> str:
     return _SCRIPT_SEED.replace("basic-memory>=0.0.0", f"basic-memory>={version}")
 
 
+def _pi_lock_manifest(version: str) -> dict[str, object]:
+    return {
+        "name": "@basicmemory/pi-basic-memory",
+        "version": version,
+        "packages": {"": {"version": version}},
+    }
+
+
 def test_update_versions_writes_npm_semver_prerelease(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -86,6 +94,8 @@ def test_update_versions_writes_npm_semver_prerelease(
     write("integrations/hermes/plugin.yaml", "version: 0.0.0\n")
     write("integrations/hermes/__init__.py", '__version__ = "0.0.0"\n')
     write("integrations/openclaw/package.json", json.dumps(package_manifest) + "\n")
+    write("integrations/pi/package.json", json.dumps(package_manifest) + "\n")
+    write("integrations/pi/package-lock.json", json.dumps(_pi_lock_manifest("0.0.0")) + "\n")
     write("plugins/codex/.codex-plugin/plugin.json", json.dumps(package_manifest) + "\n")
     for script in update_versions.HOOK_SCRIPTS:
         write(script, _SCRIPT_SEED)
@@ -100,6 +110,11 @@ def test_update_versions_writes_npm_semver_prerelease(
     assert openclaw_package["version"] == "0.21.3-beta.1"
     codex_plugin = json.loads((tmp_path / "plugins/codex/.codex-plugin/plugin.json").read_text())
     assert codex_plugin["version"] == "0.21.3-beta.1"
+    pi_package = json.loads((tmp_path / "integrations/pi/package.json").read_text())
+    assert pi_package["version"] == "0.21.3-beta.1"
+    pi_lock = json.loads((tmp_path / "integrations/pi/package-lock.json").read_text())
+    assert pi_lock["version"] == "0.21.3-beta.1"
+    assert pi_lock["packages"][""]["version"] == "0.21.3-beta.1"
     # The script floor is a pip requirement spec: Python prerelease form, not npm.
     for script in update_versions.HOOK_SCRIPTS:
         assert (tmp_path / script).read_text() == _bumped_script("0.21.3b1")
@@ -135,6 +150,8 @@ def _seed_repo(tmp_path: Path) -> None:
     write("integrations/hermes/plugin.yaml", "version: 0.0.0\n")
     write("integrations/hermes/__init__.py", '__version__ = "0.0.0"\n')
     write("integrations/openclaw/package.json", json.dumps(package_manifest) + "\n")
+    write("integrations/pi/package.json", json.dumps(package_manifest) + "\n")
+    write("integrations/pi/package-lock.json", json.dumps(_pi_lock_manifest("0.0.0")) + "\n")
     write("plugins/codex/.codex-plugin/plugin.json", json.dumps(package_manifest) + "\n")
     for script in update_versions.HOOK_SCRIPTS:
         write(script, _SCRIPT_SEED)
