@@ -32,6 +32,7 @@ from basic_memory.indexing.accepted_note_write_runner import (
 )
 from basic_memory.indexing.relation_persistence import RelationGenerationPublication
 from basic_memory.models import Entity, NoteContent, Project
+from basic_memory.markdown.note_lock import LOCKED_NOTE_MESSAGE, note_is_locked
 from basic_memory.repository import NoteContentVersionConflict
 from basic_memory.repository.note_file_vacate_repository import NoteFileVacateRepository
 from basic_memory.services.exceptions import EntityAlreadyExistsError
@@ -78,6 +79,7 @@ class AcceptedNoteMutationRejectKind(StrEnum):
     conflict = "conflict"
     not_found = "not_found"
     unsupported_media_type = "unsupported_media_type"
+    locked = "locked"
 
     @property
     def http_status_code(self) -> int:
@@ -91,6 +93,8 @@ class AcceptedNoteMutationRejectKind(StrEnum):
                 return 404
             case AcceptedNoteMutationRejectKind.unsupported_media_type:
                 return 415
+            case AcceptedNoteMutationRejectKind.locked:
+                return 423
 
 
 @dataclass(frozen=True, slots=True)
@@ -657,6 +661,7 @@ async def run_accepted_note_delete(
     )
     if note_content is not None:
         await session.refresh(note_content)
+        reject_locked_note(note_content)
     change = await delete_accepted_note(
         session,
         project_id=project.id,
@@ -822,6 +827,7 @@ async def _run_accepted_note_update(
             dependencies=dependencies,
             missing_kind=AcceptedNoteMutationRejectKind.conflict,
         )
+        reject_locked_note(current_note_content)
         await session.refresh(entity)
         if not runtime_content_type_is_markdown(entity):
             reject_accepted_note_mutation(
@@ -1043,6 +1049,7 @@ async def _run_accepted_note_edit(
         entity_external_id=request.entity_external_id,
         dependencies=dependencies,
     )
+    reject_locked_note(current_note_content)
     preparer = dependencies.preparer_factory.create_note_preparer(project)
     try:
         prepared_write = await prepare_accepted_note_edit(
@@ -1445,6 +1452,12 @@ def reject_accepted_note_file_path_conflict(
             AcceptedNoteMutationRejectKind.conflict,
             "Note already exists. Use edit_note to modify it, or delete it first.",
         )
+
+
+def reject_locked_note(note_content: NoteContent) -> None:
+    """Check the accepted predecessor before the proposed content can change policy."""
+    if note_is_locked(note_content.markdown_content):
+        reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.locked, LOCKED_NOTE_MESSAGE)
 
 
 def reject_accepted_note_mutation(

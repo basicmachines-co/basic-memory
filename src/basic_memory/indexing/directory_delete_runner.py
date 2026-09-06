@@ -11,6 +11,7 @@ from sqlalchemy import bindparam, delete, exists, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory.models import Entity, NoteContent, Project, Relation
+from basic_memory.markdown.note_lock import LOCKED_NOTE_MESSAGE, note_is_locked
 from basic_memory.repository.accepted_note_vector_cleanup import (
     ProjectIndexExternalVectorCleaner,
     delete_project_index_vector_rows,
@@ -37,6 +38,7 @@ class DirectoryDeleteRejectKind(StrEnum):
 
     bad_request = "bad_request"
     not_found = "not_found"
+    locked = "locked"
 
     @property
     def http_status_code(self) -> int:
@@ -46,6 +48,8 @@ class DirectoryDeleteRejectKind(StrEnum):
                 return 400
             case DirectoryDeleteRejectKind.not_found:
                 return 404
+            case DirectoryDeleteRejectKind.locked:
+                return 423
 
 
 @dataclass(frozen=True, slots=True)
@@ -257,6 +261,21 @@ class RepositoryDirectoryDeleteAcceptanceStore:
         )
         if not current_directory_entity_ids:
             return DirectoryEntityDeleteResult()
+
+        # A bulk delete must not bypass a note's lock or partially delete its siblings.
+        # Read accepted Markdown under the existing mutation fence, before any deletes.
+        note_contents = await session.execute(
+            select(NoteContent.markdown_content).where(
+                NoteContent.entity_id.in_(current_directory_entity_ids)
+            )
+        )
+        if any(note_is_locked(content) for content in note_contents.scalars()):
+            raise DirectoryDeleteRejected(
+                DirectoryDeleteRejection(
+                    kind=DirectoryDeleteRejectKind.locked,
+                    detail=LOCKED_NOTE_MESSAGE,
+                )
+            )
 
         # Capture surviving sources before the delete: Relation.to_id CASCADE will drop
         # the relation table rows for incoming links from entities outside the directory,
