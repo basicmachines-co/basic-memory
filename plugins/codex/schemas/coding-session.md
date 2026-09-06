@@ -31,6 +31,7 @@ settings:
     pull_request_head?: string, pull request head branch
     username?: string, operating-system user that created the checkpoint
     hostname?: string, host that created the checkpoint
+    tau_session_id?: string, Tau session identifier
     claude_session_id?: string, Claude Code session identifier
     codex_session_id?: string, Codex session identifier
     codex_turn_id?: string, Codex turn identifier
@@ -56,5 +57,5 @@ Examples:
 Pull-request fields are optional because valid coding work can precede a pull
 request. When a pull request exists, checkpoint writers populate the complete
 pull-request field set. Multiple checkpoints from one agent chat share the
-relevant `claude_session_id` or `codex_session_id`; each new checkpoint can link
+relevant `claude_session_id`, `codex_session_id`, or `tau_session_id`; each new checkpoint can link
 to its verified predecessor with `continues [[Previous checkpoint title]]`.
