@@ -26,6 +26,7 @@ from basic_memory.models import Observation, Project
 from basic_memory.schemas.document import (
     DocumentAgentObservationV1,
     DocumentAgentOutputV1,
+    DocumentAgentRelationV1,
     DocumentIngestionStage,
     DocumentIngestionV1,
     DocumentMarkdownV1,
@@ -309,3 +310,145 @@ def test_pdf_citation_rejects_source_entry_that_disagrees_with_provenance(
     assert redirected != markdown
     with pytest.raises(ValidationError, match="trusted source PDF page"):
         parse_document_markdown(redirected)
+
+
+def test_relation_context_cannot_borrow_declared_page_citation() -> None:
+    with pytest.raises(ValidationError, match="cannot define generated"):
+        DocumentAgentOutputV1(
+            title="Citations",
+            body="",
+            observations=(
+                DocumentAgentObservationV1(
+                    category="fact", content="Claim.", locator=DocumentPageLocatorV1(page=2)
+                ),
+            ),
+            relations=(
+                DocumentAgentRelationV1(
+                    relation_type="supports",
+                    target="Evidence",
+                    context="Borrowed [^document-page-2]",
+                ),
+            ),
+        )
+
+
+def test_pdf_citation_rejects_duplicate_source_ids(raw_pdf: DocumentMarkdownV1) -> None:
+    enriched = enrich(
+        raw_pdf,
+        (
+            DocumentAgentObservationV1(
+                category="fact", content="Claim.", locator=DocumentPageLocatorV1(page=2)
+            ),
+        ),
+    )
+    assert enriched.frontmatter.sources is not None
+    duplicate = enriched.model_copy(
+        update={
+            "frontmatter": enriched.frontmatter.model_copy(
+                update={"sources": enriched.frontmatter.sources * 2}
+            )
+        }
+    )
+    with pytest.raises(ValidationError, match="citation source IDs must be unique"):
+        parse_document_markdown(assemble_document_markdown(duplicate))
+
+
+def test_page_citation_rejects_non_pdf_source(raw_pdf: DocumentMarkdownV1) -> None:
+    markdown = assemble_document_markdown(raw_pdf).replace(
+        "media_type: application/pdf", "media_type: text/plain"
+    )
+    non_pdf = parse_document_markdown(markdown)
+    with pytest.raises(ValueError, match="page citations require a PDF source"):
+        enrich(
+            non_pdf,
+            (
+                DocumentAgentObservationV1(
+                    category="fact", content="Claim.", locator=DocumentPageLocatorV1(page=2)
+                ),
+            ),
+        )
+
+
+def test_page_label_is_retained_when_later_observation_omits_it(
+    raw_pdf: DocumentMarkdownV1,
+) -> None:
+    enriched = enrich(
+        raw_pdf,
+        (
+            DocumentAgentObservationV1(
+                category="fact",
+                content="First.",
+                locator=DocumentPageLocatorV1(page=2, page_label="iv"),
+            ),
+            DocumentAgentObservationV1(
+                category="fact", content="Second.", locator=DocumentPageLocatorV1(page=2)
+            ),
+        ),
+    )
+    parsed = parse_document_markdown(assemble_document_markdown(enriched))
+    assert parsed.frontmatter.sources is not None
+    assert len(parsed.frontmatter.sources) == 1
+    assert parsed.frontmatter.sources[0].locator.page_label == "iv"
+
+
+def test_page_label_is_added_when_earlier_observation_omits_it(raw_pdf: DocumentMarkdownV1) -> None:
+    enriched = enrich(
+        raw_pdf,
+        (
+            DocumentAgentObservationV1(
+                category="fact", content="First.", locator=DocumentPageLocatorV1(page=2)
+            ),
+            DocumentAgentObservationV1(
+                category="fact",
+                content="Second.",
+                locator=DocumentPageLocatorV1(page=2, page_label="iv"),
+            ),
+        ),
+    )
+    parsed = parse_document_markdown(assemble_document_markdown(enriched))
+    assert parsed.frontmatter.sources is not None
+    assert len(parsed.frontmatter.sources) == 1
+    assert parsed.frontmatter.sources[0].locator.page_label == "iv"
+
+
+def test_agent_body_cannot_borrow_declared_page_citation() -> None:
+    with pytest.raises(ValidationError, match="cannot define generated"):
+        DocumentAgentOutputV1(
+            title="Citations",
+            body="Unsupported claim [^document-page-2]",
+            observations=(
+                DocumentAgentObservationV1(
+                    category="fact", content="Claim.", locator=DocumentPageLocatorV1(page=2)
+                ),
+            ),
+        )
+
+
+def test_unlocated_observation_cannot_borrow_declared_page_citation() -> None:
+    with pytest.raises(ValidationError, match="cannot define generated"):
+        DocumentAgentOutputV1(
+            title="Citations",
+            body="",
+            observations=(
+                DocumentAgentObservationV1(
+                    category="fact", content="Claim.", locator=DocumentPageLocatorV1(page=2)
+                ),
+                DocumentAgentObservationV1(category="fact", content="Unlocated [^document-page-2]"),
+            ),
+        )
+
+
+def test_observation_context_cannot_borrow_declared_page_citation() -> None:
+    with pytest.raises(ValidationError, match="cannot define generated"):
+        DocumentAgentOutputV1(
+            title="Citations",
+            body="",
+            observations=(
+                DocumentAgentObservationV1(
+                    category="fact",
+                    content="Claim.",
+                    locator=DocumentPageLocatorV1(page=2),
+                    context="Borrowed [^document-page-2]",
+                ),
+            ),
+        )

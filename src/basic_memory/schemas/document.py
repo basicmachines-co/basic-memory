@@ -582,10 +582,19 @@ class DocumentAgentOutputV1(_DocumentContractModel):
     @model_validator(mode="after")
     def require_exact_assembled_semantics(self) -> "DocumentAgentOutputV1":
         if any(observation.locator is not None for observation in self.observations):
-            # Trusted code owns these definitions. An agent-supplied definition
-            # must not redirect a generated citation to another resource.
-            if re.search(r"(?m)^[ \t]*\[\^document-page-[0-9]+\]:", self.body):
-                raise ValueError("agent body cannot define generated document-page citations")
+            # Reserve both references and definitions: otherwise undeclared text
+            # can borrow a generated citation without supplying a locator.
+            agent_text = [self.title, self.body]
+            for observation in self.observations:
+                agent_text.extend((observation.content, observation.context or ""))
+            for relation in self.relations:
+                agent_text.extend((relation.target, relation.context or ""))
+            if any(
+                re.search(r"\[\^document-page-[0-9]+\]", text, re.IGNORECASE) for text in agent_text
+            ):
+                raise ValueError(
+                    "agent text cannot define generated document-page citations or references"
+                )
         parsed = _parse_agent_semantics(_assemble_agent_body(self))
         expected_observations = [
             _parse_agent_semantics(_format_agent_observation(observation)).observations[0]
@@ -768,8 +777,12 @@ def enrich_document_markdown(
             raw_frontmatter.source, raw_frontmatter.extraction, observation.locator
         )
         existing = citations.get(citation.id)
-        if existing is not None and existing != citation:
-            raise ValueError("observations citing the same page must agree on its page label")
+        if existing is not None and existing.locator.page_label is not None:
+            if citation.locator.page_label not in {None, existing.locator.page_label}:
+                raise ValueError("observations citing the same page must agree on its page label")
+            # An omitted label contributes no conflicting information. Keep the
+            # explicit label regardless of observation order.
+            continue
         citations[citation.id] = citation
     citation_sources = tuple(citations.values())
     return DocumentMarkdownV1(
