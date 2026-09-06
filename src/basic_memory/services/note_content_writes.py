@@ -17,11 +17,14 @@ from basic_memory.indexing.accepted_note_mutation_runner import (
     AcceptedNoteEditMutation,
     AcceptedNoteMoveMutation,
     AcceptedNoteMutationActor,
+    AcceptedNoteMutationChange,
     AcceptedNoteMutationDependencies,
     AcceptedNoteMutationRejected,
     AcceptedNoteMutationRejection,
     AcceptedNoteMutationResult,
     AcceptedNoteUpdateMutation,
+    load_existing_markdown_note_content,
+    reject_stale_base_checksum,
     run_accepted_note_create,
     run_accepted_note_delete,
     run_accepted_note_edit,
@@ -155,6 +158,35 @@ class NoteContentMutationService:
         self.content_freshener = content_freshener
         self.actor_resolver = actor_resolver
         self.read_cache = read_cache
+
+    async def on_accepted_mutation(
+        self,
+        session: AsyncSession,
+        *,
+        project_external_id: str,
+        change: AcceptedNoteMutationChange,
+        mutation_kind: NoteContentMutationKind,
+        source: str,
+    ) -> None:
+        """Contribute to the accept transaction, before it commits.
+
+        A no-op here, and the only supported way to write a row atomically with
+        an accepted note. `accepted_note_transaction` opens and closes inside the
+        mutation methods, so a caller that needs its own row to land with the
+        note -- a hosted deployment recording a durable marker, say -- otherwise
+        has to re-implement the whole method body to reach inside the
+        transaction, and then silently owns a copy of it.
+
+        The mutation's own identifying context is passed in rather than left for
+        the subclass to re-derive: the project is addressed by external id here,
+        while the accepted change carries only the tenant-internal integer, and
+        the source has already been through the actor resolver.
+
+        Raising rolls the accepted mutation back with it, which is the intended
+        behaviour: a marker that cannot be written must not leave a note
+        accepted as though it had been.
+        """
+        return None
 
     async def _publish_relation_generation(
         self,
@@ -335,6 +367,13 @@ class NoteContentMutationService:
                         ),
                         dependencies=self.mutation_dependencies,
                     )
+                    await self.on_accepted_mutation(
+                        session,
+                        project_external_id=project_external_id,
+                        change=result.change,
+                        mutation_kind="create",
+                        source=actor_context.source,
+                    )
                 accepted = await self._finish_mutation(result)
             return accepted
         except AcceptedNoteMutationRejected as error:
@@ -395,6 +434,13 @@ class NoteContentMutationService:
                         ),
                         dependencies=self.mutation_dependencies,
                     )
+                    await self.on_accepted_mutation(
+                        session,
+                        project_external_id=project_external_id,
+                        change=result.change,
+                        mutation_kind="update",
+                        source=actor_context.source,
+                    )
                 accepted = await self._finish_mutation(result)
         except AcceptedNoteMutationRejected as error:
             raise note_content_mutation_error_from_rejection(error.rejection) from error
@@ -408,10 +454,23 @@ class NoteContentMutationService:
         data: EditEntityRequest,
         user_profile_id: UUID | None,
         source: str,
+        base_checksum: str | None = None,
         actor_kind: str | None = None,
         actor_name: str | None = None,
     ) -> AcceptedNoteChange:
-        """PATCH a markdown note using the latest accepted DB content as the base."""
+        """PATCH a markdown note using the latest accepted DB content as the base.
+
+        ``base_checksum`` is the same optional optimistic-concurrency
+        precondition ``update_note`` takes: the db_checksum the caller last
+        read. When supplied, an accepted revision that has moved since is
+        rejected with a structured 409 so the caller rebases rather than
+        patching a note it never saw. It stays optional because the ordinary
+        PATCH caller -- an assistant appending to a note through MCP -- has no
+        synced revision to condition on.
+
+        The read shares this transaction with the edit, so the runner plans
+        against the same db_version the precondition just checked.
+        """
         actor_context = self._resolve_actor(
             "edit",
             user_profile_id=user_profile_id,
@@ -430,6 +489,17 @@ class NoteContentMutationService:
                 invalidate_on_rejection=freshening_may_have_published,
             ):
                 async with accepted_note_transaction(self.session_maker) as session:
+                    if base_checksum is not None:
+                        _, _, current_note_content = await load_existing_markdown_note_content(
+                            session,
+                            project_external_id=project_external_id,
+                            entity_external_id=entity_external_id,
+                            dependencies=self.mutation_dependencies,
+                        )
+                        if current_note_content.db_checksum != base_checksum:
+                            reject_stale_base_checksum(
+                                current_db_checksum=current_note_content.db_checksum
+                            )
                     result = await run_accepted_note_edit(
                         session,
                         request=AcceptedNoteEditMutation(
@@ -444,6 +514,13 @@ class NoteContentMutationService:
                             source=actor_context.source,
                         ),
                         dependencies=self.mutation_dependencies,
+                    )
+                    await self.on_accepted_mutation(
+                        session,
+                        project_external_id=project_external_id,
+                        change=result.change,
+                        mutation_kind="edit",
+                        source=actor_context.source,
                     )
                 accepted = await self._finish_mutation(result)
         except AcceptedNoteMutationRejected as error:

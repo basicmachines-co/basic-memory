@@ -13,6 +13,7 @@ from basic_memory.indexing.accepted_note_mutation_runner import (
     AcceptedNoteDeleteMutation,
     AcceptedNoteEditMutation,
     AcceptedNoteMoveMutation,
+    AcceptedNoteMutationChange,
     AcceptedNoteMutationDependencies,
     AcceptedNoteMutationRejectKind,
     AcceptedNoteMutationRejected,
@@ -47,6 +48,7 @@ from basic_memory.services.directory_deletes import (
 from basic_memory.services.note_content_reads import NoteContentQueryService
 from basic_memory.services.note_content_writes import (
     NoteContentMutationActorContext,
+    NoteContentMutationKind,
     NoteContentMutationService,
     NoteContentMutationServiceError,
 )
@@ -1073,3 +1075,163 @@ def test_directory_delete_service_rejects_project_traversal() -> None:
         assert error.detail == "Invalid directory path"
     else:  # pragma: no cover
         raise AssertionError("expected DirectoryDeleteServiceError")
+
+
+@pytest.mark.asyncio
+async def test_on_accepted_mutation_runs_inside_the_accept_transaction(monkeypatch) -> None:
+    """The hook exists so a subclass can write its own row atomically with the note.
+
+    If it ran after the transaction closed it would be worth nothing: the row it
+    writes could be lost while the note stayed accepted, which is exactly the
+    split a hosted deployment cannot tolerate. Assert the ordering, not just
+    that it was called.
+    """
+    order: list[str] = []
+
+    class RecordingSession(FakeSession):
+        @override
+        async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
+            order.append("transaction_closed")
+            return None
+
+    class RecordingSessionMaker:
+        def __call__(self) -> RecordingSession:
+            return RecordingSession()
+
+    tenant_session_maker = cast(async_sessionmaker[AsyncSession], RecordingSessionMaker())
+    returned = SimpleNamespace(status_code=201, payload={"ok": True})
+    mutation_result = AcceptedNoteMutationResult(change=cast(Any, returned))
+
+    async def fake_runner(_session, *, request, dependencies):
+        order.append("runner")
+        return mutation_result
+
+    monkeypatch.setattr(note_content_writes, "run_accepted_note_create", fake_runner)
+
+    seen: list[tuple[str, object, str, str]] = []
+
+    class HookedService(NoteContentMutationService):
+        @override
+        async def on_accepted_mutation(
+            self,
+            session: AsyncSession,
+            *,
+            project_external_id: str,
+            change: AcceptedNoteMutationChange,
+            mutation_kind: NoteContentMutationKind,
+            source: str,
+        ) -> None:
+            order.append("hook")
+            seen.append((project_external_id, change, mutation_kind, source))
+
+    service = HookedService(
+        session_maker=tenant_session_maker,
+        mutation_dependencies=cast(AcceptedNoteMutationDependencies, object()),
+    )
+
+    await service.create_note(
+        project_external_id="project-123",
+        data=EntitySchema(title="Created", directory="notes", content="# Created"),
+        user_profile_id=uuid4(),
+        source="api",
+    )
+
+    assert order.index("runner") < order.index("hook"), "the hook sees the accepted change"
+    assert order.index("hook") < order.index("transaction_closed"), (
+        "the hook must write inside the transaction that accepted the note"
+    )
+    assert seen == [("project-123", returned, "create", "api")]
+
+
+@pytest.mark.asyncio
+async def test_the_default_on_accepted_mutation_changes_nothing(monkeypatch) -> None:
+    """Local runtimes must be unaffected: the base hook is a no-op."""
+    returned = SimpleNamespace(status_code=201, payload={"ok": True})
+
+    async def fake_runner(_session, *, request, dependencies):
+        return AcceptedNoteMutationResult(change=cast(Any, returned))
+
+    monkeypatch.setattr(note_content_writes, "run_accepted_note_create", fake_runner)
+
+    service = NoteContentMutationService(
+        session_maker=cast(async_sessionmaker[AsyncSession], FakeSessionMaker()),
+        mutation_dependencies=cast(AcceptedNoteMutationDependencies, object()),
+    )
+
+    accepted = await service.create_note(
+        project_external_id="project-123",
+        data=EntitySchema(title="Created", directory="notes", content="# Created"),
+        user_profile_id=uuid4(),
+        source="api",
+    )
+
+    assert accepted is returned
+
+
+@pytest.mark.asyncio
+async def test_edit_note_rejects_a_stale_base_checksum(monkeypatch) -> None:
+    """PATCH gains the precondition PUT already had.
+
+    Without it a caller that read revision N patches revision N+5 blind, and the
+    only way to condition an edit was to re-implement this method outside core.
+    """
+    ran: list[str] = []
+
+    async def fake_runner(_session, *, request, dependencies):
+        ran.append("runner")
+        return AcceptedNoteMutationResult(change=cast(Any, SimpleNamespace(status_code=200)))
+
+    async def fake_load(_session, *, project_external_id, entity_external_id, dependencies):
+        return (None, None, SimpleNamespace(db_checksum="checksum-now"))
+
+    monkeypatch.setattr(note_content_writes, "run_accepted_note_edit", fake_runner)
+    monkeypatch.setattr(note_content_writes, "load_existing_markdown_note_content", fake_load)
+
+    service = NoteContentMutationService(
+        session_maker=cast(async_sessionmaker[AsyncSession], FakeSessionMaker()),
+        mutation_dependencies=cast(AcceptedNoteMutationDependencies, object()),
+    )
+
+    with pytest.raises(NoteContentMutationServiceError) as rejected:
+        await service.edit_note(
+            project_external_id="project-123",
+            entity_external_id="note-1",
+            data=EditEntityRequest(operation="append", content="more"),
+            user_profile_id=uuid4(),
+            source="api",
+            base_checksum="checksum-the-caller-read",
+        )
+
+    assert rejected.value.status_code == 409
+    assert ran == [], "a stale precondition must reject before the edit runs"
+
+
+@pytest.mark.asyncio
+async def test_edit_note_without_a_base_checksum_reads_no_precondition(monkeypatch) -> None:
+    """The ordinary PATCH caller has no synced revision, so none is imposed."""
+    reads: list[str] = []
+
+    async def fake_runner(_session, *, request, dependencies):
+        return AcceptedNoteMutationResult(change=cast(Any, SimpleNamespace(status_code=200)))
+
+    async def fake_load(_session, **_kwargs):
+        reads.append("read")
+        return (None, None, SimpleNamespace(db_checksum="checksum-now"))
+
+    monkeypatch.setattr(note_content_writes, "run_accepted_note_edit", fake_runner)
+    monkeypatch.setattr(note_content_writes, "load_existing_markdown_note_content", fake_load)
+
+    service = NoteContentMutationService(
+        session_maker=cast(async_sessionmaker[AsyncSession], FakeSessionMaker()),
+        mutation_dependencies=cast(AcceptedNoteMutationDependencies, object()),
+    )
+
+    await service.edit_note(
+        project_external_id="project-123",
+        entity_external_id="note-1",
+        data=EditEntityRequest(operation="append", content="more"),
+        user_profile_id=uuid4(),
+        source="api",
+    )
+
+    assert reads == []
