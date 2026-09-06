@@ -13,6 +13,7 @@ from datetime import date, datetime
 from enum import StrEnum
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Annotated, Literal
+from urllib.parse import quote
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from frontmatter import Post
@@ -196,6 +197,28 @@ class DocumentMetadataV1(_DocumentContractModel):
         return value
 
 
+class DocumentPageLocatorV1(_DocumentContractModel):
+    """A one-based physical PDF page, separate from its printed page label."""
+
+    page: int = Field(ge=1, strict=True)
+    page_label: Annotated[NonEmptyText, StringConstraints(pattern=r"^[^\r\n]+$")] | None = None
+
+    @property
+    def source_id(self) -> str:
+        # IDs are note-scoped and keyed to physical pages, never the position of
+        # an entry in sources. Reordering observations cannot misattribute them.
+        return f"document-page-{self.page}"
+
+
+class DocumentCitationSourceV1(_DocumentContractModel):
+    """OKF source entry for a cited page of the note's trusted source PDF."""
+
+    id: NonEmptyText
+    resource: NonEmptyText
+    title: NonEmptyText
+    locator: DocumentPageLocatorV1
+
+
 class DocumentNoteFrontmatterV1(_DocumentContractModel):
     """Authoritative nested frontmatter for a ``type: document`` note."""
 
@@ -212,6 +235,8 @@ class DocumentNoteFrontmatterV1(_DocumentContractModel):
     created: datetime | None = None
     modified: datetime | None = None
     source: DocumentSourceV1
+    # None keeps legacy uncited document serialization and checksums unchanged.
+    sources: tuple[DocumentCitationSourceV1, ...] | None = None
     extraction: DocumentExtractionV1
     ingestion: DocumentIngestionV1
     document: DocumentMetadataV1 = Field(default_factory=DocumentMetadataV1)
@@ -235,6 +260,13 @@ class DocumentNoteFrontmatterV1(_DocumentContractModel):
     def validate_trusted_envelope(self) -> "DocumentNoteFrontmatterV1":
         if self.source.checksum != self.ingestion.input_checksum:
             raise ValueError("ingestion input_checksum must match the source checksum")
+        if self.sources:
+            if len({citation.id for citation in self.sources}) != len(self.sources):
+                raise ValueError("citation source IDs must be unique")
+            for citation in self.sources:
+                expected = _document_citation_source(self.source, self.extraction, citation.locator)
+                if citation != expected:
+                    raise ValueError("citation must reference its trusted source PDF page")
         _require_deterministic_run_id(
             source=self.source,
             extraction=self.extraction,
@@ -447,6 +479,7 @@ class DocumentAgentObservationV1(_DocumentContractModel):
         StringConstraints(strip_whitespace=True, min_length=1, pattern=r"^[^\r\n]+$"),
     ]
     tags: tuple[AgentTag, ...] = ()
+    locator: DocumentPageLocatorV1 | None = None
     context: (
         Annotated[
             StrictStr,
@@ -463,6 +496,8 @@ class DocumentAgentObservationV1(_DocumentContractModel):
 
         parsed_observation = parsed.observations[0]
         expected_content = self.content
+        if self.locator is not None:
+            expected_content += f" [^{self.locator.source_id}]"
         if self.tags:
             expected_content += " " + " ".join(f"#{tag}" for tag in self.tags)
         if (
@@ -546,6 +581,20 @@ class DocumentAgentOutputV1(_DocumentContractModel):
 
     @model_validator(mode="after")
     def require_exact_assembled_semantics(self) -> "DocumentAgentOutputV1":
+        if any(observation.locator is not None for observation in self.observations):
+            # Reserve both references and definitions: otherwise undeclared text
+            # can borrow a generated citation without supplying a locator.
+            agent_text = [self.title, self.body]
+            for observation in self.observations:
+                agent_text.extend((observation.content, observation.context or ""))
+            for relation in self.relations:
+                agent_text.extend((relation.target, relation.context or ""))
+            if any(
+                re.search(r"\[\^document-page-[0-9]+\]", text, re.IGNORECASE) for text in agent_text
+            ):
+                raise ValueError(
+                    "agent text cannot define generated document-page citations or references"
+                )
         parsed = _parse_agent_semantics(_assemble_agent_body(self))
         expected_observations = [
             _parse_agent_semantics(_format_agent_observation(observation)).observations[0]
@@ -720,6 +769,22 @@ def enrich_document_markdown(
         raise ValueError("enrichment cannot replace trusted ingestion identity or version fields")
 
     tags = tuple(dict.fromkeys((*raw_frontmatter.tags, *agent_output.tags)))
+    citations: dict[str, DocumentCitationSourceV1] = {}
+    for observation in agent_output.observations:
+        if observation.locator is None:
+            continue
+        citation = _document_citation_source(
+            raw_frontmatter.source, raw_frontmatter.extraction, observation.locator
+        )
+        existing = citations.get(citation.id)
+        if existing is not None and existing.locator.page_label is not None:
+            if citation.locator.page_label not in {None, existing.locator.page_label}:
+                raise ValueError("observations citing the same page must agree on its page label")
+            # An omitted label contributes no conflicting information. Keep the
+            # explicit label regardless of observation order.
+            continue
+        citations[citation.id] = citation
+    citation_sources = tuple(citations.values())
     return DocumentMarkdownV1(
         frontmatter=DocumentNoteFrontmatterV1(
             title=agent_output.title,
@@ -728,16 +793,42 @@ def enrich_document_markdown(
             created=raw_frontmatter.created,
             modified=raw_frontmatter.modified,
             source=raw_frontmatter.source,
+            sources=citation_sources or None,
             extraction=raw_frontmatter.extraction,
             ingestion=target_ingestion,
             document=agent_output.document,
             bm_parse_semantics=True,
         ),
-        body=_assemble_agent_body(agent_output),
+        body=_assemble_agent_body(agent_output, citation_sources),
     )
 
 
-def _assemble_agent_body(agent_output: DocumentAgentOutputV1) -> str:
+def _document_citation_source(
+    source: DocumentSourceV1,
+    extraction: DocumentExtractionV1,
+    locator: DocumentPageLocatorV1,
+) -> DocumentCitationSourceV1:
+    """Build a standard PDF fragment from trusted provenance, not an agent URL."""
+    if source.media_type != "application/pdf":
+        raise ValueError("page citations require a PDF source")
+    if locator.page > extraction.page_count:
+        raise ValueError("citation page is outside the source PDF")
+    # RFC 8118 page= uses physical one-based pages, not printed page labels.
+    # Encode filename delimiters so a literal # or % cannot change the target.
+    resource = f"/{quote(source.file_path, safe='/')}#page={locator.page}"
+    label = locator.page_label or str(locator.page)
+    return DocumentCitationSourceV1(
+        id=locator.source_id,
+        resource=resource,
+        title=f"{PurePosixPath(source.file_path).name}, p. {label}",
+        locator=locator,
+    )
+
+
+def _assemble_agent_body(
+    agent_output: DocumentAgentOutputV1,
+    citations: tuple[DocumentCitationSourceV1, ...] = (),
+) -> str:
     sections: list[str] = []
     if normalized_body := _normalize_markdown_body(agent_output.body):
         sections.append(normalized_body.rstrip("\n"))
@@ -749,11 +840,21 @@ def _assemble_agent_body(agent_output: DocumentAgentOutputV1) -> str:
     if agent_output.relations:
         relations = [_format_agent_relation(relation) for relation in agent_output.relations]
         sections.append("## Relations\n\n" + "\n".join(relations))
+    if citations:
+        sections.append(
+            "\n".join(
+                f"[^{citation.id}]: [PDF page {citation.locator.page}]({citation.resource})"
+                for citation in citations
+            )
+        )
     return "\n\n".join(sections) + ("\n" if sections else "")
 
 
 def _format_agent_observation(observation: DocumentAgentObservationV1) -> str:
     line = f"- [{observation.category}] {observation.content}"
+    if observation.locator is not None:
+        # A space prevents a trailing Markdown escape from swallowing the marker.
+        line += f" [^{observation.locator.source_id}]"
     if observation.tags:
         line += " " + " ".join(f"#{tag}" for tag in observation.tags)
     if observation.context:
