@@ -229,7 +229,7 @@ async def test_replacement_body_can_lock_an_unlocked_note(
 
 
 @pytest.mark.asyncio
-async def test_import_cannot_overwrite_locked_note(
+async def test_import_can_overwrite_locked_note_as_raw_file_write(
     client: AsyncClient, test_project: Project, locked_note: LockedNote
 ) -> None:
     response = await client.post(
@@ -250,6 +250,76 @@ async def test_import_cannot_overwrite_locked_note(
             )
         },
     )
-    assert response.status_code == 500, response.text
-    assert "locked: true" in response.text
-    await assert_note_unchanged(client, locked_note)
+    assert response.status_code == 200, response.text
+    content = locked_note[1].read_text(encoding="utf-8")
+    assert "Overwrite attempt" in content
+    assert "locked: true" not in content
+    await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    read = await client.get(locked_note[0])
+    assert read.status_code == 200, read.text
+    assert "Overwrite attempt" in read.json()["content"]
+
+
+@pytest.mark.asyncio
+async def test_api_directory_delete_observes_offline_lock_before_indexing(
+    client: AsyncClient, test_project: Project
+) -> None:
+    base = f"/v2/projects/{test_project.external_id}/knowledge"
+    created = await client.post(
+        f"{base}/entities",
+        json={"title": "Offline lock", "directory": "protected", "content": "Original"},
+    )
+    assert created.status_code == 202, created.text
+    path = Path(test_project.path) / created.json()["file_path"]
+    locked_bytes = path.read_bytes().replace(b"---\n", b"---\nlocked: true\n", 1)
+    path.write_bytes(locked_bytes)
+    sibling = await client.post(
+        f"{base}/entities",
+        json={"title": "Sibling", "directory": "protected", "content": "Keep sibling too"},
+    )
+    assert sibling.status_code == 202, sibling.text
+    sibling_path = Path(test_project.path) / sibling.json()["file_path"]
+    sibling_bytes = sibling_path.read_bytes()
+
+    # No watcher or reindex: the API must inspect the local lock before deleting
+    # any sibling, not accept partial deletion from an older unlocked DB snapshot.
+    response = await client.post(f"{base}/delete-directory", json={"directory": "protected"})
+    assert response.status_code == 423, response.text
+    assert path.read_bytes() == locked_bytes
+    assert sibling_path.read_bytes() == sibling_bytes
+    assert (await client.get(f"{base}/entities/{created.json()['external_id']}")).status_code == 200
+    assert (await client.get(f"{base}/entities/{sibling.json()['external_id']}")).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_raw_file_deletion_overrides_lock(
+    client: AsyncClient, test_project: Project, locked_note: LockedNote
+) -> None:
+    locked_note[1].unlink()
+    await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert not locked_note[1].exists()
+    assert (await client.get(locked_note[0])).status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_raw_directory_deletion_overrides_lock(
+    client: AsyncClient, test_project: Project, locked_note: LockedNote
+) -> None:
+    directory = locked_note[1].parent
+    locked_note[1].unlink()
+    directory.rmdir()
+    await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    assert not directory.exists()
+    assert (await client.get(locked_note[0])).status_code == 404

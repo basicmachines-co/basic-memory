@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal, NotRequired, Protocol, TypedDict
@@ -31,6 +31,7 @@ from basic_memory.runtime.storage import ProjectExternalId, ProjectId, RuntimeFi
 from basic_memory.utils import valid_project_path_value
 
 type DirectoryDeleteFileStatus = Literal["complete", "pending", "failed"]
+type DirectoryFileLockCheck = Callable[[Sequence[RuntimeDirectoryFileSnapshot]], Awaitable[None]]
 
 
 class DirectoryDeleteRejectKind(StrEnum):
@@ -157,6 +158,7 @@ class DirectoryDeleteRuntime:
     # None means this runtime has no inline reindex path; the surviving source ids
     # are still surfaced on the accepted result for deferred (queued) consumers.
     relation_cleanup_refresher: DirectoryDeleteRelationCleanupRefresher | None = None
+    check_file_locks: DirectoryFileLockCheck | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -564,6 +566,7 @@ async def accept_directory_delete(
     *,
     request: DirectoryDeleteAcceptanceRequest,
     store: DirectoryDeleteAcceptanceStore,
+    check_file_locks: DirectoryFileLockCheck | None = None,
 ) -> DirectoryDeleteAcceptance:
     """Accept a directory delete into DB state before post-commit cleanup jobs."""
     try:
@@ -594,6 +597,11 @@ async def accept_directory_delete(
     )
     if not file_snapshots:
         return DirectoryDeleteAcceptance(project_id=project_id, files=())
+
+    # Local files may have acquired a lock since the last index pass. Check them
+    # before accepting any deletion; hosted runtimes use accepted Markdown below.
+    if check_file_locks is not None:
+        await check_file_locks(file_snapshots)
 
     delete_result = await store.delete_directory_entities(
         session,
@@ -658,6 +666,7 @@ async def run_directory_delete(
         session,
         request=request,
         store=runtime.store,
+        check_file_locks=runtime.check_file_locks,
     )
     return await finish_directory_delete_acceptance(
         request=request,

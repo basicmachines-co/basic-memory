@@ -18,18 +18,29 @@ from basic_memory import db
 from basic_memory.config import BasicMemoryConfig
 from basic_memory.file_utils import FileError
 from basic_memory.indexing.accepted_note_mutation_runner import AcceptedNoteMutationPreparer
-from basic_memory.indexing.directory_delete_runner import DirectoryFileDeleteEnqueueError
+from basic_memory.indexing.directory_delete_runner import (
+    DirectoryDeleteRejected,
+    DirectoryDeleteRejection,
+    DirectoryDeleteRejectKind,
+    DirectoryFileDeleteEnqueueError,
+)
 from basic_memory.indexing.note_file_delete_runner import run_note_file_delete
 from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
+from basic_memory.markdown.note_lock import LOCKED_NOTE_MESSAGE, note_is_locked
 from basic_memory.models import Project
 from basic_memory.repository.accepted_note_repositories import AcceptedNoteRepositories
 from basic_memory.repository.entity_repository import EntityRepository
-from basic_memory.runtime.cleanup import RuntimeFileDeleteResult, RuntimeNoteFileDeleteJobRequest
+from basic_memory.runtime.cleanup import (
+    RuntimeDirectoryFileSnapshot,
+    RuntimeFileDeleteResult,
+    RuntimeNoteFileDeleteJobRequest,
+)
 from basic_memory.runtime.storage import (
     RuntimeFileChecksum,
     RuntimeFilePath,
     runtime_content_type_is_markdown,
+    runtime_file_path_is_markdown_note,
 )
 from basic_memory.services.exceptions import FileOperationError
 from basic_memory.services.file_service import FileService
@@ -168,6 +179,28 @@ class LocalCurrentNoteContentFreshener:
 
 
 # --- Directory-Delete File Cleanup ---
+
+
+async def check_local_directory_file_locks(
+    file_service: FileService,
+    files: Sequence[RuntimeDirectoryFileSnapshot],
+) -> None:
+    """Reject API directory deletion when an existing local note is locked."""
+    for snapshot in files:
+        if not runtime_file_path_is_markdown_note(snapshot.file_path):
+            continue
+        # Raw filesystem deletion is outside the lock contract. Missing files do
+        # not need protection, and the ordinary index pass reconciles their rows.
+        if not await file_service.exists(snapshot.file_path):
+            continue
+        content = await file_service.read_file_content(snapshot.file_path)
+        if note_is_locked(content):
+            raise DirectoryDeleteRejected(
+                DirectoryDeleteRejection(
+                    kind=DirectoryDeleteRejectKind.locked,
+                    detail=LOCKED_NOTE_MESSAGE,
+                )
+            )
 
 
 @dataclass(frozen=True, slots=True)

@@ -11,6 +11,7 @@ behavior of its own:
 - local note-content, indexing, and background-scheduler runtimes
 """
 
+from functools import partial
 from pathlib import Path
 from typing import Annotated
 
@@ -42,6 +43,7 @@ from basic_memory.index.local_notes import (
     LocalCurrentNoteContentFreshener,
     LocalDirectoryDeleteRelationCleanupRefresher,
     LocalDirectoryFileDeleteEnqueuer,
+    check_local_directory_file_locks,
 )
 from basic_memory.repository import NoteContentRepository
 from basic_memory.repository.accepted_note_repositories import AcceptedNoteRepositories
@@ -183,6 +185,7 @@ async def get_directory_delete_service(
                 external_vector_cleaner=search_service.repository
             ),
             file_delete_enqueuer=LocalDirectoryFileDeleteEnqueuer(file_service=file_service),
+            check_file_locks=partial(check_local_directory_file_locks, file_service),
             relation_cleanup_refresher=LocalDirectoryDeleteRelationCleanupRefresher(
                 session_maker=session_maker,
                 entity_repository=entity_repository,

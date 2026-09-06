@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, TypeVar
 
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
-from basic_memory.markdown.note_lock import LOCKED_NOTE_MESSAGE, note_is_locked
 from basic_memory.markdown.schemas import EntityMarkdown
 from basic_memory.read_cache import ReadCacheInvalidator, invalidate_cache
 from basic_memory.schemas.importer import ImportResult
@@ -88,11 +87,6 @@ class Importer[T: ImportResult]:
         Returns:
             Checksum of written file.
         """
-        # Imports are API/CLI writes too; they must not overwrite a protected file.
-        if await self.file_service.exists(file_path):
-            existing_content = await self.file_service.read_file_content(file_path)
-            if note_is_locked(existing_content):
-                raise ValueError(LOCKED_NOTE_MESSAGE)
         content = self.markdown_processor.to_markdown_string(entity)
 
         # Trigger: one imported file can become visible before the remaining batch completes.
