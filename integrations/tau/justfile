@@ -1,0 +1,6 @@
+# Hermetic transport and actual Tau session tests; BM real test is opt-in.
+check:
+    uv run --frozen ruff check *.py tests
+    uv run --frozen ruff format --check *.py tests
+    uv run --frozen ty check *.py tests
+    uv run --frozen pytest -q
