@@ -250,7 +250,7 @@ class MemoryLifecycle:
                 )
             ).text
             parts.append("Shared recent activity:\n" + recent)
-            text = "\n\n".join(parts)
+            text = public_text("\n\n".join(parts))
             if len(text) > self.settings.recall_chars:
                 text = (
                     text[: self.settings.recall_chars]
@@ -417,10 +417,15 @@ class MemoryLifecycle:
                     previous = await context.summarize(
                         [
                             UserMessage(
-                                content=f"Prior handoff:\n{previous}\n\nNew conversation:\n{text[offset : offset + size]}"
+                                # Canonical notes can be edited after capture, and
+                                # intermediate model output is not a trusted input.
+                                content=public_text(
+                                    f"Prior handoff:\n{previous}\n\nNew conversation:\n"
+                                    f"{text[offset : offset + size]}"
+                                )
                             )
                         ],
-                        instructions=SUMMARY_INSTRUCTIONS + "\nFocus: " + focus,
+                        instructions=SUMMARY_INSTRUCTIONS + "\nFocus: " + public_text(focus),
                         timeout=self.settings.summary_timeout_seconds,
                     )
                     if len(previous) > size:
