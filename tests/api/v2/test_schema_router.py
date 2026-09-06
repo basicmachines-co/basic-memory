@@ -1460,3 +1460,118 @@ async def test_core_ships_a_no_op_observer(
 
     assert response.status_code == 200
     assert response.json()["results"][0]["passed"] is True
+
+
+@pytest.mark.asyncio
+async def test_validation_observer_is_told_when_the_identifier_resolves_to_nothing(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    validation_observer: RecordingValidationObserver,
+):
+    """The fourth exit reports too, or the contract depends on request shape.
+
+    An unresolvable identifier returns the same empty report an empty note type
+    returns. If only one of them notified, "once per request" would quietly mean
+    "once per request, unless you asked by identifier".
+    """
+    response = await client.post(
+        f"{v2_project_url}/schema/validate",
+        params={"identifier": "no-such-note-anywhere"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["total_notes"] == 0
+    assert len(validation_observer.calls) == 1
+    _, outcomes = validation_observer.calls[0]
+    assert outcomes == ()
+
+
+@pytest.mark.asyncio
+async def test_validation_outcome_names_the_schema_the_note_pointed_at(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_service,
+    search_service,
+    validation_observer: RecordingValidationObserver,
+):
+    """Two schema notes can cover one entity, so the entity cannot identify one.
+
+    `schema_entity` comes from the schema's own `entity:` frontmatter, so both
+    of these report `person`. Only the reference the note carried says which
+    schema actually produced the result.
+    """
+    schema_note, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="strict-person-v2",
+            directory="schemas",
+            note_type="schema",
+            entity_metadata={
+                "entity": "person",
+                "version": 2,
+                "schema": {"name": "string"},
+            },
+            content="Strict person schema.\n",
+        )
+    )
+    await search_service.index_entity(schema_note)
+
+    entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Fran",
+            directory="people",
+            note_type="person",
+            entity_metadata={"schema": "strict-person-v2"},
+            content=dedent("""\
+                ## Observations
+                - [name] Fran Baker
+            """),
+        )
+    )
+    await search_service.index_entity(entity)
+
+    response = await client.post(
+        f"{v2_project_url}/schema/validate",
+        params={"identifier": "Fran"},
+    )
+    assert response.status_code == 200
+
+    _, outcomes = validation_observer.calls[0]
+    assert len(outcomes) == 1
+    outcome = outcomes[0]
+    assert outcome.schema_entity == "person", "the covered type, shared by every person schema"
+    assert outcome.schema_reference == "strict-person-v2", "the schema this note actually used"
+
+
+@pytest.mark.asyncio
+async def test_an_inline_schema_has_no_reference_to_report(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_service,
+    search_service,
+    validation_observer: RecordingValidationObserver,
+):
+    """Nothing was pointed at, so None is the honest answer rather than a guess."""
+    entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Gus",
+            directory="people",
+            note_type="person",
+            entity_metadata={"schema": {"name": "string"}},
+            content="## Observations\n- [name] Gus Inline\n",
+        )
+    )
+    await search_service.index_entity(entity)
+
+    response = await client.post(
+        f"{v2_project_url}/schema/validate",
+        params={"note_type": "person"},
+    )
+    assert response.status_code == 200
+
+    _, outcomes = validation_observer.calls[0]
+    assert len(outcomes) == 1
+    assert outcomes[0].schema_entity == "person"
+    assert outcomes[0].schema_reference is None

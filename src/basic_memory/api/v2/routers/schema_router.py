@@ -182,7 +182,16 @@ async def validate_schema(
         # to match how read_note and other tools resolve identifiers
         entity = await link_resolver.resolve_link(identifier, session=session)
         if not entity:
-            return ValidationReport(note_type=note_type, total_notes=0, total_entities=0)
+            # A request that resolved to nothing still validated nothing, which
+            # is the same report the note-type branch produces for an empty
+            # type. Returning it without telling the observer would make the
+            # once-per-request contract depend on how the request was scoped.
+            return await _observed(
+                validation_observer,
+                project_external_id=project_id,
+                outcomes=outcomes,
+                report=ValidationReport(note_type=note_type, total_notes=0, total_entities=0),
+            )
 
         frontmatter = _entity_frontmatter(entity)
         schema_ref = frontmatter.get("schema")
@@ -211,6 +220,7 @@ async def validate_schema(
                 ValidatedNoteOutcome(
                     note_external_id=entity.external_id,
                     schema_entity=response.schema_entity,
+                    schema_reference=schema_ref if isinstance(schema_ref, str) else None,
                     passed=response.passed,
                 )
             )
@@ -469,6 +479,7 @@ async def _validate_note_entities(
                     ValidatedNoteOutcome(
                         note_external_id=entity.external_id,
                         schema_entity=response.schema_entity,
+                        schema_reference=schema_ref if isinstance(schema_ref, str) else None,
                         passed=response.passed,
                     )
                 )

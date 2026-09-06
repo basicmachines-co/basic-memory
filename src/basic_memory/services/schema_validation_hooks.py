@@ -23,10 +23,20 @@ class ValidatedNoteOutcome:
     on note content, and the note is named by its external id rather than by a
     title. What is left is what an observer can legitimately act on -- which
     schema, and whether the note satisfied it.
+
+    The two schema fields answer different questions and neither replaces the
+    other. `schema_entity` is the note type the schema covers, read from the
+    schema's own `entity:` frontmatter, so two schema notes that both cover
+    `person` report the same value. `schema_reference` is what the validated
+    note pointed at -- the string in its `schema:` frontmatter -- and is None
+    when the schema was declared inline and there was nothing to point at. An
+    observer that needs to tell two schemas for one entity apart needs the
+    reference; it is the reference as written and matched, not a stable id.
     """
 
     note_external_id: str
     schema_entity: str
+    schema_reference: str | None
     passed: bool
 
 
