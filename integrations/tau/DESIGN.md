@@ -1,83 +1,97 @@
-# Basic Memory for Tau: implementation design
+# Basic Memory for Tau: continuity design
 
-Tracked in https://github.com/basicmachines-co/basic-memory/issues/1487.
+Issue: https://github.com/basicmachines-co/basic-memory/issues/1487
+Integration: https://github.com/basicmachines-co/basic-memory/pull/1489
+Required host work: https://github.com/huggingface/tau/pull/683
 
 ## Product contract
 
-Continuity is the product: a fresh or compacted session recovers the objective,
-decisions, unfinished work, verified results, and next action. Full MCP tool access
-is infrastructure for that loop, not the whole integration.
+A fresh or compacted session recovers the objective, decisions, unfinished work,
+verified findings, and next action through the shared Basic Memory graph. Full
+MCP tool access supports that loop; it is not a substitute for it.
 
-Use the configured Basic Memory projects and shared graph rather than a Tau-only
-knowledge format. Automatic recall, ongoing knowledge capture, configurable
-transcripts, and compaction checkpoints complement explicit commands.
+## Host dependencies, implemented separately
 
-## Verified host interfaces
+Stock Tau 0.4.1 only notifies extensions around overflow compaction. Its queued
+custom messages run as follow-ups, which can cause an extra model response even
+with trigger_turn=False. Its public context cannot read persisted custom receipts
+or request a tool-free summary through the active provider.
 
-Inspected installed tau-ai 0.4.1 on 2026-09-05:
+Tau #683 supplies:
 
-- `setup(tau)` is synchronous; tools are composed into the harness before session
-  start. Live MCP discovery therefore must complete before tool composition, not
-  register tools belatedly in a session-start callback.
-- `ExtensionAPI` supports tool/command registration, prompt sections, event
-  subscriptions, custom messages, and extension-owned session entries.
-- `ExtensionContext.transcript` exposes deep-copied active-path messages, with
-  existing compaction summaries folded into user messages.
-- Session-start and shutdown events distinguish startup, reload, new, resume,
-  branch, and quit.
-- `/reload` rebuilds the extension runtime. The integration must close the outgoing
-  MCP connection and avoid duplicate capture across replacement generations.
+1. Awaited extension start/end notifications around manual, detailed manual,
+   threshold and overflow compaction. No-op checks emit nothing. Failure and
+   cancellation emit aborted end events. The original context remains available
+   until start handlers finish.
+2. `context.branch_entries`: deep-copied persisted active-path entries for receipt
+   recovery and lineage without session-file scraping.
+3. `context.summarize`: bounded tool-free active-model synthesis, no agent turn,
+   history mutation, exposed credentials, or detached task.
+4. `tau.append_message`: persist idle reference context before the next prompt,
+   without queuing another turn.
+5. Shutdown/start notifications around in-place tree branches on the same runtime.
 
-## Compaction blocker
+The package pins the tested fork SHA until these interfaces are released upstream.
+It does not modify installed Tau or pretend #506 is fully closed: that issue's
+threshold/manual frontend-iterator/TUI-status work is separate from extension
+callback delivery. Persisted-entry notifications are not required; branch snapshots
+provide authoritative receipt reconstruction.
 
-The installed API advertises `compaction_start`, `compaction_end`, and
-`entry_appended`, but declarations do not guarantee delivery:
+## Explicit ownership
 
-- `CodingSession.prompt` emits awaited start/end notifications for overflow recovery.
-- `compact`, `compact_detailed`, and `_maybe_auto_compact` do not emit those
-  notifications around normal/manual compaction.
-- `_append_compaction` persists a compaction and leaf, then replaces active context.
-- `_append_session_entry` writes storage without emitting `entry_appended`.
+`bridge.py` finishes paginated discovery during synchronous setup using a joined
+temporary thread/process, because Tau composes tools before session_start. The
+probe closes before setup returns. Runtime MCP contexts belong to one async owner
+task; calls share them. Close cancels active requests and retires contexts in their
+owner task. Restart creates a fresh stop event, including same-runtime tree branches.
 
-Do not present overflow-only checkpointing as complete compaction coverage. Resolve
-this through a supported upstream lifecycle seam, not monkey-patching installed
-Python or scraping session files. Check upstream source before proposing a patch:
-https://github.com/huggingface/tau.
+`extension.py` registers every advertised tool, preserving schemas and forwarding
+arguments unchanged. `results.py` converts native text/images, preserves other
+blocks and structured data, and validates write receipts. Routing and auth remain
+BM's responsibility; automatic memory requires an explicit project destination.
 
-## Bridge design constraints
+## Knowledge and receipt flow
 
-Hermes uses a dedicated thread/async loop to own its persistent MCP session because
-its host interface is synchronous. OpenClaw uses a persistent asynchronous client.
-Tau requires synchronous discovery during setup but asynchronous execution after
-startup. Choose the smallest lifecycle-owned bridge that satisfies both; prove
-cleanup for failed setup as well as normal shutdown before adopting a threaded
-actor. A subprocess per call is not equivalent to a persistent connection.
+`continuity.py` reads public persisted message entries, excluding reasoning,
+tools, synthetic summaries, and injected context. The last confirmed handoff plus
+new public messages are synthesized in bounded chunks under one checkpoint deadline.
+Knowledge capture at settled/compaction/shutdown uses the same source-tip identity;
+unchanged state reuses its receipt instead of making redundant model requests.
 
-Discover every tools/list page, retain schemas, namespace host names, and forward
-original MCP names/arguments unchanged. Do not auto-enable server feature gates.
-Preserve content and error semantics. No blind retries of ambiguous writes.
+Before a remote write, append a pending intent containing project, capture id,
+kind, source tip, and content digest. After a validated BM result, append a confirmed
+receipt with its returned path. Reload/start reconciles pending intents by reading
+remote content, never resubmitting writes. A sibling branch can recover the same
+source-tip capture by identity and byte digest. Divergent source tips produce
+separate snapshots linked to the prior active-branch checkpoint. Transcript notes
+are distinct, opt-in, immutable segments; handoffs link their captured sources.
 
-## Verification plan
+Startup reads confirmed active-branch checkpoints before broader scoped results,
+expands the checkpoint's graph neighborhood, and includes shared recent activity.
+Filter-only search supplies an epoch after_date to obtain BM's newest-first order
+without excluding long-idle modern sessions. Topic search also retrieves shared
+coding_session/task/decision notes. The inserted brief is bounded and labeled as
+untrusted historical reference, not current repository facts.
 
-1. Real Tau loader registration against a deterministic paginated MCP server.
-2. Tool forwarding and text/image/structured/error result conversion.
-3. Startup failure, cancellation, shutdown, and repeated reload without leaked children.
-4. Bounded automatic recall with verified note references.
-5. Capture controls, explicit destination, replay deduplication, branch/resume handling.
-6. Manual, threshold, and overflow compaction checkpoints, including failure reporting.
-7. Real Basic Memory temporary-project write/read/search and fresh-session recovery.
-8. Root package checks, static checks, and CI wiring before the PR is ready.
+## Failure and privacy policy
 
-## Preview implementation
+Automatic-memory failure is visible but does not stop coding. Host observation
+hooks are awaited, not veto hooks; a failed write can precede a compaction that
+continues. Only a confirmed checkpoint is referenced afterward. Closing always
+releases MCP, even if summary generation fails. No shutdown promise applies to
+process kills. No ambiguous remote write is retried or overwritten automatically.
 
-`bridge.py` performs joined, short-lived discovery during setup and owns the
-persistent runtime MCP session in one async task. `extension.py` registers every
-advertised tool, injects bounded startup recall, optionally captures public
-messages, and queues explicit or overflow-triggered checkpoint requests.
+Common credential patterns are masked before automatic capture and in generated
+output, but arbitrary public-text secrets cannot be reliably detected. Controls
+and destination disclosure are part of the privacy boundary. No raw tool payloads,
+hidden reasoning, model credentials, or arbitrary server error text are captured.
 
-The isolated real BM test verifies write/read/search and a fresh runtime's recall.
-The full contract remains open: normal/manual compaction events are tracked by
-https://github.com/huggingface/tau/issues/506, and durable replay reconciliation,
-branch lineage, richer task-oriented recall, and shutdown summaries are follow-ups.
-Checkpoint requests are not acknowledgements of persisted notes. See README.md
-for exact preview limits and configuration.
+## Evidence
+
+Tests cover real host registration, persisted sessions, paginated stdio tools,
+source-tip deduplication, branch lineage, all compaction paths, write/receipt
+failures, cancellation, shutdown, fresh resume, and headless TUI reload. The real-BM
+suite proves file writes, reads, searches, transcripts, checkpoints, compaction
+reference restoration, reload and resume in temporary local projects. Synthesis
+uses deterministic providers, so these tests do not claim live-model quality or
+paid/cloud account end-to-end verification.

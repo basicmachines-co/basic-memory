@@ -3,7 +3,12 @@ name = "basic-memory-tau"
 version = "0.1.0"
 description = "Basic Memory continuity and MCP tools for Tau"
 requires-python = ">=3.13"
-dependencies = ["tau-ai==0.4.1", "mcp>=2,<3"]
+dependencies = [
+    "tau-ai @ git+https://github.com/phernandez/tau@f41242532a2e55c6ee7f96b71d6949d3db9c172d",
+    "mcp>=2,<3",
+    # Match Tau's tested HTTPX API and SOCKS extra, not the 1.0 development release.
+    "httpx[socks]>=0.28,<1",
+]
 
 [dependency-groups]
 dev = ["pytest>=8", "pytest-asyncio>=1", "ruff>=0.12", "ty"]

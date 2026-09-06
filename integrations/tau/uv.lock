@@ -54,6 +54,7 @@ name = "basic-memory-tau"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "httpx", extra = ["socks"] },
     { name = "mcp" },
     { name = "tau-ai" },
 ]
@@ -68,8 +69,9 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx", extras = ["socks"], specifier = ">=0.28,<1" },
     { name = "mcp", specifier = ">=2,<3" },
-    { name = "tau-ai", specifier = "==0.4.1" },
+    { name = "tau-ai", git = "https://github.com/phernandez/tau?rev=f41242532a2e55c6ee7f96b71d6949d3db9c172d" },
 ]
 
 [package.metadata.requires-dev]
@@ -78,6 +80,15 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=1" },
     { name = "ruff", specifier = ">=0.12" },
     { name = "ty" },
+]
+
+[[package]]
+name = "certifi"
+version = "2026.7.22"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a3/c2/24167ea9858356b47a87a50d39908bfdb72ceeefe0041586e704e5376b3a/certifi-2026.7.22.tar.gz", hash = "sha256:741e2c3b351ddf169a738da9f2c048608ff7f2c5cc02f1ebc6b118bb090d5d55", size = 138112, upload-time = "2026-07-22T03:35:12.644Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0b/a7/71ac2cff56fec219ed242bb11b8efb69fcc4bec75db06fb7bfe35de520e6/certifi-2026.7.22-py3-none-any.whl", hash = "sha256:62f22742b58a1a33014a2b6b706588a8d7e2a88ae7bd1a6ebe8c992928483775", size = 136983, upload-time = "2026-07-22T03:35:11.276Z" },
 ]
 
 [[package]]
@@ -231,6 +242,19 @@ wheels = [
 ]
 
 [[package]]
+name = "httpcore"
+version = "1.0.9"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "certifi" },
+    { name = "h11" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/06/94/82699a10bca87a5556c9c59b5963f2d039dbd239f25bc2a63907a05a14cb/httpcore-1.0.9.tar.gz", hash = "sha256:6e34463af53fd2ab5d807f399a9b45ea31c3dfa2276f15a2c3f00afff6e176e8", size = 85484, upload-time = "2025-04-24T22:06:22.219Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7e/f5/f66802a942d491edb555dd61e3a9961140fd64c90bce1eafd741609d334d/httpcore-1.0.9-py3-none-any.whl", hash = "sha256:2d400746a40668fc9dec9810239072b40b4484b640a8c38fd654a024c7a1bf55", size = 78784, upload-time = "2025-04-24T22:06:20.566Z" },
+]
+
+[[package]]
 name = "httpcore2"
 version = "2.12.0"
 source = { registry = "https://pypi.org/simple" }
@@ -245,15 +269,22 @@ wheels = [
 
 [[package]]
 name = "httpx"
-version = "1.0.dev6"
+version = "0.28.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "truststore" },
-    { name = "typing-extensions" },
+    { name = "anyio" },
+    { name = "certifi" },
+    { name = "httpcore" },
+    { name = "idna" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fb/cf/b69904e914caa43e662c2275612a347c8a3f084cba7ecbcab45bb0487d63/httpx-1.0.dev6.tar.gz", hash = "sha256:918d99857fb7b841e6d79a7cda909125df8b2466e6959c3ca4c23130052b6e6a", size = 29938, upload-time = "2026-08-31T17:59:55.135Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b1/df/48c586a5fe32a0f01324ee087459e112ebb7224f646c0b5023f5e79e9956/httpx-0.28.1.tar.gz", hash = "sha256:75e98c5f16b0f35b567856f597f06ff2270a374470a5c2392242528e3e3e42fc", size = 141406, upload-time = "2024-12-06T15:37:23.222Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/74/bc/dc055edab7b3aad9da517f4b4581ee233b1b3a4df4ec9d5f84407f74bc08/httpx-1.0.dev6-py3-none-any.whl", hash = "sha256:516cd76d86f016b2bc25d544d892a3ecce8db263459b3084894753fec322c841", size = 37878, upload-time = "2026-08-31T17:59:54.19Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/39/e50c7c3a983047577ee07d2a9e53faf5a69493943ec3f6a384bdc792deb2/httpx-0.28.1-py3-none-any.whl", hash = "sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad", size = 73517, upload-time = "2024-12-06T15:37:21.509Z" },
+]
+
+[package.optional-dependencies]
+socks = [
+    { name = "socksio" },
 ]
 
 [[package]]
@@ -841,6 +872,15 @@ wheels = [
 ]
 
 [[package]]
+name = "socksio"
+version = "1.0.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f8/5c/48a7d9495be3d1c651198fd99dbb6ce190e2274d0f28b9051307bdec6b85/socksio-1.0.0.tar.gz", hash = "sha256:f88beb3da5b5c38b9890469de67d0cb0f9d494b78b106ca1845f96c10b91c4ac", size = 19055, upload-time = "2020-04-17T15:50:34.664Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/37/c3/6eeb6034408dac0fa653d126c9204ade96b819c936e136c5e8a6897eee9c/socksio-1.0.0-py3-none-any.whl", hash = "sha256:95dc1f15f9b34e8d7b16f06d74b8ccf48f609af32ab33c608d08761c5dcbb1f3", size = 12763, upload-time = "2020-04-17T15:50:31.878Z" },
+]
+
+[[package]]
 name = "sse-starlette"
 version = "3.4.11"
 source = { registry = "https://pypi.org/simple" }
@@ -868,10 +908,10 @@ wheels = [
 [[package]]
 name = "tau-ai"
 version = "0.4.1"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/phernandez/tau?rev=f41242532a2e55c6ee7f96b71d6949d3db9c172d#f41242532a2e55c6ee7f96b71d6949d3db9c172d" }
 dependencies = [
     { name = "anyio" },
-    { name = "httpx" },
+    { name = "httpx", extra = ["socks"] },
     { name = "packaging" },
     { name = "pillow" },
     { name = "pydantic" },
@@ -879,10 +919,6 @@ dependencies = [
     { name = "rich" },
     { name = "textual" },
     { name = "typer" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/92/ea/1d9a19495dbb67612f062ea2a1e81b31cccb642dddfdba37ca5da5b1936c/tau_ai-0.4.1.tar.gz", hash = "sha256:3819bf048b7d74da2aee50a46f7a6f708156c2eacae8b2f2bd9e5141298b7282", size = 1272407, upload-time = "2026-08-28T19:55:55.059Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c6/be/ce36cf167656420e3c6908d136779f3041ee04bb5e0e0dd7be2c58fb52b4/tau_ai-0.4.1-py3-none-any.whl", hash = "sha256:c0f396527c9c804f6787bc1eccb585f7f123293154861fe8b99354cba79dbc71", size = 560643, upload-time = "2026-08-28T19:55:53.707Z" },
 ]
 
 [[package]]

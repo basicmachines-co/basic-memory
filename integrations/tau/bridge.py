@@ -23,6 +23,11 @@ class Settings(BaseModel):
     project: str | None = Field(default=None, min_length=1)
     auto_recall: StrictBool = True
     checkpoint_on_compact: StrictBool = True
+    capture_knowledge: StrictBool = True
+    summarize_on_shutdown: StrictBool = True
+    checkpoint_folder: str = "tau/checkpoints"
+    summary_timeout_seconds: float = Field(default=60, gt=0, le=300)
+    summary_chunk_chars: int = Field(default=16000, ge=1000, le=50000)
     capture_transcript: StrictBool = False
     capture_folder: str = "tau/transcripts"
     timeout_seconds: float = Field(default=30, gt=0, le=300)
@@ -95,6 +100,7 @@ class McpConnection:
     async def start(self) -> None:
         if self.owner is not None:
             raise RuntimeError("Basic Memory connection already started")
+        self.stop_requested = asyncio.Event()
         ready = asyncio.Future[None]()
         self.owner = asyncio.create_task(self._own_session(ready), name="basic-memory-mcp")
         try:

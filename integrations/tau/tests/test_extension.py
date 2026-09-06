@@ -8,13 +8,14 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from mcp.types import CallToolResult, ImageContent, TextContent
-from pydantic import ValidationError
+from pydantic import JsonValue, ValidationError
 from tau.bridge import McpConnection, Settings, discover_sync, load_settings
 from tau.extension import MemoryLifecycle, make_tool, tool_result
 from tau_agent.events import MessageEndEvent
 from tau_agent.messages import AssistantMessage, ThinkingContent, UserMessage
 from tau_agent.messages import TextContent as TauText
-from tau_coding.events import CompactionEndEvent
+from tau_agent.session.entries import CustomEntry, MessageEntry
+from tau_coding.events import CompactionStartEvent
 from tau_coding.extensions import ExtensionAPI, ExtensionContext, ExtensionRuntime
 from tau_coding.extensions.runtime import BoundSession
 from tau_coding.resources import TauResourcePaths
@@ -46,7 +47,14 @@ def test_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
 async def test_sync_discovery_inside_running_loop_and_persistent_calls() -> None:
     cfg = settings()
     tools = discover_sync(cfg)
-    assert [t.name for t in tools] == ["write_note", "recent_activity", "extra_tool"]
+    assert [t.name for t in tools] == [
+        "write_note",
+        "recent_activity",
+        "extra_tool",
+        "read_note",
+        "search_notes",
+        "build_context",
+    ]
     connection = McpConnection(cfg)
     await connection.start()
     try:
@@ -122,20 +130,21 @@ async def test_real_tau_loader_recall_compaction_and_shutdown(
             TauResourcePaths(root=tmp_path), extra_paths=[ROOT], include_resource_dirs=False
         )
         assert not runtime.diagnostics
-        assert len(runtime.compose_tools([])) == 3
+        assert len(runtime.compose_tools([])) == 6
         session = MagicMock(spec=BoundSession)
         session.is_running = False
         session.session_id = "session-1"
+        session.cwd = tmp_path
+        session.active_branch_entries = ()
         runtime.bind(session)
         await runtime.emit_session_start(reason)
         assert not runtime.diagnostics
-        session.queue_follow_up_message.assert_called_once()
-        recalled = session.queue_follow_up_message.call_args.args[0]
+        session.append_context_message.assert_awaited_once()
+        recalled = session.append_context_message.call_args.args[0]
         assert "personal/notes" in recalled
         assert "untrusted reference" in recalled
-        await runtime.emit_event(CompactionEndEvent(reason="overflow"))
-        assert session.queue_follow_up_message.call_count == 2
-        assert "Write a durable" in session.queue_follow_up_message.call_args.args[0]
+        await runtime.emit_event(CompactionStartEvent(reason="overflow"))
+        assert session.queue_follow_up_message.call_count == 0  # No queued checkpoint turn.
         await runtime.emit_session_shutdown("reload")
         with pytest.raises(RuntimeError, match="disconnected"):
             await runtime.compose_tools([])[0].execute("id", {})
@@ -145,21 +154,35 @@ async def test_real_tau_loader_recall_compaction_and_shutdown(
 async def test_capture_controls_replay_and_failure() -> None:
     api = MagicMock(spec=ExtensionAPI)
     connection = MagicMock(spec=McpConnection)
-    connection.call = AsyncMock(
-        return_value=CallToolResult(
+
+    async def call(name: str, arguments: dict[str, JsonValue]) -> CallToolResult:
+        return CallToolResult(
             content=[],
-            structured_content={"result": {"file_path": "tau/message.md", "action": "created"}},
+            structured_content=(
+                {"results": []}
+                if name == "search_notes"
+                else {"result": {"file_path": "tau/message.md", "action": "created"}}
+            ),
         )
-    )
+
+    connection.call = AsyncMock(side_effect=call)
     context = MagicMock(spec=ExtensionContext)
     context.session_id = "session-1"
+    context.cwd = Path("/project")
+    context.branch_entries = []
+
+    async def append(namespace: str, data: dict[str, JsonValue]) -> None:
+        context.branch_entries.append(CustomEntry(namespace=namespace, data=data))
+
+    api.append_entry = AsyncMock(side_effect=append)
     lifecycle = MemoryLifecycle(
         api, settings(project="personal/notes", capture_transcript=True), connection
     )
     event = MessageEndEvent(message=UserMessage(content="Remember the decision", timestamp=123))
+    context.branch_entries.append(MessageEntry(message=event.message))
     await lifecycle.capture(event, context)
     await lifecycle.capture(event, context)
-    assert connection.call.await_count == 1
+    assert connection.call.await_count == 2
     arguments = connection.call.call_args.args[1]
     assert arguments["overwrite"] is False
     assert arguments["project"] == "personal/notes"
@@ -170,11 +193,13 @@ async def test_capture_controls_replay_and_failure() -> None:
             stop_reason="stop",
         )
     )
+    context.branch_entries.append(MessageEntry(message=assistant.message))
     await lifecycle.capture(assistant, context)
     assert "PRIVATE" not in json.dumps(connection.call.call_args.args)
     assert "Public response" in json.dumps(connection.call.call_args.args)
     connection.call.side_effect = RuntimeError("secret server details")
     failed = MessageEndEvent(message=UserMessage(content="new message"))
+    context.branch_entries.append(MessageEntry(message=failed.message))
     await lifecycle.capture(failed, context)
     assert lifecycle.last_error is not None
     assert "secret server details" not in str(api.notify.call_args)
@@ -191,9 +216,13 @@ async def test_failed_or_disabled_compaction_never_requests_write() -> None:
     context = MagicMock(spec=ExtensionContext)
     connection = MagicMock(spec=McpConnection)
     lifecycle = MemoryLifecycle(api, settings(project="notes"), connection)
-    await lifecycle.compacted(CompactionEndEvent(reason="overflow", aborted=True), context)
+    lifecycle.checkpoint = AsyncMock()
+    await lifecycle.compacting(object(), context)
+    lifecycle.checkpoint.assert_not_called()
     disabled = MemoryLifecycle(
         api, settings(project="notes", checkpoint_on_compact=False), connection
     )
-    await disabled.compacted(CompactionEndEvent(reason="overflow"), context)
+    disabled.checkpoint = AsyncMock()
+    await disabled.compacting(CompactionStartEvent(reason="overflow"), context)
+    disabled.checkpoint.assert_not_called()
     api.send_custom_message.assert_not_called()
