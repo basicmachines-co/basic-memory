@@ -10,6 +10,7 @@ spellings remain part of the same logical population.
 from collections.abc import Generator
 from pathlib import Path
 from textwrap import dedent
+from typing import override
 
 import pytest
 from httpx import AsyncClient
@@ -1267,6 +1268,7 @@ class RecordingValidationObserver(SchemaValidationObserver):
     def __init__(self) -> None:
         self.calls: list[tuple[str, tuple[ValidatedNoteOutcome, ...]]] = []
 
+    @override
     async def on_notes_validated(
         self,
         *,
