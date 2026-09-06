@@ -1020,8 +1020,10 @@ class EntityService(BaseService[EntityModel]):
             # 6. Prepare database updates
             updates = {"file_path": destination_path}
 
-            # 7. Update permalink if configured or repair a legacy null permalink.
-            if app_config.update_permalinks_on_move or old_permalink is None:
+            # Non-Markdown files have no permalink; moving them must preserve their bytes.
+            if entity.content_type == "text/markdown" and (
+                app_config.update_permalinks_on_move or old_permalink is None
+            ):
                 # Generate new permalink from destination path
                 new_permalink = await self.resolve_permalink(destination_path)
 
