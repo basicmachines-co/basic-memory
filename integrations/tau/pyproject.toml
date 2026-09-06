@@ -1,0 +1,24 @@
+[project]
+name = "basic-memory-tau"
+version = "0.1.0"
+description = "Basic Memory continuity and MCP tools for Tau"
+requires-python = ">=3.13"
+dependencies = ["tau-ai==0.4.1", "mcp>=2,<3"]
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=1", "ruff>=0.12", "ty"]
+
+[tool.uv]
+package = false
+prerelease = "allow"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.tau]
+extensions = ["extension.py"]

@@ -609,14 +609,14 @@ check: lint format typecheck
 # Run all code quality checks and all test suites, including semantic benchmarks
 check-all: lint format typecheck test test-semantic
 
-# Validate every consolidated agent package (Claude Code, Codex, skills, Hermes, OpenClaw)
-package-check: package-check-claude-code package-check-codex package-check-skills package-check-hermes package-check-openclaw
+# Validate every consolidated agent package (Claude Code, Codex, skills, Hermes, OpenClaw, Tau)
+package-check: package-check-claude-code package-check-codex package-check-skills package-check-hermes package-check-openclaw package-check-tau
 
 # Alias for plugin/package validation during consolidation work
 plugins-check: package-check
 
 # Validate the host-native agent harnesses
-agent-harness-check: package-check-claude-code package-check-hermes package-check-openclaw
+agent-harness-check: package-check-claude-code package-check-hermes package-check-openclaw package-check-tau
 
 # Claude Code plugin: manifests, bundled skills, bundled agent, and strict plugin validation
 package-check-claude-code:
@@ -638,6 +638,10 @@ package-check-hermes:
 package-check-openclaw:
     just --justfile integrations/openclaw/justfile --working-directory integrations/openclaw install
     just --justfile integrations/openclaw/justfile --working-directory integrations/openclaw release-check
+
+# Tau extension: real MCP transport, runtime loading, and lifecycle checks
+package-check-tau:
+    just --justfile integrations/tau/justfile --working-directory integrations/tau check
 
 # Generate Alembic migration with descriptive message
 migration message:

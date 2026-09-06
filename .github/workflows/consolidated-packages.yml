@@ -97,6 +97,16 @@ jobs:
       - name: Validate manifest and run unit tests
         run: just check
 
+  tau:
+    name: Tau extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: extractions/setup-just@v4
+      - uses: astral-sh/setup-uv@v3
+      - name: Verify Tau extension
+        run: just package-check-tau
+
   openclaw:
     name: OpenClaw package
     permissions:
