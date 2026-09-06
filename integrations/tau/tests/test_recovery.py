@@ -226,14 +226,17 @@ async def test_orientation_reads_topic_and_respects_budget() -> None:
     lifecycle, context, api = boundary()
     lifecycle.settings = Settings(project="notes", recall_chars=100)
     lifecycle.search = AsyncMock(return_value=SearchPage(results=[SearchHit(file_path="cwd.md")]))
-    lifecycle.read = AsyncMock(side_effect=lambda path: Note(file_path=path, content="x" * 200))
+    lifecycle.read = AsyncMock(
+        side_effect=lambda path, *, project=None: Note(file_path=path, content="x" * 200)
+    )
     lifecycle.connection.call = AsyncMock(
         return_value=CallToolResult(
             content=[], structured_content={"results": [{"file_path": "topic.md"}]}
         )
     )
     await lifecycle.orient(context, "topic")
-    assert lifecycle.read.await_count == 2
+    assert lifecycle.read.await_count == 1
+    lifecycle.connection.call.assert_not_called()
     assert "Recall truncated" in api.append_message.call_args.args[0]
 
 

@@ -2,13 +2,41 @@
 
 Issue: https://github.com/basicmachines-co/basic-memory/issues/1487
 Integration: https://github.com/basicmachines-co/basic-memory/pull/1489
-Required host work: https://github.com/huggingface/tau/pull/683
+Required host work: https://github.com/huggingface/tau/pull/687
 
 ## Product contract
 
 A fresh or compacted session recovers the objective, decisions, unfinished work,
 verified findings, and next action through the shared Basic Memory graph. Full
 MCP tool access supports that loop; it is not a substitute for it.
+
+## Shared Basic Memory contract
+
+`knowledge.py` models general/coding profiles at the configuration boundary and
+collects Git/PR metadata into a small frozen value. The lifecycle selects an
+explicit user-approved checkout profile; it does not discover write authority
+from repository files. The general profile remains backward compatible with
+existing `project` and capture controls. Coding profiles carry their own explicit
+write project and read-only sources. Global lifecycle flags still govern both.
+
+General snapshots use `session`; coding snapshots use `coding_session` with
+required queryable Git identity. Canonical schemas live in
+`integrations/shared/schemas`, with checked copies in each host package. Tau uses
+the same schema categories and repository queries as the hook-backed integrations,
+without importing the CLI or executing `bm hook`. Setup offers missing schemas
+with consent; it does not overwrite user knowledge or customized definitions.
+
+Repository identity, not cwd, scopes coding history across checkouts. Active tasks
+and open decisions remain project knowledge; shared-project reads carry explicit
+read-only labels. Broad coding-session topic/feed queries are excluded so another
+repository's checkpoint cannot bypass the scope. Receipt recovery still uses
+immutable source identity, independently of retrieval conventions.
+
+Git metadata is required only for a new coding checkpoint; reconciliation never
+needs current Git state. Optional GitHub PR lookup does not make local coding
+require authentication. Subprocess cancellation retires the metadata reader before
+returning. No detached writer, additional lifecycle telemetry store, or framework
+of host adapters is introduced.
 
 ## Host dependencies, implemented separately
 
@@ -17,7 +45,7 @@ custom messages run as follow-ups, which can cause an extra model response even
 with trigger_turn=False. Its public context cannot read persisted custom receipts
 or request a tool-free summary through the active provider.
 
-Tau #683 supplies:
+Tau #687 supplies:
 
 1. Awaited extension start/end notifications around manual, detailed manual,
    threshold and overflow compaction. No-op checks emit nothing. Failure and
@@ -31,7 +59,9 @@ Tau #683 supplies:
    without queuing another turn.
 5. Shutdown/start notifications around in-place tree branches on the same runtime.
 
-The package pins the tested fork SHA until these interfaces are released upstream.
+The package pins the Basic Machines fork at `d8216af` until these interfaces are
+released upstream. That revision deep-copies branch entries once at the session
+boundary; the extension facade returns the isolated snapshot without recopying it.
 It does not modify installed Tau or pretend #506 is fully closed: that issue's
 threshold/manual frontend-iterator/TUI-status work is separate from extension
 callback delivery. Persisted-entry notifications are not required; branch snapshots
@@ -67,10 +97,13 @@ separate snapshots linked to the prior active-branch checkpoint. Transcript note
 are distinct, opt-in, immutable segments; handoffs link their captured sources.
 
 Startup reads confirmed active-branch checkpoints before broader scoped results,
-expands the checkpoint's graph neighborhood, and includes shared recent activity.
+expands the checkpoint's graph neighborhood, then retrieves active tasks, open
+decisions, explicitly approved shared sources, and bounded topic matches. General
+profiles also include broader recent activity; coding profiles exclude that
+unscoped feed.
 Filter-only search supplies an epoch after_date to obtain BM's newest-first order
-without excluding long-idle modern sessions. Topic search also retrieves shared
-coding_session/task/decision notes. The inserted brief is bounded and labeled as
+without excluding long-idle modern sessions. Coding-session retrieval is
+repository-scoped; topic queries retrieve tasks and decisions only. The inserted brief is bounded and labeled as
 untrusted historical reference, not current repository facts.
 
 ## Failure and privacy policy
@@ -95,3 +128,10 @@ suite proves file writes, reads, searches, transcripts, checkpoints, compaction
 reference restoration, reload and resume in temporary local projects. Synthesis
 uses deterministic providers, so these tests do not claim live-model quality or
 paid/cloud account end-to-end verification.
+
+## Follow-up boundary
+
+A Tau sidebar can expose the active destination, recall sources, confirmed
+checkpoint, and unfinished tasks through the supported extension UI. That is a
+separate change after this contract is verified; a custom frontend is not required
+for correct memory, and this package makes no sidebar/frontend behavior claims.

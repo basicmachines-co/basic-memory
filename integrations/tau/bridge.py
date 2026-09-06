@@ -12,26 +12,41 @@ from pathlib import Path
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from mcp.types import CallToolResult, PaginatedRequestParams, Tool
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, StrictBool
+from pydantic import Field, JsonValue, StrictBool, model_validator
+
+from .knowledge import CodingProfile, GeneralProfile, SessionProfile
 
 
-class Settings(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+class Settings(GeneralProfile):
+    repositories: list[CodingProfile] = Field(default_factory=list)
 
     command: str = Field(default="bm", min_length=1)
     args: list[str] = Field(default_factory=lambda: ["mcp", "--transport", "stdio"])
-    project: str | None = Field(default=None, min_length=1)
     auto_recall: StrictBool = True
     checkpoint_on_compact: StrictBool = True
     capture_knowledge: StrictBool = True
     summarize_on_shutdown: StrictBool = True
-    checkpoint_folder: str = "tau/checkpoints"
     summary_timeout_seconds: float = Field(default=60, gt=0, le=300)
     summary_chunk_chars: int = Field(default=16000, ge=1000, le=50000)
     capture_transcript: StrictBool = False
     capture_folder: str = "tau/transcripts"
     timeout_seconds: float = Field(default=30, gt=0, le=300)
     recall_chars: int = Field(default=12000, ge=100, le=50000)
+
+    @model_validator(mode="after")
+    def unique_repository_roots(self) -> Settings:
+        roots = [profile.root for profile in self.repositories]
+        if len(set(roots)) != len(roots):
+            raise ValueError("repository roots must be unique")
+        return self
+
+    def profile_for(self, cwd: Path | None) -> SessionProfile:
+        if cwd is None:
+            return self
+        directory = cwd.resolve()
+        matches = [p for p in self.repositories if directory.is_relative_to(p.root)]
+        # Explicit user profiles are scoped by checkout; the closest wins for nested roots.
+        return max(matches, key=lambda p: len(p.root.parts)) if matches else self
 
 
 def load_settings() -> Settings:
