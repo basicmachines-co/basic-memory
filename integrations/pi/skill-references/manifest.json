@@ -1,0 +1,22 @@
+[
+  {
+    "dir": "memory-notes",
+    "name": "memory-notes",
+    "description": "How to write well-structured Basic Memory notes: frontmatter, observations with semantic categories, relations with wiki-links, and best practices for building a rich knowledge graph. Use when creating or improving notes."
+  },
+  {
+    "dir": "memory-capture",
+    "name": "memory-capture",
+    "description": "Capture the current state of a working thread or conversation into a single coherent Basic Memory note — synthesize where it landed, don't append a log. On re-capture, rewrite the same note in place instead of duplicating. Use mid-thread or end-of-thread when decisions, insights, or context are worth preserving."
+  },
+  {
+    "dir": "memory-continue",
+    "name": "memory-continue",
+    "description": "Resume prior work by rebuilding context from the Basic Memory knowledge graph — pick up where you left off using memory:// URLs, recent activity, and search. Use when starting a session or when the user says 'continue with...', 'back to...', or 'where were we?'"
+  },
+  {
+    "dir": "memory-tasks",
+    "name": "memory-tasks",
+    "description": "Task management via Basic Memory schemas: create, track, and resume structured tasks that survive context compaction. Uses BM's schema system for uniform notes queryable through the knowledge graph."
+  }
+]

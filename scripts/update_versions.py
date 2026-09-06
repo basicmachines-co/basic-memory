@@ -96,6 +96,13 @@ def set_package_version(data: dict[str, Any], version: str) -> None:
     data["version"] = version
 
 
+def set_npm_lock_version(data: dict[str, Any], version: str) -> None:
+    data["version"] = version
+    root_package = data.get("packages", {}).get("")
+    if isinstance(root_package, dict):
+        root_package["version"] = version
+
+
 # Claude Code uv hook scripts whose released dependency floor moves with each
 # package release. Codex hook refs are managed by `just set-codex-hook-version`.
 HOOK_SCRIPTS = (
@@ -107,7 +114,7 @@ HOOK_SCRIPTS = (
 # Version scopes. The two groups map to the two distribution tracks:
 #   core     — the Python package and its MCP registry manifest
 #   packages — the host-native agent artifacts (Claude Code plugin + marketplaces,
-#              Codex plugin, Hermes, OpenClaw). These are the "plugin/agent artifacts."
+#              Codex plugin, Hermes, OpenClaw, Pi). These are the "plugin/agent artifacts."
 # `all` writes both. Lockstep releases use `all`; targeted fixes can use one group.
 SCOPES = ("all", "core", "packages")
 
@@ -174,6 +181,17 @@ def _update_packages(version: str, *, dry_run: bool) -> None:
         lambda data: set_package_version(data, npm_package_version(version)),
         dry_run=dry_run,
     )
+    pi_version = npm_package_version(version)
+    update_json(
+        "integrations/pi/package.json",
+        lambda data: set_package_version(data, pi_version),
+        dry_run=dry_run,
+    )
+    update_json(
+        "integrations/pi/package-lock.json",
+        lambda data: set_npm_lock_version(data, pi_version),
+        dry_run=dry_run,
+    )
 
 
 def update_versions(raw_version: str, *, scope: str = "all", dry_run: bool) -> None:
@@ -197,7 +215,7 @@ def main() -> None:
         choices=SCOPES,
         default="all",
         help="Which artifacts to update: all (default), core (Python + server.json), "
-        "or packages (Claude Code plugin, Codex plugin, marketplaces, Hermes, OpenClaw)",
+        "or packages (Claude Code plugin, Codex plugin, marketplaces, Hermes, OpenClaw, Pi)",
     )
     parser.add_argument("--dry-run", action="store_true", help="Preview changes without writing")
     args = parser.parse_args()
