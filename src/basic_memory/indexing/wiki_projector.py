@@ -8,6 +8,7 @@ from enum import StrEnum
 from hashlib import sha256
 import json
 from pathlib import PurePosixPath, PureWindowsPath
+import re
 import unicodedata
 
 from basic_memory.runtime.project_partition import RuntimeProjectNoteOperation
@@ -705,10 +706,19 @@ def _render_log_entry(change: WikiSourceChange) -> str:
         case WikiChangeOperation.moved:
             if change.previous_path is None:
                 raise ValueError("Moved Wiki change requires previous_path")
-            description = f"Moved `{change.previous_path}` to {current_note}"
+            description = f"Moved {_render_path_text(change.previous_path)} to {current_note}"
         case WikiChangeOperation.deleted:
-            description = f"Deleted `{change.path}`"
+            description = f"Deleted {_render_path_text(change.path)}"
     return f"- {timestamp} — {description}"
+
+
+def _render_path_text(path: str) -> str:
+    """Render an accepted location literally, including embedded backticks."""
+    longest_run = max((len(run) for run in re.findall(r"`+", path)), default=0)
+    delimiter = "`" * (longest_run + 1)
+    # Padding keeps source backticks separate from the enclosing delimiter;
+    # CommonMark removes these surrounding spaces from the rendered code span.
+    return f"{delimiter} {path} {delimiter}" if longest_run else f"`{path}`"
 
 
 def _render_document(
@@ -759,14 +769,12 @@ def _normalize_note_path(path: str) -> str:
         or PurePosixPath(normalized).suffix.lower() not in RUNTIME_MARKDOWN_FILE_SUFFIXES
     ):
         raise ValueError(f"Wiki note path must be project-relative Markdown: {path}")
-    if "::" in normalized or any(character in normalized for character in "\r\n[]|`<>"):
-        raise ValueError(f"Wiki note path contains unsupported Markdown delimiters: {path}")
-    _validate_portable_path_components(normalized, path_kind="note path", source=path)
-    _reject_reserved_wiki_directory_components(
-        PurePosixPath(normalized).parts[:-1],
-        path_kind="note path",
-        source=path,
-    )
+    # The adapter supplies accepted metadata and canonical link identities. The
+    # source basename is only a location: it is never a generated filename or a
+    # wikilink target. Only its parent becomes an index/log output scope.
+    if any(unicodedata.category(character) == "Cc" for character in normalized):
+        raise ValueError(f"Wiki note path contains a control character: {path}")
+    _normalize_scope(_parent_scope(normalized))
     return normalized
 
 
@@ -863,12 +871,12 @@ def _escape_generated_markdown_text(value: str) -> str:
 
 
 def _require_unique_paths(
-    values: tuple[object, ...],
+    values: tuple[WikiSourceNote | WikiReservedDocument, ...],
     *,
     label: str,
     case_sensitive: bool = True,
 ) -> None:
-    paths = [getattr(value, "path") for value in values]
+    paths = [value.path for value in values]
     if not case_sensitive:
         paths = [_portable_path_key(path) for path in paths]
     if len(paths) != len(set(paths)):

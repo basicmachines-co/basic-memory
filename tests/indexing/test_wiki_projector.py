@@ -6,6 +6,8 @@ from hashlib import sha256
 import json
 from pathlib import Path
 
+from markdown_it import MarkdownIt
+
 import pytest
 
 from basic_memory.indexing.wiki_projector import (
@@ -191,7 +193,7 @@ def test_source_note_rejects_missing_metadata() -> None:
     ),
 )
 def test_source_note_rejects_nonportable_path_components(path: str) -> None:
-    with pytest.raises(ValueError, match="Wiki (path|note path)"):
+    with pytest.raises(ValueError, match="Wiki (path|note path|scope)"):
         WikiSourceNote(
             path=path,
             permalink="note",
@@ -1195,24 +1197,87 @@ def test_noncanonical_paths_are_rejected_at_the_contract_boundary(path: str) -> 
 @pytest.mark.parametrize(
     "path",
     (
-        "notes/closing].md",
-        "notes/opening[.md",
+        "notes/Session [Image 1].md",
+        "notes/Topic: Details.md",
         "notes/alias|target.md",
         "notes/code`span.md",
-        "notes/html<tag.md",
-        "notes/line\nbreak.md",
+        "notes/code``span.md",
+        "notes/html<tag>.md",
         "notes/cross::project.md",
+        "notes/CON.md",
+        'notes/question?star*quote".md',
     ),
 )
-def test_wikilink_delimiters_are_rejected_at_the_contract_boundary(path: str) -> None:
-    with pytest.raises(ValueError, match="unsupported Markdown delimiters"):
-        WikiSourceNote(
+@pytest.mark.parametrize(
+    "reason", [WikiProjectionReason.manual_rebuild, WikiProjectionReason.accepted_note]
+)
+def test_projection_uses_accepted_metadata_for_punctuated_filenames(
+    path: str, reason: WikiProjectionReason
+) -> None:
+    note = WikiSourceNote(
+        path=path,
+        permalink="stable-address",
+        title="Accepted title",
+        note_type="Note",
+        checksum="sum",
+    )
+    changes = tuple(
+        WikiSourceChange(
+            partition_position=position,
+            operation=operation,
             path=path,
-            permalink="unsupported",
-            title="Unsupported",
-            note_type="Note",
-            checksum="checksum",
+            previous_path=path if operation is WikiChangeOperation.moved else None,
+            permalink=note.permalink,
+            title=note.title,
+            accepted_at=ACCEPTED_AT,
+            materialized=True,
+            source="web",
         )
+        for position, operation in enumerate(WikiChangeOperation, start=1)
+    )
+    snapshot = replace(
+        _snapshot(),
+        notes=(note,),
+        changes=changes,
+        source_partition_position=len(changes),
+        current_output_watermark=0,
+    )
+    request = _request(position=len(changes), reason=reason, scopes=affected_wiki_scopes(path))
+
+    plan = plan_wiki_projection(request, snapshot)
+    rendered = {write.path: write.content.decode() for write in plan.writes}
+
+    assert note.path == path
+    assert plan.result.state is WikiProjectionState.current
+    assert set(rendered) == {"index.md", "log.md", "notes/index.md", "notes/log.md"}
+    assert "[[notes/index|Notes]]" in rendered["index.md"]
+    assert "[[stable-address|Accepted title]]" in rendered["notes/index.md"]
+    assert "Created [[stable-address|Accepted title]]" in rendered["notes/log.md"]
+    assert "Updated [[stable-address|Accepted title]]" in rendered["notes/log.md"]
+    # Historical locations are display text, never link targets or Markdown syntax.
+    tokens = MarkdownIt().parse(rendered["notes/log.md"].split("\n---\n", 1)[1])
+    code_paths = [
+        child.content
+        for token in tokens
+        for child in token.children or []
+        if child.type == "code_inline"
+    ]
+    assert code_paths == [path, path]
+    replay = plan_wiki_projection(
+        request,
+        replace(
+            snapshot,
+            current_output_watermark=len(changes),
+            reserved_documents=tuple(_reserved(write.path, write.content) for write in plan.writes),
+        ),
+    )
+    assert replay.writes == ()
+
+
+@pytest.mark.parametrize("path", ("notes/line\nbreak.md", "notes/null\x00byte.md"))
+def test_source_paths_reject_control_characters(path: str) -> None:
+    with pytest.raises(ValueError, match="control character"):
+        WikiSourceNote(path=path, permalink="note", title="Note", note_type="Note", checksum="sum")
 
 
 @pytest.mark.parametrize("path", ("", "note.txt"))

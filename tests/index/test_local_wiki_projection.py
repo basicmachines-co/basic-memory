@@ -427,3 +427,38 @@ async def test_local_wiki_requires_existing_project_directory(
 
     with pytest.raises(ValueError, match="Local project directory does not exist"):
         await inspect_local_wiki_projection(test_project, session_maker=session_maker)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "Session [Image 1].md",
+        pytest.param(
+            "Topic: Details.md",
+            marks=pytest.mark.skipif(
+                sys.platform == "win32", reason="Windows cannot store colons in source filenames"
+            ),
+        ),
+    ],
+)
+async def test_local_wiki_projects_existing_filename_without_rewriting_source(
+    config_home,
+    session_maker,
+    test_project,
+    filename,
+):
+    note = config_home / "notes" / filename
+    note.parent.mkdir()
+    content = b"---\ntitle: Accepted Title\npermalink: stable-address\n---\n\n# Body\n"
+    note.write_bytes(content)
+
+    inspection = await inspect_local_wiki_projection(test_project, session_maker=session_maker)
+    await apply_local_wiki_projection(inspection, session_maker=session_maker)
+
+    assert note.read_bytes() == content
+    assert "[[stable-address|Accepted Title]]" in (note.parent / "index.md").read_text()
+    assert "[[notes/index|Notes]]" in (config_home / "index.md").read_text()
+    replay = await inspect_local_wiki_projection(test_project, session_maker=session_maker)
+    assert replay.state is LocalWikiState.current
+    assert replay.plan.writes == ()
