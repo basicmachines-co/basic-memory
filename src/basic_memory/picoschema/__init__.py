@@ -10,7 +10,12 @@ from basic_memory.picoschema.parser import (
     parse_picoschema,
     parse_schema_note,
 )
-from basic_memory.picoschema.resolver import resolve_schema
+from basic_memory.picoschema.resolver import (
+    ResolvedSchema,
+    SchemaCandidate,
+    resolve_schema,
+    resolve_schema_with_source,
+)
 from basic_memory.picoschema.validator import (
     FieldResult,
     ValidationResult,
@@ -39,6 +44,9 @@ __all__ = [
     "parse_schema_note",
     # Resolver
     "resolve_schema",
+    "resolve_schema_with_source",
+    "SchemaCandidate",
+    "ResolvedSchema",
     # Validator
     "FieldResult",
     "ValidationResult",

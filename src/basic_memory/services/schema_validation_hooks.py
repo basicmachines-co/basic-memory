@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,20 +25,23 @@ class ValidatedNoteOutcome:
     title. What is left is what an observer can legitimately act on -- which
     schema, and whether the note satisfied it.
 
-    The two schema fields answer different questions and neither replaces the
-    other. `schema_entity` is the note type the schema covers, read from the
-    schema's own `entity:` frontmatter, so two schema notes that both cover
-    `person` report the same value. `schema_reference` is what the validated
-    note pointed at -- the string in its `schema:` frontmatter -- and is None
-    when the schema was declared inline and there was nothing to point at. An
-    observer that needs to tell two schemas for one entity apart needs the
-    reference; it is the reference as written and matched, not a stable id.
+    `schema_external_id` identifies the exact schema used by the resolver. For
+    an inline schema it is the validated note's id; for a named schema it is
+    the selected schema note's id. Observers need not repeat resolution, even
+    when several schemas cover the same type or an explicit reference misses.
+
+    The older descriptive fields remain for existing observers. `schema_entity`
+    is the covered type, and `schema_reference` is the reference as authored,
+    which may have failed before resolution fell through to the note type.
+    Neither descriptive field is a stable schema identity.
     """
 
     note_external_id: str
     schema_entity: str
     schema_reference: str | None
     passed: bool
+    schema_external_id: str
+    schema_kind: Literal["inline", "named"]
 
 
 class SchemaValidationObserver:
