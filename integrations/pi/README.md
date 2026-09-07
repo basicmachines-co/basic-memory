@@ -84,10 +84,13 @@ pi install npm:pi-mcp-adapter
 Then set:
 
 ```json
-{ "transport": "mcp" }
+{
+  "transport": "mcp",
+  "project": "my-project"
+}
 ```
 
-On `session_start`, the extension registers a session-scoped Basic Memory MCP server through the adapter's public runtime registration event. If the adapter is not installed, Pi remains usable and the extension reports the missing dependency.
+On `session_start`, the extension registers a session-scoped Basic Memory MCP server through the adapter's public runtime registration event. MCP mode requires an explicit project mapping so model-facing tools cannot fall through to an unrelated global default project. If the adapter is not installed, Pi remains usable and the extension reports the missing dependency.
 
 ## Basic Memory skills
 
