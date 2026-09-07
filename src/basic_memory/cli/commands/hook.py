@@ -482,7 +482,7 @@ def load_pi_settings(directory: Path) -> tuple[dict[str, Any], bool]:
         ("recall_timeframe", "recallTimeframe"),
         ("captureEvents", "captureEvents"),
     ):
-        if source in block:
+        if source in block and (source == target or target not in block):
             merged[target] = block[source]
     return merged, True
 
@@ -1049,7 +1049,7 @@ def _checkpoint_note(
     user_messages = [text for role, text in conversation if role == "user"]
     opening = user_messages[0]
     recent_thread = (
-        [f"**{role}:** {_clip(message, 200)}" for role, message in conversation[-6:]]
+        [f"**{role}:** {message}" for role, message in conversation]
         if event.source == "pi"
         else [_clip(message, 200) for message in user_messages[-3:]]
     )

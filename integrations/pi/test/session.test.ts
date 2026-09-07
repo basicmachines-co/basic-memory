@@ -63,16 +63,15 @@ test("buildCaptureDraft reuses a stable session title when no title is provided"
 test("buildCaptureDraft keeps the full thread in overwritten checkpoints", () => {
   const turns = Array.from({ length: 10 }, (_, index) => ({
     role: (index % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
-    text: `turn ${index}`,
+    text: index === 9 ? `${"x".repeat(220)} durable suffix` : `turn ${index}`,
   }));
 
   const draft = buildCaptureDraft({ turns, cwd: "/repo", sessionId: "s1", branchId: "b1" });
 
   assert.ok(draft);
   assert.match(draft.content, /turn 0/);
-  assert.match(draft.content, /turn 9/);
+  assert.match(draft.content, /durable suffix/);
 });
-
 
 test("buildCaptureDraft keeps branch identity when session IDs are long", () => {
   const common = {

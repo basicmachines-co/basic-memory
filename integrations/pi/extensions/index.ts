@@ -20,6 +20,12 @@ interface SearchResponse {
 const MCP_RUNTIME_REGISTER_EVENT = "pi-mcp-adapter:runtime-register:v1";
 const MCP_RUNTIME_REGISTER_VERSION = 1;
 const ENTRY_TYPE = "basic-memory-pi";
+const SETUP_GUIDANCE = [
+  "# Basic Memory",
+  "",
+  "_This Pi workspace is not configured for Basic Memory yet. Run ",
+  "`/skill:basic-memory-pi-setup` to choose an explicit project before recall or capture._",
+].join("");
 
 function modelLabel(ctx: ExtensionContext): string | undefined {
   const model = ctx.model as { provider?: string; id?: string } | undefined;
@@ -301,7 +307,11 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
   }
 
   pi.on("session_start", async (_event, ctx) => {
-    await disposeCurrentMcp();
+    try {
+      await disposeCurrentMcp();
+    } catch (error) {
+      notify(ctx, `Basic Memory MCP cleanup failed: ${formatError(error)}`, "warning");
+    }
     recalledThisSession = false;
     try {
       cfg = await loadConfig(ctx.cwd);
@@ -334,7 +344,9 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
     try {
       const content = cfg.useHookFlow
         ? await runHook(cfg, ctx, "session-start", "startup", ctx.signal)
-        : await buildRecall(cfg, event.prompt, ctx.signal);
+        : cfg.project || cfg.projectId
+          ? await buildRecall(cfg, event.prompt, ctx.signal)
+          : SETUP_GUIDANCE;
       if (!content) return;
       return { message: { customType: ENTRY_TYPE, content, display: true } };
     } catch (error) {
@@ -380,6 +392,10 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
   pi.registerCommand("bm-status", {
     description: "Show Basic Memory Pi package status",
     handler: async (_args, ctx) => {
+      if (configError) {
+        notify(ctx, configError, "error");
+        return;
+      }
       const lines = [
         `transport: ${cfg.transport}`,
         `bm: ${(cfg.bmCommand ?? [cfg.bmPath]).join(" ")}`,

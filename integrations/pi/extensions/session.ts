@@ -123,7 +123,7 @@ export function buildCaptureDraft(params: {
     `- Opening request: ${clip(openedWith, 300)}`,
     "",
     "## Thread to date",
-    ...thread.map((turn) => `- **${turn.role}:** ${clip(turn.text, 220)}`),
+    ...thread.map((turn) => `- **${turn.role}:** ${turn.text}`),
     "",
     "## Observations",
     `- [context] Pi session opened with: ${clip(openedWith, 200)}`,

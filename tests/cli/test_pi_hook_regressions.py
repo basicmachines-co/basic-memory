@@ -59,6 +59,31 @@ def test_pi_checkpoint_reuses_identity_and_separates_branches(tmp_path: Path) ->
     assert all(call["project"] == "explicit-project" for call in calls)
 
 
+def test_pi_hook_settings_preserve_canonical_key_precedence(tmp_path: Path) -> None:
+    config = tmp_path / ".pi" / "basic-memory.json"
+    config.parent.mkdir()
+    config.write_text(
+        json.dumps(
+            {
+                "project": "explicit-project",
+                "captureFolder": "canonical-folder",
+                "capture_folder": "alias-folder",
+                "recallTimeframe": "3d",
+                "recall_timeframe": "30d",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        app,
+        ["hook", "status", "--harness", "pi", "--project-dir", str(tmp_path)],
+    )
+
+    assert result.exit_code == 0
+    assert "capture folder: canonical-folder" in result.stdout
+
+
 def test_pi_checkpoint_includes_recent_assistant_turns(tmp_path: Path) -> None:
     config = tmp_path / ".pi" / "basic-memory.json"
     config.parent.mkdir()
@@ -76,6 +101,12 @@ def test_pi_checkpoint_includes_recent_assistant_turns(tmp_path: Path) -> None:
                     "turns": [
                         {"role": "user", "text": "Implement the installer"},
                         {"role": "assistant", "text": "Found the Windows path separator issue"},
+                        {"role": "user", "text": "Preserve the early blocker"},
+                        {"role": "assistant", "text": "x" * 220 + " durable suffix"},
+                        {"role": "user", "text": "later user turn"},
+                        {"role": "assistant", "text": "later assistant turn"},
+                        {"role": "user", "text": "final user turn"},
+                        {"role": "assistant", "text": "final assistant turn"},
                     ],
                 }
             ),
@@ -86,6 +117,8 @@ def test_pi_checkpoint_includes_recent_assistant_turns(tmp_path: Path) -> None:
     content = write.await_args.kwargs["content"]
     assert "**user:** Implement the installer" in content
     assert "**assistant:** Found the Windows path separator issue" in content
+    assert "**user:** Preserve the early blocker" in content
+    assert "durable suffix" in content
 
 
 def test_pi_hook_settings_use_parent_workspace_config(tmp_path: Path) -> None:
