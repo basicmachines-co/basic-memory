@@ -2,6 +2,15 @@
 
 Basic Memory for Pi gives Pi durable continuity: capture a working thread, start fresh later, and recall the decision, rationale, blocker, and next step from a real Basic Memory note.
 
+## Install from Basic Memory
+
+```bash
+bm install pi --dry-run
+bm install pi --yes
+```
+
+This copies the packaged Pi resources into `~/.pi/agent/packages/basic-memory` and registers them with `pi install`. Use `--local` to register the package in the current workspace's `.pi/settings.json` instead.
+
 ## Install from a checkout
 
 ```bash
@@ -12,6 +21,7 @@ The package loads:
 
 - `extensions/index.ts` — `/bm-status`, `/bm-recall`, `/bm-capture`, `bm_recall`, and `bm_capture`.
 - `skills/basic-memory-pi/` — Pi-aware guidance for `bm_recall` and `bm_capture`.
+- `skills/basic-memory-pi-setup/` — setup guidance for `.pi/basic-memory.json`.
 - `skill-references/` — bundled canonical Basic Memory references as `REFERENCE.md` files. See [SKILLS.md](./SKILLS.md).
 
 ## Configuration
@@ -23,8 +33,9 @@ Create `.pi/basic-memory.json` in a trusted project:
   "transport": "cli",
   "project": "main",
   "captureFolder": "pi/sessions",
-  "autoRecall": false,
-  "autoCapture": false
+  "useHookFlow": true,
+  "autoRecall": true,
+  "autoCapture": true
 }
 ```
 
@@ -35,8 +46,9 @@ Keys:
 - `project` / `projectId`: explicit Basic Memory routing. `projectId` wins when set.
 - `captureFolder`: folder for Pi session checkpoints, default `pi/sessions`.
 - `recallTimeframe`: search window for recalls, default `7d`.
-- `autoRecall`: inject one bounded recall before the first agent turn, default `false`.
-- `autoCapture`: capture after settled turns, default `false`.
+- `useHookFlow`: use `bm hook --harness pi` for automatic lifecycle recall/capture, default `true`.
+- `autoRecall`: inject one bounded recall before the first agent turn, default `true`.
+- `autoCapture`: capture after settled turns and before compaction, default `true`.
 - `captureMinChars`: minimum session text before auto-capture, default `80`.
 - `mcpServerName`: runtime MCP server name in MCP mode, default `basic-memory`.
 
@@ -68,7 +80,7 @@ On `session_start`, the extension registers a session-scoped Basic Memory MCP se
 
 ## Basic Memory skills
 
-The package exposes `basic-memory-pi` as the active Pi skill. It uses Pi's available `bm_recall` and `bm_capture` tools and keeps canonical Basic Memory skill text as `REFERENCE.md` files rather than active `SKILL.md` files that assume direct MCP tool names are present.
+The package exposes `basic-memory-pi` and `basic-memory-pi-setup` as active Pi skills. They use Pi's available commands/tools and keep canonical Basic Memory skill text as `REFERENCE.md` files rather than active `SKILL.md` files that assume direct MCP tool names are present.
 
 The package bundles this focused continuity reference set from the monorepo's canonical `skills/` source:
 
@@ -84,7 +96,7 @@ Maintainers refresh the bundled references with `npm run fetch-skills`; package 
 | Component | Minimum tested version | Notes |
 | --- | --- | --- |
 | Pi | 0.85.1 | Required extension, package, RPC, and runtime event APIs were verified on this version. |
-| Basic Memory CLI | 0.23.2 | Requires `bm tool write-note/read-note/search-notes` JSON/plain modes and project routing flags. |
+| Basic Memory CLI | package-matched release | Requires `bm hook --harness pi` for default lifecycle automation; set `useHookFlow: false` to use direct `bm tool write-note/read-note/search-notes` JSON/plain modes. |
 | pi-mcp-adapter | 2.32.1 | Required only for `transport: "mcp"`; runtime registration API verified. |
 | Node.js | 22.19.0 | Matches the installed Pi package engine floor used by maintainer checks. |
 
@@ -110,6 +122,8 @@ Model-backed end-to-end runs should use temporary `BASIC_MEMORY_HOME`, `BASIC_ME
 
 ## Privacy defaults
 
-Automatic recall and capture are disabled by default. Use explicit `/bm-recall` and `/bm-capture` first, then opt into automation deliberately in `.pi/basic-memory.json`.
+Automatic recall and capture are enabled by default so a configured project gets continuity immediately. With no explicit `.pi/basic-memory.json` project mapping, recall shows setup guidance and hook-backed capture has no write destination, so it does not silently write to an ambient default project.
 
-Recalled notes are fenced as reference data, not instructions. Captures are synthesized working-thread checkpoints, not raw transcript dumps.
+The package uses the shared `bm hook --harness pi` flow by default so Pi follows the same predictable Basic Memory lifecycle contract as other agent harnesses. Set `"autoRecall": false`, `"autoCapture": false`, or `"useHookFlow": false` to make the behavior quieter.
+
+Recalled notes are fenced as reference data, not instructions. Captures are synthesized working-thread checkpoints under `pi/sessions/`, not raw transcript dumps.

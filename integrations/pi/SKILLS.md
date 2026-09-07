@@ -1,10 +1,11 @@
 # Basic Memory skills in the Pi package
 
-The Pi package exposes one Pi-aware skill and bundles canonical Basic Memory skills as references.
+The Pi package exposes Pi-aware skills and bundles canonical Basic Memory skills as references.
 
-The active Pi skill is:
+The active Pi skills are:
 
 - `basic-memory-pi` — use Pi's `bm_recall` and `bm_capture` tools for durable continuity.
+- `basic-memory-pi-setup` — create a predictable `.pi/basic-memory.json` with explicit project routing, hook flow, and automation defaults.
 
 The package also bundles these canonical Basic Memory references under `skill-references/*/REFERENCE.md`:
 
@@ -29,4 +30,4 @@ Pi also supports loading additional Basic Memory skills directly from the top-le
 }
 ```
 
-Use that direct path only for local development when you want raw canonical Basic Memory tool instructions. The published package keeps those files as references and exposes the Pi-aware skill so model-facing guidance matches Pi's available tool surface.
+Use that direct path only for local development when you want raw canonical Basic Memory tool instructions. The published package keeps those files as references and exposes Pi-aware skills so model-facing guidance matches Pi's available tool surface.

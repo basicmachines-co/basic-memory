@@ -173,6 +173,14 @@ source = "uv-dynamic-versioning"
 "skills/memory-tasks" = "basic_memory/data/tau/skills/memory-tasks"
 "skills/memory-notes" = "basic_memory/data/tau/skills/memory-notes"
 "skills/memory-schema" = "basic_memory/data/tau/skills/memory-schema"
+"integrations/pi/extensions" = "basic_memory/data/pi/package/extensions"
+"integrations/pi/skills" = "basic_memory/data/pi/package/skills"
+"integrations/pi/skill-references" = "basic_memory/data/pi/package/skill-references"
+"integrations/pi/package.json" = "basic_memory/data/pi/package/package.json"
+"integrations/pi/package-lock.json" = "basic_memory/data/pi/package/package-lock.json"
+"integrations/pi/README.md" = "basic_memory/data/pi/package/README.md"
+"integrations/pi/SKILLS.md" = "basic_memory/data/pi/package/SKILLS.md"
+"integrations/pi/LICENSE" = "basic_memory/data/pi/package/LICENSE"
 
 [tool.uv]
 constraint-dependencies = ["fastmcp-slim==4.0.0b1"]
