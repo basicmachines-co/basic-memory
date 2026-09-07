@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 export interface SessionTurn {
   role: "user" | "assistant";
   text: string;
@@ -72,6 +74,21 @@ function frontmatter(metadata: Record<string, unknown>): string {
   return lines.join("\n");
 }
 
+function stableCheckpointTitle(params: {
+  sessionId?: string;
+  branchId?: string;
+  openedWith: string;
+  now: Date;
+}): string {
+  if (params.sessionId && params.branchId) {
+    const identity = createHash("sha256")
+      .update(JSON.stringify([params.sessionId, params.branchId]))
+      .digest("hex");
+    return `Pi session ${identity}`;
+  }
+  return `Pi session ${params.now.toISOString().slice(0, 19).replace("T", " ")} — ${clip(params.openedWith, 48)}`;
+}
+
 export function buildCaptureDraft(params: {
   turns: SessionTurn[];
   cwd: string;
@@ -87,14 +104,12 @@ export function buildCaptureDraft(params: {
   const now = new Date();
   const openedWith = userTurns[0]?.text ?? "Pi session";
   const thread = params.turns;
-  const stableThreadId = [
-    params.sessionId ? clip(params.sessionId, 18) : undefined,
-    params.branchId ? clip(params.branchId, 18) : undefined,
-  ].filter(Boolean).join("/");
-  const stableSessionTitle = stableThreadId
-    ? `Pi session ${stableThreadId} — ${clip(openedWith, 48)}`
-    : `Pi session ${now.toISOString().slice(0, 19).replace("T", " ")} — ${clip(openedWith, 48)}`;
-  const title = params.title?.trim() || stableSessionTitle;
+  const title = params.title?.trim() || stableCheckpointTitle({
+    sessionId: params.sessionId,
+    branchId: params.branchId,
+    openedWith,
+    now,
+  });
 
   const metadata: Record<string, unknown> = {
     title,
