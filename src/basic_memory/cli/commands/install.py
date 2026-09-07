@@ -39,6 +39,55 @@ class InstallFile:
         return "unchanged" if self.previous == self.content else "replace"
 
 
+def _resource_bundle(resource_path: str) -> Path:
+    """Locate unpacked wheel/editable-install resources owned by the distribution."""
+    bundle = distribution("basic-memory").locate_file(resource_path)
+    if not isinstance(bundle, Path):
+        raise InstallError("Host installation requires an unpacked Basic Memory distribution.")
+    return bundle
+
+
+def _ensure_no_home_symlink(target: Path, home: Path) -> None:
+    # User-owned symlinks are not permission to write into their targets.
+    if any(path.is_symlink() for path in (target, *target.parents) if path.is_relative_to(home)):
+        raise InstallError("A destination contains a symlink; resolve it before installing.")
+
+
+def _plan_copy(pairs: list[tuple[Path, Path]], safety_root: Path) -> list[InstallFile]:
+    plan: list[InstallFile] = []
+    for source, target in pairs:
+        _ensure_no_home_symlink(target, safety_root)
+        previous = target.read_bytes() if target.exists() else None
+        plan.append(InstallFile(target, source.read_bytes(), previous))
+    return plan
+
+
+def _apply_file_plan(plan: list[InstallFile]) -> None:
+    """Publish approved files privately, refusing drift since the preview."""
+    for item in plan:
+        current = item.path.read_bytes() if item.path.exists() else None
+        if item.path.is_symlink() or current != item.previous:
+            raise InstallError("A destination changed after preview; rerun the installer.")
+    for item in plan:
+        if item.action == "unchanged":
+            continue
+        item.path.parent.mkdir(parents=True, exist_ok=True)
+        if item.previous is None:
+            descriptor = os.open(item.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(item.content)
+        else:
+            mode = item.path.stat().st_mode & 0o777
+            with tempfile.NamedTemporaryFile(dir=item.path.parent, delete=False) as handle:
+                temporary = Path(handle.name)
+                handle.write(item.content)
+            try:
+                temporary.chmod(mode)
+                temporary.replace(item.path)
+            finally:
+                temporary.unlink(missing_ok=True)
+
+
 def plan_tau_install(bundle: Path, home: Path, cwd: Path) -> tuple[list[InstallFile], list[str]]:
     """Build a read-only plan; existing shared skills win over bundled copies."""
     extension = home / ".tau/extensions/basic-memory"
@@ -76,44 +125,14 @@ def plan_tau_install(bundle: Path, home: Path, cwd: Path) -> tuple[list[InstallF
                 pairs.append(
                     (source, home / ".tau/skills" / skill.name / source.relative_to(skill))
                 )
-    plan: list[InstallFile] = []
-    for source, target in pairs:
-        # User-owned symlinks are not permission to write into their targets.
-        if any(
-            path.is_symlink() for path in (target, *target.parents) if path.is_relative_to(home)
-        ):
-            raise InstallError("A destination contains a symlink; resolve it before installing.")
-        previous = target.read_bytes() if target.exists() else None
-        plan.append(InstallFile(target, source.read_bytes(), previous))
+    plan = _plan_copy(pairs, home)
     if not (bundle / "extension/pyproject.toml").is_file() or not plan:
         raise InstallError("Packaged Tau resources are missing; reinstall Basic Memory.")
     return plan, notices
 
 
 def apply_tau_install(plan: list[InstallFile]) -> None:
-    """Publish approved files privately, refusing drift since the preview."""
-    for item in plan:
-        current = item.path.read_bytes() if item.path.exists() else None
-        if item.path.is_symlink() or current != item.previous:
-            raise InstallError("A destination changed after preview; rerun the installer.")
-    for item in plan:
-        if item.action == "unchanged":
-            continue
-        item.path.parent.mkdir(parents=True, exist_ok=True)
-        if item.previous is None:
-            descriptor = os.open(item.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(descriptor, "wb") as handle:
-                handle.write(item.content)
-        else:
-            mode = item.path.stat().st_mode & 0o777
-            with tempfile.NamedTemporaryFile(dir=item.path.parent, delete=False) as handle:
-                temporary = Path(handle.name)
-                handle.write(item.content)
-            try:
-                temporary.chmod(mode)
-                temporary.replace(item.path)
-            finally:
-                temporary.unlink(missing_ok=True)
+    _apply_file_plan(plan)
 
 
 def other_tau_copies(home: Path, target: Path) -> bool:
@@ -131,6 +150,26 @@ def other_tau_copies(home: Path, target: Path) -> bool:
         if isinstance(project, dict) and project.get("name") == "basic-memory-tau":
             return True
     return False
+
+
+def plan_pi_install(bundle: Path, target: Path, safety_root: Path) -> list[InstallFile]:
+    """Build a read-only copy plan for the self-contained Pi package."""
+    pairs: list[tuple[Path, Path]] = []
+    for source in sorted(bundle.rglob("*")):
+        if not source.is_file():
+            continue
+        relative = source.relative_to(bundle)
+        if "node_modules" in relative.parts or "test" in relative.parts:
+            continue
+        pairs.append((source, target / relative))
+    plan = _plan_copy(pairs, safety_root)
+    if not (bundle / "package.json").is_file() or not (bundle / "extensions/index.ts").is_file():
+        raise InstallError("Packaged Pi resources are missing; reinstall Basic Memory.")
+    return plan
+
+
+def apply_pi_install(plan: list[InstallFile]) -> None:
+    _apply_file_plan(plan)
 
 
 @install_app.command("tau")
@@ -175,9 +214,7 @@ def install_tau(
             )
         # Wheel data is distribution-owned. Editable installs import Python from
         # src/ but Hatch still places these resources beside the installed metadata.
-        bundle = distribution("basic-memory").locate_file("basic_memory/data/tau")
-        if not isinstance(bundle, Path):
-            raise InstallError("Tau installation requires an unpacked Basic Memory distribution.")
+        bundle = _resource_bundle("basic_memory/data/tau")
         plan, notices = plan_tau_install(bundle, home, Path.cwd())
         for notice in notices:
             typer.echo(notice)
@@ -232,3 +269,73 @@ def install_tau(
         "Existing config may enable automatic capture. Reload shuts down the old lifecycle and may save using its old settings."
     )
     typer.echo("Connection, recall, and continuity are unverified; no Tau session was started.")
+
+
+@install_app.command("pi")
+def install_pi(
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Preview only; no writes or subprocesses."
+    ),
+    replace: bool = typer.Option(
+        False, "--replace", help="Allow replacement of listed differing files."
+    ),
+    local: bool = typer.Option(
+        False, "--local", "-l", help="Register in project-local .pi/settings.json."
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Approve the displayed file/install plan."),
+) -> None:
+    """Install the packaged Pi extension and skills, then register them with Pi.
+
+    Existing Basic Memory config is never changed. Workspace routing is chosen by
+    creating .pi/basic-memory.json after launch, usually through the bundled setup skill.
+    """
+    home = Path.home()
+    pi = shutil.which("pi")
+    target_root = Path.cwd() / ".pi/packages" if local else home / ".pi/agent/packages"
+    target = target_root / "basic-memory"
+    install_command = [pi or "pi", "install", str(target)]
+    if local:
+        install_command.append("--local")
+
+    typer.echo(f"pi: {'found' if pi else 'not found'}")
+    typer.echo(
+        "Existing Basic Memory config and credentials will not be read or changed. No notes will be written."
+    )
+    typer.echo("Pi package settings will be updated after the approved resources are copied.")
+    try:
+        bundle = _resource_bundle("basic_memory/data/pi/package")
+        safety_root = Path.cwd() if local else home
+        plan = plan_pi_install(bundle, target, safety_root)
+        for item in plan:
+            typer.echo(f"{item.action}: {item.path}")
+        typer.echo("Pi registration: " + shell_command(*install_command))
+        if dry_run:
+            return
+        if any(item.action == "replace" for item in plan) and not replace:
+            raise InstallError(
+                "Differing files preserved. Review them and rerun with --replace to approve replacements."
+            )
+        if pi is None:
+            raise InstallError(
+                "pi is required to register the package; install Pi explicitly first."
+            )
+        if not yes and not typer.confirm("Apply this installation plan?", default=False):
+            raise typer.Abort()
+        apply_pi_install(plan)
+        result = subprocess.run(install_command, capture_output=True, check=False)
+        if result.returncode:
+            raise InstallError(
+                "Resources installed, but Pi package registration failed. Raw output withheld; inspect pi separately."
+            )
+    except (OSError, ValueError) as exc:
+        message = (
+            str(exc)
+            if isinstance(exc, InstallError)
+            else "Cannot read/write installation resources. Check permissions and package contents."
+        )
+        typer.echo(message, err=True)
+        raise typer.Exit(1) from None
+    typer.echo("Resources installed and registered with Pi.")
+    typer.echo("Restart Pi, then run /skill:basic-memory-pi-setup to choose project routing.")
+    typer.echo("Use /bm-status, /bm-recall, and /bm-capture to verify continuity.")
+    typer.echo("Connection, recall, and continuity are unverified; no Pi session was started.")

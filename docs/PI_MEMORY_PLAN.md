@@ -52,12 +52,14 @@ implementations. Switching transport must not require migrating notes.
 - [x] Bounded recall at session entry / first relevant prompt, including note identifiers
       and source provenance; avoid repeatedly injecting the same context.
 - [x] Capture important decisions during work; support explicit remember/recall commands.
-- [ ] Add compaction-aware durable checkpoints without replacing native compaction.
-      Settle checkpoint timing using Pi lifecycle tests, not assumptions about reentrant turns.
+- [x] Add compaction-aware durable checkpoints without replacing native compaction.
+      Hook-backed automation listens to Pi's `session_before_compact` and returns no
+      custom compaction, so native compaction remains authoritative.
 - [x] Restore state on reload/resume and track forks/tree navigation without merging
       contradictory branches or duplicating captures.
-- [x] Choose and document automatic capture defaults and destinations. Raw transcript
-      capture is a separate opt-in decision, not an implied prerequisite for continuity.
+- [x] Choose and document automatic capture defaults and destinations. Automatic recall
+      and capture default on, but hook-backed capture requires explicit project mapping;
+      raw transcript capture is not an implied prerequisite for continuity.
 - [x] Treat recalled notes as source material, not privileged instructions. Respect project
       trust and never route private session traces into shared projects implicitly.
 - [x] Bound subprocess/request duration, propagate cancellation, and clean up owned resources.

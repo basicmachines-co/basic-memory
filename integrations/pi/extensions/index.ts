@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { BmCommandError, projectArgs, runBmJson } from "./bm-cli.ts";
+import { BmCommandError, projectArgs, runBm, runBmJson } from "./bm-cli.ts";
 import { parseConfig, resolveConfigPath, type BasicMemoryPiConfig } from "./config.ts";
 import { buildCaptureDraft, extractSessionTurns } from "./session.ts";
 
@@ -35,6 +35,44 @@ function sessionId(ctx: ExtensionContext): string | undefined {
 function sessionFile(ctx: ExtensionContext): string | undefined {
   const manager = ctx.sessionManager as { getSessionFile?: () => string | undefined };
   return manager.getSessionFile?.();
+}
+
+function hookPayload(ctx: ExtensionContext, trigger: string, entries?: unknown[]): string {
+  return JSON.stringify({
+    session_id: sessionId(ctx),
+    branch_id: branchId(ctx),
+    cwd: ctx.cwd,
+    transcript_path: sessionFile(ctx),
+    trigger,
+    model: modelLabel(ctx),
+    turns: extractSessionTurns(entries ?? (ctx.sessionManager.getBranch() as unknown[])),
+  });
+}
+
+async function runHook(
+  cfg: BasicMemoryPiConfig,
+  ctx: ExtensionContext,
+  verb: "session-start" | "pre-compact",
+  trigger: string,
+  signal?: AbortSignal,
+  entries?: unknown[],
+): Promise<string> {
+  const result = await runBm(
+    cfg,
+    ["hook", verb, "--harness", "pi", "--project-dir", ctx.cwd],
+    {
+      stdin: hookPayload(ctx, trigger, entries),
+      signal,
+      timeoutMs: verb === "session-start" ? 30_000 : 45_000,
+    },
+  );
+  if (result.code !== 0 || result.stderr.trim()) {
+    throw new BmCommandError(
+      result.stderr.trim() || result.stdout.trim() || "bm hook command failed",
+      result,
+    );
+  }
+  return result.stdout.trim();
 }
 
 function entryId(entry: unknown): string | undefined {
@@ -292,21 +330,44 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
     if (!cfg.autoRecall || recalledThisSession || configError) return;
     recalledThisSession = true;
     try {
-      const content = await buildRecall(cfg, event.prompt, ctx.signal);
+      const content = cfg.useHookFlow
+        ? await runHook(cfg, ctx, "session-start", "startup", ctx.signal)
+        : await buildRecall(cfg, event.prompt, ctx.signal);
+      if (!content) return;
       return { message: { customType: ENTRY_TYPE, content, display: true } };
     } catch (error) {
       notify(ctx, `Basic Memory recall failed: ${formatError(error)}`, "warning");
     }
   });
 
+  pi.on("session_before_compact", async (event, ctx) => {
+    if (!cfg.autoCapture || !cfg.useHookFlow || configError || (!cfg.project && !cfg.projectId)) return;
+    try {
+      const message = await runHook(
+        cfg,
+        ctx,
+        "pre-compact",
+        event.reason,
+        event.signal,
+        event.branchEntries as unknown[],
+      );
+      if (message) notify(ctx, message, "info");
+    } catch (error) {
+      notify(ctx, `Basic Memory compaction checkpoint failed: ${formatError(error)}`, "warning");
+    }
+  });
+
   pi.on("agent_settled", async (_event, ctx) => {
-    if (!cfg.autoCapture || configError) return;
+    if (!cfg.autoCapture || configError || (!cfg.project && !cfg.projectId)) return;
     const text = extractSessionTurns(ctx.sessionManager.getBranch() as unknown[])
       .map((turn) => turn.text)
       .join("\n");
     if (text.length < cfg.captureMinChars) return;
     try {
-      const message = await captureSession(cfg, ctx, undefined, ctx.signal);
+      const message = cfg.useHookFlow
+        ? await runHook(cfg, ctx, "pre-compact", "settled", ctx.signal)
+        : await captureSession(cfg, ctx, undefined, ctx.signal);
+      if (!message) return;
       pi.appendEntry(ENTRY_TYPE, { kind: "capture", message, at: new Date().toISOString() });
       notify(ctx, message, "info");
     } catch (error) {
@@ -324,6 +385,7 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
         `capture folder: ${cfg.captureFolder}`,
         `auto recall: ${cfg.autoRecall ? "on" : "off"}`,
         `auto capture: ${cfg.autoCapture ? "on" : "off"}`,
+        `hook flow: ${cfg.useHookFlow ? "on" : "off"}`,
       ];
       notify(ctx, lines.join("\n"), "info");
     },

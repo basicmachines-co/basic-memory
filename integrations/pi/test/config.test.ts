@@ -11,10 +11,11 @@ test("parseConfig applies safe defaults", () => {
     projectId: undefined,
     captureFolder: "pi/sessions",
     recallTimeframe: "7d",
-    autoRecall: false,
-    autoCapture: false,
+    autoRecall: true,
+    autoCapture: true,
     captureMinChars: 80,
     mcpServerName: "basic-memory",
+    useHookFlow: true,
     debug: false,
   });
 });
@@ -30,6 +31,7 @@ test("parseConfig accepts snake_case aliases and strict unknown keys", () => {
     auto_capture: true,
     capture_min_chars: 12,
     mcp_server_name: "memory",
+    use_hook_flow: false,
   });
 
   assert.equal(cfg.transport, "mcp");
@@ -41,6 +43,7 @@ test("parseConfig accepts snake_case aliases and strict unknown keys", () => {
   assert.equal(cfg.autoCapture, true);
   assert.equal(cfg.captureMinChars, 12);
   assert.equal(cfg.mcpServerName, "memory");
+  assert.equal(cfg.useHookFlow, false);
   assert.throws(() => parseConfig({ nope: true }), /unknown keys: nope/);
 });
 
@@ -51,6 +54,7 @@ test("parseConfig rejects invalid known values", () => {
   );
   assert.throws(() => parseConfig({ project: 123 }), /project must be a non-empty string/);
   assert.throws(() => parseConfig({ autoRecall: "yes" }), /autoRecall must be a boolean/);
+  assert.throws(() => parseConfig({ useHookFlow: "no" }), /useHookFlow must be a boolean/);
   assert.throws(
     () => parseConfig({ captureMinChars: -1 }),
     /captureMinChars must be a non-negative number/,

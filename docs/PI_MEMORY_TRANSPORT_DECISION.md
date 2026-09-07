@@ -44,7 +44,7 @@ The first write may trigger local embedding model download, which affects cold l
 
 ### Existing hook reuse
 
-`bm hook` currently supports `claude` and `codex` harness profiles only. Reusable concepts:
+`bm hook` now supports a Pi harness profile for automatic lifecycle continuity. Reusable concepts:
 
 - fail-open lifecycle behavior;
 - strict JSON booleans for capture settings;
@@ -54,19 +54,19 @@ The first write may trigger local embedding model download, which affects cold l
 - lifecycle envelopes separate from durable knowledge;
 - checkpoint prompts separate from raw transcript capture.
 
-The implementation is profile-specific enough that Pi should not invoke `bm hook --harness codex|claude`. Instead, reuse the same policies and eventually consider factoring shared recall/capture helpers after the Pi lifecycle shape is stable.
+Pi still must not invoke `bm hook --harness codex|claude`. The package owns Pi event wiring, while `bm hook --harness pi` owns the shared Basic Memory lifecycle semantics: bounded recall, fenced reference data, explicit project routing, predictable `pi/sessions` checkpoint placement, and lifecycle trace distinct from authored knowledge. Users can set `useHookFlow: false` to fall back to the package's direct CLI search/write path.
 
 ## Initial defaults
 
 - CLI mode is the no-extra-dependency default.
 - MCP mode is opt-in and requires `pi-mcp-adapter` to be installed by the user.
 - Project selection is explicit; the extension must not mutate the user's global Basic Memory default.
-- Auto-capture starts disabled until destination and privacy defaults are settled.
-- Explicit `/bm-recall` and `/bm-capture` commands come before automatic lifecycle behavior.
+- Hook flow is enabled by default for automatic lifecycle behavior, with `useHookFlow: false` as the escape hatch.
+- Auto-recall and auto-capture default on for an opinionated first-run experience.
+- Without an explicit Pi project mapping, recall emits setup guidance and hook-backed capture has no write destination, so it does not silently mutate the user's ambient default project.
+- Explicit `/bm-recall` and `/bm-capture` commands remain available for deliberate one-off use.
 
 ## Open questions
 
-- Exact Pi session entry serialization needed for a high-quality synthesized capture.
-- Whether MCP mode should register a Basic Memory server dynamically or rely on package `pi.mcp` config for users who already have the adapter.
-- The minimum supported Basic Memory version for all CLI flags and MCP tool output formats.
-- Warm/cold latency comparison between direct CLI calls and adapter MCP proxy calls.
+- Whether explicit `/bm-capture <title>` should also route through a hook verb or remain direct so user-supplied titles keep conflict-safe write semantics.
+- Warm/cold latency comparison between direct CLI calls, hook-backed CLI lifecycle calls, and adapter MCP proxy calls.

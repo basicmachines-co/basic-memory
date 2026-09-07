@@ -24,7 +24,7 @@
   ],
   "pi": {
     "extensions": ["./extensions/index.ts"],
-    "skills": ["./skills/basic-memory-pi"]
+    "skills": ["./skills/basic-memory-pi", "./skills/basic-memory-pi-setup"]
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

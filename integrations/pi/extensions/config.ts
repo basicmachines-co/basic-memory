@@ -14,6 +14,7 @@ export interface BasicMemoryPiConfig {
   autoCapture: boolean;
   captureMinChars: number;
   mcpServerName: string;
+  useHookFlow: boolean;
   debug: boolean;
 }
 
@@ -22,10 +23,11 @@ const DEFAULT_CONFIG: BasicMemoryPiConfig = {
   bmPath: "bm",
   captureFolder: "pi/sessions",
   recallTimeframe: "7d",
-  autoRecall: false,
-  autoCapture: false,
+  autoRecall: true,
+  autoCapture: true,
   captureMinChars: 80,
   mcpServerName: "basic-memory",
+  useHookFlow: true,
   debug: false,
 };
 
@@ -48,6 +50,8 @@ const ALLOWED_KEYS = new Set([
   "capture_min_chars",
   "mcpServerName",
   "mcp_server_name",
+  "useHookFlow",
+  "use_hook_flow",
   "debug",
 ]);
 
@@ -167,6 +171,7 @@ export function parseConfig(raw: unknown = {}): BasicMemoryPiConfig {
       DEFAULT_CONFIG.mcpServerName,
       "mcp_server_name",
     ),
+    useHookFlow: booleanConfigValue(data, "useHookFlow", DEFAULT_CONFIG.useHookFlow, "use_hook_flow"),
     debug: booleanConfigValue(data, "debug", DEFAULT_CONFIG.debug),
   };
 }

@@ -468,6 +468,54 @@ def test_session_start_codex_does_not_query_lifecycle_trace(bm_home: Path, tmp_p
     assert mock_search.await_args_list[2].kwargs["note_types"] == ["codex_session"]
 
 
+def test_session_start_pi_profile_reads_project_config(bm_home: Path, tmp_path: Path) -> None:
+    project = tmp_path / "pi-proj"
+    (project / ".pi").mkdir(parents=True)
+    (project / ".pi" / "basic-memory.json").write_text(
+        json.dumps({"project": "demo", "recallTimeframe": "2d"}),
+        encoding="utf-8",
+    )
+    with patch(
+        "basic_memory.mcp.tools.search_notes",
+        new_callable=AsyncMock,
+        return_value=SEARCH_EMPTY,
+    ) as mock_search:
+        result = runner.invoke(
+            cli_app,
+            ["hook", "session-start", "--harness", "pi", "--project-dir", str(project)],
+            input=_payload(project),
+        )
+
+    assert result.exit_code == 0
+    session_query = mock_search.await_args_list[2].kwargs
+    assert session_query["project"] == "demo"
+    assert session_query["note_types"] == ["pi_session"]
+    assert session_query["after_date"] == "2d"
+    assert "pi/sessions/" in result.stdout
+
+
+def test_session_start_pi_capture_events_default_off(bm_home: Path, tmp_path: Path) -> None:
+    project = tmp_path / "pi-proj"
+    (project / ".pi").mkdir(parents=True)
+    (project / ".pi" / "basic-memory.json").write_text(
+        json.dumps({"project": "demo"}),
+        encoding="utf-8",
+    )
+    with patch(
+        "basic_memory.mcp.tools.search_notes",
+        new_callable=AsyncMock,
+        return_value=SEARCH_EMPTY,
+    ):
+        result = runner.invoke(
+            cli_app,
+            ["hook", "session-start", "--harness", "pi", "--project-dir", str(project)],
+            input=_payload(project),
+        )
+
+    assert result.exit_code == 0
+    assert not (bm_home / "inbox").exists()
+
+
 @pytest.mark.parametrize(
     "session_settings",
     [
@@ -886,6 +934,44 @@ def test_pre_compact_missing_transcript_is_silent(bm_home: Path, claude_project:
 
     assert result.exit_code == 0
     mock_write.assert_not_awaited()
+
+
+def test_pre_compact_pi_writes_checkpoint_note(bm_home: Path, tmp_path: Path) -> None:
+    project = tmp_path / "pi-proj"
+    (project / ".pi").mkdir(parents=True)
+    (project / ".pi" / "basic-memory.json").write_text(
+        json.dumps({"projectId": "12345678-1234-1234-1234-123456789abc"}),
+        encoding="utf-8",
+    )
+    mock_write = AsyncMock(return_value={"action": "created"})
+    with patch("basic_memory.mcp.tools.write_note", mock_write):
+        result = runner.invoke(
+            cli_app,
+            ["hook", "pre-compact", "--harness", "pi", "--project-dir", str(project)],
+            input=_payload(
+                project,
+                branch_id="branch-42",
+                trigger="compact",
+                model="openai-codex/gpt-5.5",
+                turns=[
+                    {"role": "user", "text": "Fix the login bug"},
+                    {"role": "assistant", "text": "Found the null check issue"},
+                    {"role": "user", "text": "Now add a regression test"},
+                ],
+            ),
+        )
+
+    assert result.exit_code == 0
+    assert mock_write.await_args is not None
+    kwargs = mock_write.await_args.kwargs
+    assert kwargs["project"] is None
+    assert kwargs["project_id"] == "12345678-1234-1234-1234-123456789abc"
+    assert kwargs["directory"] == "pi/sessions"
+    assert kwargs["tags"] == ["pi", "session", "checkpoint"]
+    assert kwargs["note_type"] == "pi_session"
+    assert kwargs["metadata"]["session_id"] == "s-abc12345"
+    assert kwargs["metadata"]["pi_branch_id"] == "branch-42"
+    assert kwargs["metadata"]["model"] == "openai-codex/gpt-5.5"
 
 
 def test_pre_compact_captures_envelope_even_without_mapping(bm_home: Path, tmp_path: Path) -> None:
@@ -1803,6 +1889,13 @@ def test_install_then_codex_remove_does_not_touch_claude_config() -> None:
     assert result.exit_code == 0
     assert "nothing to remove" in result.stdout
     assert _claude_settings_path().exists()
+
+
+def test_install_pi_is_rejected() -> None:
+    result = runner.invoke(cli_app, ["hook", "install", "--harness", "pi"])
+
+    assert result.exit_code != 0
+    assert "Pi hook installation is owned by the Pi package" in result.output
 
 
 # --- helper coverage ---
