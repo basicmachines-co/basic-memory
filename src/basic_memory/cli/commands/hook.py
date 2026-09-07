@@ -679,6 +679,16 @@ def _label(result: dict[str, Any]) -> str:
     return f"- {name}" + (f" — {ref}" if ref else "")
 
 
+def _session_label(result: dict[str, Any], include_excerpt: bool) -> list[str]:
+    lines = [_label(result)]
+    if not include_excerpt:
+        return lines
+    excerpt = result.get("matched_chunk") or result.get("content")
+    if isinstance(excerpt, str) and excerpt.strip():
+        lines.append(f"  {_clip(excerpt, 500)}")
+    return lines
+
+
 def _readable(ref: str) -> str:
     from basic_memory.hooks.project_ref import UUID_RE
 
@@ -772,10 +782,17 @@ def _build_brief(
     if decision_rows:
         data_lines += ["", f"## Open decisions ({len(decision_rows)})", *map(_label, decision_rows)]
     if session_rows:
+        session_lines = [
+            line
+            for row in session_rows
+            for line in _session_label(
+                row, include_excerpt=profile.session_note_type == "pi_session"
+            )
+        ]
         data_lines += [
             "",
             f"## Recent sessions ({len(session_rows)}) — where you left off",
-            *map(_label, session_rows),
+            *session_lines,
         ]
     if not (task_rows or decision_rows or session_rows):
         data_lines += ["", "_No active tasks, open decisions, or recent sessions in this project._"]

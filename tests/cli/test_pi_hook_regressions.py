@@ -59,6 +59,37 @@ def test_pi_checkpoint_reuses_identity_and_separates_branches(tmp_path: Path) ->
     assert all(call["project"] == "explicit-project" for call in calls)
 
 
+def test_pi_hook_brief_includes_checkpoint_excerpts(tmp_path: Path) -> None:
+    config = tmp_path / ".pi" / "basic-memory.json"
+    config.parent.mkdir()
+    config.write_text(json.dumps({"project": "explicit-project"}), encoding="utf-8")
+    search = AsyncMock(
+        side_effect=[
+            {"results": []},
+            {"results": []},
+            {
+                "results": [
+                    {
+                        "title": "Pi session hashed-title",
+                        "permalink": "pi/sessions/pi-session-hashed-title",
+                        "content": "Decision: keep bmCommand as an argv override.",
+                    }
+                ]
+            },
+        ]
+    )
+    with patch("basic_memory.mcp.tools.search_notes", search):
+        result = runner.invoke(
+            app,
+            ["hook", "session-start", "--harness", "pi", "--project-dir", str(tmp_path)],
+            input=json.dumps({"session_id": "session-a", "cwd": str(tmp_path)}),
+        )
+
+    assert result.exit_code == 0
+    assert "Pi session hashed-title" in result.stdout
+    assert "Decision: keep bmCommand as an argv override." in result.stdout
+
+
 def test_pi_hook_settings_preserve_canonical_key_precedence(tmp_path: Path) -> None:
     config = tmp_path / ".pi" / "basic-memory.json"
     config.parent.mkdir()
