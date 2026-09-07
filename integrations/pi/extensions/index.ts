@@ -330,9 +330,12 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
 
   async function disposeCurrentMcp(): Promise<void> {
     const current = mcpRegistration;
-    mcpRegistration = undefined;
-    mcpRegistrationKey = undefined;
-    await current?.dispose();
+    if (!current) return;
+    await current.dispose();
+    if (mcpRegistration === current) {
+      mcpRegistration = undefined;
+      mcpRegistrationKey = undefined;
+    }
   }
 
   async function reconcileMcpRegistration(ctx: ExtensionContext): Promise<void> {
