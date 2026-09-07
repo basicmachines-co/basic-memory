@@ -315,6 +315,10 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
     return Boolean(cfg.project || cfg.projectId);
   }
 
+  function canUseProjectAutomatically(): boolean {
+    return hasProjectMapping() && process.env.BASIC_MEMORY_PI_TRUST_WORKSPACE === "1";
+  }
+
   async function refreshConfig(ctx: ExtensionContext): Promise<void> {
     try {
       cfg = await loadConfig(ctx.cwd);
@@ -345,7 +349,7 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
   }
 
   async function reconcileMcpRegistration(ctx: ExtensionContext): Promise<void> {
-    if (configError || cfg.transport !== "mcp" || !hasProjectMapping()) {
+    if (configError || cfg.transport !== "mcp" || !canUseProjectAutomatically()) {
       await disposeCurrentMcp();
       return;
     }
@@ -375,8 +379,12 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
       return;
     }
 
-    if (cfg.transport === "mcp" && !hasProjectMapping()) {
-      notify(ctx, "Basic Memory MCP mode requires an explicit project mapping.", "warning");
+    if (cfg.transport === "mcp" && !canUseProjectAutomatically()) {
+      notify(
+        ctx,
+        "Basic Memory MCP mode requires an explicit project mapping and BASIC_MEMORY_PI_TRUST_WORKSPACE=1.",
+        "warning",
+      );
     }
   });
 
@@ -387,6 +395,7 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
   pi.on("before_agent_start", async (event, ctx) => {
     await refreshConfig(ctx);
     if (!cfg.autoRecall || recalledThisSession || configError) return;
+    if (!canUseProjectAutomatically()) return;
     recalledThisSession = true;
     try {
       const content = cfg.useHookFlow
@@ -403,7 +412,7 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
 
   pi.on("session_before_compact", async (event, ctx) => {
     await refreshConfig(ctx);
-    if (!cfg.autoCapture || !cfg.useHookFlow || configError || !hasProjectMapping()) return;
+    if (!cfg.autoCapture || !cfg.useHookFlow || configError || !canUseProjectAutomatically()) return;
     try {
       const message = await runHook(
         cfg,
@@ -421,7 +430,7 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
 
   pi.on("agent_settled", async (_event, ctx) => {
     await refreshConfig(ctx);
-    if (!cfg.autoCapture || configError || !hasProjectMapping()) return;
+    if (!cfg.autoCapture || configError || !canUseProjectAutomatically()) return;
     const text = extractSessionTurns(ctx.sessionManager.getBranch() as unknown[])
       .map((turn) => turn.text)
       .join("\n");
