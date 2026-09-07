@@ -219,13 +219,15 @@ output style, and `/basic-memory:bm-setup` · `:remember` · `:share` · `:statu
 
 **Connect the Basic Memory MCP server first** — see [Connect your AI
 client](#connect-your-ai-client). The plugin's hooks and skills call it, so it's a
-hard prerequisite. Then add the marketplace and install:
+hard prerequisite. Then install the plugin:
 
 ```bash
-claude plugin marketplace add basicmachines-co/basic-memory \
-  --sparse .claude-plugin plugins/claude-code
-claude plugin install basic-memory@basicmachines-co
+bm install claude-code
 ```
+
+That registers the marketplace and installs the plugin through Claude Code. Add
+`--scope project` to declare both in the repository's settings for a team, or
+`--dry-run` to see the underlying `claude plugin` commands without running them.
 
 Source: [`plugins/claude-code`](plugins/claude-code).
 

@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import tomllib
 from dataclasses import dataclass
+from enum import StrEnum
 from importlib.metadata import distribution
 from pathlib import Path
 from typing import Literal
@@ -26,6 +27,58 @@ install_app = typer.Typer(help="Install Basic Memory resources into an agent hos
 app.add_typer(install_app, name="install")
 
 
+@dataclass(frozen=True, slots=True)
+class HostPlugin:
+    """A plugin install delegated to an agent host's own marketplace CLI."""
+
+    executable: str
+    display: str
+    installer: str
+    summary: str
+    steps: tuple[tuple[str, ...], ...]
+    next_steps: tuple[str, ...]
+
+
+def delegate_install(host: HostPlugin, *, dry_run: bool, yes: bool) -> None:
+    """Run a host's own plugin commands, without initializing Basic Memory.
+
+    The host owns every message, so a preview cannot reach the lines that only
+    hold once the plugin is actually installed.
+    """
+    typer.echo(host.summary)
+    for step in host.steps:
+        typer.echo(shell_command(host.executable, *step))
+    if dry_run:
+        return
+    executable = shutil.which(host.executable)
+    if executable is None:
+        typer.echo(f"{host.display} CLI not found on PATH. Install {host.display} first.", err=True)
+        raise typer.Exit(1)
+    if not yes and not typer.confirm("Apply this installation plan?", default=False):
+        raise typer.Abort()
+    for step in host.steps:
+        try:
+            result = subprocess.run([executable, *step], check=False)
+        except OSError:
+            typer.echo(
+                f"Cannot launch {host.display} CLI. Check its installation and permissions.",
+                err=True,
+            )
+            raise typer.Exit(1) from None
+        # A failed marketplace registration must not install from an unrelated
+        # previously configured source with the same marketplace name.
+        if result.returncode:
+            typer.echo(
+                f"{host.display} command failed: "
+                + shell_command(host.executable, *step)
+                + f". Resolve the error above and rerun {host.installer}.",
+                err=True,
+            )
+            raise typer.Exit(1)
+    for line in host.next_steps:
+        typer.echo(line)
+
+
 @install_app.command("codex")
 def install_codex(
     source: str = typer.Option(
@@ -37,39 +90,86 @@ def install_codex(
     yes: bool = typer.Option(False, "--yes", "-y", help="Approve the displayed installation plan."),
 ) -> None:
     """Install the Basic Memory plugin through Codex's user-level marketplace."""
-    commands = [
-        ["plugin", "marketplace", "add", source],
-        ["plugin", "add", "codex@basic-memory"],
-    ]
-    typer.echo("Install the Basic Memory marketplace and plugin into Codex (user-level).")
-    for command in commands:
-        typer.echo(shell_command("codex", *command))
-    if dry_run:
-        return
-    codex = shutil.which("codex")
-    if codex is None:
-        typer.echo("Codex CLI not found on PATH. Install Codex CLI first.", err=True)
-        raise typer.Exit(1)
-    if not yes and not typer.confirm("Apply this installation plan?", default=False):
-        raise typer.Abort()
-    for command in commands:
-        try:
-            result = subprocess.run([codex, *command], check=False)
-        except OSError:
-            typer.echo("Cannot launch Codex CLI. Check its installation and permissions.", err=True)
-            raise typer.Exit(1) from None
-        # A failed marketplace registration must not install from an unrelated
-        # previously configured source with the same marketplace name.
-        if result.returncode:
-            typer.echo(
-                "Codex command failed: "
-                + shell_command("codex", *command)
-                + ". Resolve the error above and rerun bm install codex.",
-                err=True,
-            )
-            raise typer.Exit(1)
-    typer.echo("Basic Memory plugin installed. Start a new Codex thread and run $bm-setup.")
-    typer.echo("Open /hooks in Codex to review and trust the Basic Memory hooks (requires uv).")
+    host = HostPlugin(
+        executable="codex",
+        display="Codex",
+        installer="bm install codex",
+        summary="Install the Basic Memory marketplace and plugin into Codex (user-level).",
+        steps=(
+            ("plugin", "marketplace", "add", source),
+            ("plugin", "add", "codex@basic-memory"),
+        ),
+        next_steps=(
+            "Basic Memory plugin installed. Start a new Codex thread and run $bm-setup.",
+            "Open /hooks in Codex to review and trust the Basic Memory hooks (requires uv).",
+        ),
+    )
+    delegate_install(host, dry_run=dry_run, yes=yes)
+
+
+class InstallScope(StrEnum):
+    """Claude Code's scopes for declaring a marketplace and installing a plugin."""
+
+    user = "user"
+    project = "project"
+    local = "local"
+
+
+@install_app.command("claude-code")
+def install_claude_code(
+    source: str = typer.Option(
+        "basicmachines-co/basic-memory",
+        "--source",
+        help="Marketplace Git source or local repo root.",
+    ),
+    scope: InstallScope = typer.Option(
+        InstallScope.user,
+        "--scope",
+        help="Where Claude Code declares the marketplace and plugin.",
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview only; no subprocesses."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Approve the displayed installation plan."),
+) -> None:
+    """Install the Basic Memory plugin through Claude Code's marketplace."""
+    add = ["plugin", "marketplace", "add", source, "--scope", scope.value]
+    # Trigger: --source names a checkout on this machine instead of a Git remote.
+    # Why: --sparse configures a git sparse-checkout, and Claude Code rejects it
+    # for directory sources. Outcome: remote installs fetch only the two paths
+    # the plugin needs out of the monorepo; local installs read the checkout.
+    if not Path(source).is_dir():
+        add += ["--sparse", ".claude-plugin", "plugins/claude-code"]
+    host = HostPlugin(
+        executable="claude",
+        display="Claude Code",
+        installer="bm install claude-code",
+        summary=(
+            "Install the Basic Memory marketplace and plugin into Claude Code "
+            f"({scope.value}-level)."
+        ),
+        steps=(
+            tuple(add),
+            ("plugin", "install", "basic-memory@basicmachines-co", "--scope", scope.value),
+        ),
+        next_steps=(
+            "Basic Memory plugin installed. Restart Claude Code and run /basic-memory:bm-setup.",
+            # The plugin ships no MCP server of its own, so an unconnected server
+            # leaves every skill failing on its first tool call.
+            "Its skills call the Basic Memory MCP server; connect it if you have not: "
+            + shell_command(
+                "claude",
+                "mcp",
+                "add",
+                "basic-memory",
+                "--",
+                "uvx",
+                "--prerelease=allow",
+                "basic-memory",
+                "mcp",
+            ),
+            "The hooks run through uv; install uv first if it is not already on PATH.",
+        ),
+    )
+    delegate_install(host, dry_run=dry_run, yes=yes)
 
 
 @dataclass(frozen=True, slots=True)

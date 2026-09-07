@@ -27,6 +27,8 @@ def test_dry_run_without_codex(codex_run: Mock, monkeypatch: pytest.MonkeyPatch)
     assert result.exit_code == 0, result.output
     assert "codex plugin marketplace add basicmachines-co/basic-memory" in result.output
     assert "codex plugin add codex@basic-memory" in result.output
+    # A preview must not claim an install that never ran.
+    assert "plugin installed" not in result.output
     codex_run.assert_not_called()
 
 

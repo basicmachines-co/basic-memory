@@ -21,9 +21,13 @@ teams are optional (see step 5).
 ## 2. Install the plugin
 
 ```bash
-claude plugin marketplace add basicmachines-co/basic-memory --sparse .claude-plugin plugins/claude-code
-claude plugin install basic-memory@basicmachines-co
+bm install claude-code
 ```
+
+This registers the marketplace and installs the plugin through Claude Code, at
+user level so one install covers every project. Use `--dry-run` to see the
+underlying `claude plugin` commands first, or `--scope project` to declare them
+in this repository's settings instead.
 
 Verify it loaded:
 
@@ -31,8 +35,9 @@ Verify it loaded:
 claude plugin details basic-memory@basicmachines-co
 ```
 
-You should see **Skills (4): remember, setup, share, status** and **Hooks (2):
-SessionStart, PreCompact**.
+You should see **Skills (8): bm-checkpoint, bm-decide, bm-orient, bm-remember,
+bm-setup, bm-share, bm-status, bm-writing** and **Hooks (2): SessionStart,
+PreCompact**.
 
 ## 3. Run setup
 

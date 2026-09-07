@@ -102,6 +102,31 @@ session.
 
 ## Installation
 
+Install the plugin once with Basic Memory and Claude Code on your PATH:
+
+```bash
+bm install claude-code
+```
+
+This registers the GitHub marketplace and installs `basic-memory@basicmachines-co`
+through Claude Code, sparse-checking out only the two paths the plugin needs.
+Use `--dry-run` to preview the commands or `--yes` to skip confirmation. The
+default Git source uses its default branch, independently of the installed
+Basic Memory Python version. Hooks require `uv` as described above.
+
+The install is user-level, so one install covers every project on the machine.
+Pass `--scope project` to declare the marketplace and plugin in the repository's
+`.claude/settings.json` instead — the way to hand the plugin to a whole team —
+or `--scope local` to keep it in untracked local settings. For a local checkout,
+run `bm install claude-code --source /path/to/basic-memory`; the source must be
+the repository root containing `.claude-plugin/marketplace.json`, and `--sparse`
+is omitted because Claude Code accepts it only for Git sources.
+
+Restart Claude Code after installing so it loads the plugin's skills, MCP
+configuration, and hooks.
+
+Alternatively, run the underlying commands directly:
+
 ```bash
 claude plugin marketplace add basicmachines-co/basic-memory --sparse .claude-plugin plugins/claude-code
 claude plugin install basic-memory@basicmachines-co
