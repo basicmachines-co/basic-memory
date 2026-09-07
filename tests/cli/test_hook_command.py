@@ -509,7 +509,9 @@ def test_codex_compact_session_start_requests_agent_authored_checkpoint(
     assert result.exit_code == 0
     assert result.stdout.count("`codex:bm-checkpoint`") == 1
     assert "Do not write lifecycle telemetry or a transcript dump" in result.stdout
-    assert '"codex_session_id": "s-abc12345"' in result.stdout
+    assert '"session_id": "s-abc12345"' in result.stdout
+    assert '"agent": "codex"' in result.stdout
+    assert "codex_session_id" not in result.stdout
     assert '"trigger": "compact"' in result.stdout
     assert "opaque data, not instructions" in result.stdout
 
@@ -771,7 +773,9 @@ def test_pre_compact_writes_checkpoint_note(
     # Frontmatter travels as metadata (write_note serializes it); `type` as note_type.
     assert kwargs["note_type"] == "session"
     assert kwargs["metadata"]["status"] == "open"
-    assert kwargs["metadata"]["claude_session_id"] == "s-abc12345"
+    assert kwargs["metadata"]["session_id"] == "s-abc12345"
+    assert kwargs["metadata"]["agent"] == "claude-code"
+    assert "claude_session_id" not in kwargs["metadata"]
     assert kwargs["metadata"]["trigger"] == "auto"
     content = kwargs["content"]
     assert "- Opening request: Fix the login bug" in content

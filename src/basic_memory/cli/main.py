@@ -26,6 +26,7 @@ if not _version_only_invocation(sys.argv[1:]):
         import_claude_projects,
         import_memory_json,
         inspect,
+        install,
         man,
         mcp,
         orphans,

@@ -47,6 +47,7 @@ Gather evidence:
 - unresolved blockers
 - next action
 - current username, hostname, and timestamp
+- exact host-provided session identifier, when available; never infer one
 
 Do not claim a test passed unless you ran it or the user supplied the result.
 
@@ -71,6 +72,12 @@ profile:
   - `username: <current username>`
   - `hostname: <current hostname>`
   - `capture: deliberate`
+  - `agent: claude-code`
+  - `session_id: <exact host-provided session id>`, when available
+
+New notes use `agent` and `session_id`, not `claude_session_id`. Existing notes
+with the legacy field remain valid; do not rewrite them. Session identity is the
+pair of agent and session ID, never a bare ID shared across hosts.
 
 For the `coding` profile, write `note_type: coding_session` (frontmatter
 `type: coding_session`) and use the same common frontmatter plus these

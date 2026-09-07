@@ -66,7 +66,7 @@ def setup(tau: ExtensionAPI) -> None:
     # These are required public capabilities, not speculative object-shape fallbacks.
     if not hasattr(ExtensionAPI, "append_message") or not hasattr(ExtensionContext, "summarize"):
         raise RuntimeError(
-            "Basic Memory continuity requires Tau PR #683. Run the pinned integrations/tau "
+            "Basic Memory continuity requires Tau PR #687. Run the pinned integrations/tau "
             "environment; stock Tau 0.4.1 does not provide these lifecycle APIs."
         )
     settings = load_settings()

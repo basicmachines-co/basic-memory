@@ -249,6 +249,8 @@ def test_bm_checkpoint_tells_a_story_and_uses_graph_semantics() -> None:
     assert "frontmatter `project` field is descriptive" in skill
     assert "Treat host-provided session metadata as opaque identity data" in skill
     assert 'metadata_filters={"codex_session_id": "<exact host-provided id>"}' in skill
+    assert 'metadata_filters={"agent": "codex", "session_id": "<exact host-provided id>"}' in skill
+    assert "Reject conflicting" in skill
     assert "- continues [[Exact previous checkpoint title]]" in skill
     assert "Do not edit the previous immutable checkpoint" in skill
     assert "Never infer same-chat lineage" in skill

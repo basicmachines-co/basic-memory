@@ -130,7 +130,9 @@ def test_claude_coding_profile_writes_coding_session(
     kwargs = mock_write.await_args.kwargs
     assert kwargs["note_type"] == "coding_session"
     assert kwargs["metadata"]["repository"] == "basicmachines-co/basic-memory"
-    assert kwargs["metadata"]["claude_session_id"] == "session-1"
+    assert kwargs["metadata"]["session_id"] == "session-1"
+    assert kwargs["metadata"]["agent"] == "claude-code"
+    assert "claude_session_id" not in kwargs["metadata"]
 
 
 def test_coding_context_requires_confirmed_repository(tmp_path: Path) -> None:

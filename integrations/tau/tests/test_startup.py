@@ -38,5 +38,5 @@ async def test_start_reconciles_pending_intents_without_replaying_messages(fails
 
 def test_stock_tau_fails_with_actionable_requirement(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delattr(ExtensionAPI, "append_message")
-    with pytest.raises(RuntimeError, match="requires Tau PR #683"):
+    with pytest.raises(RuntimeError, match="requires Tau PR #687"):
         extension.setup(MagicMock(spec=ExtensionAPI))
