@@ -508,7 +508,9 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
     async execute(_toolCallId, params: { title?: string }, signal, _onUpdate, ctx) {
       await refreshConfig(ctx);
       requireValidConfig();
-      if (!hasProjectMapping()) throw new Error("Basic Memory project is not configured");
+      if (!canUseProjectAutomatically()) {
+        throw new Error("Basic Memory workspace automation is not trusted");
+      }
       const message = await captureSession(cfg, ctx, params.title, signal);
       return { content: [{ type: "text", text: message }], details: { transport: cfg.transport } };
     },
@@ -525,7 +527,9 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
     async execute(_toolCallId, params: { query?: string }, signal, _onUpdate, ctx) {
       await refreshConfig(ctx);
       requireValidConfig();
-      const content = hasProjectMapping() ? await buildRecall(cfg, params.query, signal) : SETUP_GUIDANCE;
+      const content = canUseProjectAutomatically()
+        ? await buildRecall(cfg, params.query, signal)
+        : SETUP_GUIDANCE;
       return { content: [{ type: "text", text: content }], details: { transport: cfg.transport } };
     },
   });
