@@ -303,6 +303,7 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
   let cfg: BasicMemoryPiConfig = parseConfig();
   let configError: string | undefined;
   let mcpRegistration: { dispose(): Promise<void> } | undefined;
+  let mcpRegistrationKey: string | undefined;
   let recalledThisSession = false;
 
   function requireValidConfig(): void {
@@ -324,12 +325,31 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
       configError = `Basic Memory config error: ${formatError(error)}`;
       cfg = parseConfig({ autoRecall: false, autoCapture: false });
     }
+    await reconcileMcpRegistration(ctx);
   }
 
   async function disposeCurrentMcp(): Promise<void> {
     const current = mcpRegistration;
     mcpRegistration = undefined;
+    mcpRegistrationKey = undefined;
     await current?.dispose();
+  }
+
+  async function reconcileMcpRegistration(ctx: ExtensionContext): Promise<void> {
+    if (configError || cfg.transport !== "mcp" || !hasProjectMapping()) {
+      await disposeCurrentMcp();
+      return;
+    }
+
+    const nextKey = JSON.stringify({
+      server: cfg.mcpServerName,
+      command: cfg.bmCommand ?? [cfg.bmPath],
+      project: cfg.project,
+    });
+    if (mcpRegistration && mcpRegistrationKey === nextKey) return;
+    await disposeCurrentMcp();
+    mcpRegistration = registerBasicMemoryMcp(pi, cfg, ctx);
+    mcpRegistrationKey = mcpRegistration ? nextKey : undefined;
   }
 
   pi.on("session_start", async (_event, ctx) => {
@@ -346,8 +366,8 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
       return;
     }
 
-    if (cfg.transport === "mcp") {
-      mcpRegistration = registerBasicMemoryMcp(pi, cfg, ctx);
+    if (cfg.transport === "mcp" && !hasProjectMapping()) {
+      notify(ctx, "Basic Memory MCP mode requires an explicit project mapping.", "warning");
     }
   });
 
