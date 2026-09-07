@@ -52,10 +52,7 @@ test("buildCaptureDraft reuses a stable session title when no title is provided"
   assert.ok(first);
   assert.ok(second);
   assert.ok(otherBranch);
-  assert.equal(
-    first.title,
-    "Pi session pi-session-123/branch-a — Continue the Pi memory package",
-  );
+  assert.match(first.title, /^Pi session [a-f0-9]{64}$/);
   assert.equal(second.title, first.title);
   assert.notEqual(otherBranch.title, first.title);
 });
@@ -85,7 +82,7 @@ test("buildCaptureDraft keeps branch identity when session IDs are long", () => 
 
   assert.ok(branchA);
   assert.ok(branchB);
-  assert.match(branchA.title, /branch-alpha/);
-  assert.match(branchB.title, /branch-beta/);
+  assert.match(branchA.title, /^Pi session [a-f0-9]{64}$/);
+  assert.match(branchB.title, /^Pi session [a-f0-9]{64}$/);
   assert.notEqual(branchA.title, branchB.title);
 });

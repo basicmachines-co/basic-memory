@@ -1064,7 +1064,7 @@ def _checkpoint_note(
         if not event.session_id or not event.turn_id:
             raise ValueError("Pi checkpoints require session and branch identity")
         identity = hashlib.sha256(
-            json.dumps([event.session_id, event.turn_id]).encode()
+            json.dumps([event.session_id, event.turn_id], separators=(",", ":")).encode()
         ).hexdigest()
         title = f"Pi session {identity}"
 
