@@ -140,4 +140,4 @@ Automatic recall and capture are enabled by default so a configured project gets
 
 The package uses the shared `bm hook --harness pi` flow by default so Pi follows the same predictable Basic Memory lifecycle contract as other agent harnesses. Set `"autoRecall": false`, `"autoCapture": false`, or `"useHookFlow": false` to make the behavior quieter.
 
-Recalled notes are fenced as reference data, not instructions. Captures are synthesized working-thread checkpoints under `pi/sessions/`, not raw transcript dumps.
+Recalled notes are fenced as reference data, not instructions. Automatic captures are extractive working-thread checkpoints under `pi/sessions/`; turn text is stored so future sessions can resume from the same decisions and blockers.
