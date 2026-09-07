@@ -213,13 +213,14 @@ async function buildRecall(
   const searchArgs = [
     "tool",
     "search-notes",
-    query?.trim() || "Pi session",
     "--json",
     "--type",
     "pi_session",
     "--after_date",
     cfg.recallTimeframe,
     ...projectArgs(cfg),
+    "--",
+    query?.trim() || "Pi session",
   ];
   const response = await runBmJson<SearchResponse>(cfg, searchArgs, { signal, timeoutMs: 30_000 });
   const rows = response.results ?? [];
@@ -325,7 +326,12 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
       configError = `Basic Memory config error: ${formatError(error)}`;
       cfg = parseConfig({ autoRecall: false, autoCapture: false });
     }
-    await reconcileMcpRegistration(ctx);
+    try {
+      await reconcileMcpRegistration(ctx);
+    } catch (error) {
+      configError = `Basic Memory MCP registration error: ${formatError(error)}`;
+      cfg = parseConfig({ autoRecall: false, autoCapture: false });
+    }
   }
 
   async function disposeCurrentMcp(): Promise<void> {
