@@ -45,8 +45,11 @@ VALID_NOTE_OBJECT_ACTOR_KINDS: frozenset[RuntimeNoteActorKind] = frozenset(
 # extraction or ingestion-run note through the canonical note mutation path.
 # wiki_projector = the deterministic OKF projector accepting generated index
 # and log notes through that same path before materializing them as Markdown.
+# agent_runtime = a managed agent accepting a note through the canonical write
+# path; preserving it through materialization prevents recursive agent dispatch.
 VALID_NOTE_OBJECT_SOURCES: frozenset[RuntimeNoteChangeSource] = frozenset(
     {
+        "agent_runtime",
         "api",
         "collaboration_relay",
         "document_ingestion",
