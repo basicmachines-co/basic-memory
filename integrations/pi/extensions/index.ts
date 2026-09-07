@@ -123,7 +123,16 @@ async function loadConfig(cwd: string): Promise<BasicMemoryPiConfig> {
   const configPath = resolveConfigPath(cwd);
   try {
     const raw = JSON.parse(await readFile(configPath, "utf8"));
-    return parseConfig(raw);
+    const cfg = parseConfig(raw);
+    const overridesExecutable = raw && typeof raw === "object" && !Array.isArray(raw)
+      && ("bmCommand" in raw || "bm_command" in raw || "bmPath" in raw || "bm_path" in raw);
+    if (overridesExecutable && process.env.BASIC_MEMORY_PI_TRUST_BM_COMMAND !== "1") {
+      throw new Error(
+        "basic-memory Pi config bmPath/bmCommand requires BASIC_MEMORY_PI_TRUST_BM_COMMAND=1; "
+          + "omit it for normal installs that use bm on PATH",
+      );
+    }
+    return cfg;
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
       return parseConfig();
@@ -300,6 +309,23 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
     if (configError) throw new Error(configError);
   }
 
+  function hasProjectMapping(): boolean {
+    return Boolean(cfg.project || cfg.projectId);
+  }
+
+  async function refreshConfig(ctx: ExtensionContext): Promise<void> {
+    try {
+      cfg = await loadConfig(ctx.cwd);
+      configError = cfg.transport === "mcp" && cfg.projectId
+        ? "Basic Memory MCP mode does not support projectId; "
+          + 'set "project" to the project name instead.'
+        : undefined;
+    } catch (error) {
+      configError = `Basic Memory config error: ${formatError(error)}`;
+      cfg = parseConfig({ autoRecall: false, autoCapture: false });
+    }
+  }
+
   async function disposeCurrentMcp(): Promise<void> {
     const current = mcpRegistration;
     mcpRegistration = undefined;
@@ -313,16 +339,7 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
       notify(ctx, `Basic Memory MCP cleanup failed: ${formatError(error)}`, "warning");
     }
     recalledThisSession = false;
-    try {
-      cfg = await loadConfig(ctx.cwd);
-      configError = cfg.transport === "mcp" && cfg.projectId
-        ? "Basic Memory MCP mode does not support projectId; "
-          + 'set "project" to the project name instead.'
-        : undefined;
-    } catch (error) {
-      configError = `Basic Memory config error: ${formatError(error)}`;
-      cfg = parseConfig({ autoRecall: false, autoCapture: false });
-    }
+    await refreshConfig(ctx);
 
     if (configError) {
       notify(ctx, configError, "error");
@@ -344,7 +361,7 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
     try {
       const content = cfg.useHookFlow
         ? await runHook(cfg, ctx, "session-start", "startup", ctx.signal)
-        : cfg.project || cfg.projectId
+        : hasProjectMapping()
           ? await buildRecall(cfg, event.prompt, ctx.signal)
           : SETUP_GUIDANCE;
       if (!content) return;
@@ -355,7 +372,7 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
   });
 
   pi.on("session_before_compact", async (event, ctx) => {
-    if (!cfg.autoCapture || !cfg.useHookFlow || configError || (!cfg.project && !cfg.projectId)) return;
+    if (!cfg.autoCapture || !cfg.useHookFlow || configError || !hasProjectMapping()) return;
     try {
       const message = await runHook(
         cfg,
@@ -372,7 +389,7 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
-    if (!cfg.autoCapture || configError || (!cfg.project && !cfg.projectId)) return;
+    if (!cfg.autoCapture || configError || !hasProjectMapping()) return;
     const text = extractSessionTurns(ctx.sessionManager.getBranch() as unknown[])
       .map((turn) => turn.text)
       .join("\n");
@@ -392,6 +409,7 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
   pi.registerCommand("bm-status", {
     description: "Show Basic Memory Pi package status",
     handler: async (_args, ctx) => {
+      await refreshConfig(ctx);
       if (configError) {
         notify(ctx, configError, "error");
         return;
@@ -413,8 +431,9 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
     description: "Recall Basic Memory Pi checkpoints for a topic",
     handler: async (args, ctx) => {
       try {
+        await refreshConfig(ctx);
         requireValidConfig();
-        const content = await buildRecall(cfg, args, ctx.signal);
+        const content = hasProjectMapping() ? await buildRecall(cfg, args, ctx.signal) : SETUP_GUIDANCE;
         pi.sendMessage({ customType: ENTRY_TYPE, content, display: true }, { triggerTurn: false });
       } catch (error) {
         notify(ctx, `Basic Memory recall failed: ${formatError(error)}`, "error");
@@ -426,7 +445,9 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
     description: "Capture the current Pi working thread to Basic Memory",
     handler: async (args, ctx) => {
       try {
+        await refreshConfig(ctx);
         requireValidConfig();
+        if (!hasProjectMapping()) throw new Error("Basic Memory project is not configured");
         const message = await captureSession(cfg, ctx, args, ctx.signal);
         notify(ctx, message, "info");
       } catch (error) {
@@ -444,7 +465,9 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
       title: Type.Optional(Type.String({ description: "Optional checkpoint title" })),
     }),
     async execute(_toolCallId, params: { title?: string }, signal, _onUpdate, ctx) {
+      await refreshConfig(ctx);
       requireValidConfig();
+      if (!hasProjectMapping()) throw new Error("Basic Memory project is not configured");
       const message = await captureSession(cfg, ctx, params.title, signal);
       return { content: [{ type: "text", text: message }], details: { transport: cfg.transport } };
     },
@@ -458,9 +481,10 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
     parameters: Type.Object({
       query: Type.Optional(Type.String({ description: "Topic or search query" })),
     }),
-    async execute(_toolCallId, params: { query?: string }, signal) {
+    async execute(_toolCallId, params: { query?: string }, signal, _onUpdate, ctx) {
+      await refreshConfig(ctx);
       requireValidConfig();
-      const content = await buildRecall(cfg, params.query, signal);
+      const content = hasProjectMapping() ? await buildRecall(cfg, params.query, signal) : SETUP_GUIDANCE;
       return { content: [{ type: "text", text: content }], details: { transport: cfg.transport } };
     },
   });

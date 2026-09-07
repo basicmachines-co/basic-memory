@@ -55,7 +55,7 @@ Keys:
 
 The extension never changes the user's global Basic Memory default project.
 
-For normal installs, leave `bmPath` alone and make sure `bm` is on Pi's PATH. For branch/local development, use `bmCommand` so Pi can run Basic Memory through `uv` without depending on the workspace's shell aliases:
+For normal installs, leave `bmPath` alone and make sure `bm` is on Pi's PATH. Workspace-defined executable overrides are intentionally gated: set `BASIC_MEMORY_PI_TRUST_BM_COMMAND=1` only in workspaces you trust. For branch/local development, use `bmCommand` so Pi can run Basic Memory through `uv` without depending on the workspace's shell aliases:
 
 ```json
 {

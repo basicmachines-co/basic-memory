@@ -57,7 +57,7 @@ pi install npm:pi-mcp-adapter
 ## Defaults and escape hatches
 
 - CLI transport is the default because it only requires `bm` on PATH.
-- For local Basic Memory development, set `bmCommand` to an argv array such as `["uv", "run", "--project", "/path/to/basic-memory", "basic-memory"]`; it overrides `bmPath` without using a shell.
+- For local Basic Memory development in a trusted workspace, set `BASIC_MEMORY_PI_TRUST_BM_COMMAND=1` and use `bmCommand` as an argv array such as `["uv", "run", "--project", "/path/to/basic-memory", "basic-memory"]`; it overrides `bmPath` without using a shell.
 - Hook flow is on by default so Pi uses the shared Basic Memory lifecycle contract.
 - Automatic recall and capture are on by default once a project is configured.
 - Set `autoRecall: false`, `autoCapture: false`, or `useHookFlow: false` if the user wants quieter behavior.
