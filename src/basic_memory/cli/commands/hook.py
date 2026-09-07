@@ -94,7 +94,8 @@ def _codex_checkpoint_prompt(event: NormalizedHookEvent) -> str:
     metadata = {
         key: value
         for key, value in (
-            ("codex_session_id", event.session_id),
+            ("session_id", event.session_id),
+            ("agent", event.source),
             ("codex_turn_id", event.turn_id),
             ("trigger", event.trigger),
             ("model", event.model),
@@ -119,7 +120,6 @@ class HarnessProfile:
     session_note_type: str  # type stamped on this harness's checkpoint notes
     # Types the session-start brief recalls from durable, authored checkpoints.
     recall_session_types: tuple[str, ...]
-    session_id_key: str
     checkpoint_title_prefix: str
     checkpoint_tags: tuple[str, ...]
     setup_nudge: str
@@ -135,7 +135,6 @@ PROFILES: dict[Harness, HarnessProfile] = {
         default_capture_folder="sessions",
         session_note_type="session",
         recall_session_types=("session",),
-        session_id_key="claude_session_id",
         checkpoint_title_prefix="Session",
         checkpoint_tags=("session", "auto-capture"),
         setup_nudge=(
@@ -162,7 +161,6 @@ PROFILES: dict[Harness, HarnessProfile] = {
         default_capture_folder="codex",
         session_note_type="codex_session",
         recall_session_types=("codex_session",),
-        session_id_key="codex_session_id",
         checkpoint_title_prefix="Codex session",
         checkpoint_tags=("codex", "auto-capture"),
         setup_nudge=(
@@ -952,9 +950,10 @@ def _checkpoint_note(
         "ended": iso,
         "project": primary,
         "cwd": working_directory,
+        "agent": event.source,
     }
     if event.session_id:
-        metadata[profile.session_id_key] = event.session_id
+        metadata["session_id"] = event.session_id
     if event.turn_id:
         metadata["codex_turn_id"] = event.turn_id
     if event.trigger:

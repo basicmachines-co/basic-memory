@@ -21,7 +21,9 @@ settings:
     cwd?: string, working directory for the Codex thread
     username?: string, operating-system user that created the checkpoint
     hostname?: string, host that created the checkpoint
-    codex_session_id?: string, Codex session identifier
+    session_id?: string, exact host-provided session identifier (pair with agent)
+    agent?: string, agent harness identifier (codex for this host)
+    codex_session_id?: string, legacy Codex session identifier (read compatibility only)
     codex_turn_id?: string, Codex turn identifier
     trigger?: string, compaction trigger or deliberate checkpoint source
     model?: string, active Codex model slug when known
@@ -37,7 +39,8 @@ the next Codex thread should do first.
 Codex sessions are found by structured recall:
 `search_notes(metadata_filters={"type": "codex_session"}, after_date="7d")`.
 
-Multiple checkpoints from one Codex chat share `codex_session_id`. Each new
+New checkpoints from one Codex chat share `agent: codex` and `session_id`.
+Legacy `codex_session_id` remains accepted for existing notes. Each new
 immutable checkpoint can use `continues [[Previous checkpoint title]]` to form a
 navigable lineage without rewriting its predecessor.
 

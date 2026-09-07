@@ -16,6 +16,59 @@ single-copy active-branch snapshot fix. Stock Tau 0.4.1 lacks the
 required APIs; the extension refuses to load there rather than silently offering
 weaker continuity. No installed Tau files are patched.
 
+## Install from the Basic Memory CLI
+
+```bash
+bm install tau --dry-run
+bm install tau --sync
+```
+
+The installer previews and asks before copying the **Basic Memory** extension to
+`~/.tau/extensions/basic-memory`, the setup/shared skills to `~/.tau/skills`, and
+four templates to `~/.tau/prompts`. It works from a packaged Basic Memory wheel;
+no source checkout is needed. `--sync` separately opts into installing the pinned
+Tau environment and Python 3.13+ through uv. It does not modify global Tau.
+
+Repeated installs leave identical files untouched. Differing files stop the
+installation unless `--replace` is explicitly requested and the preview approved;
+`--yes` accepts the plan without prompting but does not imply `--replace` or
+`--sync`. Existing shared skills/templates in the user or current project's
+`.agents` resource roots are reused instead of copied again. Another detected
+Basic Memory extension install must be resolved first. Do not combine an explicit
+source `-e` load with the installed copy.
+
+No configuration, credentials, projects, schemas, or notes are changed by the
+installer. With no configured destination, automatic memory stays off. Existing
+configuration retains its capture policy, including automatic writes if enabled.
+After installation, launch the pinned environment:
+
+```bash
+uv run --project ~/.tau/extensions/basic-memory tau
+```
+
+Run `/skill:basic-memory-setup` to choose the destination, coding/general profile,
+and capture policy. `/bm-status` verifies the running connection; installation
+success alone proves neither connectivity nor continuity. Reloading an existing
+session can capture outstanding work under the old lifecycle settings.
+
+### Prompt templates
+
+- `/bm-resume <topic>`: read prior work and verify current repository state.
+- `/bm-plan <goal>`: recall constraints, propose a plan, then save an approved task.
+- `/bm-decide <choice>`: save a decision with alternatives and consequences.
+- `/bm-wrap-up [focus]`: review work/tasks and prepare the user to invoke
+  `/bm-checkpoint`; it does not pretend a text response can invoke a command.
+
+Templates reuse shared skills and respect the configured write project. They do
+not replace the extension's `/bm-status`, `/bm-orient`, `/bm-checkpoint`, or
+`/bm-remember` commands. They run as ordinary model turns, not background hooks.
+Use `/prompts` to browse them.
+
+For editable-source development, rebuild the editable install after changing
+bundled resources (`uv sync --reinstall-package basic-memory`), or test a built
+wheel (`uv build --wheel`). Resource lookup uses the installed distribution,
+not the current checkout. The source launch below remains supported.
+
 ## Run from this repository
 
 Prerequisites: Python 3.13+, uv, and an installed/configured Basic Memory CLI.
@@ -106,7 +159,7 @@ or capture destination. Unknown/invalid settings fail validation. Reload changes
 | `summarize_on_shutdown` | `true` | Save outstanding public work before closing/replacing a session |
 | `capture_transcript` | `false` | Separate immutable public user/final-assistant message notes |
 | `capture_folder` | `tau/transcripts` | Transcript directory within the project |
-| `checkpoint_folder` | `tau/checkpoints` | Synthesized handoff directory |
+| `checkpoint_folder` | `null` (automatic) | Coding: `tau/{repo name}`; general: `tau/checkpoints`, within the chosen project. An explicit folder overrides the default. |
 | `timeout_seconds` | `30` | MCP initialization/discovery/call timeout, at most 300 seconds |
 | `summary_timeout_seconds` | `60` | Entire checkpoint deadline, including synthesis and persistence, at most 300 seconds |
 | `summary_chunk_chars` | `16000` | Public input processed per summary request; previous handoff is also included |
@@ -133,7 +186,6 @@ checkout in the same user-owned config; no repository-local config is read:
       "repository": "owner/repository",
       "project": "my-memory-project",
       "read_projects": ["team/shared"],
-      "checkpoint_folder": "tau/checkpoints",
       "placement_conventions": "Decisions in decisions/, tasks in tasks/. Search before creating notes."
     }
   ]
@@ -148,8 +200,16 @@ Register each worktree explicitly, using the same confirmed `repository` identit
 for cross-checkout recall. Controls such as `capture_knowledge` remain global.
 An omitted profile destination disables automatic memory in that profile.
 
+Coding session notes default to `{chosen project}/tau/{repo name}`, using the final
+component of the confirmed repository identity (`owner/repository` → `tau/repository`).
+Worktrees of the same repository share that folder, regardless of checkout directory name.
+General sessions remain in `tau/checkpoints`; optional transcripts remain in `tau/transcripts`.
+Set `checkpoint_folder` explicitly to override placement. Existing overrides and saved notes
+are not changed.
+
 Coding checkpoints include actual Git root, branch and SHA plus optional GitHub PR
-metadata, timestamps, project, capture method, and `tau_session_id`. PR lookup is
+metadata, timestamps, project, capture method, and the shared `agent: tau` / `session_id`
+pair. Legacy agent-specific session fields remain accepted on old notes. PR lookup is
 optional when `gh` is missing, unavailable, or times out; malformed successful JSON
 is an error. Git reads have a five-second per-command bound and run without a shell.
 The model supplies knowledge synthesis, not repository identity. General and coding

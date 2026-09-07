@@ -43,6 +43,11 @@ def app_callback(
 
     command_name = ctx.invoked_subcommand or "root"
 
+    # Host installation only copies packaged resources. Broken DB/config state
+    # must not block it, and a dry run must not trigger telemetry or auto-updates.
+    if ctx.invoked_subcommand == "install":
+        return
+
     # Trigger: a `hook` invocation (the advisory harness front door, SPEC-55).
     # Why: the hook verbs need none of the global composition root — they resolve
     # config lazily via ConfigManager when they run, the lifecycle verbs

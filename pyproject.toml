@@ -154,6 +154,26 @@ dev = [
 [tool.hatch.version]
 source = "uv-dynamic-versioning"
 
+# Explicit resources only: never ship integration venvs, caches, or test data.
+[tool.hatch.build.targets.wheel.force-include]
+"integrations/tau/Basic Memory.py" = "basic_memory/data/tau/extension/Basic Memory.py"
+"integrations/tau/extension.py" = "basic_memory/data/tau/extension/extension.py"
+"integrations/tau/bridge.py" = "basic_memory/data/tau/extension/bridge.py"
+"integrations/tau/continuity.py" = "basic_memory/data/tau/extension/continuity.py"
+"integrations/tau/knowledge.py" = "basic_memory/data/tau/extension/knowledge.py"
+"integrations/tau/privacy.py" = "basic_memory/data/tau/extension/privacy.py"
+"integrations/tau/results.py" = "basic_memory/data/tau/extension/results.py"
+"integrations/tau/pyproject.toml" = "basic_memory/data/tau/extension/pyproject.toml"
+"integrations/tau/uv.lock" = "basic_memory/data/tau/extension/uv.lock"
+"integrations/tau/README.md" = "basic_memory/data/tau/extension/README.md"
+"integrations/tau/schemas" = "basic_memory/data/tau/extension/schemas"
+"integrations/tau/prompts" = "basic_memory/data/tau/prompts"
+"integrations/tau/skills/basic-memory-setup" = "basic_memory/data/tau/skills/basic-memory-setup"
+"skills/memory-continue" = "basic_memory/data/tau/skills/memory-continue"
+"skills/memory-tasks" = "basic_memory/data/tau/skills/memory-tasks"
+"skills/memory-notes" = "basic_memory/data/tau/skills/memory-notes"
+"skills/memory-schema" = "basic_memory/data/tau/skills/memory-schema"
+
 [tool.uv]
 constraint-dependencies = ["fastmcp-slim==4.0.0b1"]
 

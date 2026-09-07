@@ -31,9 +31,11 @@ settings:
     pull_request_head?: string, pull request head branch
     username?: string, operating-system user that created the checkpoint
     hostname?: string, host that created the checkpoint
-    tau_session_id?: string, Tau session identifier
-    claude_session_id?: string, Claude Code session identifier
-    codex_session_id?: string, Codex session identifier
+    session_id?: string, exact host-provided session identifier (pair with agent)
+    agent?: string, agent harness identifier such as tau or claude-code or codex
+    tau_session_id?: string, legacy Tau session identifier (read compatibility only)
+    claude_session_id?: string, legacy Claude Code session identifier (read compatibility only)
+    codex_session_id?: string, legacy Codex session identifier (read compatibility only)
     codex_turn_id?: string, Codex turn identifier
     trigger?: string, compaction trigger or deliberate checkpoint source
     model?: string, active model slug when known
@@ -52,10 +54,13 @@ Examples:
 
 `search_notes(note_types=["coding_session"], metadata_filters={"pull_request_number": "123"})`
 
-`search_notes(note_types=["coding_session"], metadata_filters={"codex_session_id": "<id>"})`
+`search_notes(note_types=["coding_session"], metadata_filters={"agent": "codex", "session_id": "<id>"})`
 
 Pull-request fields are optional because valid coding work can precede a pull
 request. When a pull request exists, checkpoint writers populate the complete
 pull-request field set. Multiple checkpoints from one agent chat share the
-relevant `claude_session_id`, `codex_session_id`, or `tau_session_id`; each new checkpoint can link
-to its verified predecessor with `continues [[Previous checkpoint title]]`.
+`agent` and `session_id` pair; session IDs alone are not cross-agent identity.
+Each new checkpoint can link to its verified predecessor with
+`continues [[Previous checkpoint title]]`. New writers use the shared fields.
+Legacy agent-specific session fields remain accepted for existing notes; do not
+rewrite old checkpoints or infer missing session IDs.

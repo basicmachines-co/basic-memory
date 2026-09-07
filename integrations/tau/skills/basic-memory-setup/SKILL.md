@@ -14,11 +14,13 @@ packages as incidental setup work.
 
 ## 1. Inspect before changing anything
 
-- Locate the Basic Memory checkout containing `integrations/tau`. Do not assume
-  the current directory is that checkout or that this skill was loaded from it.
-- Read that checkout's `integrations/tau/README.md`, `pyproject.toml`, and
-  `bridge.py` and `knowledge.py` for installation instructions, the dependency pin,
-  Settings, and the general/coding profile models.
+- Locate the integration directory: the installed `~/.tau/extensions/basic-memory`
+  from `bm install tau`, or `integrations/tau` in an explicitly identified Basic
+  Memory checkout. Do not assume the current directory or this skill's directory
+  contains the extension. A packaged install does not require a source checkout.
+- Read the integration directory's `README.md`, `pyproject.toml`, `bridge.py`, and
+  `knowledge.py` for installation instructions, the dependency pin, Settings,
+  and the general/coding profile models.
   Published reference: https://github.com/basicmachines-co/basic-memory/blob/feat-tau-1487/integrations/tau/README.md
 - Check executable availability with `command -v uv`, `command -v bm`, and
   `command -v tau`. Inspect versions/help only for executables that exist.
@@ -113,8 +115,12 @@ Use these policy overlays, replacing `CHOSEN_PROJECT` only after approval:
 }
 ```
 
-Default folders are `tau/checkpoints` and, if separately enabled,
-`tau/transcripts`. Preserve existing folder, command, arguments, timeout, and
+Coding sessions default to `tau/{repo name}` within the chosen project, using the
+final component of the confirmed repository identity, not the worktree directory name.
+General sessions default to `tau/checkpoints`; separately enabled transcripts use
+`tau/transcripts`. Omit `checkpoint_folder` (or use null) for automatic placement;
+set it explicitly only for a user-approved override.
+Preserve existing folder, command, arguments, timeout, and
 budget settings unless the user approves changing them. Never put API keys in
 this file; Basic Memory owns authentication and project routing.
 
@@ -150,7 +156,6 @@ Example configuration for coding in one approved checkout and tools-only elsewhe
       "repository": "owner/repository",
       "project": "CHOSEN_PROJECT",
       "read_projects": [],
-      "checkpoint_folder": "tau/checkpoints",
       "placement_conventions": "Decisions in decisions/, tasks in tasks/. Search before creating notes."
     }
   ],
@@ -189,8 +194,8 @@ it unchanged and proceed to verification.
 
 ### Seed shared schemas with approval
 
-Read the schema files in `<checkout>/integrations/tau/schemas/`. They are copies
-of `integrations/shared/schemas/`, shared with the other host integrations.
+Read the schema files in `<integration-directory>/schemas/`. They are bundled
+copies of the repository's `integrations/shared/schemas/`, shared with other hosts.
 
 After restating the exact write project and receiving approval, search for existing
 schema notes and read any matching definitions. Offer missing schemas only:
@@ -207,22 +212,28 @@ or lifecycle-event notes are required. Seeding does not require inventing a new
 
 ## 4. Launch the compatible environment
 
-With approval for dependency installation, run from the identified checkout:
+For a packaged install, with approval for dependency installation, use:
 
 ```bash
-uv sync --project integrations/tau
+bm install tau --sync
 ```
 
 Then give the user this command to run in their terminal:
 
 ```bash
-uv run --project integrations/tau tau -e ./integrations/tau
+uv run --project ~/.tau/extensions/basic-memory tau
 ```
 
-This launches the pinned isolated environment, not the user's installed Tau.
-Loading the extension from source does not automatically discover this setup skill;
-follow the README's separate skill-copy instructions if desired. Do not load both
-an installed copy and an explicit source copy of the extension.
+The installed extension is discovered automatically; do not also pass `-e`.
+For source development, with approval, run `uv sync --project <integration-directory>`
+and launch `uv run --project <integration-directory> tau -e <integration-directory>`.
+Use actual resolved paths, not the placeholder literally. Do not install a second
+copy alongside an existing source/copy install without choosing which one to keep.
+
+This launches the pinned isolated environment, not the user's global Tau.
+`bm install tau` installs this setup skill and the prompt templates separately;
+loading from source alone does not discover them. Follow the README's manual
+skill-copy instructions when using source development.
 
 In an already compatible Tau session, ask the user to `/reload` after config
 changes. **Reload/replacement shuts down the old lifecycle first:** if automatic

@@ -17,8 +17,9 @@ from test_knowledge import git_repo
 
 
 @pytest.mark.skipif(not COMMAND, reason="Set BM_TAU_TEST_COMMAND for real schema interoperability")
+@pytest.mark.parametrize("legacy", [False, True])
 async def test_shared_schema_and_cross_checkout_recall(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, legacy: bool
 ) -> None:
     assert COMMAND is not None
     isolate_basic_memory(tmp_path, monkeypatch)
@@ -118,7 +119,12 @@ async def test_shared_schema_and_cross_checkout_recall(
             key: note.frontmatter[key]
             for key in ("project", "started", "repository", "repo_root", "cwd", "branch", "git_sha")
         }
-        foreign_metadata["codex_session_id"] = "foreign-session"
+        # Old checkpoints remain readable without rewriting their host-specific identity.
+        if legacy:
+            foreign_metadata["codex_session_id"] = "foreign-session"
+        else:
+            foreign_metadata["session_id"] = "foreign-session"
+            foreign_metadata["agent"] = "codex"
         foreign = confirm_write(
             await connection.call(
                 "write_note",

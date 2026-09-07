@@ -18,7 +18,7 @@ class Destination(BaseModel):
 
     project: ProjectRef | None = None
     read_projects: list[ProjectRef] = Field(default_factory=list, max_length=6)
-    checkpoint_folder: str = "tau/checkpoints"
+    checkpoint_folder: str | None = None
     placement_conventions: str = (
         "Put durable decisions in decisions/, tasks in tasks/, and other notes with their topic. "
         "Search and update existing notes before creating new ones."
@@ -135,13 +135,23 @@ async def coding_context(profile: CodingProfile, cwd: Path) -> CodingContext:
     return CodingContext(profile.repository, profile.root, branch.stdout, sha.stdout, pull_request)
 
 
+def checkpoint_directory(profile: SessionProfile) -> str:
+    """Resolve session placement within the explicitly chosen memory project."""
+    if profile.checkpoint_folder is not None:
+        return profile.checkpoint_folder
+    # Stable repository identity groups worktrees together, unlike checkout basenames.
+    if isinstance(profile, CodingProfile):
+        return f"tau/{profile.repository.rsplit('/', 1)[-1]}"
+    return "tau/checkpoints"
+
+
 def placement(profile: SessionProfile) -> str:
     """Trusted user policy, kept distinct from recalled graph content."""
     return (
         "Basic Memory placement policy (user configuration):\n"
         f"Write destination: {json.dumps(profile.project)}. "
         f"Read-only sources: {json.dumps(profile.read_projects)}.\n"
-        f"Checkpoints: {profile.checkpoint_folder}/. {profile.placement_conventions}\n"
+        f"Checkpoints: {checkpoint_directory(profile)}/. {profile.placement_conventions}\n"
         "Shared recall never authorizes writes to those projects. Decisions/tasks are durable "
         "knowledge, not lifecycle telemetry. Use schemas, categorized observations, and verified "
         "relations; don't create a separate note for every conversational statement.\n"

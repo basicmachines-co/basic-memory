@@ -21,7 +21,14 @@ from tau_coding.extensions import ExtensionAPI, ExtensionCommandContext, Extensi
 from tau_coding.extensions.api import InputEvent, InputHookResult
 
 from .bridge import McpConnection, Settings
-from .knowledge import CodingProfile, SessionProfile, coding_context, placement, validate_checkout
+from .knowledge import (
+    CodingProfile,
+    SessionProfile,
+    checkpoint_directory,
+    coding_context,
+    placement,
+    validate_checkout,
+)
 from .privacy import public_text
 from .results import confirm_write, tool_result
 
@@ -406,8 +413,8 @@ class MemoryLifecycle:
                 "status": "open",
                 "capture": "summarized" if kind == "checkpoint" else "transcript",
                 "capture_id": capture_id,
-                "session_id": context.session_id,  # preserve existing receipt/search compatibility
-                "tau_session_id": context.session_id,
+                "session_id": context.session_id,
+                "agent": "tau",
                 "source_tip": source_tip,
                 "cwd": context.cwd.as_posix(),
                 "reason": reason,
@@ -431,7 +438,7 @@ class MemoryLifecycle:
             )
             await self.tau.append_entry(NAMESPACE, record.model_dump(mode="json"))
             folder = (
-                self.profile.checkpoint_folder
+                checkpoint_directory(self.profile)
                 if kind == "checkpoint"
                 else self.settings.capture_folder
             )

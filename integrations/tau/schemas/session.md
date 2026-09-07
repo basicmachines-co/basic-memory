@@ -20,8 +20,10 @@ settings:
     cwd?: string, the working directory the session ran in
     username?: string, operating-system user that created the checkpoint
     hostname?: string, host that created the checkpoint
-    tau_session_id?: string, Tau session identifier
-    claude_session_id?: string, Claude Code session identifier
+    session_id?: string, exact host-provided session identifier (pair with agent)
+    agent?: string, agent harness identifier such as tau or claude-code or codex
+    tau_session_id?: string, legacy Tau session identifier (read compatibility only)
+    claude_session_id?: string, legacy Claude Code session identifier (read compatibility only)
     capture?(enum, how this checkpoint was produced): [extractive, deliberate, summarized]
 ---
 

@@ -12,7 +12,14 @@ from mcp.types import CallToolResult
 from pydantic import ValidationError
 from tau.bridge import Settings
 from tau.continuity import Note, SearchHit, SearchPage
-from tau.knowledge import CodingProfile, CommandResult, coding_context, command
+from tau.knowledge import (
+    CodingProfile,
+    CommandResult,
+    checkpoint_directory,
+    coding_context,
+    command,
+    placement,
+)
 from test_recovery import boundary
 
 
@@ -50,6 +57,26 @@ def test_profiles_are_explicit_scoped_and_validate(tmp_path: Path) -> None:
     for invalid in ({"read_projects": [""]}, {"project": " "}, {"auto_recall": "false"}):
         with pytest.raises(ValidationError):
             Settings.model_validate(invalid)
+
+
+@pytest.mark.parametrize("repository", ["org/repo", "repo"])
+@pytest.mark.parametrize("folder", [None, "handoffs", "tau/checkpoints", ""])
+def test_checkpoint_placement_defaults_and_overrides(
+    tmp_path: Path, repository: str, folder: str | None
+) -> None:
+    profile = CodingProfile(
+        root=tmp_path / "repo-worktree",
+        repository=repository,
+        project="private",
+        checkpoint_folder=folder,
+    )
+    expected = "tau/repo" if folder is None else folder
+    assert checkpoint_directory(profile) == expected
+    assert f"Checkpoints: {expected}/." in placement(profile)
+    restored = CodingProfile.model_validate_json(profile.model_dump_json())
+    assert checkpoint_directory(restored) == expected
+    general = Settings(project="general", checkpoint_folder=folder)
+    assert checkpoint_directory(general) == ("tau/checkpoints" if folder is None else folder)
 
 
 @pytest.mark.parametrize("pr_state", ["missing", "timeout", "none", "present", "invalid"])
@@ -222,11 +249,14 @@ async def test_checkpoint_write_contract_and_destination(
     assert call.args[0] == "write_note"
     args = call.args[1]
     assert args["project"] == "private"
+    assert args["directory"] == ("tau/repo" if coding else "tau/checkpoints")
     assert args["note_type"] == ("coding_session" if coding else "session")
     metadata = args["metadata"]
     assert metadata["project"] == "private"
     assert metadata["started"] and metadata["ended"]
-    assert metadata["tau_session_id"] == "s"
+    assert metadata["session_id"] == "s"
+    assert metadata["agent"] == "tau"
+    assert "tau_session_id" not in metadata
     assert metadata["capture"] == "summarized"
     assert ("repository" in metadata) is coding
     assert api.append_entry.call_args.args[1]["status"] == "confirmed"

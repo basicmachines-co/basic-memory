@@ -42,13 +42,15 @@ Gather repo evidence:
 - unresolved blockers
 - next action
 - current username, hostname, and timestamp
-- host-provided `codex_session_id`, `codex_turn_id`, `trigger`, and `model`
+- host-provided `session_id`, `agent`, `codex_turn_id`, `trigger`, and `model`
   values from the checkpoint request, when present
 
 Use direct, read-only evidence for repository and pull-request state. Do not
 claim a test passed unless you ran it or the user supplied the result.
 Treat host-provided session metadata as opaque identity data. Preserve exact
-non-empty values; never infer or rewrite them.
+non-empty values; never infer or rewrite them. For older requests supplying only
+`codex_session_id`, use that exact value as `session_id` with `agent: codex`.
+Do not emit the legacy field on new checkpoints.
 
 ## Write
 
@@ -94,7 +96,8 @@ Write a note to Basic Memory. For the `general` profile:
   - `username: <current username>`
   - `hostname: <current hostname>`
   - `capture: deliberate`
-  - `codex_session_id: <host-provided Codex session id>`, when supplied
+  - `agent: codex`
+  - `session_id: <host-provided Codex session id>`, when supplied
   - `codex_turn_id: <host-provided Codex turn id>`, when supplied
   - `trigger: <host-provided checkpoint trigger>`, when supplied
   - `model: <host-provided model slug>`, when supplied
@@ -119,14 +122,18 @@ the required coding fields cannot be proven.
 
 ### Link Checkpoints From The Same Chat
 
-When `codex_session_id` is available, use it as the exact same-chat identity:
+When `session_id` is available, pair it with `agent: codex` for same-chat identity:
 
 1. Before writing, search the configured `primaryProject` for both
    `codex_session` and `coding_session` notes with
+   `metadata_filters={"agent": "codex", "session_id": "<exact host-provided id>"}`.
+   Also search legacy notes with
    `metadata_filters={"codex_session_id": "<exact host-provided id>"}`.
-2. Page through all matches and select the newest earlier checkpoint by its
-   valid `started` timestamp. Read that note directly from `primaryProject` and
-   confirm its frontmatter contains the exact same `codex_session_id`.
+2. Page through both searches, deduplicate, and select the newest earlier
+   checkpoint by its valid `started` timestamp. Read it directly from
+   `primaryProject`. Confirm the exact `agent`/`session_id` pair, or the exact
+   legacy `codex_session_id` when shared identity is absent. Reject conflicting
+   agent/session fields; a bare session ID is never cross-agent identity.
 3. Add `- continues [[Exact previous checkpoint title]]` under `## Relations`.
 
 Do not edit the previous immutable checkpoint to add a forward edge; Basic
