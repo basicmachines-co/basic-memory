@@ -49,7 +49,8 @@ def test_dry_run_never_initializes_config_or_database(
     result = runner.invoke(app, ["install", "pi", "--dry-run"])
 
     assert result.exit_code == 0, result.output
-    assert "extensions/index.ts" in result.output
+    output = result.output.replace("\\", "/")
+    assert "extensions/index.ts" in output
     assert "basic-memory-pi-setup" in result.output
     assert "Pi registration: /bin/pi install" in result.output
     assert not (Path.home() / ".pi/agent/packages/basic-memory").exists()
