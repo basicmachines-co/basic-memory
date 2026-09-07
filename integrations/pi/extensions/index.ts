@@ -25,7 +25,7 @@ const SETUP_GUIDANCE = [
   "",
   "_This Pi workspace is not configured for Basic Memory yet. Run ",
   "`/skill:basic-memory-pi-setup` to choose an explicit project before recall or capture._",
-].join("");
+].join("\n");
 
 function modelLabel(ctx: ExtensionContext): string | undefined {
   const model = ctx.model as { provider?: string; id?: string } | undefined;
