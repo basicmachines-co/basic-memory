@@ -4,12 +4,14 @@ import { join } from "node:path";
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { bmCommandParts } from "../extensions/bm-cli.ts";
 import { parseConfig, resolveConfigPath } from "../extensions/config.ts";
 
 test("parseConfig applies safe defaults", () => {
   assert.deepEqual(parseConfig(), {
     transport: "cli",
     bmPath: "bm",
+    bmCommand: undefined,
     project: undefined,
     projectId: undefined,
     captureFolder: "pi/sessions",
@@ -27,6 +29,7 @@ test("parseConfig accepts snake_case aliases and strict unknown keys", () => {
   const cfg = parseConfig({
     transport: "mcp",
     bm_path: "/tmp/bm",
+    bm_command: ["uv", "run", "basic-memory"],
     project_id: "123",
     capture_folder: "sessions",
     recall_timeframe: "3d",
@@ -39,6 +42,7 @@ test("parseConfig accepts snake_case aliases and strict unknown keys", () => {
 
   assert.equal(cfg.transport, "mcp");
   assert.equal(cfg.bmPath, "/tmp/bm");
+  assert.deepEqual(cfg.bmCommand, ["uv", "run", "basic-memory"]);
   assert.equal(cfg.projectId, "123");
   assert.equal(cfg.captureFolder, "sessions");
   assert.equal(cfg.recallTimeframe, "3d");
@@ -62,12 +66,24 @@ test("resolveConfigPath finds the nearest ancestor workspace config", () => {
   assert.equal(resolveConfigPath(child, "custom.json"), join(child, "custom.json"));
 });
 
+test("bmCommand overrides bmPath when invoking the CLI", () => {
+  assert.deepEqual(bmCommandParts(parseConfig({ bmPath: "bm" })), {
+    command: "bm",
+    argsPrefix: [],
+  });
+  assert.deepEqual(
+    bmCommandParts(parseConfig({ bmPath: "bm", bmCommand: ["uv", "run", "basic-memory"] })),
+    { command: "uv", argsPrefix: ["run", "basic-memory"] },
+  );
+});
+
 test("parseConfig rejects invalid known values", () => {
   assert.throws(
     () => parseConfig({ transport: "mpc" }),
     /transport must be "cli" or "mcp"/,
   );
   assert.throws(() => parseConfig({ project: 123 }), /project must be a non-empty string/);
+  assert.throws(() => parseConfig({ bmCommand: [] }), /bmCommand must be a non-empty string array/);
   assert.throws(() => parseConfig({ autoRecall: "yes" }), /autoRecall must be a boolean/);
   assert.throws(() => parseConfig({ useHookFlow: "no" }), /useHookFlow must be a boolean/);
   assert.throws(

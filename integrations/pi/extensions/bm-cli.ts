@@ -25,6 +25,11 @@ export function projectArgs(cfg: BasicMemoryPiConfig): string[] {
   return args;
 }
 
+export function bmCommandParts(cfg: BasicMemoryPiConfig): { command: string; argsPrefix: string[] } {
+  const command = cfg.bmCommand ?? [cfg.bmPath];
+  return { command: command[0], argsPrefix: command.slice(1) };
+}
+
 export async function runBm(
   cfg: BasicMemoryPiConfig,
   args: string[],
@@ -37,7 +42,8 @@ export async function runBm(
   timeout.unref?.();
 
   return await new Promise<BmCommandResult>((resolve, reject) => {
-    const child = spawn(cfg.bmPath, args, {
+    const bm = bmCommandParts(cfg);
+    const child = spawn(bm.command, [...bm.argsPrefix, ...args], {
       stdio: ["pipe", "pipe", "pipe"],
       signal,
     });

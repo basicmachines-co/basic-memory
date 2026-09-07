@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { BmCommandError, projectArgs, runBm, runBmJson } from "./bm-cli.ts";
+import { BmCommandError, bmCommandParts, projectArgs, runBm, runBmJson } from "./bm-cli.ts";
 import { parseConfig, resolveConfigPath, type BasicMemoryPiConfig } from "./config.ts";
 import { buildCaptureDraft, extractSessionTurns } from "./session.ts";
 
@@ -150,6 +150,7 @@ function registerBasicMemoryMcp(
   cfg: BasicMemoryPiConfig,
   ctx: ExtensionContext,
 ): { dispose(): Promise<void> } | undefined {
+  const bm = bmCommandParts(cfg);
   const request: {
     version: 1;
     name: string;
@@ -159,8 +160,9 @@ function registerBasicMemoryMcp(
     version: MCP_RUNTIME_REGISTER_VERSION,
     name: cfg.mcpServerName,
     definition: {
-      command: cfg.bmPath,
+      command: bm.command,
       args: [
+        ...bm.argsPrefix,
         "mcp",
         "--transport",
         "stdio",
@@ -380,7 +382,7 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
     handler: async (_args, ctx) => {
       const lines = [
         `transport: ${cfg.transport}`,
-        `bm: ${cfg.bmPath}`,
+        `bm: ${(cfg.bmCommand ?? [cfg.bmPath]).join(" ")}`,
         `project: ${cfg.projectId ? `id:${cfg.projectId}` : cfg.project ?? "default"}`,
         `capture folder: ${cfg.captureFolder}`,
         `auto recall: ${cfg.autoRecall ? "on" : "off"}`,
