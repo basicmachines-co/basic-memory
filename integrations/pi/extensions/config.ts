@@ -1,5 +1,6 @@
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 
 export type BasicMemoryTransport = "cli" | "mcp";
 
@@ -62,9 +63,20 @@ function expandUserPath(path: string): string {
 }
 
 export function resolveConfigPath(cwd: string, explicitPath?: string): string {
-  const candidate = explicitPath?.trim() || ".pi/basic-memory.json";
-  const expanded = expandUserPath(candidate);
-  return isAbsolute(expanded) ? expanded : resolve(cwd, expanded);
+  const candidate = explicitPath?.trim();
+  if (candidate) {
+    const expanded = expandUserPath(candidate);
+    return isAbsolute(expanded) ? expanded : resolve(cwd, expanded);
+  }
+
+  let current = resolve(cwd);
+  while (true) {
+    const configPath = join(current, ".pi", "basic-memory.json");
+    if (existsSync(configPath)) return configPath;
+    const parent = dirname(current);
+    if (parent === current) return resolve(cwd, ".pi", "basic-memory.json");
+    current = parent;
+  }
 }
 
 function configValue(data: Record<string, unknown>, primary: string, alias?: string): unknown {
