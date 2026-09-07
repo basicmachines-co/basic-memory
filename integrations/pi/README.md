@@ -43,6 +43,7 @@ Keys:
 
 - `transport`: `cli` or `mcp`. CLI is the default and needs only `bm` on PATH.
 - `bmPath`: path to the Basic Memory CLI, default `bm`.
+- `bmCommand`: optional argv array that overrides `bmPath` when the CLI needs a wrapper or prefix.
 - `project` / `projectId`: explicit Basic Memory routing. `projectId` wins when set.
 - `captureFolder`: folder for Pi session checkpoints, default `pi/sessions`.
 - `recallTimeframe`: search window for recalls, default `7d`.
@@ -53,6 +54,16 @@ Keys:
 - `mcpServerName`: runtime MCP server name in MCP mode, default `basic-memory`.
 
 The extension never changes the user's global Basic Memory default project.
+
+For normal installs, leave `bmPath` alone and make sure `bm` is on Pi's PATH. For branch/local development, use `bmCommand` so Pi can run Basic Memory through `uv` without depending on the workspace's shell aliases:
+
+```json
+{
+  "bmCommand": ["uv", "run", "--project", "/path/to/basic-memory", "basic-memory"]
+}
+```
+
+`bmCommand` is passed as argv, not through a shell. The first item is the executable and the remaining items are prepended before the plugin's `bm` arguments.
 
 ## Commands and tools
 

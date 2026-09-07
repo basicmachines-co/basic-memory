@@ -7,6 +7,7 @@ export type BasicMemoryTransport = "cli" | "mcp";
 export interface BasicMemoryPiConfig {
   transport: BasicMemoryTransport;
   bmPath: string;
+  bmCommand?: string[];
   project?: string;
   projectId?: string;
   captureFolder: string;
@@ -36,6 +37,8 @@ const ALLOWED_KEYS = new Set([
   "transport",
   "bmPath",
   "bm_path",
+  "bmCommand",
+  "bm_command",
   "project",
   "projectId",
   "project_id",
@@ -107,6 +110,23 @@ function optionalStringConfigValue(
   throw new Error(`basic-memory Pi config ${primary} must be a non-empty string`);
 }
 
+function optionalStringListConfigValue(
+  data: Record<string, unknown>,
+  primary: string,
+  alias?: string,
+): string[] | undefined {
+  const value = configValue(data, primary, alias);
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(`basic-memory Pi config ${primary} must be a non-empty string array`);
+  }
+  const strings = value.map((item) => (typeof item === "string" ? item.trim() : ""));
+  if (strings.some((item) => item.length === 0)) {
+    throw new Error(`basic-memory Pi config ${primary} must be a non-empty string array`);
+  }
+  return strings;
+}
+
 function booleanConfigValue(
   data: Record<string, unknown>,
   primary: string,
@@ -150,6 +170,7 @@ export function parseConfig(raw: unknown = {}): BasicMemoryPiConfig {
   return {
     transport: rawTransport,
     bmPath: requiredStringValue(data, "bmPath", DEFAULT_CONFIG.bmPath, "bm_path"),
+    bmCommand: optionalStringListConfigValue(data, "bmCommand", "bm_command"),
     project: optionalStringConfigValue(data, "project"),
     projectId: optionalStringConfigValue(data, "projectId", "project_id"),
     captureFolder: requiredStringValue(
