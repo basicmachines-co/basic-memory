@@ -59,6 +59,61 @@ def test_pi_checkpoint_reuses_identity_and_separates_branches(tmp_path: Path) ->
     assert all(call["project"] == "explicit-project" for call in calls)
 
 
+def test_pi_checkpoint_includes_recent_assistant_turns(tmp_path: Path) -> None:
+    config = tmp_path / ".pi" / "basic-memory.json"
+    config.parent.mkdir()
+    config.write_text(json.dumps({"project": "explicit-project"}), encoding="utf-8")
+    write = AsyncMock(return_value={"action": "updated"})
+    with patch("basic_memory.mcp.tools.write_note", write):
+        result = runner.invoke(
+            app,
+            ["hook", "pre-compact", "--harness", "pi", "--project-dir", str(tmp_path)],
+            input=json.dumps(
+                {
+                    "session_id": "session-a",
+                    "branch_id": "branch-a",
+                    "cwd": str(tmp_path),
+                    "turns": [
+                        {"role": "user", "text": "Implement the installer"},
+                        {"role": "assistant", "text": "Found the Windows path separator issue"},
+                    ],
+                }
+            ),
+        )
+
+    assert result.exit_code == 0
+    assert write.await_args is not None
+    content = write.await_args.kwargs["content"]
+    assert "**user:** Implement the installer" in content
+    assert "**assistant:** Found the Windows path separator issue" in content
+
+
+def test_pi_hook_settings_use_parent_workspace_config(tmp_path: Path) -> None:
+    config = tmp_path / ".pi" / "basic-memory.json"
+    config.parent.mkdir()
+    config.write_text(json.dumps({"project": "explicit-project"}), encoding="utf-8")
+    child = tmp_path / "src" / "package"
+    child.mkdir(parents=True)
+    write = AsyncMock(return_value={"action": "updated"})
+    with patch("basic_memory.mcp.tools.write_note", write):
+        result = runner.invoke(
+            app,
+            ["hook", "pre-compact", "--harness", "pi", "--project-dir", str(child)],
+            input=json.dumps(
+                {
+                    "session_id": "session-a",
+                    "branch_id": "branch-a",
+                    "cwd": str(child),
+                    "turns": [{"role": "user", "text": "Preserve this decision"}],
+                }
+            ),
+        )
+
+    assert result.exit_code == 0
+    assert write.await_args is not None
+    assert write.await_args.kwargs["project"] == "explicit-project"
+
+
 @pytest.mark.parametrize("branch", [None, "branch-a"])
 def test_pi_failed_capture_never_reports_success(tmp_path: Path, branch: str | None) -> None:
     config = tmp_path / ".pi" / "basic-memory.json"

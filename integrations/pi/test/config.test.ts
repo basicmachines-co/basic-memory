@@ -1,7 +1,10 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { parseConfig } from "../extensions/config.ts";
+import { parseConfig, resolveConfigPath } from "../extensions/config.ts";
 
 test("parseConfig applies safe defaults", () => {
   assert.deepEqual(parseConfig(), {
@@ -45,6 +48,18 @@ test("parseConfig accepts snake_case aliases and strict unknown keys", () => {
   assert.equal(cfg.mcpServerName, "memory");
   assert.equal(cfg.useHookFlow, false);
   assert.throws(() => parseConfig({ nope: true }), /unknown keys: nope/);
+});
+
+test("resolveConfigPath finds the nearest ancestor workspace config", () => {
+  const root = join(tmpdir(), `bm-pi-config-${process.pid}-${Date.now()}`);
+  const child = join(root, "packages", "cli");
+  const config = join(root, ".pi", "basic-memory.json");
+  mkdirSync(join(root, ".pi"), { recursive: true });
+  mkdirSync(child, { recursive: true });
+  writeFileSync(config, "{}\n");
+
+  assert.equal(resolveConfigPath(child), config);
+  assert.equal(resolveConfigPath(child, "custom.json"), join(child, "custom.json"));
 });
 
 test("parseConfig rejects invalid known values", () => {
