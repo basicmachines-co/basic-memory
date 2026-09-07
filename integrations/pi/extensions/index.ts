@@ -385,6 +385,7 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
+    await refreshConfig(ctx);
     if (!cfg.autoRecall || recalledThisSession || configError) return;
     recalledThisSession = true;
     try {
@@ -401,6 +402,7 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
   });
 
   pi.on("session_before_compact", async (event, ctx) => {
+    await refreshConfig(ctx);
     if (!cfg.autoCapture || !cfg.useHookFlow || configError || !hasProjectMapping()) return;
     try {
       const message = await runHook(
@@ -418,6 +420,7 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
+    await refreshConfig(ctx);
     if (!cfg.autoCapture || configError || !hasProjectMapping()) return;
     const text = extractSessionTurns(ctx.sessionManager.getBranch() as unknown[])
       .map((turn) => turn.text)
