@@ -70,7 +70,16 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "project",
         "project_id",
     ],
-    "grep": ["pattern", "literal", "page", "page_size", "project", "project_id"],
+    "grep": [
+        "pattern",
+        "literal",
+        "page",
+        "page_size",
+        "project",
+        "project_id",
+        "context_lines",
+        "max_matches",
+    ],
     "list_directory": [
         "dir_name",
         "depth",
@@ -104,6 +113,8 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "page_size",
         "output_format",
         "include_frontmatter",
+        "start_line",
+        "end_line",
     ],
     "recent_activity": [
         "type",

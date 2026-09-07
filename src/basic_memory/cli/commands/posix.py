@@ -332,6 +332,31 @@ def _plain_find_fields(result: dict[str, Any]) -> None:
         print(f"{row.get('file_path', '')}\t{fields_json}")
 
 
+def _display_grep_lines(result: dict[str, Any], *, plain: bool) -> None:
+    """Print bounded windows without reintroducing the search response's full body."""
+    output: list[str] = [f"Search candidates: page {result['current_page']}"]
+    for row in result["results"]:
+        path = row["file_path"]
+        output.append(f"{path}: {row['match_count']} matching line(s)")
+        for window in row["windows"]:
+            for number, line in zip(
+                range(window["start_line"], window["end_line"] + 1),
+                window["content"].split("\n"),
+                strict=True,
+            ):
+                marker = ":" if number in window["match_lines"] else "-"
+                output.append(f"{path}{marker}{number}{marker}{line}")
+        if row["next_match_line"] is not None:
+            output.append(f"… more matches; read {path} at line {row['next_match_line']}")
+    if result["has_more"]:
+        output.append(f"… more candidates; use --page {result['current_page'] + 1}")
+    text = "\n".join(output)
+    if plain:
+        print(text)
+    else:
+        console.print(Text(text))
+
+
 # --- tail rendering ---
 # tail's row shape ({type, title, permalink, file_path, created_at}) differs
 # from recent-activity's payload, so it gets its own small renderers rather
@@ -622,6 +647,22 @@ def grep(
             "--literal", "-F", help="Literal full-text matching instead of semantic search"
         ),
     ] = False,
+    context_lines: Annotated[
+        Optional[int],
+        typer.Option(
+            "-C",
+            "--context-lines",
+            min=0,
+            max=10,
+            help="Compact literal line matches with surrounding context (requires -F)",
+        ),
+    ] = None,
+    max_matches: Annotated[
+        int,
+        typer.Option(
+            "--max-matches", min=1, max=100, help="Matching lines per candidate in context mode"
+        ),
+    ] = 10,
     page: Annotated[int, typer.Option("--page", help="Page number (1-indexed)")] = 1,
     page_size: Annotated[int, typer.Option("--page-size", help="Results per page")] = 10,
     json_output: JsonOption = False,
@@ -635,6 +676,7 @@ def grep(
 
     Examples:
 
+    bm grep -F "retry" -C 3 --plain
     bm grep "auth token rotation"
     bm grep -F "BASIC_MEMORY_FORCE_LOCAL"
     bm grep "deploy checklist" --page-size 20 --json
@@ -652,6 +694,8 @@ def grep(
                 mcp_grep(
                     pattern,
                     literal=literal,
+                    context_lines=context_lines,
+                    max_matches=max_matches,
                     page=page,
                     page_size=page_size,
                     project=project,
@@ -662,6 +706,8 @@ def grep(
         mode = _resolve_output_mode(json_output, plain)
         if mode == "json":
             _print_json(result)
+        elif context_lines is not None:
+            _display_grep_lines(result, plain=mode == "plain")
         elif mode == "plain":
             _plain_search_results(result, query=pattern)
         else:

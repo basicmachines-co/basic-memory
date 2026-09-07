@@ -11,6 +11,7 @@ from fastmcp import Context
 from pydantic import AliasChoices, Field
 
 from basic_memory.config import ConfigManager
+from basic_memory.markdown.line_scanning import format_line_read
 from basic_memory.mcp.project_context import (
     detect_project_from_identifier_prefix,
     get_project_client,
@@ -57,7 +58,7 @@ def _exact_external_id(identifier: str) -> str | None:
 
 @mcp.tool(
     title="Read Note",
-    description="Read a markdown note by title or permalink.",
+    description="Read a markdown note by title or permalink, optionally a numbered line range.",
     tags={"notes"},
     # TODO: re-enable once MCP client rendering is working
     # meta={"ui/resourceUri": "ui://basic-memory/note-preview"},
@@ -90,6 +91,8 @@ async def read_note(
     output_format: Literal["text", "json"] = "text",
     include_frontmatter: bool = False,
     context: Context | None = None,
+    start_line: int | None = None,
+    end_line: int | None = None,
 ) -> str | dict[str, Any]:
     """Return the raw markdown for a note, or guidance text if no match is found.
 
@@ -118,7 +121,7 @@ async def read_note(
                    From the CLI this is a positional argument, not a flag.
         page: Page of fallback-search results to use when the identifier does not
             resolve to a note directly (default: 1). A direct or exact-title match
-            always returns the full note content — page/page_size never chunk the
+            returns the note content — page/page_size never chunk the
             note itself, and the title-match lookup pages through fixed-size pages
             of title results until an exact match is found or results are
             exhausted, regardless of page or page_size. Aliases: page_number.
@@ -127,14 +130,21 @@ async def read_note(
             Aliases: limit, per_page.
         output_format: "text" returns markdown content or guidance text.
             "json" returns a structured object with title/permalink/file_path/content/frontmatter.
-        include_frontmatter: When output_format="json", whether content should include the
-            opening YAML frontmatter block; the parsed frontmatter object is returned either
-            way. The CLI flag is --frontmatter (--include-frontmatter is a deprecated alias).
+        include_frontmatter: For unsliced JSON reads, include opening YAML in content;
+            parsed frontmatter is returned either way. Explicit line ranges are never
+            stripped. CLI: --frontmatter (--include-frontmatter is a deprecated alias).
+        start_line: First document line to read (1-based, inclusive). Defaults to 1
+            when only end_line is given. Line scans count the full Markdown,
+            including frontmatter, matching cat's default line coordinates.
+        end_line: Last document line to read (inclusive); omitted means EOF.
+            Out-of-file ranges return empty content; invalid/reversed ranges fail.
+            With either bound, text output is numbered and JSON carries coordinates,
+            has_more, and next_start_line/next_end_line. include_frontmatter does
+            not strip an explicitly addressed range. Edits between calls may shift lines.
         context: Optional FastMCP context for performance caching.
 
     Returns:
-        The full markdown content of the note if found, or helpful guidance if not found.
-        Content includes frontmatter, observations, relations, and all markdown formatting.
+        Markdown content, a numbered line scan, or helpful guidance if not found.
 
     Examples:
         # Read by permalink
@@ -168,6 +178,13 @@ async def read_note(
         raise ValueError(f"page must be >= 1, got {page}")
     if page_size < 1:
         raise ValueError(f"page_size must be >= 1, got {page_size}")
+
+    if start_line is not None and start_line < 1:
+        raise ValueError(f"start_line must be >= 1, got {start_line}")
+    if end_line is not None and end_line < (start_line or 1):
+        raise ValueError(f"end_line must be >= start_line, got {end_line}")
+    line_scan = start_line is not None or end_line is not None
+    lines_param = f"{start_line or 1}-{'' if end_line is None else end_line}" if line_scan else None
 
     # Detect project from a memory URL or permalink prefix before routing.
     # project_id routes by external UUID, so it bypasses URL discovery entirely.
@@ -246,6 +263,33 @@ async def read_note(
             knowledge_client = KnowledgeClient(client, active_project.external_id)
             resource_client = ResourceClient(client, active_project.external_id)
 
+            async def _read_resolved_note(entity_id: str) -> str | dict[str, Any]:
+                # Only explicit line scans use the sliced API in text mode. Ordinary
+                # text reads retain their resource path; UUID JSON reads stay one GET.
+                payload = await read_note_json_by_external_id(
+                    knowledge_client=knowledge_client,
+                    resource_client=resource_client,
+                    entity_external_id=entity_id,
+                    include_frontmatter=include_frontmatter,
+                    lines=lines_param,
+                )
+                if not line_scan:
+                    return dict(payload)
+                first = payload["start_line"]
+                last = payload["end_line"]
+                total = payload["total_lines"]
+                width = last - first + 1
+                if output_format == "text":
+                    return format_line_read(
+                        payload["content"], start_line=first, end_line=last, total_lines=total
+                    )
+                return {
+                    **payload,
+                    "has_more": last < total,
+                    "next_start_line": last + 1 if last < total else None,
+                    "next_end_line": min(total, last + width) if last < total else None,
+                }
+
             def _empty_json_payload() -> dict[str, Any]:
                 return {
                     "title": None,
@@ -318,17 +362,10 @@ async def read_note(
                 value = item.get("external_id")
                 return value if isinstance(value, str) and value else None
 
-            if output_format == "json":
+            if output_format == "json" or line_scan:
                 exact_external_id = _exact_external_id(entity_path)
                 if exact_external_id is not None:
-                    return dict(
-                        await read_note_json_by_external_id(
-                            knowledge_client=knowledge_client,
-                            resource_client=resource_client,
-                            entity_external_id=exact_external_id,
-                            include_frontmatter=include_frontmatter,
-                        )
-                    )
+                    return await _read_resolved_note(exact_external_id)
 
                 try:
                     entity_id = await knowledge_client.resolve_entity(entity_path, strict=True)
@@ -339,14 +376,7 @@ async def read_note(
                         "Returning JSON read_note result from entity: {path}",
                         path=entity_path,
                     )
-                    return dict(
-                        await read_note_json_by_external_id(
-                            knowledge_client=knowledge_client,
-                            resource_client=resource_client,
-                            entity_external_id=entity_id,
-                            include_frontmatter=include_frontmatter,
-                        )
-                    )
+                    return await _read_resolved_note(entity_id)
             else:
                 # Text mode intentionally retains the resolve -> resource behavior.
                 try:
@@ -400,7 +430,7 @@ async def read_note(
                     logger.info(f"No exact title match found for: {identifier}")
                     break
 
-            if result is not None and output_format == "json":
+            if result is not None and (output_format == "json" or line_scan):
                 try:
                     entity_id = _result_external_id(result)
                     if entity_id is None and _result_permalink(result) is not None:
@@ -411,14 +441,7 @@ async def read_note(
                         logger.info(
                             f"Found note by exact title search: {_result_permalink(result)}"
                         )
-                        return dict(
-                            await read_note_json_by_external_id(
-                                knowledge_client=knowledge_client,
-                                resource_client=resource_client,
-                                entity_external_id=entity_id,
-                                include_frontmatter=include_frontmatter,
-                            )
-                        )
+                        return await _read_resolved_note(entity_id)
                 except Exception as error:  # pragma: no cover
                     logger.info(
                         "Failed to fetch content for found title match "
