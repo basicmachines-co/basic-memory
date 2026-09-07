@@ -100,7 +100,20 @@ session.
 
 ## Install
 
-Install the plugin once from the Basic Memory repository root:
+Install the plugin once with Basic Memory and Codex CLI on your PATH:
+
+```bash
+bm install codex
+```
+
+This registers the GitHub marketplace and installs `codex@basic-memory` through
+Codex CLI. Use `--dry-run` to preview the commands or `--yes` to skip confirmation.
+For a local checkout, run `bm install codex --source /path/to/basic-memory`.
+The source must be the repository root containing `.agents/plugins/marketplace.json`.
+The default Git source uses its default branch, independently of the installed
+Basic Memory Python version. Hooks require `uv` as described above.
+
+Alternatively, install directly from the Basic Memory repository root:
 
 ```bash
 codex plugin marketplace add "$(git rev-parse --show-toplevel)"
