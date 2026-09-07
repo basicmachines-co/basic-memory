@@ -255,7 +255,7 @@ async def validate_schema(
                     schema_reference=schema_ref if isinstance(schema_ref, str) else None,
                     passed=response.passed,
                     schema_external_id=resolved.source.external_id,
-                    schema_kind="inline" if isinstance(schema_ref, dict) else "named",
+                    schema_kind=resolved.kind,
                 )
             )
 
@@ -509,7 +509,7 @@ async def _validate_note_entities(
                         schema_reference=schema_ref if isinstance(schema_ref, str) else None,
                         passed=response.passed,
                         schema_external_id=resolved.source.external_id,
-                        schema_kind="inline" if isinstance(schema_ref, dict) else "named",
+                        schema_kind=resolved.kind,
                     )
                 )
 

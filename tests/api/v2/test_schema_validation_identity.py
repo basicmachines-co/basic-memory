@@ -164,3 +164,71 @@ async def test_invalid_schema_never_reports_an_identity(
     response = await client.post(f"{v2_project_url}/schema/validate", params=params)
     assert response.status_code == 400
     assert identity_observer.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", ["type", "all"])
+async def test_mixed_batch_attributes_each_note_to_its_own_schema(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url: str,
+    entity_service: EntityService,
+    search_service: SearchService,
+    identity_observer: IdentityObserver,
+    scope: str,
+) -> None:
+    # A passing named note, a failing named note, and an inline note must
+    # retain their own identities and results regardless of batch ordering.
+    expected: dict[str, tuple[str, str, bool]] = {}
+    for field, passed in (("name", True), ("role", False)):
+        schema, _ = await entity_service.create_or_update_entity(
+            EntitySchema(
+                title=f"person-by-{field}",
+                directory="schemas",
+                note_type="schema",
+                entity_metadata={
+                    "entity": "person",
+                    "schema": {field: "string"},
+                    "settings": {"validation": "strict"},
+                },
+                content="A person schema.\n",
+            )
+        )
+        await search_service.index_entity(schema)
+        note, _ = await entity_service.create_or_update_entity(
+            EntitySchema(
+                title=f"Person with {field} schema",
+                directory="people",
+                note_type="person",
+                entity_metadata={"schema": schema.title},
+                content="## Observations\n- [name] Example\n",
+            )
+        )
+        await search_service.index_entity(note)
+        expected[note.external_id] = (schema.external_id, "named", passed)
+
+    inline, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Person with inline schema",
+            directory="people",
+            note_type="person",
+            entity_metadata={"schema": {"name": "string"}},
+            content="## Observations\n- [name] Example\n",
+        )
+    )
+    await search_service.index_entity(inline)
+    expected[inline.external_id] = (inline.external_id, "inline", True)
+
+    params = {"note_type": "person"} if scope == "type" else {}
+    response = await client.post(f"{v2_project_url}/schema/validate", params=params)
+    assert response.status_code == 200
+    assert response.json()["total_notes"] == 3
+    assert response.json()["valid_count"] == 2
+    assert len(identity_observer.calls) == 1
+    project_id, outcomes = identity_observer.calls[0]
+    assert project_id == test_project.external_id
+    assert len(outcomes) == 3
+    assert {
+        outcome.note_external_id: (outcome.schema_external_id, outcome.schema_kind, outcome.passed)
+        for outcome in outcomes
+    } == expected

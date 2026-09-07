@@ -20,7 +20,7 @@ from basic_memory.picoschema.parser import (
     parse_schema_note,
     parse_validation_mode,
 )
-from typing import Any
+from typing import Any, Literal
 
 
 # Type alias for the search function dependency.
@@ -44,6 +44,7 @@ class SchemaCandidate[Source]:
 class ResolvedSchema[Source]:
     definition: SchemaDefinition
     source: Source
+    kind: Literal["inline", "named"]
 
 
 async def resolve_schema(
@@ -97,7 +98,9 @@ async def resolve_schema_with_source[Source](
     # Why: inline schemas are self-contained, no lookup needed
     # Outcome: parse and return immediately
     if isinstance(schema_value, dict):
-        return ResolvedSchema(_schema_from_inline(schema_value, note_frontmatter), inline_source)
+        return ResolvedSchema(
+            _schema_from_inline(schema_value, note_frontmatter), inline_source, kind="inline"
+        )
 
     # --- 2. Explicit reference ---
     # Trigger: schema field is a string (entity name or permalink)
@@ -107,7 +110,9 @@ async def resolve_schema_with_source[Source](
         candidates = await search_fn(schema_value)
         if candidates:
             selected = candidates[0]
-            return ResolvedSchema(parse_schema_note(selected.frontmatter), selected.source)
+            return ResolvedSchema(
+                parse_schema_note(selected.frontmatter), selected.source, kind="named"
+            )
 
     # --- 3. Implicit by type ---
     # Trigger: no schema field, but the note has a type field
@@ -118,7 +123,9 @@ async def resolve_schema_with_source[Source](
         candidates = await search_fn(note_type)
         if candidates:
             selected = candidates[0]
-            return ResolvedSchema(parse_schema_note(selected.frontmatter), selected.source)
+            return ResolvedSchema(
+                parse_schema_note(selected.frontmatter), selected.source, kind="named"
+            )
 
     # --- 4. No schema ---
     return None

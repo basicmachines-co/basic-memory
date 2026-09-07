@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from basic_memory.picoschema.resolver import SchemaCandidate, resolve_schema_with_source
+from basic_memory.picoschema import ResolvedSchema, SchemaCandidate, resolve_schema_with_source
 
 
 @pytest.mark.asyncio
@@ -15,6 +15,7 @@ from basic_memory.picoschema.resolver import SchemaCandidate, resolve_schema_wit
         ({"schema": "explicit", "type": "person"}, ["explicit"], "selected-schema"),
         ({"schema": "missing", "type": "person"}, ["missing", "person"], "selected-schema"),
         ({"type": "person"}, ["person"], "selected-schema"),
+        ({"schema": 42, "type": "person"}, ["person"], "selected-schema"),
         ({"schema": "missing"}, ["missing"], None),
         ({"type": "missing"}, ["missing"], None),
         ({}, [], None),
@@ -39,7 +40,8 @@ async def test_source_follows_resolution(
     if expected_source is None:
         assert result is None
     else:
-        assert result is not None
+        assert isinstance(result, ResolvedSchema)
+        assert result.kind == ("inline" if expected_source == "inline-note" else "named")
         assert result.source == expected_source
         assert result.definition.fields[0].name == (
             "local" if expected_source == "inline-note" else "name"
