@@ -33,6 +33,7 @@ import json
 import math
 import os
 import re
+from dataclasses import asdict
 from typing import Annotated, Any, Optional
 
 from fastmcp import Context
@@ -42,6 +43,8 @@ from pydantic import BeforeValidator, TypeAdapter
 from basic_memory.config import ConfigManager
 from basic_memory.file_utils import ParseError, has_frontmatter, parse_frontmatter
 from basic_memory.man import bundled_pages, find_page, parse_page_ref, render_index
+from basic_memory.markdown.line_scanning import scan_literal_lines
+from basic_memory.markdown.sections import document_lines
 from basic_memory.mcp.container import get_container
 from basic_memory.mcp.note_reads import read_note_json_by_external_id
 from basic_memory.mcp.project_context import (
@@ -307,7 +310,7 @@ async def cat(
     if server_side_slice or (start_line is None and end_line is None):
         return qualify_note_paths(payload, route)
 
-    lines = str(payload["content"]).splitlines()
+    lines = document_lines(payload["content"])
     total_lines = len(lines)
     first = start_line or 1
     last = min(end_line, total_lines) if end_line is not None else total_lines
@@ -349,6 +352,8 @@ async def grep(
     project: Optional[str] = None,
     project_id: Optional[str] = None,
     context: Context | None = None,
+    context_lines: int | None = None,
+    max_matches: int = 10,
 ) -> dict[str, Any]:
     """Search note content, semantically by default.
 
@@ -356,13 +361,21 @@ async def grep(
         pattern: Text to search for.
         literal: Force literal full-text matching instead of semantic search.
         page: Page number (1-indexed).
-        page_size: Results per page.
+        page_size: Results per page (maximum 100 in line-scanning mode).
+        context_lines: Return compact literal match windows with 0-10 surrounding lines
+            (requires literal=True). Case-insensitive substrings, coordinates including
+            frontmatter, overlapping windows merged. Scans current content of this
+            indexed candidate page; pagination/totals count candidates, not exact matches.
+        max_matches: Maximum matching lines to show per candidate in line mode (1-100,
+            default 10). Omitted matches carry next_match_line for a targeted read_note
+            or cat read. Edits between calls can shift line positions.
         project: Project name. Required when more than one project is addressable.
         project_id: Project external_id (UUID); takes precedence over `project`.
         context: Optional FastMCP context.
 
     Returns:
-        The search response as JSON: results, pagination, and totals.
+        Normally the search response as JSON. With context_lines, only note identity,
+        match windows/counts, and candidate pagination; no full body or duplicate excerpt.
     """
     if not pattern or not pattern.strip():
         raise ValueError("pattern must not be empty")
@@ -370,6 +383,19 @@ async def grep(
         raise ValueError(f"page must be >= 1, got {page}")
     if page_size < 1:
         raise ValueError(f"page_size must be >= 1, got {page_size}")
+    if context_lines is not None:
+        if not literal:
+            raise ValueError("grep: context_lines requires literal=True")
+        if not 0 <= context_lines <= 10:
+            raise ValueError("grep: context_lines must be between 0 and 10")
+        if "\n" in pattern or "\r" in pattern:
+            raise ValueError("grep: line scanning requires a single-line pattern")
+        if page_size > 100:
+            raise ValueError("grep: line scanning page_size must be <= 100")
+    elif max_matches != 10:
+        raise ValueError("grep: max_matches requires context_lines")
+    if not 1 <= max_matches <= 100:
+        raise ValueError("grep: max_matches must be between 1 and 100")
 
     # grep's pattern is never parsed as a path — search text like "error/timeout"
     # must not be mistaken for a mount. Routing participates for the refusal rule
@@ -388,11 +414,43 @@ async def grep(
         active_project,
     ):
         # Import here to avoid circular import
-        from basic_memory.mcp.clients import SearchClient
+        from basic_memory.mcp.clients import KnowledgeClient, ResourceClient, SearchClient
 
         search_client = SearchClient(client, active_project.external_id)
         response = await search_client.search(query.model_dump(), page=page, page_size=page_size)
-        return response.model_dump(mode="json", exclude_none=True)
+        payload = response.model_dump(mode="json", exclude_none=True)
+        if context_lines is None:
+            return payload
+
+        # Search excerpts are truncated/indexed: derive coordinates from the same
+        # accepted content read_note serves. Hydrate only this bounded candidate page.
+        knowledge_client = KnowledgeClient(client, active_project.external_id)
+        resource_client = ResourceClient(client, active_project.external_id)
+        rows: list[dict[str, Any]] = []
+        for candidate in response.results:
+            if candidate.external_id is None:
+                raise ToolError("grep: line scanning requires search results with external_id")
+            note = await read_note_json_by_external_id(
+                knowledge_client=knowledge_client,
+                resource_client=resource_client,
+                entity_external_id=candidate.external_id,
+                include_frontmatter=True,
+            )
+            scan = scan_literal_lines(
+                note["content"], pattern, context_lines=context_lines, max_matches=max_matches
+            )
+            rows.append(
+                {
+                    "title": note["title"],
+                    "permalink": note["permalink"],
+                    "file_path": note["file_path"],
+                    "external_id": candidate.external_id,
+                    **asdict(scan),
+                }
+            )
+        payload["results"] = rows
+        payload["pagination_scope"] = "search_candidates"
+        return payload
 
 
 async def _project_mount_listing(

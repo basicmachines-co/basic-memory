@@ -699,6 +699,14 @@ def write_note(
 @tool_app.command()
 def read_note(
     identifier: str,
+    start_line: Annotated[
+        Optional[int],
+        typer.Option(min=1, help="First document line, including frontmatter (1-based)"),
+    ] = None,
+    end_line: Annotated[
+        Optional[int],
+        typer.Option(min=1, help="Last document line, inclusive; omitted reads to EOF"),
+    ] = None,
     include_frontmatter: bool = typer.Option(
         False,
         "--frontmatter",
@@ -740,6 +748,7 @@ def read_note(
     bm tool read-note my-note --frontmatter
     bm tool read-note my-note --plain
     bm tool read-note my-note --json
+    bm tool read-note my-note --start-line 120 --end-line 180 --plain
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
     from basic_memory.mcp.tools import read_note as mcp_read_note
@@ -756,6 +765,8 @@ def read_note(
                     project_id=project_id,
                     include_frontmatter=include_frontmatter,
                     output_format="json",
+                    start_line=start_line,
+                    end_line=end_line,
                 )
             )
 
@@ -776,6 +787,19 @@ def read_note(
         mode = _resolve_output_mode(json_output, plain)
         if mode == "json" or isinstance(result, str):
             _print_json(result)
+        elif "start_line" in result:
+            from basic_memory.markdown.line_scanning import format_line_read
+
+            text = format_line_read(
+                result["content"],
+                start_line=result["start_line"],
+                end_line=result["end_line"],
+                total_lines=result["total_lines"],
+            )
+            if mode == "plain":
+                print(text)
+            else:
+                console.print(Text(text))
         elif mode == "plain":
             _plain_read_note(result, include_frontmatter=include_frontmatter)
         else:

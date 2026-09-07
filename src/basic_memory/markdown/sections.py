@@ -50,6 +50,18 @@ def _ends_with_terminator(text: str) -> bool:
     return text.endswith(("\n", "\r"))
 
 
+def document_lines(text: str) -> list[str]:
+    """Count physical Markdown lines, without a phantom line after a final newline.
+
+    Unlike str.splitlines(), Unicode separators inside prose do not move the
+    coordinates away from those used by the section and line-range reader.
+    """
+    if not text:
+        return []
+    lines = _split_lines(text)
+    return lines[:-1] if _ends_with_terminator(text) else lines
+
+
 @dataclass(frozen=True, slots=True)
 class MarkdownSection:
     """One heading-bounded span of a note body, addressed by its heading path.
