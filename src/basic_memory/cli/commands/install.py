@@ -26,6 +26,52 @@ install_app = typer.Typer(help="Install Basic Memory resources into an agent hos
 app.add_typer(install_app, name="install")
 
 
+@install_app.command("codex")
+def install_codex(
+    source: str = typer.Option(
+        "basicmachines-co/basic-memory",
+        "--source",
+        help="Marketplace Git source or local repo root.",
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview only; no subprocesses."),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Approve the displayed installation plan."),
+) -> None:
+    """Install the Basic Memory plugin through Codex's user-level marketplace."""
+    commands = [
+        ["plugin", "marketplace", "add", source],
+        ["plugin", "add", "codex@basic-memory"],
+    ]
+    typer.echo("Install the Basic Memory marketplace and plugin into Codex (user-level).")
+    for command in commands:
+        typer.echo(shell_command("codex", *command))
+    if dry_run:
+        return
+    codex = shutil.which("codex")
+    if codex is None:
+        typer.echo("Codex CLI not found on PATH. Install Codex CLI first.", err=True)
+        raise typer.Exit(1)
+    if not yes and not typer.confirm("Apply this installation plan?", default=False):
+        raise typer.Abort()
+    for command in commands:
+        try:
+            result = subprocess.run([codex, *command], check=False)
+        except OSError:
+            typer.echo("Cannot launch Codex CLI. Check its installation and permissions.", err=True)
+            raise typer.Exit(1) from None
+        # A failed marketplace registration must not install from an unrelated
+        # previously configured source with the same marketplace name.
+        if result.returncode:
+            typer.echo(
+                "Codex command failed: "
+                + shell_command("codex", *command)
+                + ". Resolve the error above and rerun bm install codex.",
+                err=True,
+            )
+            raise typer.Exit(1)
+    typer.echo("Basic Memory plugin installed. Start a new Codex thread and run $bm-setup.")
+    typer.echo("Open /hooks in Codex to review and trust the Basic Memory hooks (requires uv).")
+
+
 @dataclass(frozen=True, slots=True)
 class InstallFile:
     path: Path
