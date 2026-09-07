@@ -34,7 +34,13 @@ from basic_memory.schemas.schema import (
     DriftFieldResponse,
     TypeValidationSummary,
 )
-from basic_memory.picoschema.resolver import SchemaSearchFn, resolve_schema
+from basic_memory.picoschema.resolver import (
+    ResolvedSchema,
+    SchemaCandidate,
+    SchemaSearchFn,
+    resolve_schema,
+    resolve_schema_with_source,
+)
 from basic_memory.picoschema.parser import SchemaDefinition
 from basic_memory.picoschema.validator import validate_note
 from basic_memory.services.schema_validation_hooks import (
@@ -151,6 +157,39 @@ async def _resolve_schema_for_api(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
+async def _resolve_note_schema(
+    session: AsyncSession,
+    entity_repository: EntityRepositoryV2ExternalDep,
+    file_service: FileServiceV2ExternalDep,
+    entity: Entity,
+    frontmatter: dict[str, Any],
+) -> ResolvedSchema[Entity] | None:
+    """Keep the selected schema entity attached to the definition we validate.
+
+    Single-note and batch validation must report the same authoritative
+    identity. Re-querying after validation can choose a different schema and
+    cannot disambiguate multiple matches from the covered type alone.
+    """
+    schema_ref = frontmatter.get("schema")
+
+    async def search_fn(query: str) -> list[SchemaCandidate[Entity]]:
+        entities = await _find_schema_entities(
+            session,
+            entity_repository,
+            query,
+            allow_reference_match=isinstance(schema_ref, str) and query == schema_ref,
+        )
+        return [
+            SchemaCandidate(await _schema_frontmatter_from_file(file_service, candidate), candidate)
+            for candidate in entities
+        ]
+
+    try:
+        return await resolve_schema_with_source(frontmatter, search_fn, inline_source=entity)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
 @router.post("/schema/validate", response_model=ValidationReport)
 async def validate_schema(
     entity_repository: EntityRepositoryV2ExternalDep,
@@ -196,20 +235,13 @@ async def validate_schema(
         frontmatter = _entity_frontmatter(entity)
         schema_ref = frontmatter.get("schema")
 
-        async def search_fn(query: str) -> list[dict[str, Any]]:
-            entities = await _find_schema_entities(
-                session,
-                entity_repository,
-                query,
-                allow_reference_match=isinstance(schema_ref, str) and query == schema_ref,
-            )
-            return [await _schema_frontmatter_from_file(file_service, e) for e in entities]
-
-        schema_def = await _resolve_schema_for_api(frontmatter, search_fn)
-        if schema_def:
+        resolved = await _resolve_note_schema(
+            session, entity_repository, file_service, entity, frontmatter
+        )
+        if resolved is not None:
             result = validate_note(
                 entity.title or entity.permalink or identifier,
-                schema_def,
+                resolved.definition,
                 _entity_observations(entity),
                 _entity_relations(entity),
                 frontmatter=frontmatter,
@@ -222,6 +254,8 @@ async def validate_schema(
                     schema_entity=response.schema_entity,
                     schema_reference=schema_ref if isinstance(schema_ref, str) else None,
                     passed=response.passed,
+                    schema_external_id=resolved.source.external_id,
+                    schema_kind="inline" if isinstance(schema_ref, dict) else "named",
                 )
             )
 
@@ -454,20 +488,13 @@ async def _validate_note_entities(
         frontmatter = _entity_frontmatter(entity)
         schema_ref = frontmatter.get("schema")
 
-        async def search_fn(query: str) -> list[dict[str, Any]]:
-            found = await _find_schema_entities(
-                session,
-                entity_repository,
-                query,
-                allow_reference_match=isinstance(schema_ref, str) and query == schema_ref,
-            )
-            return [await _schema_frontmatter_from_file(file_service, e) for e in found]
-
-        schema_def = await _resolve_schema_for_api(frontmatter, search_fn)
-        if schema_def:
+        resolved = await _resolve_note_schema(
+            session, entity_repository, file_service, entity, frontmatter
+        )
+        if resolved is not None:
             result = validate_note(
                 entity.title or entity.permalink or entity.file_path,
-                schema_def,
+                resolved.definition,
                 _entity_observations(entity),
                 _entity_relations(entity),
                 frontmatter=frontmatter,
@@ -481,6 +508,8 @@ async def _validate_note_entities(
                         schema_entity=response.schema_entity,
                         schema_reference=schema_ref if isinstance(schema_ref, str) else None,
                         passed=response.passed,
+                        schema_external_id=resolved.source.external_id,
+                        schema_kind="inline" if isinstance(schema_ref, dict) else "named",
                     )
                 )
 

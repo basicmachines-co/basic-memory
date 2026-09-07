@@ -12,6 +12,7 @@ data access layer.
 """
 
 from collections.abc import Callable, Awaitable
+from dataclasses import dataclass
 
 from basic_memory.picoschema.parser import (
     SchemaDefinition,
@@ -25,6 +26,24 @@ from typing import Any
 # Type alias for the search function dependency.
 # Given a query string, returns a list of frontmatter dicts from matching schema notes.
 type SchemaSearchFn = Callable[[str], Awaitable[list[dict[str, Any]]]]
+
+
+@dataclass(frozen=True, slots=True)
+class SchemaCandidate[Source]:
+    """A schema's authored definition paired with its caller-owned source.
+
+    Keeping these together lets resolution return the source it actually used,
+    without making the schema engine depend on database entities or identities.
+    """
+
+    frontmatter: dict[str, Any]
+    source: Source
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedSchema[Source]:
+    definition: SchemaDefinition
+    source: Source
 
 
 async def resolve_schema(
@@ -48,6 +67,29 @@ async def resolve_schema(
     Returns:
         A SchemaDefinition if a schema is found, None otherwise.
     """
+
+    async def search_candidates(query: str) -> list[SchemaCandidate[None]]:
+        return [SchemaCandidate(metadata, None) for metadata in await search_fn(query)]
+
+    resolved = await resolve_schema_with_source(
+        note_frontmatter, search_candidates, inline_source=None
+    )
+    return resolved.definition if resolved is not None else None
+
+
+async def resolve_schema_with_source[Source](
+    note_frontmatter: dict[str, Any],
+    search_fn: Callable[[str], Awaitable[list[SchemaCandidate[Source]]]],
+    *,
+    inline_source: Source,
+) -> ResolvedSchema[Source] | None:
+    """Resolve once, preserving the source of the definition selected.
+
+    Callers supply their own source value, including the owner of an inline
+    schema. Named lookups retain first-match selection, and a missing explicit
+    reference still falls through to the note type. The definition-only API
+    delegates here so both entrypoints follow the same resolution rules.
+    """
     schema_value = note_frontmatter.get("schema")
 
     # --- 1. Inline schema ---
@@ -55,16 +97,17 @@ async def resolve_schema(
     # Why: inline schemas are self-contained, no lookup needed
     # Outcome: parse and return immediately
     if isinstance(schema_value, dict):
-        return _schema_from_inline(schema_value, note_frontmatter)
+        return ResolvedSchema(_schema_from_inline(schema_value, note_frontmatter), inline_source)
 
     # --- 2. Explicit reference ---
     # Trigger: schema field is a string (entity name or permalink)
     # Why: the note points to a specific schema note by name
     # Outcome: search for the referenced schema note and parse it
     if isinstance(schema_value, str):
-        result = await _schema_from_reference(schema_value, search_fn)
-        if result is not None:
-            return result
+        candidates = await search_fn(schema_value)
+        if candidates:
+            selected = candidates[0]
+            return ResolvedSchema(parse_schema_note(selected.frontmatter), selected.source)
 
     # --- 3. Implicit by type ---
     # Trigger: no schema field, but the note has a type field
@@ -72,9 +115,10 @@ async def resolve_schema(
     # Outcome: search for a schema note whose entity matches the note's type
     note_type = note_frontmatter.get("type")
     if note_type:
-        result = await _schema_from_type(note_type, search_fn)
-        if result is not None:
-            return result
+        candidates = await search_fn(note_type)
+        if candidates:
+            selected = candidates[0]
+            return ResolvedSchema(parse_schema_note(selected.frontmatter), selected.source)
 
     # --- 4. No schema ---
     return None
@@ -100,28 +144,3 @@ def _schema_from_inline(
         fields=fields,
         validation_mode=validation_mode,
     )
-
-
-async def _schema_from_reference(
-    ref: str,
-    search_fn: SchemaSearchFn,
-) -> SchemaDefinition | None:
-    """Look up a schema by entity name or permalink reference.
-
-    The search function is expected to find schema notes matching the reference.
-    """
-    results = await search_fn(ref)
-    if not results:
-        return None
-    return parse_schema_note(results[0])
-
-
-async def _schema_from_type(
-    note_type: str,
-    search_fn: SchemaSearchFn,
-) -> SchemaDefinition | None:
-    """Look up a schema implicitly by matching the note's type to a schema's entity field."""
-    results = await search_fn(note_type)
-    if not results:
-        return None
-    return parse_schema_note(results[0])
