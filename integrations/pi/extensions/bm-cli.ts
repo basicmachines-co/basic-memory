@@ -49,13 +49,30 @@ export async function runBm(
     });
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
+    let settled = false;
+
+    function finish(result: BmCommandResult): void {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      resolve(result);
+    }
+
+    function fail(error: Error): void {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      reject(error);
+    }
 
     child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
     child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
-    child.on("error", reject);
+    child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+      stderr.push(Buffer.from(error.message));
+    });
+    child.on("error", fail);
     child.on("close", (code) => {
-      clearTimeout(timeout);
-      resolve({
+      finish({
         stdout: Buffer.concat(stdout).toString("utf8"),
         stderr: Buffer.concat(stderr).toString("utf8"),
         code,
