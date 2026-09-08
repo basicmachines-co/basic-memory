@@ -145,14 +145,8 @@ def validate_claude_plugin(plugin_dir: Path) -> None:
     for event in REQUIRED_HOOK_EVENTS:
         if event not in hooks:
             raise SystemExit(f"hooks/hooks.json: missing {event} hook")
-    # Trigger: the shims pin core's exact fastmcp beta so older uv can resolve
-    #   basic-memory (pre-release transitives are refused there) without
-    #   enabling pre-releases for basic-memory itself.
-    # Why: nothing else keeps the shim pin and core's pyproject in lockstep,
-    #   and drift makes shim resolution conflict — which the fail-open contract
-    #   turns into a silent hook no-op.
-    # Outcome: validation fails loudly when core moves its fastmcp pin without
-    #   the shims following.
+    # Both the declared dependency and effective override must follow core;
+    # a stale override silently wins over an updated direct dependency.
     core_pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     core_match = re.search(r'^\s*"fastmcp==([^"]+)",$', core_pyproject, re.MULTILINE)
     if not core_match:
@@ -178,6 +172,11 @@ def validate_claude_plugin(plugin_dir: Path) -> None:
                 f"{script}: fastmcp pin {shim_pins[0]} does not match "
                 f"core pyproject pin {core_fastmcp_pin}"
             )
+        overrides = re.findall(
+            r'^# override-dependencies = \["fastmcp==([^\"]+)"\]$', text, re.MULTILINE
+        )
+        if overrides != [core_fastmcp_pin]:
+            raise SystemExit(f"{script}: fastmcp override must match core pin {core_fastmcp_pin}")
 
     # --- Output style ---
     output_style = plugin_dir / "output-styles/basic-memory.md"

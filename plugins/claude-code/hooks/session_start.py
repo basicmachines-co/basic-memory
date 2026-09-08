@@ -3,12 +3,12 @@
 # requires-python = ">=3.12"
 # dependencies = [
 #     "basic-memory>=0.23.2",
-#     # Direct pre-release pin so old uv resolves basic-memory (which
-#     # requires this exact beta transitively) without enabling
-#     # pre-releases for basic-memory itself. Keep in lockstep with
-#     # core pyproject's fastmcp pin.
-#     "fastmcp==4.0.0b1",
+#     "fastmcp==4.0.3",
 # ]
+# [tool.uv]
+# # The released Basic Memory runtime still pins the beta. Use the stable
+# # version tested by core until the next runtime release carries this pin.
+# override-dependencies = ["fastmcp==4.0.3"]
 # ///
 """SessionStart hook — the entire hook. All logic (settings resolution, the
 context brief, lifecycle-envelope capture) lives in the released basic-memory
