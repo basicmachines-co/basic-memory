@@ -12,6 +12,7 @@ from basic_memory.markdown import EntityMarkdown
 from basic_memory.markdown.entity_parser import normalize_frontmatter_metadata
 from basic_memory.models import Entity
 from basic_memory.models import Observation as ObservationModel
+from basic_memory.schemas.document import derive_document_note_external_id
 
 
 def entity_model_from_markdown(
@@ -46,7 +47,17 @@ def entity_model_from_markdown(
     # SQLAlchemy's Python-side default may not always evaluate,
     # so we explicitly set it here for reliability (fixes #512)
     if not model.external_id:
-        model.external_id = str(uuid.uuid4())
+        # Generated document ledgers refer to an identity derived from the source.
+        # Validate its source identity before constructing the indexed representation;
+        # ordinary notes retain random IDs and existing entities keep their identity.
+        if markdown.frontmatter.metadata.get("schema") == "schema/document-extraction":
+            match markdown.frontmatter.metadata.get("source"):
+                case {"entity_external_id": str(source_id)}:
+                    model.external_id = derive_document_note_external_id(uuid.UUID(source_id))
+                case _:
+                    raise ValueError("Generated document is missing its source entity identity")
+        else:
+            model.external_id = str(uuid.uuid4())
 
     # Update basic fields
     model.title = markdown.frontmatter.title
