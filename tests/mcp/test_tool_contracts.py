@@ -206,9 +206,9 @@ EXPECTED_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
 # The MCP-UI tools are disabled in tools/__init__.py but register onto the shared
 # server whenever tests import their module directly, so tolerate their presence
 # without requiring it — keeps this contract independent of test execution order.
-# The POSIX tools (#1399) are hidden unless enable_posix_tools is set, so they
-# normally don't appear in list_tools(); optional status keeps the contract
-# independent of whether a gate test has revealed them.
+# The POSIX tools are enabled by default during lifespan startup, but remain
+# hidden before config is read. Optional status keeps this direct-list contract
+# independent of whether another test has started the shared server.
 OPTIONAL_TOOL_ANNOTATIONS: dict[str, dict[str, bool]] = {
     "read_note_ui": {"readOnlyHint": True, "destructiveHint": False},
     "search_notes_ui": {"readOnlyHint": True, "destructiveHint": False},

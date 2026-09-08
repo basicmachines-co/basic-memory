@@ -611,9 +611,10 @@ class BasicMemoryConfig(BaseSettings):
     )
 
     enable_posix_tools: bool = Field(
-        default=False,
+        default=True,
         description=(
             "Register the POSIX-style read-only MCP tools (cat, grep, ls, find, tail, man). "
+            "Enabled by default; set false to hide them. "
             "Env: BASIC_MEMORY_ENABLE_POSIX_TOOLS"
         ),
     )
