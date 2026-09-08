@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime, timezone
 from email.utils import format_datetime
 from io import BytesIO
-from typing import Any
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -32,6 +32,24 @@ _CALL_HELPERS: tuple[tuple[CallHelper, dict[str, Any]], ...] = (
     (call_query, {"json": {"value": "same request"}}),
     (call_delete, {}),
 )
+
+
+def test_utc_now_returns_the_current_aware_utc_time() -> None:
+    before = datetime.now(timezone.utc)
+    current = utils_module._utc_now()
+    after = datetime.now(timezone.utc)
+
+    assert current.tzinfo is timezone.utc
+    assert before <= current <= after
+
+
+def test_parse_retry_after_rejects_a_date_without_timezone() -> None:
+    response = httpx.Response(
+        429,
+        headers={"Retry-After": "Sun, 06 Nov 1994 08:49:37"},
+    )
+
+    assert utils_module._parse_retry_after(response) is None
 
 
 @pytest.mark.asyncio
@@ -357,6 +375,39 @@ async def test_call_post_does_not_retry_async_request_content() -> None:
     assert "quota detail" in str(exc.value)
     assert "request body cannot be safely replayed" in str(exc.value)
     assert "Server Retry-After: 1" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_call_patch_preserves_error_detail_from_a_response() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, json={"detail": "patch detail"})
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="https://cloud.invalid") as client:
+        with pytest.raises(ToolError, match="patch detail"):
+            await call_patch(client, "/v2/resource", json={"value": "replacement"})
+
+
+@pytest.mark.asyncio
+async def test_call_patch_rebuilds_detail_when_client_raises_status_error() -> None:
+    class DirectStatusErrorClient:
+        async def patch(self, *args: Any, **kwargs: Any) -> httpx.Response:
+            request = httpx.Request("PATCH", "https://cloud.invalid/v2/resource")
+            response = httpx.Response(
+                409,
+                request=request,
+                json={"detail": "direct patch detail"},
+            )
+            raise httpx.HTTPStatusError(
+                "conflict",
+                request=request,
+                response=response,
+            )
+
+    client = cast(httpx.AsyncClient, DirectStatusErrorClient())
+
+    with pytest.raises(ToolError, match="direct patch detail"):
+        await call_patch(client, "/v2/resource", json={"value": "replacement"})
 
 
 @pytest.mark.asyncio
