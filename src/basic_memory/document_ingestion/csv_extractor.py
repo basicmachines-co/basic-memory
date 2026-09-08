@@ -142,5 +142,7 @@ def _table_row(cells: Sequence[str], width: int) -> str:
     # Ragged rows are common in hand-edited exports: pad short rows and drop
     # cells past the header width so every line stays a valid table row.
     padded = [*cells[:width], *([""] * (width - len(cells)))]
-    escaped = (cell.replace("\n", " ").replace("|", "\\|") for cell in padded)
+    # Backslashes first: a literal `\` before a `|` would otherwise turn the pipe
+    # escape into an escaped backslash followed by a live cell separator.
+    escaped = (cell.replace("\n", " ").replace("\\", "\\\\").replace("|", "\\|") for cell in padded)
     return "| " + " | ".join(escaped) + " |"

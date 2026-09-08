@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -42,7 +43,13 @@ RESULT = RawDocumentWriteResult(
 
 @patch("basic_memory.cli.commands.import_document.import_document", new_callable=AsyncMock)
 def test_import_document_reports_the_written_notes(mock_import: AsyncMock) -> None:
-    mock_import.return_value = ("main", RESULT)
+    routing_seen: list[str | None] = []
+
+    async def record_routing(path: Path, project: str | None) -> tuple[str, RawDocumentWriteResult]:
+        routing_seen.append(os.environ.get("BASIC_MEMORY_FORCE_LOCAL"))
+        return ("main", RESULT)
+
+    mock_import.side_effect = record_routing
 
     result = runner.invoke(cli_app, ["import", "document", "docs/plan.docx", "--project", "main"])
 
@@ -50,6 +57,9 @@ def test_import_document_reports_the_written_notes(mock_import: AsyncMock) -> No
     assert "docs/plan.docx.md (created)" in result.output
     assert "already recorded" in result.output
     mock_import.assert_awaited_once_with(Path("docs/plan.docx"), "main")
+    # The local runtime reads and writes the project directory, so the command
+    # must pin local API routing even for a cloud-configured project.
+    assert routing_seen == ["true"]
 
 
 @patch("basic_memory.cli.commands.import_document.import_document", new_callable=AsyncMock)
