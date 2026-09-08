@@ -14,6 +14,7 @@ from loguru import logger
 from markdown_it import MarkdownIt
 
 from basic_memory.markdown.plugins import observation_plugin, relation_plugin
+from basic_memory.markdown.path_links import markdown_link_target
 from basic_memory.markdown.schemas import (
     EntityFrontmatter,
     EntityMarkdown,
@@ -154,7 +155,7 @@ class EntityContent:
     relations: list[Relation] = field(default_factory=list)
 
 
-def parse(content: str) -> EntityContent:
+def parse(content: str, *, source_path: str | None = None) -> EntityContent:
     """Parse markdown content into EntityMarkdown."""
 
     # Parse content for observations and relations using markdown-it
@@ -163,6 +164,17 @@ def parse(content: str) -> EntityContent:
 
     if content:
         for token in md.parse(content):
+            # MarkdownIt owns link syntax, including escapes, reference links and
+            # code exclusion. Rooted targets retain exact project-path semantics
+            # through deferred resolution without changing the authored body.
+            if source_path is not None:
+                for child in token.children or []:
+                    if child.type == "link_open":
+                        href = child.attrGet("href")
+                        assert isinstance(href, str)
+                        target = markdown_link_target(href, source_path) if href else None
+                        if target is not None:
+                            relations.append(Relation(type="links_to", target=target))
             # check for observations and relations
             if token.meta:
                 if "observation" in token.meta:
@@ -349,7 +361,16 @@ class EntityParser:
             or (isinstance(semantic_setting, str) and semantic_setting.lower() == "false")
         )
         entity_content = (
-            parse(post.content) if parse_semantics else EntityContent(content=post.content)
+            parse(
+                post.content,
+                source_path=(
+                    file_path.relative_to(self.base_path).as_posix()
+                    if file_path.is_absolute()
+                    else file_path.as_posix()
+                ),
+            )
+            if parse_semantics
+            else EntityContent(content=post.content)
         )
 
         # The parser reports only a qualifier the author plainly meant: an unknown kind,
