@@ -73,7 +73,12 @@ async def test_write_note_emits_root_operation_and_project_context(
         },
     )
     span_names = [name for name, _ in spans]
-    assert "api.request.knowledge.create_entity" in span_names
+    assert "mcp.client.knowledge.write_note" in span_names
+    assert _contains_span_attrs(
+        spans,
+        "api.request.knowledge.write_note",
+        {"entrypoint": "api", "domain": "knowledge", "action": "write_note"},
+    )
     assert _contains_span_attrs(
         spans,
         "routing.client_session",
