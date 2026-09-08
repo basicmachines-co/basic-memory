@@ -317,6 +317,12 @@ class LocalProjectIndexObservedFileSource(ProjectIndexObservedFileSource):
             if self.indexed_stat_source is not None
             else {}
         )
+        # With a confirmed empty index, every discovered path is new. Hashes
+        # cannot identify changes or moves yet; the batch reader computes them
+        # when indexing content. Status can therefore count files without reads.
+        if self.indexed_stat_source is not None and not indexed_stats:
+            return tuple(RuntimeObservedIndexFile(path=path) for path in file_paths)
+
         observed_files: list[RuntimeObservedIndexFile] = []
         for file_path in file_paths:
             try:
