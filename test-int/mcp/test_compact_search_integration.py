@@ -52,14 +52,18 @@ async def test_compact_search_can_discover_then_read_notes(
         if observations:
             for row in expected["results"]:
                 row["title"] = row["category"]
-                row["permalink"] = row["file_path"]
+                row["permalink"] = (
+                    f"{test_project.name}/{row['file_path']}" if all_projects else row["file_path"]
+                )
         assert compact == expected
         assert len(json.dumps(compact)) < len(json.dumps(full)) / 3
 
         selected = compact["results"][0]
         read = await client.call_tool(
             "read_note",
-            {"identifier": selected["external_id"], "project": test_project.name},
+            {"identifier": selected["permalink"]}
+            if all_projects and observations
+            else {"identifier": selected["external_id"], "project": test_project.name},
         )
         assert body in read.content[0].text
 

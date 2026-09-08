@@ -573,14 +573,10 @@ def _qualify_results_for_project(
         else:
             result_data = dict(result)
         project = project_ref.get("project")
-        if (
-            compact
-            and result_data.get("type") == SearchItemType.OBSERVATION
-            and project
-            and "/" in project
-        ):
+        if compact and result_data.get("type") == SearchItemType.OBSERVATION and project:
             # This is an exact file read target, not a generated permalink:
-            # retain its extension, spaces, and case under the workspace route.
+            # retain its extension, spaces, and case under the local project or
+            # workspace/project route.
             result_data["permalink"] = (
                 f"{project.strip('/')}/{result_data['file_path'].lstrip('/')}"
             )
