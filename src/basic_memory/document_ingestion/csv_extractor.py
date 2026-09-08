@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import io
+import re
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -44,6 +45,13 @@ class CsvLimits(BaseModel):
     max_source_bytes: int = Field(default=25 * 1024 * 1024, gt=0)
     max_rows: int = Field(default=200, gt=0)
     max_output_bytes: int = Field(default=5 * 1024 * 1024, gt=0)
+    # The stdlib parser rejects any field over its own limit (128 KiB by default),
+    # which is far below the source ceiling; exported text or JSON columns hit it.
+    max_field_bytes: int = Field(default=25 * 1024 * 1024, gt=0)
+
+
+_DEFAULT_LIMITS = CsvLimits()
+_LINE_BREAKS = re.compile(r"\r\n|\r|\n")
 
 
 class CsvExtractionError(RuntimeError):
@@ -78,7 +86,10 @@ class CsvExtractor:
             raise CsvSourceTooLargeError("CSV source exceeds the configured extraction byte limit")
         started = time.perf_counter()
         preview = await asyncio.to_thread(
-            render_csv_preview, content, max_rows=self.limits.max_rows
+            render_csv_preview,
+            content,
+            max_rows=self.limits.max_rows,
+            max_field_bytes=self.limits.max_field_bytes,
         )
         if len(preview.markdown.encode("utf-8")) > self.limits.max_output_bytes:
             raise CsvExtractionError("CSV preview exceeds the configured output byte limit")
@@ -105,24 +116,37 @@ class CsvExtractor:
         )
 
 
-def render_csv_preview(content: bytes, *, max_rows: int) -> CsvPreview:
+def render_csv_preview(
+    content: bytes,
+    *,
+    max_rows: int,
+    max_field_bytes: int = _DEFAULT_LIMITS.max_field_bytes,
+) -> CsvPreview:
     """Render the header, the first ``max_rows`` rows, and the total row count."""
     try:
         text = content.decode("utf-8-sig")
     except UnicodeDecodeError as error:
         raise CsvDecodeError("CSV source is not UTF-8 encoded") from error
 
-    reader = csv.reader(io.StringIO(text, newline=""))
-    header = next(reader, None)
-    if header is None:
-        return CsvPreview(markdown="_Empty CSV file._\n", row_count=0, shown_rows=0)
+    # ``csv.field_size_limit`` is process-wide and has no per-reader form. Only
+    # ever raise it: a higher ceiling cannot break another caller, and a source
+    # already bounded by ``max_source_bytes`` must not fail on one long column.
+    if csv.field_size_limit() < max_field_bytes:
+        csv.field_size_limit(max_field_bytes)
 
+    reader = csv.reader(io.StringIO(text, newline=""))
     shown: list[Sequence[str]] = []
     row_count = 0
-    for row in reader:
-        row_count += 1
-        if len(shown) < max_rows:
-            shown.append(row)
+    try:
+        header = next(reader, None)
+        if header is None:
+            return CsvPreview(markdown="_Empty CSV file._\n", row_count=0, shown_rows=0)
+        for row in reader:
+            row_count += 1
+            if len(shown) < max_rows:
+                shown.append(row)
+    except csv.Error as error:
+        raise CsvExtractionError(f"CSV source could not be parsed: {error}") from error
 
     width = len(header)
     lines = [
@@ -142,7 +166,11 @@ def _table_row(cells: Sequence[str], width: int) -> str:
     # Ragged rows are common in hand-edited exports: pad short rows and drop
     # cells past the header width so every line stays a valid table row.
     padded = [*cells[:width], *([""] * (width - len(cells)))]
-    # Backslashes first: a literal `\` before a `|` would otherwise turn the pipe
-    # escape into an escaped backslash followed by a live cell separator.
-    escaped = (cell.replace("\n", " ").replace("\\", "\\\\").replace("|", "\\|") for cell in padded)
+    # Every line-break form is flattened, CRLF included: canonical note assembly
+    # turns a stray carriage return into a newline, which would split the row.
+    # Backslashes are escaped before pipes: a literal `\` before a `|` would
+    # otherwise turn the pipe escape into an escaped backslash and a live separator.
+    escaped = (
+        _LINE_BREAKS.sub(" ", cell).replace("\\", "\\\\").replace("|", "\\|") for cell in padded
+    )
     return "| " + " | ".join(escaped) + " |"
