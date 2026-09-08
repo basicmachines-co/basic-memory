@@ -391,12 +391,7 @@ def test_pr_create_skill_delegates_to_current_pr_workflow() -> None:
 
 
 def test_codex_hook_fastmcp_pins_match_core_pyproject() -> None:
-    """The shims pin core's exact fastmcp beta; drift breaks shim resolution.
-
-    Old uv refuses pre-release transitives, so each shim carries the pin as a
-    direct dependency. Nothing rewrites it automatically — this test is the
-    lockstep enforcement when core's pyproject moves its fastmcp pin.
-    """
+    """The direct dependency and effective override must both follow core."""
     repo_root = Path(__file__).resolve().parents[1]
     core = re.search(
         r'^\s*"fastmcp==([^"]+)",$', (repo_root / "pyproject.toml").read_text(), re.MULTILINE
@@ -406,3 +401,30 @@ def test_codex_hook_fastmcp_pins_match_core_pyproject() -> None:
         shim = (repo_root / "plugins/codex/hooks" / name).read_text()
         pins = re.findall(r'^#     "fastmcp==([^"]+)",$', shim, re.MULTILINE)
         assert pins == [core.group(1)], name
+        overrides = re.findall(
+            r'^# override-dependencies = \["fastmcp==([^\"]+)"\]$', shim, re.MULTILINE
+        )
+        assert overrides == [core.group(1)], name
+
+
+def test_claude_validator_rejects_stale_fastmcp_override(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    plugin_dir = tmp_path / "claude-code"
+    shutil.copytree(repo_root / "plugins/claude-code", plugin_dir)
+    script = plugin_dir / "hooks/session_start.py"
+    original = script.read_text()
+    script.write_text(
+        re.sub(
+            r'override-dependencies = \["fastmcp==[^\"]+"\]',
+            'override-dependencies = ["fastmcp==0.0.0"]',
+            original,
+        )
+    )
+    result = subprocess.run(
+        [sys.executable, str(repo_root / "scripts/validate_claude_plugin.py"), str(plugin_dir)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert "fastmcp override must match core pin" in result.stderr
