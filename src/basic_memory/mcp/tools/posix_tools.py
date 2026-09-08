@@ -2,8 +2,8 @@
 
 Six familiar Unix verbs — cat, grep, ls, find, tail, man — each a thin
 translation over the same typed API clients the canonical tools use. They are
-tagged ``POSIX_TOOLS_TAG`` and hidden by default: the composition root in
-``basic_memory.mcp.server`` flips their visibility from the
+tagged ``POSIX_TOOLS_TAG`` and hidden until startup: the composition root in
+``basic_memory.mcp.server`` sets their visibility from the default-enabled
 ``enable_posix_tools`` config flag at lifespan startup, so no tool body ever
 checks config itself.
 
@@ -1431,6 +1431,6 @@ async def man(
         return response.model_dump(mode="json", exclude_none=True)
 
 
-# Default-hidden until the composition root reads config in lifespan. Keeps the
-# tool listing identical to today for any consumer that lists before startup.
+# Hidden until the composition root reads config, so importing tools never
+# bypasses an explicit opt-out before startup.
 set_posix_tools_visibility(mcp, False)
