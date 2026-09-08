@@ -98,6 +98,8 @@ def test_only_the_save_clause_supplies_qualifications() -> None:
         "I've saved it to Basic Memory; no other settings were changed.",
         "I've saved it, no problem.",
         "Saved it to memory://notes/renewal.",
+        "Saved to `memory://notes/renewal`.",
+        "I've saved that the meeting is in Paris.",
         "- Saved to Basic Memory.",
         "1. Saved to Basic Memory.",
         "* **Saved to Basic Memory.**",
@@ -110,6 +112,8 @@ def test_only_the_save_clause_supplies_qualifications() -> None:
         "Stored it in Dropbox.",
         "Sure, I saved it to Google Drive.",
         "Saved the Basic Memory config to Google Drive.",
+        "Saved into Google Drive.",
+        "Saved that photo to Google Drive.",
     ]:
         assert not _module.claims_memory_save(response, memory_requested=True)
 

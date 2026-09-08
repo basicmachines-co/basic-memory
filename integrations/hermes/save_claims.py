@@ -15,13 +15,14 @@ _SAVE_CLAIM = re.compile(
 _MEMORY_REQUEST = re.compile(r"\bremember\b", re.IGNORECASE)
 _CAPTURE_REQUEST = re.compile(r"\b(?:save|record|note)\s+", re.IGNORECASE)
 _MEMORY_DESTINATION = re.compile(
-    r"\b(?:to|in|on|into)\s+(?:basic[- ]memory\b|memory://)", re.IGNORECASE
+    r"\b(?:to|in|on|into)\s+`?(?:basic[- ]memory\b|memory://)", re.IGNORECASE
 )
 _QUALIFIED_CLAIM = re.compile(r"\b(?:not|never|nothing|none|zero|no)\b|\?", re.IGNORECASE)
 _OTHER_DESTINATION = re.compile(
-    r"\blocally\b|\b(?:to|on|in)\s+\S",
+    r"\blocally\b|\b(?:to|on|in|into)\s+\S",
     re.IGNORECASE,
 )
+_CONTENT_CLAUSE = re.compile(r"\bthat\s+.+?\b(?:is|are|was|were|will|has|have)\b", re.IGNORECASE)
 _HISTORICAL_SAVE = re.compile(
     r"\b(?:yesterday|previously|earlier|already|last\s+(?:time|week|month|year|session))\b",
     re.IGNORECASE,
@@ -50,7 +51,10 @@ def claims_memory_save(response: str, *, memory_requested: bool) -> bool:
                 continue
             claim = re.sub(r"^[,:;—–]\s+", "", sentence[match.start() :])
             claim = re.split(r"[;,]\s+(?!but\b|however\b|yet\b)", claim, flags=re.IGNORECASE)[0]
-            names_memory = bool(_MEMORY_DESTINATION.search(claim))
+            # A reported proposition can contain locations that are not storage destinations.
+            # Keep noun objects such as "that photo to Google Drive" in the save clause.
+            destination_clause = _CONTENT_CLAUSE.split(claim, maxsplit=1)[0]
+            names_memory = bool(_MEMORY_DESTINATION.search(destination_clause))
             if not memory_requested and not names_memory:
                 continue
             # A greeting or later question cannot qualify this save clause.
@@ -58,7 +62,7 @@ def claims_memory_save(response: str, *, memory_requested: bool) -> bool:
                 continue
             if _HISTORICAL_SAVE.search(claim):
                 continue
-            if not names_memory and _OTHER_DESTINATION.search(claim):
+            if not names_memory and _OTHER_DESTINATION.search(destination_clause):
                 continue
             return True
     return False
@@ -88,12 +92,13 @@ class SaveClaimGuard:
         if not session_id or not turn_id:
             return
         # Capture verbs establish context unless they explicitly target another destination.
+        destination_clause = _CONTENT_CLAUSE.split(user_message, maxsplit=1)[0]
         requested = bool(
             _MEMORY_REQUEST.search(user_message)
-            or _MEMORY_DESTINATION.search(user_message)
+            or _MEMORY_DESTINATION.search(destination_clause)
             or (
                 _CAPTURE_REQUEST.search(user_message)
-                and not _OTHER_DESTINATION.search(user_message)
+                and not _OTHER_DESTINATION.search(destination_clause)
             )
         )
         with self._lock:
