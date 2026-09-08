@@ -6,6 +6,9 @@ both directions of the gate; visibility marks stack with the last one winning,
 so each test restores the pre-startup hidden state it started from.
 """
 
+import subprocess
+import sys
+
 import pytest
 
 from basic_memory.mcp.server import lifespan, mcp, set_posix_tools_visibility
@@ -13,15 +16,30 @@ from basic_memory.mcp.server import lifespan, mcp, set_posix_tools_visibility
 POSIX_TOOL_NAMES = {"cat", "find", "grep", "ls", "man", "tail"}
 
 
-@pytest.mark.asyncio
-async def test_posix_tools_hidden_before_startup():
-    """Importing the tools must not change what clients see before startup."""
-    names = {tool.name for tool in await mcp.list_tools()}
-    assert names.isdisjoint(POSIX_TOOL_NAMES)
+def test_posix_tools_hidden_before_startup():
+    """A fresh interpreter proves import behavior independently of prior lifespans."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import asyncio; import basic_memory.mcp.tools; "
+            "from basic_memory.mcp.server import mcp; "
+            "names = {tool.name for tool in asyncio.run(mcp.list_tools())}; "
+            "assert 'read_note' in names; "
+            "assert names.isdisjoint({'cat', 'find', 'grep', 'ls', 'man', 'tail'})",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.asyncio
 async def test_posix_tools_visible_by_default(config_manager):
+    # Other tests may have started the singleton already; establish this test
+    # boundary explicitly rather than depending on suite order.
+    set_posix_tools_visibility(mcp, False)
     baseline = {tool.name for tool in await mcp.list_tools()}
     cfg = config_manager.load_config()
     assert cfg.enable_posix_tools is True
