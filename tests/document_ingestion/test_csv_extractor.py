@@ -86,6 +86,18 @@ def test_render_csv_preview_accepts_fields_larger_than_the_stdlib_default() -> N
     assert wide.decode() in preview.markdown
 
 
+@pytest.mark.parametrize(
+    "content", [b"large\nx\n", b"h\nlarge\n", b"h\nx\nlarge\n", "h\néé\n".encode()]
+)
+def test_render_csv_preview_enforces_field_bytes_even_with_a_higher_parser_limit(
+    content: bytes,
+) -> None:
+    render_csv_preview(b"header\nvalue\n", max_rows=1)
+
+    with pytest.raises(CsvExtractionError, match="field byte limit"):
+        render_csv_preview(content, max_rows=1, max_field_bytes=3)
+
+
 def test_render_csv_preview_names_a_parser_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     # The lenient reader only fails on a field above the process-wide size limit,
     # which a bounded source cannot produce under default limits; drive the
