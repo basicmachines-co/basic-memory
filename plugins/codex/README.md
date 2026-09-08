@@ -95,8 +95,53 @@ ref. All refs are updated together with
   - Windows: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
 
 Disclosure: uv installs the pinned Basic Memory Git ref on first run and reuses
-its cache afterward. Every failure path exits 0 — the hooks never disrupt a
-session.
+its cache afterward. The Python hook scripts exit 0 on failure so they do not
+disrupt a session. If the host cannot find `uv`, those scripts never start; a
+successful interactive-shell probe does not prove that Desktop can launch them.
+
+## Troubleshooting Desktop hooks on WSL
+
+`uv` must be available on the **hook process's PATH**, not just installed in the
+WSL distribution. Codex Desktop can launch hooks with a different PATH from
+`codex-tui` or an interactive terminal. In [#1499](https://github.com/basicmachines-co/basic-memory/issues/1499),
+the documented installer put uv at `~/.local/bin/uv`, but Desktop's hook PATH
+included `/usr/local/bin` and omitted `~/.local/bin`.
+
+First check the installation inside the WSL distribution used by the project:
+
+```bash
+command -v uv
+"$HOME/.local/bin/uv" --version
+```
+
+These commands establish shell visibility and the default installer location.
+To diagnose Desktop, inspect the failing hook's output and actual PATH. A
+`uv: command not found` launcher error means Basic Memory's Python hook never
+ran. Compare the manifest command with an absolute-path invocation of uv using
+the same hook payload and environment. Empty output or exit status 0 alone is
+not proof of successful context loading.
+
+For the confirmed WSL case where uv exists at `~/.local/bin/uv` and Desktop
+includes `/usr/local/bin`, the reporter recovered by adding a symlink:
+
+```bash
+sudo ln -s "$HOME/.local/bin/uv" /usr/local/bin/uv
+```
+
+Do not replace an existing `/usr/local/bin/uv`; inspect it first if `ln` reports
+that it exists. If uv is installed elsewhere, use its verified absolute path.
+This is a WSL/Linux workaround, not a native Windows installation command.
+
+Fully quit and restart Codex Desktop, then create a new task in the WSL project.
+Verify both outcomes:
+
+1. Startup includes Basic Memory session context, with the hooks enabled and trusted.
+2. After compaction, the resumed turn receives the `bm-checkpoint` instruction
+   and creates an actual checkpoint note with `trigger: compact` in the configured
+   project. `checkpointOnCompact` must be enabled.
+
+A successful TUI run, a lifecycle inbox event, or a successful hook exit is not
+a substitute for these Desktop checks.
 
 ## Install
 
