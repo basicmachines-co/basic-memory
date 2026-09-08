@@ -15,7 +15,7 @@ settings:
     section(enum, Unix manual section number): [1, 3, 5, 7, 8]
     name: string, page name without section suffix (e.g. write-note)
     summary: string, one-line NAME description
-    generated?(enum, who owns the mechanical sections): [registry, typer, hand]
+    generated?(enum, who owns the mechanical sections): [registry, cli, hand]
     tool?: string, MCP tool this page documents (section 3 pages)
     command?: string, CLI command this page documents (section 1 pages)
     verified?: string, version and path that verified this page (e.g. 0.21.6 mcp+cli)
@@ -42,9 +42,9 @@ manual lives in the Basic Memory team workspace `manual` project.
 - **Verified examples** — EXAMPLES contain only commands that actually ran;
   the `verified` field records the version and path (mcp, cli, or both).
 - **generated** — declares regeneration ownership: `registry` (from the MCP
-  tool registry) and `typer` (from CLI help) pages get mechanical sections
-  rewritten; curated sections (EXAMPLES, GOTCHAS, SEE ALSO, observations)
-  are never overwritten.
+  tool registry) and `cli` (from the Typer CLI command tree) pages get
+  mechanical sections rewritten; curated sections (EXAMPLES, GOTCHAS, SEE ALSO,
+  observations) are never overwritten.
 - **gotcha / bug observations** — field knowledge accumulates on pages
   without being clobbered by regeneration; bugs link their tracking issues.
 

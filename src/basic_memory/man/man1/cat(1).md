@@ -17,9 +17,9 @@ generated: cli
 
 ```
 bm cat IDENTIFIER [--lines LINES] [--section SECTION]
-       [--max-tokens MAX_TOKENS] [--frontmatter | --no-frontmatter] [--json]
-       [--plain] [--project PROJECT] [--project-id PROJECT_ID] [--local]
-       [--cloud]
+       [--max-tokens MAX_TOKENS] [--frontmatter | --no-frontmatter]
+       [--json | --plain] [--project PROJECT] [--project-id PROJECT_ID]
+       [--local | --cloud]
 ```
 
 ## DESCRIPTION
