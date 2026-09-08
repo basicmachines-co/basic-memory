@@ -8,6 +8,8 @@ import logfire
 
 from loguru import logger
 from fastmcp import Context
+from fastmcp.exceptions import ToolError
+from httpx import HTTPStatusError
 from pydantic import AliasChoices, Field
 
 from basic_memory.config import ConfigManager
@@ -130,6 +132,8 @@ async def read_note(
             Aliases: limit, per_page.
         output_format: "text" returns markdown content or guidance text.
             "json" returns a structured object with title/permalink/file_path/content/frontmatter.
+            Unresolved notes carry error="NOTE_NOT_FOUND" and a message, with
+            related_results when suggestions are available.
         include_frontmatter: For unsliced JSON reads, include opening YAML in content;
             parsed frontmatter is returned either way. Explicit line ranges are never
             stripped. CLI: --frontmatter (--include-frontmatter is a deprecated alias).
@@ -290,13 +294,15 @@ async def read_note(
                     "next_end_line": min(total, last + width) if last < total else None,
                 }
 
-            def _empty_json_payload() -> dict[str, Any]:
+            def _not_found_json_payload() -> dict[str, Any]:
                 return {
                     "title": None,
                     "permalink": None,
                     "file_path": None,
                     "content": None,
                     "frontmatter": None,
+                    "error": "NOTE_NOT_FOUND",
+                    "message": f"Note not found: {identifier}",
                 }
 
             def _search_results(payload: object) -> list[dict[str, object]]:
@@ -345,7 +351,13 @@ async def read_note(
                     output_format="json",
                     context=context,
                 )
-                return cast(dict[str, object], response) if isinstance(response, dict) else {}
+                # JSON searches return a dict even when empty. Text here is a
+                # formatted search failure, not evidence that the note is absent.
+                if not isinstance(response, dict):
+                    if output_format == "json" or line_scan:
+                        raise RuntimeError(f"Fallback search failed: {response}")
+                    return {}
+                return cast(dict[str, object], response)
 
             def _result_title(item: dict[str, object]) -> str:
                 return str(item.get("title") or "")
@@ -365,11 +377,47 @@ async def read_note(
             if output_format == "json" or line_scan:
                 exact_external_id = _exact_external_id(entity_path)
                 if exact_external_id is not None:
-                    return await _read_resolved_note(exact_external_id)
+                    try:
+                        return await _read_resolved_note(exact_external_id)
+                    except ToolError as error:
+                        cause = error.__cause__
+                        # Only the entity GET proves this UUID is absent. A 404
+                        # from its resource fallback is a failed content read.
+                        if (
+                            isinstance(cause, HTTPStatusError)
+                            and cause.response.status_code == 404
+                            and cause.request.url.path.endswith(
+                                f"/knowledge/entities/{exact_external_id}"
+                            )
+                        ):
+                            if line_scan:
+                                # The slice endpoint also uses 404 for an existing
+                                # non-Markdown entity. Confirm absence without slice
+                                # parameters before classifying this error as missing.
+                                try:
+                                    await knowledge_client.get_entity(exact_external_id)
+                                except ToolError as lookup_error:
+                                    lookup_cause = lookup_error.__cause__
+                                    if (
+                                        not isinstance(lookup_cause, HTTPStatusError)
+                                        or lookup_cause.response.status_code != 404
+                                    ):
+                                        raise
+                                else:
+                                    raise error
+                            if output_format == "json":
+                                return _not_found_json_payload()
+                            return format_not_found_message(active_project.name, identifier)
+                        raise
 
                 try:
                     entity_id = await knowledge_client.resolve_entity(entity_path, strict=True)
-                except Exception as error:  # pragma: no cover
+                except ToolError as error:
+                    cause = error.__cause__
+                    # Search is a recovery for a confirmed lookup miss, not for
+                    # unavailable or unauthorized resolution services.
+                    if not isinstance(cause, HTTPStatusError) or cause.response.status_code != 404:
+                        raise
                     logger.info(f"Direct lookup failed for '{entity_path}': {error}")
                 else:
                     logger.info(
@@ -431,22 +479,16 @@ async def read_note(
                     break
 
             if result is not None and (output_format == "json" or line_scan):
-                try:
-                    entity_id = _result_external_id(result)
-                    if entity_id is None and _result_permalink(result) is not None:
-                        entity_id = await knowledge_client.resolve_entity(
-                            _result_permalink(result) or "", strict=True
-                        )
-                    if entity_id is not None:
-                        logger.info(
-                            f"Found note by exact title search: {_result_permalink(result)}"
-                        )
-                        return await _read_resolved_note(entity_id)
-                except Exception as error:  # pragma: no cover
-                    logger.info(
-                        "Failed to fetch content for found title match "
-                        f"{_result_permalink(result)}: {error}"
+                # An exact candidate identifies a note; retrieval failures must surface
+                # as operational errors instead of suggesting that it is missing.
+                entity_id = _result_external_id(result)
+                if entity_id is None and _result_permalink(result) is not None:
+                    entity_id = await knowledge_client.resolve_entity(
+                        _result_permalink(result) or "", strict=True
                     )
+                if entity_id is not None:
+                    logger.info(f"Found note by exact title search: {_result_permalink(result)}")
+                    return await _read_resolved_note(entity_id)
             elif result is not None and _result_permalink(result):
                 try:
                     entity_id = await knowledge_client.resolve_entity(
@@ -472,13 +514,13 @@ async def read_note(
             text_candidates = _search_results(text_results)
             if not text_candidates:
                 if output_format == "json":
-                    return _empty_json_payload()
+                    return _not_found_json_payload()
                 return format_not_found_message(active_project.name, identifier)
             # The fallback search is paginated server-side to page_size, so list
             # the whole returned page instead of a hardcoded cap — otherwise the
             # caller's page_size would be silently ignored past the cap.
             if output_format == "json":
-                payload = _empty_json_payload()
+                payload = _not_found_json_payload()
                 payload["related_results"] = [
                     {
                         "title": _result_title(result),
