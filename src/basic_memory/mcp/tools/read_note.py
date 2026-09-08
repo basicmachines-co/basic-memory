@@ -390,6 +390,21 @@ async def read_note(
                                 f"/knowledge/entities/{exact_external_id}"
                             )
                         ):
+                            if line_scan:
+                                # The slice endpoint also uses 404 for an existing
+                                # non-Markdown entity. Confirm absence without slice
+                                # parameters before classifying this error as missing.
+                                try:
+                                    await knowledge_client.get_entity(exact_external_id)
+                                except ToolError as lookup_error:
+                                    lookup_cause = lookup_error.__cause__
+                                    if (
+                                        not isinstance(lookup_cause, HTTPStatusError)
+                                        or lookup_cause.response.status_code != 404
+                                    ):
+                                        raise
+                                else:
+                                    raise error
                             if output_format == "json":
                                 return _not_found_json_payload()
                             return format_not_found_message(active_project.name, identifier)

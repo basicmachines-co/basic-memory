@@ -472,3 +472,36 @@ async def test_uuid_resource_404_is_a_read_error_not_a_missing_entity(
     with pytest.raises(ToolError) as raised:
         await read_note_module.read_note(ENTITY_ID, project="main", output_format="json")
     assert raised.value is error
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("confirmation_status", [None, 503])
+async def test_failed_unsliced_confirmation_does_not_report_missing(
+    monkeypatch: pytest.MonkeyPatch, confirmation_status: int | None
+) -> None:
+    import importlib
+
+    read_note_module = importlib.import_module("basic_memory.mcp.tools.read_note")
+    clients_module = importlib.import_module("basic_memory.mcp.clients")
+    _patch_project_routing(monkeypatch, read_note_module)
+    request = Request("GET", f"http://test/v2/projects/{PROJECT_ID}/knowledge/entities/{ENTITY_ID}")
+    slice_error = ToolError("No Markdown content to slice")
+    slice_error.__cause__ = HTTPStatusError(
+        "No Markdown content to slice", request=request, response=Response(404, request=request)
+    )
+    confirmation_error = ToolError("Confirmation unavailable")
+    if confirmation_status is None:
+        confirmation_error.__cause__ = ReadTimeout("Timed out", request=request)
+    else:
+        confirmation_error.__cause__ = HTTPStatusError(
+            "Unavailable", request=request, response=Response(confirmation_status, request=request)
+        )
+    get_entity = AsyncMock(side_effect=[slice_error, confirmation_error])
+    monkeypatch.setattr(clients_module.KnowledgeClient, "get_entity", get_entity)
+
+    with pytest.raises(ToolError) as raised:
+        await read_note_module.read_note(
+            ENTITY_ID, project="main", output_format="json", start_line=1
+        )
+    assert raised.value is confirmation_error
+    assert get_entity.await_count == 2
