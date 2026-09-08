@@ -3,6 +3,7 @@
 from dataclasses import asdict
 from typing import Annotated, assert_never
 
+import logfire
 from fastapi import APIRouter, HTTPException, Path
 
 from basic_memory.deps import (
@@ -60,59 +61,69 @@ async def write_note(
     app_config: AppConfigDep,
 ) -> WriteNoteResponse:
     """Create at the requested path or replace the note that currently owns it."""
-    # Release the read connection before the mutation opens its own transaction.
-    async with session_maker() as session:
-        project = await project_repository.get_by_id(session, project_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
-    workspace = current_workspace_permalink_context()
-    candidates = build_permalink_resolution_candidates(
-        data.note.file_path,
-        project.permalink,
-        include_project=app_config.permalinks_include_project,
-        workspace_permalink=(
-            workspace.workspace_slug if workspace and workspace.should_prefix_permalinks else None
-        ),
-    )
-    try:
-        outcome = await note_content_mutation_service.write_note(
-            project_external_id=project_external_id,
-            data=data.note,
-            overwrite=data.overwrite,
-            entity_repository=entity_repository,
-            permalink_candidates=candidates,
-            user_profile_id=None,
-            source="api",
+    with logfire.span(
+        "api.request.knowledge.write_note",
+        entrypoint="api",
+        domain="knowledge",
+        action="write_note",
+    ):
+        # Release the read connection before the mutation opens its own transaction.
+        async with session_maker() as session:
+            project = await project_repository.get_by_id(session, project_id)
+        if project is None:
+            raise HTTPException(status_code=404, detail="Project not found")
+        workspace = current_workspace_permalink_context()
+        candidates = build_permalink_resolution_candidates(
+            data.note.file_path,
+            project.permalink,
+            include_project=app_config.permalinks_include_project,
+            workspace_permalink=(
+                workspace.workspace_slug
+                if workspace and workspace.should_prefix_permalinks
+                else None
+            ),
         )
-    except NoteContentMutationServiceError as error:
-        raise HTTPException(status_code=error.status_code, detail=error.detail) from error
-    match outcome:
-        case Created(change=change) | Updated(change=change):
-            accepted = await note_content_materialization_provider.materialize_write_change(change)
-            entity = EntityResponseV2.model_validate(
-                runtime_note_content_payload_as_dict(accepted.payload)
+        try:
+            outcome = await note_content_mutation_service.write_note(
+                project_external_id=project_external_id,
+                data=data.note,
+                overwrite=data.overwrite,
+                entity_repository=entity_repository,
+                permalink_candidates=candidates,
+                user_profile_id=None,
+                source="api",
             )
-            # Runtime-injected schedulers preserve local and Cloud publication behavior.
-            if app_config.semantic_search_enabled:
-                vector_sync_scheduler.schedule_entity_vector_sync(
-                    entity_id=entity.id, project_id=project_id
+        except NoteContentMutationServiceError as error:
+            raise HTTPException(status_code=error.status_code, detail=error.detail) from error
+        match outcome:
+            case Created(change=change) | Updated(change=change):
+                accepted = await note_content_materialization_provider.materialize_write_change(
+                    change
                 )
-            relation_resolution_scheduler.schedule_relation_resolution(project_id=project_id)
-            match outcome:
-                case Created():
-                    return NoteCreated(entity=entity)
-                case Updated():
-                    return NoteUpdated(entity=entity)
-                case _:
-                    assert_never(outcome)
-        case AlreadyExists(file_path=file_path):
-            return NoteAlreadyExists(file_path=file_path)
-        case TargetMoved(note=note):
-            return NoteTargetMoved(**asdict(note))
-        case Locked(message=message):
-            return NoteLocked(message=message)
-        case Rejected(rejection=rejection):
-            error = note_content_mutation_error_from_rejection(rejection)
-            raise HTTPException(status_code=error.status_code, detail=error.detail)
-        case _:
-            assert_never(outcome)
+                entity = EntityResponseV2.model_validate(
+                    runtime_note_content_payload_as_dict(accepted.payload)
+                )
+                # Runtime-injected schedulers preserve local and Cloud publication behavior.
+                if app_config.semantic_search_enabled:
+                    vector_sync_scheduler.schedule_entity_vector_sync(
+                        entity_id=entity.id, project_id=project_id
+                    )
+                relation_resolution_scheduler.schedule_relation_resolution(project_id=project_id)
+                match outcome:
+                    case Created():
+                        return NoteCreated(entity=entity)
+                    case Updated():
+                        return NoteUpdated(entity=entity)
+                    case _:
+                        assert_never(outcome)
+            case AlreadyExists(file_path=file_path):
+                return NoteAlreadyExists(file_path=file_path)
+            case TargetMoved(note=note):
+                return NoteTargetMoved(**asdict(note))
+            case Locked(message=message):
+                return NoteLocked(message=message)
+            case Rejected(rejection=rejection):
+                error = note_content_mutation_error_from_rejection(rejection)
+                raise HTTPException(status_code=error.status_code, detail=error.detail)
+            case _:
+                assert_never(outcome)

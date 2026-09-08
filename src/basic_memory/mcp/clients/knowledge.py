@@ -60,14 +60,19 @@ class KnowledgeClient:
         """Write at an exact path and preserve the service's expected outcomes."""
         from basic_memory.mcp.tools.utils import call_post
 
-        response = await call_post(
-            self.http_client,
-            f"{self._base_path}/write",
-            json=WriteNoteRequest(note=note, overwrite=overwrite).model_dump(mode="json"),
+        with logfire.span(
+            "mcp.client.knowledge.write_note",
             client_name="knowledge",
             operation="write_note",
-            path_template="/v2/projects/{project_id}/knowledge/write",
-        )
+        ):
+            response = await call_post(
+                self.http_client,
+                f"{self._base_path}/write",
+                json=WriteNoteRequest(note=note, overwrite=overwrite).model_dump(mode="json"),
+                client_name="knowledge",
+                operation="write_note",
+                path_template="/v2/projects/{project_id}/knowledge/write",
+            )
         return write_note_response_adapter.validate_json(response.content)
 
     async def create_entity(self, entity_data: dict[str, Any]) -> EntityResponse:
