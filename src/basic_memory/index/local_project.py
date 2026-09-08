@@ -322,7 +322,10 @@ class LocalProjectIndexObservedFileSource(ProjectIndexObservedFileSource):
             try:
                 metadata = await self.file_service.get_file_metadata(file_path)
                 checksum = self._reuse_indexed_checksum(file_path, metadata, indexed_stats)
-                if checksum is None:
+                # A confirmed empty index has no changed or moved files to
+                # compare. Keep stat metadata, but let the batch reader hash
+                # new content when indexing rather than during status.
+                if checksum is None and (self.indexed_stat_source is None or indexed_stats):
                     checksum = await self.file_service.compute_checksum(file_path)
             except (OSError, FileError, FileOperationError) as exc:
                 # Trigger: a path the walk just listed fails stat/checksum
