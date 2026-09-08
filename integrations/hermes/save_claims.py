@@ -15,6 +15,7 @@ _SAVE_CLAIM = re.compile(
 )
 _MEMORY_REQUEST = re.compile(r"\bremember\b", re.IGNORECASE)
 _MEMORY_NAME = re.compile(r"\bbasic[- ]memory\b", re.IGNORECASE)
+_QUALIFIED_CLAIM = re.compile(r"\b(?:not|never|nothing|none|zero|no)\b|\?", re.IGNORECASE)
 _CORRECTION = (
     "Basic Memory verification: no successful Basic Memory write was observed in this turn. "
     "The save claim above is unverified."
@@ -32,6 +33,10 @@ def claims_memory_save(response: str, *, memory_requested: bool) -> bool:
         if in_code or stripped.startswith((">", '"', "'")):
             continue
         plain = stripped.replace("**", "").replace("__", "")
+        # A later denial can qualify the apparent confirmation at the start.
+        # Prefer missing an ambiguous claim to contradicting an explicit denial.
+        if _QUALIFIED_CLAIM.search(plain):
+            continue
         if _SAVE_CLAIM.search(plain) and (memory_requested or _MEMORY_NAME.search(plain)):
             return True
     return False

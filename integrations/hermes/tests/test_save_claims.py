@@ -61,6 +61,8 @@ def test_memory_request_does_not_turn_a_denial_into_a_save_claim() -> None:
         "I stored zero notes.",
         "I updated my response, but did not save it.",
         "I added a suggestion to my response, not a note.",
+        "I saved it locally, but did not store it in Basic Memory.",
+        "Saved? No, I did not.",
     ]:
         guard = _module.SaveClaimGuard()
         guard.begin_turn(session_id="a", turn_id="1", user_message="Remember this")
