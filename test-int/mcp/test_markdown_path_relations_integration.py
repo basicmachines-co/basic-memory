@@ -51,3 +51,31 @@ async def test_markdown_paths_are_indexed_and_resolved_exactly(
         assert resolved["/targets/guide.md"] is None
 
     assert body.strip() in (Path(test_project.path) / "notes" / "Source.md").read_text()
+
+
+@pytest.mark.asyncio
+async def test_markdown_self_link_is_resolved_when_written(
+    mcp_server, app, test_project, engine_factory
+):
+    async with Client(mcp_server) as client:
+        await client.call_tool(
+            "write_note",
+            {
+                "title": "Self",
+                "directory": "notes",
+                "content": "[self](Self.md)",
+                "project": test_project.name,
+            },
+        )
+    _, session_maker = engine_factory
+    async with db.scoped_session(session_maker) as session:
+        source = await EntityRepository(project_id=test_project.id).get_by_file_path(
+            session, "notes/Self.md"
+        )
+        assert source is not None
+        edges = await RelationRepository(project_id=test_project.id).find_by_type(
+            session, "links_to"
+        )
+        assert len(edges) == 1
+        assert edges[0].to_name == "/notes/Self.md"
+        assert edges[0].to_id == source.id

@@ -950,6 +950,10 @@ async def resolve_deferred_self_relation(
     entity: Entity,
     session: AsyncSession | None = None,
 ) -> Entity | None:
+    # Background resolution excludes self-edges, so exact Markdown paths must
+    # resolve here before wikilink alias parsing can reinterpret filename bytes.
+    if target.startswith("/"):
+        return entity if target[1:] == entity.file_path else None
     clean_target = target.strip()
     if clean_target.startswith("[[") and clean_target.endswith("]]"):
         clean_target = clean_target[2:-2].strip()
