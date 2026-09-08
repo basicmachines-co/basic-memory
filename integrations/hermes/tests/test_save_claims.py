@@ -53,6 +53,20 @@ def test_generic_file_save_does_not_imply_basic_memory() -> None:
     assert "unverified" in guard.transform(session_id="a", response_text="I've saved it.")
 
 
+def test_memory_request_does_not_turn_a_denial_into_a_save_claim() -> None:
+    for response in [
+        "I have saved nothing to Basic Memory.",
+        "Saved no notes to Basic Memory.",
+        "I recorded none of this in Basic Memory.",
+        "I stored zero notes.",
+        "I updated my response, but did not save it.",
+        "I added a suggestion to my response, not a note.",
+    ]:
+        guard = _module.SaveClaimGuard()
+        guard.begin_turn(session_id="a", turn_id="1", user_message="Remember this")
+        assert guard.transform(session_id="a", response_text=response) is None
+
+
 def test_missing_turn_identity_does_not_create_evidence() -> None:
     guard = _module.SaveClaimGuard()
     guard.begin_turn(session_id="a", user_message="Remember this")

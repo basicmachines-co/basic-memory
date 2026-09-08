@@ -9,7 +9,8 @@ from dataclasses import dataclass, replace
 
 _SAVE_CLAIM = re.compile(
     r"(?:^|[.!?]\s+)(?:I(?:['’]ve| have)?\s+)?"
-    r"(?:saved|stored|recorded|remembered|added|updated)\b",
+    r"(?:saved|stored|recorded|remembered)\b"
+    r"(?!\s+(?:nothing|none|no|not|zero)\b)",
     re.IGNORECASE,
 )
 _MEMORY_REQUEST = re.compile(r"\bremember\b", re.IGNORECASE)
