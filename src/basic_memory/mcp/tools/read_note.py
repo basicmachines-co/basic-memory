@@ -130,6 +130,8 @@ async def read_note(
             Aliases: limit, per_page.
         output_format: "text" returns markdown content or guidance text.
             "json" returns a structured object with title/permalink/file_path/content/frontmatter.
+            Unresolved notes carry error="NOTE_NOT_FOUND" and a message, with
+            related_results when suggestions are available.
         include_frontmatter: For unsliced JSON reads, include opening YAML in content;
             parsed frontmatter is returned either way. Explicit line ranges are never
             stripped. CLI: --frontmatter (--include-frontmatter is a deprecated alias).
@@ -290,13 +292,15 @@ async def read_note(
                     "next_end_line": min(total, last + width) if last < total else None,
                 }
 
-            def _empty_json_payload() -> dict[str, Any]:
+            def _not_found_json_payload() -> dict[str, Any]:
                 return {
                     "title": None,
                     "permalink": None,
                     "file_path": None,
                     "content": None,
                     "frontmatter": None,
+                    "error": "NOTE_NOT_FOUND",
+                    "message": f"Note not found: {identifier}",
                 }
 
             def _search_results(payload: object) -> list[dict[str, object]]:
@@ -472,13 +476,13 @@ async def read_note(
             text_candidates = _search_results(text_results)
             if not text_candidates:
                 if output_format == "json":
-                    return _empty_json_payload()
+                    return _not_found_json_payload()
                 return format_not_found_message(active_project.name, identifier)
             # The fallback search is paginated server-side to page_size, so list
             # the whole returned page instead of a hardcoded cap — otherwise the
             # caller's page_size would be silently ignored past the cap.
             if output_format == "json":
-                payload = _empty_json_payload()
+                payload = _not_found_json_payload()
                 payload["related_results"] = [
                     {
                         "title": _result_title(result),
