@@ -27,6 +27,7 @@ from basic_memory.document_ingestion.raw_document import (
     ExtractedDocument,
     RawDocumentArtifacts,
     build_raw_document_artifacts_from_extracted,
+    build_raw_ingestion_run_markdown,
 )
 from basic_memory.schemas.document import (
     DocumentExtractionStatus,
@@ -272,6 +273,45 @@ async def test_writer_rebuilds_the_raw_projection_when_the_source_changed(
     )
     assert sidecar.frontmatter.source.checksum == "sha256:" + "b" * 64
     assert knowledge.indexed.count(second.document_file_path) == 2
+
+
+@pytest.mark.asyncio
+async def test_writer_rewrites_a_run_note_that_names_other_sidecar_bytes(
+    file_service: FileService,
+) -> None:
+    knowledge = knowledge_api()
+    writer = LocalRawDocumentWriter(file_service, knowledge)
+    built = artifacts()
+    first = await writer.write(built)
+    # Simulate an overlapping import that replaced the sidecar after this run
+    # note was written: the note now names bytes that are no longer on disk.
+    stale_note = build_raw_ingestion_run_markdown(
+        built, raw_checksum="sha256:" + "d" * 64, raw_created_at=NOW
+    )
+    await file_service.write_file(built.run_file_path, stale_note)
+
+    second = await writer.write(built)
+
+    assert second.document_created is False
+    assert second.run_created is True
+    run_note = parse_document_ingestion_run_markdown(
+        (file_service.base_path / built.run_file_path).read_text(encoding="utf-8")
+    )
+    assert run_note.frontmatter.output is not None
+    assert run_note.frontmatter.output.raw is not None
+    assert run_note.frontmatter.output.raw.checksum == first.document_db_checksum
+    assert knowledge.indexed.count(built.run_file_path) == 2
+
+
+@pytest.mark.asyncio
+async def test_writer_refuses_a_hand_written_run_note(file_service: FileService) -> None:
+    knowledge = knowledge_api()
+    writer = LocalRawDocumentWriter(file_service, knowledge)
+    built = artifacts()
+    await file_service.write_file(built.run_file_path, "# Not a run note\n")
+
+    with pytest.raises(DocumentSidecarConflictError, match="not a generated ingestion run note"):
+        await writer.write(built)
 
 
 @pytest.mark.asyncio

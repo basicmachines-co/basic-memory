@@ -37,6 +37,13 @@ def test_render_csv_preview_escapes_cells_and_reports_the_row_count() -> None:
     )
 
 
+def test_render_csv_preview_escapes_backslashes_before_pipes() -> None:
+    preview = render_csv_preview(b"path\nC:\\dir\\file\na\\|b\n", max_rows=200)
+
+    assert "| C:\\\\dir\\\\file |" in preview.markdown
+    assert "| a\\\\\\|b |" in preview.markdown
+
+
 def test_render_csv_preview_truncates_to_max_rows_but_counts_every_row() -> None:
     content = b"n\n" + b"".join(f"{index}\n".encode() for index in range(10))
 

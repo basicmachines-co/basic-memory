@@ -20,7 +20,6 @@ from typing import Protocol
 from uuid import UUID
 
 from basic_memory.document_ingestion.csv_extractor import CSV_MEDIA_TYPE, CsvExtractor
-from basic_memory.file_utils import ParseError
 from basic_memory.document_ingestion.markitdown_extractor import markitdown_extractors
 from basic_memory.document_ingestion.pdf_inspector import PdfInspector
 from basic_memory.document_ingestion.raw_document import (
@@ -36,7 +35,12 @@ from basic_memory.document_ingestion.raw_document import (
     canonical_db_checksum,
     raw_document_matches,
 )
-from basic_memory.schemas.document import DocumentIngestionStage, parse_document_markdown
+from basic_memory.file_utils import ParseError
+from basic_memory.schemas.document import (
+    DocumentIngestionStage,
+    parse_document_ingestion_run_markdown,
+    parse_document_markdown,
+)
 from basic_memory.schemas.v2.entity import EntityResolveResponse, EntityResponseV2
 from basic_memory.services.file_service import FileService
 
@@ -206,10 +210,26 @@ async def accept_run_note(
     *,
     raw_checksum: str,
 ) -> bool:
-    """Write the run note for this deterministic run id unless it already exists."""
+    """Write the run note for this run id unless it already names the accepted sidecar bytes."""
     path = artifacts.run_file_path
     if await file_service.exists(path):
-        return False
+        try:
+            existing = parse_document_ingestion_run_markdown(
+                await file_service.read_file_content(path)
+            )
+        except (ParseError, ValueError) as error:
+            raise DocumentSidecarConflictError(
+                f"{path} exists and is not a generated ingestion run note"
+            ) from error
+        output = existing.frontmatter.output
+        recorded_checksum = output.raw.checksum if output and output.raw else None
+        if recorded_checksum == raw_checksum:
+            return False
+        # Trigger: the run note names different sidecar bytes than the note on disk.
+        # Why: two imports of the same unchanged source can interleave (same run id,
+        #      different extracted_at), leaving one run's sidecar beside the other
+        #      run's note; reusing the stale note would freeze that mismatch.
+        # Outcome: rewrite the run note so provenance converges on this pass.
     markdown = build_raw_ingestion_run_markdown(
         artifacts, raw_checksum=raw_checksum, raw_created_at=datetime.now(tz=UTC)
     )
