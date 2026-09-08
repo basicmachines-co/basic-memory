@@ -1,11 +1,4 @@
-import type {
-  AssembleResult,
-  BootstrapResult,
-  CompactResult,
-  ContextEngine,
-  SubagentSpawnPreparation,
-} from "openclaw/plugin-sdk"
-import { delegateCompactionToRuntime } from "openclaw/plugin-sdk/core"
+import type { HarnessContextEngine as ContextEngine } from "openclaw/plugin-sdk/agent-harness-runtime"
 import type { BmClient } from "../bm-client.ts"
 import type { BasicMemoryConfig } from "../config.ts"
 import { selectCaptureTurn } from "../hooks/capture.ts"
@@ -18,6 +11,14 @@ const SUBAGENT_HANDOFF_FOLDER = "agent/subagents"
 const MAX_SUBAGENT_RECALL_CHARS = 800
 
 type BootstrapParams = Parameters<NonNullable<ContextEngine["bootstrap"]>>[0]
+type BootstrapResult = Awaited<
+  ReturnType<NonNullable<ContextEngine["bootstrap"]>>
+>
+type AssembleResult = Awaited<ReturnType<ContextEngine["assemble"]>>
+type CompactResult = Awaited<ReturnType<ContextEngine["compact"]>>
+type SubagentSpawnPreparation = Awaited<
+  ReturnType<NonNullable<ContextEngine["prepareSubagentSpawn"]>>
+>
 type AssembleParams = Parameters<ContextEngine["assemble"]>[0]
 type AfterTurnParams = Parameters<NonNullable<ContextEngine["afterTurn"]>>[0]
 type CompactParams = Parameters<ContextEngine["compact"]>[0]
@@ -193,6 +194,10 @@ export class BasicMemoryContextEngine implements ContextEngine {
   }
 
   async compact(params: CompactParams): Promise<CompactResult> {
+    // Load the host runtime only when compaction needs its SQLite-backed services.
+    const { delegateCompactionToRuntime } = await import(
+      "openclaw/plugin-sdk/core"
+    )
     return delegateCompactionToRuntime(params)
   }
 

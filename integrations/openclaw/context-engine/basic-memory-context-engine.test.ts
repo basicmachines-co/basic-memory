@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, jest } from "bun:test"
-import type { ContextEngine } from "openclaw/plugin-sdk"
+import type { HarnessContextEngine as ContextEngine } from "openclaw/plugin-sdk/agent-harness-runtime"
 import type { BmClient } from "../bm-client.ts"
 import type { BasicMemoryConfig } from "../config.ts"
 import {

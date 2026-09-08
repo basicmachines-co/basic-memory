@@ -60,7 +60,11 @@ describe("plugin service lifecycle", () => {
       "openclaw-basic-memory",
       expect.any(Function),
     )
-    expect(api.on).not.toHaveBeenCalled()
+    expect(api.on.mock.calls.map(([name]) => name)).toEqual([
+      "llm_input",
+      "after_tool_call",
+      "reply_payload_sending",
+    ])
 
     await services[0].start({ workspaceDir: "/tmp/workspace" })
 

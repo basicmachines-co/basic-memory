@@ -11,6 +11,7 @@ import {
   resolveProjectPath,
 } from "./config.ts"
 import { BasicMemoryContextEngine } from "./context-engine/basic-memory-context-engine.ts"
+import { registerSaveClaimGuard } from "./hooks/save-claims.ts"
 import { initLogger, log } from "./logger.ts"
 import { CONVERSATION_SCHEMA_CONTENT } from "./schema/conversation-schema.ts"
 import { TASK_SCHEMA_CONTENT } from "./schema/task-schema.ts"
@@ -57,6 +58,7 @@ export default definePluginEntry({
     )
 
     const client = new BmClient(cfg.bmPath, cfg.project)
+    registerSaveClaimGuard(api)
 
     // --- BM Tools (always registered) ---
     registerSearchTool(api, client)

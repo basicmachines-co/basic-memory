@@ -39,7 +39,7 @@ All data stays on your machine as Markdown files indexed locally with SQLite. Cl
 
 ## Install
 
-**Prerequisite:** [uv](https://docs.astral.sh/uv/) (Python package manager) — used to install the Basic Memory CLI.
+**Prerequisites:** OpenClaw 2026.9.2 or later and [uv](https://docs.astral.sh/uv/) (Python package manager), used to install the Basic Memory CLI.
 
 ```bash
 # macOS
@@ -150,6 +150,20 @@ After each conversation turn, the plugin records the exchange as a timestamped e
 ### Persistent connection
 
 The plugin keeps a long-lived Basic Memory process running over standard I/O. No cold starts per tool call. The connection auto-reconnects if it drops.
+
+### Save-claim verification
+
+For live final replies with a session and run ID, the plugin tracks successful
+`write_note` and `edit_note` results. If the reply claims a save after a remember
+request, or explicitly names Basic Memory, but no successful write was observed,
+it appends an unverified-save correction. Failed writes and note conflicts do not
+count as saves. This requires the `reply_payload_sending` hook in OpenClaw 2026.9.2.
+
+Detection covers direct English confirmations such as “I have saved it.” It skips
+quotes, fenced code, questions and explicit denials. It does not verify the content
+of a note, claims about earlier saves, or writes through shell commands and other
+clients. Streaming chunks and replayed replies without run correlation are outside
+this check. Evidence is bounded to the most recent 256 runs in this plugin instance.
 
 ## Agent tools
 

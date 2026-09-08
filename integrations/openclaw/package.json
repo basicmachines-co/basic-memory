@@ -4,7 +4,7 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "description": "Basic Memory plugin for OpenClaw \u2014 local-first knowledge graph for agent memory",
+  "description": "Basic Memory plugin for OpenClaw — local-first knowledge graph for agent memory",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -22,6 +22,7 @@
     "commands/slash.ts",
     "hooks/capture.ts",
     "hooks/recall.ts",
+    "hooks/save-claims.ts",
     "tools/build-context.ts",
     "tools/delete-note.ts",
     "tools/edit-note.ts",
@@ -53,7 +54,7 @@
     "@sinclair/typebox": "0.34.47"
   },
   "peerDependencies": {
-    "openclaw": ">=2026.5.2"
+    "openclaw": ">=2026.9.2"
   },
   "scripts": {
     "postinstall": "bash scripts/setup-bm.sh || true",
@@ -76,21 +77,21 @@
       "./dist/index.js"
     ],
     "compat": {
-      "pluginApi": ">=2026.5.2",
-      "minGatewayVersion": "2026.5.2"
+      "pluginApi": ">=2026.9.2",
+      "minGatewayVersion": "2026.9.2"
     },
     "build": {
-      "openclawVersion": "2026.5.4",
-      "pluginSdkVersion": "2026.5.4"
+      "openclawVersion": "2026.9.2",
+      "pluginSdkVersion": "2026.9.2"
     },
     "install": {
-      "minHostVersion": ">=2026.5.2"
+      "minHostVersion": ">=2026.9.2"
     }
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.6",
     "@types/node": "^20.0.0",
-    "openclaw": "^2026.5.4",
+    "openclaw": "^2026.9.2",
     "typescript": "^5.9.3"
   }
 }
