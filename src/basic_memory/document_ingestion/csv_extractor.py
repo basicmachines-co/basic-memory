@@ -141,7 +141,9 @@ def render_csv_preview(
         header = next(reader, None)
         if header is None:
             return CsvPreview(markdown="_Empty CSV file._\n", row_count=0, shown_rows=0)
+        require_csv_field_bound(header, max_field_bytes)
         for row in reader:
+            require_csv_field_bound(row, max_field_bytes)
             row_count += 1
             if len(shown) < max_rows:
                 shown.append(row)
@@ -160,6 +162,12 @@ def render_csv_preview(
     else:
         lines.append(f"_{row_count} rows._")
     return CsvPreview(markdown="\n".join(lines) + "\n", row_count=row_count, shown_rows=len(shown))
+
+
+def require_csv_field_bound(cells: Sequence[str], max_field_bytes: int) -> None:
+    """Enforce this import's byte bound independently of the global character ceiling."""
+    if any(len(cell.encode("utf-8")) > max_field_bytes for cell in cells):
+        raise CsvExtractionError("CSV field exceeds the configured field byte limit")
 
 
 def _table_row(cells: Sequence[str], width: int) -> str:

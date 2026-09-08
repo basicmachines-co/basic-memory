@@ -53,6 +53,10 @@ class DocumentSourceResolutionError(RuntimeError):
     """The requested path did not resolve to its own indexed file entity."""
 
 
+class DocumentSourceTooLargeError(RuntimeError):
+    """The local source exceeds the reader's allocation bound."""
+
+
 class DocumentSidecarConflictError(RuntimeError):
     """The sidecar path holds content this runtime must not overwrite."""
 
@@ -115,6 +119,11 @@ class LocalDocumentSourceReader:
     """Read source bytes from the project directory; the checksum is the generation."""
 
     project_home: Path
+    max_source_bytes: int = 25 * 1024 * 1024
+
+    def __post_init__(self) -> None:
+        if self.max_source_bytes < 1:
+            raise ValueError("max_source_bytes must be positive")
 
     async def read(
         self,
@@ -122,7 +131,9 @@ class LocalDocumentSourceReader:
         *,
         observed_etag: str | None,
     ) -> DocumentSourceSnapshot:
-        content = await asyncio.to_thread((self.project_home / entity.file_path).read_bytes)
+        content = await asyncio.to_thread(
+            read_bounded_source, self.project_home / entity.file_path, self.max_source_bytes
+        )
         checksum = sha256_checksum(content)
         if observed_etag is not None and observed_etag != checksum:
             raise DocumentSourceChangedError(
@@ -138,12 +149,25 @@ class LocalDocumentSourceReader:
 
     async def require_current(self, snapshot: DocumentSourceSnapshot) -> None:
         current = await asyncio.to_thread(
-            (self.project_home / snapshot.entity.file_path).read_bytes
+            read_bounded_source,
+            self.project_home / snapshot.entity.file_path,
+            self.max_source_bytes,
         )
         if sha256_checksum(current) != snapshot.checksum:
             raise DocumentSourceChangedError(
                 f"{snapshot.entity.file_path} changed on disk during extraction"
             )
+
+
+def read_bounded_source(path: Path, max_source_bytes: int) -> bytes:
+    """Bound parent-process allocation before the extractor applies its own limits."""
+    with path.open("rb") as source:
+        content = source.read(max_source_bytes + 1)
+    if len(content) > max_source_bytes:
+        raise DocumentSourceTooLargeError(
+            f"{path.name} exceeds the local document source byte limit ({max_source_bytes})"
+        )
+    return content
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,10 +245,13 @@ async def accept_document_note(
                 f"{path} changed while it was being replaced; re-run the import"
             )
     checksum = await file_service.write_file(path, artifacts.document_markdown)
+    # Formatting is part of the accepted write; provenance must describe its
+    # persisted projection, not the extractor's pre-format Markdown.
+    persisted = parse_document_markdown(await file_service.read_file_content(path))
     await knowledge.index_file(path)
     return AcceptedDocumentNote(
         canonical_db_checksum(checksum),
-        document_markdown_checksum(artifacts.document_markdown),
+        raw_projection_checksum(persisted),
         True,
     )
 
