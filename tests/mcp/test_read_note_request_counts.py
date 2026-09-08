@@ -7,13 +7,22 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
-from httpx import Response
+from fastmcp.exceptions import ToolError
+from httpx import HTTPStatusError, ReadTimeout, Request, Response
 
 from basic_memory.mcp.note_reads import read_note_json_by_external_id
 from basic_memory.schemas.v2 import EntityResponseV2
 
 PROJECT_ID = "11111111-1111-4111-8111-111111111111"
 ENTITY_ID = "22222222-2222-4222-8222-222222222222"
+
+
+def lookup_miss() -> ToolError:
+    request = Request("POST", "http://test/knowledge/resolve")
+    response = Response(404, request=request)
+    error = ToolError("Note not found")
+    error.__cause__ = HTTPStatusError("Note not found", request=request, response=response)
+    return error
 
 
 def _entity(
@@ -176,7 +185,7 @@ async def test_exact_title_json_uses_search_result_external_id_without_second_re
             calls["resolve"] += 1
             assert identifier == "Request Count"
             assert strict is True
-            raise RuntimeError("force exact-title fallback")
+            raise lookup_miss()
 
         async def get_entity(self, entity_id: str) -> EntityResponseV2:
             calls["entity"] += 1
@@ -398,7 +407,7 @@ async def test_fallback_search_failure_is_not_reported_as_missing(
     monkeypatch.setattr(
         clients_module.KnowledgeClient,
         "resolve_entity",
-        AsyncMock(side_effect=RuntimeError("force search fallback")),
+        AsyncMock(side_effect=lookup_miss()),
     )
 
     async def search_result(*, search_type: str, **_kwargs: object) -> dict[str, object] | str:
@@ -409,3 +418,57 @@ async def test_fallback_search_failure_is_not_reported_as_missing(
     monkeypatch.setattr(read_note_module, "search_notes", search_result)
     with pytest.raises(RuntimeError, match="Search service unavailable"):
         await read_note_module.read_note("Unknown Note", project="main", output_format="json")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [None, 403, 429, 503])
+@pytest.mark.parametrize("identifier", ["Note Title", ENTITY_ID])
+async def test_operational_lookup_errors_propagate_without_search(
+    monkeypatch: pytest.MonkeyPatch, status_code: int | None, identifier: str
+) -> None:
+    import importlib
+
+    read_note_module = importlib.import_module("basic_memory.mcp.tools.read_note")
+    clients_module = importlib.import_module("basic_memory.mcp.clients")
+    _patch_project_routing(monkeypatch, read_note_module)
+    request = Request("GET", f"http://test/v2/projects/{PROJECT_ID}/knowledge/entities/{ENTITY_ID}")
+    error = ToolError("Service request failed")
+    if status_code is None:
+        error.__cause__ = ReadTimeout("Timed out", request=request)
+    else:
+        response = Response(status_code, request=request)
+        error.__cause__ = HTTPStatusError(
+            "Service request failed", request=request, response=response
+        )
+    method = "get_entity" if identifier == ENTITY_ID else "resolve_entity"
+    monkeypatch.setattr(clients_module.KnowledgeClient, method, AsyncMock(side_effect=error))
+    search = AsyncMock(return_value={"results": []})
+    monkeypatch.setattr(read_note_module, "search_notes", search)
+
+    with pytest.raises(ToolError) as raised:
+        await read_note_module.read_note(identifier, project="main", output_format="json")
+    assert raised.value is error
+    search.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_uuid_resource_404_is_a_read_error_not_a_missing_entity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib
+
+    read_note_module = importlib.import_module("basic_memory.mcp.tools.read_note")
+    clients_module = importlib.import_module("basic_memory.mcp.clients")
+    _patch_project_routing(monkeypatch, read_note_module)
+    monkeypatch.setattr(
+        clients_module.KnowledgeClient, "get_entity", AsyncMock(return_value=_entity(content=None))
+    )
+    request = Request("GET", f"http://test/v2/projects/{PROJECT_ID}/resource/{ENTITY_ID}")
+    response = Response(404, request=request)
+    error = ToolError("Content unavailable")
+    error.__cause__ = HTTPStatusError("Content unavailable", request=request, response=response)
+    monkeypatch.setattr(clients_module.ResourceClient, "read", AsyncMock(side_effect=error))
+
+    with pytest.raises(ToolError) as raised:
+        await read_note_module.read_note(ENTITY_ID, project="main", output_format="json")
+    assert raised.value is error

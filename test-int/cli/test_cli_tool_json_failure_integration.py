@@ -14,17 +14,20 @@ from basic_memory.cli.main import app as cli_app
 runner = CliRunner()
 
 
-def test_read_note_not_found(app, app_config, test_project, config_manager):
+@pytest.mark.parametrize(
+    "identifier", ["nonexistent-note-that-does-not-exist", "22222222-2222-4222-8222-222222222222"]
+)
+def test_read_note_not_found(app, app_config, test_project, config_manager, identifier):
     """A missing note remains machine-readable but must not report success."""
     result = runner.invoke(
         cli_app,
-        ["tool", "read-note", "nonexistent-note-that-does-not-exist"],
+        ["tool", "read-note", identifier],
     )
 
     assert result.exit_code == 1
     data = json.loads(result.stdout)
     assert data["error"] == "NOTE_NOT_FOUND"
-    assert data["message"] == "Note not found: nonexistent-note-that-does-not-exist"
+    assert data["message"] == f"Note not found: {identifier}"
     assert "Note not found" in result.stderr
     assert data["title"] is None
     assert data["permalink"] is None

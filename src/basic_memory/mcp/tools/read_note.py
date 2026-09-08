@@ -8,6 +8,8 @@ import logfire
 
 from loguru import logger
 from fastmcp import Context
+from fastmcp.exceptions import ToolError
+from httpx import HTTPStatusError
 from pydantic import AliasChoices, Field
 
 from basic_memory.config import ConfigManager
@@ -375,11 +377,32 @@ async def read_note(
             if output_format == "json" or line_scan:
                 exact_external_id = _exact_external_id(entity_path)
                 if exact_external_id is not None:
-                    return await _read_resolved_note(exact_external_id)
+                    try:
+                        return await _read_resolved_note(exact_external_id)
+                    except ToolError as error:
+                        cause = error.__cause__
+                        # Only the entity GET proves this UUID is absent. A 404
+                        # from its resource fallback is a failed content read.
+                        if (
+                            isinstance(cause, HTTPStatusError)
+                            and cause.response.status_code == 404
+                            and cause.request.url.path.endswith(
+                                f"/knowledge/entities/{exact_external_id}"
+                            )
+                        ):
+                            if output_format == "json":
+                                return _not_found_json_payload()
+                            return format_not_found_message(active_project.name, identifier)
+                        raise
 
                 try:
                     entity_id = await knowledge_client.resolve_entity(entity_path, strict=True)
-                except Exception as error:  # pragma: no cover
+                except ToolError as error:
+                    cause = error.__cause__
+                    # Search is a recovery for a confirmed lookup miss, not for
+                    # unavailable or unauthorized resolution services.
+                    if not isinstance(cause, HTTPStatusError) or cause.response.status_code != 404:
+                        raise
                     logger.info(f"Direct lookup failed for '{entity_path}': {error}")
                 else:
                     logger.info(
