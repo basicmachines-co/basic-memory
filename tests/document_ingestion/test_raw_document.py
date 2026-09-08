@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 from typing import override
 from uuid import UUID
 
 import pytest
+
+from basic_memory.schemas.document_page_map import DocumentPageMapV1, DocumentPageRangeV1
 
 from basic_memory.document_ingestion.pdf_inspector import (
     PdfInspector,
@@ -116,6 +119,29 @@ def test_build_raw_document_artifacts_is_typed_and_deterministic() -> None:
 
 def test_engine_version_is_part_of_run_identity() -> None:
     assert artifacts().run_id != artifacts(engine_version="1.17.0").run_id
+
+
+def test_mapped_extraction_cannot_reuse_a_legacy_run() -> None:
+    output = extraction_output()
+    page_map = DocumentPageMapV1(
+        body_checksum="sha256:" + hashlib.sha256(output.markdown.encode()).hexdigest(),
+        body_length=len(output.markdown),
+        pages=(DocumentPageRangeV1(page=1, start=0, end=len(output.markdown)),),
+    )
+    mapped = build_raw_document_artifacts(
+        source_snapshot(),
+        output.model_copy(update={"page_map": page_map}),
+        limits=PdfInspectorLimits(),
+        started_at=STARTED_AT,
+        extracted_at=EXTRACTED_AT,
+    )
+    legacy = artifacts()
+    assert mapped.run_id != legacy.run_id
+    assert mapped.document_external_id == legacy.document_external_id
+    assert mapped.extraction.profile == "pdf-inspector-v2"
+    assert legacy.extraction.profile == "pdf-inspector-v1"
+    with pytest.raises(RuntimeError, match="deterministic run identity"):
+        require_matching_raw_document(accepted_document(legacy), mapped)
 
 
 def test_raw_run_note_references_the_accepted_document_checksum() -> None:

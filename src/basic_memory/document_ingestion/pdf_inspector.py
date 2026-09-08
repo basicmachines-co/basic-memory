@@ -17,6 +17,8 @@ from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from basic_memory.schemas.document_page_map import DocumentPageMapV1
+
 PDF_INSPECTOR_ENGINE = "firecrawl/pdf-inspector"
 PDF_INSPECTOR_WORKER_MODULE = "basic_memory.document_ingestion.pdf_inspector_worker"
 
@@ -57,6 +59,7 @@ class PdfInspectorOutput(BaseModel):
     page_count: int = Field(gt=0)
     extracted_page_count: int = Field(ge=0)
     pages_needing_ocr: tuple[int, ...] = ()
+    page_map: DocumentPageMapV1 | None = None
     confidence: float = Field(ge=0.0, le=1.0)
     processing_time_ms: int = Field(ge=0)
     is_complex_layout: bool
@@ -67,6 +70,12 @@ class PdfInspectorOutput(BaseModel):
     @model_validator(mode="after")
     def validate_page_diagnostics(self) -> PdfInspectorOutput:
         """Keep page diagnostics within the document and internally consistent."""
+        if self.page_map is not None:
+            if len(self.page_map.pages) != self.page_count:
+                raise ValueError("page map must contain every physical page")
+            body = self.markdown.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
+            body = body + "\n" if body else ""
+            self.page_map.resolve_span(body, start=0, end=len(body))
         page_lists = (
             self.pages_needing_ocr,
             self.pages_with_tables,

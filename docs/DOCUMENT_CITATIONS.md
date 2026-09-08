@@ -50,9 +50,33 @@ retrieve a historical version or automatically detect replacement of the PDF.
 ## Scope and prior art
 
 This implements page-level addressing for #1366 and the citation convention from
-the amended SPEC-89. It does not implement an extraction offset map, quote
+the amended SPEC-89. It does not implement quote
 highlighting, generic OKF conformance (#1246), evidence watermarks, or contradiction
 detection. Cloud prompt adoption and viewer routing are separate integration work.
+
+## Extraction page map
+
+New pdf-inspector extractions retain `extraction.page_map` on both the document
+and ingestion-run note. Each entry has a one-based physical `page` and half-open
+`start`/`end` offsets measured in Unicode code points, as in Python string slices.
+The ranges partition the normalized raw Markdown body, including page markers;
+inter-page separators belong to the preceding page. OCR-only pages retain a
+range for their marker. Offsets exclude frontmatter and include the canonical
+final newline.
+
+The map carries `body_length` and a SHA-256 checksum of that body's UTF-8 bytes.
+`DocumentPageMapV1.resolve_span(body, start=..., end=...)` verifies the exact body
+before returning the physical pages intersecting a nonempty span. It rejects
+rewritten text and invalid bounds. After enrichment the map still describes the
+raw extraction revision, never the new agent-written body. Retrieve that raw
+revision before resolving a span; the source PDF checksum identifies a different
+artifact and cannot substitute for the body checksum.
+
+Older extractions omit the optional map and retain their serialized shape. The
+pdf-inspector extraction profile is now `pdf-inspector-v2`, yielding a new run
+identity when the same PDF is explicitly re-extracted; existing notes are not
+backfilled automatically. Other extraction providers may supply the same
+parser-neutral map contract.
 
 - [RFC 8118, section 3](https://www.rfc-editor.org/rfc/rfc8118.html#section-3)
   defines the PDF `page=N` fragment with one-based page numbering.

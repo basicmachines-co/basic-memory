@@ -9,6 +9,7 @@ PDF cannot exhaust the parent process.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.metadata
 import sys
 
@@ -27,6 +28,7 @@ from basic_memory.document_ingestion.pdf_inspector import (
     PdfInspectorOutput,
     PdfInspectorPdfType,
 )
+from basic_memory.schemas.document_page_map import DocumentPageMapV1, DocumentPageRangeV1
 
 
 def _normalized_pages(pages: list[int], *, page_count: int) -> tuple[int, ...]:
@@ -73,6 +75,29 @@ def inspect_pdf_bytes(
             continue
         markdown_parts.append(f"<!-- Page {page_number} -->\n\n{page.markdown.strip()}")
     markdown = "\n\n".join(markdown_parts).strip()
+    # Canonical note assembly normalizes line endings and adds one final newline.
+    # Record offsets against those stored body characters, not native bytes or
+    # frontmatter. Separators belong to the preceding page; OCR markers retain
+    # their physical page even when no text could be extracted.
+    page_ranges: list[DocumentPageRangeV1] = []
+    body_parts: list[str] = []
+    offset = 0
+    for index, part in enumerate(markdown_parts):
+        normalized = part.replace("\r\n", "\n").replace("\r", "\n")
+        normalized = (
+            normalized + "\n\n" if index < len(markdown_parts) - 1 else normalized.rstrip() + "\n"
+        )
+        body_parts.append(normalized)
+        page_ranges.append(
+            DocumentPageRangeV1(page=index + 1, start=offset, end=offset + len(normalized))
+        )
+        offset += len(normalized)
+    canonical_body = "".join(body_parts)
+    page_map = DocumentPageMapV1(
+        body_checksum="sha256:" + hashlib.sha256(canonical_body.encode("utf-8")).hexdigest(),
+        body_length=len(canonical_body),
+        pages=tuple(page_ranges),
+    )
     if len(markdown.encode("utf-8")) > max_output_bytes:
         raise ValueError("PDF extraction exceeds the configured output byte limit")
 
@@ -90,6 +115,7 @@ def inspect_pdf_bytes(
         engine_version=engine_version,
         pdf_type=PdfInspectorPdfType(result.pdf_type),
         markdown=markdown,
+        page_map=page_map,
         title=result.title,
         page_count=result.page_count,
         extracted_page_count=sum(not page.needs_ocr for page in page_result.pages),
