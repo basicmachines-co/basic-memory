@@ -470,31 +470,27 @@ async def write_note(
                         return _format_overwrite_error(title, entity.permalink, active_project.name)
 
                     logger.debug(f"Entity exists, updating instead permalink={entity.permalink}")
-                    try:
-                        if not entity.permalink:
-                            raise ValueError(
-                                "Entity permalink is required for updates"
-                            )  # pragma: no cover
-                        # Resolve the conflicting entity by file_path with strict=True.
-                        # The 409 came from a file_service.exists(file_path) check, so this
-                        # file_path is the authoritative key for the canonical row. Resolving
-                        # by permalink with fuzzy fallback (the previous behavior) could pick
-                        # an orphan with a similar permalink — especially in workspace-prefixed
-                        # palaces where the client-built permalink omits the workspace slug —
-                        # causing the update to write to the wrong row and the next call to
-                        # mint a -1/-2 suffix on the canonical entity.
-                        # POSIX-normalize so Windows clients send the same form the server stores.
-                        file_path_identifier = Path(entity.file_path).as_posix()
-                        entity_id = await knowledge_client.resolve_entity(
-                            file_path_identifier, strict=True
-                        )
-                        result = await knowledge_client.update_entity(
-                            entity_id, entity.model_dump()
-                        )
-                        action = "Updated"
-                    except Exception as update_error:  # pragma: no cover
-                        # Re-raise the original error if update also fails
-                        raise e from update_error  # pragma: no cover
+                    # Report the attempted replacement's failure, not the create conflict
+                    # that selected this path (for example, a locked-note refusal).
+                    if not entity.permalink:
+                        raise ValueError(
+                            "Entity permalink is required for updates"
+                        )  # pragma: no cover
+                    # Resolve the conflicting entity by file_path with strict=True.
+                    # The 409 came from a file_service.exists(file_path) check, so this
+                    # file_path is the authoritative key for the canonical row. Resolving
+                    # by permalink with fuzzy fallback (the previous behavior) could pick
+                    # an orphan with a similar permalink — especially in workspace-prefixed
+                    # palaces where the client-built permalink omits the workspace slug —
+                    # causing the update to write to the wrong row and the next call to
+                    # mint a -1/-2 suffix on the canonical entity.
+                    # POSIX-normalize so Windows clients send the same form the server stores.
+                    file_path_identifier = Path(entity.file_path).as_posix()
+                    entity_id = await knowledge_client.resolve_entity(
+                        file_path_identifier, strict=True
+                    )
+                    result = await knowledge_client.update_entity(entity_id, entity.model_dump())
+                    action = "Updated"
                 else:
                     # Re-raise if it's not a conflict error
                     raise  # pragma: no cover
