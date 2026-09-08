@@ -12,16 +12,23 @@ from basic_memory.man import (
     MAN_DIR,
     PageRef,
     bundled_pages,
+    declare_ownership,
     declare_registry_ownership,
+    extract_cli_synopsis,
     extract_mcp_synopsis,
+    extract_options,
     extract_parameters,
     find_page,
     parse_page_ref,
     remove_parameters,
+    render_cli_synopsis,
     render_index,
+    render_options,
     render_parameters,
     render_synopsis,
+    replace_cli_synopsis,
     replace_mcp_synopsis,
+    replace_options,
     replace_parameters,
 )
 from basic_memory.mcp.server import mcp
@@ -37,6 +44,7 @@ assert SPEC.loader is not None
 update_man_pages = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(update_man_pages)
 regenerate_page = update_man_pages.regenerate_page
+regenerate_cli_page = update_man_pages.regenerate_cli_page
 
 
 def _has_parameters_block(page_text: str) -> bool:
@@ -409,3 +417,144 @@ def test_render_index_lists_every_page_with_uri_and_summary() -> None:
     assert "## Section 3 — MCP tools" in index
     for page in bundled_pages():
         assert f"- [{page.title}]({page.uri}) — {page.summary}" in index
+
+
+# --- Section 1: CLI SYNOPSIS and OPTIONS from the Typer command tree ---
+# The shell SYNOPSIS and OPTIONS blocks on a section-1 page are mechanical
+# restatements of a `bm` verb's parameters, the CLI counterpart of section 3's
+# registry-owned SYNOPSIS/PARAMETERS. These tests hold them byte-equal to the live
+# Typer rendering and pin the CLI-specific syntax the section-3 renderers lack.
+
+
+def _cli_command(page):
+    """Resolve the Click command a section-1 page documents, with its `bm` path."""
+    command_path = update_man_pages.SECTION1_COMMAND_PATHS.get(page.name, page.name)
+    return command_path, update_man_pages.resolve_cli_command(command_path)
+
+
+def test_render_cli_synopsis_renders_the_shell_form() -> None:
+    _, grep = _cli_command(find_page(PageRef("grep", 1)))
+    synopsis = render_cli_synopsis("grep", grep)
+
+    assert synopsis.startswith("bm grep PATTERN")
+    assert "[--literal]" in synopsis  # a boolean flag renders bare
+    assert "[--page PAGE]" in synopsis  # a value option carries a metavar
+    assert all(len(line) <= 76 for line in synopsis.splitlines())
+    # Continuations align under the command name, like render_synopsis's wrap.
+    for line in synopsis.splitlines()[1:]:
+        assert line.startswith(" " * len("bm grep "))
+
+    # apropos(1) documents `bm man apropos`, a verb on the man subgroup, so its
+    # shell form carries the full command path rather than a bare `bm apropos`.
+    apropos_path, apropos = _cli_command(find_page(PageRef("apropos", 1)))
+    assert apropos_path == "man apropos"
+    assert render_cli_synopsis(apropos_path, apropos).startswith("bm man apropos QUERY")
+
+
+def test_render_options_includes_shared_and_global_flags() -> None:
+    # D2: OPTIONS is the COMPLETE public option list, including the shared output
+    # and routing flags the hand-written blocks left out — grep(1) grows from four
+    # bullets to the full set. That growth is the point, not a regression.
+    _, grep = _cli_command(find_page(PageRef("grep", 1)))
+    options = render_options(grep)
+    for shared in ("--json", "--plain", "--project", "--project-id", "--local", "--cloud"):
+        assert f"- **{shared}**" in options, f"{shared} missing from generated OPTIONS"
+
+
+def test_render_options_preserves_aliases_and_boolean_pairs() -> None:
+    # D3: OPTIONS keeps the CLI syntax section-3 PARAMETERS has no concept of —
+    # flag aliases (-F, --literal) and paired booleans (--x / --no-x).
+    _, grep = _cli_command(find_page(PageRef("grep", 1)))
+    assert "- **-F, --literal** — Literal full-text matching" in render_options(grep)
+
+    _, cat = _cli_command(find_page(PageRef("cat", 1)))
+    assert "- **--frontmatter / --no-frontmatter** (default: --frontmatter)" in render_options(cat)
+
+
+def test_replace_options_touches_only_the_options_block() -> None:
+    page = (
+        "# t\n\n## SYNOPSIS\n\n```\nbm t\n```\n\n"
+        "## OPTIONS\n\n- **--old** — old\n\n"
+        "## EXAMPLES\n\nx\n"
+    )
+    replaced = replace_options(page, "- **--new** — new")
+    assert extract_options(replaced) == "- **--new** — new"
+    assert "```\nbm t\n```" in replaced  # SYNOPSIS untouched
+    assert "## EXAMPLES\n\nx\n" in replaced  # EXAMPLES untouched
+    with pytest.raises(ValueError, match="no OPTIONS block"):
+        replace_options("# t\n\n## DESCRIPTION\n", "- **--x** — x")
+    with pytest.raises(ValueError, match="no OPTIONS block"):
+        extract_options("# t\n\n## DESCRIPTION\n")
+
+
+def test_replace_cli_synopsis_replaces_the_whole_synopsis_body() -> None:
+    # find(1) ships two shell forms; the CLI generator collapses them to one, so
+    # the whole SYNOPSIS body is replaced, not just the first fenced block.
+    two_forms = (
+        "# t\n\n## SYNOPSIS\n\n```\nbm t --a\n```\n\n```\nbm t --b\n```\n\n"
+        "## DESCRIPTION\n\nprose\n"
+    )
+    replaced = replace_cli_synopsis(two_forms, "bm t --a --b")
+    assert extract_cli_synopsis(replaced) == "bm t --a --b"
+    assert replaced.count("```") == 2  # exactly one fenced block remains
+    assert "## DESCRIPTION\n\nprose\n" in replaced  # DESCRIPTION untouched
+    with pytest.raises(ValueError, match="no SYNOPSIS block"):
+        replace_cli_synopsis("# t\n\n## DESCRIPTION\n", "bm t")
+    with pytest.raises(ValueError, match="no SYNOPSIS block"):
+        extract_cli_synopsis("# t\n\n## DESCRIPTION\n")
+    # A SYNOPSIS body that is not one fenced block (unfenced prose, or two blocks)
+    # is a stale page the generator has not rewritten yet, not a shell form.
+    with pytest.raises(ValueError, match="not a single fenced block"):
+        extract_cli_synopsis("# t\n\n## SYNOPSIS\n\nbm t\n\n## DESCRIPTION\n")
+    with pytest.raises(ValueError, match="not a single fenced block"):
+        extract_cli_synopsis(two_forms)
+
+
+def test_section_1_synopsis_and_options_are_exactly_the_typer_rendering() -> None:
+    # SYNOPSIS and OPTIONS are CLI-owned: byte-equal to the rendering of the Typer
+    # command tree. A verb option change without regenerating the pages fails here,
+    # pointing at the fix.
+    for page in bundled_pages():
+        if page.section != 1:
+            continue
+        command_path, command = _cli_command(page)
+        page_text = page.read()
+        assert extract_cli_synopsis(page_text) == render_cli_synopsis(command_path, command), (
+            f"{page.title} SYNOPSIS is stale; run `just man-regen` and commit the result"
+        )
+        assert extract_options(page_text) == render_options(command), (
+            f"{page.title} OPTIONS is stale; run `just man-regen` and commit the result"
+        )
+
+
+def test_section_1_pages_declare_cli_ownership() -> None:
+    # generated: cli declares the Typer generator owns the mechanical sections,
+    # the section-1 counterpart of section 3's generated: registry.
+    for page in bundled_pages():
+        if page.section == 1:
+            assert page.generated == "cli", f"{page.title} declares generated: {page.generated}"
+
+
+def test_regenerate_cli_page_is_idempotent_over_the_shipped_pages() -> None:
+    # Round-tripping a shipped page through the generator is a no-op: it is what
+    # produced the page. This mirrors `just man-regen` making no diff.
+    for page in bundled_pages():
+        if page.section != 1:
+            continue
+        command_path, command = _cli_command(page)
+        text = page.read()
+        assert regenerate_cli_page(text, command_path, command) == text
+
+
+def test_declare_ownership_sets_the_named_owner_in_frontmatter_only() -> None:
+    # A curated body may contain a literal `generated: ...` line (a YAML example);
+    # only the opening frontmatter block is the generator's to rewrite.
+    page = "---\ntitle: t(1)\ngenerated: hand\n---\n\n# t(1)\n\n```yaml\ngenerated: hand\n```\n"
+
+    flipped = declare_ownership(page, owner="cli")
+
+    assert flipped.startswith("---\ntitle: t(1)\ngenerated: cli\n---\n")
+    assert "```yaml\ngenerated: hand\n```" in flipped
+    assert declare_ownership(flipped, owner="cli") == flipped
+    # The thin registry wrapper is declare_ownership with a fixed owner.
+    assert declare_registry_ownership(page) == declare_ownership(page, owner="registry")

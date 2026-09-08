@@ -165,6 +165,14 @@ _MCP_SYNOPSIS_RE = re.compile(r"(## SYNOPSIS\n\n(?:MCP:\n\n)?```\n)(.*?)(\n```)"
 # `## ` heading (or EOF), leaving that separator out of the captured body.
 _PARAMETERS_RE = re.compile(r"(## PARAMETERS\n\n)(.*?)(?=\n+## |\n*\Z)", re.S)
 
+# Matches the whole body under ## SYNOPSIS and ## OPTIONS on a section-1 page, up
+# to the blank line before the next `## ` heading (or EOF). The single-block
+# _MCP_SYNOPSIS_RE cannot serve SYNOPSIS here: find(1) documents two shell forms
+# in two fenced blocks, and the CLI generator collapses them to one, so the whole
+# section body — every fenced block — has to be replaced, not just the first.
+_SYNOPSIS_BODY_RE = re.compile(r"(## SYNOPSIS\n\n)(.*?)(?=\n+## |\n*\Z)", re.S)
+_OPTIONS_RE = re.compile(r"(## OPTIONS\n\n)(.*?)(?=\n+## |\n*\Z)", re.S)
+
 
 def _default_literal(value: object) -> str:
     """Render a schema default the way the call would be written in Python."""
@@ -298,6 +306,133 @@ def render_parameters(tool_name: str, parameters: Mapping[str, Any]) -> str:
     return "\n".join(bullets)
 
 
+# --- Typer-generated SYNOPSIS and OPTIONS (section 1) ---
+# The SYNOPSIS shell form and the OPTIONS list on a section-1 page are mechanical:
+# they must show exactly the command the Typer command tree advertises, the same
+# way section 3's SYNOPSIS/PARAMETERS track the MCP registry. These helpers render
+# both from a resolved Click command; scripts/update_man_pages.py runs them over the
+# section-1 corpus and a test holds every shipped block byte-equal to the rendering.
+#
+# The renderers take an already-resolved Click command (Typer builds Click objects
+# via typer.main.get_command) rather than importing Typer or Click here, so the
+# lightweight `basic_memory.man` import stays free of the CLI stack. Command
+# parameters are read structurally through Click's public attributes
+# (``param_type_name``, ``opts``, ``secondary_opts``, ``is_flag``, ``required``,
+# ``default``, ``help``), so ``Any`` is the honest type for the passed command.
+
+
+def _order_opts(opts: list[str]) -> list[str]:
+    """Order an option's spellings short flags first, then long ones.
+
+    ``-p, --project`` reads the way people write it; a stable sort keeps the
+    declared order within each group so multi-short or multi-long spellings hold
+    their author-chosen sequence.
+    """
+    return sorted(opts, key=lambda opt: opt.startswith("--"))
+
+
+def _synopsis_opt(opts: list[str]) -> str:
+    """The spelling to show for an option in the shell SYNOPSIS: its long form.
+
+    The long form names the option unambiguously; a short-only option falls back
+    to its first (short) spelling.
+    """
+    longs = [opt for opt in opts if opt.startswith("--")]
+    return longs[0] if longs else opts[0]
+
+
+def render_cli_synopsis(command_path: str, command: Any) -> str:
+    """Render a section-1 page's shell SYNOPSIS from a resolved Click command.
+
+    Positional arguments come first in declaration order (bare when required,
+    bracketed when optional), then every public option as a bracketed token:
+    ``[--flag]`` for a boolean flag, ``[--on | --no-on]`` for a boolean pair, and
+    ``[--opt METAVAR]`` for a value option (metavar is the parameter name upper-
+    cased). Lines wrap at the code block's width with continuations aligned under
+    the command name — mirroring render_synopsis's wrap for the MCP form.
+    """
+    tokens: list[str] = []
+    for param in command.params:
+        if param.param_type_name != "argument":
+            continue
+        metavar = param.name.upper()
+        tokens.append(metavar if param.required else f"[{metavar}]")
+    for param in command.params:
+        if param.param_type_name != "option" or getattr(param, "hidden", False):
+            continue
+        opt = _synopsis_opt(param.opts)
+        if param.secondary_opts:
+            tokens.append(f"[{opt} | {_synopsis_opt(param.secondary_opts)}]")
+        elif param.is_flag:
+            tokens.append(f"[{opt}]")
+        else:
+            tokens.append(f"[{opt} {param.name.upper()}]")
+
+    prefix = f"bm {command_path}"
+    indent = " " * (len(prefix) + 1)
+    lines: list[str] = []
+    line = prefix
+    count = 0  # tokens already placed on the current line
+    for token in tokens:
+        candidate = f"{line} {token}"
+        # Wrap only once a line carries a token, so a token longer than the width
+        # still lands (overlong but unbroken) rather than looping.
+        if count > 0 and len(candidate) > SYNOPSIS_WIDTH:
+            lines.append(line)
+            line = indent + token
+            count = 1
+        else:
+            line = candidate
+            count += 1
+    lines.append(line)
+    return "\n".join(lines)
+
+
+def _option_default_note(param: Any) -> str | None:
+    """The ``default: ...`` note for an option bullet, or None when there is none.
+
+    A boolean pair reports which flag is on by default (``default: --frontmatter``);
+    a bare flag reports nothing, since off is simply its absence; a value option
+    reports its default literal when the schema carries one.
+    """
+    default = param.default
+    if param.secondary_opts:
+        flags = param.opts if default else param.secondary_opts
+        longs = [opt for opt in flags if opt.startswith("--")]
+        return f"default: {longs[0] if longs else flags[0]}"
+    if param.is_flag or default is None:
+        return None
+    return f"default: {_default_literal(default)}"
+
+
+def render_options(command: Any) -> str:
+    """Render a section-1 page's ## OPTIONS body from a resolved Click command.
+
+    Every public option is one bullet, in declaration order (the order --help
+    lists them). Reusing render_parameters's conventions — default literals,
+    single-line descriptions, bullet shape — the head carries the CLI-specific
+    syntax those have no concept of: flag aliases join short-first as
+    ``-F, --literal`` and a boolean pair shows both sides as
+    ``--frontmatter / --no-frontmatter``. Positional arguments are not options;
+    they appear in the SYNOPSIS instead. Returns "" when the command has no
+    options.
+    """
+    bullets: list[str] = []
+    for param in command.params:
+        if param.param_type_name != "option" or getattr(param, "hidden", False):
+            continue
+        opts_display = ", ".join(_order_opts(param.opts))
+        if param.secondary_opts:
+            opts_display += f" / {', '.join(_order_opts(param.secondary_opts))}"
+        head = f"- **{opts_display}**"
+        default_note = _option_default_note(param)
+        if default_note is not None:
+            head += f" ({default_note})"
+        description = _normalise_description(param.help)
+        bullets.append(f"{head} — {description}" if description else head)
+    return "\n".join(bullets)
+
+
 def extract_mcp_synopsis(page_text: str) -> str:
     """The MCP call block a page currently shows under ## SYNOPSIS."""
     match = _MCP_SYNOPSIS_RE.search(page_text)
@@ -374,15 +509,75 @@ def remove_parameters(page_text: str) -> str:
     return f"{before}\n\n{after}" if after else f"{before}\n"
 
 
-def declare_registry_ownership(page_text: str) -> str:
-    """Flip ``generated: hand`` to ``registry`` — in the frontmatter only.
+def extract_cli_synopsis(page_text: str) -> str:
+    """The shell form a section-1 page currently shows under ## SYNOPSIS.
 
-    A curated body may legally contain a literal ``generated: hand`` line (a YAML
-    example, say); only the opening frontmatter block is the generator's to rewrite.
+    Returns the fenced block's inner text (the ``bm ...`` lines). Raises if the
+    section is missing or is not a single fenced block — the shape the CLI
+    generator writes and the drift test compares against.
+    """
+    match = _SYNOPSIS_BODY_RE.search(page_text)
+    if match is None:
+        raise ValueError("page has no SYNOPSIS block")
+    body = match.group(2)
+    inner = body.removeprefix("```\n").removesuffix("\n```")
+    if not (body.startswith("```\n") and body.endswith("\n```")) or "```" in inner:
+        raise ValueError("SYNOPSIS is not a single fenced block")
+    return inner
+
+
+def replace_cli_synopsis(page_text: str, synopsis: str) -> str:
+    """Return the page with its whole ## SYNOPSIS body replaced by one fenced block.
+
+    The entire body is replaced, not just the first fence, so a page that shipped
+    several shell forms (find(1)) collapses to the one the generator renders. Other
+    sections are untouched.
+    """
+    match = _SYNOPSIS_BODY_RE.search(page_text)
+    if match is None:
+        raise ValueError("page has no SYNOPSIS block")
+    fenced = f"```\n{synopsis}\n```"
+    return f"{page_text[: match.start()]}{match.group(1)}{fenced}{page_text[match.end() :]}"
+
+
+def extract_options(page_text: str) -> str:
+    """The bullet body a section-1 page currently shows under ## OPTIONS."""
+    match = _OPTIONS_RE.search(page_text)
+    if match is None:
+        raise ValueError("page has no OPTIONS block")
+    return match.group(2)
+
+
+def replace_options(page_text: str, options: str) -> str:
+    """Return the page with its ## OPTIONS body replaced in place; other blocks
+    untouched.
+
+    Every bundled section-1 page already carries an OPTIONS heading, so this
+    rewrites the block rather than inserting one, and fails fast if a page lacks it.
+    """
+    match = _OPTIONS_RE.search(page_text)
+    if match is None:
+        raise ValueError("page has no OPTIONS block")
+    return f"{page_text[: match.start()]}{match.group(1)}{options}{page_text[match.end() :]}"
+
+
+def declare_registry_ownership(page_text: str) -> str:
+    """Declare a section-3 page registry-owned — a thin wrapper over declare_ownership."""
+    return declare_ownership(page_text, owner="registry")
+
+
+def declare_ownership(page_text: str, owner: str = "cli") -> str:
+    """Rewrite the frontmatter's ``generated:`` field to ``owner`` — nothing else.
+
+    ``generated:`` declares who may rewrite a page's mechanical sections: the MCP
+    registry generator (``registry``) or the Typer CLI generator (``cli``). A
+    curated body may legally contain a literal ``generated: ...`` line (a YAML
+    example, say); only the opening frontmatter block is the generator's to rewrite,
+    and only the first such line in it, so the count stays 1.
     """
     frontmatter, fence, body = page_text.partition("\n---\n")
     frontmatter = re.sub(
-        r"^generated: hand$", "generated: registry", frontmatter, count=1, flags=re.M
+        r"^generated: \w+$", f"generated: {owner}", frontmatter, count=1, flags=re.M
     )
     return frontmatter + fence + body
 

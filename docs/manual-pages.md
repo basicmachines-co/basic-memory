@@ -80,7 +80,7 @@ type: manpage
 section: 3                      # 1 | 3 | 5 | 7 | 8
 name: write-note                # page name without section suffix
 summary: create or overwrite a markdown note in the knowledge base
-generated: hand                 # hand | registry | typer  (regeneration ownership)
+generated: hand                 # hand | registry | cli  (regeneration ownership)
 tool: write_note                # section-3 pages: the MCP tool documented
 command: basic-memory status    # section-1 pages: the CLI command documented
 verified: 0.21.6 mcp+cli        # version + path(s) that proved the page
@@ -186,12 +186,16 @@ GOTCHAS, SEE ALSO, observations) survives — that ownership split is what the
 
 ## Roadmap
 
-- **Registry generator (SYNOPSIS: shipped)** — `just man-regen` renders every
-  section-3 MCP SYNOPSIS block from the live tool registry and a test holds
-  the shipped blocks byte-equal to the rendering, so a tool change without a
-  regenerate fails CI. Those pages declare `generated: registry`. Still to
-  come: PARAMETERS from the schema descriptions, and section-1 from Typer
-  help — the hand-written corpus remains the template spec.
+- **Registry generator (section 3: shipped)** — `just man-regen` renders every
+  section-3 MCP SYNOPSIS and PARAMETERS block from the live tool registry and a
+  test holds the shipped blocks byte-equal to the rendering, so a tool change
+  without a regenerate fails CI. Those pages declare `generated: registry`.
+- **CLI generator (section 1: shipped)** — the same `just man-regen` renders
+  every section-1 shell SYNOPSIS and OPTIONS block from the Typer command tree
+  (aliases and paired booleans included, and the full option list, shared and
+  routing flags included), held byte-equal by a drift test. Those pages declare
+  `generated: cli`. Curated sections stay hand-owned; the hand-written corpus
+  remains the template spec for everything else.
 - **Projects as consumers** — `bm man install --project <name>` copies the
   bundled pages into a project as notes, so `SEE ALSO` becomes traversable
   relations and the pages join search. (`bm man <topic>`, `bm man list`, the
