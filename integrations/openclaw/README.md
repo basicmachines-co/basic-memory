@@ -54,6 +54,7 @@ Then install the plugin:
 ```bash
 openclaw plugins install @basicmemory/openclaw-basic-memory
 openclaw plugins enable openclaw-basic-memory --slot memory
+openclaw config set plugins.entries.openclaw-basic-memory.hooks.allowConversationAccess true
 openclaw gateway restart
 ```
 
@@ -76,7 +77,8 @@ openclaw plugins doctor
   plugins: {
     entries: {
       "openclaw-basic-memory": {
-        enabled: true
+        enabled: true,
+        hooks: { allowConversationAccess: true }
       }
     },
     slots: {
@@ -96,6 +98,7 @@ This uses sensible defaults: auto-generated project name, maps to your workspace
     entries: {
       "openclaw-basic-memory": {
         enabled: true,
+        hooks: { allowConversationAccess: true },
         config: {
           project: "my-agent",        // BM project name (default: "openclaw-{hostname}")
           projectPath: ".",            // Project directory (default: workspace root)
@@ -158,6 +161,12 @@ For live final replies with a session and run ID, the plugin tracks successful
 request, or explicitly names Basic Memory, but no successful write was observed,
 it appends an unverified-save correction. Failed writes and note conflicts do not
 count as saves. This requires the `reply_payload_sending` hook in OpenClaw 2026.9.2.
+
+OpenClaw requires the explicit `hooks.allowConversationAccess` grant shown above
+for npm-installed plugins to observe the turn prompt through `llm_input`.
+Without this grant, OpenClaw blocks that hook and the guard is inactive. The grant
+allows the plugin to read conversation content; native `/remember` still writes
+directly without it.
 
 Detection covers direct English confirmations such as “I have saved it.” It skips
 quotes, fenced code, questions and explicit denials. It does not verify the content

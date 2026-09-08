@@ -145,6 +145,10 @@ describe("claim recognition", () => {
   for (const text of [
     "No problem, I've saved it to Basic Memory.",
     "I've saved it. Do you need anything else?",
+    "I've saved it to Basic Memory; no other settings were changed.",
+    "I've saved it, no problem.",
+    "It's saved in Basic Memory.",
+    "That is now recorded in Basic Memory.",
   ]) {
     it(`ignores unrelated qualifications: ${text}`, () => {
       expect(claimsMemorySave(text, true)).toBe(true)
@@ -166,6 +170,10 @@ describe("claim recognition", () => {
     "```\nI saved it.\n```",
     "I updated my response.",
     "Saved the image to disk.",
+    "Saved the photo to Google Drive.",
+    "Stored it in Dropbox.",
+    "Sure, I saved it to Google Drive.",
+    "I saved it to Basic Memory yesterday.",
   ]) {
     it(`leaves qualified or quoted text alone: ${text}`, () => {
       expect(claimsMemorySave(text, true)).toBe(false)

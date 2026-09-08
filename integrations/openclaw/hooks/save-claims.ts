@@ -25,19 +25,26 @@ export function claimsMemorySave(
     if (fenced || /^[>"']/.test(line)) continue
     for (const sentence of line.replace(/\*\*/g, "").split(/(?<=[.!?])\s+/)) {
       const match =
-        /(?:^|[,:;—–]\s+)(?:I(?:['’]ve| have)?\s+)?(?:saved|stored|recorded|remembered)\b/i.exec(
+        /(?:^|[,:;—–]\s+)(?:I(?:['’]ve| have)?\s+|(?:it|that|this)(?:['’]s| is| has been)\s+(?:now\s+)?)?(?:saved|stored|recorded|remembered)\b/i.exec(
           sentence,
         )
       if (!match) continue
-      const claim = sentence.slice(match.index)
+      const claim = sentence
+        .slice(match.index)
+        .replace(/^[,:;—–]\s+/, "")
+        .split(/[;,]\s+(?!but\b|however\b|yet\b)/i)[0]
       if (!memoryRequested && !MEMORY_NAME.test(claim)) continue
       // Only the save clause supplies qualifications; a greeting or later question does not.
       if (/\b(?:not|never|nothing|none|zero|no)\b|\?/i.test(claim)) continue
       if (
-        !MEMORY_NAME.test(claim) &&
-        /\blocally\b|\b(?:to|on|in)\s+(?:(?:the|my|your|local)\s+)?(?:disk|filesystem|file system|desktop|downloads|clipboard)\b/i.test(
+        /\b(?:yesterday|previously|earlier|already|last\s+(?:time|week|month|year|session))\b/i.test(
           claim,
         )
+      )
+        continue
+      if (
+        !MEMORY_NAME.test(claim) &&
+        /\blocally\b|\b(?:to|on|in)\s+\S/i.test(claim)
       )
         continue
       return true
