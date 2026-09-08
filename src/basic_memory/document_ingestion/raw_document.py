@@ -198,6 +198,12 @@ def build_raw_document_artifacts(
     extracted_at: datetime,
 ) -> RawDocumentArtifacts:
     """Map native extraction output into Core's portable document contract."""
+    # Older adapters can still supply the optional, map-less output contract.
+    # Preserve their v1 identity; only mapped output earns the v2 provenance
+    # profile, so a later mapped extraction cannot reuse a map-less run.
+    extraction_profile = (
+        PDF_RAW_EXTRACTION_PROFILE if extracted.page_map is not None else "pdf-inspector-v1"
+    )
     options_hash = extraction_options_checksum(limits)
     run_id = UUID(
         derive_document_ingestion_run_id(
@@ -206,7 +212,7 @@ def build_raw_document_artifacts(
             pipeline_version=PDF_RAW_PIPELINE_VERSION,
             extractor_engine=extracted.engine,
             extractor_version=extracted.engine_version,
-            extraction_profile=PDF_RAW_EXTRACTION_PROFILE,
+            extraction_profile=extraction_profile,
             extraction_options_hash=options_hash,
             prompt_version=None,
         )
@@ -224,7 +230,7 @@ def build_raw_document_artifacts(
     extraction = DocumentExtractionV1(
         engine=extracted.engine,
         engine_version=extracted.engine_version,
-        profile=PDF_RAW_EXTRACTION_PROFILE,
+        profile=extraction_profile,
         options_hash=options_hash,
         classification=extracted.pdf_type.value,
         status=(

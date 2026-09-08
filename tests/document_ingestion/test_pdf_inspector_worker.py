@@ -110,6 +110,7 @@ def test_page_map_survives_document_and_run_serialization(monkeypatch: pytest.Mo
         extracted_at=now,
     )
     document = parse_document_markdown(artifacts.document_markdown)
+    assert document.frontmatter.extraction.profile == "pdf-inspector-v2"
     run = parse_document_ingestion_run_markdown(
         build_raw_ingestion_run_markdown(
             artifacts, raw_checksum="sha256:" + "b" * 64, raw_created_at=now
