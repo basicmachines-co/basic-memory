@@ -351,7 +351,10 @@ async def test_unchanged_import_after_indexer_annotation_keeps_provenance_consis
 
 
 @pytest.mark.asyncio
-async def test_writer_refuses_to_replace_an_edited_raw_sidecar(file_service: FileService) -> None:
+@pytest.mark.parametrize("reimport_unchanged", [False, True])
+async def test_writer_refuses_to_replace_an_edited_raw_sidecar(
+    file_service: FileService, reimport_unchanged: bool
+) -> None:
     writer = LocalRawDocumentWriter(file_service, knowledge_api())
     first = artifacts(checksum_char="a")
     await writer.write(first)
@@ -362,6 +365,8 @@ async def test_writer_refuses_to_replace_an_edited_raw_sidecar(file_service: Fil
     )
 
     with pytest.raises(DocumentSidecarConflictError, match="edited since"):
+        if reimport_unchanged:
+            await writer.write(first)
         await writer.write(artifacts(checksum_char="b"))
 
     assert "My annotation about row three." in sidecar.read_text(encoding="utf-8")
@@ -426,7 +431,7 @@ async def test_writer_refuses_when_the_sidecar_changes_before_the_replacing_writ
 
 
 @pytest.mark.asyncio
-async def test_writer_rewrites_a_run_note_that_names_other_sidecar_bytes(
+async def test_writer_refuses_a_run_note_that_names_other_sidecar_bytes(
     file_service: FileService,
 ) -> None:
     knowledge = knowledge_api()
@@ -440,19 +445,16 @@ async def test_writer_rewrites_a_run_note_that_names_other_sidecar_bytes(
     )
     await file_service.write_file(built.run_file_path, stale_note)
 
-    second = await writer.write(built)
+    with pytest.raises(DocumentSidecarConflictError, match="edited since"):
+        await writer.write(built)
 
-    assert second.document_created is False
-    assert second.run_created is True
     run_note = parse_document_ingestion_run_markdown(
         (file_service.base_path / built.run_file_path).read_text(encoding="utf-8")
     )
     assert run_note.frontmatter.output is not None
     assert run_note.frontmatter.output.raw is not None
-    assert run_note.frontmatter.output.raw.checksum == document_markdown_checksum(
-        built.document_markdown
-    )
-    assert knowledge.indexed.count(built.run_file_path) == 2
+    assert run_note.frontmatter.output.raw.checksum == "sha256:" + "d" * 64
+    assert knowledge.indexed.count(built.run_file_path) == 1
 
 
 @pytest.mark.asyncio
