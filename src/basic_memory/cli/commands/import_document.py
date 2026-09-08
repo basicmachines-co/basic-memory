@@ -62,11 +62,14 @@ async def import_document(path: Path, project: str | None) -> tuple[str, RawDocu
         app_config = config_manager.config
         markdown_processor = MarkdownProcessor(EntityParser(project_home), app_config=app_config)
         file_service = FileService(project_home, markdown_processor, app_config=app_config)
+        # The reader that snapshots the source also fences the write: the writer
+        # re-checks the source generation under the note lock before replacing.
+        source_reader = LocalDocumentSourceReader(project_home)
         runtime = RawDocumentRuntime(
             source_resolver=ApiDocumentSourceEntityResolver(knowledge),
-            source_reader=LocalDocumentSourceReader(project_home),
+            source_reader=source_reader,
             extractors=default_document_extractors(),
-            writer=LocalRawDocumentWriter(file_service, knowledge),
+            writer=LocalRawDocumentWriter(file_service, knowledge, source_reader),
         )
         result = await runtime.ingest(file_path=relative_path, observed_etag=None)
         return project_item.name, result

@@ -9,8 +9,11 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from filelock import FileLock
+
 from basic_memory import file_utils
 from basic_memory.config import BasicMemoryConfig
+from basic_memory.document_ingestion import local_runtime
 from basic_memory.document_ingestion.csv_extractor import CSV_MEDIA_TYPE
 from basic_memory.document_ingestion.local_runtime import (
     ApiDocumentSourceEntityResolver,
@@ -69,6 +72,21 @@ class FakeKnowledgeApi:
 
     async def index_file(self, file_path: str) -> None:
         self.indexed.append(file_path)
+
+
+class RecordingFence:
+    """Source-generation fence that records what it was asked to prove."""
+
+    def __init__(self, *, refuse: bool = False) -> None:
+        self.refuse = refuse
+        self.checked: list[tuple[str, str]] = []
+
+    async def require_generation(self, file_path: str, checksum: str) -> None:
+        self.checked.append((file_path, checksum))
+        if self.refuse:
+            raise DocumentSourceChangedError(
+                f"{file_path} changed before its document note was accepted"
+            )
 
 
 def resolved(file_path: str) -> EntityResolveResponse:
@@ -255,7 +273,7 @@ async def test_writer_creates_the_sidecar_and_run_note_and_indexes_both(
 
     monkeypatch.setattr(file_utils, "write_file_atomic", write_with_newlines)
     knowledge = knowledge_api()
-    writer = LocalRawDocumentWriter(file_service, knowledge)
+    writer = LocalRawDocumentWriter(file_service, knowledge, RecordingFence())
     built = artifacts()
 
     result = await writer.write(built)
@@ -289,7 +307,7 @@ async def test_writer_reuses_and_refreshes_a_formatted_sidecar(
     app_config: BasicMemoryConfig,
 ) -> None:
     file_service.app_config = app_config.model_copy(update={"format_on_save": True})
-    writer = LocalRawDocumentWriter(file_service, knowledge_api())
+    writer = LocalRawDocumentWriter(file_service, knowledge_api(), RecordingFence())
     built = artifacts()
     await writer.write(built)
     persisted = await file_service.read_file_content(built.document_file_path)
@@ -305,7 +323,7 @@ async def test_writer_reuses_and_refreshes_a_formatted_sidecar(
 @pytest.mark.asyncio
 async def test_writer_reuses_an_identical_raw_projection(file_service: FileService) -> None:
     knowledge = knowledge_api()
-    writer = LocalRawDocumentWriter(file_service, knowledge)
+    writer = LocalRawDocumentWriter(file_service, knowledge, RecordingFence())
     first = await writer.write(artifacts())
 
     second = await writer.write(artifacts())
@@ -321,7 +339,7 @@ async def test_writer_rebuilds_the_raw_projection_when_the_source_changed(
     file_service: FileService,
 ) -> None:
     knowledge = knowledge_api()
-    writer = LocalRawDocumentWriter(file_service, knowledge)
+    writer = LocalRawDocumentWriter(file_service, knowledge, RecordingFence())
     first = await writer.write(artifacts(checksum_char="a"))
 
     second = await writer.write(artifacts(checksum_char="b"))
@@ -347,7 +365,7 @@ def with_permalink(markdown: str, permalink: str) -> str:
 async def test_writer_rebuilds_an_untouched_sidecar_that_the_indexer_annotated(
     file_service: FileService,
 ) -> None:
-    writer = LocalRawDocumentWriter(file_service, knowledge_api())
+    writer = LocalRawDocumentWriter(file_service, knowledge_api(), RecordingFence())
     first = artifacts(checksum_char="a")
     await writer.write(first)
     sidecar = file_service.base_path / first.document_file_path
@@ -373,7 +391,7 @@ async def test_unchanged_import_after_indexer_annotation_keeps_provenance_consis
     checksum and a later source change is refused as an edit.
     """
     knowledge = knowledge_api()
-    writer = LocalRawDocumentWriter(file_service, knowledge)
+    writer = LocalRawDocumentWriter(file_service, knowledge, RecordingFence())
     first = artifacts(checksum_char="a")
     await writer.write(first)
     sidecar = file_service.base_path / first.document_file_path
@@ -396,7 +414,7 @@ async def test_unchanged_import_after_indexer_annotation_keeps_provenance_consis
 async def test_writer_refuses_to_replace_an_edited_raw_sidecar(
     file_service: FileService, reimport_unchanged: bool
 ) -> None:
-    writer = LocalRawDocumentWriter(file_service, knowledge_api())
+    writer = LocalRawDocumentWriter(file_service, knowledge_api(), RecordingFence())
     first = artifacts(checksum_char="a")
     await writer.write(first)
     sidecar = file_service.base_path / first.document_file_path
@@ -417,7 +435,7 @@ async def test_writer_refuses_to_replace_an_edited_raw_sidecar(
 async def test_writer_refuses_to_replace_a_raw_sidecar_without_its_run_note(
     file_service: FileService,
 ) -> None:
-    writer = LocalRawDocumentWriter(file_service, knowledge_api())
+    writer = LocalRawDocumentWriter(file_service, knowledge_api(), RecordingFence())
     first = artifacts(checksum_char="a")
     await writer.write(first)
     (file_service.base_path / first.run_file_path).unlink()
@@ -430,7 +448,7 @@ async def test_writer_refuses_to_replace_a_raw_sidecar_without_its_run_note(
 async def test_writer_refuses_to_replace_a_raw_sidecar_whose_run_note_is_not_generated(
     file_service: FileService,
 ) -> None:
-    writer = LocalRawDocumentWriter(file_service, knowledge_api())
+    writer = LocalRawDocumentWriter(file_service, knowledge_api(), RecordingFence())
     first = artifacts(checksum_char="a")
     await writer.write(first)
     (file_service.base_path / first.run_file_path).write_text(
@@ -445,7 +463,7 @@ async def test_writer_refuses_to_replace_a_raw_sidecar_whose_run_note_is_not_gen
 async def test_writer_refuses_when_the_sidecar_changes_before_the_replacing_write(
     file_service: FileService, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    writer = LocalRawDocumentWriter(file_service, knowledge_api())
+    writer = LocalRawDocumentWriter(file_service, knowledge_api(), RecordingFence())
     first = artifacts(checksum_char="a")
     await writer.write(first)
     sidecar = file_service.base_path / first.document_file_path
@@ -476,7 +494,7 @@ async def test_writer_refuses_a_run_note_that_names_other_sidecar_bytes(
     file_service: FileService,
 ) -> None:
     knowledge = knowledge_api()
-    writer = LocalRawDocumentWriter(file_service, knowledge)
+    writer = LocalRawDocumentWriter(file_service, knowledge, RecordingFence())
     built = artifacts()
     await writer.write(built)
     # Simulate an overlapping import that replaced the sidecar after this run
@@ -501,7 +519,7 @@ async def test_writer_refuses_a_run_note_that_names_other_sidecar_bytes(
 @pytest.mark.asyncio
 async def test_writer_refuses_a_hand_written_run_note(file_service: FileService) -> None:
     knowledge = knowledge_api()
-    writer = LocalRawDocumentWriter(file_service, knowledge)
+    writer = LocalRawDocumentWriter(file_service, knowledge, RecordingFence())
     built = artifacts()
     await file_service.write_file(built.run_file_path, "# Not a run note\n")
 
@@ -513,7 +531,7 @@ async def test_writer_refuses_a_hand_written_run_note(file_service: FileService)
 async def test_writer_refuses_a_hand_written_sidecar(file_service: FileService) -> None:
     built = artifacts()
     await file_service.write_file(built.document_file_path, "# My own notes about riders\n")
-    writer = LocalRawDocumentWriter(file_service, knowledge_api())
+    writer = LocalRawDocumentWriter(file_service, knowledge_api(), RecordingFence())
 
     with pytest.raises(DocumentSidecarConflictError, match="not a generated document note"):
         await writer.write(built)
@@ -538,7 +556,7 @@ async def test_writer_refuses_an_enriched_sidecar(file_service: FileService) -> 
     )
     enriched = document.model_copy(update={"frontmatter": enriched_frontmatter})
     await file_service.write_file(built.document_file_path, assemble_document_markdown(enriched))
-    writer = LocalRawDocumentWriter(file_service, knowledge_api())
+    writer = LocalRawDocumentWriter(file_service, knowledge_api(), RecordingFence())
 
     with pytest.raises(DocumentSidecarConflictError, match="enriched past the raw stage"):
         await writer.write(built)
@@ -548,3 +566,118 @@ def test_default_document_extractors_cover_pdf_office_and_csv() -> None:
     extractors = default_document_extractors(python_executable="python-x")
 
     assert set(extractors) == {PDF_MEDIA_TYPE, CSV_MEDIA_TYPE, DOCX_MEDIA_TYPE, PPTX_MEDIA_TYPE}
+
+
+# --- Source generation fence and note lock ---
+
+
+@pytest.mark.asyncio
+async def test_reader_fences_on_the_source_generation(tmp_path: Path) -> None:
+    content = b"team,name\nAST,Ana\n"
+    write_source(tmp_path, content)
+    reader = LocalDocumentSourceReader(tmp_path)
+
+    await reader.require_generation("data/riders.csv", sha256(content))
+
+    with pytest.raises(DocumentSourceChangedError, match="older version of the source"):
+        await reader.require_generation("data/riders.csv", "sha256:" + "0" * 64)
+
+
+@pytest.mark.asyncio
+async def test_writer_fences_every_write_on_the_extracted_source_generation(
+    file_service: FileService,
+) -> None:
+    fence = RecordingFence()
+    writer = LocalRawDocumentWriter(file_service, knowledge_api(), fence)
+
+    await writer.write(artifacts(checksum_char="a"))
+    await writer.write(artifacts(checksum_char="a"))
+    await writer.write(artifacts(checksum_char="b"))
+
+    # Creation and rebuild are fenced inside the note lock; reuse writes nothing.
+    assert fence.checked == [
+        ("data/riders.csv", "sha256:" + "a" * 64),
+        ("data/riders.csv", "sha256:" + "b" * 64),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_writer_stops_a_stale_import_before_it_replaces_a_newer_sidecar(
+    file_service: FileService,
+) -> None:
+    knowledge = knowledge_api()
+    current = await LocalRawDocumentWriter(file_service, knowledge, RecordingFence()).write(
+        artifacts(checksum_char="b")
+    )
+    stale = LocalRawDocumentWriter(file_service, knowledge, RecordingFence(refuse=True))
+
+    with pytest.raises(DocumentSourceChangedError, match="changed before its document note"):
+        await stale.write(artifacts(checksum_char="a"))
+
+    sidecar = parse_document_markdown(
+        (file_service.base_path / current.document_file_path).read_text(encoding="utf-8")
+    )
+    assert sidecar.frontmatter.source.checksum == "sha256:" + "b" * 64
+    assert knowledge.indexed == [current.document_file_path, current.run_file_path]
+
+
+@pytest.mark.asyncio
+async def test_writer_stops_a_stale_import_before_it_creates_a_sidecar(
+    file_service: FileService,
+) -> None:
+    stale = LocalRawDocumentWriter(file_service, knowledge_api(), RecordingFence(refuse=True))
+    built = artifacts()
+
+    with pytest.raises(DocumentSourceChangedError):
+        await stale.write(built)
+
+    assert not (file_service.base_path / built.document_file_path).exists()
+    assert not (file_service.base_path / built.run_file_path).exists()
+
+
+@pytest.mark.asyncio
+async def test_writer_refuses_while_another_import_holds_the_note_lock(
+    file_service: FileService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(local_runtime, "NOTE_LOCK_TIMEOUT_SECONDS", 0.1)
+    built = artifacts()
+    other_import = FileLock(
+        str(local_runtime.note_lock_path(file_service.base_path / built.document_file_path))
+    )
+    other_import.acquire()
+    try:
+        with pytest.raises(DocumentSidecarConflictError, match="another import"):
+            await LocalRawDocumentWriter(file_service, knowledge_api(), RecordingFence()).write(
+                built
+            )
+    finally:
+        other_import.release()
+
+    assert not (file_service.base_path / built.document_file_path).exists()
+
+
+@pytest.mark.asyncio
+async def test_writer_refuses_to_create_over_a_note_that_appeared_meanwhile(
+    file_service: FileService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    built = artifacts()
+    real_exists = file_service.exists
+    calls = 0
+
+    async def appears_after_the_first_look(path: Path | str) -> bool:
+        # The caller saw no note; by the time the lock is held someone wrote one.
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return False
+        return await real_exists(path)
+
+    monkeypatch.setattr(file_service, "exists", appears_after_the_first_look)
+    await file_service.write_file(built.document_file_path, "# Written in the gap\n")
+
+    with pytest.raises(DocumentSidecarConflictError, match="changed while"):
+        await LocalRawDocumentWriter(file_service, knowledge_api(), RecordingFence()).write(built)
+
+    assert (file_service.base_path / built.document_file_path).read_text(
+        encoding="utf-8"
+    ) == "# Written in the gap\n"

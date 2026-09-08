@@ -13,11 +13,16 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import sys
+import tempfile
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 from uuid import UUID
+
+from filelock import FileLock, Timeout
 
 from basic_memory.document_ingestion.csv_extractor import CSV_MEDIA_TYPE, CsvExtractor
 from basic_memory.document_ingestion.markitdown_extractor import markitdown_extractors
@@ -59,6 +64,17 @@ class DocumentSourceTooLargeError(RuntimeError):
 
 class DocumentSidecarConflictError(RuntimeError):
     """The sidecar path holds content this runtime must not overwrite."""
+
+
+# Imports of the same source serialize on the sidecar path; one waits this long
+# for the other before giving up rather than racing it.
+NOTE_LOCK_TIMEOUT_SECONDS = 30.0
+
+
+class SourceGenerationFence(Protocol):
+    """Prove the source still has the bytes an extraction was made from."""
+
+    async def require_generation(self, file_path: str, checksum: str) -> None: ...
 
 
 class DocumentKnowledgeApi(Protocol):
@@ -148,15 +164,24 @@ class LocalDocumentSourceReader:
         )
 
     async def require_current(self, snapshot: DocumentSourceSnapshot) -> None:
-        current = await asyncio.to_thread(
-            read_bounded_source,
-            self.project_home / snapshot.entity.file_path,
-            self.max_source_bytes,
-        )
-        if sha256_checksum(current) != snapshot.checksum:
+        if await self.current_checksum(snapshot.entity.file_path) != snapshot.checksum:
             raise DocumentSourceChangedError(
                 f"{snapshot.entity.file_path} changed on disk during extraction"
             )
+
+    async def require_generation(self, file_path: str, checksum: str) -> None:
+        """Fence a write on the source generation it was extracted from."""
+        if await self.current_checksum(file_path) != checksum:
+            raise DocumentSourceChangedError(
+                f"{file_path} changed before its document note was accepted; "
+                "the import was made from an older version of the source"
+            )
+
+    async def current_checksum(self, file_path: str) -> str:
+        current = await asyncio.to_thread(
+            read_bounded_source, self.project_home / file_path, self.max_source_bytes
+        )
+        return sha256_checksum(current)
 
 
 def read_bounded_source(path: Path, max_source_bytes: int) -> bytes:
@@ -185,9 +210,12 @@ class LocalRawDocumentWriter:
 
     file_service: FileService
     knowledge: DocumentKnowledgeApi
+    source_fence: SourceGenerationFence
 
     async def write(self, artifacts: RawDocumentArtifacts) -> RawDocumentWriteResult:
-        document = await accept_document_note(self.file_service, self.knowledge, artifacts)
+        document = await accept_document_note(
+            self.file_service, self.knowledge, self.source_fence, artifacts
+        )
         run_created = await accept_run_note(
             self.file_service, self.knowledge, artifacts, raw_checksum=document.projection_checksum
         )
@@ -205,6 +233,7 @@ class LocalRawDocumentWriter:
 async def accept_document_note(
     file_service: FileService,
     knowledge: DocumentKnowledgeApi,
+    source_fence: SourceGenerationFence,
     artifacts: RawDocumentArtifacts,
 ) -> AcceptedDocumentNote:
     """Write the sidecar note unless an identical raw projection already exists.
@@ -212,6 +241,7 @@ async def accept_document_note(
     Return physical and normalized projection checksums with the write status.
     """
     path = artifacts.document_file_path
+    on_disk_checksum: str | None = None
     if await file_service.exists(path):
         existing_markdown = await file_service.read_file_content(path)
         on_disk_checksum = canonical_db_checksum(await file_service.compute_checksum(path))
@@ -239,12 +269,14 @@ async def accept_document_note(
         # rebuilt from the new run, but only while it is still the projection an
         # earlier run wrote. Note content is canonical, and a raw note a person
         # has annotated must not be replaced silently.
-        # Compare-and-swap: the note must still be the bytes judged untouched above.
-        if canonical_db_checksum(await file_service.compute_checksum(path)) != on_disk_checksum:
-            raise DocumentSidecarConflictError(
-                f"{path} changed while it was being replaced; re-run the import"
-            )
-    checksum = await file_service.write_file(path, artifacts.document_markdown)
+    async with guarded_note_replacement(file_service, path, expected_checksum=on_disk_checksum):
+        # Trigger: the source changed after extraction, and possibly a newer import
+        #     already wrote its sidecar (which the check above saw as untouched).
+        # Why: these artifacts describe an older source generation; writing them
+        #     would roll the canonical note back with nothing to roll it forward.
+        # Outcome: the stale import stops here, inside the lock, before any write.
+        await source_fence.require_generation(artifacts.source.file_path, artifacts.source.checksum)
+        checksum = await file_service.write_file(path, artifacts.document_markdown)
     # Formatting is part of the accepted write; provenance must describe its
     # persisted projection, not the extractor's pre-format Markdown.
     persisted = parse_document_markdown(await file_service.read_file_content(path))
@@ -254,6 +286,57 @@ async def accept_document_note(
         raw_projection_checksum(persisted),
         True,
     )
+
+
+@asynccontextmanager
+async def guarded_note_replacement(
+    file_service: FileService,
+    path: str,
+    *,
+    expected_checksum: str | None,
+) -> AsyncIterator[None]:
+    """Hold the note's lock and admit the write only while the note is as expected.
+
+    ``expected_checksum`` is the canonical checksum the caller read, or ``None``
+    when the caller saw no file: creation must not clobber a note that appeared
+    in between. A checksum read followed by an unconditional atomic write leaves
+    a gap another import could write into; the lock closes that gap between
+    imports, and the re-check under the lock turns any other change into a
+    conflict instead of a silent overwrite.
+    """
+    full_path = file_service.base_path / path
+    # Acquired in a worker thread so a contended lock never stalls the event loop,
+    # released from the loop thread: the lock state must not be thread-local.
+    lock = FileLock(
+        str(note_lock_path(full_path)), timeout=NOTE_LOCK_TIMEOUT_SECONDS, thread_local=False
+    )
+    try:
+        await asyncio.to_thread(lock.acquire)
+    except Timeout as error:
+        raise DocumentSidecarConflictError(
+            f"{path} is being written by another import; re-run once it finishes"
+        ) from error
+    try:
+        current = (
+            canonical_db_checksum(await file_service.compute_checksum(path))
+            if await file_service.exists(path)
+            else None
+        )
+        if current != expected_checksum:
+            raise DocumentSidecarConflictError(
+                f"{path} changed while it was being replaced; re-run the import"
+            )
+        yield
+    finally:
+        lock.release()
+
+
+def note_lock_path(note_path: Path) -> Path:
+    """Lock file for one note, kept outside the project so the indexer never sees it."""
+    lock_dir = Path(tempfile.gettempdir()) / "basic-memory-note-locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256(str(note_path.resolve()).encode("utf-8")).hexdigest()
+    return lock_dir / f"{digest}.lock"
 
 
 def raw_projection_checksum(document: DocumentMarkdownV1) -> str:
@@ -312,7 +395,9 @@ async def accept_run_note(
 ) -> bool:
     """Write the run note for this run id unless it already names the accepted sidecar bytes."""
     path = artifacts.run_file_path
+    on_disk_checksum: str | None = None
     if await file_service.exists(path):
+        on_disk_checksum = canonical_db_checksum(await file_service.compute_checksum(path))
         try:
             existing = parse_document_ingestion_run_markdown(
                 await file_service.read_file_content(path)
@@ -333,6 +418,7 @@ async def accept_run_note(
     markdown = build_raw_ingestion_run_markdown(
         artifacts, raw_checksum=raw_checksum, raw_created_at=datetime.now(tz=UTC)
     )
-    await file_service.write_file(path, markdown)
+    async with guarded_note_replacement(file_service, path, expected_checksum=on_disk_checksum):
+        await file_service.write_file(path, markdown)
     await knowledge.index_file(path)
     return True

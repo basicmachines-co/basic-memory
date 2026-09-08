@@ -31,11 +31,12 @@ async def test_local_run_points_to_the_indexed_document(
     )
     knowledge = KnowledgeClient(client, test_project.external_id)
     files = FileService(home, MarkdownProcessor(EntityParser(home)))
+    source_reader = LocalDocumentSourceReader(home)
     runtime = RawDocumentRuntime(
         source_resolver=ApiDocumentSourceEntityResolver(knowledge),
-        source_reader=LocalDocumentSourceReader(home),
+        source_reader=source_reader,
         extractors=default_document_extractors(),
-        writer=LocalRawDocumentWriter(files, knowledge),
+        writer=LocalRawDocumentWriter(files, knowledge, source_reader),
     )
 
     result = await runtime.ingest(file_path="riders.csv", observed_etag=None)
