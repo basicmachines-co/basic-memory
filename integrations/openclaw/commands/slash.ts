@@ -55,10 +55,12 @@ export function registerCommands(
 
       try {
         const title = text.length > 60 ? text.slice(0, 60) : text
-        await client.writeNote(title, text, "agent/memories")
+        const note = await client.writeNote(title, text, "agent/memories")
 
         const preview = text.length > 60 ? `${text.slice(0, 60)}...` : text
-        return { text: `Remembered: "${preview}"` }
+        return {
+          text: `Remembered: "${preview}"\npermalink: ${note.permalink}\nfile_path: ${note.file_path}`,
+        }
       } catch (err) {
         log.error("/remember failed", err)
         return {

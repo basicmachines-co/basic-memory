@@ -165,6 +165,10 @@ of a note, claims about earlier saves, or writes through shell commands and othe
 clients. Streaming chunks and replayed replies without run correlation are outside
 this check. Evidence is bounded to the most recent 256 runs in this plugin instance.
 
+The native `/remember` command writes directly and confirms with the exact
+`permalink` and `file_path` returned by Basic Memory. A failed write returns a
+failure message instead of a confirmation.
+
 ## Agent tools
 
 All tools accept an optional `project` parameter for cross-project operations.
