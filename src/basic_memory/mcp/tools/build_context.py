@@ -29,7 +29,40 @@ from basic_memory.schemas.memory import (
 )
 
 
-def _format_entity_block(result: ContextResult) -> str:
+def _compact_observation(observation: ObservationSummary) -> ObservationSummary:
+    """Navigate to the owning file without repeating content-derived labels."""
+    return observation.model_copy(
+        update={"title": observation.category, "permalink": observation.file_path}
+    )
+
+
+def _compact_context_labels(graph: GraphContext) -> GraphContext:
+    # Observation titles and permalinks embed source prose. Use the category and
+    # owning file for discovery; keep numeric and external IDs unchanged.
+    return graph.model_copy(
+        update={
+            "results": [
+                result.model_copy(
+                    update={
+                        "primary_result": _compact_observation(result.primary_result)
+                        if isinstance(result.primary_result, ObservationSummary)
+                        else result.primary_result,
+                        "observations": [_compact_observation(obs) for obs in result.observations],
+                        "related_results": [
+                            _compact_observation(item)
+                            if isinstance(item, ObservationSummary)
+                            else item
+                            for item in result.related_results
+                        ],
+                    }
+                )
+                for result in graph.results
+            ]
+        }
+    )
+
+
+def _format_entity_block(result: ContextResult, *, compact: bool = False) -> str:
     """Format a single context result as a markdown block."""
     primary = result.primary_result
     lines = []
@@ -39,12 +72,12 @@ def _format_entity_block(result: ContextResult) -> str:
     if primary.permalink:
         lines.append(f"permalink: {primary.permalink}")
     # RelationSummary has no content field; Entity/Observation do
-    if not isinstance(primary, RelationSummary) and primary.content:
+    if not compact and not isinstance(primary, RelationSummary) and primary.content:
         lines.append("")
         lines.append(primary.content)
 
     # --- Observations ---
-    if result.observations:
+    if result.observations and not compact:
         lines.append("")
         lines.append("### Observations")
         for obs in result.observations:
@@ -77,7 +110,7 @@ def _format_entity_block(result: ContextResult) -> str:
     return "\n".join(lines)
 
 
-def _format_context_markdown(graph: GraphContext, project: str) -> str:
+def _format_context_markdown(graph: GraphContext, project: str, *, compact: bool = False) -> str:
     """Format GraphContext as compact markdown text.
 
     Produces a human-readable markdown representation that is much smaller
@@ -101,7 +134,7 @@ def _format_context_markdown(graph: GraphContext, project: str) -> str:
     parts.append("")
 
     # --- Entity blocks separated by --- ---
-    entity_blocks = [_format_entity_block(result) for result in graph.results]
+    entity_blocks = [_format_entity_block(result, compact=compact) for result in graph.results]
     parts.append("\n\n---\n\n".join(entity_blocks))
 
     # --- Footer ---
@@ -187,6 +220,12 @@ async def build_context(
     ] = DEFAULT_CONTEXT_RELATED_RESULTS,
     output_format: Literal["json", "text"] = "json",
     context: Context | None = None,
+    compact: Annotated[
+        bool,
+        "Omit note and observation bodies for graph discovery. Preserve identifiers, "
+        "relation targets and pagination; use read_note for selected content. "
+        "This reduces response size, not traversal work or a guaranteed token budget.",
+    ] = False,
 ) -> dict[str, Any] | str:
     """Get context needed to continue a discussion within a specific project.
 
@@ -215,6 +254,7 @@ async def build_context(
         output_format: Response format - "json" for structured JSON dict,
             "text" for compact markdown text
         context: Optional FastMCP context for performance caching.
+        compact: Omit note and observation bodies while retaining navigation summaries.
 
     Returns:
         dict (output_format="json"): Structured JSON with internal fields excluded
@@ -340,7 +380,25 @@ async def build_context(
                 f"output_format={output_format}"
             )
 
+            if compact:
+                graph = _compact_context_labels(graph)
+
             if output_format == "text":
-                return _format_context_markdown(graph, active_project.name)
+                return _format_context_markdown(graph, active_project.name, compact=compact)
+
+            # Discovery keeps the same graph and pagination, but leaves source prose
+            # for an explicit read. Exclude at serialization to preserve API models.
+            if compact:
+                return graph.model_dump(
+                    exclude={
+                        "results": {
+                            "__all__": {
+                                "primary_result": {"content"},
+                                "observations": {"__all__": {"content"}},
+                                "related_results": {"__all__": {"content"}},
+                            }
+                        }
+                    }
+                )
 
             return graph.model_dump()

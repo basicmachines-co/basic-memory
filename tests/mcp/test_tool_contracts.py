@@ -24,6 +24,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "page_size",
         "max_related",
         "output_format",
+        "compact",
     ],
     "cat": [
         "identifier",
