@@ -4,7 +4,12 @@ These functions provide a consistent interface for making HTTP requests
 to the Basic Memory API, with improved error handling and logging.
 """
 
+import asyncio
+import random
 import typing
+from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, Optional
 
 import logfire
@@ -33,6 +38,13 @@ from loguru import logger
 from fastmcp.exceptions import ToolError
 
 from basic_memory.config import ConfigManager
+
+_RATE_LIMIT_MAX_ATTEMPTS = 3
+_RATE_LIMIT_MAX_TOTAL_WAIT_SECONDS = 30.0
+_RATE_LIMIT_JITTER_MIN_SECONDS = 0.05
+_RATE_LIMIT_JITTER_MAX_SECONDS = 0.25
+
+type _RequestCall = Callable[[], Awaitable[Response]]
 
 
 def _classify_http_outcome(status_code: int) -> str:
@@ -225,6 +237,123 @@ def _resolve_error_message(
     return get_error_message(status_code, url, method)
 
 
+def _utc_now() -> datetime:
+    """Return the current UTC time for HTTP-date Retry-After values."""
+    return datetime.now(timezone.utc)
+
+
+def _parse_retry_after(response: Response) -> tuple[str, float] | None:
+    """Parse a Retry-After delay-seconds or HTTP-date header."""
+    raw_retry_after = response.headers.get("Retry-After")
+    if raw_retry_after is None:
+        return None
+
+    retry_after = raw_retry_after.strip()
+    if retry_after.isascii() and retry_after.isdigit():
+        normalized_delay = retry_after.lstrip("0") or "0"
+        max_wait_text = str(int(_RATE_LIMIT_MAX_TOTAL_WAIT_SECONDS))
+        if len(normalized_delay) > len(max_wait_text) or (
+            len(normalized_delay) == len(max_wait_text) and normalized_delay > max_wait_text
+        ):
+            return raw_retry_after, float("inf")
+        return raw_retry_after, float(int(retry_after))
+
+    try:
+        retry_at = parsedate_to_datetime(retry_after)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+    if retry_at.tzinfo is None:
+        return None
+
+    delay_seconds = (retry_at.astimezone(timezone.utc) - _utc_now()).total_seconds()
+    return raw_retry_after, max(0.0, delay_seconds)
+
+
+def _request_body_is_replayable(
+    content: RequestContent | None,
+    files: RequestFiles | None,
+) -> bool:
+    """Return whether httpx can safely rebuild the request body for another attempt."""
+    return files is None and (content is None or isinstance(content, (str, bytes)))
+
+
+def _with_rate_limit_context(message: str, context: str) -> str:
+    """Preserve the server detail while adding actionable retry context."""
+    separator = "" if message.endswith((".", "!", "?")) else "."
+    return f"{message}{separator} {context}"
+
+
+async def _request_with_rate_limit_retry(
+    request: _RequestCall,
+    *,
+    method: str,
+    url: URL | str,
+    replayable: bool,
+) -> tuple[Response, str | None]:
+    """Retry Basic Memory gateway 429 responses within an explicit wait budget.
+
+    The gateway rejects rate-limited requests before application processing, so replayable
+    writes are safe to retry. This is a cumulative sleep budget, not an end-to-end request
+    deadline; each individual HTTP attempt retains the caller's configured timeout.
+    """
+    total_wait_seconds = 0.0
+
+    for attempt in range(1, _RATE_LIMIT_MAX_ATTEMPTS + 1):
+        response = await request()
+        if response.status_code != 429:
+            return response, None
+
+        response_data = _extract_response_data(response)
+        error_message = _resolve_error_message(429, url, method, response_data)
+        retry_boundary = _parse_retry_after(response)
+
+        if retry_boundary is None:
+            return response, _with_rate_limit_context(
+                error_message,
+                "Automatic retry skipped because Retry-After is missing or invalid.",
+            )
+
+        raw_retry_after, server_delay_seconds = retry_boundary
+        boundary_text = f"Server Retry-After: {raw_retry_after}."
+
+        if not replayable:
+            return response, _with_rate_limit_context(
+                error_message,
+                "Automatic retry skipped because the request body cannot be safely replayed. "
+                f"{boundary_text}",
+            )
+
+        if attempt == _RATE_LIMIT_MAX_ATTEMPTS:
+            return response, _with_rate_limit_context(
+                error_message,
+                f"Rate-limit retry exhausted after {attempt} attempts. {boundary_text}",
+            )
+
+        jitter_seconds = random.uniform(
+            _RATE_LIMIT_JITTER_MIN_SECONDS,
+            _RATE_LIMIT_JITTER_MAX_SECONDS,
+        )
+        wait_seconds = server_delay_seconds + jitter_seconds
+        if total_wait_seconds + wait_seconds > _RATE_LIMIT_MAX_TOTAL_WAIT_SECONDS:
+            return response, _with_rate_limit_context(
+                error_message,
+                "Rate-limit retry wait budget exhausted before the next attempt "
+                f"(maximum cumulative wait {_RATE_LIMIT_MAX_TOTAL_WAIT_SECONDS:g}s). "
+                f"{boundary_text}",
+            )
+
+        logger.warning(
+            f"Rate limit exceeded: {method} {url}; retrying in {wait_seconds:.3f}s "
+            f"(attempt {attempt + 1}/{_RATE_LIMIT_MAX_ATTEMPTS})"
+        )
+        await response.aclose()
+        await asyncio.sleep(wait_seconds)
+        total_wait_seconds += wait_seconds
+
+    raise AssertionError("rate-limit retry loop exhausted without returning")  # pragma: no cover
+
+
 async def call_get(
     client: AsyncClient,
     url: URL | str,
@@ -274,15 +403,20 @@ async def call_get(
             has_query=bool(params),
             has_body=False,
         ) as request_span:
-            response = await client.get(
-                url,
-                params=params,
-                headers=_request_headers(headers),
-                cookies=cookies,
-                auth=auth,
-                follow_redirects=follow_redirects,
-                timeout=timeout,
-                extensions=extensions,
+            response, rate_limit_error_message = await _request_with_rate_limit_retry(
+                lambda: client.get(
+                    url,
+                    params=params,
+                    headers=_request_headers(headers),
+                    cookies=cookies,
+                    auth=auth,
+                    follow_redirects=follow_redirects,
+                    timeout=timeout,
+                    extensions=extensions,
+                ),
+                method="GET",
+                url=url,
+                replayable=True,
             )
             request_span.set_attributes(_response_span_attrs(response))
 
@@ -292,7 +426,9 @@ async def call_get(
         # Handle different status codes differently
         status_code = response.status_code
         response_data = _extract_response_data(response)
-        error_message = _resolve_error_message(status_code, url, "GET", response_data)
+        error_message = rate_limit_error_message or _resolve_error_message(
+            status_code, url, "GET", response_data
+        )
 
         # Log at appropriate level based on status code
         if 400 <= status_code < 500:
@@ -379,19 +515,24 @@ async def call_put(
             has_query=bool(params),
             has_body=any(value is not None for value in (content, data, files, json)),
         ) as request_span:
-            response = await client.put(
-                url,
-                content=content,
-                data=data,
-                files=files,
-                json=json,
-                params=params,
-                headers=_request_headers(headers),
-                cookies=cookies,
-                auth=auth,
-                follow_redirects=follow_redirects,
-                timeout=timeout,
-                extensions=extensions,
+            response, rate_limit_error_message = await _request_with_rate_limit_retry(
+                lambda: client.put(
+                    url,
+                    content=content,
+                    data=data,
+                    files=files,
+                    json=json,
+                    params=params,
+                    headers=_request_headers(headers),
+                    cookies=cookies,
+                    auth=auth,
+                    follow_redirects=follow_redirects,
+                    timeout=timeout,
+                    extensions=extensions,
+                ),
+                method="PUT",
+                url=url,
+                replayable=_request_body_is_replayable(content, files),
             )
             request_span.set_attributes(_response_span_attrs(response))
 
@@ -402,7 +543,9 @@ async def call_put(
         status_code = response.status_code
 
         response_data = _extract_response_data(response)
-        error_message = _resolve_error_message(status_code, url, "PUT", response_data)
+        error_message = rate_limit_error_message or _resolve_error_message(
+            status_code, url, "PUT", response_data
+        )
 
         # Log at appropriate level based on status code
         if 400 <= status_code < 500:
@@ -475,6 +618,7 @@ async def call_patch(
         ToolError: If the request fails with an appropriate error message
     """
     logger.debug(f"Calling PATCH '{url}'")
+    error_message = None
     request_span: logfire.LogfireSpan | None = None
 
     try:
@@ -488,19 +632,24 @@ async def call_patch(
             has_query=bool(params),
             has_body=any(value is not None for value in (content, data, files, json)),
         ) as request_span:
-            response = await client.patch(
-                url,
-                content=content,
-                data=data,
-                files=files,
-                json=json,
-                params=params,
-                headers=_request_headers(headers),
-                cookies=cookies,
-                auth=auth,
-                follow_redirects=follow_redirects,
-                timeout=timeout,
-                extensions=extensions,
+            response, rate_limit_error_message = await _request_with_rate_limit_retry(
+                lambda: client.patch(
+                    url,
+                    content=content,
+                    data=data,
+                    files=files,
+                    json=json,
+                    params=params,
+                    headers=_request_headers(headers),
+                    cookies=cookies,
+                    auth=auth,
+                    follow_redirects=follow_redirects,
+                    timeout=timeout,
+                    extensions=extensions,
+                ),
+                method="PATCH",
+                url=url,
+                replayable=_request_body_is_replayable(content, files),
             )
             request_span.set_attributes(_response_span_attrs(response))
 
@@ -511,7 +660,9 @@ async def call_patch(
         status_code = response.status_code
 
         response_data = _extract_response_data(response)
-        error_message = _resolve_error_message(status_code, url, "PATCH", response_data)
+        error_message = rate_limit_error_message or _resolve_error_message(
+            status_code, url, "PATCH", response_data
+        )
 
         # Log at appropriate level based on status code
         if 400 <= status_code < 500:
@@ -529,10 +680,10 @@ async def call_patch(
         return response  # This line will never execute, but it satisfies the type checker  # pragma: no cover
 
     except HTTPStatusError as e:
-        status_code = e.response.status_code
-
-        response_data = _extract_response_data(e.response)
-        error_message = _resolve_error_message(status_code, url, "PATCH", response_data)
+        if error_message is None:
+            status_code = e.response.status_code
+            response_data = _extract_response_data(e.response)
+            error_message = _resolve_error_message(status_code, url, "PATCH", response_data)
 
         raise ToolError(error_message) from e
     except TransportError as e:
@@ -603,19 +754,24 @@ async def call_post(
             has_query=bool(params),
             has_body=any(value is not None for value in (content, data, files, json)),
         ) as request_span:
-            response = await client.post(
+            response, rate_limit_error_message = await _request_with_rate_limit_retry(
+                lambda: client.post(
+                    url=url,
+                    content=content,
+                    data=data,
+                    files=files,
+                    json=json,
+                    params=params,
+                    headers=_request_headers(headers),
+                    cookies=cookies,
+                    auth=auth,
+                    follow_redirects=follow_redirects,
+                    timeout=timeout,
+                    extensions=extensions,
+                ),
+                method="POST",
                 url=url,
-                content=content,
-                data=data,
-                files=files,
-                json=json,
-                params=params,
-                headers=_request_headers(headers),
-                cookies=cookies,
-                auth=auth,
-                follow_redirects=follow_redirects,
-                timeout=timeout,
-                extensions=extensions,
+                replayable=_request_body_is_replayable(content, files),
             )
             request_span.set_attributes(_response_span_attrs(response))
         logger.debug(f"response: {_extract_response_data(response)}")
@@ -626,7 +782,9 @@ async def call_post(
         # Handle different status codes differently
         status_code = response.status_code
         response_data = _extract_response_data(response)
-        error_message = _resolve_error_message(status_code, url, "POST", response_data)
+        error_message = rate_limit_error_message or _resolve_error_message(
+            status_code, url, "POST", response_data
+        )
 
         # Log at appropriate level based on status code
         if 400 <= status_code < 500:
@@ -691,20 +849,25 @@ async def call_query(
             has_query=bool(params),
             has_body=any(value is not None for value in (content, data, files, json)),
         ) as request_span:
-            response = await client.request(
-                "QUERY",
+            response, rate_limit_error_message = await _request_with_rate_limit_retry(
+                lambda: client.request(
+                    "QUERY",
+                    url=url,
+                    content=content,
+                    data=data,
+                    files=files,
+                    json=json,
+                    params=params,
+                    headers=_request_headers(headers),
+                    cookies=cookies,
+                    auth=auth,
+                    follow_redirects=follow_redirects,
+                    timeout=timeout,
+                    extensions=extensions,
+                ),
+                method="QUERY",
                 url=url,
-                content=content,
-                data=data,
-                files=files,
-                json=json,
-                params=params,
-                headers=_request_headers(headers),
-                cookies=cookies,
-                auth=auth,
-                follow_redirects=follow_redirects,
-                timeout=timeout,
-                extensions=extensions,
+                replayable=_request_body_is_replayable(content, files),
             )
             request_span.set_attributes(_response_span_attrs(response))
 
@@ -713,7 +876,9 @@ async def call_query(
 
         status_code = response.status_code
         response_data = _extract_response_data(response)
-        error_message = _resolve_error_message(status_code, url, "QUERY", response_data)
+        error_message = rate_limit_error_message or _resolve_error_message(
+            status_code, url, "QUERY", response_data
+        )
 
         if 400 <= status_code < 500:
             if status_code == 429:  # pragma: no cover
@@ -819,15 +984,20 @@ async def call_delete(
             has_query=bool(params),
             has_body=False,
         ) as request_span:
-            response = await client.delete(
+            response, rate_limit_error_message = await _request_with_rate_limit_retry(
+                lambda: client.delete(
+                    url=url,
+                    params=params,
+                    headers=_request_headers(headers),
+                    cookies=cookies,
+                    auth=auth,
+                    follow_redirects=follow_redirects,
+                    timeout=timeout,
+                    extensions=extensions,
+                ),
+                method="DELETE",
                 url=url,
-                params=params,
-                headers=_request_headers(headers),
-                cookies=cookies,
-                auth=auth,
-                follow_redirects=follow_redirects,
-                timeout=timeout,
-                extensions=extensions,
+                replayable=True,
             )
             request_span.set_attributes(_response_span_attrs(response))
 
@@ -837,7 +1007,9 @@ async def call_delete(
         # Handle different status codes differently
         status_code = response.status_code
         response_data = _extract_response_data(response)
-        error_message = _resolve_error_message(status_code, url, "DELETE", response_data)
+        error_message = rate_limit_error_message or _resolve_error_message(
+            status_code, url, "DELETE", response_data
+        )
 
         # Log at appropriate level based on status code
         if 400 <= status_code < 500:
