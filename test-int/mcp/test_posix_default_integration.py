@@ -26,6 +26,10 @@ async def test_posix_registration_over_mcp(mcp_server, config_manager, setting, 
         async with Client(mcp_server, mode=mode) as client:
             tools = {tool.name: tool for tool in await client.list_tools()}
             assert {"read_note", "search_notes", "write_note", "build_context"} <= tools.keys()
+            instructions = client.instructions
+            assert instructions is not None
+            assert "When available in your tool list" in instructions
+            assert "If they are absent, use the existing rich tools instead" in instructions
             if setting is False:
                 assert POSIX_TOOLS.isdisjoint(tools)
                 hidden = await client.call_tool("man", {}, raise_on_error=False)
@@ -37,8 +41,6 @@ async def test_posix_registration_over_mcp(mcp_server, config_manager, setting, 
                     assert annotations is not None
                     assert annotations.read_only_hint is True
                     assert annotations.destructive_hint is False
-                instructions = client.instructions
-                assert instructions is not None
                 assert "Projects are mount points" in instructions
                 assert 'cat(identifier="research/notes/topic.md")' in instructions
     finally:

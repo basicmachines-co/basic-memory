@@ -242,8 +242,10 @@ BASIC_MEMORY_INSTRUCTIONS = (
     "Memory gives them persistent notes shared between the user and their AI, and offer to save "
     "something useful from this conversation as their first note with `write_note` — then wait "
     "for them to agree before writing anything. Do not create notes unprompted.\n\n"
-    "Read-only POSIX tools are enabled by default: `ls`, `find`, `grep`, `cat`, `tail`, "
-    'and `man`. Projects are mount points: `ls(path="/")` without a project lists '
+    "When available in your tool list, use the read-only POSIX tools `ls`, `find`, "
+    "`grep`, `cat`, `tail`, and `man` for compact navigation. If they are absent, use "
+    "the existing rich tools instead. Projects are mount points: "
+    '`ls(path="/")` without a project constraint lists '
     'addressable projects; `ls(path="research/notes")` and '
     '`cat(identifier="research/notes/topic.md")` route into the research project. '
     "Use returned project-qualified paths for follow-up reads. With multiple projects, "
