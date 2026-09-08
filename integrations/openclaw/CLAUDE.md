@@ -101,7 +101,7 @@ Flexible config with defaults, snake_case aliases (`memory_dir`/`memory_file`), 
 ## Dependencies
 
 - **Runtime**: `@modelcontextprotocol/sdk` (MCP client/transport), `@sinclair/typebox` (schema validation)
-- **Peer**: `openclaw` (>=2026.5.2)
+- **Peer**: `openclaw` (>=2026.9.2)
 - **Dev**: `typescript`, `@biomejs/biome`, `@types/node`
 - **External**: Basic Memory CLI (`bm`) must be installed separately (Python, installed via `uv`)
 

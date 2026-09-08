@@ -23,16 +23,25 @@ export function claimsMemorySave(
       continue
     }
     if (fenced || /^[>"']/.test(line)) continue
-    if (!memoryRequested && !MEMORY_NAME.test(line)) continue
-    // Explicit qualifications take precedence over an apparent confirmation.
-    if (/\b(?:not|never|nothing|none|zero|no)\b|\?/.test(line.toLowerCase()))
-      continue
-    if (
-      /(?:^|[.!?]\s+)(?:I(?:['’]ve| have)?\s+)?(?:saved|stored|recorded|remembered)\b/i.test(
-        line.replace(/\*\*/g, ""),
+    for (const sentence of line.replace(/\*\*/g, "").split(/(?<=[.!?])\s+/)) {
+      const match =
+        /(?:^|[,:;—–]\s+)(?:I(?:['’]ve| have)?\s+)?(?:saved|stored|recorded|remembered)\b/i.exec(
+          sentence,
+        )
+      if (!match) continue
+      const claim = sentence.slice(match.index)
+      if (!memoryRequested && !MEMORY_NAME.test(claim)) continue
+      // Only the save clause supplies qualifications; a greeting or later question does not.
+      if (/\b(?:not|never|nothing|none|zero|no)\b|\?/i.test(claim)) continue
+      if (
+        !MEMORY_NAME.test(claim) &&
+        /\blocally\b|\b(?:to|on|in)\s+(?:(?:the|my|your|local)\s+)?(?:disk|filesystem|file system|desktop|downloads|clipboard)\b/i.test(
+          claim,
+        )
       )
-    )
+        continue
       return true
+    }
   }
   return false
 }
@@ -66,7 +75,9 @@ export function registerSaveClaimGuard(api: OpenClawPluginApi): void {
     if (runs.has(runKey)) return
     runs.set(runKey, {
       memoryRequested:
-        /\bremember\b/i.test(event.prompt) || MEMORY_NAME.test(event.prompt),
+        /\b(?:remember|(?:save|record|note)\s+(?:this|that|it)\b)/i.test(
+          event.prompt,
+        ) || MEMORY_NAME.test(event.prompt),
       writeObserved: false,
     })
     // Aborted runs may never deliver a final payload; bound retained evidence.

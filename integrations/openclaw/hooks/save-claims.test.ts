@@ -47,6 +47,17 @@ function harness() {
 }
 
 describe("save claim delivery guard", () => {
+  for (const prompt of ["Save this", "Record this", "Note this"]) {
+    it(`treats ${prompt} as a capture request`, () => {
+      const host = harness()
+      host.dispatch(
+        "llm_input",
+        { runId: "run-1", prompt },
+        { sessionKey: "session-1" },
+      )
+      expect(host.reply().payload.text).toContain(SAVE_CLAIM_CORRECTION)
+    })
+  }
   it("corrects final claims and preserves other payload fields", () => {
     const host = harness()
     host.begin()
@@ -132,12 +143,29 @@ describe("save claim delivery guard", () => {
 
 describe("claim recognition", () => {
   for (const text of [
+    "No problem, I've saved it to Basic Memory.",
+    "I've saved it. Do you need anything else?",
+  ]) {
+    it(`ignores unrelated qualifications: ${text}`, () => {
+      expect(claimsMemorySave(text, true)).toBe(true)
+    })
+  }
+  for (const text of [
+    "Sure, I saved it in Basic Memory.",
+    "Done — I've recorded it.",
+  ]) {
+    it(`recognizes conversational prefaces: ${text}`, () => {
+      expect(claimsMemorySave(text, true)).toBe(true)
+    })
+  }
+  for (const text of [
     "I saved it locally, but did not store it in Basic Memory.",
     "Saved? No, I did not.",
     "I have saved nothing.",
     "> I saved it.",
     "```\nI saved it.\n```",
     "I updated my response.",
+    "Saved the image to disk.",
   ]) {
     it(`leaves qualified or quoted text alone: ${text}`, () => {
       expect(claimsMemorySave(text, true)).toBe(false)
