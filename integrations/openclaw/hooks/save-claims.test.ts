@@ -54,6 +54,7 @@ describe("save claim delivery guard", () => {
     "Please save my preference",
     "Record my renewal date",
     "Please save Fred's birthday",
+    "Save this and send a copy to me",
   ]) {
     it(`treats ${prompt} as a capture request`, () => {
       const host = harness()
@@ -167,6 +168,10 @@ describe("claim recognition", () => {
     "It's saved in Basic Memory.",
     "That is now recorded in Basic Memory.",
     "Saved it to memory://notes/renewal.",
+    "Saved to `memory://notes/renewal`.",
+    "I've saved that the meeting is in Paris.",
+    "I've noted it in Basic Memory.",
+    "I saved the attachment to disk, but saved your preference in Basic Memory.",
     "- Saved to Basic Memory.",
     "1. Saved to Basic Memory.",
     "I saved it in Basic Memory, but did not change any other settings.",
@@ -195,6 +200,7 @@ describe("claim recognition", () => {
     "Saved the image to disk.",
     "Saved the photo to Google Drive.",
     "Saved the Basic Memory config to Google Drive.",
+    "Saved into Google Drive.",
     "Stored it in Dropbox.",
     "Sure, I saved it to Google Drive.",
     "I saved it to Basic Memory yesterday.",

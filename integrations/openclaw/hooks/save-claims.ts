@@ -10,8 +10,9 @@ interface RunEvidence {
 
 const MAX_TRACKED_RUNS = 256
 const MEMORY_DESTINATION =
-  /\b(?:to|in|on|into)\s+(?:basic[- ]memory\b|memory:\/\/)/i
-const OTHER_DESTINATION = /\blocally\b|\b(?:to|on|in)\s+\S/i
+  /\b(?:to|in|on|into)\s+`?(?:basic[- ]memory\b|memory:\/\/)/i
+const OTHER_DESTINATION = /\blocally\b|\b(?:to|on|in|into)\s+\S/i
+const CONTENT_CLAUSE = /\bthat\s+.+?\b(?:is|are|was|were|will|has|have)\b/i
 
 export function claimsMemorySave(
   text: string,
@@ -29,35 +30,39 @@ export function claimsMemorySave(
       .replace(/\*\*|__/g, "")
       .replace(/^(?:[-+*]|\d+[.)])\s+/, "")
     for (const sentence of plain.split(/(?<=[.!?])\s+/)) {
-      const match =
-        /(?:^|[,:;—–]\s+)(?:I(?:['’]ve| have)?\s+|(?:it|that|this)(?:['’]s| is| has been)\s+(?:now\s+)?)?(?:saved|stored|recorded|remembered)\b/i.exec(
-          sentence,
+      for (const match of sentence.matchAll(
+        /(?:^|[,:;—–]\s+)(?:(?:but|and|however|yet)\s+)?(?:I(?:['’]ve| have)?\s+|(?:it|that|this)(?:['’]s| is| has been)\s+(?:now\s+)?)?(?:saved|stored|recorded|remembered|noted)\b/gi,
+      )) {
+        // A later retraction of the save still qualifies it; a denial of an
+        // unrelated action (such as changing settings) does not.
+        if (
+          /\b(?:not|never)\s+(?:actually\s+)?(?:save|store|record|remember|write|persist)\b/i.test(
+            sentence.slice(match.index),
+          )
         )
-      if (!match) continue
-      // A later retraction of the save still qualifies it; a denial of an
-      // unrelated action (such as changing settings) does not.
-      if (
-        /\b(?:not|never)\s+(?:actually\s+)?(?:save|store|record|remember|write|persist)\b/i.test(
-          sentence.slice(match.index),
+          continue
+        const claim = sentence
+          .slice(match.index)
+          .replace(/^[,:;—–]\s+/, "")
+          .split(/[;,]\s+/)[0]
+        const destinationClause = claim.split(CONTENT_CLAUSE, 1)[0]
+        if (!memoryRequested && !MEMORY_DESTINATION.test(destinationClause))
+          continue
+        // Only the save clause supplies qualifications; a greeting or later question does not.
+        if (/\b(?:not|never|nothing|none|zero|no)\b|\?/i.test(claim)) continue
+        if (
+          /\b(?:yesterday|previously|earlier|already|last\s+(?:time|week|month|year|session))\b/i.test(
+            claim,
+          )
         )
-      )
-        continue
-      const claim = sentence
-        .slice(match.index)
-        .replace(/^[,:;—–]\s+/, "")
-        .split(/[;,]\s+/)[0]
-      if (!memoryRequested && !MEMORY_DESTINATION.test(claim)) continue
-      // Only the save clause supplies qualifications; a greeting or later question does not.
-      if (/\b(?:not|never|nothing|none|zero|no)\b|\?/i.test(claim)) continue
-      if (
-        /\b(?:yesterday|previously|earlier|already|last\s+(?:time|week|month|year|session))\b/i.test(
-          claim,
+          continue
+        if (
+          !MEMORY_DESTINATION.test(destinationClause) &&
+          OTHER_DESTINATION.test(destinationClause)
         )
-      )
-        continue
-      if (!MEMORY_DESTINATION.test(claim) && OTHER_DESTINATION.test(claim))
-        continue
-      return true
+          continue
+        return true
+      }
     }
   }
   return false
@@ -93,9 +98,14 @@ export function registerSaveClaimGuard(api: OpenClawPluginApi): void {
     runs.set(runKey, {
       memoryRequested:
         /\bremember\b/i.test(event.prompt) ||
-        MEMORY_DESTINATION.test(event.prompt) ||
-        (/\b(?:save|record|note)\s+/i.test(event.prompt) &&
-          !OTHER_DESTINATION.test(event.prompt)),
+        event.prompt.split(/[;.!?]|\b(?:and|but|then)\b/i).some((clause) => {
+          const destinationClause = clause.split(CONTENT_CLAUSE, 1)[0]
+          return (
+            MEMORY_DESTINATION.test(destinationClause) ||
+            (/\b(?:save|record|note)\s+/i.test(clause) &&
+              !OTHER_DESTINATION.test(destinationClause))
+          )
+        }),
       writeObserved: false,
     })
     // Aborted runs may never deliver a final payload; bound retained evidence.
