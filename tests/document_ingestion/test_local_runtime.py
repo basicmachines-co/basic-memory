@@ -10,11 +10,13 @@ from uuid import UUID, uuid4
 import pytest
 
 from basic_memory import file_utils
+from basic_memory.config import BasicMemoryConfig
 from basic_memory.document_ingestion.csv_extractor import CSV_MEDIA_TYPE
 from basic_memory.document_ingestion.local_runtime import (
     ApiDocumentSourceEntityResolver,
     DocumentSidecarConflictError,
     DocumentSourceResolutionError,
+    DocumentSourceTooLargeError,
     LocalDocumentSourceReader,
     LocalRawDocumentWriter,
     default_document_extractors,
@@ -161,6 +163,26 @@ async def test_reader_snapshots_bytes_with_the_checksum_as_the_generation(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_reader_bounds_source_allocation_and_rechecks(tmp_path: Path) -> None:
+    source = write_source(tmp_path, b"a\n1\n")
+    reader = LocalDocumentSourceReader(tmp_path, max_source_bytes=4)
+    snapshot = await reader.read(csv_entity(), observed_etag=None)
+    # Exercise the real bounded read with a file much larger than the allowed allocation.
+    with source.open("wb") as file:
+        file.truncate(1024 * 1024)
+
+    with pytest.raises(DocumentSourceTooLargeError, match="source byte limit"):
+        await reader.read(csv_entity(), observed_etag=None)
+    with pytest.raises(DocumentSourceTooLargeError, match="source byte limit"):
+        await reader.require_current(snapshot)
+
+
+def test_reader_rejects_an_unbounded_read_size(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="must be positive"):
+        LocalDocumentSourceReader(tmp_path, max_source_bytes=-2)
+
+
+@pytest.mark.asyncio
 async def test_reader_rejects_a_stale_observed_etag(tmp_path: Path) -> None:
     write_source(tmp_path)
     reader = LocalDocumentSourceReader(tmp_path)
@@ -259,6 +281,25 @@ async def test_writer_creates_the_sidecar_and_run_note_and_indexes_both(
     assert reused.run_created is False
     rebuilt = await writer.write(artifacts(checksum_char="b"))
     assert rebuilt.document_created is True
+
+
+@pytest.mark.asyncio
+async def test_writer_reuses_and_refreshes_a_formatted_sidecar(
+    file_service: FileService,
+    app_config: BasicMemoryConfig,
+) -> None:
+    file_service.app_config = app_config.model_copy(update={"format_on_save": True})
+    writer = LocalRawDocumentWriter(file_service, knowledge_api())
+    built = artifacts()
+    await writer.write(built)
+    persisted = await file_service.read_file_content(built.document_file_path)
+    assert persisted != built.document_markdown
+
+    reused = await writer.write(built)
+    assert reused.document_created is False
+    assert reused.run_created is False
+    refreshed = await writer.write(artifacts(checksum_char="b"))
+    assert refreshed.document_created is True
 
 
 @pytest.mark.asyncio
