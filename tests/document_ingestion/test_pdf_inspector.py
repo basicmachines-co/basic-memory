@@ -10,6 +10,8 @@ from typing import Any, cast
 import pytest
 from pydantic import ValidationError
 
+from basic_memory.document_ingestion.bounded_process import kill_and_wait
+from tests.document_ingestion.process_fakes import FakeProcess, install_fake_process
 from basic_memory.document_ingestion.pdf_inspector import (
     PDF_INSPECTOR_ENGINE,
     PdfInspector,
@@ -19,7 +21,6 @@ from basic_memory.document_ingestion.pdf_inspector import (
     PdfInspectorProcessError,
     PdfInspectorSourceTooLargeError,
     PdfInspectorTimeoutError,
-    _kill_and_wait,
 )
 
 
@@ -57,77 +58,6 @@ def minimal_text_pdf() -> bytes:
         ).encode()
     )
     return bytes(document)
-
-
-class FakeStdin:
-    """Scripted stdin writer; flags when the adapter starts feeding the child."""
-
-    def __init__(self, *, started: asyncio.Event, broken: bool) -> None:
-        self._started = started
-        self._broken = broken
-        self.written = b""
-        self.closed = False
-
-    def write(self, data: bytes) -> None:
-        self._started.set()
-        self.written += data
-
-    async def drain(self) -> None:
-        if self._broken:
-            raise BrokenPipeError
-
-    def close(self) -> None:
-        self.closed = True
-
-
-def pipe(data: bytes, *, eof: bool = True) -> asyncio.StreamReader:
-    reader = asyncio.StreamReader()
-    reader.feed_data(data)
-    if eof:
-        reader.feed_eof()
-    return reader
-
-
-class FakeProcess:
-    """Stand-in for asyncio's subprocess handle with scripted pipes."""
-
-    def __init__(
-        self,
-        *,
-        returncode: int | None = 0,
-        stdout: bytes = b"",
-        stderr: bytes = b"",
-        hang: bool = False,
-        kill_raises: bool = False,
-        stdin_broken: bool = False,
-    ) -> None:
-        self.returncode = returncode
-        self._kill_raises = kill_raises
-        self.communicate_started = asyncio.Event()
-        self.stdin = FakeStdin(started=self.communicate_started, broken=stdin_broken)
-        # A hanging child never closes stdout, so the capped read waits forever.
-        self.stdout = pipe(stdout, eof=not hang)
-        self.stderr = pipe(stderr)
-        self.killed = False
-        self.waited = False
-
-    def kill(self) -> None:
-        if self._kill_raises:
-            raise ProcessLookupError
-        self.killed = True
-        self.returncode = -9
-
-    async def wait(self) -> int:
-        self.waited = True
-        return self.returncode if self.returncode is not None else -9
-
-
-def install_fake_process(monkeypatch: pytest.MonkeyPatch, process: FakeProcess) -> None:
-    async def create_subprocess(*args: object, **kwargs: object) -> FakeProcess:
-        _ = (args, kwargs)
-        return process
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", create_subprocess)
 
 
 @pytest.mark.skipif(
@@ -309,11 +239,11 @@ async def test_pdf_inspector_rejects_invalid_child_result(
 @pytest.mark.asyncio
 async def test_kill_and_wait_tolerates_a_child_that_already_exited() -> None:
     raced = FakeProcess(returncode=None, kill_raises=True)
-    await _kill_and_wait(cast(asyncio.subprocess.Process, raced))
+    await kill_and_wait(cast(asyncio.subprocess.Process, raced))
     assert raced.waited is True
 
     finished = FakeProcess(returncode=0)
-    await _kill_and_wait(cast(asyncio.subprocess.Process, finished))
+    await kill_and_wait(cast(asyncio.subprocess.Process, finished))
     assert finished.killed is False
     assert finished.waited is True
 

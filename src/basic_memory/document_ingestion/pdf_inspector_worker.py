@@ -15,20 +15,13 @@ import sys
 
 import pdf_inspector
 
-# POSIX rlimits are the child's isolation boundary on the Linux workers and on
-# macOS dev machines. Windows has no `resource` module; there the parent's
-# wall-clock deadline is the only ceiling, and the limit helpers below no-op.
-if sys.platform == "win32":  # pragma: no cover - exercised only on Windows CI
-    resource = None
-else:
-    import resource
-
 from basic_memory.document_ingestion.pdf_inspector import (
     PDF_INSPECTOR_ENGINE,
     PdfInspectorOutput,
     PdfInspectorPdfType,
 )
 from basic_memory.schemas.document_page_map import DocumentPageMapV1, DocumentPageRangeV1
+from basic_memory.document_ingestion.worker_limits import apply_cpu_limit, apply_memory_limit
 
 
 def _normalized_pages(pages: list[int], *, page_count: int) -> tuple[int, ...]:
@@ -135,23 +128,6 @@ def inspect_pdf_bytes(
     )
 
 
-def _apply_cpu_limit(cpu_seconds: int) -> None:
-    """Bound native CPU time so a malformed PDF cannot monopolize a worker."""
-    if resource is None:
-        return
-    resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds + 1))
-
-
-def _apply_memory_limit(max_memory_bytes: int) -> None:
-    """Bound parser address space on Linux before reading source bytes."""
-    if resource is None or sys.platform != "linux":
-        # RLIMIT_AS is the deployed Linux isolation boundary. Applying the same
-        # byte ceiling on macOS constrains its much larger virtual mappings and
-        # makes the local subprocess fail before native parsing begins.
-        return
-    resource.setrlimit(resource.RLIMIT_AS, (max_memory_bytes, max_memory_bytes))
-
-
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-pages", type=int, required=True)
@@ -164,8 +140,8 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     """Read PDF bytes from stdin and emit one validated JSON result to stdout."""
     args = _parse_args()
-    _apply_memory_limit(args.max_memory_bytes)
-    _apply_cpu_limit(args.cpu_seconds)
+    apply_memory_limit(args.max_memory_bytes)
+    apply_cpu_limit(args.cpu_seconds)
     result = inspect_pdf_bytes(
         sys.stdin.buffer.read(),
         max_pages=args.max_pages,

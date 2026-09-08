@@ -4,6 +4,17 @@
 
 ### Features
 
+- **#1512**: Word, PowerPoint, and CSV files get the same sidecar Markdown note a
+  PDF gets. `bm import document <path>` indexes the project, extracts the file,
+  and writes `<file>.<ext>.md` next to it plus a run note under
+  `document-ingestion-runs/`, all through the existing parser-neutral document
+  contract. Office formats run through Microsoft's `markitdown` converters
+  (`basic-memory[documents]`) inside the same killable, byte-capped worker
+  process as pdf-inspector; CSV renders a bounded stdlib preview with strict
+  UTF-8. Re-running is a no-op while the source is unchanged, and the command
+  refuses to overwrite a hand-written or enriched note at the sidecar path.
+  PDF keeps pdf-inspector and works through the same command.
+
 - **#610**: The manual's SYNOPSIS blocks are now generated from the tool registry.
   `just man-regen` renders the MCP call on every section-3 page from the schema
   clients actually receive (required parameters first, then defaults, in schema
