@@ -970,6 +970,9 @@ def edit_note(
 @tool_app.command()
 def build_context(
     url: str,
+    compact: Annotated[
+        bool, typer.Option("--compact", help="Omit note and observation bodies for discovery")
+    ] = False,
     depth: Optional[int] = typer.Option(1, "--depth", help="Depth of context to build"),
     timeframe: Optional[str] = typer.Option(
         "7d", "--timeframe", help="Timeframe filter (e.g., '7d', '1 week')"
@@ -1032,6 +1035,7 @@ def build_context(
                     page_size=page_size,
                     max_related=max_related,
                     output_format="json",
+                    compact=compact,
                 )
             )
 
@@ -1146,6 +1150,9 @@ def search_notes(
         Optional[str],
         typer.Argument(help="Search query string (optional when using metadata filters)"),
     ] = "",
+    compact: Annotated[
+        bool, typer.Option("--compact", help="Omit note bodies and matched excerpts for discovery")
+    ] = False,
     permalink: Annotated[bool, typer.Option("--permalink", help="Search permalink values")] = False,
     title: Annotated[bool, typer.Option("--title", help="Search title values")] = False,
     vector: Annotated[bool, typer.Option("--vector", help="Use vector retrieval")] = False,
@@ -1304,6 +1311,7 @@ def search_notes(
                     metadata_filters=metadata_filters,
                     tags=tags,
                     status=status,
+                    compact=compact,
                 )
             )
 
