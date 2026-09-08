@@ -38,6 +38,10 @@ from basic_memory.document_ingestion.raw_document import (
 from basic_memory.file_utils import ParseError
 from basic_memory.schemas.document import (
     DocumentIngestionStage,
+    DocumentMarkdownV1,
+    assemble_document_markdown,
+    derive_document_ingestion_run_path,
+    document_markdown_checksum,
     parse_document_ingestion_run_markdown,
     parse_document_markdown,
 )
@@ -179,6 +183,7 @@ async def accept_document_note(
     path = artifacts.document_file_path
     if await file_service.exists(path):
         existing_markdown = await file_service.read_file_content(path)
+        existing_checksum = canonical_db_checksum(await file_service.compute_checksum(path))
         try:
             existing = parse_document_markdown(existing_markdown)
         except (ParseError, ValueError) as error:
@@ -194,13 +199,58 @@ async def accept_document_note(
                 f"{path} has been enriched past the raw stage; refusing to overwrite it"
             )
         if raw_document_matches(existing, artifacts):
-            checksum = await file_service.compute_checksum(path)
-            return canonical_db_checksum(checksum), False
+            return existing_checksum, False
         # Same source path, different bytes or engine: the raw projection is
-        # derived state and is rebuilt from the new run.
+        # rebuilt from the new run, but only while it is still the projection an
+        # earlier run wrote. Note content is canonical, and a raw note a person
+        # has annotated must not be replaced silently.
+        await require_untouched_raw_projection(file_service, existing, path=path)
+        # Compare-and-swap: the note must still be the bytes judged untouched above.
+        if canonical_db_checksum(await file_service.compute_checksum(path)) != existing_checksum:
+            raise DocumentSidecarConflictError(
+                f"{path} changed while it was being replaced; re-run the import"
+            )
     checksum = await file_service.write_file(path, artifacts.document_markdown)
     await knowledge.index_file(path)
     return canonical_db_checksum(checksum), True
+
+
+async def require_untouched_raw_projection(
+    file_service: FileService,
+    existing: DocumentMarkdownV1,
+    *,
+    path: str,
+) -> None:
+    """Fail unless the raw sidecar on disk is still what its own run note recorded.
+
+    The indexer adds a ``permalink`` to a freshly written note; that is the one
+    change a pristine projection is allowed to carry. Anything else means a person
+    edited the note, and the rebuild must stop instead of discarding their words.
+    """
+    run_id = existing.frontmatter.ingestion.run_id
+    run_path = derive_document_ingestion_run_path(run_id)
+    if not await file_service.exists(run_path):
+        raise DocumentSidecarConflictError(
+            f"{path} was written by run {run_id} but that run note is missing; "
+            "move the note aside to rebuild it"
+        )
+    try:
+        run = parse_document_ingestion_run_markdown(await file_service.read_file_content(run_path))
+    except (ParseError, ValueError) as error:
+        raise DocumentSidecarConflictError(
+            f"{run_path} exists and is not a generated ingestion run note"
+        ) from error
+    output = run.frontmatter.output
+    recorded_checksum = output.raw.checksum if output and output.raw else None
+    pristine_frontmatter = existing.frontmatter.model_copy(update={"permalink": None})
+    pristine = assemble_document_markdown(
+        existing.model_copy(update={"frontmatter": pristine_frontmatter})
+    )
+    if recorded_checksum != document_markdown_checksum(pristine):
+        raise DocumentSidecarConflictError(
+            f"{path} has been edited since run {run_id} wrote it; "
+            "move it aside or finish enriching it before importing the source again"
+        )
 
 
 async def accept_run_note(

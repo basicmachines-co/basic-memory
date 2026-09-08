@@ -275,6 +275,108 @@ async def test_writer_rebuilds_the_raw_projection_when_the_source_changed(
     assert knowledge.indexed.count(second.document_file_path) == 2
 
 
+def with_permalink(markdown: str, permalink: str) -> str:
+    """Reproduce the indexer adding a permalink to a freshly written sidecar."""
+    document = parse_document_markdown(markdown)
+    frontmatter = document.frontmatter.model_copy(update={"permalink": permalink})
+    return assemble_document_markdown(document.model_copy(update={"frontmatter": frontmatter}))
+
+
+@pytest.mark.asyncio
+async def test_writer_rebuilds_an_untouched_sidecar_that_the_indexer_annotated(
+    file_service: FileService,
+) -> None:
+    writer = LocalRawDocumentWriter(file_service, knowledge_api())
+    first = artifacts(checksum_char="a")
+    await writer.write(first)
+    sidecar = file_service.base_path / first.document_file_path
+    sidecar.write_text(
+        with_permalink(sidecar.read_text(encoding="utf-8"), "main/data/riders.csv"),
+        encoding="utf-8",
+    )
+
+    second = await writer.write(artifacts(checksum_char="b"))
+
+    assert second.document_created is True
+    rebuilt = parse_document_markdown(sidecar.read_text(encoding="utf-8"))
+    assert rebuilt.frontmatter.source.checksum == "sha256:" + "b" * 64
+
+
+@pytest.mark.asyncio
+async def test_writer_refuses_to_replace_an_edited_raw_sidecar(file_service: FileService) -> None:
+    writer = LocalRawDocumentWriter(file_service, knowledge_api())
+    first = artifacts(checksum_char="a")
+    await writer.write(first)
+    sidecar = file_service.base_path / first.document_file_path
+    sidecar.write_text(
+        sidecar.read_text(encoding="utf-8") + "\nMy annotation about row three.\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(DocumentSidecarConflictError, match="edited since"):
+        await writer.write(artifacts(checksum_char="b"))
+
+    assert "My annotation about row three." in sidecar.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_writer_refuses_to_replace_a_raw_sidecar_without_its_run_note(
+    file_service: FileService,
+) -> None:
+    writer = LocalRawDocumentWriter(file_service, knowledge_api())
+    first = artifacts(checksum_char="a")
+    await writer.write(first)
+    (file_service.base_path / first.run_file_path).unlink()
+
+    with pytest.raises(DocumentSidecarConflictError, match="run note is missing"):
+        await writer.write(artifacts(checksum_char="b"))
+
+
+@pytest.mark.asyncio
+async def test_writer_refuses_to_replace_a_raw_sidecar_whose_run_note_is_not_generated(
+    file_service: FileService,
+) -> None:
+    writer = LocalRawDocumentWriter(file_service, knowledge_api())
+    first = artifacts(checksum_char="a")
+    await writer.write(first)
+    (file_service.base_path / first.run_file_path).write_text(
+        "# Someone's note\n", encoding="utf-8"
+    )
+
+    with pytest.raises(DocumentSidecarConflictError, match="not a generated ingestion run note"):
+        await writer.write(artifacts(checksum_char="b"))
+
+
+@pytest.mark.asyncio
+async def test_writer_refuses_when_the_sidecar_changes_before_the_replacing_write(
+    file_service: FileService, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    writer = LocalRawDocumentWriter(file_service, knowledge_api())
+    first = artifacts(checksum_char="a")
+    await writer.write(first)
+    sidecar = file_service.base_path / first.document_file_path
+    real_compute_checksum = file_service.compute_checksum
+    calls = 0
+
+    async def edit_between_checks(path: Path | str) -> str:
+        # The second checksum read is the compare-and-swap guard: mutate the file
+        # right before it so the guard sees bytes that differ from the decision.
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            sidecar.write_text(
+                sidecar.read_text(encoding="utf-8") + "\nLate edit.\n", encoding="utf-8"
+            )
+        return await real_compute_checksum(path)
+
+    monkeypatch.setattr(file_service, "compute_checksum", edit_between_checks)
+
+    with pytest.raises(DocumentSidecarConflictError, match="changed while"):
+        await writer.write(artifacts(checksum_char="b"))
+
+    assert "Late edit." in sidecar.read_text(encoding="utf-8")
+
+
 @pytest.mark.asyncio
 async def test_writer_rewrites_a_run_note_that_names_other_sidecar_bytes(
     file_service: FileService,
