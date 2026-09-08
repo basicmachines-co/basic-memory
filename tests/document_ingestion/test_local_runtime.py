@@ -303,6 +303,34 @@ async def test_writer_rebuilds_an_untouched_sidecar_that_the_indexer_annotated(
 
 
 @pytest.mark.asyncio
+async def test_unchanged_import_after_indexer_annotation_keeps_provenance_consistent(
+    file_service: FileService,
+) -> None:
+    """The permalink the indexer adds must not leak into recorded checksums.
+
+    Otherwise an unchanged re-import rewrites the run note with the annotated
+    checksum and a later source change is refused as an edit.
+    """
+    knowledge = knowledge_api()
+    writer = LocalRawDocumentWriter(file_service, knowledge)
+    first = artifacts(checksum_char="a")
+    created = await writer.write(first)
+    sidecar = file_service.base_path / first.document_file_path
+    sidecar.write_bytes(
+        with_permalink(sidecar.read_text(encoding="utf-8"), "main/data/riders.csv").encode()
+    )
+
+    unchanged = await writer.write(artifacts(checksum_char="a"))
+    rebuilt = await writer.write(artifacts(checksum_char="b"))
+
+    assert unchanged.document_created is False
+    assert unchanged.run_created is False
+    assert unchanged.document_db_checksum == created.document_db_checksum
+    assert rebuilt.document_created is True
+    assert knowledge.indexed.count(first.run_file_path) == 1
+
+
+@pytest.mark.asyncio
 async def test_writer_refuses_to_replace_an_edited_raw_sidecar(file_service: FileService) -> None:
     writer = LocalRawDocumentWriter(file_service, knowledge_api())
     first = artifacts(checksum_char="a")

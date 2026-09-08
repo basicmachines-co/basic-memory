@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+
 import pytest
 
 from basic_memory import __version__ as basic_memory_version
@@ -67,6 +69,55 @@ def test_render_csv_preview_flattens_multiline_cells() -> None:
     preview = render_csv_preview(b'note\n"line one\nline two"\n', max_rows=200)
 
     assert "| line one line two |" in preview.markdown
+
+
+def test_render_csv_preview_flattens_crlf_and_lone_cr_inside_cells() -> None:
+    preview = render_csv_preview(b'note\r\n"line one\r\nline two\rline three"\r\n', max_rows=200)
+
+    assert "| line one line two line three |" in preview.markdown
+    assert "\r" not in preview.markdown
+
+
+def test_render_csv_preview_accepts_fields_larger_than_the_stdlib_default() -> None:
+    wide = b"x" * 200_000
+    preview = render_csv_preview(b"blob\n" + wide + b"\n", max_rows=200)
+
+    assert preview.row_count == 1
+    assert wide.decode() in preview.markdown
+
+
+def test_render_csv_preview_names_a_parser_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The lenient reader only fails on a field above the process-wide size limit,
+    # which a bounded source cannot produce under default limits; drive the
+    # translation directly. Real readers fail while iterating, not on construction.
+    class FailingReader:
+        def __iter__(self) -> FailingReader:
+            return self
+
+        def __next__(self) -> list[str]:
+            raise csv.Error("field larger than field limit (131072)")
+
+    monkeypatch.setattr(csv, "reader", lambda *args, **kwargs: FailingReader())
+
+    with pytest.raises(CsvExtractionError, match="could not be parsed: field larger"):
+        render_csv_preview(b"a,b\n1,2\n", max_rows=200)
+
+
+def test_render_csv_preview_only_raises_the_field_size_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[int] = []
+
+    def record_limit(new_limit: int | None = None) -> int:
+        if new_limit is not None:
+            seen.append(new_limit)
+        return 10**9
+
+    monkeypatch.setattr(csv, "field_size_limit", record_limit)
+
+    render_csv_preview(b"a\n1\n", max_rows=200, max_field_bytes=1024)
+
+    assert seen == []
 
 
 def test_render_csv_preview_names_an_empty_file() -> None:
