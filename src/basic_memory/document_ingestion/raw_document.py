@@ -52,7 +52,9 @@ from basic_memory.schemas.document import (
 # Actor source recorded on generated notes; see VALID_NOTE_OBJECT_SOURCES.
 DOCUMENT_INGESTION_SOURCE = "document_ingestion"
 PDF_RAW_PIPELINE_VERSION = "pdf-inspector-raw-v1"
-PDF_RAW_EXTRACTION_PROFILE = "pdf-inspector-v1"
+# Page-map provenance changes the accepted envelope; a new profile prevents
+# idempotent writers from reusing a prior run that lacks the map.
+PDF_RAW_EXTRACTION_PROFILE = "pdf-inspector-v2"
 
 
 class DocumentSourceChangedError(RuntimeError):
@@ -237,6 +239,7 @@ def build_raw_document_artifacts(
         requires_ocr=bool(extracted.pages_needing_ocr),
         ocr_page_count=len(extracted.pages_needing_ocr),
         pages_needing_ocr=extracted.pages_needing_ocr,
+        page_map=extracted.page_map,
         confidence=extracted.confidence,
         has_encoding_issues=extracted.has_encoding_issues,
         has_tables=bool(extracted.pages_with_tables),

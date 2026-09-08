@@ -5,14 +5,27 @@ from __future__ import annotations
 import io
 import sys
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
+from uuid import UUID
 
 import pytest
 
 from basic_memory.document_ingestion import pdf_inspector_worker
 from basic_memory.document_ingestion.pdf_inspector import PDF_INSPECTOR_ENGINE, PdfInspectorOutput
+from basic_memory.document_ingestion.pdf_inspector import PdfInspectorLimits
+from basic_memory.document_ingestion.raw_document import (
+    DocumentSourceEntity,
+    DocumentSourceSnapshot,
+    build_raw_document_artifacts,
+    build_raw_ingestion_run_markdown,
+)
+from basic_memory.schemas.document import (
+    parse_document_markdown,
+    parse_document_ingestion_run_markdown,
+)
 
 
 @dataclass(frozen=True)
@@ -69,6 +82,52 @@ def test_inspect_pdf_bytes_maps_native_output(monkeypatch: pytest.MonkeyPatch) -
     assert result.extracted_page_count == 1
     assert result.pages_needing_ocr == (2,)
     assert result.markdown == "<!-- Page 1 -->\n\n# Page one\n\n<!-- Page 2: OCR required -->"
+
+
+def test_page_map_survives_document_and_run_serialization(monkeypatch: pytest.MonkeyPatch) -> None:
+    engine = fake_engine(pages=(FakePage(0, False, "é🙂\r\nQuote"), FakePage(1, True, "")))
+    monkeypatch.setattr(pdf_inspector_worker, "pdf_inspector", engine)
+    extracted = pdf_inspector_worker.inspect_pdf_bytes(
+        b"%PDF-test", max_pages=10, max_output_bytes=10_000
+    )
+    now = datetime.now(UTC)
+    artifacts = build_raw_document_artifacts(
+        DocumentSourceSnapshot(
+            entity=DocumentSourceEntity(
+                entity_id=1,
+                external_id=UUID("11111111-1111-1111-1111-111111111111"),
+                file_path="report.pdf",
+                media_type="application/pdf",
+            ),
+            content=b"%PDF-test",
+            checksum="sha256:" + "a" * 64,
+            size_bytes=9,
+            storage_etag="source-version",
+        ),
+        extracted,
+        limits=PdfInspectorLimits(),
+        started_at=now,
+        extracted_at=now,
+    )
+    document = parse_document_markdown(artifacts.document_markdown)
+    run = parse_document_ingestion_run_markdown(
+        build_raw_ingestion_run_markdown(
+            artifacts, raw_checksum="sha256:" + "b" * 64, raw_created_at=now
+        )
+    )
+    assert run.frontmatter.extraction == document.frontmatter.extraction
+    page_map = document.frontmatter.extraction.page_map
+    assert page_map is not None
+    assert page_map == extracted.page_map
+    start = document.body.index("é🙂")
+    assert page_map.resolve_span(document.body, start=start, end=start + 2) == (1,)
+    start = document.body.index("OCR required")
+    assert page_map.resolve_span(document.body, start=start, end=start + 3) == (2,)
+    with pytest.raises(ValueError, match="every physical page"):
+        PdfInspectorOutput.model_validate({**extracted.model_dump(), "page_count": 3})
+    extraction = document.frontmatter.extraction
+    with pytest.raises(ValueError, match="every physical page"):
+        type(extraction).model_validate({**extraction.model_dump(), "page_count": 3})
 
 
 @pytest.mark.parametrize(

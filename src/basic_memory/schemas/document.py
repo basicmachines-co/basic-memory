@@ -31,6 +31,7 @@ from pydantic import (
 )
 
 from basic_memory.file_utils import dump_frontmatter, parse_frontmatter, remove_frontmatter
+from basic_memory.schemas.document_page_map import DocumentPageMapV1
 
 if TYPE_CHECKING:  # pragma: no cover - static import only
     from basic_memory.markdown.entity_parser import EntityContent
@@ -132,6 +133,7 @@ class DocumentExtractionV1(_DocumentContractModel):
     requires_ocr: StrictBool
     ocr_page_count: int = Field(ge=0, strict=True)
     pages_needing_ocr: tuple[StrictInt, ...] = ()
+    page_map: DocumentPageMapV1 | None = None
     confidence: float | None = Field(default=None, ge=0.0, le=1.0, strict=True)
     has_encoding_issues: StrictBool = False
     has_tables: StrictBool = False
@@ -144,6 +146,8 @@ class DocumentExtractionV1(_DocumentContractModel):
 
     @model_validator(mode="after")
     def validate_page_diagnostics(self) -> "DocumentExtractionV1":
+        if self.page_map is not None and len(self.page_map.pages) != self.page_count:
+            raise ValueError("page map must contain every physical page")
         if self.extracted_page_count > self.page_count:
             raise ValueError("extracted_page_count cannot exceed page_count")
         if self.ocr_page_count != len(self.pages_needing_ocr):

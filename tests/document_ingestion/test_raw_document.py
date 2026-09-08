@@ -105,7 +105,7 @@ def test_build_raw_document_artifacts_is_typed_and_deterministic() -> None:
     assert parsed.frontmatter.type == "document"
     assert parsed.frontmatter.source.storage_etag == "etag-1"
     assert parsed.frontmatter.extraction.status is DocumentExtractionStatus.complete
-    assert parsed.frontmatter.extraction.profile == "pdf-inspector-v1"
+    assert parsed.frontmatter.extraction.profile == "pdf-inspector-v2"
     assert parsed.frontmatter.extraction.options_hash == extraction_options_checksum(limits)
     assert parsed.frontmatter.extraction.classification == "text_based"
     assert parsed.frontmatter.extraction.duration_ms == 12
