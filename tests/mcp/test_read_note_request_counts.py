@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from httpx import Response
@@ -382,3 +383,29 @@ async def test_exact_id_helper_does_not_fabricate_frontmatter_from_entity_metada
 
     assert result["content"] == "plain body\n"
     assert result["frontmatter"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failed_search", ["title", "text"])
+async def test_fallback_search_failure_is_not_reported_as_missing(
+    monkeypatch: pytest.MonkeyPatch, failed_search: str
+) -> None:
+    import importlib
+
+    read_note_module = importlib.import_module("basic_memory.mcp.tools.read_note")
+    clients_module = importlib.import_module("basic_memory.mcp.clients")
+    _patch_project_routing(monkeypatch, read_note_module)
+    monkeypatch.setattr(
+        clients_module.KnowledgeClient,
+        "resolve_entity",
+        AsyncMock(side_effect=RuntimeError("force search fallback")),
+    )
+
+    async def search_result(*, search_type: str, **_kwargs: object) -> dict[str, object] | str:
+        if search_type == failed_search:
+            return "Search service unavailable; retry later"
+        return {"results": [], "has_more": False}
+
+    monkeypatch.setattr(read_note_module, "search_notes", search_result)
+    with pytest.raises(RuntimeError, match="Search service unavailable"):
+        await read_note_module.read_note("Unknown Note", project="main", output_format="json")

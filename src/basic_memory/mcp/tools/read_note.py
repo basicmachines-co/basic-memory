@@ -349,7 +349,13 @@ async def read_note(
                     output_format="json",
                     context=context,
                 )
-                return cast(dict[str, object], response) if isinstance(response, dict) else {}
+                # JSON searches return a dict even when empty. Text here is a
+                # formatted search failure, not evidence that the note is absent.
+                if not isinstance(response, dict):
+                    if output_format == "json" or line_scan:
+                        raise RuntimeError(f"Fallback search failed: {response}")
+                    return {}
+                return cast(dict[str, object], response)
 
             def _result_title(item: dict[str, object]) -> str:
                 return str(item.get("title") or "")
