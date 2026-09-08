@@ -75,6 +75,17 @@ def test_missing_turn_identity_does_not_create_evidence() -> None:
     assert guard.transform(session_id="a", response_text="Saved to Basic Memory.") is None
 
 
+def test_only_the_save_clause_supplies_qualifications() -> None:
+    for response in [
+        "No problem, I've saved it to Basic Memory.",
+        "I've saved it. Do you need anything else?",
+        "Sure, I saved it in Basic Memory.",
+        "Done — I've recorded it.",
+    ]:
+        assert _module.claims_memory_save(response, memory_requested=True)
+    assert not _module.claims_memory_save("Saved the image to disk.", memory_requested=True)
+
+
 def test_reported_hermes_acknowledgment_is_corrected() -> None:
     guard = _module.SaveClaimGuard()
     guard.begin_turn(
