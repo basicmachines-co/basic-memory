@@ -13,6 +13,7 @@ from rich.panel import Panel
 
 from basic_memory.cli.app import import_app
 from basic_memory.cli.commands.command_utils import run_with_cleanup
+from basic_memory.cli.commands.routing import force_routing
 from basic_memory.config import ConfigManager
 
 if TYPE_CHECKING:
@@ -84,7 +85,13 @@ def document(
 ) -> None:
     """Write ``<file>.md`` next to the source and a run note under document-ingestion-runs/."""
     try:
-        project_name, result = run_with_cleanup(import_document(path, project))
+        # Trigger: the project may be configured for cloud routing.
+        # Why: this runtime reads the source and writes the sidecar in the local
+        #      project directory, so the API it indexes through must be the local
+        #      one; a cloud client would be asked to index files it cannot see.
+        # Outcome: local ASGI routing for the whole command, whatever the project mode.
+        with force_routing(local=True):
+            project_name, result = run_with_cleanup(import_document(path, project))
     except typer.BadParameter as error:
         typer.echo(f"Error: {error}", err=True)
         raise typer.Exit(1)
