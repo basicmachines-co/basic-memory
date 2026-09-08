@@ -26,7 +26,7 @@ search_notes(query=None, project=None, project_id=None,
              entity_types=None, categories=None, after_date=None,
              metadata_filters=None, tags=None, status=None,
              min_similarity=None, valid_at=None, valid_overlaps=None,
-             time_kind=None)
+             time_kind=None, compact=False)
 ```
 
 CLI:
@@ -72,6 +72,14 @@ query. Because one note can carry several assertions that disagree, these
 queries return observation-level results, each carrying the assertion that
 matched.
 
+**Compact discovery** (`compact=True`) omits `content`, `matched_chunk`, and
+their content-length/truncation fields. Identifiers, metadata, relation targets,
+scores, temporal assertions, and pagination are retained. It works with JSON or
+text output and with `search_all_projects=True`. Read selected notes afterward
+with `read_note`; a search hit is discovery, not full content verification.
+This reduces the MCP response, not the underlying API query or database work.
+It is not a hard token budget: titles and metadata can still be large.
+
 ## PARAMETERS
 
 - **query** (string | null, optional, default: None) — Optional search query string (supports boolean operators, phrases, patterns). Omit or pass None for filter-only searches using metadata_filters, tags, or status.
@@ -93,6 +101,7 @@ matched.
 - **valid_at** (string | null, optional, default: None) — Optional date ("2026-07-28") or RFC 3339 instant ("2026-07-28T09:00:00Z"; a timestamp with no offset is read as UTC). Returns sources whose authored valid range contains it. Sources with no temporal qualifier are excluded. Aliases: as_of, valid_on.
 - **valid_overlaps** (string | null, optional, default: None) — Optional PostgreSQL-style range literal ("[2026-06-10,2026-07-27)", "(,2026-07-27]", "[2026-06-10,)"). Returns sources whose authored valid range overlaps it. Mutually exclusive with valid_at; also excludes undated sources. Aliases: overlaps, valid_during.
 - **time_kind** (string | null, optional, default: None) — Optional kind of valid time to narrow to: "effective", "valid", "occurred", "due", or "mentioned". Valid on its own. Alias: kind.
+- **compact** (boolean, optional, default: False) — Omit note bodies and matched excerpts from results. Keep identifiers, metadata, relation targets, scores and pagination for discovery, then read selected notes.
 
 ## MCP USAGE
 
