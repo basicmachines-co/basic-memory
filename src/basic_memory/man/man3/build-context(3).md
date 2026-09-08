@@ -21,7 +21,8 @@ MCP:
 
 ```
 build_context(url, project=None, project_id=None, depth=1, timeframe="7d",
-              page=1, page_size=10, max_related=10, output_format="json")
+              page=1, page_size=10, max_related=10, output_format="json",
+              compact=False)
 ```
 
 CLI:
@@ -43,6 +44,12 @@ URL forms: `"folder/note"`, `"memory://folder/note"`, and patterns
 (`"folder/*"` — but see GOTCHAS for cloud projects). Each traversal step
 costs two depth levels internally (relation, then entity).
 
+Use `compact=True` for graph discovery without note or observation bodies.
+JSON keeps the graph shape, identifiers, categories, short observation titles,
+relations and pagination; text omits the observation section and note bodies.
+Read selected notes with `read_note`. The default response is unchanged.
+This reduces MCP output, not API traversal work, and is not a fixed token limit.
+
 ## PARAMETERS
 
 - **url** (string, required) — memory:// URI pointing to discussion content (e.g. memory://specs/search), or a bare permalink path.
@@ -54,6 +61,7 @@ costs two depth levels internally (relation, then entity).
 - **page_size** (integer, optional, default: 10) — Number of primary results to return per page (default: 10, maximum: 50)
 - **max_related** (integer, optional, default: 10) — Maximum total related results to return (default: 10, maximum: 100)
 - **output_format** (string, optional, default: "json") — Response format - "json" for structured JSON dict, "text" for compact markdown text
+- **compact** (boolean, optional, default: False) — Omit note and observation bodies for graph discovery. Preserve identifiers, relation targets and pagination; use read_note for selected content. This reduces response size, not traversal work or a guaranteed token budget.
 
 ## MCP USAGE
 
