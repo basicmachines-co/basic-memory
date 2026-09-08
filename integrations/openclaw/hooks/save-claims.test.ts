@@ -47,7 +47,13 @@ function harness() {
 }
 
 describe("save claim delivery guard", () => {
-  for (const prompt of ["Save this", "Record this", "Note this"]) {
+  for (const prompt of [
+    "Save this",
+    "Record this",
+    "Note this",
+    "Please save my preference",
+    "Record my renewal date",
+  ]) {
     it(`treats ${prompt} as a capture request`, () => {
       const host = harness()
       host.dispatch(
@@ -149,6 +155,10 @@ describe("claim recognition", () => {
     "I've saved it, no problem.",
     "It's saved in Basic Memory.",
     "That is now recorded in Basic Memory.",
+    "Saved it to memory://notes/renewal.",
+    "- Saved to Basic Memory.",
+    "1. Saved to Basic Memory.",
+    "I saved it in Basic Memory, but did not change any other settings.",
   ]) {
     it(`ignores unrelated qualifications: ${text}`, () => {
       expect(claimsMemorySave(text, true)).toBe(true)
@@ -164,6 +174,7 @@ describe("claim recognition", () => {
   }
   for (const text of [
     "I saved it locally, but did not store it in Basic Memory.",
+    "I saved it in Basic Memory, but I did not actually save it.",
     "Saved? No, I did not.",
     "I have saved nothing.",
     "> I saved it.",

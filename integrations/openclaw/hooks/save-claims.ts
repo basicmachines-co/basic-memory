@@ -9,7 +9,7 @@ interface RunEvidence {
 }
 
 const MAX_TRACKED_RUNS = 256
-const MEMORY_NAME = /\bbasic[- ]memory\b/i
+const MEMORY_NAME = /\bbasic[- ]memory\b|\bmemory:\/\//i
 
 export function claimsMemorySave(
   text: string,
@@ -23,16 +23,27 @@ export function claimsMemorySave(
       continue
     }
     if (fenced || /^[>"']/.test(line)) continue
-    for (const sentence of line.replace(/\*\*/g, "").split(/(?<=[.!?])\s+/)) {
+    const plain = line
+      .replace(/\*\*|__/g, "")
+      .replace(/^(?:[-+*]|\d+[.)])\s+/, "")
+    for (const sentence of plain.split(/(?<=[.!?])\s+/)) {
       const match =
         /(?:^|[,:;—–]\s+)(?:I(?:['’]ve| have)?\s+|(?:it|that|this)(?:['’]s| is| has been)\s+(?:now\s+)?)?(?:saved|stored|recorded|remembered)\b/i.exec(
           sentence,
         )
       if (!match) continue
+      // A later retraction of the save still qualifies it; a denial of an
+      // unrelated action (such as changing settings) does not.
+      if (
+        /\b(?:not|never)\s+(?:actually\s+)?(?:save|store|record|remember|write|persist)\b/i.test(
+          sentence,
+        )
+      )
+        continue
       const claim = sentence
         .slice(match.index)
         .replace(/^[,:;—–]\s+/, "")
-        .split(/[;,]\s+(?!but\b|however\b|yet\b)/i)[0]
+        .split(/[;,]\s+/)[0]
       if (!memoryRequested && !MEMORY_NAME.test(claim)) continue
       // Only the save clause supplies qualifications; a greeting or later question does not.
       if (/\b(?:not|never|nothing|none|zero|no)\b|\?/i.test(claim)) continue
@@ -82,7 +93,7 @@ export function registerSaveClaimGuard(api: OpenClawPluginApi): void {
     if (runs.has(runKey)) return
     runs.set(runKey, {
       memoryRequested:
-        /\b(?:remember|(?:save|record|note)\s+(?:this|that|it)\b)/i.test(
+        /\b(?:remember|(?:save|record|note)\s+(?:this|that|it|my|our|your|the|a|an)\b)/i.test(
           event.prompt,
         ) || MEMORY_NAME.test(event.prompt),
       writeObserved: false,
