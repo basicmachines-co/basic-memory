@@ -770,14 +770,11 @@ def read_note(
                 )
             )
 
-        # MCP tool returns an error field on failure in JSON mode (e.g.
-        # SECURITY_VALIDATION_ERROR on a path-traversal identifier). A genuine
-        # not-found returns null fields with no `error` key, so it still exits 0.
-        # Trigger: result carries a non-empty `error`.
-        # Why: parity with edit-note/delete-note/search-notes so a blocked read
-        #      surfaces a non-zero exit instead of looking like success.
-        # Outcome: print the error to stderr and exit non-zero.
-        if isinstance(result, dict) and result.get("error"):
+        # A missing note may carry useful suggestions. Render those in the
+        # requested mode before exiting non-zero; other failures keep the
+        # existing JSON diagnostic path.
+        not_found = isinstance(result, dict) and result.get("error") == "NOTE_NOT_FOUND"
+        if isinstance(result, dict) and result.get("error") and not not_found:
             typer.echo(f"Error: {result['error']}", err=True)
             _print_json(result)
             raise typer.Exit(1)
@@ -801,9 +798,12 @@ def read_note(
             else:
                 console.print(Text(text))
         elif mode == "plain":
-            _plain_read_note(result, include_frontmatter=include_frontmatter)
+            _plain_read_note(result, include_frontmatter=include_frontmatter and not not_found)
         else:
             _display_read_note(result, include_frontmatter=include_frontmatter)
+        if not_found:
+            typer.echo(f"Error: Note not found: {identifier}", err=True)
+            raise typer.Exit(1)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
@@ -970,6 +970,9 @@ def edit_note(
 @tool_app.command()
 def build_context(
     url: str,
+    compact: Annotated[
+        bool, typer.Option("--compact", help="Omit note and observation bodies for discovery")
+    ] = False,
     depth: Optional[int] = typer.Option(1, "--depth", help="Depth of context to build"),
     timeframe: Optional[str] = typer.Option(
         "7d", "--timeframe", help="Timeframe filter (e.g., '7d', '1 week')"
@@ -1032,6 +1035,7 @@ def build_context(
                     page_size=page_size,
                     max_related=max_related,
                     output_format="json",
+                    compact=compact,
                 )
             )
 
@@ -1146,6 +1150,9 @@ def search_notes(
         Optional[str],
         typer.Argument(help="Search query string (optional when using metadata filters)"),
     ] = "",
+    compact: Annotated[
+        bool, typer.Option("--compact", help="Omit note bodies and matched excerpts for discovery")
+    ] = False,
     permalink: Annotated[bool, typer.Option("--permalink", help="Search permalink values")] = False,
     title: Annotated[bool, typer.Option("--title", help="Search title values")] = False,
     vector: Annotated[bool, typer.Option("--vector", help="Use vector retrieval")] = False,
@@ -1304,6 +1311,7 @@ def search_notes(
                     metadata_filters=metadata_filters,
                     tags=tags,
                     status=status,
+                    compact=compact,
                 )
             )
 

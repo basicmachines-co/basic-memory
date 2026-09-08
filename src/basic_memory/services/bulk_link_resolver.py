@@ -34,6 +34,8 @@ class RelationTargetReference:
     @classmethod
     def parse(cls, link_text: str) -> "RelationTargetReference":
         """Normalize wikilink syntax once for the whole bulk-resolution pass."""
+        if link_text.startswith("/"):
+            return cls(original=link_text, identifier=link_text, explicitly_qualified=False)
         clean_text, _ = normalize_link_text(link_text)
         return cls(
             original=link_text,
@@ -205,6 +207,11 @@ class BulkLinkResolutionSnapshot:
     def resolve(self, target: RelationTargetReference) -> Entity | None:
         """Resolve one parsed target without additional I/O."""
         current_index = self.entity_indexes[self.current_project_id]
+
+        # Rooted Markdown targets are file identities, never title/permalink or
+        # cross-project guesses, including while their target is still absent.
+        if target.identifier.startswith("/"):
+            return current_index.by_file_path.get(target.identifier[1:])
 
         try:
             external_id = str(uuid_mod.UUID(target.identifier))

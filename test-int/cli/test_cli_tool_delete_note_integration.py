@@ -36,14 +36,19 @@ def _write_note(
     return json.loads(result.stdout)
 
 
-def _read_note(identifier: str, *, project: str | None = None) -> dict[str, Any]:
+def _read_note(
+    identifier: str, *, project: str | None = None, missing: bool = False
+) -> dict[str, Any]:
     args = ["tool", "read-note", identifier]
     if project is not None:
         args.extend(["--project", project])
 
     result = runner.invoke(cli_app, args)
-    assert result.exit_code == 0, result.output
-    return json.loads(result.stdout)
+    assert result.exit_code == (1 if missing else 0), result.output
+    payload = json.loads(result.stdout)
+    if missing:
+        assert payload["error"] == "NOTE_NOT_FOUND"
+    return payload
 
 
 def _delete_note(
@@ -114,7 +119,7 @@ def test_delete_note_removes_file_database_record_and_search_result(
     }
     assert not note_path.exists()
 
-    missing = _read_note(note["permalink"])
+    missing = _read_note(note["permalink"], missing=True)
     assert missing["title"] is None
     assert missing["permalink"] is None
     assert missing["content"] is None
@@ -177,7 +182,7 @@ def test_delete_note_project_id_takes_precedence_over_wrong_project_name(
     assert exit_code == 0, output
     assert payload["deleted"] is True
     assert payload["title"] == "CLI Delete By Project ID"
-    assert _read_note(note["permalink"])["title"] is None
+    assert _read_note(note["permalink"], missing=True)["title"] is None
 
 
 def test_delete_note_memory_url_detects_project_from_identifier(
@@ -197,7 +202,7 @@ def test_delete_note_memory_url_detects_project_from_identifier(
     assert exit_code == 0, output
     assert payload["deleted"] is True
     assert payload["permalink"] == note["permalink"]
-    assert _read_note(note["permalink"], project=test_project.name)["title"] is None
+    assert _read_note(note["permalink"], project=test_project.name, missing=True)["title"] is None
 
 
 def test_delete_directory_removes_nested_files_database_records_and_search_results(
@@ -238,7 +243,7 @@ def test_delete_directory_removes_nested_files_database_records_and_search_resul
     assert not any(path.exists() for path in note_paths)
 
     for note in notes:
-        assert _read_note(note["permalink"])["title"] is None
+        assert _read_note(note["permalink"], missing=True)["title"] is None
 
     search = _search_notes("CLI Delete Directory", mode_flag="--title")
     assert search["total"] == 0

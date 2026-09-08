@@ -31,7 +31,7 @@ from basic_memory.mcp.tools.project_management import (
 # ChatGPT-compatible tools
 from basic_memory.mcp.tools.chatgpt_tools import search, fetch
 
-# POSIX-style read-side tools (hidden unless enable_posix_tools is set, #1399)
+# POSIX-style read-side tools (enabled by default at server startup, #1476)
 from basic_memory.mcp.tools.posix_tools import cat, find, grep, ls, man, tail
 
 # Schema tools

@@ -67,7 +67,7 @@ For normal installs, leave `bmPath` alone and make sure `bm` is on Pi's PATH. Wo
 
 ## Commands and tools
 
-- `/bm-status` — show effective package settings.
+- `/bm-status` — show the explicit project (or `unconfigured`), workspace trust, and effective automation state. Auto recall/capture report `blocked` with the reason when a project mapping or workspace trust is missing, and `off (configured)` when disabled in settings.
 - `/bm-recall [topic]` — search recent Pi checkpoints and inject fenced reference data.
 - `/bm-capture [title]` — write the current working thread as a `pi_session` note.
 - `bm_recall` — LLM-callable recall tool.
@@ -136,7 +136,7 @@ Model-backed end-to-end runs should use temporary `BASIC_MEMORY_HOME`, `BASIC_ME
 
 ## Privacy defaults
 
-Automatic recall and capture are enabled by default so a configured project gets continuity immediately. With no explicit `.pi/basic-memory.json` project mapping, recall shows setup guidance and hook-backed capture has no write destination, so it does not silently write to an ambient default project.
+Automatic recall and capture default to enabled in configuration, but run only with an explicit project mapping and workspace trust. With no explicit `.pi/basic-memory.json` project mapping, manual recall shows setup guidance and automatic recall/capture are blocked, so they do not silently use an ambient default project.
 
 The package uses the shared `bm hook --harness pi` flow by default so Pi follows the same predictable Basic Memory lifecycle contract as other agent harnesses. Set `BASIC_MEMORY_PI_TRUST_WORKSPACE=1` only for workspaces you trust to enable automatic recall/capture from that workspace's project mapping. Set `"autoRecall": false`, `"autoCapture": false`, or `"useHookFlow": false` to make the behavior quieter.
 

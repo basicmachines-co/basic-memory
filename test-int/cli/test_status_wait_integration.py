@@ -35,3 +35,38 @@ def test_status_wait_returns_once_indexed(app, app_config, test_project, config_
     data = json.loads(result.output[start:])
     assert data["total_files"] == 1
     assert data["observed_files"][0]["path"] == "test-notes/Wait Test Note.md"
+
+
+def test_unindexed_status_counts_files_without_hashing(
+    app, app_config, test_project, config_manager, monkeypatch
+) -> None:
+    """First status walks eligible paths without reading their contents."""
+    from pathlib import Path
+
+    from basic_memory.services import FileService
+
+    root = Path(test_project.path)
+    (root / "notes").mkdir()
+    (root / "notes" / "new.md").write_text("# New\n", encoding="utf-8")
+    (root / "asset.txt").write_text("unindexed asset", encoding="utf-8")
+    (root / ".hidden.md").write_text("hidden", encoding="utf-8")
+
+    async def unexpected_checksum(self: FileService, path: str) -> str:
+        raise AssertionError(f"Unindexed status must not hash {path}")
+
+    monkeypatch.setattr(FileService, "compute_checksum", unexpected_checksum)
+    result = runner.invoke(cli_app, ["status", "--json"])
+
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.stdout)
+    assert data["total_files"] == 2
+    assert {item["path"] for item in data["observed_files"]} == {"notes/new.md", "asset.txt"}
+    assert all(item["checksum"] is None for item in data["observed_files"])
+    assert data["readiness"]["phase"] == "never_indexed"
+    assert data["readiness"]["indexed_entities"] == 0
+    files = next(stage for stage in data["readiness"]["stages"] if stage["name"] == "files")
+    assert files["pending"] == files["total"] == 2
+    assert {item["path"]: item["size"] for item in data["observed_files"]} == {
+        "notes/new.md": (root / "notes" / "new.md").stat().st_size,
+        "asset.txt": (root / "asset.txt").stat().st_size,
+    }

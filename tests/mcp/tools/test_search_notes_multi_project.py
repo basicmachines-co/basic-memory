@@ -39,8 +39,10 @@ def local_routing(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("compact", [False, True])
+@pytest.mark.parametrize("observations", [False, True])
 async def test_search_notes_search_all_projects_qualifies_result_permalinks(
-    monkeypatch, cloud_routing
+    monkeypatch, cloud_routing, compact, observations
 ):
     """Multi-project search belongs to search_notes and keeps result ids routable."""
     clients_mod = importlib.import_module("basic_memory.mcp.clients")
@@ -91,9 +93,12 @@ async def test_search_notes_search_all_projects_qualifies_result_permalinks(
                         title=title,
                         permalink="main/tests/mcp-test-note",
                         content="MCP content",
-                        type=SearchItemType.ENTITY,
+                        type=SearchItemType.OBSERVATION if observations else SearchItemType.ENTITY,
+                        category="fact" if observations else None,
                         score=score,
-                        file_path="/main/tests/mcp-test-note.md",
+                        file_path="tests/Exact Note.md"
+                        if observations
+                        else "/main/tests/mcp-test-note.md",
                     )
                 ],
                 current_page=page,
@@ -110,6 +115,7 @@ async def test_search_notes_search_all_projects_qualifies_result_permalinks(
         query="MCP Test Note",
         search_all_projects=True,
         output_format="json",
+        compact=compact,
     )
 
     assert isinstance(result, dict)
@@ -117,10 +123,13 @@ async def test_search_notes_search_all_projects_qualifies_result_permalinks(
         ("personal/main", "11111111-1111-1111-1111-111111111111"),
         ("team-paul/main", "22222222-2222-2222-2222-222222222222"),
     ]
+    path = "tests/Exact Note.md" if compact and observations else "tests/mcp-test-note"
     assert [item["permalink"] for item in result["results"]] == [
-        "team-paul/main/tests/mcp-test-note",
-        "personal/main/tests/mcp-test-note",
+        f"team-paul/main/{path}",
+        f"personal/main/{path}",
     ]
+    if compact:
+        assert all("content" not in item for item in result["results"])
     assert result["total_is_exact"] is True
 
 
@@ -372,7 +381,10 @@ async def test_search_notes_search_all_projects_propagates_retryable_service_out
 
 
 @pytest.mark.asyncio
-async def test_search_notes_search_all_projects_local_omits_project_id(monkeypatch, local_routing):
+@pytest.mark.parametrize("compact_observations", [False, True])
+async def test_search_notes_search_all_projects_local_omits_project_id(
+    monkeypatch, local_routing, compact_observations
+):
     """Without a cloud route, fan-out must address each project by name only.
 
     project_id (external UUID) routes through the cloud v2 API path, which
@@ -422,7 +434,9 @@ async def test_search_notes_search_all_projects_local_omits_project_id(monkeypat
                         title=f"Note in {self.project_id or 'local'}",
                         permalink="notes/example",
                         content="",
-                        type=SearchItemType.ENTITY,
+                        type=SearchItemType.OBSERVATION
+                        if compact_observations
+                        else SearchItemType.ENTITY,
                         score=0.5,
                         file_path="/notes/example.md",
                     )
@@ -441,6 +455,7 @@ async def test_search_notes_search_all_projects_local_omits_project_id(monkeypat
         query="anything",
         search_all_projects=True,
         output_format="json",
+        compact=compact_observations,
     )
 
     assert isinstance(result, dict)
@@ -450,3 +465,8 @@ async def test_search_notes_search_all_projects_local_omits_project_id(monkeypat
     )
     assert result["total"] == 2
     assert result["total_is_exact"] is True
+    if compact_observations:
+        assert [item["permalink"] for item in result["results"]] == [
+            "alpha/notes/example.md",
+            "beta/notes/example.md",
+        ]

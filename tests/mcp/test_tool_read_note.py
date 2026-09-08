@@ -5,12 +5,22 @@ from types import SimpleNamespace
 from textwrap import dedent
 
 import pytest
+from fastmcp.exceptions import ToolError
+from httpx import HTTPStatusError, Request, Response
 
 from basic_memory import db
 from basic_memory.mcp.tools import write_note, read_note
 from basic_memory.mcp.tools.read_note import _parse_opening_frontmatter
 from tests.mcp.conftest import ContextState, ctx
 from typing import override
+
+
+def lookup_miss() -> ToolError:
+    request = Request("POST", "http://test/knowledge/resolve")
+    response = Response(404, request=request)
+    error = ToolError("Note not found")
+    error.__cause__ = HTTPStatusError("Note not found", request=request, response=response)
+    return error
 
 
 def test_parse_opening_frontmatter_handles_crlf():
@@ -61,7 +71,7 @@ async def test_read_note_title_search_fallback_fetches_by_permalink(monkeypatch,
         async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
             # Fail on the direct identifier to force fallback to title search
             if identifier == direct_identifier:
-                raise RuntimeError("force direct lookup failure")
+                raise lookup_miss()
             return await super().resolve_entity(identifier, strict=strict)
 
     monkeypatch.setattr(clients_mod, "KnowledgeClient", SelectiveKnowledgeClient)
@@ -112,7 +122,7 @@ async def test_read_note_returns_related_results_when_text_search_finds_matches(
     class FailingKnowledgeClient(OriginalKnowledgeClient):
         @override
         async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
-            raise RuntimeError("force fallback")
+            raise lookup_miss()
 
     monkeypatch.setattr(clients_mod, "KnowledgeClient", FailingKnowledgeClient)
     monkeypatch.setattr(read_note_module, "search_notes", fake_search_notes_fn)
@@ -173,7 +183,7 @@ async def test_read_note_forwards_pagination_to_fallback_search(monkeypatch, app
     class FailingKnowledgeClient(OriginalKnowledgeClient):
         @override
         async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
-            raise RuntimeError("force fallback")
+            raise lookup_miss()
 
     monkeypatch.setattr(clients_mod, "KnowledgeClient", FailingKnowledgeClient)
     monkeypatch.setattr(read_note_module, "search_notes", fake_search_notes_fn)
@@ -216,7 +226,7 @@ async def test_read_note_title_fallback_finds_exact_match_on_later_page(
         async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
             # Fail on the direct identifier to force fallback to title search
             if identifier == direct_identifier:
-                raise RuntimeError("force direct lookup failure")
+                raise lookup_miss()
             return await super().resolve_entity(identifier, strict=strict)
 
     monkeypatch.setattr(clients_mod, "KnowledgeClient", SelectiveKnowledgeClient)
@@ -261,7 +271,7 @@ async def test_read_note_title_fallback_finds_exact_match_with_small_page_size(
         async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
             # Fail on the direct identifier to force fallback to title search
             if identifier == direct_identifier:
-                raise RuntimeError("force direct lookup failure")
+                raise lookup_miss()
             return await super().resolve_entity(identifier, strict=strict)
 
     monkeypatch.setattr(clients_mod, "KnowledgeClient", SelectiveKnowledgeClient)
@@ -325,7 +335,7 @@ async def test_read_note_title_fallback_pages_past_higher_ranked_fuzzy_titles(
         async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
             # Fail on the direct identifier to force fallback to title search
             if identifier == direct_identifier:
-                raise RuntimeError("force direct lookup failure")
+                raise lookup_miss()
             return await super().resolve_entity(identifier, strict=strict)
 
     monkeypatch.setattr(clients_mod, "KnowledgeClient", SelectiveKnowledgeClient)
@@ -371,7 +381,7 @@ async def test_read_note_title_lookup_stops_at_page_cap(monkeypatch, app, test_p
     class FailingKnowledgeClient(OriginalKnowledgeClient):
         @override
         async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
-            raise RuntimeError("force fallback")
+            raise lookup_miss()
 
     monkeypatch.setattr(clients_mod, "KnowledgeClient", FailingKnowledgeClient)
     monkeypatch.setattr(read_note_module, "search_notes", fake_search_notes_fn)
@@ -412,7 +422,7 @@ async def test_read_note_related_results_list_full_search_page(monkeypatch, app,
     class FailingKnowledgeClient(OriginalKnowledgeClient):
         @override
         async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
-            raise RuntimeError("force fallback")
+            raise lookup_miss()
 
     monkeypatch.setattr(clients_mod, "KnowledgeClient", FailingKnowledgeClient)
     monkeypatch.setattr(read_note_module, "search_notes", fake_search_notes_fn)
@@ -449,7 +459,7 @@ async def test_read_note_title_fallback_requires_exact_title_match(monkeypatch, 
         @override
         async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
             if strict:
-                raise RuntimeError("force strict direct lookup failure")
+                raise lookup_miss()
             return await super().resolve_entity(identifier, strict=strict)
 
     async def fake_search_notes_fn(*, query, search_type, **kwargs):
@@ -962,7 +972,7 @@ async def test_read_note_memory_url_fallback_uses_search_tool_normalization(
         @override
         async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
             if strict and identifier.endswith("test/memory-url-fallback-note"):
-                raise RuntimeError("force direct lookup failure")
+                raise lookup_miss()
             return await super().resolve_entity(identifier, strict=strict)
 
     async def fake_search_notes_fn(*, query, search_type, project, **kwargs):
@@ -1318,3 +1328,15 @@ class TestReadNoteSecurityEdgeCases:
             if ".." in attack_identifier.strip() or "~" in attack_identifier.strip():
                 assert "# Error" in result
                 assert "paths must stay within project boundaries" in result
+
+
+@pytest.mark.asyncio
+async def test_missing_uuid_line_scan_returns_not_found_guidance(app, test_project) -> None:
+    result = await read_note(
+        "22222222-2222-4222-8222-222222222222",
+        project=test_project.name,
+        start_line=1,
+        end_line=10,
+    )
+    assert isinstance(result, str)
+    assert "Note Not Found" in result

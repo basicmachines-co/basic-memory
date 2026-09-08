@@ -111,7 +111,7 @@ async def lifespan(app: FastMCP):
     # Trigger: the enable_posix_tools config flag.
     # Why: tools register at import time; the composition root is the one place
     #      config decides what clients see (no if-checks inside tool bodies).
-    # Outcome: flag off (default) keeps the tool listing identical to today.
+    # Outcome: enabled by default; an explicit opt-out hides the POSIX group.
     set_posix_tools_visibility(app, config.enable_posix_tools)
 
     standalone_redis_url = None if container.mode.is_cloud else config.redis_url
@@ -242,6 +242,17 @@ BASIC_MEMORY_INSTRUCTIONS = (
     "Memory gives them persistent notes shared between the user and their AI, and offer to save "
     "something useful from this conversation as their first note with `write_note` — then wait "
     "for them to agree before writing anything. Do not create notes unprompted.\n\n"
+    "When available in your tool list, use the read-only POSIX tools `ls`, `find`, "
+    "`grep`, `cat`, `tail`, and `man` for compact navigation. If they are absent, use "
+    "the existing rich tools instead. Projects are mount points: "
+    '`ls(path="/")` without a project constraint lists '
+    'addressable projects; `ls(path="research/notes")` and '
+    '`cat(identifier="research/notes/topic.md")` route into the research project. '
+    "Use returned project-qualified paths for follow-up reads. With multiple projects, "
+    "qualify paths or pass `project` (also required for `grep` and `tail`); an explicit "
+    "project must agree with any path prefix. `cat` supports bounded line, section, and "
+    "token-budget reads; `find` can return selected metadata fields. All existing tools "
+    "remain available. Set `enable_posix_tools=false` to hide the POSIX tools.\n\n"
     "For a fuller guide, read the `memory://ai_assistant_guide` resource. The manual has a "
     "page for nearly every tool, with verified examples and gotchas: `memory://man` lists "
     "them, and `memory://man/<tool>(3)` (for example `memory://man/search-notes(3)`) is one "

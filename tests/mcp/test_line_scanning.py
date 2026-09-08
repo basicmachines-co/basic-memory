@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 from fastmcp.exceptions import ToolError
+from httpx import HTTPStatusError, Request, Response
 
 from basic_memory.mcp.clients import KnowledgeClient, SearchClient
 from basic_memory.mcp.tools import cat, grep, read_note, write_note
@@ -136,7 +137,10 @@ async def test_exact_title_fallback_keeps_line_scan(client, test_project, monkey
     )
 
     async def refuse_resolve(*args: object, **kwargs: object) -> str:
-        raise ToolError("force title search")
+        request = Request("POST", "http://test/knowledge/resolve")
+        raise ToolError("force title search") from HTTPStatusError(
+            "Not found", request=request, response=Response(404, request=request)
+        )
 
     monkeypatch.setattr(KnowledgeClient, "resolve_entity", refuse_resolve)
     result = await read_note("Exact Fallback", end_line=1, project=test_project.name)
