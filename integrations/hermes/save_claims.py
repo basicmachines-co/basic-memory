@@ -13,7 +13,10 @@ _SAVE_CLAIM = re.compile(
     re.IGNORECASE,
 )
 _MEMORY_REQUEST = re.compile(r"\bremember\b", re.IGNORECASE)
-_MEMORY_NAME = re.compile(r"\bbasic[- ]memory\b|\bmemory://", re.IGNORECASE)
+_CAPTURE_REQUEST = re.compile(r"\b(?:save|record|note)\s+", re.IGNORECASE)
+_MEMORY_DESTINATION = re.compile(
+    r"\b(?:to|in|on|into)\s+(?:basic[- ]memory\b|memory://)", re.IGNORECASE
+)
 _QUALIFIED_CLAIM = re.compile(r"\b(?:not|never|nothing|none|zero|no)\b|\?", re.IGNORECASE)
 _OTHER_DESTINATION = re.compile(
     r"\blocally\b|\b(?:to|on|in)\s+\S",
@@ -47,7 +50,7 @@ def claims_memory_save(response: str, *, memory_requested: bool) -> bool:
                 continue
             claim = re.sub(r"^[,:;—–]\s+", "", sentence[match.start() :])
             claim = re.split(r"[;,]\s+(?!but\b|however\b|yet\b)", claim, flags=re.IGNORECASE)[0]
-            names_memory = bool(_MEMORY_NAME.search(claim))
+            names_memory = bool(_MEMORY_DESTINATION.search(claim))
             if not memory_requested and not names_memory:
                 continue
             # A greeting or later question cannot qualify this save clause.
@@ -84,10 +87,15 @@ class SaveClaimGuard:
     ) -> None:
         if not session_id or not turn_id:
             return
-        # Generic save requests also cover images and files outside Basic Memory.
-        # Only an explicit memory destination or remember request supplies context
-        # for a destination-free confirmation such as "I've saved it."
-        requested = bool(_MEMORY_REQUEST.search(user_message) or _MEMORY_NAME.search(user_message))
+        # Capture verbs establish context unless they explicitly target another destination.
+        requested = bool(
+            _MEMORY_REQUEST.search(user_message)
+            or _MEMORY_DESTINATION.search(user_message)
+            or (
+                _CAPTURE_REQUEST.search(user_message)
+                and not _OTHER_DESTINATION.search(user_message)
+            )
+        )
         with self._lock:
             self._turns[session_id] = TurnEvidence(turn_id, requested)
 

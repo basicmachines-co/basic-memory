@@ -53,6 +53,20 @@ def test_generic_file_save_does_not_imply_basic_memory() -> None:
     assert "unverified" in guard.transform(session_id="a", response_text="I've saved it.")
 
 
+def test_named_capture_requests_require_write_evidence() -> None:
+    for request in [
+        "Please save my favorite color for later",
+        "Please record that",
+        "Please note that",
+    ]:
+        guard = _module.SaveClaimGuard()
+        guard.begin_turn(session_id="a", turn_id="1", user_message=request)
+        assert "unverified" in guard.transform(session_id="a", response_text="I've recorded it.")
+    guard = _module.SaveClaimGuard()
+    guard.begin_turn(session_id="a", turn_id="1", user_message="Save the image to disk")
+    assert guard.transform(session_id="a", response_text="I've saved it.") is None
+
+
 def test_memory_request_does_not_turn_a_denial_into_a_save_claim() -> None:
     for response in [
         "I have saved nothing to Basic Memory.",
@@ -95,6 +109,7 @@ def test_only_the_save_clause_supplies_qualifications() -> None:
         "Saved the photo to Google Drive.",
         "Stored it in Dropbox.",
         "Sure, I saved it to Google Drive.",
+        "Saved the Basic Memory config to Google Drive.",
     ]:
         assert not _module.claims_memory_save(response, memory_requested=True)
 
