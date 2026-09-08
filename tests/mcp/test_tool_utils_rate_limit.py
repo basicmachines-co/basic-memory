@@ -237,6 +237,41 @@ async def test_call_get_does_not_truncate_retry_after_to_wait_budget(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("retry_after", "expected_delay"),
+    [("0" * 5000, 0.125), ("0" * 5000 + "1", 1.125)],
+)
+async def test_call_get_accepts_long_zero_padded_retry_after(
+    monkeypatch: pytest.MonkeyPatch,
+    retry_after: str,
+    expected_delay: float,
+) -> None:
+    calls = 0
+    sleep_delays: list[float] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(429, headers={"Retry-After": retry_after})
+        return httpx.Response(200)
+
+    async def record_sleep(delay: float) -> None:
+        sleep_delays.append(delay)
+
+    monkeypatch.setattr(asyncio, "sleep", record_sleep)
+    monkeypatch.setattr(random, "uniform", lambda _start, _end: 0.125)
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport, base_url="https://cloud.invalid") as client:
+        response = await call_get(client, "/v2/resource")
+
+    assert response.status_code == 200
+    assert calls == 2
+    assert sleep_delays == [expected_delay]
+
+
+@pytest.mark.asyncio
 async def test_call_get_limits_cumulative_retry_wait(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = 0
     sleep_delays: list[float] = []

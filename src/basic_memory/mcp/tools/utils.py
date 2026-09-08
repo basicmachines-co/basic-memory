@@ -256,7 +256,7 @@ def _parse_retry_after(response: Response) -> tuple[str, float] | None:
             len(normalized_delay) == len(max_wait_text) and normalized_delay > max_wait_text
         ):
             return raw_retry_after, float("inf")
-        return raw_retry_after, float(int(retry_after))
+        return raw_retry_after, float(int(normalized_delay))
 
     try:
         retry_at = parsedate_to_datetime(retry_after)
