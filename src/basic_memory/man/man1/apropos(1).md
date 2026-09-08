@@ -16,8 +16,8 @@ generated: cli
 ## SYNOPSIS
 
 ```
-bm man apropos QUERY [--project PROJECT] [--json] [--plain] [--local]
-               [--cloud]
+bm man apropos QUERY [--project PROJECT] [--json | --plain]
+               [--local | --cloud]
 ```
 
 ## DESCRIPTION

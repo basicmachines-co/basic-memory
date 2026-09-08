@@ -16,8 +16,8 @@ generated: cli
 ## SYNOPSIS
 
 ```
-bm ls [PATH] [--page PAGE] [--page-size PAGE_SIZE] [--json] [--plain]
-      [--project PROJECT] [--project-id PROJECT_ID] [--local] [--cloud]
+bm ls [PATH] [--page PAGE] [--page-size PAGE_SIZE] [--json | --plain]
+      [--project PROJECT] [--project-id PROJECT_ID] [--local | --cloud]
 ```
 
 ## DESCRIPTION

@@ -18,8 +18,8 @@ generated: cli
 ```
 bm grep PATTERN [--literal] [--context-lines CONTEXT_LINES]
         [--max-matches MAX_MATCHES] [--page PAGE] [--page-size PAGE_SIZE]
-        [--json] [--plain] [--project PROJECT] [--project-id PROJECT_ID]
-        [--local] [--cloud]
+        [--json | --plain] [--project PROJECT] [--project-id PROJECT_ID]
+        [--local | --cloud]
 ```
 
 ## DESCRIPTION

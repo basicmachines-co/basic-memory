@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -469,6 +470,86 @@ def test_render_options_preserves_aliases_and_boolean_pairs() -> None:
 
     _, cat = _cli_command(find_page(PageRef("cat", 1)))
     assert "- **--frontmatter / --no-frontmatter** (default: --frontmatter)" in render_options(cat)
+
+
+def test_render_cli_synopsis_groups_mutually_exclusive_options() -> None:
+    # --json/--plain and --local/--cloud are rejected in combination by the CLI
+    # (test_cli_man_lookup asserts exit 1 for both pairs), so the SYNOPSIS must show
+    # each pair as a single `|` alternative, not two freely-combinable tokens.
+    apropos_path, apropos = _cli_command(find_page(PageRef("apropos", 1)))
+    synopsis = render_cli_synopsis(apropos_path, apropos)
+    assert "[--json | --plain]" in synopsis
+    assert "[--local | --cloud]" in synopsis
+    # never the flattened, freely-combinable spelling the constraint forbids
+    for flattened in ("[--json]", "[--plain]", "[--local]", "[--cloud]"):
+        assert flattened not in synopsis
+    # --project/--project-id are NOT mutually exclusive (--project-id takes
+    # precedence), so they stay separate tokens rather than being grouped.
+    _, find = _cli_command(find_page(PageRef("find", 1)))
+    find_synopsis = render_cli_synopsis("find", find)
+    assert "[--project PROJECT]" in find_synopsis
+    assert "[--project-id PROJECT_ID]" in find_synopsis
+    assert "--project |" not in find_synopsis
+
+
+def test_render_cli_synopsis_keeps_repeatable_options_repeatable() -> None:
+    # find --meta is multiple=True: the SYNOPSIS keeps the `...` repetition notation
+    # so the page still shows the option can be passed more than once.
+    _, find = _cli_command(find_page(PageRef("find", 1)))
+    synopsis = render_cli_synopsis("find", find)
+    assert "[--meta META ...]" in synopsis
+    # a non-repeatable value option carries no repetition notation
+    assert "[--fields FIELDS]" in synopsis
+    assert "[--fields FIELDS ...]" not in synopsis
+
+
+@dataclass
+class _FakeClickParam:
+    """A structural stand-in for a Click parameter (the ClickParam Protocol).
+
+    Lets the visibility branch be exercised without a hidden option in the live
+    CLI, and pins that ``param.hidden`` is read directly — a param shape missing it
+    would raise rather than default to public, per the fail-fast contract.
+    """
+
+    param_type_name: str
+    name: str
+    opts: list[str]
+    secondary_opts: list[str] = field(default_factory=list)
+    required: bool = False
+    is_flag: bool = False
+    multiple: bool = False
+    hidden: bool = False
+    default: object = None
+    help: str | None = None
+
+
+@dataclass
+class _FakeClickCommand:
+    params: list[_FakeClickParam]
+
+
+def test_render_excludes_hidden_options_from_synopsis_and_options() -> None:
+    kept = _FakeClickParam("option", "keep", ["--keep"], is_flag=True, help="kept")
+    secret = _FakeClickParam("option", "secret", ["--secret"], is_flag=True, hidden=True, help="x")
+    command = _FakeClickCommand([kept, secret])
+
+    synopsis = render_cli_synopsis("t", command)
+    assert "[--keep]" in synopsis
+    assert "--secret" not in synopsis
+
+    options = render_options(command)
+    assert "- **--keep**" in options
+    assert "--secret" not in options
+
+
+def test_render_options_is_not_grouped_for_mutually_exclusive_pairs() -> None:
+    # The mutex grouping is a SYNOPSIS-only concern: OPTIONS still documents every
+    # option as its own bullet, so each flag keeps its own description.
+    apropos_path, apropos = _cli_command(find_page(PageRef("apropos", 1)))
+    options = render_options(apropos)
+    for flag in ("--json", "--plain", "--local", "--cloud"):
+        assert f"- **{flag}**" in options
 
 
 def test_replace_options_touches_only_the_options_block() -> None:

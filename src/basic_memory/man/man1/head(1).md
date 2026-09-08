@@ -16,9 +16,9 @@ generated: cli
 ## SYNOPSIS
 
 ```
-bm head IDENTIFIER [--lines N] [--frontmatter | --no-frontmatter] [--json]
-        [--plain] [--project PROJECT] [--project-id PROJECT_ID] [--local]
-        [--cloud]
+bm head IDENTIFIER [--lines N] [--frontmatter | --no-frontmatter]
+        [--json | --plain] [--project PROJECT] [--project-id PROJECT_ID]
+        [--local | --cloud]
 ```
 
 ## DESCRIPTION

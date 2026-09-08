@@ -17,8 +17,8 @@ generated: cli
 
 ```
 bm tree [PATH] [--name NAME] [--depth DEPTH] [--page PAGE]
-        [--page-size PAGE_SIZE] [--json] [--plain] [--project PROJECT]
-        [--project-id PROJECT_ID] [--local] [--cloud]
+        [--page-size PAGE_SIZE] [--json | --plain] [--project PROJECT]
+        [--project-id PROJECT_ID] [--local | --cloud]
 ```
 
 ## DESCRIPTION

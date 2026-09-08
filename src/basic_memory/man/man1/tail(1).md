@@ -16,8 +16,8 @@ generated: cli
 ## SYNOPSIS
 
 ```
-bm tail [--timeframe TIMEFRAME] [--lines N] [--json] [--plain]
-        [--project PROJECT] [--project-id PROJECT_ID] [--local] [--cloud]
+bm tail [--timeframe TIMEFRAME] [--lines N] [--json | --plain]
+        [--project PROJECT] [--project-id PROJECT_ID] [--local | --cloud]
 ```
 
 ## DESCRIPTION
