@@ -8,6 +8,8 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
+from fastmcp.exceptions import ToolError
+from httpx import HTTPStatusError, Request, Response
 
 from basic_memory import file_utils
 from basic_memory.config import BasicMemoryConfig
@@ -64,7 +66,12 @@ class FakeKnowledgeApi:
         return self.resolved
 
     async def get_entity(self, entity_id: str) -> EntityResponseV2:
-        assert entity_id == self.resolved.external_id
+        if entity_id != self.resolved.external_id:
+            request = Request("GET", f"https://test/entities/{entity_id}")
+            response = Response(404, request=request)
+            raise ToolError("not found") from HTTPStatusError(
+                "not found", request=request, response=response
+            )
         return self.entity
 
     async def index_file(self, file_path: str) -> None:
@@ -453,7 +460,7 @@ async def test_writer_refuses_when_the_sidecar_changes_before_the_replacing_writ
     calls = 0
 
     async def edit_between_checks(path: Path | str) -> str:
-        # The second checksum read is the compare-and-swap guard: mutate the file
+        # The second checksum read is a preflight guard: mutate the file
         # right before it so the guard sees bytes that differ from the decision.
         nonlocal calls
         calls += 1
@@ -548,3 +555,28 @@ def test_default_document_extractors_cover_pdf_office_and_csv() -> None:
     extractors = default_document_extractors(python_executable="python-x")
 
     assert set(extractors) == {PDF_MEDIA_TYPE, CSV_MEDIA_TYPE, DOCX_MEDIA_TYPE, PPTX_MEDIA_TYPE}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("http_failure", [False, True])
+async def test_writer_propagates_identity_lookup_failures(
+    file_service: FileService,
+    monkeypatch: pytest.MonkeyPatch,
+    http_failure: bool,
+) -> None:
+    knowledge = knowledge_api()
+
+    async def unavailable(entity_id: str) -> EntityResponseV2:
+        if http_failure:
+            request = Request("GET", f"https://test/entities/{entity_id}")
+            response = Response(503, request=request)
+            raise ToolError("unavailable") from HTTPStatusError(
+                "unavailable", request=request, response=response
+            )
+        raise ToolError("unavailable")
+
+    monkeypatch.setattr(knowledge, "get_entity", unavailable)
+    built = artifacts()
+    with pytest.raises(ToolError, match="unavailable"):
+        await LocalRawDocumentWriter(file_service, knowledge).write(built)
+    assert not await file_service.exists(built.document_file_path)
