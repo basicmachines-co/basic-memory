@@ -89,6 +89,7 @@ class LinkResolver:
     """Service for resolving markdown links to permalinks.
 
     Uses a combination of exact matching and search-based resolution:
+    Strict .md paths select their current file owner before generated permalink candidates.
     1. Try exact permalink match (fastest)
     2. Try exact title match
     3. Try exact file path match
@@ -408,6 +409,20 @@ class LinkResolver:
                 else:
                     # Multiple candidates - pick closest to source
                     return self._find_closest_entity(candidates, source_path)
+
+        # Strict explicit paths name the current file owner before generated aliases
+        # from moved notes (#1479). Preserve verbatim custom permalink precedence.
+        if strict and clean_text.casefold().endswith(".md"):
+            exact_file = await entity_repository.get_by_file_path(
+                session, clean_text, load_relations=load_relations
+            )
+            if exact_file is not None:
+                exact_permalink = await entity_repository.get_by_permalink(
+                    session, permalink_candidates[0], load_relations=load_relations
+                )
+                if exact_permalink is not None:
+                    return exact_permalink
+                return exact_file
 
         # Standard resolution (no source context): permalink first, then title.
         #
