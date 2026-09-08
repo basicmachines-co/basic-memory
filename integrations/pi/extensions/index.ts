@@ -154,6 +154,29 @@ function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+export function formatStatus(cfg: BasicMemoryPiConfig, workspaceTrusted: boolean): string {
+  const configured = Boolean(cfg.project || cfg.projectId);
+  const blocked = !configured ? "no project mapping" : !workspaceTrusted ? "workspace not trusted" : undefined;
+  const automation = (enabled: boolean): string => !enabled
+    ? "off (configured)"
+    : blocked ? `blocked (${blocked})` : "on";
+  const lines = [
+    `transport: ${cfg.transport}`,
+    `bm: ${(cfg.bmCommand ?? [cfg.bmPath]).join(" ")}`,
+    `project: ${cfg.projectId ? `id:${cfg.projectId}` : cfg.project ?? "unconfigured"}`,
+    `workspace trust: ${workspaceTrusted ? "on" : "off"}`,
+    `capture folder: ${cfg.captureFolder}`,
+    `auto recall: ${automation(cfg.autoRecall)}`,
+    `auto capture: ${automation(cfg.autoCapture)}`,
+    `hook flow: ${cfg.useHookFlow ? "on" : "off"}`,
+  ];
+  if (!configured) lines.push("Run /skill:basic-memory-pi-setup to choose an explicit project.");
+  if (!workspaceTrusted) {
+    lines.push("To enable workspace automation, trust this workspace by setting BASIC_MEMORY_PI_TRUST_WORKSPACE=1 in Pi's environment.");
+  }
+  return lines.join("\n");
+}
+
 export function recallFenceFor(content: string): string {
   const backtickRuns = content.match(/`+/g) ?? [];
   const longestRun = backtickRuns.reduce((longest, run) => Math.max(longest, run.length), 0);
@@ -455,16 +478,7 @@ export default function basicMemoryPi(pi: ExtensionAPI): void {
         notify(ctx, configError, "error");
         return;
       }
-      const lines = [
-        `transport: ${cfg.transport}`,
-        `bm: ${(cfg.bmCommand ?? [cfg.bmPath]).join(" ")}`,
-        `project: ${cfg.projectId ? `id:${cfg.projectId}` : cfg.project ?? "default"}`,
-        `capture folder: ${cfg.captureFolder}`,
-        `auto recall: ${cfg.autoRecall ? "on" : "off"}`,
-        `auto capture: ${cfg.autoCapture ? "on" : "off"}`,
-        `hook flow: ${cfg.useHookFlow ? "on" : "off"}`,
-      ];
-      notify(ctx, lines.join("\n"), "info");
+      notify(ctx, formatStatus(cfg, process.env.BASIC_MEMORY_PI_TRUST_WORKSPACE === "1"), "info");
     },
   });
 
