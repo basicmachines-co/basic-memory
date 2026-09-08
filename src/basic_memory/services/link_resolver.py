@@ -183,6 +183,14 @@ class LinkResolver:
         """
         logger.trace(f"Resolving link: {link_text} (source: {source_path})")
 
+        # Markdown hrefs are normalized to project-root paths by the parser.
+        # They must not fall through to aliases, titles or another project.
+        if link_text.startswith("/"):
+            async with db.scoped_session(self.session_maker, session) as active_session:
+                return await self.entity_repository.get_by_file_path(
+                    active_session, link_text[1:], load_relations=load_relations
+                )
+
         # Clean link text and extract any alias
         clean_text, alias = self._normalize_link_text(link_text)
         explicit_project_reference = "::" in clean_text
