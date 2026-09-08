@@ -52,14 +52,15 @@ pi install npm:pi-mcp-adapter
 }
 ```
 
-6. Run `/bm-status`, then `/bm-recall setup` or `/bm-capture Pi setup checkpoint` to verify the path.
+6. If the user wants automatic recall/capture or MCP tools, confirm they trust this workspace's project mapping, then set `BASIC_MEMORY_PI_TRUST_WORKSPACE=1` in the environment used to launch Pi. A project mapping alone does not enable automation. Manual `/bm-recall` and `/bm-capture` remain available with an explicit mapping without this trust setting.
+7. Run `/bm-status` and check the effective auto recall/capture state, then `/bm-recall setup` or `/bm-capture Pi setup checkpoint` to verify the path.
 
 ## Defaults and escape hatches
 
 - CLI transport is the default because it only requires `bm` on PATH.
 - For local Basic Memory development in a trusted workspace, set `BASIC_MEMORY_PI_TRUST_BM_COMMAND=1` and use `bmCommand` as an argv array such as `["uv", "run", "--project", "/path/to/basic-memory", "basic-memory"]`; it overrides `bmPath` without using a shell.
 - Hook flow is on by default so Pi uses the shared Basic Memory lifecycle contract.
-- Automatic recall and capture are on by default once a project is configured.
+- Automatic recall and capture are on by default once a project is configured and workspace trust is enabled.
 - Set `BASIC_MEMORY_PI_TRUST_WORKSPACE=1` only after the user confirms this workspace should use its Basic Memory project mapping automatically; otherwise manual `/bm-recall` and `/bm-capture` still work.
 - Set `autoRecall: false`, `autoCapture: false`, or `useHookFlow: false` if the user wants quieter behavior.
 
