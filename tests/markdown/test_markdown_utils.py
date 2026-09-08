@@ -8,6 +8,7 @@ import pytest
 from basic_memory.markdown.schemas import EntityMarkdown, EntityFrontmatter, Observation
 from basic_memory.markdown.utils import entity_model_from_markdown
 from basic_memory.models import Entity
+from basic_memory.schemas.document import derive_document_note_external_id
 
 
 class TestEntityModelFromMarkdown:
@@ -70,6 +71,31 @@ class TestEntityModelFromMarkdown:
 
         # Should preserve the existing external_id
         assert entity.external_id == existing_external_id
+
+    @pytest.mark.parametrize("existing_id", [None, "12345678-1234-1234-1234-123456789012"])
+    def test_generated_document_identity_comes_from_its_source(
+        self, existing_id: str | None
+    ) -> None:
+        source_id = "11111111-1111-1111-1111-111111111111"
+        markdown = self._create_markdown(note_type="document")
+        markdown.frontmatter.metadata.update(
+            {"schema": "schema/document-extraction", "source": {"entity_external_id": source_id}}
+        )
+        existing = Entity(external_id=existing_id) if existing_id else None
+
+        result = entity_model_from_markdown(Path("source.pdf.md"), markdown, entity=existing)
+
+        assert result.external_id == (existing_id or derive_document_note_external_id(source_id))
+
+    @pytest.mark.parametrize("source", [None, {}, {"entity_external_id": "invalid-uuid"}])
+    def test_generated_document_rejects_invalid_source_identity(self, source: object) -> None:
+        markdown = self._create_markdown(note_type="document")
+        markdown.frontmatter.metadata.update(
+            {"schema": "schema/document-extraction", "source": source}
+        )
+
+        with pytest.raises(ValueError):
+            entity_model_from_markdown(Path("source.pdf.md"), markdown)
 
     def test_entity_with_empty_external_id_gets_new_one(self):
         """Test that an entity with empty string external_id gets a new UUID."""
