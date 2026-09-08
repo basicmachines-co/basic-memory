@@ -298,6 +298,8 @@ async def write_note(
                   beyond title/type/tags. Nested dicts are supported. Not available from the CLI.
         overwrite: If True, replace existing note on conflict. If False, error on conflict.
                    If None (default), consult write_note_overwrite_default config setting.
+                   Refuses when the requested path resolves to a note at a different path;
+                   inspect or edit the returned note identity instead.
         output_format: "text" returns the existing markdown summary. "json" returns
                        machine-readable metadata; on conflict it returns action: "conflict"
                        with an error code instead of raising.
@@ -438,6 +440,37 @@ async def write_note(
 
             # Use typed KnowledgeClient for API calls
             knowledge_client = KnowledgeClient(client, active_project.external_id)
+
+            # A retained permalink can outlive its original filename after a move.
+            # Refuse that identity/path mismatch before optimistic create can mint a shadow.
+            if effective_overwrite:
+                requested_path = Path(entity.file_path).as_posix()
+                try:
+                    existing = await knowledge_client.resolve_entity_response(
+                        requested_path, strict=True
+                    )
+                except ToolError as error:
+                    cause = error.__cause__
+                    if not isinstance(cause, HTTPStatusError) or cause.response.status_code != 404:
+                        raise
+                    existing = None
+                if existing is not None and existing.file_path != requested_path:
+                    if output_format == "json":
+                        return {
+                            "title": title,
+                            "permalink": existing.permalink,
+                            "file_path": existing.file_path,
+                            "checksum": None,
+                            "action": "conflict",
+                            "error": "NOTE_PATH_CONFLICT",
+                        }
+                    return (
+                        "# Error: Note exists at a different path\n\n"
+                        f"The requested note resolves to `{existing.file_path}`. "
+                        "Nothing was written.\n\n"
+                        f"Read or edit `{existing.external_id}` to update that note, "
+                        "or choose a distinct title for a new note."
+                    )
 
             # Try to create the entity first (optimistic create)
             logger.debug(f"Attempting to create entity permalink={entity.permalink}")

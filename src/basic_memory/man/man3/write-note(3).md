@@ -56,7 +56,7 @@ prepends, or edits sections in place without rewriting the file.
 - **tags** (array | string | null, optional, default: None) — Tags to categorize the note. Can be a list of strings, a comma-separated string, or None. Note: If passing from external MCP clients, use a string format (e.g. "tag1,tag2,tag3")
 - **note_type** (string, optional, default: "note") — Type of note to create (stored in frontmatter `type:`). Defaults to "note". Can be "guide", "report", "config", "person", etc. The CLI flag is --type. A `type:` in content frontmatter takes precedence over this parameter, and this is what schema validation keys on.
 - **metadata** (object | null, optional, default: None) — Optional dict of extra frontmatter fields merged into entity_metadata. Useful for schema notes or any note that needs custom YAML frontmatter beyond title/type/tags. Nested dicts are supported. Not available from the CLI.
-- **overwrite** (boolean | null, optional, default: None) — If True, replace existing note on conflict. If False, error on conflict. If None (default), consult write_note_overwrite_default config setting.
+- **overwrite** (boolean | null, optional, default: None) — If True, replace existing note on conflict. If False, error on conflict. If None (default), consult write_note_overwrite_default config setting. Refuses when the requested path resolves to a note at a different path; inspect or edit the returned note identity instead.
 - **output_format** (string, optional, default: "text") — "text" returns the existing markdown summary. "json" returns machine-readable metadata; on conflict it returns action: "conflict" with an error code instead of raising.
 
 ## MCP USAGE
