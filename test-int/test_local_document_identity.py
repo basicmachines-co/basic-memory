@@ -11,7 +11,7 @@ from basic_memory.document_ingestion.local_runtime import (
     LocalRawDocumentWriter,
     default_document_extractors,
 )
-from basic_memory.document_ingestion.raw_document import RawDocumentRuntime
+from basic_memory.document_ingestion.raw_document import RawDocumentRuntime, canonical_db_checksum
 from basic_memory.markdown import EntityParser, MarkdownProcessor
 from basic_memory.mcp.clients import KnowledgeClient, ProjectClient
 from basic_memory.models import Project
@@ -42,9 +42,21 @@ async def test_local_run_points_to_the_indexed_document(
     indexed = await knowledge.get_entity(str(result.document_external_id))
     run = parse_document_ingestion_run_markdown(await files.read_file_content(result.run_file_path))
 
+    assert result.document_db_checksum == canonical_db_checksum(
+        await files.compute_checksum(result.document_file_path)
+    )
     assert indexed.file_path == result.document_file_path
     assert run.frontmatter.output is not None
     assert str(run.frontmatter.output.document_entity_external_id) == indexed.external_id
+    reused = await runtime.ingest(file_path="riders.csv", observed_etag=None)
+    assert reused.document_created is False
+    assert reused.run_created is False
+    (home / "riders.csv").write_bytes(b"team,name\nAST,Bea\n")
+    refreshed = await runtime.ingest(file_path="riders.csv", observed_etag=None)
+    assert refreshed.document_created is True
+    assert refreshed.document_db_checksum == canonical_db_checksum(
+        await files.compute_checksum(refreshed.document_file_path)
+    )
 
 
 @pytest.mark.asyncio

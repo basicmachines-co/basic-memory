@@ -58,6 +58,7 @@ class FakeKnowledgeApi:
         self.resolved = resolved
         self.entity = entity
         self.indexed: list[str] = []
+        self.files: FileService | None = None
 
     async def resolve_entity_response(
         self, identifier: str, *, strict: bool = False
@@ -76,6 +77,9 @@ class FakeKnowledgeApi:
 
     async def index_file(self, file_path: str) -> None:
         self.indexed.append(file_path)
+        if self.files is not None and file_path.endswith(".csv.md"):
+            content = await self.files.read_file_content(file_path)
+            await self.files.write_file(file_path, with_permalink(content, "main/data/riders.csv"))
 
 
 def resolved(file_path: str) -> EntityResolveResponse:
@@ -354,14 +358,12 @@ def with_permalink(markdown: str, permalink: str) -> str:
 async def test_writer_rebuilds_an_untouched_sidecar_that_the_indexer_annotated(
     file_service: FileService,
 ) -> None:
-    writer = LocalRawDocumentWriter(file_service, knowledge_api())
+    knowledge = knowledge_api()
+    knowledge.files = file_service
+    writer = LocalRawDocumentWriter(file_service, knowledge)
     first = artifacts(checksum_char="a")
     await writer.write(first)
     sidecar = file_service.base_path / first.document_file_path
-    sidecar.write_text(
-        with_permalink(sidecar.read_text(encoding="utf-8"), "main/data/riders.csv"),
-        encoding="utf-8",
-    )
 
     second = await writer.write(artifacts(checksum_char="b"))
 
@@ -374,19 +376,13 @@ async def test_writer_rebuilds_an_untouched_sidecar_that_the_indexer_annotated(
 async def test_unchanged_import_after_indexer_annotation_keeps_provenance_consistent(
     file_service: FileService,
 ) -> None:
-    """The permalink the indexer adds must not leak into recorded checksums.
-
-    Otherwise an unchanged re-import rewrites the run note with the annotated
-    checksum and a later source change is refused as an edit.
-    """
+    """Provenance records the accepted post-index text, including its permalink."""
     knowledge = knowledge_api()
+    knowledge.files = file_service
     writer = LocalRawDocumentWriter(file_service, knowledge)
     first = artifacts(checksum_char="a")
     await writer.write(first)
     sidecar = file_service.base_path / first.document_file_path
-    sidecar.write_bytes(
-        with_permalink(sidecar.read_text(encoding="utf-8"), "main/data/riders.csv").encode()
-    )
 
     unchanged = await writer.write(artifacts(checksum_char="a"))
     assert unchanged.document_db_checksum == sha256(sidecar.read_bytes())
@@ -580,3 +576,17 @@ async def test_writer_propagates_identity_lookup_failures(
     with pytest.raises(ToolError, match="unavailable"):
         await LocalRawDocumentWriter(file_service, knowledge).write(built)
     assert not await file_service.exists(built.document_file_path)
+
+
+@pytest.mark.asyncio
+async def test_writer_preserves_authored_frontmatter_comments(file_service: FileService) -> None:
+    writer = LocalRawDocumentWriter(file_service, knowledge_api())
+    first = artifacts()
+    await writer.write(first)
+    path = file_service.base_path / first.document_file_path
+    edited = path.read_text(encoding="utf-8").replace("---\n", "---\n# My source annotation\n", 1)
+    path.write_text(edited, encoding="utf-8")
+
+    with pytest.raises(DocumentSidecarConflictError, match="edited since"):
+        await writer.write(artifacts(checksum_char="b"))
+    assert path.read_text(encoding="utf-8") == edited
