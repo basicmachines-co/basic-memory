@@ -1,9 +1,11 @@
-"""Portable raw PDF ingestion: stable source snapshot -> extraction -> document artifacts.
+"""Portable raw document ingestion: stable source snapshot -> extraction -> document artifacts.
 
-The uploaded PDF stays its own file entity. This module maps one stable source
-snapshot plus the bounded extractor's output into Core's document contract (a
-``type: document`` note and its ``document_ingestion_run`` note) and orchestrates
-the read / extract / revalidate / write sequence behind narrow protocols.
+The uploaded source file stays its own file entity. This module maps one stable
+source snapshot plus a bounded extractor's output into Core's document contract
+(a ``type: document`` note and its ``document_ingestion_run`` note) and
+orchestrates the read / extract / revalidate / write sequence behind narrow
+protocols. Extractors are chosen by the source entity's media type; PDF,
+Office, and CSV each map into the same parser-neutral :class:`ExtractedDocument`.
 
 Storage reads and accepted-note writes are runtime-specific (Tigris and PGQueuer
 in Cloud, the project directory locally) and are supplied by the caller. The
@@ -15,11 +17,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from typing import Protocol
 from uuid import UUID
+
+from pydantic import BaseModel
 
 from basic_memory.document_ingestion.pdf_inspector import (
     PdfInspector,
@@ -51,6 +56,7 @@ from basic_memory.schemas.document import (
 
 # Actor source recorded on generated notes; see VALID_NOTE_OBJECT_SOURCES.
 DOCUMENT_INGESTION_SOURCE = "document_ingestion"
+PDF_MEDIA_TYPE = "application/pdf"
 PDF_RAW_PIPELINE_VERSION = "pdf-inspector-raw-v1"
 # Page-map provenance changes the accepted envelope; a new profile prevents
 # idempotent writers from reusing a prior run that lacks the map.
@@ -61,12 +67,16 @@ class DocumentSourceChangedError(RuntimeError):
     """The source object changed while its bytes were being read."""
 
 
+class UnsupportedDocumentMediaTypeError(RuntimeError):
+    """No extractor is configured for the source entity's media type."""
+
+
 # --- Values ---
 
 
 @dataclass(frozen=True, slots=True)
 class DocumentSourceEntity:
-    """Indexed identity of the PDF source file entity."""
+    """Indexed identity of the source file entity."""
 
     entity_id: int
     external_id: UUID
@@ -84,6 +94,21 @@ class DocumentSourceSnapshot:
     size_bytes: int
     storage_etag: str
     storage_version_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ExtractedDocument:
+    """Parser-neutral result of one bounded extraction.
+
+    ``kind`` names the source format for ``DocumentMetadataV1.kind`` and the note
+    tag (``pdf``, ``docx``, ``pptx``, ``csv``). ``pipeline_version`` names the raw
+    pipeline that produced the Markdown and is part of the run identity.
+    """
+
+    extraction: DocumentExtractionV1
+    markdown: str
+    kind: str
+    pipeline_version: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +162,16 @@ class DocumentSourceReader(Protocol):
         """Fail unless the extracted storage generation is still current."""
 
 
+class DocumentExtractor(Protocol):
+    """Turn one source's bytes into parser-neutral Markdown inside the runtime's bounds."""
+
+    async def extract(self, content: bytes, *, file_name: str) -> ExtractedDocument: ...
+
+
+type DocumentExtractors = Mapping[str, DocumentExtractor]
+"""Extractors keyed by the exact media type the indexer recorded for the source."""
+
+
 class RawDocumentWriter(Protocol):
     """Accept raw document and ingestion-run notes idempotently."""
 
@@ -147,8 +182,65 @@ class RawDocumentWriter(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class RawDocumentRuntime:
+    """Orchestrate one stable source read, media-type dispatch, extraction, and write."""
+
+    source_resolver: DocumentSourceEntityResolver
+    source_reader: DocumentSourceReader
+    extractors: DocumentExtractors
+    writer: RawDocumentWriter
+
+    async def ingest(
+        self,
+        *,
+        file_path: str,
+        observed_etag: str | None,
+    ) -> RawDocumentWriteResult:
+        started_at = datetime.now(tz=UTC)
+        source_entity = await self.source_resolver.resolve(file_path)
+        extractor = self.extractors.get(source_entity.media_type)
+        if extractor is None:
+            raise UnsupportedDocumentMediaTypeError(
+                f"No document extractor is configured for {source_entity.media_type!r} "
+                f"({file_path})"
+            )
+        source = await self.source_reader.read(
+            source_entity,
+            observed_etag=observed_etag,
+        )
+        extracted = await extractor.extract(
+            source.content, file_name=PurePosixPath(source_entity.file_path).name
+        )
+        artifacts = build_raw_document_artifacts_from_extracted(
+            source, extracted, started_at=started_at
+        )
+        # Extraction can take seconds; re-resolve so a source replaced or moved
+        # meanwhile is rejected instead of being written under stale provenance.
+        current_source_entity = await self.source_resolver.resolve(file_path)
+        if current_source_entity != source.entity:
+            raise DocumentSourceChangedError(
+                "Indexed document source identity changed during extraction"
+            )
+        await self.source_reader.require_current(source)
+        return await self.writer.write(artifacts)
+
+
+@dataclass(frozen=True, slots=True)
+class PdfDocumentExtractor:
+    """Adapt the bounded pdf-inspector subprocess to the neutral extractor protocol."""
+
+    inspector: PdfInspector
+
+    async def extract(self, content: bytes, *, file_name: str) -> ExtractedDocument:
+        output = await self.inspector.extract(content)
+        return pdf_extracted_document(
+            output, limits=self.inspector.limits, extracted_at=datetime.now(tz=UTC)
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class RawPdfDocumentRuntime:
-    """Orchestrate one stable source read, extraction, and accepted write."""
+    """PDF-only runtime kept for Cloud's job wiring; dispatches through the generic one."""
 
     source_resolver: DocumentSourceEntityResolver
     source_reader: DocumentSourceReader
@@ -161,59 +253,35 @@ class RawPdfDocumentRuntime:
         file_path: str,
         observed_etag: str | None,
     ) -> RawDocumentWriteResult:
-        started_at = datetime.now(tz=UTC)
-        source_entity = await self.source_resolver.resolve(file_path)
-        source = await self.source_reader.read(
-            source_entity,
-            observed_etag=observed_etag,
+        runtime = RawDocumentRuntime(
+            source_resolver=self.source_resolver,
+            source_reader=self.source_reader,
+            extractors={PDF_MEDIA_TYPE: PdfDocumentExtractor(self.extractor)},
+            writer=self.writer,
         )
-        extracted = await self.extractor.extract(source.content)
-        artifacts = build_raw_document_artifacts(
-            source,
-            extracted,
-            limits=self.extractor.limits,
-            started_at=started_at,
-            extracted_at=datetime.now(tz=UTC),
-        )
-        # Extraction can take seconds; re-resolve so a source replaced or moved
-        # meanwhile is rejected instead of being written under stale provenance.
-        current_source_entity = await self.source_resolver.resolve(file_path)
-        if current_source_entity != source.entity:
-            raise DocumentSourceChangedError(
-                "Indexed PDF source identity changed during extraction"
-            )
-        await self.source_reader.require_current(source)
-        return await self.writer.write(artifacts)
+        return await runtime.ingest(file_path=file_path, observed_etag=observed_etag)
 
 
 # --- Contract mapping ---
 
 
-def build_raw_document_artifacts(
+def build_raw_document_artifacts_from_extracted(
     source: DocumentSourceSnapshot,
-    extracted: PdfInspectorOutput,
+    extracted: ExtractedDocument,
     *,
-    limits: PdfInspectorLimits,
     started_at: datetime,
-    extracted_at: datetime,
 ) -> RawDocumentArtifacts:
-    """Map native extraction output into Core's portable document contract."""
-    # Older adapters can still supply the optional, map-less output contract.
-    # Preserve their v1 identity; only mapped output earns the v2 provenance
-    # profile, so a later mapped extraction cannot reuse a map-less run.
-    extraction_profile = (
-        PDF_RAW_EXTRACTION_PROFILE if extracted.page_map is not None else "pdf-inspector-v1"
-    )
-    options_hash = extraction_options_checksum(limits)
+    """Map one parser-neutral extraction into Core's portable document contract."""
+    extraction = extracted.extraction
     run_id = UUID(
         derive_document_ingestion_run_id(
             source_entity_external_id=source.entity.external_id,
             source_checksum=source.checksum,
-            pipeline_version=PDF_RAW_PIPELINE_VERSION,
-            extractor_engine=extracted.engine,
-            extractor_version=extracted.engine_version,
-            extraction_profile=extraction_profile,
-            extraction_options_hash=options_hash,
+            pipeline_version=extracted.pipeline_version,
+            extractor_engine=extraction.engine,
+            extractor_version=extraction.engine_version,
+            extraction_profile=extraction.profile,
+            extraction_options_hash=extraction.options_hash,
             prompt_version=None,
         )
     )
@@ -227,11 +295,57 @@ def build_raw_document_artifacts(
         storage_version_id=source.storage_version_id,
         storage_etag=source.storage_etag,
     )
+    ingestion = DocumentIngestionV1(
+        stage=DocumentIngestionStage.raw,
+        pipeline_version=extracted.pipeline_version,
+        run_id=run_id,
+        input_checksum=source.checksum,
+    )
+    # Raw extraction is untrusted semantic input: keep the body searchable but
+    # opt out of observation/relation parsing until a bounded enrichment pass.
+    document = DocumentMarkdownV1(
+        frontmatter=DocumentNoteFrontmatterV1(
+            title=PurePosixPath(source.entity.file_path).name,
+            tags=("document", extracted.kind, "generated"),
+            source=source_contract,
+            extraction=extraction,
+            ingestion=ingestion,
+            document=DocumentMetadataV1(kind=extracted.kind),
+            bm_parse_semantics=False,
+        ),
+        body=extracted.markdown,
+    )
+    return RawDocumentArtifacts(
+        source=source_contract,
+        extraction=extraction,
+        ingestion=ingestion,
+        document_external_id=document_external_id,
+        document_file_path=derive_document_note_path(source.entity.file_path),
+        document_markdown=assemble_document_markdown(document),
+        run_id=run_id,
+        run_file_path=derive_document_ingestion_run_path(run_id),
+        started_at=started_at,
+    )
+
+
+def pdf_extracted_document(
+    extracted: PdfInspectorOutput,
+    *,
+    limits: PdfInspectorLimits,
+    extracted_at: datetime,
+) -> ExtractedDocument:
+    """Map native pdf-inspector output into the parser-neutral extraction contract."""
+    # Older adapters can still supply the optional, map-less output contract.
+    # Preserve their v1 identity; only mapped output earns the v2 provenance
+    # profile, so a later mapped extraction cannot reuse a map-less run.
+    extraction_profile = (
+        PDF_RAW_EXTRACTION_PROFILE if extracted.page_map is not None else "pdf-inspector-v1"
+    )
     extraction = DocumentExtractionV1(
         engine=extracted.engine,
         engine_version=extracted.engine_version,
         profile=extraction_profile,
-        options_hash=options_hash,
+        options_hash=extraction_options_checksum(limits),
         classification=extracted.pdf_type.value,
         status=(
             DocumentExtractionStatus.needs_ocr
@@ -251,35 +365,26 @@ def build_raw_document_artifacts(
         has_tables=bool(extracted.pages_with_tables),
         has_columns=bool(extracted.pages_with_columns),
     )
-    ingestion = DocumentIngestionV1(
-        stage=DocumentIngestionStage.raw,
-        pipeline_version=PDF_RAW_PIPELINE_VERSION,
-        run_id=run_id,
-        input_checksum=source.checksum,
-    )
-    # Raw extraction is untrusted semantic input: keep the body searchable but
-    # opt out of observation/relation parsing until a bounded enrichment pass.
-    document = DocumentMarkdownV1(
-        frontmatter=DocumentNoteFrontmatterV1(
-            title=PurePosixPath(source.entity.file_path).name,
-            tags=("document", "pdf", "generated"),
-            source=source_contract,
-            extraction=extraction,
-            ingestion=ingestion,
-            document=DocumentMetadataV1(kind="pdf"),
-            bm_parse_semantics=False,
-        ),
-        body=extracted.markdown,
-    )
-    return RawDocumentArtifacts(
-        source=source_contract,
+    return ExtractedDocument(
         extraction=extraction,
-        ingestion=ingestion,
-        document_external_id=document_external_id,
-        document_file_path=derive_document_note_path(source.entity.file_path),
-        document_markdown=assemble_document_markdown(document),
-        run_id=run_id,
-        run_file_path=derive_document_ingestion_run_path(run_id),
+        markdown=extracted.markdown,
+        kind="pdf",
+        pipeline_version=PDF_RAW_PIPELINE_VERSION,
+    )
+
+
+def build_raw_document_artifacts(
+    source: DocumentSourceSnapshot,
+    extracted: PdfInspectorOutput,
+    *,
+    limits: PdfInspectorLimits,
+    started_at: datetime,
+    extracted_at: datetime,
+) -> RawDocumentArtifacts:
+    """Map native PDF extraction output into Core's portable document contract."""
+    return build_raw_document_artifacts_from_extracted(
+        source,
+        pdf_extracted_document(extracted, limits=limits, extracted_at=extracted_at),
         started_at=started_at,
     )
 
@@ -321,7 +426,7 @@ def build_raw_ingestion_run_markdown(
     return assemble_document_ingestion_run_markdown(run)
 
 
-def extraction_options_checksum(limits: PdfInspectorLimits) -> str:
+def extraction_options_checksum(limits: BaseModel) -> str:
     """Return a stable identity for every extraction-shaping limit."""
     encoded = json.dumps(
         limits.model_dump(mode="json"),
@@ -334,6 +439,19 @@ def extraction_options_checksum(limits: PdfInspectorLimits) -> str:
 # --- Identity checks for reusing already-accepted notes ---
 
 
+def raw_document_matches(
+    document: DocumentMarkdownV1,
+    artifacts: RawDocumentArtifacts,
+) -> bool:
+    """Report whether an accepted raw document was produced by this run's deterministic inputs."""
+    return (
+        document.frontmatter.source == artifacts.source
+        and document.frontmatter.ingestion == artifacts.ingestion
+        and document.frontmatter.extraction.engine == artifacts.extraction.engine
+        and document.frontmatter.extraction.engine_version == artifacts.extraction.engine_version
+    )
+
+
 def require_matching_raw_document(
     document: DocumentMarkdownV1,
     artifacts: RawDocumentArtifacts,
@@ -341,12 +459,7 @@ def require_matching_raw_document(
     """Fail unless an accepted document still matches this run's deterministic inputs."""
     if document.frontmatter.ingestion.stage is not DocumentIngestionStage.raw:
         raise RuntimeError("Existing ingestion run document is no longer at the raw stage")
-    if (
-        document.frontmatter.source != artifacts.source
-        or document.frontmatter.ingestion != artifacts.ingestion
-        or document.frontmatter.extraction.engine != artifacts.extraction.engine
-        or document.frontmatter.extraction.engine_version != artifacts.extraction.engine_version
-    ):
+    if not raw_document_matches(document, artifacts):
         raise RuntimeError("Existing raw document does not match the deterministic run identity")
 
 

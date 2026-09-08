@@ -75,6 +75,9 @@ redis = [
 pdf = [
     "pdf-inspector>=0.2.6,<2",
 ]
+documents = [
+    "markitdown[docx,pptx]>=0.1.7,<0.2",
+]
 
 [project.urls]
 Homepage = "https://github.com/basicmachines-co/basic-memory"
@@ -149,6 +152,7 @@ dev = [
     "libcst>=1.8.6",
     "pytest-timeout>=2.4.0",
     "pytest-split>=0.11.0",
+    "markitdown[docx,pptx]>=0.1.7,<0.2",
 ]
 
 [tool.hatch.version]
