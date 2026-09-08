@@ -39,7 +39,18 @@ Gather a concise diagnostic. Do not over-investigate.
    - treat the command's settings resolution as canonical for hook behavior; if
      it disagrees with the manually read config, show the mismatch
 
-4. Hook files:
+4. Hook files and launcher visibility:
+   - check `uv --version` in the current environment independently of CLI
+     reachability; uv is a required hook prerequisite
+   - distinguish "uv missing from this shell" from "Desktop hook runtime
+     verified"; shell success does not establish the Desktop hook process's PATH
+   - when Desktop/WSL hooks fail while TUI works, inspect the actual hook
+     launch error and PATH; `uv: command not found` occurs before the Python
+     script can emit a diagnostic
+   - consult `../../README.md` under "Troubleshooting Desktop hooks on WSL"
+     for the default-location probe and conditional symlink workaround
+   - only report Desktop hook execution as verified when startup context and a
+     post-compaction checkpoint note were observed; otherwise label it unverified
    - confirm `plugins/codex/hooks/hooks.json` exists if running from this repo
    - remind the user that Codex plugin hooks must be reviewed and trusted before
      they run
@@ -75,7 +86,8 @@ Basic Memory for Codex
 - Shared pending envelopes: <count or unavailable>
 - Shared archived envelopes: <count or unavailable>
 - Last flush: <timestamp, never, or unavailable>
-- Hook runtime: basic-memory <version>; uv <version or missing>
+- Hook runtime in this environment: basic-memory <version>; uv <version or missing>
+- Desktop hook execution: <verified from context and checkpoint | unverified>
 - Recent checkpoints: <count across coding_session and codex_session>
 - Active tasks: <count>
 - Open decisions: <count>
