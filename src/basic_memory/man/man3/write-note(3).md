@@ -45,6 +45,13 @@ conflict error by default. Pass `overwrite=True` (CLI: `--overwrite`) to
 replace it. For incremental changes prefer [[edit-note(3)]], which appends,
 prepends, or edits sections in place without rewriting the file.
 
+Overwrite addresses the exact file path generated from the title and directory.
+If that path is vacant but its retained permalink identifies a moved note,
+the tool returns `NOTE_PATH_CONFLICT` with the current path. Read or edit the
+moved note by its identifier, or use `overwrite=False` to create a separate note.
+If a replacement note already occupies the requested path, overwrite updates
+that replacement. Locked notes refuse replacement without changing their content.
+
 ## PARAMETERS
 
 - **title** (string, required) — The title of the note; written to frontmatter and drives the permalink. No H1 is added for you: content is saved as given, so include a "# Title" heading yourself if the note should open with one.

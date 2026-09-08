@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
-from typing import Literal, Protocol
+from dataclasses import dataclass, replace
+from typing import Literal, Protocol, assert_never
 from uuid import UUID
 
 from loguru import logger
@@ -24,6 +24,8 @@ from basic_memory.indexing.accepted_note_mutation_runner import (
     AcceptedNoteMutationResult,
     AcceptedNoteUpdateMutation,
     load_existing_markdown_note_content,
+    load_accepted_note_mutation_project,
+    resolve_accepted_note_schema_directory,
     reject_stale_base_checksum,
     run_accepted_note_create,
     run_accepted_note_delete,
@@ -45,6 +47,17 @@ from basic_memory.read_cache import (
 )
 from basic_memory.schemas.base import Entity as EntitySchema
 from basic_memory.schemas.request import EditEntityRequest
+from basic_memory.repository.entity_repository import EntityRepository
+from basic_memory.services.note_write_outcomes import (
+    AlreadyExists,
+    Created,
+    Updated,
+    TargetMoved,
+    Locked,
+    Rejected,
+    NoteLocation,
+    WriteOutcome,
+)
 
 AcceptedNoteChange = RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload]
 
@@ -332,6 +345,105 @@ class NoteContentMutationService:
             raise
         return True
 
+    async def write_note(
+        self,
+        *,
+        project_external_id: str,
+        data: EntitySchema,
+        overwrite: bool,
+        entity_repository: EntityRepository,
+        permalink_candidates: Sequence[str],
+        user_profile_id: UUID | None,
+        source: str,
+    ) -> WriteOutcome:
+        """Create at a path or replace its current owner, without search resolution.
+
+        Retained exact permalinks only identify a moved target when the requested
+        path has no owner. Rejections leave the transaction before becoming values,
+        so the existing rollback, cache invalidation, and publication rules still apply.
+        """
+        target: NoteLocation | None = None
+        try:
+            async with accepted_note_transaction(self.session_maker) as session:
+                project = await load_accepted_note_mutation_project(
+                    session,
+                    project_external_id=project_external_id,
+                    dependencies=self.mutation_dependencies,
+                )
+                if entity_repository.project_id != project.id:
+                    raise ValueError("Write repository must belong to the requested project")
+                data = await resolve_accepted_note_schema_directory(
+                    session,
+                    project_id=project.id,
+                    data=data,
+                    dependencies=self.mutation_dependencies,
+                )
+                existing = await entity_repository.get_by_file_path(
+                    session,
+                    data.file_path,
+                    load_relations=False,
+                )
+                if existing is not None:
+                    if not overwrite:
+                        return AlreadyExists(data.file_path)
+                    target = NoteLocation(
+                        str(existing.external_id),
+                        existing.title,
+                        existing.file_path,
+                        existing.permalink,
+                    )
+                elif overwrite:
+                    for permalink in permalink_candidates:
+                        moved = await entity_repository.get_by_permalink(
+                            session,
+                            permalink,
+                            load_relations=False,
+                        )
+                        if moved is not None:
+                            return TargetMoved(
+                                NoteLocation(
+                                    str(moved.external_id),
+                                    moved.title,
+                                    moved.file_path,
+                                    moved.permalink,
+                                )
+                            )
+
+            # Dispatch through the public operations so runtime overrides retain
+            # their pre-acceptance work as well as the in-transaction hook.
+            match target:
+                case None:
+                    change = await self.create_note(
+                        project_external_id=project_external_id,
+                        data=data,
+                        user_profile_id=user_profile_id,
+                        source=source,
+                    )
+                    return Created(change)
+                case NoteLocation(external_id=entity_id):
+                    change = await self.update_note(
+                        project_external_id=project_external_id,
+                        entity_external_id=entity_id,
+                        data=data,
+                        user_profile_id=user_profile_id,
+                        source=source,
+                    )
+                    return Updated(change)
+                case _:
+                    assert_never(target)
+        except AcceptedNoteMutationRejected as error:
+            return Rejected(error.rejection)
+        except NoteContentMutationServiceError as error:
+            # Legacy create/update adapters expose structured service errors.
+            # Translate their recoverable outcomes once; preserve other refusals.
+            match error.status_code:
+                case 423:
+                    return Locked(str(error.detail))
+                case 409 if target is None:
+                    return AlreadyExists(data.file_path)
+                case _:
+                    raise
+
     async def create_note(
         self,
         *,
@@ -343,39 +455,15 @@ class NoteContentMutationService:
         actor_name: str | None = None,
     ) -> AcceptedNoteChange:
         """POST a new markdown note into accepted DB state."""
-        actor_context = self._resolve_actor(
-            "create",
-            user_profile_id=user_profile_id,
-            source=source,
-            actor_kind=actor_kind,
-            actor_name=actor_name,
-        )
         try:
-            async with self._mutation_cache_scope(project_external_id):
-                async with accepted_note_transaction(self.session_maker) as session:
-                    result = await run_accepted_note_create(
-                        session,
-                        request=AcceptedNoteCreateMutation(
-                            project_external_id=project_external_id,
-                            data=data,
-                            actor=accepted_note_mutation_actor(
-                                user_profile_id=actor_context.user_profile_id,
-                                actor_kind=actor_context.actor_kind,
-                                actor_name=actor_context.actor_name,
-                            ),
-                            source=actor_context.source,
-                        ),
-                        dependencies=self.mutation_dependencies,
-                    )
-                    await self.on_accepted_mutation(
-                        session,
-                        project_external_id=project_external_id,
-                        change=result.change,
-                        mutation_kind="create",
-                        source=actor_context.source,
-                    )
-                accepted = await self._finish_mutation(result)
-            return accepted
+            return await self._accept_write(
+                AcceptedNoteCreateMutation(
+                    project_external_id=project_external_id,
+                    data=data,
+                    actor=AcceptedNoteMutationActor(user_profile_id, actor_kind, actor_name),
+                    source=source,
+                )
+            )
         except AcceptedNoteMutationRejected as error:
             raise note_content_mutation_error_from_rejection(error.rejection) from error
 
@@ -400,51 +488,81 @@ class NoteContentMutationService:
         (issue #1445). It stays optional so callers without a synced base still
         write.
         """
-        actor_context = self._resolve_actor(
-            "update",
-            user_profile_id=user_profile_id,
-            source=source,
-            actor_kind=actor_kind,
-            actor_name=actor_name,
-        )
-        freshening_may_have_published = False
         try:
-            freshening_may_have_published = await self.freshen_existing_note_content(
-                project_external_id=project_external_id,
-                entity_external_id=entity_external_id,
+            return await self._accept_write(
+                AcceptedNoteUpdateMutation(
+                    project_external_id=project_external_id,
+                    entity_external_id=entity_external_id,
+                    data=data,
+                    actor=AcceptedNoteMutationActor(user_profile_id, actor_kind, actor_name),
+                    source=source,
+                    base_checksum=base_checksum,
+                )
             )
-            async with self._mutation_cache_scope(
-                project_external_id,
-                invalidate_on_rejection=freshening_may_have_published,
-            ):
-                async with accepted_note_transaction(self.session_maker) as session:
-                    result = await run_accepted_note_update(
-                        session,
-                        request=AcceptedNoteUpdateMutation(
-                            project_external_id=project_external_id,
-                            entity_external_id=entity_external_id,
-                            data=data,
-                            actor=accepted_note_mutation_actor(
-                                user_profile_id=actor_context.user_profile_id,
-                                actor_kind=actor_context.actor_kind,
-                                actor_name=actor_context.actor_name,
-                            ),
-                            source=actor_context.source,
-                            base_checksum=base_checksum,
-                        ),
-                        dependencies=self.mutation_dependencies,
-                    )
-                    await self.on_accepted_mutation(
-                        session,
-                        project_external_id=project_external_id,
-                        change=result.change,
-                        mutation_kind="update",
-                        source=actor_context.source,
-                    )
-                accepted = await self._finish_mutation(result)
         except AcceptedNoteMutationRejected as error:
             raise note_content_mutation_error_from_rejection(error.rejection) from error
-        return accepted
+
+    async def _accept_write(
+        self,
+        request: AcceptedNoteCreateMutation | AcceptedNoteUpdateMutation,
+    ) -> AcceptedNoteChange:
+        """Share actor resolution, transaction ownership and publication for full writes."""
+        kind: NoteContentMutationKind
+        match request:
+            case AcceptedNoteCreateMutation():
+                kind = "create"
+            case AcceptedNoteUpdateMutation():
+                kind = "update"
+            case _:
+                assert_never(request)
+        actor = self._resolve_actor(
+            kind,
+            user_profile_id=request.actor.user_profile_id,
+            source=request.source,
+            actor_kind=request.actor.kind,
+            actor_name=request.actor.name,
+        )
+        request = replace(
+            request,
+            actor=AcceptedNoteMutationActor(
+                actor.user_profile_id, actor.actor_kind, actor.actor_name
+            ),
+            source=actor.source,
+        )
+        freshened = False
+        if isinstance(request, AcceptedNoteUpdateMutation):
+            freshened = await self.freshen_existing_note_content(
+                project_external_id=request.project_external_id,
+                entity_external_id=request.entity_external_id,
+            )
+        async with self._mutation_cache_scope(
+            request.project_external_id,
+            invalidate_on_rejection=freshened,
+        ):
+            async with accepted_note_transaction(self.session_maker) as session:
+                match request:
+                    case AcceptedNoteCreateMutation():
+                        result = await run_accepted_note_create(
+                            session,
+                            request=request,
+                            dependencies=self.mutation_dependencies,
+                        )
+                    case AcceptedNoteUpdateMutation():
+                        result = await run_accepted_note_update(
+                            session,
+                            request=request,
+                            dependencies=self.mutation_dependencies,
+                        )
+                    case _:
+                        assert_never(request)
+                await self.on_accepted_mutation(
+                    session,
+                    project_external_id=request.project_external_id,
+                    change=result.change,
+                    mutation_kind=kind,
+                    source=actor.source,
+                )
+            return await self._finish_mutation(result)
 
     async def edit_note(
         self,

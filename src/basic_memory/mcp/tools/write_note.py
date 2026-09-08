@@ -3,8 +3,7 @@
 import dataclasses
 import textwrap
 from collections.abc import Sequence
-from pathlib import Path
-from typing import TYPE_CHECKING, Any, Annotated, List, Union, Optional, Literal
+from typing import TYPE_CHECKING, Any, Annotated, List, Union, Optional, Literal, assert_never
 
 import logfire
 from httpx import HTTPStatusError
@@ -18,6 +17,13 @@ from basic_memory.mcp.server import mcp
 from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from basic_memory.schemas.base import Entity
+from basic_memory.schemas.v2.note_write import (
+    NoteCreated,
+    NoteUpdated,
+    NoteAlreadyExists,
+    NoteTargetMoved,
+    NoteLocked,
+)
 from basic_memory.schemas.search import (
     SearchItemType,
     SearchQuery,
@@ -439,52 +445,45 @@ async def write_note(
             # Use typed KnowledgeClient for API calls
             knowledge_client = KnowledgeClient(client, active_project.external_id)
 
-            # Try to create the entity first (optimistic create)
-            logger.debug(f"Attempting to create entity permalink={entity.permalink}")
-            action = "Created"  # Default to created
-            try:
-                result = await knowledge_client.create_entity(entity.model_dump())
-                action = "Created"
-            except Exception as e:
-                # If creation failed due to conflict (already exists), try to update
-                if (
-                    "409" in str(e)
-                    or "conflict" in str(e).lower()
-                    or "already exists" in str(e).lower()
-                ):
-                    # Guard: block overwrite unless explicitly enabled
-                    if not effective_overwrite:
-                        logger.warning(
-                            f"write_note blocked: note already exists (overwrite not enabled) "
-                            f"permalink={entity.permalink}"
-                        )
-                        if output_format == "json":
-                            return {
-                                "title": title,
-                                "permalink": entity.permalink,
-                                "file_path": None,
-                                "checksum": None,
-                                "action": "conflict",
-                                "error": "NOTE_ALREADY_EXISTS",
-                            }
-                        return _format_overwrite_error(title, entity.permalink, active_project.name)
-
-                    logger.debug(f"Entity exists, updating instead permalink={entity.permalink}")
-                    # The create conflict identifies an existing file. Resolve its path
-                    # strictly, then update by the returned UUID; no permalink is required.
-                    # Fuzzy resolution could select a different note with a similar identity.
-                    # POSIX-normalize so Windows clients send the same form the server stores.
-                    file_path_identifier = Path(entity.file_path).as_posix()
-                    entity_id = await knowledge_client.resolve_entity(
-                        file_path_identifier, strict=True
-                    )
-                    # Propagate the replacement failure (such as a locked-note refusal)
-                    # instead of masking it with the initial create conflict.
-                    result = await knowledge_client.update_entity(entity_id, entity.model_dump())
+            # The API owns path identity and overwrite policy; expected outcomes stay
+            # typed all the way here, so presentation never has to parse an HTTP error.
+            outcome = await knowledge_client.write_note(entity, overwrite=effective_overwrite)
+            match outcome:
+                case NoteCreated(entity=result):
+                    action = "Created"
+                case NoteUpdated(entity=result):
                     action = "Updated"
-                else:
-                    # Re-raise if it's not a conflict error
-                    raise  # pragma: no cover
+                case NoteAlreadyExists():
+                    if output_format == "json":
+                        return {
+                            "title": title,
+                            "permalink": entity.permalink,
+                            "file_path": None,
+                            "checksum": None,
+                            "action": "conflict",
+                            "error": "NOTE_ALREADY_EXISTS",
+                        }
+                    return _format_overwrite_error(title, entity.permalink, active_project.name)
+                case NoteTargetMoved() as moved:
+                    if output_format == "json":
+                        return {
+                            "title": moved.title,
+                            "permalink": moved.permalink,
+                            "file_path": moved.file_path,
+                            "checksum": None,
+                            "action": "conflict",
+                            "error": "NOTE_PATH_CONFLICT",
+                        }
+                    return (
+                        "# Error: Note is at a different path\n\n"
+                        f"The requested note is now at `{moved.file_path}`. "
+                        f"Read or edit it using `{moved.external_id}`. "
+                        "Use overwrite=False to create a separate note at the requested path."
+                    )
+                case NoteLocked(message=message):
+                    raise ToolError(message)
+                case _:
+                    assert_never(outcome)
             # --- Similar-note advisory ---
             # Trigger: the note was created (not updated).
             # Why: agents writing across sessions know the topic but not whether a note on
@@ -550,7 +549,7 @@ async def write_note(
                 f"project: {active_project.name}",
                 f"file_path: {result.file_path}",
                 f"permalink: {response_permalink}",
-                f"checksum: {result.checksum[:8] if result.checksum else 'unknown'}",
+                f"checksum: {result.file_checksum[:8] if result.file_checksum else 'unknown'}",
             ]
 
             # Count observations by category
@@ -598,7 +597,7 @@ async def write_note(
                     "title": result.title,
                     "permalink": response_permalink,
                     "file_path": result.file_path,
-                    "checksum": result.checksum,
+                    "checksum": result.file_checksum,
                     "action": action.lower(),
                     "similar_notes": [dataclasses.asdict(note) for note in similar_notes],
                 }
