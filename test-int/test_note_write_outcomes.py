@@ -63,6 +63,26 @@ async def test_write_rejection_keeps_validation_detail(
     assert not (Path(test_project.path) / "notes/Invalid.md").exists()
 
 
+async def test_write_rejects_invalid_frontmatter_before_selecting_identity(
+    client: AsyncClient,
+    test_project: Project,
+) -> None:
+    response = await client.post(
+        f"/v2/projects/{test_project.external_id}/knowledge/write",
+        json={
+            "note": {
+                "title": "Invalid",
+                "directory": "notes",
+                "content": "---\npermalink: [broken\n---\nBody",
+            },
+            "overwrite": True,
+        },
+    )
+    assert response.status_code == 400
+    assert "Invalid YAML" in response.json()["detail"]
+    assert not (Path(test_project.path) / "notes/Invalid.md").exists()
+
+
 @pytest.mark.parametrize("overwrite", [False, True])
 async def test_write_preserves_runtime_operation_overrides(
     client: AsyncClient,

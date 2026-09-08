@@ -11,6 +11,8 @@ from uuid import UUID
 from loguru import logger
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from basic_memory.file_utils import ParseError, has_frontmatter, parse_frontmatter
+
 from basic_memory.indexing.accepted_note_mutation_runner import (
     AcceptedNoteCreateMutation,
     AcceptedNoteDeleteMutation,
@@ -393,6 +395,13 @@ class NoteContentMutationService:
                         existing.permalink,
                     )
                 elif overwrite:
+                    # A supplied frontmatter permalink is the identity preparation
+                    # would use. Check it before generated path aliases to avoid
+                    # creating a suffixed shadow of a moved custom-permalink note.
+                    if data.content and has_frontmatter(data.content):
+                        permalink = parse_frontmatter(data.content).get("permalink")
+                        if isinstance(permalink, str) and permalink:
+                            permalink_candidates = (permalink, *permalink_candidates)
                     for permalink in permalink_candidates:
                         moved = await entity_repository.get_by_permalink(
                             session,
@@ -433,6 +442,8 @@ class NoteContentMutationService:
                     assert_never(target)
         except AcceptedNoteMutationRejected as error:
             return Rejected(error.rejection)
+        except ParseError as error:
+            raise NoteContentMutationServiceError(400, str(error)) from error
         except NoteContentMutationServiceError as error:
             # Legacy create/update adapters expose structured service errors.
             # Translate their recoverable outcomes once; preserve other refusals.

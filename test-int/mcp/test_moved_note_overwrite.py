@@ -10,17 +10,19 @@ from basic_memory.config import ConfigManager
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("output_format", ["text", "json"])
+@pytest.mark.parametrize("custom_permalink", [None, "custom/song"])
 async def test_overwrite_after_rename_refuses_without_changing_files(
-    mcp_server, app, test_project, app_config, output_format
+    mcp_server, app, test_project, app_config, output_format, custom_permalink
 ):
     app_config.update_permalinks_on_move = False
     ConfigManager().save_config(app_config)
+    frontmatter = f"---\npermalink: {custom_permalink}\n---\n" if custom_permalink else ""
     async with Client(mcp_server) as client:
         arguments = {
             "project": test_project.name,
             "title": "song-sketching",
             "directory": "app/probe",
-            "content": "# original\nfirst body",
+            "content": f"{frontmatter}# original\nfirst body",
         }
         await client.call_tool("write_note", arguments)
         await client.call_tool(
@@ -37,7 +39,7 @@ async def test_overwrite_after_rename_refuses_without_changing_files(
             "write_note",
             {
                 **arguments,
-                "content": "# replacement\nsecond body",
+                "content": f"{frontmatter}# replacement\nsecond body",
                 "overwrite": True,
                 "output_format": output_format,
             },
