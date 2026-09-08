@@ -1481,37 +1481,10 @@ class TestWriteNoteOverwriteGuard:
         assert "file_path: guard/Brand New Note.md" in result
 
     @pytest.mark.asyncio
-    async def test_write_note_overwrite_resolves_by_file_path_strictly(
-        self, app, test_project, entity_repository, session_maker, monkeypatch
+    async def test_write_note_overwrite_preserves_exact_path_identity(
+        self, app, test_project, entity_repository, session_maker
     ):
-        """Regression: overwrite=True must resolve the conflicting entity by
-        file_path with strict=True, not by permalink with fuzzy fallback.
-
-        Bug shape: in workspace-prefixed palaces the client-built permalink
-        omits the workspace slug, so resolve_entity(permalink) with the default
-        strict=False would fall through to fuzzy search and could pick an
-        orphan row sharing tokens with the canonical permalink. The update
-        then wrote to the orphan, the canonical row stayed stale, and the
-        next overwrite minted a -1/-2 suffix because the permalink uniqueness
-        check found duplicate rows.
-
-        The 409 we catch came from a file_service.exists(file_path) check,
-        so file_path is the authoritative key — strict resolution against it
-        is safe even when permalinks are workspace-prefixed elsewhere.
-        """
-        # Spy on the resolve_entity call to assert the identifier and strict flag.
-        from basic_memory.mcp.clients import knowledge as knowledge_mod
-
-        original_resolve = knowledge_mod.KnowledgeClient.resolve_entity
-        captured: dict[str, Any] = {}
-
-        async def spy_resolve(self, identifier, *, strict=False):
-            captured["identifier"] = identifier
-            captured["strict"] = strict
-            return await original_resolve(self, identifier, strict=strict)
-
-        monkeypatch.setattr(knowledge_mod.KnowledgeClient, "resolve_entity", spy_resolve)
-
+        """Replacing an exact path preserves its UUID and does not mint duplicate identities."""
         # Create then overwrite the canonical note.
         await write_note(
             project=test_project.name,
@@ -1533,11 +1506,6 @@ class TestWriteNoteOverwriteGuard:
             overwrite=True,
         )
         assert "# Updated note" in result
-
-        # The overwrite path resolved by file_path with strict=True — not by
-        # permalink with the default fuzzy fallback.
-        assert captured.get("identifier") == "features/foo/Overview.md"
-        assert captured.get("strict") is True
 
         # And the canonical row was updated in place — no duplicate -1/-2 row.
         async with db.scoped_session(session_maker) as session:

@@ -125,22 +125,10 @@ async def test_write_note_update_existing(mcp_server, app, test_project):
 
 
 @pytest.mark.asyncio
-async def test_write_note_overwrite_resolves_conflict_by_file_path_when_permalink_changes(
-    mcp_server, app, test_project, monkeypatch
+async def test_write_note_overwrite_preserves_path_when_permalink_changes(
+    mcp_server, app, test_project
 ):
-    """Overwrite resolves the conflict by strict file path through the MCP client stack."""
-    from basic_memory.mcp.clients import knowledge as knowledge_mod
-
-    original_resolve = knowledge_mod.KnowledgeClient.resolve_entity
-    captured_resolve: dict[str, Any] = {}
-
-    async def spy_resolve(self, identifier: str, *, strict: bool = False) -> str:
-        captured_resolve["identifier"] = identifier
-        captured_resolve["strict"] = strict
-        return await original_resolve(self, identifier, strict=strict)
-
-    monkeypatch.setattr(knowledge_mod.KnowledgeClient, "resolve_entity", spy_resolve)
-
+    """A custom permalink replacement still updates the exact requested file."""
     async with Client(mcp_server) as client:
         created = await client.call_tool(
             "write_note",
@@ -182,10 +170,6 @@ async def test_write_note_overwrite_resolves_conflict_by_file_path_when_permalin
         assert updated_payload["action"] == "updated"
         assert updated_payload["permalink"] == "overwrite-conflicts/custom-overwrite-permalink"
         assert updated_payload["file_path"] == "overwrite-conflicts/Overwrite Permalink Change.md"
-        assert captured_resolve == {
-            "identifier": "overwrite-conflicts/Overwrite Permalink Change.md",
-            "strict": True,
-        }
 
         read_updated = await client.call_tool(
             "read_note",

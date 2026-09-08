@@ -21,6 +21,12 @@ from basic_memory.schemas.response import (
 from basic_memory.schemas.v2.graph import GraphNode, OrphanEntitiesResponse
 from basic_memory.schemas.v2.entity import EntityResolveResponse, EntityResponseV2
 from basic_memory.schemas.v2.accepted_content import AcceptedNoteContentBatchResponse
+from basic_memory.schemas.base import Entity
+from basic_memory.schemas.v2.note_write import (
+    WriteNoteRequest,
+    WriteNoteResponse,
+    write_note_response_adapter,
+)
 
 
 class KnowledgeClient:
@@ -49,6 +55,20 @@ class KnowledgeClient:
         self._base_path = f"/v2/projects/{project_id}/knowledge"
 
     # --- Entity CRUD Operations ---
+
+    async def write_note(self, note: Entity, *, overwrite: bool) -> WriteNoteResponse:
+        """Write at an exact path and preserve the service's expected outcomes."""
+        from basic_memory.mcp.tools.utils import call_post
+
+        response = await call_post(
+            self.http_client,
+            f"{self._base_path}/write",
+            json=WriteNoteRequest(note=note, overwrite=overwrite).model_dump(mode="json"),
+            client_name="knowledge",
+            operation="write_note",
+            path_template="/v2/projects/{project_id}/knowledge/write",
+        )
+        return write_note_response_adapter.validate_json(response.content)
 
     async def create_entity(self, entity_data: dict[str, Any]) -> EntityResponse:
         """Create a new entity.

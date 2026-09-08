@@ -13,6 +13,9 @@ from basic_memory.api.v2.routers.prompt_router import router as prompt_router
 from basic_memory.api.v2.routers.importer_router import router as importer_router
 from basic_memory.api.v2.routers.schema_router import router as schema_router
 from basic_memory.api.v2.routers.inspect_router import router as inspect_router
+from basic_memory.api.v2.routers.note_write_router import router as note_write_router
+
+knowledge_router.include_router(note_write_router)
 
 __all__ = [
     "accepted_content_router",
