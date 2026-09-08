@@ -16,8 +16,11 @@ _MEMORY_REQUEST = re.compile(r"\bremember\b", re.IGNORECASE)
 _MEMORY_NAME = re.compile(r"\bbasic[- ]memory\b", re.IGNORECASE)
 _QUALIFIED_CLAIM = re.compile(r"\b(?:not|never|nothing|none|zero|no)\b|\?", re.IGNORECASE)
 _OTHER_DESTINATION = re.compile(
-    r"\blocally\b|\b(?:to|on|in)\s+(?:(?:the|my|your|local)\s+)?"
-    r"(?:disk|filesystem|file system|desktop|downloads|clipboard)\b",
+    r"\blocally\b|\b(?:to|on|in)\s+\S",
+    re.IGNORECASE,
+)
+_HISTORICAL_SAVE = re.compile(
+    r"\b(?:yesterday|previously|earlier|already|last\s+(?:time|week|month|year|session))\b",
     re.IGNORECASE,
 )
 _CORRECTION = (
@@ -41,12 +44,15 @@ def claims_memory_save(response: str, *, memory_requested: bool) -> bool:
             match = _SAVE_CLAIM.search(sentence)
             if match is None:
                 continue
-            claim = sentence[match.start() :]
+            claim = re.sub(r"^[,:;—–]\s+", "", sentence[match.start() :])
+            claim = re.split(r"[;,]\s+(?!but\b|however\b|yet\b)", claim, flags=re.IGNORECASE)[0]
             names_memory = bool(_MEMORY_NAME.search(claim))
             if not memory_requested and not names_memory:
                 continue
             # A greeting or later question cannot qualify this save clause.
             if _QUALIFIED_CLAIM.search(claim):
+                continue
+            if _HISTORICAL_SAVE.search(claim):
                 continue
             if not names_memory and _OTHER_DESTINATION.search(claim):
                 continue

@@ -81,9 +81,18 @@ def test_only_the_save_clause_supplies_qualifications() -> None:
         "I've saved it. Do you need anything else?",
         "Sure, I saved it in Basic Memory.",
         "Done — I've recorded it.",
+        "I've saved it to Basic Memory; no other settings were changed.",
+        "I've saved it, no problem.",
     ]:
         assert _module.claims_memory_save(response, memory_requested=True)
     assert not _module.claims_memory_save("Saved the image to disk.", memory_requested=True)
+    for response in [
+        "I saved it to Basic Memory yesterday.",
+        "Saved the photo to Google Drive.",
+        "Stored it in Dropbox.",
+        "Sure, I saved it to Google Drive.",
+    ]:
+        assert not _module.claims_memory_save(response, memory_requested=True)
 
 
 def test_reported_hermes_acknowledgment_is_corrected() -> None:
