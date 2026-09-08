@@ -39,6 +39,8 @@ from typing import Any, Callable
 from agent.memory_provider import MemoryProvider
 from tools.registry import tool_error
 
+from .save_claims import SaveClaimGuard
+
 __version__ = "0.23.2"
 
 logger = logging.getLogger("hermes.memory.basic-memory")
@@ -2036,6 +2038,32 @@ def register(ctx: Any) -> None:
     provider = BasicMemoryProvider()
     _active_providers.append(provider)
     ctx.register_memory_provider(provider)
+
+    # Hook discovery can instantiate a second, inactive provider. Select the
+    # configured backend at the turn boundary instead of closing over that
+    # instance's initialization state, which would disable the guard on reload.
+    if hasattr(ctx, "register_hook"):
+        guard = SaveClaimGuard()
+
+        def begin_memory_turn(
+            *, session_id: str = "", turn_id: str = "", user_message: str = "", **_: object
+        ) -> None:
+            from hermes_cli.config import cfg_get, load_config_readonly
+
+            if cfg_get(load_config_readonly(), "memory", "provider") == PROVIDER_NAME:
+                guard.begin_turn(session_id=session_id, turn_id=turn_id, user_message=user_message)
+            else:
+                guard.end_session(session_id=session_id)
+
+        ctx.register_hook("pre_llm_call", begin_memory_turn)
+        ctx.register_hook("post_tool_call", guard.observe_tool)
+        ctx.register_hook("transform_llm_output", guard.transform)
+        ctx.register_hook("on_session_end", guard.end_session)
+    else:
+        logger.warning(
+            "basic-memory: this Hermes host does not expose plugin hooks; "
+            "save-claim verification requires a Hermes upgrade"
+        )
 
     # Bundle the user-facing skill so `hermes plugins install` wires it up
     # with the rest of the plugin. The skill is opt-in via

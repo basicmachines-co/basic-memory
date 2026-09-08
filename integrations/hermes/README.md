@@ -82,6 +82,27 @@ Plus automatic capture:
 
 A bundled skill (`skill:view basic-memory:basic-memory`) gives the agent a longer reference doc on top of the always-on `system_prompt_block`.
 
+### Save confirmations
+
+When `memory.provider` is `basic-memory`, the plugin checks direct English save
+confirmations against successful `bm_write` or `bm_edit` events in the same turn.
+Without an observed successful write it appends:
+
+> Basic Memory verification: no successful Basic Memory write was observed in this turn. The save claim above is unverified.
+
+This is a bounded heuristic: it recognizes confirmations such as “Saved to Basic
+Memory” and “I've saved it” after a remember request. It skips quoted and fenced
+examples. It does not verify the contents of a successful write, recognize every
+paraphrase or language, or observe writes made through a shell or another client.
+Automatic transcript capture does not count as saving the requested note.
+
+The guard requires Hermes to dispatch `pre_llm_call` and `post_tool_call` with
+session/turn IDs, plus `transform_llm_output` before final-response delivery. Older
+hosts without hook registration log an upgrade warning. Host contract tests below
+verify the installed Hermes source; they pass against released Hermes v0.21.1
+(`v2026.9.7`). Use that release or newer for save-claim verification; the older
+prerequisite above covers the ordinary memory tools.
+
 ## Slash commands
 
 For direct, in-session use without going through the agent (requires Hermes ≥ v0.11.0):
@@ -210,7 +231,9 @@ hermes plugins remove basic-memory     # then revert memory.provider in config.y
 
 ## Development
 
-The plugin is a single-file Python module at `__init__.py`. The Hermes plugin loader expects `register(ctx)` and grep-detects either `register_memory_provider` or `MemoryProvider` in the file.
+The plugin entrypoint is `__init__.py`; `save_claims.py` owns turn-scoped write
+evidence and confirmation detection. The Hermes plugin loader expects `register(ctx)`
+and grep-detects either `register_memory_provider` or `MemoryProvider` in the entrypoint.
 
 For local development (point Hermes at your working tree instead of going through `hermes plugins install`):
 
@@ -239,6 +262,16 @@ BM_INTEGRATION=1 uv run --with pytest --with mcp pytest tests/test_integration.p
 The unit suite stubs out Hermes-internal imports (`agent.memory_provider`, `tools.registry`) so it runs without a Hermes install. `mcp` is optional at unit-test time — its absence just makes `is_available()` return False, which the tests verify.
 
 Integration tests require `BM_INTEGRATION=1`, `bm` CLI on PATH, and `mcp` Python package importable. Each session creates a unique throwaway BM project (under `tempfile.mkdtemp`) and removes it on teardown, so they never touch your real BM projects.
+
+To verify hook loading, tool-result status, and final-response replacement against
+a Hermes checkout, run from that checkout with its test environment:
+
+```bash
+scripts/run_tests.sh /absolute/path/to/basic-memory/integrations/hermes/host_tests/test_save_claims.py -q
+```
+
+These tests use the real memory-provider loader, hook dispatcher, and turn finalizer
+with temporary configuration. They make no model or Basic Memory server requests.
 
 ## License
 

@@ -49,6 +49,7 @@ _PLUGIN_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "__init_
 _spec = importlib.util.spec_from_file_location("hermes_basic_memory_plugin", _PLUGIN_PATH)
 assert _spec is not None and _spec.loader is not None
 _plugin = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = _plugin
 _spec.loader.exec_module(_plugin)
 
 
