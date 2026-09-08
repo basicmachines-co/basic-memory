@@ -66,3 +66,7 @@ def test_unindexed_status_counts_files_without_hashing(
     assert data["readiness"]["indexed_entities"] == 0
     files = next(stage for stage in data["readiness"]["stages"] if stage["name"] == "files")
     assert files["pending"] == files["total"] == 2
+    assert {item["path"]: item["size"] for item in data["observed_files"]} == {
+        "notes/new.md": len(b"# New\n"),
+        "asset.txt": len(b"unindexed asset"),
+    }
