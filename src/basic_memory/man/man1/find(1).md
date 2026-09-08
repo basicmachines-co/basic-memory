@@ -4,7 +4,7 @@ type: manpage
 section: 1
 name: find
 summary: recursively list files, or query notes by frontmatter metadata
-generated: hand
+generated: cli
 ---
 
 # find(1)
@@ -16,13 +16,10 @@ generated: hand
 ## SYNOPSIS
 
 ```
-bm find [PATH] [--name GLOB] [--depth N] [--page N] [--page-size N]
-        [--json | --plain] [--project NAME | --project-id UUID]
-        [--local | --cloud]
-
-bm find [PATH] --meta PREDICATE [--meta PREDICATE ...] [--fields LIST]
-        [--page N] [--page-size N] [--json | --plain]
-        [--project NAME | --project-id UUID] [--local | --cloud]
+bm find [PATH] [--name NAME] [--depth DEPTH] [--page PAGE]
+        [--page-size PAGE_SIZE] [--meta META] [--fields FIELDS] [--json]
+        [--plain] [--project PROJECT] [--project-id PROJECT_ID] [--local]
+        [--cloud]
 ```
 
 ## DESCRIPTION
@@ -131,18 +128,18 @@ predicates keep their existing frontmatter comparison behavior.
 
 ## OPTIONS
 
-- **--name** — file-name glob, e.g. `"*.md"`; omitted matches everything.
-  Cannot combine with `--meta`
-- **--depth** — recursion depth, 1-10 (default 10). A non-default depth
-  cannot combine with `--meta`
-- **--meta** — frontmatter predicate, repeatable; see PREDICATE GRAMMAR.
-  Switches the payload to the search response shape
-- **--fields** — comma-separated frontmatter fields to show per hit, e.g.
-  `"title,priority"`; dot-paths allowed, in the same shape predicate keys
-  take, and a malformed one is refused rather than shown as null for every
-  hit. A field a note does not carry shows as null. Projects each hit down to
-  its identity plus those fields — no note content. Requires `--meta`
-- **--page, --page-size** — pagination (defaults 1 and 10)
+- **--name** — File-name glob, e.g. "*.md"
+- **--depth** (default: 10) — Recursion depth (API bound 1-10)
+- **--page** (default: 1) — Page number (1-indexed)
+- **--page-size** (default: 10) — Nodes per page
+- **--meta** — Metadata predicate, repeatable: 'status=active', 'confidence>0.6', 'priority in high,critical', 'tags has security', 'score between 0.3,0.8', 'owner=null' (key missing or null). PATH still scopes the query, by file path
+- **--fields** — Comma-separated frontmatter fields to show per hit, e.g. "title,priority" (requires --meta)
+- **--json** — Output raw JSON instead of formatted display
+- **--plain** — Output undecorated plain text (no colors/markup), even when piped
+- **--project** — The project to use. If not provided, the default project will be used.
+- **--project-id** — Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.
+- **--local** — Force local API routing (ignore cloud mode)
+- **--cloud** — Force cloud API routing
 
 ## EXAMPLES
 
