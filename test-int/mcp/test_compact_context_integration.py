@@ -43,13 +43,23 @@ async def test_compact_context_preserves_graph_navigation(mcp_server, app, test_
             result["primary_result"].pop("content", None)
             for item in [*result["observations"], *result["related_results"]]:
                 item.pop("content", None)
+                if item["type"] == "observation":
+                    item["permalink"] = item["file_path"]
+                    item["title"] = item["category"]
         assert compact == full
+        assert "detailed-observation" not in compact_result.content[0].text.lower()
+        assert "Detailed observation" not in compact_result.content[0].text
         assert len(compact_result.content[0].text) < len(full_result.content[0].text) / 2
         selected = compact["results"][0]["primary_result"]
         read = await client.call_tool(
             "read_note", {"identifier": selected["external_id"], "project": test_project.name}
         )
         assert body in read.content[0].text
+        observation = compact["results"][0]["observations"][0]
+        observed_note = await client.call_tool(
+            "read_note", {"identifier": observation["permalink"], "project": test_project.name}
+        )
+        assert body in observed_note.content[0].text
         text_result = await client.call_tool(
             "build_context", {**arguments, "compact": True, "output_format": "text"}
         )

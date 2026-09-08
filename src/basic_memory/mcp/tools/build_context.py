@@ -29,6 +29,39 @@ from basic_memory.schemas.memory import (
 )
 
 
+def _compact_observation(observation: ObservationSummary) -> ObservationSummary:
+    """Navigate to the owning file without repeating content-derived labels."""
+    return observation.model_copy(
+        update={"title": observation.category, "permalink": observation.file_path}
+    )
+
+
+def _compact_context_labels(graph: GraphContext) -> GraphContext:
+    # Observation titles and permalinks embed source prose. Use the category and
+    # owning file for discovery; keep numeric and external IDs unchanged.
+    return graph.model_copy(
+        update={
+            "results": [
+                result.model_copy(
+                    update={
+                        "primary_result": _compact_observation(result.primary_result)
+                        if isinstance(result.primary_result, ObservationSummary)
+                        else result.primary_result,
+                        "observations": [_compact_observation(obs) for obs in result.observations],
+                        "related_results": [
+                            _compact_observation(item)
+                            if isinstance(item, ObservationSummary)
+                            else item
+                            for item in result.related_results
+                        ],
+                    }
+                )
+                for result in graph.results
+            ]
+        }
+    )
+
+
 def _format_entity_block(result: ContextResult, *, compact: bool = False) -> str:
     """Format a single context result as a markdown block."""
     primary = result.primary_result
@@ -346,6 +379,9 @@ async def build_context(
                 f"related_count={graph.metadata.related_count or 0} "
                 f"output_format={output_format}"
             )
+
+            if compact:
+                graph = _compact_context_labels(graph)
 
             if output_format == "text":
                 return _format_context_markdown(graph, active_project.name, compact=compact)

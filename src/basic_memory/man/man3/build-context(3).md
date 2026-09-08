@@ -45,8 +45,10 @@ URL forms: `"folder/note"`, `"memory://folder/note"`, and patterns
 costs two depth levels internally (relation, then entity).
 
 Use `compact=True` for graph discovery without note or observation bodies.
-JSON keeps the graph shape, identifiers, categories, short observation titles,
+JSON keeps the graph shape, identifiers, categories,
 relations and pagination; text omits the observation section and note bodies.
+Observation titles become their categories and their content-derived permalinks
+become owning-file paths, which can be passed to `read_note`.
 Read selected notes with `read_note`. The default response is unchanged.
 This reduces MCP output, not API traversal work, and is not a fixed token limit.
 
