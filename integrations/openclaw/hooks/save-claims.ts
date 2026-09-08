@@ -9,7 +9,9 @@ interface RunEvidence {
 }
 
 const MAX_TRACKED_RUNS = 256
-const MEMORY_NAME = /\bbasic[- ]memory\b|\bmemory:\/\//i
+const MEMORY_DESTINATION =
+  /\b(?:to|in|on|into)\s+(?:basic[- ]memory\b|memory:\/\/)/i
+const OTHER_DESTINATION = /\blocally\b|\b(?:to|on|in)\s+\S/i
 
 export function claimsMemorySave(
   text: string,
@@ -36,7 +38,7 @@ export function claimsMemorySave(
       // unrelated action (such as changing settings) does not.
       if (
         /\b(?:not|never)\s+(?:actually\s+)?(?:save|store|record|remember|write|persist)\b/i.test(
-          sentence,
+          sentence.slice(match.index),
         )
       )
         continue
@@ -44,7 +46,7 @@ export function claimsMemorySave(
         .slice(match.index)
         .replace(/^[,:;—–]\s+/, "")
         .split(/[;,]\s+/)[0]
-      if (!memoryRequested && !MEMORY_NAME.test(claim)) continue
+      if (!memoryRequested && !MEMORY_DESTINATION.test(claim)) continue
       // Only the save clause supplies qualifications; a greeting or later question does not.
       if (/\b(?:not|never|nothing|none|zero|no)\b|\?/i.test(claim)) continue
       if (
@@ -53,10 +55,7 @@ export function claimsMemorySave(
         )
       )
         continue
-      if (
-        !MEMORY_NAME.test(claim) &&
-        /\blocally\b|\b(?:to|on|in)\s+\S/i.test(claim)
-      )
+      if (!MEMORY_DESTINATION.test(claim) && OTHER_DESTINATION.test(claim))
         continue
       return true
     }
@@ -93,9 +92,10 @@ export function registerSaveClaimGuard(api: OpenClawPluginApi): void {
     if (runs.has(runKey)) return
     runs.set(runKey, {
       memoryRequested:
-        /\b(?:remember|(?:save|record|note)\s+(?:this|that|it|my|our|your|the|a|an)\b)/i.test(
-          event.prompt,
-        ) || MEMORY_NAME.test(event.prompt),
+        /\bremember\b/i.test(event.prompt) ||
+        MEMORY_DESTINATION.test(event.prompt) ||
+        (/\b(?:save|record|note)\s+/i.test(event.prompt) &&
+          !OTHER_DESTINATION.test(event.prompt)),
       writeObserved: false,
     })
     // Aborted runs may never deliver a final payload; bound retained evidence.

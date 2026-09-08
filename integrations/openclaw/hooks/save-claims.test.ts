@@ -53,6 +53,7 @@ describe("save claim delivery guard", () => {
     "Note this",
     "Please save my preference",
     "Record my renewal date",
+    "Please save Fred's birthday",
   ]) {
     it(`treats ${prompt} as a capture request`, () => {
       const host = harness()
@@ -80,6 +81,16 @@ describe("save claim delivery guard", () => {
         payload: host.reply().payload,
       }),
     ).toBeUndefined()
+  })
+
+  it("does not treat explicit file saves as memory requests", () => {
+    const host = harness()
+    host.dispatch(
+      "llm_input",
+      { runId: "run-1", prompt: "Save the image to disk" },
+      { sessionKey: "session-1" },
+    )
+    expect(host.reply()).toBeUndefined()
   })
 
   for (const toolName of ["write_note", "edit_note"]) {
@@ -159,6 +170,7 @@ describe("claim recognition", () => {
     "- Saved to Basic Memory.",
     "1. Saved to Basic Memory.",
     "I saved it in Basic Memory, but did not change any other settings.",
+    "I did not save the card number; I saved the restaurant preference in Basic Memory.",
   ]) {
     it(`ignores unrelated qualifications: ${text}`, () => {
       expect(claimsMemorySave(text, true)).toBe(true)
@@ -182,6 +194,7 @@ describe("claim recognition", () => {
     "I updated my response.",
     "Saved the image to disk.",
     "Saved the photo to Google Drive.",
+    "Saved the Basic Memory config to Google Drive.",
     "Stored it in Dropbox.",
     "Sure, I saved it to Google Drive.",
     "I saved it to Basic Memory yesterday.",
