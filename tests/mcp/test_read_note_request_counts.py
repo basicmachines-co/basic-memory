@@ -155,8 +155,10 @@ async def test_permalink_json_resolves_once_then_reads_entity_once(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("fetch_fails", [False, True])
 async def test_exact_title_json_uses_search_result_external_id_without_second_resolve(
     monkeypatch: pytest.MonkeyPatch,
+    fetch_fails: bool,
 ) -> None:
     import importlib
 
@@ -178,6 +180,8 @@ async def test_exact_title_json_uses_search_result_external_id_without_second_re
         async def get_entity(self, entity_id: str) -> EntityResponseV2:
             calls["entity"] += 1
             assert entity_id == ENTITY_ID
+            if fetch_fails:
+                raise RuntimeError("entity fetch unavailable")
             return _entity()
 
     class RecordingResourceClient:
@@ -206,6 +210,12 @@ async def test_exact_title_json_uses_search_result_external_id_without_second_re
     monkeypatch.setattr(clients_module, "KnowledgeClient", RecordingKnowledgeClient)
     monkeypatch.setattr(clients_module, "ResourceClient", RecordingResourceClient)
     monkeypatch.setattr(read_note_module, "search_notes", fake_search_notes)
+
+    if fetch_fails:
+        with pytest.raises(RuntimeError, match="entity fetch unavailable"):
+            await read_note_module.read_note("Request Count", project="main", output_format="json")
+        assert calls == {"resolve": 1, "entity": 1, "resource": 0}
+        return
 
     result = await read_note_module.read_note(
         "Request Count",

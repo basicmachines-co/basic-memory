@@ -435,22 +435,16 @@ async def read_note(
                     break
 
             if result is not None and (output_format == "json" or line_scan):
-                try:
-                    entity_id = _result_external_id(result)
-                    if entity_id is None and _result_permalink(result) is not None:
-                        entity_id = await knowledge_client.resolve_entity(
-                            _result_permalink(result) or "", strict=True
-                        )
-                    if entity_id is not None:
-                        logger.info(
-                            f"Found note by exact title search: {_result_permalink(result)}"
-                        )
-                        return await _read_resolved_note(entity_id)
-                except Exception as error:  # pragma: no cover
-                    logger.info(
-                        "Failed to fetch content for found title match "
-                        f"{_result_permalink(result)}: {error}"
+                # An exact candidate identifies a note; retrieval failures must surface
+                # as operational errors instead of suggesting that it is missing.
+                entity_id = _result_external_id(result)
+                if entity_id is None and _result_permalink(result) is not None:
+                    entity_id = await knowledge_client.resolve_entity(
+                        _result_permalink(result) or "", strict=True
                     )
+                if entity_id is not None:
+                    logger.info(f"Found note by exact title search: {_result_permalink(result)}")
+                    return await _read_resolved_note(entity_id)
             elif result is not None and _result_permalink(result):
                 try:
                     entity_id = await knowledge_client.resolve_entity(
