@@ -13,7 +13,7 @@ _SAVE_CLAIM = re.compile(
     re.IGNORECASE,
 )
 _MEMORY_REQUEST = re.compile(r"\bremember\b", re.IGNORECASE)
-_MEMORY_NAME = re.compile(r"\bbasic[- ]memory\b", re.IGNORECASE)
+_MEMORY_NAME = re.compile(r"\bbasic[- ]memory\b|\bmemory://", re.IGNORECASE)
 _QUALIFIED_CLAIM = re.compile(r"\b(?:not|never|nothing|none|zero|no)\b|\?", re.IGNORECASE)
 _OTHER_DESTINATION = re.compile(
     r"\blocally\b|\b(?:to|on|in)\s+\S",
@@ -40,6 +40,7 @@ def claims_memory_save(response: str, *, memory_requested: bool) -> bool:
         if in_code or stripped.startswith((">", '"', "'")):
             continue
         plain = stripped.replace("**", "").replace("__", "")
+        plain = re.sub(r"^(?:[-+*]|\d+[.)])\s+", "", plain)
         for sentence in re.split(r"(?<=[.!?])\s+", plain):
             match = _SAVE_CLAIM.search(sentence)
             if match is None:

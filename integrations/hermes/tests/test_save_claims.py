@@ -83,6 +83,10 @@ def test_only_the_save_clause_supplies_qualifications() -> None:
         "Done — I've recorded it.",
         "I've saved it to Basic Memory; no other settings were changed.",
         "I've saved it, no problem.",
+        "Saved it to memory://notes/renewal.",
+        "- Saved to Basic Memory.",
+        "1. Saved to Basic Memory.",
+        "* **Saved to Basic Memory.**",
     ]:
         assert _module.claims_memory_save(response, memory_requested=True)
     assert not _module.claims_memory_save("Saved the image to disk.", memory_requested=True)
