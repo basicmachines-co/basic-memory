@@ -381,7 +381,10 @@ async def test_search_notes_search_all_projects_propagates_retryable_service_out
 
 
 @pytest.mark.asyncio
-async def test_search_notes_search_all_projects_local_omits_project_id(monkeypatch, local_routing):
+@pytest.mark.parametrize("compact_observations", [False, True])
+async def test_search_notes_search_all_projects_local_omits_project_id(
+    monkeypatch, local_routing, compact_observations
+):
     """Without a cloud route, fan-out must address each project by name only.
 
     project_id (external UUID) routes through the cloud v2 API path, which
@@ -431,7 +434,9 @@ async def test_search_notes_search_all_projects_local_omits_project_id(monkeypat
                         title=f"Note in {self.project_id or 'local'}",
                         permalink="notes/example",
                         content="",
-                        type=SearchItemType.ENTITY,
+                        type=SearchItemType.OBSERVATION
+                        if compact_observations
+                        else SearchItemType.ENTITY,
                         score=0.5,
                         file_path="/notes/example.md",
                     )
@@ -450,6 +455,7 @@ async def test_search_notes_search_all_projects_local_omits_project_id(monkeypat
         query="anything",
         search_all_projects=True,
         output_format="json",
+        compact=compact_observations,
     )
 
     assert isinstance(result, dict)
@@ -459,3 +465,8 @@ async def test_search_notes_search_all_projects_local_omits_project_id(monkeypat
     )
     assert result["total"] == 2
     assert result["total_is_exact"] is True
+    if compact_observations:
+        assert [item["permalink"] for item in result["results"]] == [
+            "alpha/notes/example.md",
+            "beta/notes/example.md",
+        ]
