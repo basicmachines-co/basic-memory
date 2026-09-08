@@ -44,6 +44,25 @@ from basic_memory.temporal import TemporalQualifierError, parse_temporal_filter
 _SERVICE_UNAVAILABLE_HEADING = "# Search Failed - Service Temporarily Unavailable"
 
 
+def _compact_search_response(response: SearchResponse) -> SearchResponse:
+    """Keep discovery identities and pagination without repeating source prose."""
+    return response.model_copy(
+        update={
+            "results": [
+                result.model_copy(
+                    update={
+                        "content": None,
+                        "matched_chunk": None,
+                        "content_length": None,
+                        "content_truncated": None,
+                    }
+                )
+                for result in response.results
+            ]
+        }
+    )
+
+
 def _default_search_type() -> str:
     """Pick default search mode from config, falling back to auto-detection.
 
@@ -588,6 +607,7 @@ async def _search_all_projects(
     valid_overlaps: str | None,
     time_kind: str | None,
     context: Context | None,
+    compact: bool = False,
 ) -> dict[str, Any] | str:
     """Search every accessible project when the caller explicitly opts in."""
     requested_page = max(page, 1)
@@ -730,6 +750,8 @@ async def _search_all_projects(
         }
     )
 
+    if compact:
+        response = _compact_search_response(response)
     if output_format == "json":
         return response.model_dump(mode="json", exclude_none=True)
     return _format_search_markdown(response, "all projects", query)
@@ -873,6 +895,11 @@ async def search_notes(
         "source carrying an assertion of that kind.",
     ] = None,
     context: Context | None = None,
+    compact: Annotated[
+        bool,
+        "Omit note bodies and matched excerpts from results. Keep identifiers, metadata, "
+        "relation targets, scores and pagination for discovery, then read selected notes.",
+    ] = False,
 ) -> dict[str, Any] | str:
     """Search across all content in the knowledge base with comprehensive syntax support.
 
@@ -1063,6 +1090,8 @@ async def search_notes(
         time_kind: Optional kind of valid time to narrow to: "effective", "valid",
                  "occurred", "due", or "mentioned". Valid on its own. Alias: kind.
         context: Optional FastMCP context for performance caching.
+        compact: Omit content and matched excerpts in either output format. Defaults to False.
+                 Use returned note identifiers with read_note for content verification.
 
     Returns:
         Formatted markdown text (output_format="text"), dict (output_format="json"),
@@ -1249,6 +1278,7 @@ async def search_notes(
             valid_overlaps=valid_overlaps,
             time_kind=time_kind,
             context=context,
+            compact=compact,
         )
         return all_projects_result
 
@@ -1434,6 +1464,8 @@ async def search_notes(
                     # Don't treat this as an error, but the user might want guidance
                     # We return the empty result as normal - the user can decide if they need help
 
+                if compact:
+                    result = _compact_search_response(result)
                 if output_format == "json":
                     return result.model_dump(mode="json", exclude_none=True)
 
