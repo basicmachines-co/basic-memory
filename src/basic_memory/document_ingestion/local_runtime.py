@@ -19,6 +19,9 @@ from pathlib import Path
 from typing import Protocol
 from uuid import UUID
 
+from fastmcp.exceptions import ToolError
+from httpx import HTTPStatusError
+
 from basic_memory.document_ingestion.csv_extractor import CSV_MEDIA_TYPE, CsvExtractor
 from basic_memory.document_ingestion.markitdown_extractor import markitdown_extractors
 from basic_memory.document_ingestion.pdf_inspector import PdfInspector
@@ -212,6 +215,20 @@ async def accept_document_note(
     Return physical and normalized projection checksums with the write status.
     """
     path = artifacts.document_file_path
+    # A generated document owns one indexed identity. Moving only its source
+    # must not create a second canonical note with that same identity.
+    try:
+        indexed = await knowledge.get_entity(str(artifacts.document_external_id))
+    except ToolError as error:
+        cause = error.__cause__
+        if not isinstance(cause, HTTPStatusError) or cause.response.status_code != 404:
+            raise
+    else:
+        if indexed.file_path != path:
+            raise DocumentSidecarConflictError(
+                f"generated document is already indexed at {indexed.file_path}; "
+                "move its sidecar with the source before importing again"
+            )
     if await file_service.exists(path):
         existing_markdown = await file_service.read_file_content(path)
         on_disk_checksum = canonical_db_checksum(await file_service.compute_checksum(path))
@@ -225,6 +242,13 @@ async def accept_document_note(
                 f"{path} exists and is not a generated document note; "
                 f"move it aside to ingest {artifacts.source.file_path}"
             ) from error
+        # A recreated source is a new entity, not a refresh of the old source.
+        # Preserve the old sidecar and its identity rather than publishing a ledger
+        # that points at an ID the indexer cannot assign to that existing note.
+        if existing.frontmatter.source.entity_external_id != artifacts.source.entity_external_id:
+            raise DocumentSidecarConflictError(
+                f"{path} belongs to a different source entity; move it aside before importing"
+            )
         if existing.frontmatter.ingestion.stage is not DocumentIngestionStage.raw:
             raise DocumentSidecarConflictError(
                 f"{path} has been enriched past the raw stage; refusing to overwrite it"
@@ -239,7 +263,7 @@ async def accept_document_note(
         # rebuilt from the new run, but only while it is still the projection an
         # earlier run wrote. Note content is canonical, and a raw note a person
         # has annotated must not be replaced silently.
-        # Compare-and-swap: the note must still be the bytes judged untouched above.
+        # Preflight guard only: atomic acceptance across concurrent writers is tracked in #1530.
         if canonical_db_checksum(await file_service.compute_checksum(path)) != on_disk_checksum:
             raise DocumentSidecarConflictError(
                 f"{path} changed while it was being replaced; re-run the import"

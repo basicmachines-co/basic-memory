@@ -45,3 +45,52 @@ async def test_local_run_points_to_the_indexed_document(
     assert indexed.file_path == result.document_file_path
     assert run.frontmatter.output is not None
     assert str(run.frontmatter.output.document_entity_external_id) == indexed.external_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["move", "recreate"])
+async def test_local_import_refuses_changed_source_ownership(
+    client: AsyncClient,
+    test_project: Project,
+    change: str,
+) -> None:
+    from basic_memory.document_ingestion.local_runtime import DocumentSidecarConflictError
+
+    home = Path(test_project.path)
+    source_path = "riders.csv"
+    (home / source_path).write_bytes(b"team,name\nAST,Ana\n")
+    projects = ProjectClient(client)
+    await projects.index(test_project.external_id, force_full=False, run_in_background=False)
+    knowledge = KnowledgeClient(client, test_project.external_id)
+    files = FileService(home, MarkdownProcessor(EntityParser(home)))
+    runtime = RawDocumentRuntime(
+        source_resolver=ApiDocumentSourceEntityResolver(knowledge),
+        source_reader=LocalDocumentSourceReader(home),
+        extractors=default_document_extractors(),
+        writer=LocalRawDocumentWriter(files, knowledge),
+    )
+    first = await runtime.ingest(file_path=source_path, observed_etag=None)
+    sidecar_before = (home / first.document_file_path).read_bytes()
+    run_before = (home / first.run_file_path).read_bytes()
+    source = await knowledge.resolve_entity_response(source_path, strict=True)
+
+    if change == "move":
+        source_path = "moved.csv"
+        (home / "riders.csv").rename(home / source_path)
+        await projects.index(test_project.external_id, force_full=False, run_in_background=False)
+        moved = await knowledge.resolve_entity_response(source_path, strict=True)
+        assert moved.external_id == source.external_id
+    else:
+        await knowledge.delete_entity(source.external_id)
+        (home / source_path).write_bytes(b"team,name\nAST,Bea\n")
+        await projects.index(test_project.external_id, force_full=False, run_in_background=False)
+
+    with pytest.raises(DocumentSidecarConflictError):
+        await runtime.ingest(file_path=source_path, observed_etag=None)
+
+    assert (home / first.document_file_path).read_bytes() == sidecar_before
+    assert (home / first.run_file_path).read_bytes() == run_before
+    indexed = await knowledge.get_entity(str(first.document_external_id))
+    assert indexed.file_path == first.document_file_path
+    if change == "move":
+        assert not (home / "moved.csv.md").exists()
