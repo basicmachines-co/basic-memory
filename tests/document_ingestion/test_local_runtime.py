@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from basic_memory import file_utils
 from basic_memory.document_ingestion.csv_extractor import CSV_MEDIA_TYPE
 from basic_memory.document_ingestion.local_runtime import (
     ApiDocumentSourceEntityResolver,
@@ -35,6 +36,7 @@ from basic_memory.schemas.document import (
     DocumentIngestionStage,
     DocumentIngestionV1,
     assemble_document_markdown,
+    document_markdown_checksum,
     parse_document_ingestion_run_markdown,
     parse_document_markdown,
 )
@@ -217,9 +219,19 @@ def artifacts(*, checksum_char: str = "a") -> RawDocumentArtifacts:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
 async def test_writer_creates_the_sidecar_and_run_note_and_indexes_both(
     file_service: FileService,
+    monkeypatch: pytest.MonkeyPatch,
+    newline: str,
 ) -> None:
+    # Exercise Windows persistence on every host so checksum drift fails locally.
+    async def write_with_newlines(path: Path, content: str) -> None:
+        await file_utils.write_file_atomic_bytes(
+            path, content.replace("\r\n", "\n").replace("\n", newline).encode("utf-8")
+        )
+
+    monkeypatch.setattr(file_utils, "write_file_atomic", write_with_newlines)
     knowledge = knowledge_api()
     writer = LocalRawDocumentWriter(file_service, knowledge)
     built = artifacts()
@@ -238,7 +250,15 @@ async def test_writer_creates_the_sidecar_and_run_note_and_indexes_both(
     )
     assert run_note.frontmatter.output is not None
     assert run_note.frontmatter.output.raw is not None
-    assert run_note.frontmatter.output.raw.checksum == result.document_db_checksum
+    assert run_note.frontmatter.output.raw.checksum == document_markdown_checksum(
+        built.document_markdown
+    )
+
+    reused = await writer.write(built)
+    assert reused.document_db_checksum == result.document_db_checksum
+    assert reused.run_created is False
+    rebuilt = await writer.write(artifacts(checksum_char="b"))
+    assert rebuilt.document_created is True
 
 
 @pytest.mark.asyncio
@@ -314,18 +334,18 @@ async def test_unchanged_import_after_indexer_annotation_keeps_provenance_consis
     knowledge = knowledge_api()
     writer = LocalRawDocumentWriter(file_service, knowledge)
     first = artifacts(checksum_char="a")
-    created = await writer.write(first)
+    await writer.write(first)
     sidecar = file_service.base_path / first.document_file_path
     sidecar.write_bytes(
         with_permalink(sidecar.read_text(encoding="utf-8"), "main/data/riders.csv").encode()
     )
 
     unchanged = await writer.write(artifacts(checksum_char="a"))
+    assert unchanged.document_db_checksum == sha256(sidecar.read_bytes())
     rebuilt = await writer.write(artifacts(checksum_char="b"))
 
     assert unchanged.document_created is False
     assert unchanged.run_created is False
-    assert unchanged.document_db_checksum == created.document_db_checksum
     assert rebuilt.document_created is True
     assert knowledge.indexed.count(first.run_file_path) == 1
 
@@ -412,7 +432,7 @@ async def test_writer_rewrites_a_run_note_that_names_other_sidecar_bytes(
     knowledge = knowledge_api()
     writer = LocalRawDocumentWriter(file_service, knowledge)
     built = artifacts()
-    first = await writer.write(built)
+    await writer.write(built)
     # Simulate an overlapping import that replaced the sidecar after this run
     # note was written: the note now names bytes that are no longer on disk.
     stale_note = build_raw_ingestion_run_markdown(
@@ -429,7 +449,9 @@ async def test_writer_rewrites_a_run_note_that_names_other_sidecar_bytes(
     )
     assert run_note.frontmatter.output is not None
     assert run_note.frontmatter.output.raw is not None
-    assert run_note.frontmatter.output.raw.checksum == first.document_db_checksum
+    assert run_note.frontmatter.output.raw.checksum == document_markdown_checksum(
+        built.document_markdown
+    )
     assert knowledge.indexed.count(built.run_file_path) == 2
 
 

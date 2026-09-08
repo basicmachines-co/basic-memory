@@ -147,6 +147,15 @@ class LocalDocumentSourceReader:
 
 
 @dataclass(frozen=True, slots=True)
+class AcceptedDocumentNote:
+    """Keep physical file identity separate from normalized run provenance."""
+
+    file_checksum: str
+    projection_checksum: str
+    written: bool
+
+
+@dataclass(frozen=True, slots=True)
 class LocalRawDocumentWriter:
     """Write the sidecar and run notes into the project directory and index them."""
 
@@ -154,19 +163,17 @@ class LocalRawDocumentWriter:
     knowledge: DocumentKnowledgeApi
 
     async def write(self, artifacts: RawDocumentArtifacts) -> RawDocumentWriteResult:
-        document_checksum, document_created = await accept_document_note(
-            self.file_service, self.knowledge, artifacts
-        )
+        document = await accept_document_note(self.file_service, self.knowledge, artifacts)
         run_created = await accept_run_note(
-            self.file_service, self.knowledge, artifacts, raw_checksum=document_checksum
+            self.file_service, self.knowledge, artifacts, raw_checksum=document.projection_checksum
         )
         return RawDocumentWriteResult(
             document_external_id=artifacts.document_external_id,
             document_file_path=artifacts.document_file_path,
-            document_db_checksum=document_checksum,
+            document_db_checksum=document.file_checksum,
             run_id=artifacts.run_id,
             run_file_path=artifacts.run_file_path,
-            document_created=document_created,
+            document_created=document.written,
             run_created=run_created,
         )
 
@@ -175,10 +182,10 @@ async def accept_document_note(
     file_service: FileService,
     knowledge: DocumentKnowledgeApi,
     artifacts: RawDocumentArtifacts,
-) -> tuple[str, bool]:
+) -> AcceptedDocumentNote:
     """Write the sidecar note unless an identical raw projection already exists.
 
-    Returns the canonical checksum of the note on disk and whether it was written.
+    Return physical and normalized projection checksums with the write status.
     """
     path = artifacts.document_file_path
     if await file_service.exists(path):
@@ -199,7 +206,7 @@ async def accept_document_note(
                 f"{path} has been enriched past the raw stage; refusing to overwrite it"
             )
         if raw_document_matches(existing, artifacts):
-            return raw_projection_checksum(existing), False
+            return AcceptedDocumentNote(on_disk_checksum, raw_projection_checksum(existing), False)
         # Same source path, different bytes or engine: the raw projection is
         # rebuilt from the new run, but only while it is still the projection an
         # earlier run wrote. Note content is canonical, and a raw note a person
@@ -210,16 +217,20 @@ async def accept_document_note(
             raise DocumentSidecarConflictError(
                 f"{path} changed while it was being replaced; re-run the import"
             )
-    await file_service.write_file(path, artifacts.document_markdown)
+    checksum = await file_service.write_file(path, artifacts.document_markdown)
     await knowledge.index_file(path)
-    return document_markdown_checksum(artifacts.document_markdown), True
+    return AcceptedDocumentNote(
+        canonical_db_checksum(checksum),
+        document_markdown_checksum(artifacts.document_markdown),
+        True,
+    )
 
 
 def raw_projection_checksum(document: DocumentMarkdownV1) -> str:
     """Checksum of a raw sidecar as its run wrote it, before the indexer's permalink.
 
-    Every checksum the local runtime records or compares is this one, so a note
-    the indexer has annotated still matches the run note that produced it.
+    Run provenance uses LF serialization on creation, reuse and rebuild. Physical
+    file checksums retain native line endings for filesystem change detection.
     """
     pristine_frontmatter = document.frontmatter.model_copy(update={"permalink": None})
     pristine = assemble_document_markdown(
