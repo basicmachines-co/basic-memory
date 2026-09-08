@@ -183,7 +183,7 @@ async def accept_document_note(
     path = artifacts.document_file_path
     if await file_service.exists(path):
         existing_markdown = await file_service.read_file_content(path)
-        existing_checksum = canonical_db_checksum(await file_service.compute_checksum(path))
+        on_disk_checksum = canonical_db_checksum(await file_service.compute_checksum(path))
         try:
             existing = parse_document_markdown(existing_markdown)
         except (ParseError, ValueError) as error:
@@ -199,20 +199,33 @@ async def accept_document_note(
                 f"{path} has been enriched past the raw stage; refusing to overwrite it"
             )
         if raw_document_matches(existing, artifacts):
-            return existing_checksum, False
+            return raw_projection_checksum(existing), False
         # Same source path, different bytes or engine: the raw projection is
         # rebuilt from the new run, but only while it is still the projection an
         # earlier run wrote. Note content is canonical, and a raw note a person
         # has annotated must not be replaced silently.
         await require_untouched_raw_projection(file_service, existing, path=path)
         # Compare-and-swap: the note must still be the bytes judged untouched above.
-        if canonical_db_checksum(await file_service.compute_checksum(path)) != existing_checksum:
+        if canonical_db_checksum(await file_service.compute_checksum(path)) != on_disk_checksum:
             raise DocumentSidecarConflictError(
                 f"{path} changed while it was being replaced; re-run the import"
             )
-    checksum = await file_service.write_file(path, artifacts.document_markdown)
+    await file_service.write_file(path, artifacts.document_markdown)
     await knowledge.index_file(path)
-    return canonical_db_checksum(checksum), True
+    return document_markdown_checksum(artifacts.document_markdown), True
+
+
+def raw_projection_checksum(document: DocumentMarkdownV1) -> str:
+    """Checksum of a raw sidecar as its run wrote it, before the indexer's permalink.
+
+    Every checksum the local runtime records or compares is this one, so a note
+    the indexer has annotated still matches the run note that produced it.
+    """
+    pristine_frontmatter = document.frontmatter.model_copy(update={"permalink": None})
+    pristine = assemble_document_markdown(
+        document.model_copy(update={"frontmatter": pristine_frontmatter})
+    )
+    return document_markdown_checksum(pristine)
 
 
 async def require_untouched_raw_projection(
@@ -242,11 +255,7 @@ async def require_untouched_raw_projection(
         ) from error
     output = run.frontmatter.output
     recorded_checksum = output.raw.checksum if output and output.raw else None
-    pristine_frontmatter = existing.frontmatter.model_copy(update={"permalink": None})
-    pristine = assemble_document_markdown(
-        existing.model_copy(update={"frontmatter": pristine_frontmatter})
-    )
-    if recorded_checksum != document_markdown_checksum(pristine):
+    if recorded_checksum != raw_projection_checksum(existing):
         raise DocumentSidecarConflictError(
             f"{path} has been edited since run {run_id} wrote it; "
             "move it aside or finish enriching it before importing the source again"
