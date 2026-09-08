@@ -562,6 +562,8 @@ def _qualify_permalink_for_project(permalink: object, project: str | None) -> ob
 def _qualify_results_for_project(
     results: list[SearchResult | dict[str, Any]],
     project_ref: dict[str, str | None],
+    *,
+    compact: bool = False,
 ) -> list[dict[str, Any]]:
     """Attach the searched workspace/project prefix to each result permalink."""
     qualified: list[dict[str, Any]] = []
@@ -570,10 +572,22 @@ def _qualify_results_for_project(
             result_data = result.model_dump()
         else:
             result_data = dict(result)
-        result_data["permalink"] = _qualify_permalink_for_project(
-            result_data.get("permalink"),
-            project_ref.get("project"),
-        )
+        project = project_ref.get("project")
+        if (
+            compact
+            and result_data.get("type") == SearchItemType.OBSERVATION
+            and project
+            and "/" in project
+        ):
+            # This is an exact file read target, not a generated permalink:
+            # retain its extension, spaces, and case under the workspace route.
+            result_data["permalink"] = (
+                f"{project.strip('/')}/{result_data['file_path'].lstrip('/')}"
+            )
+        else:
+            result_data["permalink"] = _qualify_permalink_for_project(
+                result_data.get("permalink"), project
+            )
         qualified.append(result_data)
     return qualified
 
@@ -694,6 +708,9 @@ async def _search_all_projects(
                 time_kind=time_kind,
                 search_all_projects=False,
                 context=context,
+                # Project qualification below must run after compact replaces
+                # observation excerpt permalinks with their owning file paths.
+                compact=compact,
             )
         except Exception as exc:
             logger.warning(
@@ -719,7 +736,9 @@ async def _search_all_projects(
         total += _result_total(results, raw_results)
         total_is_exact = total_is_exact and _result_total_is_exact(results)
         any_project_has_more = any_project_has_more or results.get("has_more") is True
-        merged_results.extend(_qualify_results_for_project(raw_results, project_ref))
+        merged_results.extend(
+            _qualify_results_for_project(raw_results, project_ref, compact=compact)
+        )
 
     # Trigger: a valid-time filter was requested and not one project answered.
     # Why: each leg confirms the filter through SearchClient or is refused by it, and a
@@ -758,8 +777,6 @@ async def _search_all_projects(
         }
     )
 
-    if compact:
-        response = _compact_search_response(response)
     if output_format == "json":
         return response.model_dump(mode="json", exclude_none=True)
     return _format_search_markdown(response, "all projects", query)
