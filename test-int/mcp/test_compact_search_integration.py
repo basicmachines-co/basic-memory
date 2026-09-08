@@ -8,10 +8,13 @@ from fastmcp import Client
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("all_projects", [False, True])
+@pytest.mark.parametrize("observations", [False, True])
 async def test_compact_search_can_discover_then_read_notes(
-    mcp_server, app, test_project, all_projects
+    mcp_server, app, test_project, all_projects, observations
 ):
     body = "CompactNeedle " + "This is source prose for a long note. " * 250
+    if observations:
+        body = "- [fact] " + body
     async with Client(mcp_server) as client:
         await client.call_tool(
             "write_note",
@@ -26,6 +29,7 @@ async def test_compact_search_can_discover_then_read_notes(
             "query": "CompactNeedle",
             "search_type": "text",
             "output_format": "json",
+            "entity_types": ["observation"] if observations else ["entity"],
         }
         if all_projects:
             arguments["search_all_projects"] = True
@@ -45,6 +49,10 @@ async def test_compact_search_can_discover_then_read_notes(
                 for row in full["results"]
             ],
         }
+        if observations:
+            for row in expected["results"]:
+                row["title"] = row["category"]
+                row["permalink"] = row["file_path"]
         assert compact == expected
         assert len(json.dumps(compact)) < len(json.dumps(full)) / 3
 
@@ -58,5 +66,6 @@ async def test_compact_search_can_discover_then_read_notes(
         text_result = await client.call_tool(
             "search_notes", {**arguments, "compact": True, "output_format": "text"}
         )
-        assert "CompactNeedle" in text_result.content[0].text
+        assert ("fact" if observations else "CompactNeedle") in text_result.content[0].text
         assert "This is source prose" not in text_result.content[0].text
+        assert "this-is-source-prose" not in text_result.content[0].text

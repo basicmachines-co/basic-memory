@@ -55,6 +55,14 @@ def _compact_search_response(response: SearchResponse) -> SearchResponse:
                         "matched_chunk": None,
                         "content_length": None,
                         "content_truncated": None,
+                        # Observation labels embed excerpts too. Keep owner-file
+                        # navigation and IDs without duplicating source prose.
+                        "title": (result.category or "observation")
+                        if result.type == SearchItemType.OBSERVATION
+                        else result.title,
+                        "permalink": result.file_path
+                        if result.type == SearchItemType.OBSERVATION
+                        else result.permalink,
                     }
                 )
                 for result in response.results

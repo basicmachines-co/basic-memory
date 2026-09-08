@@ -77,6 +77,8 @@ their content-length/truncation fields. Identifiers, metadata, relation targets,
 scores, temporal assertions, and pagination are retained. It works with JSON or
 text output and with `search_all_projects=True`. Read selected notes afterward
 with `read_note`; a search hit is discovery, not full content verification.
+Observation titles use their category and their permalinks use the owning file
+path instead of repeating observation prose; IDs remain unchanged.
 This reduces the MCP response, not the underlying API query or database work.
 It is not a hard token budget: titles and metadata can still be large.
 
