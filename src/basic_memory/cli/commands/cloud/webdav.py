@@ -19,6 +19,7 @@ object-storage credentials are scoped to an entire tenant bucket and cannot
 express per-project access.
 """
 
+import asyncio
 import re
 import xml.etree.ElementTree as ElementTree
 from dataclasses import dataclass
@@ -44,6 +45,24 @@ _PROPFIND_BODY = (
 # or a multipart digest-of-digests with its "-N" part-count suffix — is not a
 # content hash and must never be compared as one.
 _CONTENT_HASH_PATTERN = re.compile(r"[0-9a-fA-F]{32}")
+
+# The service meters every request on this transport, and a transfer of any real
+# size will meet its own rate limit: enumerating a project costs one PROPFIND per
+# directory, and the transfer that follows costs one request per file. A 429 is
+# therefore an ordinary step in a healthy transfer rather than a failure, and the
+# response carries a Retry-After telling us when the window resets.
+#
+# Retrying is what makes progress possible at all. Before this, a single 429
+# aborted the whole transfer, and since every re-run restarts the walk at the
+# first directory, a project past the per-minute ceiling could never finish no
+# matter how long the user waited (#2039).
+_RATE_LIMIT_MAX_ATTEMPTS = 6
+# A single wait is capped so an implausible Retry-After cannot hang the CLI, and
+# floored at one second so a "retry immediately" answer cannot spin.
+_RATE_LIMIT_MAX_WAIT_SECONDS = 60.0
+_RATE_LIMIT_MIN_WAIT_SECONDS = 1.0
+# Used when a 429 arrives with no Retry-After, or one we cannot parse.
+_RATE_LIMIT_FALLBACK_WAIT_SECONDS = 5.0
 
 
 class WebdavError(Exception):
@@ -130,6 +149,72 @@ def etag_content_hash(etag: str | None) -> str | None:
     return etag.lower()
 
 
+# --- Rate-limit retry ---
+
+
+async def _sleep(seconds: float) -> None:
+    """Wait out a rate-limit window.
+
+    A module-level seam so tests can observe the waits this client would take
+    without spending them.
+    """
+    await asyncio.sleep(seconds)
+
+
+def _retry_after_seconds(response: httpx.Response) -> float:
+    """Read Retry-After as a wait in seconds, clamped to a sane range.
+
+    RFC 9110 allows either delay-seconds or an HTTP-date, and the value is
+    advisory: a header we cannot parse still tells us the window is closed, so
+    every unusable form falls back to a fixed wait rather than giving up.
+    """
+    raw = response.headers.get("Retry-After")
+    if raw is None:
+        return _RATE_LIMIT_FALLBACK_WAIT_SECONDS
+
+    candidate = raw.strip()
+    if candidate.isdigit():
+        seconds = float(candidate)
+    else:
+        try:
+            retry_at = parsedate_to_datetime(candidate)
+        except (TypeError, ValueError, OverflowError):
+            return _RATE_LIMIT_FALLBACK_WAIT_SECONDS
+        if retry_at.tzinfo is None:
+            return _RATE_LIMIT_FALLBACK_WAIT_SECONDS
+        seconds = (retry_at - datetime.now(retry_at.tzinfo)).total_seconds()
+
+    return min(max(seconds, _RATE_LIMIT_MIN_WAIT_SECONDS), _RATE_LIMIT_MAX_WAIT_SECONDS)
+
+
+async def _request_with_rate_limit_retry(
+    client: httpx.AsyncClient,
+    method: str,
+    request_path: str,
+    *,
+    content: bytes | str | None = None,
+    headers: dict[str, str] | None = None,
+) -> httpx.Response:
+    """Send one request, waiting out any rate-limit rejections.
+
+    Every request this module sends is safe to repeat: the reads have no body,
+    and the one write carries the same bytes and headers each time, so a replay
+    is the identical request rather than a second effect. The body is passed
+    explicitly rather than forwarded, so a caller cannot quietly add a parameter
+    that makes a retry something other than the same request again.
+
+    A 429 on the final attempt is returned rather than raised, so the caller's
+    own error handling reports it with the rate-limit detail attached.
+    """
+    for remaining in range(_RATE_LIMIT_MAX_ATTEMPTS - 1, -1, -1):
+        response = await client.request(method, request_path, content=content, headers=headers)
+        if response.status_code != httpx.codes.TOO_MANY_REQUESTS or remaining == 0:
+            return response
+        await _sleep(_retry_after_seconds(response))
+
+    raise AssertionError("unreachable: the loop returns on its final attempt")
+
+
 async def list_project_files(client: httpx.AsyncClient, project: str) -> list[RemoteFile]:
     """Enumerate every file in a cloud project.
 
@@ -176,7 +261,7 @@ async def download_file(client: httpx.AsyncClient, project: str, rel_path: str) 
     """
     request_path = webdav_path(project, rel_path)
     try:
-        response = await client.get(request_path)
+        response = await _request_with_rate_limit_retry(client, "GET", request_path)
         response.raise_for_status()
     except httpx.HTTPError as exc:
         raise WebdavError(f"Failed to download {rel_path}: {_describe(exc)}") from exc
@@ -220,7 +305,9 @@ async def upload_file(
         headers["If-None-Match"] = "*"
 
     try:
-        response = await client.put(request_path, content=content, headers=headers)
+        response = await _request_with_rate_limit_retry(
+            client, "PUT", request_path, content=content, headers=headers
+        )
         # Checked before raise_for_status: a refused precondition is the answer
         # this call asked for, not a failure.
         if create_only and response.status_code == httpx.codes.PRECONDITION_FAILED:
@@ -239,7 +326,8 @@ async def _propfind(client: httpx.AsyncClient, project: str, rel_dir: str) -> li
     """List one collection, returning its immediate children."""
     request_path = webdav_path(project, rel_dir)
     try:
-        response = await client.request(
+        response = await _request_with_rate_limit_retry(
+            client,
             "PROPFIND",
             request_path,
             content=_PROPFIND_BODY,
@@ -384,5 +472,32 @@ def _same_path(href: str, request_path: str) -> bool:
 def _describe(exc: httpx.HTTPError) -> str:
     """Render an httpx failure as a single actionable line."""
     if isinstance(exc, httpx.HTTPStatusError):
-        return f"HTTP {exc.response.status_code} - {exc.response.text.strip()}"
+        detail = f"HTTP {exc.response.status_code} - {exc.response.text.strip()}"
+        return f"{detail}{_rate_limit_detail(exc.response)}"
     return str(exc)
+
+
+def _rate_limit_detail(response: httpx.Response) -> str:
+    """Append the rate-limit headers to a 429, or nothing for any other status.
+
+    A rate-limited transfer is the one failure a user can act on, by retrying
+    later or by moving less at once, but only if they can see it. The body alone
+    does not say what the limit was or when it resets, which left the headers
+    reachable only by editing this file (#2039).
+    """
+    if response.status_code != httpx.codes.TOO_MANY_REQUESTS:
+        return ""
+
+    reported = [
+        (label, response.headers.get(header))
+        for label, header in (
+            ("limit", "X-RateLimit-Limit"),
+            ("remaining", "X-RateLimit-Remaining"),
+            ("retry after", "Retry-After"),
+            ("resets at", "X-RateLimit-Reset"),
+        )
+    ]
+    known = [f"{label} {value}" for label, value in reported if value is not None]
+    if not known:
+        return ""
+    return f" (rate limit: {', '.join(known)})"
