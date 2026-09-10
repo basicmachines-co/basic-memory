@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import httpx
 import pytest
 
+from basic_memory.cli.commands.cloud import webdav as webdav_module
 from basic_memory.cli.commands.cloud.webdav import (
     WebdavError,
     download_file,
@@ -468,3 +469,189 @@ async def test_upload_file_without_create_only_still_raises_on_412():
     async with _client(handler) as client:
         with pytest.raises(WebdavError, match="HTTP 412"):
             await upload_file(client, "research", "a.md", content=b"hi", mtime=1)
+
+
+# --- Rate-limit retry (#2039) ---
+
+
+@pytest.fixture
+def recorded_waits(monkeypatch):
+    """Collect the waits this client would take instead of spending them."""
+    waits: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        waits.append(seconds)
+
+    monkeypatch.setattr(webdav_module, "_sleep", fake_sleep)
+    return waits
+
+
+def _rate_limited(retry_after: str | None = "4") -> httpx.Response:
+    headers = {
+        "X-RateLimit-Limit": "120",
+        "X-RateLimit-Remaining": "0",
+        "X-RateLimit-Reset": "1789045631",
+    }
+    if retry_after is not None:
+        headers["Retry-After"] = retry_after
+    return httpx.Response(
+        429,
+        headers=headers,
+        json={
+            "detail": {
+                "code": "rate_limit_exceeded",
+                "message": "Too many requests. Retry after the current rate-limit window resets.",
+                "scope": "principal",
+            }
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_propfind_walk_survives_a_rate_limit(recorded_waits):
+    """A 429 mid-walk must not abort the transfer.
+
+    This is the reported failure: one throttled PROPFIND aborted the whole
+    project walk, and because each re-run restarted at the first directory the
+    pull could never finish.
+    """
+    attempts: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(request.url.path)
+        if len(attempts) == 1:
+            return _rate_limited()
+        return httpx.Response(
+            200,
+            text=_multistatus(
+                "/webdav/research/",
+                _file_entry("/webdav/research/a.md", "a.md", 3),
+            ),
+        )
+
+    async with _client(handler) as client:
+        files = await list_project_files(client, "research")
+
+    assert [file.path for file in files] == ["a.md"]
+    assert len(attempts) == 2
+    assert recorded_waits == [4.0]
+
+
+@pytest.mark.asyncio
+async def test_download_survives_a_rate_limit(recorded_waits):
+    """The transfer phase is metered too, so GET needs the same handling."""
+    attempts: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(request.method)
+        if len(attempts) == 1:
+            return _rate_limited()
+        return httpx.Response(200, content=b"body")
+
+    async with _client(handler) as client:
+        downloaded = await download_file(client, "research", "a.md")
+
+    assert downloaded.content == b"body"
+    assert recorded_waits == [4.0]
+
+
+@pytest.mark.asyncio
+async def test_upload_retry_replays_the_same_write(recorded_waits):
+    """A replayed PUT must be the identical request, not a second effect."""
+    seen: list[tuple[bytes, str | None, str | None]] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(
+            (
+                request.content,
+                request.headers.get("X-OC-Mtime"),
+                request.headers.get("If-None-Match"),
+            )
+        )
+        if len(seen) == 1:
+            return _rate_limited()
+        return httpx.Response(201)
+
+    async with _client(handler) as client:
+        written = await upload_file(
+            client, "research", "a.md", content=b"body", mtime=1789045631, create_only=True
+        )
+
+    assert written is True
+    assert seen[0] == seen[1] == (b"body", "1789045631", "*")
+    assert recorded_waits == [4.0]
+
+
+@pytest.mark.asyncio
+async def test_create_only_precondition_is_not_retried(recorded_waits):
+    """412 is this call's answer, not a rejection to wait out."""
+    attempts: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(request.method)
+        return httpx.Response(412)
+
+    async with _client(handler) as client:
+        written = await upload_file(
+            client, "research", "a.md", content=b"body", mtime=1, create_only=True
+        )
+
+    assert written is False
+    assert len(attempts) == 1
+    assert recorded_waits == []
+
+
+@pytest.mark.asyncio
+async def test_persistent_rate_limit_reports_the_headers(recorded_waits):
+    """A transfer that cannot get through must say what stopped it."""
+    attempts: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(request.method)
+        return _rate_limited()
+
+    async with _client(handler) as client:
+        with pytest.raises(WebdavError) as caught:
+            await list_project_files(client, "research")
+
+    message = str(caught.value)
+    assert "HTTP 429" in message
+    assert "rate limit: limit 120, remaining 0, retry after 4, resets at 1789045631" in message
+    # Bounded: the attempts stop, and only the waits between them are taken.
+    assert len(attempts) == 6
+    assert recorded_waits == [4.0] * 5
+
+
+@pytest.mark.asyncio
+async def test_non_rate_limit_errors_are_not_retried(recorded_waits):
+    """Only 429 is a wait-and-repeat answer; a 404 is final."""
+    attempts: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        attempts.append(request.method)
+        return httpx.Response(404, text="missing")
+
+    async with _client(handler) as client:
+        with pytest.raises(WebdavError) as caught:
+            await download_file(client, "research", "a.md")
+
+    assert len(attempts) == 1
+    assert recorded_waits == []
+    # No rate-limit detail is appended to a status that has none.
+    assert "rate limit" not in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    ("retry_after", "expected"),
+    [
+        ("4", 4.0),
+        ("0", 1.0),  # floored, so "retry immediately" cannot spin
+        ("9999", 60.0),  # capped, so an implausible header cannot hang the CLI
+        (None, 5.0),  # absent: the window is still closed
+        ("not-a-date", 5.0),  # unparseable falls back rather than giving up
+        ("Mon, 08 Jun 2026 10:30:00 GMT", 1.0),  # a past HTTP-date floors
+    ],
+)
+def test_retry_after_seconds(retry_after, expected):
+    response = _rate_limited(retry_after=retry_after)
+    assert webdav_module._retry_after_seconds(response) == expected
