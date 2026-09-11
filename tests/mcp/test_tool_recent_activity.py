@@ -695,3 +695,53 @@ async def test_recent_activity_entity_rows_include_external_id(client, test_grap
     assert any(re.search(uuid_pattern, line) for line in entity_lines), (
         f"entity rows missing external_id: {entity_lines!r}"
     )
+
+
+@pytest.mark.asyncio
+async def test_recent_activity_never_indexed_says_so(
+    client, test_project, session_maker, config_home
+):
+    """A never-indexed project must not report an ordinary empty activity feed (#1534)."""
+    from sqlalchemy import text as sa_text
+
+    from basic_memory import db
+
+    # Trigger: files exist on disk but no index pass has ever completed.
+    notes_dir = config_home / "notes"
+    notes_dir.mkdir(exist_ok=True)
+    (notes_dir / "unindexed-note.md").write_text("# Unindexed Note\n\nNot yet indexed.\n")
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(
+            sa_text("UPDATE project SET last_indexed_at = NULL WHERE id = :id"),
+            {"id": test_project.id},
+        )
+
+    result = await recent_activity(project=test_project.name, timeframe="7d")
+
+    assert isinstance(result, str)
+    assert "never been indexed" in result
+    assert "bm project index" in result
+
+
+@pytest.mark.asyncio
+async def test_recent_activity_indexed_empty_keeps_onboarding(
+    client, test_project, session_maker, config_home
+):
+    """An indexed-but-quiet project keeps the original onboarding copy (#1534)."""
+    from datetime import datetime
+
+    from sqlalchemy import text as sa_text
+
+    from basic_memory import db
+
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(
+            sa_text("UPDATE project SET last_indexed_at = :now WHERE id = :id"),
+            {"now": datetime.now(), "id": test_project.id},
+        )
+
+    result = await recent_activity(project=test_project.name, timeframe="7d")
+
+    assert isinstance(result, str)
+    assert "No recent activity" in result
+    assert "never been indexed" not in result
