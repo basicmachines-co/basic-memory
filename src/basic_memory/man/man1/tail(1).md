@@ -4,7 +4,7 @@ type: manpage
 section: 1
 name: tail
 summary: show recently changed notes
-generated: hand
+generated: cli
 ---
 
 # tail(1)
@@ -16,8 +16,8 @@ generated: hand
 ## SYNOPSIS
 
 ```
-bm tail [--timeframe WINDOW] [-n N] [--json | --plain]
-        [--project NAME | --project-id UUID] [--local | --cloud]
+bm tail [--timeframe TIMEFRAME] [--lines N] [--json | --plain]
+        [--project PROJECT] [--project-id PROJECT_ID] [--local | --cloud]
 ```
 
 ## DESCRIPTION
@@ -30,9 +30,14 @@ output) emits the rows as a JSON array.
 
 ## OPTIONS
 
-- **--timeframe** — time window, e.g. `7d`, `yesterday`, `2 days ago`
-  (default `7d`)
-- **-n, --lines** — rows to show, 1-100 (default 10)
+- **--timeframe** (default: "7d") — Time window, e.g. "7d", "yesterday"
+- **-n, --lines** (default: 10) — Rows to show (1-100)
+- **--json** — Output raw JSON instead of formatted display
+- **--plain** — Output undecorated plain text (no colors/markup), even when piped
+- **--project** — The project to use. If not provided, the default project will be used.
+- **--project-id** — Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.
+- **--local** — Force local API routing (ignore cloud mode)
+- **--cloud** — Force cloud API routing
 
 ## EXAMPLES
 

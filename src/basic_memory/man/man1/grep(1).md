@@ -4,7 +4,7 @@ type: manpage
 section: 1
 name: grep
 summary: search note content from the shell
-generated: hand
+generated: cli
 ---
 
 # grep(1)
@@ -16,9 +16,9 @@ generated: hand
 ## SYNOPSIS
 
 ```
-bm grep PATTERN [-F | --literal] [--page N] [--page-size N]
-        [-C N | --context-lines N] [--max-matches N]
-        [--json | --plain] [--project NAME | --project-id UUID]
+bm grep PATTERN [--literal] [--context-lines CONTEXT_LINES]
+        [--max-matches MAX_MATCHES] [--page PAGE] [--page-size PAGE_SIZE]
+        [--json | --plain] [--project PROJECT] [--project-id PROJECT_ID]
         [--local | --cloud]
 ```
 
@@ -46,10 +46,17 @@ Line positions can change if the note is edited between calls.
 
 ## OPTIONS
 
-- **-F, --literal** — literal full-text matching instead of semantic search
-- **-C, --context-lines** — opt into line scanning with 0-10 lines around each match; requires -F
-- **--max-matches** — matching lines to show per candidate in line mode, 1-100 (default 10)
-- **--page, --page-size** — result pagination (defaults 1 and 10)
+- **-F, --literal** — Literal full-text matching instead of semantic search
+- **-C, --context-lines** — Compact literal line matches with surrounding context (requires -F)
+- **--max-matches** (default: 10) — Matching lines per candidate in context mode
+- **--page** (default: 1) — Page number (1-indexed)
+- **--page-size** (default: 10) — Results per page
+- **--json** — Output raw JSON instead of formatted display
+- **--plain** — Output undecorated plain text (no colors/markup), even when piped
+- **--project** — The project to use. If not provided, the default project will be used.
+- **--project-id** — Project external_id (UUID). Takes precedence over --project; use to disambiguate same-named projects across cloud workspaces.
+- **--local** — Force local API routing (ignore cloud mode)
+- **--cloud** — Force cloud API routing
 
 ## EXAMPLES
 
