@@ -2281,3 +2281,112 @@ def test_search_notes_parse_str_list_rejects_non_string_list_elements_in_place()
     # All-string lists still work correctly.
     assert parse_str_list(["note", "task"]) == ["note", "task"]
     assert parse_str_list(["note,task"]) == ["note", "task"]
+
+
+@pytest.mark.asyncio
+async def test_search_never_indexed_text_says_so(client, test_project, session_maker, config_home):
+    """A never-indexed project must not report an ordinary empty result (#1534)."""
+    from sqlalchemy import text as sa_text
+
+    from basic_memory import db
+
+    # Trigger: files exist on disk but no index pass has ever completed.
+    notes_dir = config_home / "notes"
+    notes_dir.mkdir(exist_ok=True)
+    (notes_dir / "unindexed-note.md").write_text(
+        "# Unindexed Note\n\nNothing about this file can be found by search.\n"
+    )
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(
+            sa_text("UPDATE project SET last_indexed_at = NULL WHERE id = :id"),
+            {"id": test_project.id},
+        )
+
+    response = await search_notes(
+        project=test_project.name,
+        query="unindexed-note-xyzzy",
+        search_type="text",
+        output_format="text",
+    )
+
+    assert isinstance(response, str)
+    assert "never been indexed" in response
+    assert "bm project index" in response
+    assert "Try broader or different terms" not in response
+
+
+@pytest.mark.asyncio
+async def test_search_never_indexed_json_carries_phase(
+    client, test_project, session_maker, config_home
+):
+    """The structured search path carries index_phase on a never-indexed miss (#1534)."""
+    from sqlalchemy import text as sa_text
+
+    from basic_memory import db
+
+    notes_dir = config_home / "notes"
+    notes_dir.mkdir(exist_ok=True)
+    (notes_dir / "unindexed-note.md").write_text("# Unindexed Note\n\nNo index covers this.\n")
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(
+            sa_text("UPDATE project SET last_indexed_at = NULL WHERE id = :id"),
+            {"id": test_project.id},
+        )
+
+    response = await search_notes(
+        project=test_project.name,
+        query="unindexed-note-xyzzy",
+        search_type="text",
+        output_format="json",
+    )
+
+    assert isinstance(response, dict)
+    assert response["results"] == []
+    assert response["index_phase"] == "never_indexed"
+
+
+@pytest.mark.asyncio
+async def test_search_indexed_miss_keeps_original_copy(
+    client, test_project, session_maker, config_home
+):
+    """An indexed project with genuinely no match keeps the plain-miss copy (#1534)."""
+    from datetime import datetime
+
+    from sqlalchemy import text as sa_text
+
+    from basic_memory import db
+    from basic_memory.mcp.tools import write_note as write_note_tool
+
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(
+            sa_text("UPDATE project SET last_indexed_at = :now WHERE id = :id"),
+            {"now": datetime.now(), "id": test_project.id},
+        )
+
+    created = await write_note_tool(
+        project=test_project.name,
+        title="Indexed Note",
+        directory="notes",
+        content="# Indexed Note\n\nSearchable content about telescopes.\n",
+    )
+    assert created
+
+    miss = await search_notes(
+        project=test_project.name,
+        query="nothing-matches-this-xyzzy",
+        search_type="text",
+        output_format="text",
+    )
+    assert isinstance(miss, str)
+    assert "Try broader or different terms" in miss
+    assert "never been indexed" not in miss
+
+    hit = await search_notes(
+        project=test_project.name,
+        query="telescopes",
+        search_type="text",
+        output_format="json",
+    )
+    assert isinstance(hit, dict)
+    assert len(hit["results"]) > 0
+    assert "index_phase" not in hit
