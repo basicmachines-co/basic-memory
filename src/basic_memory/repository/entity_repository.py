@@ -17,6 +17,7 @@ from sqlalchemy.engine import Row
 from basic_memory.models.knowledge import Entity, Observation, Relation
 from basic_memory.models.relation_search_refresh import RelationSearchRefresh
 from basic_memory.repository.repository import Repository
+from basic_memory.runtime.storage import RUNTIME_MARKDOWN_CONTENT_TYPE
 
 type EntityMetadata = dict[str, Any] | None
 
@@ -368,6 +369,10 @@ class EntityRepository(Repository[Entity]):
         Only queries file_path and checksum columns, skips loading full entities and relationships.
         This is much faster than loading complete Entity objects when you only need checksums.
 
+        A markdown path whose indexed content type is not markdown is an incomplete
+        projection; its checksum is masked to unknown so the next scan re-reads the
+        file and repairs the type fields in place.
+
         Args:
             session: Database session to use for the query
             file_paths: List of file paths to query
@@ -403,9 +408,23 @@ class EntityRepository(Repository[Entity]):
         legacy_markdown_identity = (Entity.content_type == "text/markdown") & Entity.permalink.is_(
             None
         )
+        # A markdown path whose indexed type is not markdown keeps a matching
+        # checksum, so it would report unchanged forever. Mask it as unknown so
+        # the normal scan re-reads the file and repairs the type fields.
+        markdown_path_without_markdown_type = (
+            or_(
+                func.lower(Entity.file_path).like("%.md"),
+                func.lower(Entity.file_path).like("%.markdown"),
+            )
+        ) & (Entity.content_type != RUNTIME_MARKDOWN_CONTENT_TYPE)
         indexed_checksum = case(
             (
-                or_(publication_pending, legacy_relation_pending, legacy_markdown_identity),
+                or_(
+                    publication_pending,
+                    legacy_relation_pending,
+                    legacy_markdown_identity,
+                    markdown_path_without_markdown_type,
+                ),
                 None,
             ),
             else_=Entity.checksum,

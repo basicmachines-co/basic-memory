@@ -1378,3 +1378,44 @@ async def test_find_without_relations_empty_project(
     async with db.scoped_session(session_maker) as session:
         result = await entity_repository.find_without_relations(session)
     assert result == []
+
+
+@pytest.mark.asyncio
+async def test_get_by_file_paths_masks_markdown_path_without_markdown_type(
+    entity_repository: EntityRepository, session_maker, test_project: Project
+):
+    """A markdown path with a non-markdown type reports an unknown checksum (issue #1538)."""
+    now = datetime.now(timezone.utc)
+    async with db.scoped_session(session_maker) as session:
+        corrupt = Entity(
+            project_id=test_project.id,
+            title="#note.md#",
+            note_type="file",
+            permalink=None,
+            file_path="notes/note.md",
+            content_type="text/plain",
+            checksum="corrupt-checksum",
+            created_at=now,
+            updated_at=now,
+        )
+        healthy = Entity(
+            project_id=test_project.id,
+            title="Healthy",
+            note_type="note",
+            permalink="notes/healthy",
+            file_path="notes/healthy.md",
+            content_type="text/markdown",
+            checksum="healthy-checksum",
+            created_at=now,
+            updated_at=now,
+        )
+        session.add_all([corrupt, healthy])
+
+    async with db.scoped_session(session_maker) as session:
+        rows = await entity_repository.get_by_file_paths(
+            session, ["notes/note.md", "notes/healthy.md"]
+        )
+        checksum_by_path = {row[0]: row[1] for row in rows}
+
+    assert checksum_by_path["notes/note.md"] is None
+    assert checksum_by_path["notes/healthy.md"] == "healthy-checksum"
