@@ -17,7 +17,10 @@ from sqlalchemy.engine import Row
 from basic_memory.models.knowledge import Entity, Observation, Relation
 from basic_memory.models.relation_search_refresh import RelationSearchRefresh
 from basic_memory.repository.repository import Repository
-from basic_memory.runtime.storage import RUNTIME_MARKDOWN_CONTENT_TYPE
+from basic_memory.runtime.storage import (
+    RUNTIME_MARKDOWN_CONTENT_TYPE,
+    runtime_file_path_is_markdown_note,
+)
 
 type EntityMetadata = dict[str, Any] | None
 
@@ -411,12 +414,12 @@ class EntityRepository(Repository[Entity]):
         # A markdown path whose indexed type is not markdown keeps a matching
         # checksum, so it would report unchanged forever. Mask it as unknown so
         # the normal scan re-reads the file and repairs the type fields.
-        markdown_path_without_markdown_type = (
-            or_(
-                func.lower(Entity.file_path).like("%.md"),
-                func.lower(Entity.file_path).like("%.markdown"),
-            )
-        ) & (Entity.content_type != RUNTIME_MARKDOWN_CONTENT_TYPE)
+        # Use the indexer's suffix semantics: extension-only basenames such as
+        # .md are resources and would otherwise be masked dirty after every index.
+        markdown_paths = [path for path in posix_paths if runtime_file_path_is_markdown_note(path)]
+        markdown_path_without_markdown_type = Entity.file_path.in_(markdown_paths) & (
+            Entity.content_type != RUNTIME_MARKDOWN_CONTENT_TYPE
+        )
         indexed_checksum = case(
             (
                 or_(
