@@ -39,6 +39,11 @@ from basic_memory.document_ingestion.raw_document import (
     raw_document_matches,
 )
 from basic_memory.file_utils import ParseError
+from basic_memory.ignore_utils import (
+    IGNORED_PATH_REJECTION_DETAIL,
+    load_gitignore_patterns,
+    should_ignore_path,
+)
 from basic_memory.schemas.document import (
     DocumentIngestionStage,
     DocumentMarkdownV1,
@@ -189,6 +194,20 @@ class LocalRawDocumentWriter:
     knowledge: DocumentKnowledgeApi
 
     async def write(self, artifacts: RawDocumentArtifacts) -> RawDocumentWriteResult:
+        ignore_patterns = await asyncio.to_thread(
+            load_gitignore_patterns, self.file_service.base_path
+        )
+        for path in (artifacts.document_file_path, artifacts.run_file_path):
+            if should_ignore_path(
+                self.file_service.base_path / path,
+                self.file_service.base_path,
+                ignore_patterns,
+            ):
+                raise DocumentSidecarConflictError(
+                    f"generated path {path!r} {IGNORED_PATH_REJECTION_DETAIL}; "
+                    "update the ignore rules before importing"
+                )
+
         document = await accept_document_note(self.file_service, self.knowledge, artifacts)
         run_created = await accept_run_note(
             self.file_service,

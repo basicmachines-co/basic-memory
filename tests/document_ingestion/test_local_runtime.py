@@ -296,6 +296,24 @@ async def test_writer_creates_the_sidecar_and_run_note_and_indexes_both(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("ignored_pattern", ["*.csv.md", "document-ingestion-runs/"])
+async def test_writer_rejects_ignored_generated_paths_before_writing(
+    file_service: FileService,
+    ignored_pattern: str,
+) -> None:
+    (file_service.base_path / ".gitignore").write_text(ignored_pattern, encoding="utf-8")
+    knowledge = knowledge_api()
+    built = artifacts()
+
+    with pytest.raises(DocumentSidecarConflictError, match="matches Basic Memory ignore rules"):
+        await LocalRawDocumentWriter(file_service, knowledge).write(built)
+
+    assert not await file_service.exists(built.document_file_path)
+    assert not await file_service.exists(built.run_file_path)
+    assert knowledge.indexed == []
+
+
+@pytest.mark.asyncio
 async def test_writer_reuses_and_refreshes_a_formatted_sidecar(
     file_service: FileService,
     app_config: BasicMemoryConfig,
