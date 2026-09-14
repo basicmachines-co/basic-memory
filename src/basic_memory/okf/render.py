@@ -11,6 +11,7 @@ import yaml
 
 from basic_memory.markdown.entity_parser import parse
 from basic_memory.markdown.path_links import markdown_link_target
+from basic_memory.repository.entity_repository import file_path_alias
 from basic_memory.services.link_resolver import normalize_link_text
 from basic_memory.utils import build_permalink_resolution_candidates
 
@@ -51,6 +52,9 @@ def convert_wikilinks(body: str, source: str, targets: dict[str, str], project: 
     """Use MarkdownIt's code/escape/link rules while retaining untouched source bytes."""
     body = body.replace("\r\n", "\n").replace("\r", "\n")
     replacements: list[tuple[int, int, str]] = []
+    path_aliases: dict[str, list[str]] = {}
+    for path in sorted(set(targets.values())):
+        path_aliases.setdefault(file_path_alias(path), []).append(path)
 
     def wikilink(state: StateInline, silent: bool) -> bool:
         start = state.pos
@@ -85,6 +89,19 @@ def convert_wikilinks(body: str, source: str, targets: dict[str, str], project: 
             for candidate in build_permalink_resolution_candidates(target, project):
                 if candidate in targets:
                     resolved = targets[candidate]
+                    break
+        if resolved is None:
+            # Forgiving filename spelling is a last resort after exact identities.
+            candidates = ([relative] if relative else []) + build_permalink_resolution_candidates(
+                target, project
+            )
+            for candidate in candidates:
+                path = candidate.lstrip("/")
+                if not path.casefold().endswith(".md"):
+                    path += ".md"
+                matches = path_aliases.get(file_path_alias(path), [])
+                if len(matches) == 1:
+                    resolved = matches[0]
                     break
         # A missing target stays a broken link, not a guessed edge to another concept.
         href = "/" + (resolved or target.lstrip("/") or source)

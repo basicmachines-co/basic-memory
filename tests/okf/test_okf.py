@@ -401,3 +401,18 @@ def test_indented_source_fence_is_body_not_metadata():
     assert check_document("a.md", source) == []
     with pytest.raises(ValueError, match="Unterminated"):
         parse_document("---\ntype: custom\n  ---\nBody", source=True)
+
+
+def test_unique_filename_alias_follows_exact_identity():
+    targets = {"My_Note.md": "My_Note.md"}
+    assert convert_wikilinks("[[my-note]]", "source.md", targets, "p") == "[my-note](/My_Note.md)"
+    targets["my-note"] = "specific.md"
+    assert convert_wikilinks("[[my-note]]", "source.md", targets, "p") == "[my-note](/specific.md)"
+    targets.pop("my-note")
+    targets["MY-NOTE.md"] = "MY-NOTE.md"
+    assert convert_wikilinks("[[my-note]]", "source.md", targets, "p") == "[my-note](/my-note)"
+    targets["folder/My_Note.md"] = "folder/My_Note.md"
+    assert (
+        convert_wikilinks("[[./my-note.md]]", "folder/source.md", targets, "p")
+        == "[./my-note.md](/folder/My_Note.md)"
+    )
