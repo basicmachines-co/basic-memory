@@ -399,6 +399,7 @@ def _format_search_markdown(
         return (
             f"No results found for '{query or ''}' in project '{project}'. "
             f"Try broader or different terms, or {suggestion}."
+            + (f"\n\n{result.query_hint}" if result.query_hint else "")
         )
 
     parts = []
@@ -663,6 +664,7 @@ async def _search_all_projects(
     # How many projects actually answered. A leg that fails is skipped with a warning,
     # so without this the caller cannot tell "no note matched" from "nothing ran".
     projects_answered = 0
+    query_hint: str | None = None
 
     # Trigger: caller asked for an account-wide search.
     # Why: project_id (external UUID) routes through the cloud v2 API path,
@@ -729,6 +731,8 @@ async def _search_all_projects(
             continue
 
         projects_answered += 1
+        if isinstance(results.get("query_hint"), str):
+            query_hint = results["query_hint"]
         raw_results = _raw_results_from_search_payload(results)
         total += _result_total(results, raw_results)
         total_is_exact = total_is_exact and _result_total_is_exact(results)
@@ -763,6 +767,11 @@ async def _search_all_projects(
     response = SearchResponse.model_validate(
         {
             "results": paged_results,
+            # Only propagate query guidance when every project answered and the
+            # aggregate is empty; one empty leg must not label a successful search.
+            "query_hint": query_hint
+            if requested_page == 1 and not merged_results and projects_answered == len(project_refs)
+            else None,
             "current_page": requested_page,
             "page_size": requested_page_size,
             "total": total,
