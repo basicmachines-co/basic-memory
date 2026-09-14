@@ -138,7 +138,7 @@ def render_csv_preview(
     shown: list[Sequence[str]] = []
     row_count = 0
     try:
-        header = next(reader, None)
+        header = next((row for row in reader if row), None)
         if header is None:
             return CsvPreview(markdown="_Empty CSV file._\n", row_count=0, shown_rows=0)
         require_csv_field_bound(header, max_field_bytes)
