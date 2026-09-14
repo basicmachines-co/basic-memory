@@ -17,6 +17,11 @@ from basic_memory.services.search_guidance import unspaced_script_query_hint
         "人々生活",
         "ㄅㄆㄇㄈ",
         "ㇰㇱㇲㇳ",
+        "น้ำแข็ง",
+        "မြန်မာစာ",
+        "漢\ufe00字情報",
+        "雾凇\u200d拼音",
+        "雾凇\u200c拼音",
     ],
 )
 @pytest.mark.parametrize("mode", [SearchRetrievalMode.FTS, SearchRetrievalMode.HYBRID])
@@ -29,6 +34,10 @@ def test_plain_compounds_receive_guidance(text: str, mode: SearchRetrievalMode):
     [
         SearchQuery(),
         SearchQuery(text="雾凇"),
+        SearchQuery(text="漢\ufe00字\ufe00情"),
+        SearchQuery(text="漢\u200d字情"),
+        SearchQuery(text="๑๒๓๔"),
+        SearchQuery(text="雾凇,拼音"),
         SearchQuery(text="雾凇 拼音"),
         SearchQuery(text='"雾凇拼音"'),
         SearchQuery(text="雾凇 AND 拼音"),
