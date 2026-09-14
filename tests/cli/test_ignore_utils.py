@@ -3,6 +3,8 @@
 import tempfile
 from pathlib import Path
 
+import pytest
+
 from basic_memory.ignore_utils import (
     DEFAULT_IGNORE_PATTERNS,
     get_bmignore_path,
@@ -363,3 +365,40 @@ def test_gitignore_escaped_hash_pattern_loads(tmp_path, monkeypatch):
 
     assert "#*#" in patterns
     assert should_ignore_path(tmp_path / "#note.md#", tmp_path, patterns) is True
+
+
+@pytest.mark.parametrize("ignore_file", [".bmignore", ".gitignore"])
+@pytest.mark.parametrize(
+    ("raw_pattern", "matching_name", "nonmatching_name"),
+    [
+        (r"\#foo", "#foo", " #foo"),
+        (r" \#foo", " #foo", "#foo"),
+        (" #foo", " #foo", "#foo"),
+        ("  foo", "  foo", "foo"),
+        ("\tfoo", "\tfoo", "foo"),
+        ("foo\t", "foo\t", "foo"),
+        ("\\#foo   ", "#foo", "#foo "),
+        (" \\#foo   ", " #foo", "#foo"),
+        ("foo\\ ", "foo ", "foo"),
+        ("foo\\   ", "foo ", "foo   "),
+        ("foo\\ \\ ", "foo  ", "foo "),
+    ],
+)
+def test_ignore_pattern_whitespace_and_hashes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    ignore_file: str,
+    raw_pattern: str,
+    matching_name: str,
+    nonmatching_name: str,
+) -> None:
+    """Both loaders preserve Git's significant whitespace through matching."""
+    monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(tmp_path))
+    (tmp_path / ".bmignore").write_text("*~\n")
+    (tmp_path / ignore_file).write_text(f"# comment\n   \n{raw_pattern}\r\n*~\n")
+
+    patterns = load_gitignore_patterns(tmp_path)
+
+    assert patterns == {matching_name, "*~"}
+    assert should_ignore_path(tmp_path / matching_name, tmp_path, patterns)
+    assert not should_ignore_path(tmp_path / nonmatching_name, tmp_path, patterns)

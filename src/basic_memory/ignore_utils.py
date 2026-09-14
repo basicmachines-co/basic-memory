@@ -1,6 +1,7 @@
 """Utilities for handling .gitignore patterns and file filtering."""
 
 import fnmatch
+import re
 from pathlib import Path
 from typing import Set
 
@@ -75,12 +76,13 @@ def _parse_ignore_pattern_line(raw_line: str) -> str | None:
     escapes a pattern that itself begins with ``#`` (gitignore rule), so
     ``\\#*#`` yields the pattern ``#*#``.
     """
-    line = raw_line.strip()
+    line = raw_line.rstrip("\r\n")
     if not line or line.startswith("#"):
         return None
-    if line.startswith("\\#"):
-        return line[1:]
-    return line
+    # fnmatch has no backslash escapes. Decode literal hashes, spaces, and
+    # backslashes together so escaped trailing spaces survive, while unescaped
+    # trailing spaces are discarded without changing significant leading ones.
+    return re.sub(r"\\([\\ #])| +$", lambda match: match[1] or "", line) or None
 
 
 def get_bmignore_path() -> Path:
