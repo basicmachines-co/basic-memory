@@ -491,6 +491,15 @@ def test_render_cli_synopsis_groups_mutually_exclusive_options() -> None:
     assert "[--project-id PROJECT_ID]" in find_synopsis
     assert "--project |" not in find_synopsis
 
+    _, cat = _cli_command(find_page(PageRef("cat", 1)))
+    cat_synopsis = render_cli_synopsis("cat", cat)
+    assert "[--lines LINES | --section SECTION]" in cat_synopsis
+    assert "[--lines LINES]" not in cat_synopsis
+    assert "[--section SECTION]" not in cat_synopsis
+    # A partial pair stays usable: tail has --lines but no --section.
+    _, tail = _cli_command(find_page(PageRef("tail", 1)))
+    assert "[--lines N]" in render_cli_synopsis("tail", tail)
+
 
 def test_render_cli_synopsis_keeps_repeatable_options_repeatable() -> None:
     # find --meta is multiple=True: the SYNOPSIS keeps the `...` repetition notation

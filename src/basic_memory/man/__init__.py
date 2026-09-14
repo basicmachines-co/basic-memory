@@ -353,7 +353,8 @@ class ClickCommand(Protocol):
 
 # Option pairs the CLI rejects in combination — ``--json``/``--plain`` guarded by
 # _validate_output_flags and ``--local``/``--cloud`` by validate_routing_flags in
-# cli/commands/posix.py. Click carries no cross-parameter constraint, so the
+# cli/commands/posix.py; cat's --lines/--section conflict in mcp/tools/posix_tools.py.
+# Click carries no cross-parameter constraint, so the
 # generator must name them here: the SYNOPSIS shows a fully-present pair as one
 # ``[--json | --plain]`` alternative rather than two freely-combinable tokens, the
 # way the curated pages did. Tuples fix the render order (json before plain). Pairs
@@ -361,6 +362,7 @@ class ClickCommand(Protocol):
 MUTUALLY_EXCLUSIVE_OPTIONS: tuple[tuple[str, ...], ...] = (
     ("--json", "--plain"),
     ("--local", "--cloud"),
+    ("--lines", "--section"),
 )
 
 
@@ -463,7 +465,8 @@ def _render_cli_form(
             if pair in emitted_pairs:
                 continue
             emitted_pairs.add(pair)
-            tokens.append("[" + " | ".join(pair) + "]")
+            alternatives = [_synopsis_option_token(present_longs[opt])[1:-1] for opt in pair]
+            tokens.append("[" + " | ".join(alternatives) + "]")
         else:
             tokens.append(_synopsis_option_token(param, required=param.name in required_options))
 
