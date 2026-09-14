@@ -382,7 +382,7 @@ async def test_search_pagination(mcp_server, app, test_project):
 
 
 @pytest.mark.asyncio
-async def test_search_no_results(mcp_server, app, test_project):
+async def test_search_no_results(mcp_server, app, test_project, indexed_project):
     """Test search with no matching results."""
 
     async with Client(mcp_server) as client:

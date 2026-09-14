@@ -543,3 +543,12 @@ async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
     """Create test client that both MCP and tests will use."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
+
+
+@pytest_asyncio.fixture
+async def indexed_project(client: AsyncClient, test_project: Project) -> Project:
+    """Complete an initial pass for tests asserting honest misses after reads/deletes."""
+    from basic_memory.mcp.clients.project import ProjectClient
+
+    await ProjectClient(client).index(test_project.external_id, run_in_background=False)
+    return test_project

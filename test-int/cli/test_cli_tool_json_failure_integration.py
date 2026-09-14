@@ -17,7 +17,9 @@ runner = CliRunner()
 @pytest.mark.parametrize(
     "identifier", ["nonexistent-note-that-does-not-exist", "22222222-2222-4222-8222-222222222222"]
 )
-def test_read_note_not_found(app, app_config, test_project, config_manager, identifier):
+def test_read_note_not_found(
+    app, app_config, test_project, config_manager, identifier, indexed_project
+):
     """A missing note remains machine-readable but must not report success."""
     result = runner.invoke(
         cli_app,
@@ -37,7 +39,7 @@ def test_read_note_not_found(app, app_config, test_project, config_manager, iden
 @pytest.mark.parametrize("mode", ["piped", "json", "plain", "rich"])
 @pytest.mark.parametrize("related", [False, True])
 def test_read_after_delete_fails_in_every_mode(
-    app, app_config, test_project, config_manager, monkeypatch, mode, related
+    app, app_config, test_project, config_manager, monkeypatch, mode, related, indexed_project
 ):
     """The actual write/delete/read flow must fail even when search offers alternatives."""
     monkeypatch.setattr("basic_memory.cli.commands.tool._use_rich", lambda: mode == "rich")
@@ -131,7 +133,9 @@ def test_write_note_then_read_note_roundtrip(app, app_config, test_project, conf
     assert read_data["permalink"] == write_data["permalink"]
 
 
-def test_recent_activity_empty_project(app, app_config, test_project, config_manager, monkeypatch):
+def test_recent_activity_empty_project(
+    app, app_config, test_project, config_manager, monkeypatch, indexed_project
+):
     """recent-activity on empty project returns valid empty JSON list."""
     monkeypatch.setenv("BASIC_MEMORY_MCP_PROJECT", test_project.name)
 

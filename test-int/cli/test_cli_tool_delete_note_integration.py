@@ -97,7 +97,7 @@ def _project_file(test_project, file_path: str) -> Path:
 
 
 def test_delete_note_removes_file_database_record_and_search_result(
-    app, app_config, test_project, config_manager
+    app, app_config, test_project, config_manager, indexed_project
 ) -> None:
     """Single-note deletion removes the note from every user-visible surface."""
     note = _write_note(
@@ -164,7 +164,7 @@ def test_delete_note_case_mismatch_does_not_delete_exact_note(
 
 
 def test_delete_note_project_id_takes_precedence_over_wrong_project_name(
-    app, app_config, test_project, config_manager
+    app, app_config, test_project, config_manager, indexed_project
 ) -> None:
     """CLI `--project-id` routes destructive operations to the exact project."""
     note = _write_note(
@@ -186,7 +186,7 @@ def test_delete_note_project_id_takes_precedence_over_wrong_project_name(
 
 
 def test_delete_note_memory_url_detects_project_from_identifier(
-    app, app_config, test_project, config_manager
+    app, app_config, test_project, config_manager, indexed_project
 ) -> None:
     """A memory:// URL can select the project without a separate --project flag."""
     note = _write_note(
@@ -206,7 +206,7 @@ def test_delete_note_memory_url_detects_project_from_identifier(
 
 
 def test_delete_directory_removes_nested_files_database_records_and_search_results(
-    app, app_config, test_project, config_manager
+    app, app_config, test_project, config_manager, indexed_project
 ) -> None:
     """Directory deletion removes nested notes and reports a complete JSON summary."""
     notes = [

@@ -124,3 +124,12 @@ async def second_project(config_manager, engine_factory, tmp_path_factory) -> Pr
     config.projects["second-project"] = ProjectEntry(path=str(project_path))
     config_manager.save_config(config)
     return project
+
+
+@pytest_asyncio.fixture
+async def indexed_project(client: AsyncClient, test_project: Project) -> Project:
+    """Complete an initial pass for tests asserting ordinary empty retrieval."""
+    from basic_memory.mcp.clients.project import ProjectClient
+
+    await ProjectClient(client).index(test_project.external_id, run_in_background=False)
+    return test_project

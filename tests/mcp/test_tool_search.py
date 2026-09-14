@@ -2393,20 +2393,3 @@ async def test_search_indexed_miss_keeps_original_copy(
     assert isinstance(hit, dict)
     assert len(hit["results"]) > 0
     assert "index_phase" not in hit
-
-
-@pytest.fixture
-async def indexed_project(test_project, session_maker):
-    """Filter miss tests require a project with a completed index pass."""
-    from sqlalchemy import update
-
-    from basic_memory import db
-    from basic_memory.models import Project
-
-    async with db.scoped_session(session_maker) as session:
-        await session.execute(
-            update(Project)
-            .where(Project.id == test_project.id)
-            .values(last_indexed_at=datetime.now())
-        )
-    return test_project
