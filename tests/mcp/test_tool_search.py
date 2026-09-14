@@ -1833,7 +1833,7 @@ async def test_search_notes_tags_invalid_type_rejected_via_mcp(mcp, client, test
 
 
 @pytest.mark.asyncio
-async def test_search_notes_direct_call_splits_comma_tags(client, test_project):
+async def test_search_notes_direct_call_splits_comma_tags(client, test_project, indexed_project):
     """Direct callers bypass the BeforeValidator, so the body must normalize tags.
 
     Regression for the CLI path: `bm tool search-notes --tag alpha,beta` calls this
@@ -2231,7 +2231,9 @@ def test_search_notes_categories_annotation_rejects_non_string_list_elements():
 
 
 @pytest.mark.asyncio
-async def test_search_notes_direct_call_splits_comma_note_types(client, test_project):
+async def test_search_notes_direct_call_splits_comma_note_types(
+    client, test_project, indexed_project
+):
     """Direct callers bypass the BeforeValidator, so the body must normalize note_types.
 
     Regression for the CLI path: `bm tool search-notes --type note,task` calls this
@@ -2316,10 +2318,10 @@ async def test_search_never_indexed_text_says_so(client, test_project, session_m
 
 
 @pytest.mark.asyncio
-async def test_search_never_indexed_json_carries_phase(
+async def test_search_never_indexed_json_returns_index_required(
     client, test_project, session_maker, config_home
 ):
-    """The structured search path carries index_phase on a never-indexed miss (#1534)."""
+    """JSON mode uses error guidance, never a success-shaped empty result (#1534)."""
     from sqlalchemy import text as sa_text
 
     from basic_memory import db
@@ -2340,9 +2342,10 @@ async def test_search_never_indexed_json_carries_phase(
         output_format="json",
     )
 
-    assert isinstance(response, dict)
-    assert response["results"] == []
-    assert response["index_phase"] == "never_indexed"
+    assert isinstance(response, str)
+    assert response.startswith("# Project Index Required")
+    assert "never been indexed" in response
+    assert "bm project index" in response
 
 
 @pytest.mark.asyncio
@@ -2390,3 +2393,20 @@ async def test_search_indexed_miss_keeps_original_copy(
     assert isinstance(hit, dict)
     assert len(hit["results"]) > 0
     assert "index_phase" not in hit
+
+
+@pytest.fixture
+async def indexed_project(test_project, session_maker):
+    """Filter miss tests require a project with a completed index pass."""
+    from sqlalchemy import update
+
+    from basic_memory import db
+    from basic_memory.models import Project
+
+    async with db.scoped_session(session_maker) as session:
+        await session.execute(
+            update(Project)
+            .where(Project.id == test_project.id)
+            .values(last_indexed_at=datetime.now())
+        )
+    return test_project

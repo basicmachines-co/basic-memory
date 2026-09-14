@@ -36,6 +36,10 @@ MODE_RESTRICTED_COMMANDS: dict[tuple[str, ...], str] = {
 # Keyed by (module relative to basic_memory/, enclosing function) so the registry
 # survives line moves.
 JUSTIFIED_SITES: dict[tuple[str, str], str] = {
+    ("mcp/index_readiness.py", "project_index_required"): (
+        "labels the command as local-project-only and separately presents the server-side "
+        "cloud remedy; ProjectItem does not carry the resolved routing mode"
+    ),
     ("cli/commands/project.py", "add_project"): (
         "the `bm project index` hints sit under `if not effective_cloud_mode`, and the "
         "`bm cloud bisync` one is the Personal-only aside printed after the Team-safe "
