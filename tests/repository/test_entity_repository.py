@@ -1419,3 +1419,49 @@ async def test_get_by_file_paths_masks_markdown_path_without_markdown_type(
 
     assert checksum_by_path["notes/note.md"] is None
     assert checksum_by_path["notes/healthy.md"] == "healthy-checksum"
+
+
+@pytest.mark.parametrize(
+    ("file_path", "is_markdown"),
+    [
+        ("note.md", True),
+        ("notes/note.MARKDOWN", True),
+        ("notes/.hidden.md", True),
+        (".md", False),
+        (".markdown", False),
+        ("notes/.MD", False),
+        ("notes/.markdown", False),
+        ("notes/note.md.bak", False),
+        ("notes/#note.md#", False),
+    ],
+)
+async def test_get_by_file_paths_matches_note_path_semantics(
+    entity_repository: EntityRepository,
+    session_maker,
+    test_project: Project,
+    file_path: str,
+    is_markdown: bool,
+) -> None:
+    """Only genuine note paths with a wrong indexed type need checksum repair."""
+    now = datetime.now(timezone.utc)
+    async with db.scoped_session(session_maker) as session:
+        session.add(
+            Entity(
+                project_id=test_project.id,
+                title=file_path,
+                note_type="file",
+                permalink=None,
+                file_path=file_path,
+                content_type="text/plain",
+                checksum="current-checksum",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    async with db.scoped_session(session_maker) as session:
+        rows = await entity_repository.get_by_file_paths(session, [file_path])
+
+    assert [(row[0], row[1]) for row in rows] == [
+        (file_path, None if is_markdown else "current-checksum")
+    ]

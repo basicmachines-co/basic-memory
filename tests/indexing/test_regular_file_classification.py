@@ -4,6 +4,8 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
+import pytest
+
 import basic_memory.indexing.batch_indexer as batch_indexer_module
 from sqlalchemy.ext.asyncio import AsyncSession
 from basic_memory import db
@@ -13,6 +15,7 @@ from basic_memory.indexing.batch_indexer import (
     RUNTIME_RESOURCE_CONTENT_TYPE,
     regular_file_content_type,
 )
+from basic_memory.indexing.change_detector import ChangeDetector
 from basic_memory.indexing.models import IndexInputFile, StorageIndexFileWriter
 from basic_memory.models import Entity, NoteSection, Observation, Relation, RelationSearchRefresh
 from basic_memory.repository import NoteContentRepository, NoteSectionRepository
@@ -634,7 +637,11 @@ async def test_missing_note_content_fence_preserves_concurrent_bootstrap(
     assert note_content.markdown_content == "# Accepted during bootstrap"
 
 
+@pytest.mark.parametrize(
+    "poison_path", [".md", ".markdown", "_phase7_import/.md", "_phase7_import/.MARKDOWN"]
+)
 async def test_legacy_poison_without_note_content_converges_to_resource(
+    poison_path: str,
     app_config,
     entity_service,
     entity_repository,
@@ -645,7 +652,6 @@ async def test_legacy_poison_without_note_content_converges_to_resource(
     project_id = relation_repository.project_id
     assert project_id is not None
     now = datetime.now(tz=UTC)
-    poison_path = "_phase7_import/.md"
     poison = Entity(
         project_id=project_id,
         title="Legacy poison",
@@ -691,3 +697,12 @@ async def test_legacy_poison_without_note_content_converges_to_resource(
     assert repaired is not None
     assert repaired.content_type == RUNTIME_RESOURCE_CONTENT_TYPE
     assert repaired.permalink is None
+
+    # Repeated scans must settle after resource indexing, despite a Markdown MIME hint.
+    assert repaired.checksum is not None
+    detector = ChangeDetector(entity_repository, search_service.session_maker)
+    for _ in range(2):
+        report = await detector.detect_all_changes({poison_path: repaired})
+        assert report.unchanged_files == [poison_path]
+        assert report.modified_files == []
+        assert report.new_files == []
