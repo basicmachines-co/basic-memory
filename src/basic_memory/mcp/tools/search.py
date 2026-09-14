@@ -25,6 +25,7 @@ from basic_memory.mcp.async_client import (
     is_factory_mode,
 )
 from basic_memory.mcp.container import get_container
+from basic_memory.mcp.index_readiness import project_index_required
 from basic_memory.mcp.project_context import (
     detect_project_from_identifier_prefix,
     get_project_client,
@@ -1477,13 +1478,11 @@ async def search_notes(
                     f"page={result.current_page} page_size={result.page_size}"
                 )
 
-                # Check if we got no results and provide helpful guidance
+                # An empty page is a trustworthy miss only after an index pass.
                 if not result.results:
-                    logger.debug(
-                        f"Search returned no results for query: {query} in project {active_project.name}"
-                    )
-                    # Don't treat this as an error, but the user might want guidance
-                    # We return the empty result as normal - the user can decide if they need help
+                    guidance = await project_index_required(client, active_project)
+                    if guidance is not None:
+                        return guidance
 
                 if compact:
                     result = _compact_search_response(result)

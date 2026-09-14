@@ -698,8 +698,9 @@ async def test_recent_activity_entity_rows_include_external_id(client, test_grap
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("output_format", ["text", "json"])
 async def test_recent_activity_never_indexed_says_so(
-    client, test_project, session_maker, config_home
+    client, test_project, session_maker, config_home, output_format
 ):
     """A never-indexed project must not report an ordinary empty activity feed (#1534)."""
     from sqlalchemy import text as sa_text
@@ -716,7 +717,9 @@ async def test_recent_activity_never_indexed_says_so(
             {"id": test_project.id},
         )
 
-    result = await recent_activity(project=test_project.name, timeframe="7d")
+    result = await recent_activity(
+        project=test_project.name, timeframe="7d", output_format=output_format
+    )
 
     assert isinstance(result, str)
     assert "never been indexed" in result

@@ -2,6 +2,7 @@
 
 from contextlib import asynccontextmanager
 import importlib
+from unittest.mock import AsyncMock
 
 from httpx import HTTPStatusError, Request, Response
 from fastmcp.exceptions import ToolError
@@ -167,6 +168,8 @@ async def test_search_notes_multi_project_search_is_opt_in(monkeypatch):
     monkeypatch.setattr(search_mod, "get_project_client", fake_get_project_client)
     monkeypatch.setattr(search_mod, "resolve_project_and_path", fake_resolve_project_and_path)
     monkeypatch.setattr(clients_mod, "SearchClient", MockSearchClient)
+
+    monkeypatch.setattr(search_mod, "project_index_required", AsyncMock(return_value=None))
 
     result = await search_mod.search_notes(query="MCP Test Note", output_format="json")
 

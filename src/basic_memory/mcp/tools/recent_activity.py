@@ -9,6 +9,7 @@ from fastmcp import Context
 from pydantic import AliasChoices, Field
 
 from basic_memory.mcp.async_client import get_client
+from basic_memory.mcp.index_readiness import project_index_required
 from basic_memory.mcp.project_context import (
     get_project_client,
     resolve_project_parameter,
@@ -117,7 +118,7 @@ async def recent_activity(
                 it routes to the exact project regardless of name collisions across cloud
                 workspaces. Takes precedence over `project`. Get from list_memory_projects().
         output_format: "text" returns human-readable summary text. "json" returns
-            a flat list of recent items.
+            a flat list of recent items, or index-required guidance if never indexed.
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -224,6 +225,11 @@ async def recent_activity(
             # Query each project's activity
             for project_info in project_list.projects:
                 project_activity = await _get_project_activity(client, project_info, params, depth)
+                # Discovery must not hide an unindexed project in an empty summary.
+                if not project_activity.item_count:
+                    guidance = await project_index_required(client, project_info)
+                    if guidance is not None:
+                        return guidance
                 projects_activity[project_info.name] = project_activity
 
                 # Aggregate stats
@@ -329,6 +335,12 @@ async def recent_activity(
                 params=params,
             )
             activity_data = GraphContext.model_validate(response.json())
+
+            # Do not offer first-note onboarding before the project was indexed.
+            if not activity_data.results:
+                guidance = await project_index_required(client, active_project)
+                if guidance is not None:
+                    return guidance
 
             if output_format == "json":
                 return _extract_recent_rows(activity_data)
