@@ -1,10 +1,12 @@
 """Tests for the EntityRepository."""
 
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
+from sqlalchemy import event, select
+from sqlalchemy.engine import Connection, ExecutionContext
 
 from basic_memory import db
 from basic_memory.models import Entity, Observation, Relation, Project
@@ -1465,3 +1467,33 @@ async def test_get_by_file_paths_matches_note_path_semantics(
     assert [(row[0], row[1]) for row in rows] == [
         (file_path, None if is_markdown else "current-checksum")
     ]
+
+
+async def test_get_by_file_paths_keeps_batch_under_sqlite_bind_limit(
+    entity_repository: EntityRepository, session_maker
+) -> None:
+    """A full detector batch must not bind every Markdown path twice."""
+    parameter_counts: list[int] = []
+
+    def record_parameter_count(
+        connection: Connection,
+        cursor: object,
+        statement: str,
+        parameters: Sequence[object] | Mapping[str, object],
+        context: ExecutionContext,
+        executemany: bool,
+    ) -> None:
+        parameter_counts.append(len(parameters))
+
+    async with db.scoped_session(session_maker) as session:
+        engine = session.get_bind()
+        event.listen(engine, "before_cursor_execute", record_parameter_count)
+        try:
+            await entity_repository.get_by_file_paths(
+                session, [f"notes/note-{index}.md" for index in range(900)]
+            )
+        finally:
+            event.remove(engine, "before_cursor_execute", record_parameter_count)
+
+    assert len(parameter_counts) == 1
+    assert parameter_counts[0] <= 999
