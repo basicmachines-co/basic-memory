@@ -574,9 +574,12 @@ def replace_section_content(
             "Section replacement requires unique headers."
         )
     if not matches:
-        logger.info(f"Section '{section_header}' not found, appending to end of document")
-        separator = "\n\n" if current_content and not current_content.endswith("\n\n") else ""
-        return current_content + separator + section_header + "\n" + new_content
+        # A replacement must identify existing content before any write is prepared.
+        raise ValueError(
+            f"Section '{section_header}' not found in document. "
+            "Read the note and use the exact heading, including any trailing tags or text. "
+            "Use append with a heading and content to create a new section."
+        )
     section_line_index = matches[0]
     target_level = len(section_header) - len(section_header.lstrip("#"))
     end_index = len(lines)
@@ -608,7 +611,7 @@ def insert_relative_to_section(
     if not matches:
         raise ValueError(
             f"Section '{section_header}' not found in document. "
-            "Use replace_section to create a new section."
+            "Use append with a heading and content to create a new section."
         )
     if len(matches) > 1:
         raise ValueError(

@@ -562,7 +562,7 @@ async def test_edit_note_replace_section_missing_section(client, test_project):
 
 @pytest.mark.asyncio
 async def test_edit_note_replace_section_nonexistent_section(client, test_project):
-    """Test replacing a section that doesn't exist - should append it."""
+    """A missing section returns an error and leaves the note unchanged."""
     # Create initial note without the target section
     await write_note(
         project=test_project.name,
@@ -570,6 +570,9 @@ async def test_edit_note_replace_section_nonexistent_section(client, test_projec
         directory="docs",
         content="# Document\n\n## Existing Section\nSome content here.",
     )
+
+    path = Path(test_project.path) / "docs/Document.md"
+    original = path.read_bytes()
 
     # Try to replace non-existent section
     result = await edit_note(
@@ -581,11 +584,11 @@ async def test_edit_note_replace_section_nonexistent_section(client, test_projec
     )
 
     assert isinstance(result, str)
-    assert "Edited note (replace_section)" in result
-    assert f"project: {test_project.name}" in result
-    assert "file_path: docs/Document.md" in result
-    assert f"[Session: Using project '{test_project.name}']" in result
-    # Should succeed - the section gets appended if it doesn't exist
+    assert "# Edit Failed" in result
+    assert "Section '## New Section' not found" in result
+    assert "exact heading" in result
+    assert "Use append" in result
+    assert path.read_bytes() == original
 
 
 @pytest.mark.asyncio
