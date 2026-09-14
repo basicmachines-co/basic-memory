@@ -54,10 +54,10 @@ def parse_document(content: str, *, source: bool = False) -> Document:
     if source:
         while lines and not lines[0].strip():
             lines.pop(0)
-    if not lines or lines[0].strip() != "---":
+    if not lines or (lines[0].rstrip(" \t\r\n") if source else lines[0].strip()) != "---":
         return Document({}, content, False)
     for end in range(1, len(lines)):
-        if lines[end].strip() == "---":
+        if (lines[end].rstrip(" \t\r\n") if source else lines[end].strip()) == "---":
             break
     else:
         raise ValueError("Unterminated YAML frontmatter")

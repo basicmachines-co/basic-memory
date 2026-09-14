@@ -389,3 +389,15 @@ def test_mixed_case_semantic_opt_out(setting):
     files = render_bundle(ExportSnapshot("p", (ExportFile("a.md", content.encode()),)))
     document = parse_document(next(file.content.decode() for file in files if file.path == "a.md"))
     assert document.metadata["bm"] == {"okf_export": {"version": 1, "relations": []}}
+
+
+def test_indented_source_fence_is_body_not_metadata():
+    source = "  ---\ntype: custom\ntitle: Authored text\n---\n# Body"
+    files = render_bundle(ExportSnapshot("p", (ExportFile("a.md", source.encode()),)))
+    document = parse_document(next(file.content.decode() for file in files if file.path == "a.md"))
+    assert document.metadata["type"] == "note"
+    assert "title" not in document.metadata
+    assert document.body == source
+    assert check_document("a.md", source) == []
+    with pytest.raises(ValueError, match="Unterminated"):
+        parse_document("---\ntype: custom\n  ---\nBody", source=True)
