@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import override, List, Optional, Sequence, Union, Any
 
 from loguru import logger
-from sqlalchemy import case, exists, func, or_, select
+from sqlalchemy import case, exists, func, or_, select, union_all
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only, selectinload
@@ -17,7 +17,10 @@ from sqlalchemy.engine import Row
 from basic_memory.models.knowledge import Entity, Observation, Relation
 from basic_memory.models.relation_search_refresh import RelationSearchRefresh
 from basic_memory.repository.repository import Repository
-from basic_memory.runtime.storage import RUNTIME_MARKDOWN_CONTENT_TYPE
+from basic_memory.runtime.storage import (
+    RUNTIME_MARKDOWN_CONTENT_TYPE,
+    runtime_file_path_is_markdown_note,
+)
 
 type EntityMetadata = dict[str, Any] | None
 
@@ -408,37 +411,35 @@ class EntityRepository(Repository[Entity]):
         legacy_markdown_identity = (Entity.content_type == "text/markdown") & Entity.permalink.is_(
             None
         )
-        # A markdown path whose indexed type is not markdown keeps a matching
-        # checksum, so it would report unchanged forever. Mask it as unknown so
-        # the normal scan re-reads the file and repairs the type fields.
-        # Match PurePosixPath.suffix on normalized POSIX paths: a leading dot
-        # alone is not a suffix. Keep this predicate fixed-size so a 900-path
-        # change-detection batch still fits SQLite's 999-variable limit.
-        lower_path = func.lower(Entity.file_path)
-        markdown_path_without_markdown_type = (
-            or_(
-                lower_path.like("%.md") & (lower_path != ".md") & ~lower_path.like("%/.md"),
-                lower_path.like("%.markdown")
-                & (lower_path != ".markdown")
-                & ~lower_path.like("%/.markdown"),
+        # Classify with the indexer's canonical suffix semantics, including
+        # dot-only basenames. Partition the lookup so each path is bound once;
+        # duplicating the path list would exceed SQLite's limit for full batches.
+        paths_by_markdown: dict[bool, list[str]] = {True: [], False: []}
+        for path in posix_paths:
+            paths_by_markdown[runtime_file_path_is_markdown_note(path)].append(path)
+
+        queries = []
+        for is_markdown, paths in paths_by_markdown.items():
+            if not paths:
+                continue
+            incomplete_projection = [
+                publication_pending,
+                legacy_relation_pending,
+                legacy_markdown_identity,
+            ]
+            # A genuine note with a resource type needs one normal indexing pass
+            # even when its checksum matches. Resources must be able to settle.
+            if is_markdown:
+                incomplete_projection.append(Entity.content_type != RUNTIME_MARKDOWN_CONTENT_TYPE)
+            indexed_checksum = case(
+                (or_(*incomplete_projection), None),
+                else_=Entity.checksum,
+            ).label("checksum")
+            path_query = select(Entity.file_path, indexed_checksum).where(
+                Entity.file_path.in_(paths)
             )
-        ) & (Entity.content_type != RUNTIME_MARKDOWN_CONTENT_TYPE)
-        indexed_checksum = case(
-            (
-                or_(
-                    publication_pending,
-                    legacy_relation_pending,
-                    legacy_markdown_identity,
-                    markdown_path_without_markdown_type,
-                ),
-                None,
-            ),
-            else_=Entity.checksum,
-        ).label("checksum")
-        query = select(Entity.file_path, indexed_checksum).where(  # pragma: no cover
-            Entity.file_path.in_(posix_paths)
-        )
-        query = self._add_project_filter(query)  # pragma: no cover
+            queries.append(self._add_project_filter(path_query))
+        query = union_all(*queries)
 
         result = await session.execute(query)  # pragma: no cover
         return list(result.all())  # pragma: no cover
