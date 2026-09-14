@@ -54,13 +54,15 @@ def export(
     """
     from basic_memory.cli.commands.command_utils import run_with_cleanup
     from basic_memory.cli.container import get_or_create_container
+    from basic_memory.db import maybe_install_uvloop
     from basic_memory.okf.export import export_project
     from basic_memory.okf.validation import CheckReport, Diagnostic
 
     try:
-        report = run_with_cleanup(
-            export_project(get_or_create_container().config, project, destination, replace=replace)
-        )
+        config = get_or_create_container().config
+        # PostgreSQL needs the guarded policy before run_with_cleanup creates its loop.
+        maybe_install_uvloop(config)
+        report = run_with_cleanup(export_project(config, project, destination, replace=replace))
     except (ValueError, OSError, UnicodeError) as error:
         report = CheckReport(
             diagnostics=[Diagnostic(path=str(destination), rule="export", message=str(error))]

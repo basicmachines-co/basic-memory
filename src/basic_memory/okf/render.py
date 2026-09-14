@@ -146,6 +146,8 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
         document = parse_document(file.content.decode("utf-8"))
         documents[file.path] = document
         aliases = {file.path, str(PurePosixPath(file.path).with_suffix(""))}
+        if not document.metadata.get("title"):
+            aliases.add(PurePosixPath(file.path).stem)
         for key in ("permalink", "title"):
             value = document.metadata.get(key)
             if isinstance(value, str) and value:

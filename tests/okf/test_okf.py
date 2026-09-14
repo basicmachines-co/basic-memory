@@ -172,7 +172,7 @@ async def test_failed_validation_leaves_destination_intact(export_config, tmp_pa
 def test_reserved_source_and_ignore_rules(export_config):
     root = Path(export_config.projects["export"].path)
     (root / "index.md").write_text("---\nbm: {profile: wiki/1}\n---\n[[Live Wiki]]")
-    (root / "log.md").write_text("# old log")
+    (root / "log.md").write_text("---\nbm: {profile: wiki/1}\n---\n# old log")
     (root / ".secret").write_text("secret")
     (root / "paper.pdf").write_bytes(b"pdf")
     assert {file.path for file in snapshot_files(root)} == {"a.md", "paper.pdf"}
@@ -259,3 +259,79 @@ def test_source_relative_path_precedes_root_path():
         convert_wikilinks("[[nested/a]]", "folder/source.md", targets, "p")
         == "[nested/a](/folder/nested/a.md)"
     )
+
+
+def test_filename_default_title_resolves_nested_note():
+    files = render_bundle(
+        ExportSnapshot(
+            "p",
+            (
+                ExportFile("guides/Guide.md", b"---\ntype: note\n---\n# Guide"),
+                ExportFile("source.md", b"[[Guide]]"),
+            ),
+        )
+    )
+    source = next(file.content for file in files if file.path == "source.md")
+    assert b"[Guide](/guides/Guide.md)" in source
+
+
+def test_timestamp_and_fence_whitespace_survive_export():
+    content = (
+        "--- \t\ntype: note\ntitle: A\npermalink: a\ntags: [tag]\n"
+        "stale_after: 2026-06-30T14:00:00Z\ncreated: 2026-06-01\n---\t\n# A\n"
+    )
+    assert check_document("a.md", content) == []
+    expected = parse_document(content)
+    assert expected.metadata["stale_after"] == "2026-06-30T14:00:00Z"
+    assert expected.metadata["created"] == "2026-06-01"
+    files = render_bundle(ExportSnapshot("p", (ExportFile("a.md", content.encode()),)))
+    document = parse_document(next(file.content.decode() for file in files if file.path == "a.md"))
+    assert document.body == expected.body
+    assert {key: document.metadata[key] for key in expected.metadata} == expected.metadata
+
+
+@pytest.mark.parametrize("name", ["index.md", "log.md"])
+def test_unmarked_reserved_notes_are_not_discarded(export_config, name):
+    root = Path(export_config.projects["export"].path)
+    path = root / name
+    path.write_text("# My authored note\nImportant facts")
+    with pytest.raises(ValueError, match="rename it first"):
+        snapshot_files(root)
+    assert path.read_text() == "# My authored note\nImportant facts"
+
+
+def test_check_rejects_fifo_without_opening_it(tmp_path, monkeypatch):
+    import os
+
+    if os.name == "nt":
+        pytest.skip("Windows does not support POSIX FIFOs")
+    path = tmp_path / "blocked.md"
+    os.mkfifo(path)
+    monkeypatch.setattr(Path, "read_text", lambda *args, **kwargs: pytest.fail("opened FIFO"))
+    report = check_bundle(tmp_path)
+    assert report.diagnostics[0].path == "blocked.md"
+    assert report.diagnostics[0].rule == "filesystem.regular_file"
+
+
+def test_export_installs_event_loop_policy_before_async_work(export_config, tmp_path, monkeypatch):
+    import basic_memory.cli.commands.command_utils as command_utils
+
+    set_container(CliContainer(export_config, RuntimeMode.TEST))
+    events = []
+    run_with_cleanup = command_utils.run_with_cleanup
+
+    def install(config):
+        assert config is export_config
+        events.append("policy")
+
+    def run(coroutine):
+        assert events == ["policy"]
+        return run_with_cleanup(coroutine)
+
+    monkeypatch.setattr("basic_memory.db.maybe_install_uvloop", install)
+    monkeypatch.setattr(command_utils, "run_with_cleanup", run)
+    result = CliRunner().invoke(
+        app, ["okf", "export", str(tmp_path / "bundle"), "--project", "export"]
+    )
+    assert result.exit_code == 0, result.output
+    assert events == ["policy"]

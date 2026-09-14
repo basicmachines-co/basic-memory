@@ -33,18 +33,30 @@ class Document:
     has_frontmatter: bool
 
 
+class FrontmatterLoader(yaml.SafeLoader):
+    """Keep authored timestamp spelling, including ISO T/Z semantics, intact."""
+
+
+FrontmatterLoader.yaml_implicit_resolvers = {
+    character: [
+        (tag, expression) for tag, expression in resolvers if tag != "tag:yaml.org,2002:timestamp"
+    ]
+    for character, resolvers in yaml.SafeLoader.yaml_implicit_resolvers.items()
+}
+
+
 def parse_document(content: str) -> Document:
     """Require a mapping when a YAML fence is present; preserve YAML value types."""
     lines = content.splitlines(keepends=True)
-    if not lines or lines[0].rstrip("\r\n") != "---":
+    if not lines or lines[0].strip() != "---":
         return Document({}, content, False)
     for end in range(1, len(lines)):
-        if lines[end].rstrip("\r\n") == "---":
+        if lines[end].strip() == "---":
             break
     else:
         raise ValueError("Unterminated YAML frontmatter")
     try:
-        metadata = yaml.safe_load("".join(lines[1:end]))
+        metadata = yaml.load("".join(lines[1:end]), Loader=FrontmatterLoader)
     except yaml.YAMLError as error:
         raise ValueError(f"Invalid YAML frontmatter: {error}") from error
     if not isinstance(metadata, dict):
@@ -139,6 +151,15 @@ def check_bundle(root: Path) -> CheckReport:
                 )
                 continue
             if name not in files or path.suffix != ".md":
+                continue
+            if not path.is_file():
+                report.diagnostics.append(
+                    Diagnostic(
+                        path=relative,
+                        rule="filesystem.regular_file",
+                        message="Markdown must be a regular file",
+                    )
+                )
                 continue
             if name not in {"index.md", "log.md"}:
                 report.concepts += 1

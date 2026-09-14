@@ -181,3 +181,39 @@ async def test_journal_materialization_and_identity(app_config, test_project, en
     assert len(history) == 1
     assert history[0].path == "a.md"
     assert history[0].accepted_at.date() == accepted_at.date()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("partial_journal", [False, True])
+async def test_pre_journal_database_exports_without_migration(
+    source_config, tmp_path, monkeypatch, partial_journal
+):
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from basic_memory.config import APP_DATABASE_NAME, DatabaseBackend
+
+    source_config.database_backend = DatabaseBackend.SQLITE
+    database_path = source_config.data_dir_path / APP_DATABASE_NAME
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    engine = create_async_engine(f"sqlite+aiosqlite:///{database_path}")
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(text("CREATE TABLE project (id INTEGER PRIMARY KEY)"))
+            if partial_journal:
+                await connection.execute(
+                    text("CREATE TABLE accepted_project_note_change (id INTEGER PRIMARY KEY)")
+                )
+
+        async def existing_db(**kwargs):
+            assert kwargs["ensure_migrations"] is False
+            return engine, async_sessionmaker(engine)
+
+        monkeypatch.setattr(db, "get_or_create_db", existing_db)
+        before = database_path.read_bytes()
+        destination = tmp_path / "bundle"
+        report = await export_project(source_config, "export", destination)
+        assert report.success and report.concepts == 1
+        assert database_path.read_bytes() == before
+        assert "\n## " not in (destination / "log.md").read_text()
+    finally:
+        await engine.dispose()

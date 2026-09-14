@@ -8,6 +8,8 @@ from importlib.machinery import SourceFileLoader
 from pathlib import Path
 import shutil
 import sys
+from datetime import UTC, datetime
+from types import ModuleType
 
 import pytest
 
@@ -17,6 +19,7 @@ from basic_memory.index.local_project import (
     run_local_project_index_for_project,
 )
 from basic_memory.okf.validation import check_bundle, check_document, parse_document
+from basic_memory.okf.render import ExportFile, ExportSnapshot, render_bundle
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.relation_repository import RelationRepository
 from basic_memory.schemas.search import SearchQuery
@@ -24,7 +27,7 @@ from basic_memory.schemas.search import SearchQuery
 FIXTURES = Path(__file__).parents[1] / "tests/fixtures/okf"
 
 
-def upstream_concept_count(root: Path) -> int:
+def upstream_parser() -> ModuleType:
     # Load the unmodified pinned parser only in tests. Explicit counts ensure a
     # permissive consumer cannot hide malformed concepts by silently skipping them.
     spec = importlib.util.spec_from_loader(
@@ -35,6 +38,11 @@ def upstream_concept_count(root: Path) -> int:
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
+    return module
+
+
+def upstream_concept_count(root: Path) -> int:
+    module = upstream_parser()
     count = 0
     for path in root.rglob("*.md"):
         if path.name in {"index.md", "log.md"}:
@@ -175,3 +183,18 @@ def test_upstream_sample_log_is_not_conformance_authority():
     assert {diagnostic.rule for diagnostic in check_document("log.md", text)} == {
         "reserved.frontmatter"
     }
+
+
+def test_upstream_timestamp_behavior_survives_export():
+    module = upstream_parser()
+    source = "--- \t\ntype: note\nstale_after: 2026-06-30T14:00:00Z\n---\t\n# A\n"
+    exported = next(
+        file.content.decode()
+        for file in render_bundle(ExportSnapshot("p", (ExportFile("a.md", source.encode()),)))
+        if file.path == "a.md"
+    )
+    for content in (source, exported):
+        document = module.OKFDocument.parse(content)
+        document.validate()
+        assert module.is_stale(document.frontmatter, datetime(2026, 7, 1, tzinfo=UTC))
+        assert not module.is_stale(document.frontmatter, datetime(2026, 6, 1, tzinfo=UTC))

@@ -17,18 +17,33 @@ async def recorded_history(
     from basic_memory import db
     from basic_memory.repository.project_repository import ProjectRepository
     from basic_memory.utils import ensure_timezone_aware
+    from sqlalchemy import inspect
 
     # database_path creates an empty DB as a side effect; a read-only export must
     # distinguish absent history before opening the existing database.
     database_path = config.data_dir_path / APP_DATABASE_NAME
     if config.database_backend == DatabaseBackend.SQLITE and not database_path.exists():
         return ()
-    _, session_maker = await db.get_or_create_db(
+    engine, session_maker = await db.get_or_create_db(
         db_path=database_path,
         db_type=db.DatabaseType.FILESYSTEM,
         config=config,
         ensure_migrations=False,
     )
+    # An older database has no accepted-change journal. Export remains read-only
+    # and reports no recorded history instead of migrating or querying missing columns.
+    async with engine.connect() as connection:
+        has_journal = await connection.run_sync(
+            lambda sync: (
+                inspect(sync).has_table("accepted_project_note_change")
+                and any(
+                    column["name"] == "partition_position"
+                    for column in inspect(sync).get_columns("project")
+                )
+            )
+        )
+    if not has_journal:
+        return ()
     repository = ProjectRepository()
     async with db.scoped_session(session_maker) as session:
         project = await repository.get_by_name(session, project_name)
@@ -67,11 +82,9 @@ def snapshot_files(root: Path) -> tuple[ExportFile, ...]:
             document = parse_document(content.decode("utf-8"))
             bm = document.metadata.get("bm")
             # Never silently discard user-authored concepts at reserved names.
-            if (
-                document.has_frontmatter
-                and not (isinstance(bm, dict) and bm.get("profile") == "wiki/1")
-                and set(document.metadata) != {"okf_version"}
-            ):
+            if not (isinstance(bm, dict) and bm.get("profile") == "wiki/1") and set(
+                document.metadata
+            ) != {"okf_version"}:
                 raise ValueError(
                     f"{path}: reserved OKF filename contains a concept; rename it first"
                 )

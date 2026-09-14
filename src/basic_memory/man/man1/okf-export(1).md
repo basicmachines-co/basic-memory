@@ -38,7 +38,10 @@ records accepted Basic Memory journal history under ISO date headings.
 File materialization may lag recorded acceptance; the log does not claim
 every recorded version is represented by the exported files.
 It does not reconstruct offline edits. Live Wiki bytes are not copied.
-User-authored concepts at reserved filenames must be renamed before export.
+Unmarked files at reserved filenames must be renamed before export, even without
+frontmatter; only recognized Wiki artifacts or marked OKF indexes are replaced.
+Databases predating the accepted-change journal produce an empty history without
+being migrated by export.
 
 The destination is staged and checked before publication. Existing destinations
 are refused unless `--replace` is explicit. A failed publication restores the
