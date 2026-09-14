@@ -71,12 +71,16 @@ def test_convert_office_bytes_drops_picture_references_with_filename_alt_text() 
         ("Before ![Revenue by region](Picture3.jpg) after", "Before Revenue by region after"),
         ("![image.png](Picture2.jpg)", ""),
         ("![](data:image/png;base64,AAAA)", ""),
-        ("![ Chart 1.PNG ](x)", ""),
+        ("![ Chart 1.PNG ](x)",) * 2,
         (
             r"Before ![Revenue \] by region](data:image/png;base64,AAAA) after",
             r"Before Revenue \] by region after",
         ),
         ("![Revenue [Q1]](data:image/png;base64,AAAA)", "Revenue [Q1]"),
+        ("Literal ![alt](https://example.com/image.png) syntax",) * 2,
+        (r"Escaped \![image.png](Picture2.jpg)",) * 2,
+        ("`![image.png](Picture2.jpg)`",) * 2,
+        ("```markdown\n![image.png](Picture2.jpg)\n```",) * 2,
         ("No pictures here", "No pictures here"),
     ],
 )
