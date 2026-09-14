@@ -70,7 +70,7 @@ async def test_search_prompt_with_timeframe(client, test_graph):
 
 
 @pytest.mark.asyncio
-async def test_search_prompt_no_results(client):
+async def test_search_prompt_no_results(client, indexed_project):
     """Test search_prompt when no results are found."""
     result = await search_prompt("XYZ123NonExistentQuery")  # pyright: ignore [reportGeneralTypeIssues]
 

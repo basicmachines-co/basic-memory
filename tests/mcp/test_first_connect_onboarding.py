@@ -38,7 +38,9 @@ def test_server_sets_first_connect_instructions():
 
 
 @pytest.mark.asyncio
-async def test_recent_activity_empty_project_offers_first_note(client, test_project):
+async def test_recent_activity_empty_project_offers_first_note(
+    client, test_project, indexed_project
+):
     """An empty project (no test_graph) should surface the offer-not-act first-note guidance."""
     result = await recent_activity(project=test_project.name, timeframe="7d")  # pyright: ignore[reportGeneralTypeIssues]
 
@@ -64,7 +66,9 @@ async def test_recent_activity_populated_project_has_no_first_note_offer(
 
 
 @pytest.mark.asyncio
-async def test_recent_activity_filtered_empty_result_has_no_first_note_offer(client, test_project):
+async def test_recent_activity_filtered_empty_result_has_no_first_note_offer(
+    client, test_project, indexed_project
+):
     """A type-filter miss does not mean an established project has no notes."""
     await write_note(
         project=test_project.name,
@@ -87,7 +91,7 @@ async def test_recent_activity_filtered_empty_result_has_no_first_note_offer(cli
 
 @pytest.mark.asyncio
 async def test_recent_activity_out_of_range_page_has_no_first_note_offer(
-    client, test_project, test_graph
+    client, test_project, test_graph, indexed_project
 ):
     """An empty later page should direct the agent back through pagination."""
     result = await recent_activity(
@@ -107,7 +111,7 @@ async def test_recent_activity_out_of_range_page_has_no_first_note_offer(
 
 
 @pytest.mark.asyncio
-async def test_search_no_results_points_to_recent_activity(client, test_project):
+async def test_search_no_results_points_to_recent_activity(client, test_project, indexed_project):
     """Empty search must point at recent_activity rather than repeat the first-note offer."""
     result = await search_notes(query="XYZ123NoSuchNote", project=test_project.name)  # pyright: ignore[reportGeneralTypeIssues]
 

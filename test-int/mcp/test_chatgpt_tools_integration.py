@@ -104,7 +104,7 @@ async def test_chatgpt_search_basic(mcp_server, app, test_project):
 
 
 @pytest.mark.asyncio
-async def test_chatgpt_search_empty_results(mcp_server, app, test_project):
+async def test_chatgpt_search_empty_results(mcp_server, app, test_project, indexed_project):
     """Test ChatGPT search with no matching results."""
 
     async with openai_mcp_client(mcp_server) as client:

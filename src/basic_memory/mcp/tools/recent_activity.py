@@ -118,7 +118,7 @@ async def recent_activity(
                 it routes to the exact project regardless of name collisions across cloud
                 workspaces. Takes precedence over `project`. Get from list_memory_projects().
         output_format: "text" returns human-readable summary text. "json" returns
-            a flat list of recent items, or index-required guidance if never indexed.
+            a flat list of recent items.
         context: Optional FastMCP context for performance caching.
 
     Returns:

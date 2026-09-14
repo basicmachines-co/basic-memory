@@ -67,7 +67,7 @@ async def test_delete_note_by_title(mcp_server, app, test_project):
 
 
 @pytest.mark.asyncio
-async def test_delete_note_by_permalink(mcp_server, app, test_project):
+async def test_delete_note_by_permalink(mcp_server, app, test_project, indexed_project):
     """Test deleting a note by its permalink."""
 
     async with Client(mcp_server) as client:
@@ -362,7 +362,7 @@ async def test_delete_note_rejects_case_mismatch(mcp_server, app, test_project):
 
 
 @pytest.mark.asyncio
-async def test_delete_multiple_notes_sequentially(mcp_server, app, test_project):
+async def test_delete_multiple_notes_sequentially(mcp_server, app, test_project, indexed_project):
     """Test deleting multiple notes in sequence."""
 
     async with Client(mcp_server) as client:

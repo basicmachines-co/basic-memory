@@ -50,7 +50,7 @@ async def test_write_note_text_and_json_modes(app, test_project):
 
 
 @pytest.mark.asyncio
-async def test_read_note_text_and_json_modes(app, test_project):
+async def test_read_note_text_and_json_modes(app, test_project, indexed_project):
     await write_note(
         project=test_project.name,
         title="Mode Read Note",
