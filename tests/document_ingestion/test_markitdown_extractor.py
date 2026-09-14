@@ -82,7 +82,7 @@ async def test_markitdown_extractor_passes_format_and_limits_to_the_worker(
         python_executable="python-x",
     )
 
-    extracted = await extractor.extract(b"docx-bytes", file_name="plan.docx")
+    extracted = await extractor.extract(b"docx-bytes", file_name="--plan.docx")
 
     assert process.argv == (
         "python-x",
@@ -90,8 +90,7 @@ async def test_markitdown_extractor_passes_format_and_limits_to_the_worker(
         MARKITDOWN_WORKER_MODULE,
         "--format",
         "docx",
-        "--file-name",
-        "plan.docx",
+        "--file-name=--plan.docx",
         "--max-output-bytes",
         "1000",
         "--max-memory-bytes",
