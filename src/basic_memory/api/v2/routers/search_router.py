@@ -39,6 +39,7 @@ from basic_memory.repository.semantic_errors import (
     SemanticSearchDisabledError,
 )
 from basic_memory.schemas.search import SearchQuery, SearchResponse, SearchRetrievalMode
+from basic_memory.services.search_guidance import unspaced_cjk_query_hint
 
 # App registration mounts this router at /v2/projects/{project_id}.
 router = APIRouter(tags=["search"])
@@ -243,6 +244,11 @@ async def search(
                     total=total,
                     total_is_exact=exact_count_available,
                     has_more=has_more,
+                    # A later empty page is pagination, not evidence of a compound miss.
+                    # Guidance adds no retrieval pass and makes no index-completeness claim.
+                    query_hint=unspaced_cjk_query_hint(query)
+                    if page == 1 and not search_results and total == 0
+                    else None,
                     # None, not False, when nothing was asked: an ordinary search
                     # payload stays exactly what it was before valid time existed.
                     temporal_applied=True if temporal_requested else None,

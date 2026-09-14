@@ -315,6 +315,10 @@ class SearchResponse(BaseModel):
         description="Whether total is an exact count that clients can use for pagination",
     )
     has_more: bool = False
+    query_hint: str | None = Field(
+        default=None,
+        description="Actionable guidance for an empty query, not an index health status",
+    )
     # Version-skew guard. SearchQuery ignores unknown fields, so a client that sends a
     # valid-time filter to a server predating SPEC-82 would receive unfiltered results
     # that look filtered -- silently including the undated sources the filter excludes.
