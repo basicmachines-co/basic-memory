@@ -30,6 +30,9 @@ The content can be sliced by a 1-indexed inclusive line range (`--lines
 (`--section Decisions`, path form `Auth/Decisions`, or `Heading[1]` for a
 duplicate), or truncated to an approximate token budget (`--max-tokens`).
 
+`--lines` and `--section` cannot be combined. A section response includes
+start_line and end_line for follow-up `--lines` reads.
+
 On a TTY the note renders as formatted Markdown; `--plain` writes the raw
 content to stdout (slice details go to stderr); `--json`, or piped output,
 emits the structured payload with slice metadata (start_line, end_line,
