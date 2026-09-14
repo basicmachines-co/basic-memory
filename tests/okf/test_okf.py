@@ -359,3 +359,33 @@ def test_index_entry_link_applies_to_whole_item():
 def test_log_heading_ends_date_group():
     text = "## 2026-01-01\n- Recorded\n# Appendix\n- Undated"
     assert [item.rule for item in check_document("log.md", text)] == ["log.group"]
+
+
+@pytest.mark.parametrize("prefix", ["\ufeff", "\n \t\n", "\ufeff\n\n"])
+def test_source_frontmatter_prefix_preserves_metadata(prefix):
+    content = prefix + "---\ntitle: A\npermalink: a\ntags: [tag]\ntype: custom\n---\n# A"
+    files = render_bundle(ExportSnapshot("p", (ExportFile("a.md", content.encode()),)))
+    document = parse_document(next(file.content.decode() for file in files if file.path == "a.md"))
+    assert document.metadata["title"] == "A"
+    assert document.metadata["permalink"] == "a"
+    assert document.metadata["tags"] == ["tag"]
+    assert document.metadata["type"] == "custom"
+    assert document.body == "# A"
+    assert check_document("a.md", content)[0].rule == "concept.frontmatter"
+
+
+def test_empty_frontmatter_gets_export_defaults():
+    files = render_bundle(ExportSnapshot("p", (ExportFile("a.md", b"---\n---\n# A"),)))
+    document = parse_document(next(file.content.decode() for file in files if file.path == "a.md"))
+    assert document.metadata["type"] == "note"
+    assert document.metadata["tags"] == []
+    assert document.body == "# A"
+    assert check_document("a.md", "---\n---\n# A")[0].rule == "concept.type"
+
+
+@pytest.mark.parametrize("setting", ['"False"', '"FALSE"', '"fAlSe"'])
+def test_mixed_case_semantic_opt_out(setting):
+    content = f"---\nbm_parse_semantics: {setting}\n---\n- depends_on [[A]]"
+    files = render_bundle(ExportSnapshot("p", (ExportFile("a.md", content.encode()),)))
+    document = parse_document(next(file.content.decode() for file in files if file.path == "a.md"))
+    assert document.metadata["bm"] == {"okf_export": {"version": 1, "relations": []}}

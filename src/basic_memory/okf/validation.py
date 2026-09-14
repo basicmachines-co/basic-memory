@@ -10,6 +10,8 @@ from markdown_it import MarkdownIt
 from pydantic import BaseModel, Field
 import yaml
 
+from basic_memory.file_utils import strip_bom
+
 
 class Diagnostic(BaseModel):
     path: str
@@ -45,9 +47,13 @@ FrontmatterLoader.yaml_implicit_resolvers = {
 }
 
 
-def parse_document(content: str) -> Document:
+def parse_document(content: str, *, source: bool = False) -> Document:
     """Require a mapping when a YAML fence is present; preserve YAML value types."""
-    lines = content.splitlines(keepends=True)
+    lines = (strip_bom(content) if source else content).splitlines(keepends=True)
+    # BM accepts a BOM and leading blank lines; OKF check keeps its on-disk boundary.
+    if source:
+        while lines and not lines[0].strip():
+            lines.pop(0)
     if not lines or lines[0].strip() != "---":
         return Document({}, content, False)
     for end in range(1, len(lines)):
@@ -59,6 +65,8 @@ def parse_document(content: str) -> Document:
         metadata = yaml.load("".join(lines[1:end]), Loader=FrontmatterLoader)
     except yaml.YAMLError as error:
         raise ValueError(f"Invalid YAML frontmatter: {error}") from error
+    if metadata is None:
+        metadata = {}
     if not isinstance(metadata, dict):
         raise ValueError("Frontmatter must be a YAML mapping")
     return Document(metadata, "".join(lines[end + 1 :]), True)

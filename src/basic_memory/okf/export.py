@@ -84,7 +84,7 @@ def snapshot_files(root: Path) -> tuple[ExportFile, ...]:
             )
         content = (root / path).read_bytes()
         if PurePosixPath(path).name in {"index.md", "log.md"}:
-            document = parse_document(content.decode("utf-8"))
+            document = parse_document(content.decode("utf-8"), source=True)
             bm = document.metadata.get("bm")
             # Never silently discard user-authored concepts at reserved names.
             if not (isinstance(bm, dict) and bm.get("profile") == "wiki/1") and set(

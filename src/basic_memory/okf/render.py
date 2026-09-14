@@ -143,7 +143,7 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
     for file in snapshot.files:
         if PurePosixPath(file.path).suffix != ".md":
             continue
-        document = parse_document(file.content.decode("utf-8"))
+        document = parse_document(file.content.decode("utf-8"), source=True)
         documents[file.path] = document
         aliases = {file.path, str(PurePosixPath(file.path).with_suffix(""))}
         if not document.metadata.get("title"):
@@ -175,7 +175,10 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
         metadata.setdefault("type", "note")
         metadata.setdefault("tags", [])
         semantic_setting = metadata.get("bm_parse_semantics")
-        if semantic_setting is not False and semantic_setting != "false":
+        if not (
+            semantic_setting is False
+            or (isinstance(semantic_setting, str) and semantic_setting.lower() == "false")
+        ):
             semantics = parse(document.body)
             # Observation syntax remains intact and is documented by the profile.
             # Typed relation metadata is needed because a standard link is untyped.
