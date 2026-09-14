@@ -139,6 +139,14 @@ def test_render_csv_preview_names_an_empty_file() -> None:
     assert preview.row_count == 0
 
 
+def test_render_csv_preview_skips_blank_records_before_the_header() -> None:
+    preview = render_csv_preview(b"\n\nname,age\nAda,37\n", max_rows=200)
+
+    assert preview.markdown.startswith("| name | age |\n| --- | --- |\n| Ada | 37 |")
+    assert preview.row_count == 1
+    assert preview.shown_rows == 1
+
+
 def test_render_csv_preview_rejects_non_utf8_instead_of_guessing() -> None:
     with pytest.raises(CsvDecodeError, match="not UTF-8"):
         render_csv_preview(b"name\nJos\xe9\n", max_rows=200)

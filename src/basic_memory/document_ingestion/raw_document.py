@@ -394,12 +394,13 @@ def build_raw_ingestion_run_markdown(
     *,
     raw_checksum: str,
     raw_created_at: datetime,
+    raw_storage_version_id: str | None = None,
 ) -> str:
     """Build the compact queryable history note for an accepted raw revision."""
     raw_revision = DocumentRevisionReferenceV1(
         kind=DocumentRevisionKind.raw_extraction,
         checksum=raw_checksum,
-        storage_version_id=None,
+        storage_version_id=raw_storage_version_id,
         created_at=raw_created_at,
     )
     run = DocumentIngestionRunMarkdownV1(

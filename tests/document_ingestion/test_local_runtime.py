@@ -286,6 +286,7 @@ async def test_writer_creates_the_sidecar_and_run_note_and_indexes_both(
     assert run_note.frontmatter.output.raw.checksum == document_markdown_checksum(
         built.document_markdown
     )
+    assert run_note.frontmatter.output.raw.storage_version_id == result.document_db_checksum
 
     reused = await writer.write(built)
     assert reused.document_db_checksum == result.document_db_checksum
@@ -414,6 +415,20 @@ async def test_writer_refuses_to_replace_an_edited_raw_sidecar(
         await writer.write(artifacts(checksum_char="b"))
 
     assert "My annotation about row three." in sidecar.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_writer_refuses_to_replace_a_raw_sidecar_with_changed_newlines(
+    file_service: FileService,
+) -> None:
+    writer = LocalRawDocumentWriter(file_service, knowledge_api())
+    first = artifacts(checksum_char="a")
+    await writer.write(first)
+    sidecar = file_service.base_path / first.document_file_path
+    sidecar.write_bytes(sidecar.read_bytes().replace(b"\n", b"\r\n"))
+
+    with pytest.raises(DocumentSidecarConflictError, match="edited since"):
+        await writer.write(artifacts(checksum_char="b"))
 
 
 @pytest.mark.asyncio
