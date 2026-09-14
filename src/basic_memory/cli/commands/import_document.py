@@ -48,7 +48,8 @@ async def import_document(path: Path, project: str | None) -> tuple[str, RawDocu
             raise typer.BadParameter(f"File not found: {path}")
         if not source.is_relative_to(project_home):
             raise typer.BadParameter(
-                f"{path} is not inside project {project_item.name!r} ({project_home})"
+                f"{path} is not inside project {project_item.name!r} ({project_home}). "
+                "Copy the file into that project directory, then run the command again."
             )
         relative_path = source.relative_to(project_home).as_posix()
 
@@ -74,13 +75,28 @@ async def import_document(path: Path, project: str | None) -> tuple[str, RawDocu
 
 @import_app.command(
     name="document",
-    help="Extract a PDF, docx, pptx, or csv file in a project into a sidecar Markdown note.",
+    help=(
+        "Extract a PDF, DOCX, PPTX, or CSV already stored inside a project into a sidecar "
+        "Markdown note."
+    ),
 )
 def document(
-    path: Annotated[Path, typer.Argument(help="Path to a file inside the project directory")],
+    path: Annotated[
+        Path,
+        typer.Argument(
+            help=(
+                "Source file path. It must be inside the selected project; copy external files "
+                "into the project first."
+            )
+        ),
+    ],
     project: Annotated[
         Optional[str],
-        typer.Option("--project", "-p", help="Project name (defaults to the default project)"),
+        typer.Option(
+            "--project",
+            "-p",
+            help="Project containing the source file (defaults to the default project).",
+        ),
     ] = None,
 ) -> None:
     """Write ``<file>.md`` next to the source and a run note under document-ingestion-runs/."""
