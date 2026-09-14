@@ -4,7 +4,7 @@ type: manpage
 section: 1
 name: apropos
 summary: search the Basic Memory manual
-generated: hand
+generated: cli
 ---
 
 # apropos(1)
@@ -16,8 +16,8 @@ generated: hand
 ## SYNOPSIS
 
 ```
-bm man apropos QUERY [--project NAME] [--json | --plain]
-       [--local | --cloud]
+bm man apropos QUERY [--project PROJECT] [--json | --plain]
+               [--local | --cloud]
 ```
 
 ## DESCRIPTION
@@ -32,7 +32,11 @@ An empty result is a successful search (exit 0), not an error.
 
 ## OPTIONS
 
-- **--project** — manual project to search (default: `manual`)
+- **--project** — Manual project to search (default: manual)
+- **--json** — Output raw JSON instead of formatted display
+- **--plain** — Output undecorated plain text (no colors/markup), even when piped
+- **--local** — Force local API routing (ignore cloud mode)
+- **--cloud** — Force cloud API routing
 
 ## EXAMPLES
 
