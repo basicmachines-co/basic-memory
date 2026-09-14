@@ -78,7 +78,7 @@ async def test_unindexed_cjk_miss_keeps_index_guidance(
 
     notes_dir = config_home / "notes"
     notes_dir.mkdir(exist_ok=True)
-    (notes_dir / "unindexed.md").write_text("# Diary\n\n雾凇词库部署\n")
+    (notes_dir / "unindexed.md").write_text("# Diary\n\n雾凇词库部署\n", encoding="utf-8")
     async with db.scoped_session(session_maker) as session:
         await session.execute(
             text("UPDATE project SET last_indexed_at = NULL WHERE id = :id"),
