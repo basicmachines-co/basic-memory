@@ -217,3 +217,65 @@ async def test_pre_journal_database_exports_without_migration(
         assert "\n## " not in (destination / "log.md").read_text()
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_history_reads_only_legacy_project_identity(source_config, monkeypatch):
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from basic_memory.config import APP_DATABASE_NAME, DatabaseBackend
+
+    source_config.database_backend = DatabaseBackend.SQLITE
+    path = source_config.data_dir_path / APP_DATABASE_NAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    root = Path(source_config.projects["export"].path)
+    engine = create_async_engine(f"sqlite+aiosqlite:///{path}")
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "CREATE TABLE project (id INTEGER PRIMARY KEY, name TEXT, path TEXT, partition_position INTEGER)"
+                )
+            )
+            await connection.execute(
+                text("INSERT INTO project VALUES (1, 'export', :path, 1)"), {"path": str(root)}
+            )
+            await connection.run_sync(AcceptedProjectNoteChange.metadata.create_all)
+        session_maker = async_sessionmaker(engine)
+        async with session_maker.begin() as session:
+            session.add(
+                AcceptedProjectNoteChange(
+                    project_id=1,
+                    project_external_id="p",
+                    partition_position=1,
+                    entity_id=1,
+                    note_external_id="n",
+                    permalink="a",
+                    title="A",
+                    operation="create",
+                    file_path="a.md",
+                    accepted_at=datetime(2026, 1, 1, tzinfo=UTC),
+                    source="cli",
+                )
+            )
+
+        async def existing_db(**kwargs):
+            return engine, session_maker
+
+        monkeypatch.setattr(db, "get_or_create_db", existing_db)
+        before = path.read_bytes()
+        history = await recorded_history(source_config, "export", root)
+        assert len(history) == 1 and history[0].path == "a.md"
+        assert path.read_bytes() == before
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.parametrize("directory", ["index.md", "log.md", "nested/Index.md"])
+def test_reserved_directory_is_rejected_before_staging(source_config, directory):
+    root = Path(source_config.projects["export"].path)
+    parent = root / directory
+    parent.mkdir(parents=True)
+    (parent / "a.md").write_text("---\ntype: note\n---\n# A")
+    with pytest.raises(ValueError, match="reserved OKF directory name; rename it first"):
+        snapshot_files(root)

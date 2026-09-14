@@ -15,9 +15,10 @@ async def recorded_history(
 ) -> tuple[RecordedChange, ...]:
     """Read available journal evidence without indexing or repairing source files."""
     from basic_memory import db
+    from basic_memory.models.project import Project
     from basic_memory.repository.project_repository import ProjectRepository
     from basic_memory.utils import ensure_timezone_aware
-    from sqlalchemy import inspect
+    from sqlalchemy import inspect, select
 
     # database_path creates an empty DB as a side effect; a read-only export must
     # distinguish absent history before opening the existing database.
@@ -46,13 +47,22 @@ async def recorded_history(
         return ()
     repository = ProjectRepository()
     async with db.scoped_session(session_maker) as session:
-        project = await repository.get_by_name(session, project_name)
+        # Select only journal identity fields: later project metadata migrations
+        # must not make already-recorded history unreadable after an upgrade.
+        project = (
+            await session.execute(
+                select(Project.id, Project.path, Project.partition_position).where(
+                    Project.name == project_name
+                )
+            )
+        ).one_or_none()
         if project is None:
             return ()
-        if Path(project.path).resolve() != root:
+        project_id, project_path, partition_position = project
+        if Path(project_path).resolve() != root:
             raise ValueError("Configured project path differs from the recorded project path")
         changes = await repository.list_accepted_note_changes(
-            session, project.id, through_position=project.partition_position
+            session, project_id, through_position=partition_position
         )
         return tuple(
             RecordedChange(
@@ -76,6 +86,10 @@ def snapshot_files(root: Path) -> tuple[ExportFile, ...]:
     files = []
     for path in scan.file_paths:
         name = PurePosixPath(path).name
+        if any(
+            part.casefold() in {"index.md", "log.md"} for part in PurePosixPath(path).parts[:-1]
+        ):
+            raise ValueError(f"{path}: reserved OKF directory name; rename it first")
         if name.casefold() in {"index.md", "log.md"} and name not in {"index.md", "log.md"}:
             raise ValueError(f"{path}: reserved filename casing collides with generated OKF files")
         if runtime_file_path_is_markdown_note(path) and PurePosixPath(path).suffix != ".md":
