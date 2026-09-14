@@ -1,6 +1,7 @@
 """Utilities for handling .gitignore patterns and file filtering."""
 
 import fnmatch
+import re
 from pathlib import Path
 from typing import Set
 
@@ -66,6 +67,22 @@ DEFAULT_IGNORE_PATTERNS = {
     "*.swo",
     "*~",
 }
+
+
+def _parse_ignore_pattern_line(raw_line: str) -> str | None:
+    """Return the pattern for one gitignore-style line, or None to skip it.
+
+    Blank lines and comments (leading ``#``) are skipped. A leading backslash
+    escapes a pattern that itself begins with ``#`` (gitignore rule), so
+    ``\\#*#`` yields the pattern ``#*#``.
+    """
+    line = raw_line.rstrip("\r\n")
+    if not line or line.startswith("#"):
+        return None
+    # fnmatch has no backslash escapes. Decode literal hashes, spaces, and
+    # backslashes together so escaped trailing spaces survive, while unescaped
+    # trailing spaces are discarded without changing significant leading ones.
+    return re.sub(r"\\([\\ #])| +$", lambda match: match[1] or "", line) or None
 
 
 def get_bmignore_path() -> Path:
@@ -170,10 +187,9 @@ def load_bmignore_patterns() -> Set[str]:
     try:
         with bmignore_path.open("r", encoding="utf-8") as f:
             for line in f:
-                line = line.strip()
-                # Skip empty lines and comments
-                if line and not line.startswith("#"):
-                    patterns.add(line)
+                pattern = _parse_ignore_pattern_line(line)
+                if pattern:
+                    patterns.add(pattern)
     except Exception:  # pragma: no cover
         # If we can't read .bmignore, fall back to defaults
         return set(DEFAULT_IGNORE_PATTERNS)  # pragma: no cover
@@ -209,10 +225,9 @@ def load_gitignore_patterns(base_path: Path, use_gitignore: bool = True) -> Set[
             try:
                 with gitignore_file.open("r", encoding="utf-8") as f:
                     for line in f:
-                        line = line.strip()
-                        # Skip empty lines and comments
-                        if line and not line.startswith("#"):
-                            patterns.add(line)
+                        pattern = _parse_ignore_pattern_line(line)
+                        if pattern:
+                            patterns.add(pattern)
             except Exception:
                 # If we can't read .gitignore, just use default patterns
                 pass
