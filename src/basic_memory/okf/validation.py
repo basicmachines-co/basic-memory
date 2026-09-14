@@ -95,21 +95,27 @@ def check_document(path: str, content: str) -> list[Diagnostic]:
         if not any(token.type == "heading_open" for token in tokens):
             fail("index.heading", "Index requires a section heading (OKF §8)")
         # Links are structural entries; prose and code examples are not entries.
-        in_entry = False
+        entries: list[bool] = []
         for token in tokens:
             if token.type == "list_item_open":
-                in_entry = True
+                entries.append(False)
             elif token.type == "list_item_close":
-                in_entry = False
-            elif in_entry and token.type == "inline":
-                if not any(child.type == "link_open" for child in token.children or []):
+                if not entries.pop():
                     fail("index.link", "Index entries require standard Markdown links (OKF §8)")
+            elif entries and token.type == "inline":
+                if any(child.type == "link_open" for child in token.children or []):
+                    # A link anywhere in an entry satisfies it, including nested entries.
+                    entries = [True] * len(entries)
     else:
         previous: date | None = None
+        in_date_group = False
         for index, token in enumerate(tokens):
-            if token.type == "list_item_open" and previous is None:
+            if token.type == "list_item_open" and not in_date_group:
                 fail("log.group", "Log entries require a preceding date heading (OKF §9)")
-            if token.type != "heading_open" or token.tag == "h1":
+            if token.type != "heading_open":
+                continue
+            in_date_group = False
+            if token.tag == "h1":
                 continue
             heading = tokens[index + 1].content
             try:
@@ -122,6 +128,7 @@ def check_document(path: str, content: str) -> list[Diagnostic]:
             if previous is not None and day >= previous:
                 fail("log.order", "Log date groups must be unique and newest first (OKF §9)")
             previous = day
+            in_date_group = True
     return diagnostics
 
 

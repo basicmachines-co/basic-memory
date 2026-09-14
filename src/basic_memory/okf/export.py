@@ -68,6 +68,7 @@ async def recorded_history(
 
 def snapshot_files(root: Path) -> tuple[ExportFile, ...]:
     from basic_memory.index.local_project import scan_local_project_index_files
+    from basic_memory.runtime.storage import runtime_file_path_is_markdown_note
 
     scan = scan_local_project_index_files(root)
     if scan.unreadable_directories:
@@ -77,6 +78,10 @@ def snapshot_files(root: Path) -> tuple[ExportFile, ...]:
         name = PurePosixPath(path).name
         if name.casefold() in {"index.md", "log.md"} and name not in {"index.md", "log.md"}:
             raise ValueError(f"{path}: reserved filename casing collides with generated OKF files")
+        if runtime_file_path_is_markdown_note(path) and PurePosixPath(path).suffix != ".md":
+            raise ValueError(
+                f"{path}: OKF concepts require a lowercase .md suffix; rename it first"
+            )
         content = (root / path).read_bytes()
         if PurePosixPath(path).name in {"index.md", "log.md"}:
             document = parse_document(content.decode("utf-8"))

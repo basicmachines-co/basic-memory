@@ -335,3 +335,27 @@ def test_export_installs_event_loop_policy_before_async_work(export_config, tmp_
     )
     assert result.exit_code == 0, result.output
     assert events == ["policy"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("suffix", [".markdown", ".MD", ".Markdown"])
+async def test_export_rejects_non_okf_markdown_suffix(export_config, tmp_path, suffix):
+    source = Path(export_config.projects["export"].path) / ("note" + suffix)
+    source.write_text("---\ntype: note\n---\n[[A]]")
+    destination = tmp_path / "bundle"
+    with pytest.raises(ValueError, match="lowercase .md suffix"):
+        await export_project(export_config, "export", destination)
+    assert not destination.exists()
+    assert source.read_text() == "---\ntype: note\n---\n[[A]]"
+
+
+def test_index_entry_link_applies_to_whole_item():
+    assert check_document("index.md", "# Index\n- [A](a.md)\n\n  A description.") == []
+    assert check_document("index.md", "# Index\n- Group\n  - [A](a.md)\n\n    Description.") == []
+    diagnostics = check_document("index.md", "# Index\n- [A](a.md)\n  - Missing link")
+    assert [item.rule for item in diagnostics] == ["index.link"]
+
+
+def test_log_heading_ends_date_group():
+    text = "## 2026-01-01\n- Recorded\n# Appendix\n- Undated"
+    assert [item.rule for item in check_document("log.md", text)] == ["log.group"]

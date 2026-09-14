@@ -25,6 +25,8 @@ Export a configured local project to a static directory outside the project.
 Source files remain unchanged. Cloud projects must first be pulled locally.
 The export follows Basic Memory's project ignore rules; non-Markdown assets
 such as PDFs retain their relative paths. Symlinks are not exported.
+Concept filenames must use lowercase `.md`; supported BM alternatives such as
+`.markdown` or `.MD` must be renamed before export so OKF readers cannot skip them.
 
 Concept frontmatter is preserved, with absent `type` defaulting to `note`
 and absent `tags` to an empty list. Wikilinks become standard Markdown links.
