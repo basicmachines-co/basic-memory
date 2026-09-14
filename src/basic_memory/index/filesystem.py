@@ -134,6 +134,11 @@ def local_relative_path_is_filtered(relative_path: str) -> bool:
     """Return whether a project-relative path should be ignored before indexing."""
     if relative_path.endswith(LOCAL_FILTERED_FILE_SUFFIXES):
         return True
+    # Emacs autosaves are scratch copies, not resources. Filter before watcher
+    # move detection and full-scan reconciliation, even with an older .bmignore.
+    basename = Path(relative_path).name
+    if basename.startswith("#") and basename.endswith("#"):
+        return True
     return any(path_part.startswith(".") for path_part in Path(relative_path).parts)
 
 
