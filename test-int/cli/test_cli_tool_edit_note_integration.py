@@ -1,6 +1,7 @@
 """Integration tests for `basic-memory tool edit-note`."""
 
 import json
+from pathlib import Path
 
 from typer.testing import CliRunner
 
@@ -352,3 +353,41 @@ def test_edit_note_project_and_routing_flag_parity(app, app_config, test_project
     )
     assert conflict.exit_code != 0
     assert "Cannot specify both --local and --cloud" in conflict.output
+
+
+def test_replace_section_tagged_heading_requires_exact_match(
+    app, app_config, test_project, config_manager
+):
+    """A heading mismatch must fail without changing canonical bytes (#1531)."""
+    note = _write_note(
+        "Status",
+        "edit-tests",
+        "# Status\n\n## Open items #urgent #work\n\n- Stale item.\n\n"
+        "## Closing\n\nUnrelated trailing content.",
+    )
+    path = Path(test_project.path) / note["file_path"]
+    original = path.read_bytes()
+    args = [
+        "tool",
+        "edit-note",
+        note["permalink"],
+        "--operation",
+        "replace_section",
+        "--content",
+        "- Replaced content.",
+        "--section",
+        "## Open items",
+    ]
+    result = runner.invoke(cli_app, args)
+    assert result.exit_code != 0, result.output
+    assert "Section '## Open items' not found" in result.output
+    assert path.read_bytes() == original
+
+    args[-1] = "## Open items #urgent #work"
+    result = runner.invoke(cli_app, args)
+    assert result.exit_code == 0, result.output
+    updated = _read_note(note["permalink"])["content"]
+    assert updated.count("## Open items") == 1
+    assert "- Stale item." not in updated
+    assert "- Replaced content." in updated
+    assert "## Closing\n\nUnrelated trailing content." in updated

@@ -419,7 +419,8 @@ async def edit_note(
                   - "append": Add content to the end of the note (creates the note if it doesn't exist)
                   - "prepend": Add content to the beginning of the note (creates the note if it doesn't exist)
                   - "find_replace": Replace occurrences of find_text with content (note must exist)
-                  - "replace_section": Replace a markdown section identified by its header (note must exist).
+                  - "replace_section": Replace a markdown section identified by its header (note and section must exist).
+                    The heading must match exactly, including trailing tags or text; a miss fails without writing.
                     By default the section spans through the next heading of the same or higher
                     level, so its subsections are replaced too; see replace_subsections.
                   - "insert_before_section": Insert content before a section heading without consuming it (note must exist)
@@ -490,7 +491,7 @@ async def edit_note(
         # edit_note("work-project", "docs/meeting-notes-2025", "append", "content")  # Use exact result
 
         # Add new section to document
-        edit_note("planning", "project-plan", "replace_section", "TBD - needs research\\n", section="## Future Work")
+        edit_note("project-plan", "append", "\\n## Future Work\\nTBD - needs research\\n", project="planning")
 
         # Update status across document (expecting exactly 2 occurrences)
         edit_note("reports", "status-report", "find_replace", "In Progress", find_text="Not Started", expected_replacements=2)

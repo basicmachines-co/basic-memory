@@ -922,10 +922,10 @@ async def test_edit_entity_replace_section(
 
 
 @pytest.mark.asyncio
-async def test_edit_entity_replace_section_create_new(
+async def test_edit_entity_replace_section_not_found(
     entity_service: EntityService, file_service: FileService
 ):
-    """Test replacing a section that doesn't exist creates it."""
+    """A missing section fails without changing the note."""
     # Create test entity without the section
     entity = await entity_service.create_entity(
         EntitySchema(
@@ -936,19 +936,17 @@ async def test_edit_entity_replace_section_create_new(
         )
     )
 
-    # Edit entity with replace_section operation for non-existent section
-    updated = await entity_service.edit_entity(
-        identifier=_permalink(entity),
-        operation="replace_section",
-        content="New section content",
-        section="## New Section",
-    )
+    file_path = file_service.get_entity_path(entity)
+    original = file_path.read_bytes()
+    with pytest.raises(ValueError, match="Section '## New Section' not found"):
+        await entity_service.edit_entity(
+            identifier=_permalink(entity),
+            operation="replace_section",
+            content="New section content",
+            section="## New Section",
+        )
 
-    # Verify section was created
-    file_path = file_service.get_entity_path(updated)
-    file_content, _ = await file_service.read_file(file_path)
-    assert "## New Section" in file_content
-    assert "New section content" in file_content
+    assert file_path.read_bytes() == original
 
 
 @pytest.mark.asyncio
