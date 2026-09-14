@@ -11,6 +11,7 @@ from typing import override, TYPE_CHECKING, Any, ClassVar, Dict, Literal, Option
 from loguru import logger
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
 
 from basic_memory.config_migrations import (
     migrate_legacy_projects,
@@ -942,6 +943,50 @@ class BasicMemoryConfig(BaseSettings):
         elif self.default_project is not None and self.default_project not in self.projects:
             self.default_project = next(iter(self.projects.keys()))
 
+    def _resolve_sqlite_database_url_path(self) -> Optional[Path]:
+        """Derive the SQLite database file path from an explicit ``database_url``.
+
+        Returns ``None`` when ``database_url`` is unset or the backend is not
+        SQLite, so ``app_database_path`` falls back to the existing
+        ``data_dir_path / APP_DATABASE_NAME`` default (Postgres deployments
+        never use this; their ``database_url`` is consumed directly in db.py).
+
+        When a SQLite ``database_url`` is set, this is the single place that
+        parses it, following SQLAlchemy's own convention: three slashes is a
+        relative path (resolved against the current working directory), four
+        is absolute (issue #539). This lets each project/worktree point at
+        its own index file — e.g.
+        ``BASIC_MEMORY_DATABASE_URL=sqlite+aiosqlite:///.basic-memory/memory.db`` —
+        instead of always sharing the global data-dir database.
+        """
+        if self.database_backend != DatabaseBackend.SQLITE or not self.database_url:
+            return None
+
+        try:
+            url = make_url(self.database_url)
+        except Exception as error:
+            raise ValueError(
+                f"Invalid database_url for sqlite backend: {self.database_url!r} ({error})"
+            ) from error
+
+        if not url.drivername.startswith("sqlite"):
+            raise ValueError(
+                "database_url must use a sqlite driver (e.g. "
+                "'sqlite+aiosqlite:///path/to.db') when database_backend='sqlite'; "
+                f"got {url.drivername!r}. Set database_backend='postgres' for a "
+                "Postgres database_url, or unset database_url to use the default "
+                "SQLite path."
+            )
+
+        if not url.database:
+            raise ValueError(
+                "database_url for the sqlite backend must include a file path, e.g. "
+                "'sqlite+aiosqlite:///.basic-memory/memory.db' "
+                "(in-memory SQLite is not supported for the app database)."
+            )
+
+        return Path(url.database)
+
     @property
     def app_database_path(self) -> Path:
         """Get the path to the app-level database.
@@ -950,9 +995,13 @@ class BasicMemoryConfig(BaseSettings):
         across all projects.
 
         Uses BASIC_MEMORY_CONFIG_DIR when set so each process/worktree can
-        isolate both config and database state.
+        isolate both config and database state. When ``database_url`` is set
+        to a SQLite URL, that path is used instead — see
+        ``_resolve_sqlite_database_url_path``.
         """
-        database_path = self.data_dir_path / APP_DATABASE_NAME
+        database_path = self._resolve_sqlite_database_url_path() or (
+            self.data_dir_path / APP_DATABASE_NAME
+        )
         if not database_path.exists():  # pragma: no cover
             database_path.parent.mkdir(parents=True, exist_ok=True)
             database_path.touch()
