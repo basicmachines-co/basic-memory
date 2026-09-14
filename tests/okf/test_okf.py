@@ -399,8 +399,8 @@ def test_indented_source_fence_is_body_not_metadata():
     assert "title" not in document.metadata
     assert document.body == source
     assert check_document("a.md", source) == []
-    with pytest.raises(ValueError, match="Unterminated"):
-        parse_document("---\ntype: custom\n  ---\nBody", source=True)
+    unmatched = "---\ntype: custom\n  ---\nBody"
+    assert parse_document(unmatched, source=True).body == unmatched
 
 
 def test_unique_filename_alias_follows_exact_identity():
@@ -416,3 +416,16 @@ def test_unique_filename_alias_follows_exact_identity():
         convert_wikilinks("[[./my-note.md]]", "folder/source.md", targets, "p")
         == "[./my-note.md](/folder/My_Note.md)"
     )
+
+
+@pytest.mark.parametrize(
+    "source", ["---\n# Thematic break", "---\n- scalar\n---\nBody", "---\nbad: [\n---\nBody"]
+)
+def test_non_frontmatter_source_blocks_remain_body(source):
+    files = render_bundle(ExportSnapshot("p", (ExportFile("a.md", source.encode()),)))
+    exported = next(file.content.decode() for file in files if file.path == "a.md")
+    document = parse_document(exported)
+    assert document.metadata["type"] == "note"
+    assert document.body == source
+    assert check_document("a.md", exported) == []
+    assert check_document("a.md", source)[0].rule == "frontmatter"
