@@ -31,8 +31,26 @@ from basic_memory.document_ingestion.markitdown_extractor import (
 from basic_memory.document_ingestion.worker_limits import apply_cpu_limit, apply_memory_limit
 
 SLIDE_MARKER = "<!-- Slide number:"
-_IMAGE_REFERENCE = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
 _IMAGE_FILENAME = re.compile(r"^[\w .-]*\.(?:png|jpe?g|gif|bmp|tiff?|svg|emf|wmf)$", re.IGNORECASE)
+
+
+def _closing_delimiter(markdown: str, start: int, opening: str, closing: str) -> int | None:
+    """Find a balanced closing delimiter while respecting Markdown escapes."""
+    depth = 1
+    index = start
+    while index < len(markdown):
+        character = markdown[index]
+        if character == "\\":
+            index += 2
+            continue
+        if character == opening:
+            depth += 1
+        elif character == closing:
+            depth -= 1
+            if depth == 0:
+                return index
+        index += 1
+    return None
 
 
 def strip_image_references(markdown: str) -> str:
@@ -44,13 +62,29 @@ def strip_image_references(markdown: str) -> str:
     name (``image.png``) it says nothing about the content and is dropped too.
     """
 
-    def replacement(match: re.Match[str]) -> str:
-        alt_text = match.group(1).strip()
-        if not alt_text or _IMAGE_FILENAME.match(alt_text):
-            return ""
-        return alt_text
+    output: list[str] = []
+    cursor = 0
+    while (image_start := markdown.find("![", cursor)) >= 0:
+        alt_end = _closing_delimiter(markdown, image_start + 2, "[", "]")
+        if alt_end is None or alt_end + 1 >= len(markdown) or markdown[alt_end + 1] != "(":
+            output.append(markdown[cursor : image_start + 2])
+            cursor = image_start + 2
+            continue
 
-    return _IMAGE_REFERENCE.sub(replacement, markdown)
+        target_end = _closing_delimiter(markdown, alt_end + 2, "(", ")")
+        if target_end is None:
+            output.append(markdown[cursor : image_start + 2])
+            cursor = image_start + 2
+            continue
+
+        output.append(markdown[cursor:image_start])
+        alt_text = markdown[image_start + 2 : alt_end].strip()
+        if alt_text and not _IMAGE_FILENAME.match(alt_text):
+            output.append(alt_text)
+        cursor = target_end + 1
+
+    output.append(markdown[cursor:])
+    return "".join(output)
 
 
 def convert_office_bytes(
