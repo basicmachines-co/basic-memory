@@ -32,6 +32,10 @@ from basic_memory.document_ingestion.worker_limits import apply_cpu_limit, apply
 
 SLIDE_MARKER = "<!-- Slide number:"
 _IMAGE_FILENAME = re.compile(r"^[\w .-]*\.(?:png|jpe?g|gif|bmp|tiff?|svg|emf|wmf)$", re.IGNORECASE)
+_GENERATED_IMAGE_TARGET = re.compile(
+    r"^(?:Picture\d+\.(?:png|jpe?g|gif|bmp|tiff?|svg|emf|wmf)\Z|data:image/[^,;]+(?:;[^,]+)*,)",
+    re.IGNORECASE,
+)
 
 
 def _closing_delimiter(markdown: str, start: int, opening: str, closing: str) -> int | None:
@@ -53,6 +57,42 @@ def _closing_delimiter(markdown: str, start: int, opening: str, closing: str) ->
     return None
 
 
+def _inside_code(markdown: str, position: int) -> bool:
+    """Return whether a position is inside a fenced, indented, or inline code span."""
+    line_start = markdown.rfind("\n", 0, position) + 1
+    line_prefix = markdown[line_start:position]
+    if line_prefix.startswith(("    ", "\t")):
+        return True
+
+    fence: tuple[str, int] | None = None
+    for line in markdown[:line_start].splitlines():
+        stripped = line.lstrip(" ")
+        if len(line) - len(stripped) > 3 or not stripped.startswith(("```", "~~~")):
+            continue
+        marker = stripped[0]
+        marker_length = len(stripped) - len(stripped.lstrip(marker))
+        if fence is None:
+            fence = (marker, marker_length)
+        elif marker == fence[0] and marker_length >= fence[1]:
+            fence = None
+    if fence is not None:
+        return True
+
+    inline_delimiter: int | None = None
+    index = 0
+    while index < len(line_prefix):
+        if line_prefix[index] != "`":
+            index += 1
+            continue
+        run_length = len(line_prefix[index:]) - len(line_prefix[index:].lstrip("`"))
+        if inline_delimiter is None:
+            inline_delimiter = run_length
+        elif run_length == inline_delimiter:
+            inline_delimiter = None
+        index += run_length
+    return inline_delimiter is not None
+
+
 def strip_image_references(markdown: str) -> str:
     """Drop picture links, keeping alt text only when it describes the picture.
 
@@ -65,6 +105,21 @@ def strip_image_references(markdown: str) -> str:
     output: list[str] = []
     cursor = 0
     while (image_start := markdown.find("![", cursor)) >= 0:
+        if _inside_code(markdown, image_start):
+            output.append(markdown[cursor : image_start + 2])
+            cursor = image_start + 2
+            continue
+
+        preceding_backslashes = 0
+        escape_index = image_start - 1
+        while escape_index >= 0 and markdown[escape_index] == "\\":
+            preceding_backslashes += 1
+            escape_index -= 1
+        if preceding_backslashes % 2:
+            output.append(markdown[cursor : image_start + 2])
+            cursor = image_start + 2
+            continue
+
         alt_end = _closing_delimiter(markdown, image_start + 2, "[", "]")
         if alt_end is None or alt_end + 1 >= len(markdown) or markdown[alt_end + 1] != "(":
             output.append(markdown[cursor : image_start + 2])
@@ -75,6 +130,12 @@ def strip_image_references(markdown: str) -> str:
         if target_end is None:
             output.append(markdown[cursor : image_start + 2])
             cursor = image_start + 2
+            continue
+
+        target = markdown[alt_end + 2 : target_end].strip()
+        if not _GENERATED_IMAGE_TARGET.match(target):
+            output.append(markdown[cursor : target_end + 1])
+            cursor = target_end + 1
             continue
 
         output.append(markdown[cursor:image_start])
