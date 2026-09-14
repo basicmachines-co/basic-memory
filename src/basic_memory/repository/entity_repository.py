@@ -1,6 +1,7 @@
 """Repository for managing entities in the knowledge graph."""
 
 import unicodedata
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -365,7 +366,11 @@ class EntityRepository(Repository[Entity]):
         return {row.file_path: row.permalink for row in result.all()}
 
     async def get_by_file_paths(
-        self, session: AsyncSession, file_paths: Sequence[Union[Path, str]]
+        self,
+        session: AsyncSession,
+        file_paths: Sequence[Union[Path, str]],
+        *,
+        content_types: Mapping[str, str | None] | None = None,
     ) -> List[Row[Any]]:
         """Get file paths and checksums for multiple entities (optimized for change detection).
 
@@ -379,6 +384,8 @@ class EntityRepository(Repository[Entity]):
         Args:
             session: Database session to use for the query
             file_paths: List of file paths to query
+            content_types: Canonical provider types keyed by normalized path. None means
+                no MIME information, matching the indexer's suffix-only classification.
 
         Returns:
             List of (file_path, checksum) tuples for matching entities
@@ -416,7 +423,12 @@ class EntityRepository(Repository[Entity]):
         # duplicating the path list would exceed SQLite's limit for full batches.
         paths_by_markdown: dict[bool, list[str]] = {True: [], False: []}
         for path in posix_paths:
-            paths_by_markdown[runtime_file_path_is_markdown_note(path)].append(path)
+            content_type = content_types[path] if content_types is not None else None
+            is_markdown = runtime_file_path_is_markdown_note(path) and content_type in (
+                None,
+                RUNTIME_MARKDOWN_CONTENT_TYPE,
+            )
+            paths_by_markdown[is_markdown].append(path)
 
         queries = []
         for is_markdown, paths in paths_by_markdown.items():

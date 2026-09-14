@@ -641,6 +641,7 @@ class LocalProjectIndexRuntimeFactory:
             indexed_checksum_source=RepositoryIndexedFileChecksumSource(
                 session_maker=dependencies.session_maker,
                 entity_repository=dependencies.entity_repository,
+                content_type_provider=dependencies.file_service,
             ),
             current_checksum_source=metadata_source,
             moved_entity_source=RepositoryMovedEntitySource(
@@ -689,6 +690,7 @@ class LocalProjectIndexRuntimeFactory:
             change_detector=ChangeDetector(
                 session_maker=dependencies.session_maker,
                 entity_repository=dependencies.entity_repository,
+                content_type_provider=dependencies.file_service,
             ),
             maintenance_runner=StoreProjectIndexMaintenanceRunner(
                 move_store=active_maintenance_store,

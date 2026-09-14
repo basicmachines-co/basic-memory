@@ -16,6 +16,8 @@ from basic_memory.indexing.batch_indexer import (
     regular_file_content_type,
 )
 from basic_memory.indexing.change_detector import ChangeDetector
+from basic_memory.indexing.file_index_checking import RepositoryIndexedFileChecksumSource
+from basic_memory.indexing.input_file_adaptation import build_index_input_files
 from basic_memory.indexing.models import IndexInputFile, StorageIndexFileWriter
 from basic_memory.models import Entity, NoteSection, Observation, Relation, RelationSearchRefresh
 from basic_memory.repository import NoteContentRepository, NoteSectionRepository
@@ -720,3 +722,63 @@ async def test_legacy_poison_without_note_content_converges_to_resource(
         assert report.unchanged_files == [poison_path]
         assert report.modified_files == []
         assert report.new_files == []
+
+
+@pytest.mark.parametrize("resource_type", ["text/plain", "application/pdf"])
+async def test_mime_classified_markdown_suffix_resource_converges(
+    resource_type: str,
+    monkeypatch,
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+) -> None:
+    """A provider-classified resource must settle even with an ordinary .md suffix."""
+    path = "report.md"
+    content = b"plain resource bytes"
+
+    def resource_content_type(path: str) -> str:
+        return resource_type
+
+    monkeypatch.setattr(file_service, "content_type", resource_content_type)
+    files = build_index_input_files(
+        {path: IndexInputFile(path=path, content=content, size=len(content))},
+        content_type_provider=file_service,
+    )
+    batch_indexer = BatchIndexer(
+        project_id=relation_repository.project_id,
+        app_config=app_config,
+        entity_service=entity_service,
+        entity_repository=entity_repository,
+        observation_repository=entity_service.observation_repository,
+        relation_repository=relation_repository,
+        search_service=search_service,
+        file_writer=StorageIndexFileWriter(storage=file_service),
+        session_maker=search_service.session_maker,
+    )
+    result = await batch_indexer.index_files(files, max_concurrent=1)
+    assert result.errors == []
+    async with db.scoped_session(search_service.session_maker) as session:
+        resource = await entity_repository.get_by_file_path(session, path)
+    assert resource is not None
+    assert resource.content_type == resource_type
+    assert resource.permalink is None
+    assert resource.checksum is not None
+
+    detector = ChangeDetector(
+        entity_repository, search_service.session_maker, content_type_provider=file_service
+    )
+    for _ in range(2):
+        report = await detector.detect_all_changes({path: resource})
+        assert report.unchanged_files == [path]
+        assert report.new_files == []
+        assert report.modified_files == []
+
+        source = RepositoryIndexedFileChecksumSource(
+            entity_repository=entity_repository,
+            session_maker=search_service.session_maker,
+            content_type_provider=file_service,
+        )
+        assert await source.load_indexed_file_checksums([path]) == {path: resource.checksum}

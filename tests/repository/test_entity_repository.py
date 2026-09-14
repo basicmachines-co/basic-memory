@@ -1508,3 +1508,37 @@ async def test_get_by_file_paths_keeps_batch_under_sqlite_bind_limit(
 
     assert len(parameter_counts) == 1
     assert parameter_counts[0] <= 999
+
+
+@pytest.mark.parametrize(
+    ("provider_type", "expected_checksum"),
+    [(None, None), ("text/markdown", None), ("text/plain", "current-checksum")],
+)
+async def test_get_by_file_paths_repairs_only_provider_classified_notes(
+    entity_repository: EntityRepository,
+    session_maker,
+    test_project: Project,
+    provider_type: str | None,
+    expected_checksum: str | None,
+) -> None:
+    """Expected MIME comes from the provider, not the potentially corrupt indexed row."""
+    now = datetime.now(timezone.utc)
+    async with db.scoped_session(session_maker) as session:
+        session.add(
+            Entity(
+                project_id=test_project.id,
+                title="report.md",
+                note_type="file",
+                permalink=None,
+                file_path="report.md",
+                content_type="text/plain",
+                checksum="current-checksum",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+    async with db.scoped_session(session_maker) as session:
+        rows = await entity_repository.get_by_file_paths(
+            session, ["report.md"], content_types={"report.md": provider_type}
+        )
+    assert [(row[0], row[1]) for row in rows] == [("report.md", expected_checksum)]

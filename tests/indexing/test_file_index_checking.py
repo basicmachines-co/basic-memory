@@ -1,6 +1,6 @@
 """Tests for portable file-index metadata checking."""
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import cast
 
@@ -49,6 +49,8 @@ class RecordingChecksumRepository:
         self,
         session: AsyncSession,
         file_paths: Sequence[str],
+        *,
+        content_types: Mapping[str, str | None] | None = None,
     ) -> list[tuple[object, object | None]]:
         self.calls.append((session, tuple(file_paths)))
         return self.rows
