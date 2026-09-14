@@ -149,6 +149,8 @@ class LocalIndexEntityRepository(
         self,
         session: AsyncSession,
         file_paths: Sequence[Path | str],
+        *,
+        content_types: Mapping[str, str | None] | None = None,
     ) -> Sequence[IndexedFileChecksumRow]: ...
 
     @override

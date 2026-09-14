@@ -2553,6 +2553,8 @@ class RuntimeFactoryEntityRepository:
         self,
         session: AsyncSession,
         file_paths: Sequence[Path | str],
+        *,
+        content_types: Mapping[str, str | None] | None = None,
     ) -> Sequence[IndexedFileChecksumRow]:
         return ()
 
@@ -2938,3 +2940,43 @@ async def test_repository_indexed_file_stat_source_loads_indexed_rows(
         size=42,
         checksum="known-checksum",
     )
+
+
+async def test_local_project_index_preserves_provider_classified_markdown_suffix_resource(
+    test_project: Project,
+    project_config,
+    entity_repository,
+    session_maker: async_sessionmaker[AsyncSession],
+    config_manager,
+    monkeypatch,
+) -> None:
+    """Project runtime uses the same provider for detection and resource indexing."""
+    content = b"plain resource bytes"
+    resource_path = project_config.home / "report.md"
+    resource_path.write_bytes(content)
+    original_content_type = FileService.content_type
+
+    def content_type(self: FileService, path: Path | str) -> str:
+        if str(path) == "report.md":
+            return "text/plain"
+        return original_content_type(self, path)
+
+    monkeypatch.setattr(FileService, "content_type", content_type)
+    factory = LocalProjectIndexRuntimeFactory(batch_size=10)
+    first = await run_local_project_index_for_project(test_project, runtime_factory=factory)
+    assert first.enqueued_files == 1
+    for _ in range(2):
+        settled = await run_local_project_index_for_project(test_project, runtime_factory=factory)
+        assert settled.enqueued_files == 0
+
+    assert resource_path.read_bytes() == content
+    async with db.scoped_session(session_maker) as session:
+        resource = await entity_repository.get_by_file_path(session, "report.md")
+        note_content = await NoteContentRepository(test_project.id).get_by_file_path(
+            session, "report.md"
+        )
+    assert resource is not None
+    assert resource.content_type == "text/plain"
+    assert resource.permalink is None
+    assert resource.checksum == sha256(content).hexdigest()
+    assert note_content is None

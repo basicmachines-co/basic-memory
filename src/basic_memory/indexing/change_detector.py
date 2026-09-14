@@ -22,6 +22,7 @@ from basic_memory.indexing.change_planning import (
     storage_checksums_from_sources,
 )
 from basic_memory.indexing.file_index_checking import IndexedFileChecksumRepository
+from basic_memory.indexing.input_file_adaptation import IndexContentTypeProvider
 from basic_memory.indexing.file_index_planning import FileIndexChecksum, FileIndexPath
 
 # SQLite caps a statement at ~999 bind variables and Postgres at ~32767. Each
@@ -75,6 +76,8 @@ class ChangeDetector:
 
     entity_repository: ChangeDetectionEntityRepository
     session_maker: async_sessionmaker[AsyncSession]
+    # Supply the same provider as indexing; absent MIME information uses suffix semantics.
+    content_type_provider: IndexContentTypeProvider | None = None
 
     async def detect_all_changes(
         self,
@@ -95,7 +98,17 @@ class ChangeDetector:
         async with db.scoped_session(self.session_maker) as session:
             # Batch the IN() lookup so large projects stay under the bind limit.
             for path_batch in batched(paths, MAX_QUERY_BIND_PARAMETERS):
-                rows = await self.entity_repository.get_by_file_paths(session, path_batch)
+                if self.content_type_provider is None:
+                    rows = await self.entity_repository.get_by_file_paths(session, path_batch)
+                else:
+                    rows = await self.entity_repository.get_by_file_paths(
+                        session,
+                        path_batch,
+                        content_types={
+                            path: self.content_type_provider.content_type(path)
+                            for path in path_batch
+                        },
+                    )
                 for row in rows:
                     checksum_by_path[str(row[0])] = str(row[1]) if row[1] is not None else None
 

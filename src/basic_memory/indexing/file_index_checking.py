@@ -8,6 +8,7 @@ from typing import Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from basic_memory.indexing.input_file_adaptation import IndexContentTypeProvider
 from basic_memory.indexing.file_index_planning import (
     FileIndexChecksum,
     FileIndexDecision,
@@ -57,6 +58,8 @@ class IndexedFileChecksumRepository(Protocol):
         self,
         session: AsyncSession,
         file_paths: Sequence[FileIndexPath],
+        *,
+        content_types: Mapping[str, str | None] | None = None,
     ) -> Sequence[IndexedFileChecksumRow]:
         """Return rows whose first two fields are file path and checksum."""
 
@@ -169,6 +172,8 @@ class RepositoryIndexedFileChecksumSource:
 
     session_maker: async_sessionmaker[AsyncSession]
     entity_repository: IndexedFileChecksumRepository
+    # Supply the same provider as indexing; absent MIME information uses suffix semantics.
+    content_type_provider: IndexContentTypeProvider | None = None
 
     async def load_indexed_file_checksums(
         self,
@@ -176,7 +181,16 @@ class RepositoryIndexedFileChecksumSource:
     ) -> Mapping[FileIndexPath, FileIndexChecksum | None]:
         """Load accepted entity checksums for target paths."""
         async with self.session_maker() as session:
-            rows = await self.entity_repository.get_by_file_paths(session, file_paths)
+            if self.content_type_provider is None:
+                rows = await self.entity_repository.get_by_file_paths(session, file_paths)
+            else:
+                rows = await self.entity_repository.get_by_file_paths(
+                    session,
+                    file_paths,
+                    content_types={
+                        path: self.content_type_provider.content_type(path) for path in file_paths
+                    },
+                )
         return {str(row[0]): None if row[1] is None else str(row[1]) for row in rows}
 
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -66,6 +66,8 @@ class IndexMarkdownEntityRepository(Protocol):
         self,
         session: AsyncSession,
         file_paths: Sequence[Path | str],
+        *,
+        content_types: Mapping[str, str | None] | None = None,
     ) -> Sequence[IndexedFileChecksumRow]: ...
 
     async def find_by_ids(
