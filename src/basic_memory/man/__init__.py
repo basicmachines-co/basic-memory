@@ -168,7 +168,7 @@ _PARAMETERS_RE = re.compile(r"(## PARAMETERS\n\n)(.*?)(?=\n+## |\n*\Z)", re.S)
 # Matches the whole body under ## SYNOPSIS and ## OPTIONS on a section-1 page, up
 # to the blank line before the next `## ` heading (or EOF). The single-block
 # _MCP_SYNOPSIS_RE cannot serve SYNOPSIS here: find(1) documents two shell forms
-# in two fenced blocks, and the CLI generator collapses them to one, so the whole
+# in two fenced blocks, and the CLI generator uses one fence, so the whole
 # section body — every fenced block — has to be replaced, not just the first.
 _SYNOPSIS_BODY_RE = re.compile(r"(## SYNOPSIS\n\n)(.*?)(?=\n+## |\n*\Z)", re.S)
 _OPTIONS_RE = re.compile(r"(## OPTIONS\n\n)(.*?)(?=\n+## |\n*\Z)", re.S)
@@ -384,7 +384,7 @@ def _synopsis_opt(opts: list[str]) -> str:
     return longs[0] if longs else opts[0]
 
 
-def _synopsis_option_token(param: ClickParam) -> str:
+def _synopsis_option_token(param: ClickParam, *, required: bool = False) -> str:
     """The bracketed SYNOPSIS token for one public option.
 
     ``[--flag]`` for a boolean flag, ``[--on | --no-on]`` for a boolean pair, and
@@ -400,10 +400,33 @@ def _synopsis_option_token(param: ClickParam) -> str:
         return f"[{opt}]"
     metavar = param.name.upper()
     inner = f"{opt} {metavar} ..." if param.multiple else f"{opt} {metavar}"
+    if required:
+        return f"{opt} {metavar} [{inner}]" if param.multiple else inner
     return f"[{inner}]"
 
 
 def render_cli_synopsis(command_path: str, command: ClickCommand) -> str:
+    """Render valid command forms, retaining explicitly declared CLI constraints."""
+    # find's metadata mode requires --meta and rejects listing filters. Click
+    # does not encode these dependencies; preserve the two documented forms.
+    if command_path == "find":
+        listing = [param for param in command.params if param.name not in {"meta", "fields"}]
+        metadata = [param for param in command.params if param.name not in {"name", "depth"}]
+        return "\n\n".join(
+            (
+                _render_cli_form(command_path, listing),
+                _render_cli_form(command_path, metadata, required_options=frozenset({"meta"})),
+            )
+        )
+    return _render_cli_form(command_path, command.params)
+
+
+def _render_cli_form(
+    command_path: str,
+    params: Sequence[ClickParam],
+    *,
+    required_options: frozenset[str] = frozenset(),
+) -> str:
     """Render a section-1 page's shell SYNOPSIS from a resolved Click command.
 
     Positional arguments come first in declaration order (bare when required,
@@ -415,15 +438,13 @@ def render_cli_synopsis(command_path: str, command: ClickCommand) -> str:
     under the command name — mirroring render_synopsis's wrap for the MCP form.
     """
     tokens: list[str] = []
-    for param in command.params:
+    for param in params:
         if param.param_type_name != "argument":
             continue
         metavar = param.name.upper()
         tokens.append(metavar if param.required else f"[{metavar}]")
 
-    options = [
-        param for param in command.params if param.param_type_name == "option" and not param.hidden
-    ]
+    options = [param for param in params if param.param_type_name == "option" and not param.hidden]
     # A mutex pair renders as one grouped token only when both members are actually
     # public options on this command; map each present member's long form to its pair.
     present_longs = {_synopsis_opt(param.opts): param for param in options}
@@ -444,7 +465,7 @@ def render_cli_synopsis(command_path: str, command: ClickCommand) -> str:
             emitted_pairs.add(pair)
             tokens.append("[" + " | ".join(pair) + "]")
         else:
-            tokens.append(_synopsis_option_token(param))
+            tokens.append(_synopsis_option_token(param, required=param.name in required_options))
 
     prefix = f"bm {command_path}"
     indent = " " * (len(prefix) + 1)
@@ -608,7 +629,7 @@ def replace_cli_synopsis(page_text: str, synopsis: str) -> str:
     """Return the page with its whole ## SYNOPSIS body replaced by one fenced block.
 
     The entire body is replaced, not just the first fence, so a page that shipped
-    several shell forms (find(1)) collapses to the one the generator renders. Other
+    several shell forms (find(1)) uses the single fence the generator renders. Other
     sections are untouched.
     """
     match = _SYNOPSIS_BODY_RE.search(page_text)

@@ -503,6 +503,30 @@ def test_render_cli_synopsis_keeps_repeatable_options_repeatable() -> None:
     assert "[--fields FIELDS ...]" not in synopsis
 
 
+def test_find_synopsis_separates_listing_and_metadata_constraints() -> None:
+    _, command = _cli_command(find_page(PageRef("find", 1)))
+    listing, metadata = render_cli_synopsis("find", command).split("\n\n")
+
+    assert "[--name NAME]" in listing
+    assert "[--depth DEPTH]" in listing
+    assert "--meta" not in listing
+    assert "--fields" not in listing
+    assert "--meta META [--meta META ...]" in metadata
+    assert "[--fields FIELDS]" in metadata
+    assert "--name" not in metadata
+    assert "--depth" not in metadata
+    for form in (listing, metadata):
+        assert form.startswith("bm find [PATH]")
+        assert "[--json | --plain]" in form
+        assert "[--local | --cloud]" in form
+        assert all(len(line) <= 76 for line in form.splitlines())
+    # Both forms survive the actual page replacement/extraction boundary.
+    page = find_page(PageRef("find", 1))
+    assert page is not None
+    regenerated = regenerate_cli_page(page.read(), "find", command)
+    assert extract_cli_synopsis(regenerated) == f"{listing}\n\n{metadata}"
+
+
 @dataclass
 class _FakeClickParam:
     """A structural stand-in for a Click parameter (the ClickParam Protocol).
@@ -569,7 +593,7 @@ def test_replace_options_touches_only_the_options_block() -> None:
 
 
 def test_replace_cli_synopsis_replaces_the_whole_synopsis_body() -> None:
-    # find(1) ships two shell forms; the CLI generator collapses them to one, so
+    # Older pages can carry two fences; the CLI generator uses one fence, so
     # the whole SYNOPSIS body is replaced, not just the first fenced block.
     two_forms = (
         "# t\n\n## SYNOPSIS\n\n```\nbm t --a\n```\n\n```\nbm t --b\n```\n\n"
