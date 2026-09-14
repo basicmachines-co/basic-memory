@@ -90,3 +90,11 @@ async def test_unindexed_cjk_miss_keeps_index_guidance(
     assert isinstance(result, str)
     assert result.startswith("# Project Index Required")
     assert "shorter word" not in result
+
+
+@pytest.mark.asyncio
+async def test_supplementary_han_miss_has_guidance(client: AsyncClient, v2_project_url: str):
+    response = await client.post(f"{v2_project_url}/search/", json={"text": "𠮷野家情報"})
+    assert response.status_code == 200
+    assert response.json()["results"] == []
+    assert "shorter word" in response.json()["query_hint"]
