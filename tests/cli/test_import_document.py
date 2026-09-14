@@ -41,6 +41,14 @@ RESULT = RawDocumentWriteResult(
 # --- Command wrapper ---
 
 
+def test_import_document_help_explains_the_project_boundary() -> None:
+    result = runner.invoke(cli_app, ["import", "document", "--help"])
+
+    assert result.exit_code == 0, result.output
+    assert "already stored inside a project" in result.output
+    assert "copy external files into the project first" in result.output
+
+
 @patch("basic_memory.cli.commands.import_document.import_document", new_callable=AsyncMock)
 def test_import_document_reports_the_written_notes(mock_import: AsyncMock) -> None:
     routing_seen: list[str | None] = []
@@ -168,6 +176,9 @@ async def test_import_document_rejects_a_file_outside_the_project(tmp_path: Path
             "basic_memory.mcp.project_context.get_active_project",
             AsyncMock(return_value=project_item(project_home)),
         ),
-        pytest.raises(typer.BadParameter, match="not inside project 'main'"),
+        pytest.raises(
+            typer.BadParameter,
+            match="Copy the file into that project directory, then run the command again",
+        ),
     ):
         await import_document(outside, "main")
