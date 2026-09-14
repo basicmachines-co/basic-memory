@@ -78,9 +78,10 @@ def test_convert_office_bytes_drops_picture_references_with_filename_alt_text() 
         ),
         ("![Revenue [Q1]](data:image/png;base64,AAAA)", "Revenue [Q1]"),
         ("Literal ![alt](https://example.com/image.png) syntax",) * 2,
-        (r"Escaped \![image.png](Picture2.jpg)",) * 2,
-        ("`![image.png](Picture2.jpg)`",) * 2,
-        ("```markdown\n![image.png](Picture2.jpg)\n```",) * 2,
+        (r"Escaped \![image.png](Picture2.jpg)", "Escaped \\"),
+        ("`![image.png](Picture2.jpg)`", "``"),
+        ("```markdown\n![image.png](Picture2.jpg)\n```", "```markdown\n\n```"),
+        ("![payload](data:text/html;base64,AAAA)", "payload"),
         ("No pictures here", "No pictures here"),
     ],
 )
