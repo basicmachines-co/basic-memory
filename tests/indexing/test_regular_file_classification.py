@@ -19,6 +19,7 @@ from basic_memory.indexing.change_detector import ChangeDetector
 from basic_memory.indexing.models import IndexInputFile, StorageIndexFileWriter
 from basic_memory.models import Entity, NoteSection, Observation, Relation, RelationSearchRefresh
 from basic_memory.repository import NoteContentRepository, NoteSectionRepository
+from basic_memory.runtime.storage import runtime_file_path_is_markdown_note
 
 
 def test_markdown_mime_without_note_basename_is_persisted_as_resource() -> None:
@@ -638,7 +639,16 @@ async def test_missing_note_content_fence_preserves_concurrent_bootstrap(
 
 
 @pytest.mark.parametrize(
-    "poison_path", [".md", ".markdown", "_phase7_import/.md", "_phase7_import/.MARKDOWN"]
+    "poison_path",
+    [
+        ".md",
+        ".markdown",
+        "..md",
+        "...md",
+        "assets/..markdown",
+        "_phase7_import/.md",
+        "_phase7_import/.MARKDOWN",
+    ],
 )
 async def test_legacy_poison_without_note_content_converges_to_resource(
     poison_path: str,
@@ -649,6 +659,10 @@ async def test_legacy_poison_without_note_content_converges_to_resource(
     search_service,
     file_service,
 ) -> None:
+    # Python 3.14 changed suffix handling for multiple leading dots. Exercise
+    # resource convergence only when the canonical runtime classifier selects it.
+    if runtime_file_path_is_markdown_note(poison_path):
+        pytest.skip("This Python version classifies the multi-dot basename as Markdown")
     project_id = relation_repository.project_id
     assert project_id is not None
     now = datetime.now(tz=UTC)

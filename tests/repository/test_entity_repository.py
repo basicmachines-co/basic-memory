@@ -2,6 +2,7 @@
 
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
+from pathlib import PurePosixPath
 
 import pytest
 import pytest_asyncio
@@ -1430,6 +1431,9 @@ async def test_get_by_file_paths_masks_markdown_path_without_markdown_type(
         ("notes/note.MARKDOWN", True),
         ("notes/.hidden.md", True),
         (".md", False),
+        ("..md", bool(PurePosixPath("..md").suffix)),
+        ("...md", bool(PurePosixPath("...md").suffix)),
+        ("assets/..markdown", bool(PurePosixPath("assets/..markdown").suffix)),
         (".markdown", False),
         ("notes/.MD", False),
         ("notes/.markdown", False),
@@ -1469,8 +1473,9 @@ async def test_get_by_file_paths_matches_note_path_semantics(
     ]
 
 
+@pytest.mark.parametrize("include_resources", [False, True])
 async def test_get_by_file_paths_keeps_batch_under_sqlite_bind_limit(
-    entity_repository: EntityRepository, session_maker
+    entity_repository: EntityRepository, session_maker, include_resources: bool
 ) -> None:
     """A full detector batch must not bind every Markdown path twice."""
     parameter_counts: list[int] = []
@@ -1490,7 +1495,13 @@ async def test_get_by_file_paths_keeps_batch_under_sqlite_bind_limit(
         event.listen(engine, "before_cursor_execute", record_parameter_count)
         try:
             await entity_repository.get_by_file_paths(
-                session, [f"notes/note-{index}.md" for index in range(900)]
+                session,
+                [
+                    f"notes/note-{index}.txt"
+                    if include_resources and index % 2
+                    else f"notes/note-{index}.md"
+                    for index in range(900)
+                ],
             )
         finally:
             event.remove(engine, "before_cursor_execute", record_parameter_count)
