@@ -453,3 +453,35 @@ def test_cli_export_resolves_configured_display_name(export_config, tmp_path):
     assert result.exit_code == 0, result.output
     assert json.loads(result.stdout)["concepts"] == 1
     assert "# My Project" in (destination / "index.md").read_text()
+
+
+@pytest.mark.parametrize(
+    "body", ["- item\n\t[[A]]", "> quote\n>\t[[A]]", "- item\n\t[[A]] and [[A]]"]
+)
+def test_tab_indented_links_keep_source_indentation(body):
+    assert convert_wikilinks(body, "source.md", {"A": "a.md"}, "p") == body.replace(
+        "[[A]]", "[A](/a.md)"
+    )
+
+
+@pytest.mark.parametrize("path", ["log.md", "nested/index.md"])
+def test_okf_version_only_exempts_root_index(export_config, path):
+    root = Path(export_config.projects["export"].path)
+    target = root / path
+    target.parent.mkdir(exist_ok=True)
+    target.write_text("---\nokf_version: '0.2'\n---\nAuthored content")
+    with pytest.raises(ValueError, match="rename it first"):
+        snapshot_files(root)
+
+
+@pytest.mark.asyncio
+async def test_disabled_project_prefix_policy_reaches_export(export_config, tmp_path):
+    root = Path(export_config.projects["export"].path)
+    (root / "folder/export").mkdir(parents=True)
+    (root / "folder/export/foo.md").write_text("---\ntype: note\n---\nRelative")
+    (root / "a.md").write_text("---\npermalink: export/foo\n---\nSemantic")
+    (root / "folder/source.md").write_text("[[export/foo]]")
+    export_config.permalinks_include_project = False
+    destination = tmp_path / "bundle"
+    assert (await export_project(export_config, "export", destination)).success
+    assert "[export/foo](/folder/export/foo.md)" in (destination / "folder/source.md").read_text()

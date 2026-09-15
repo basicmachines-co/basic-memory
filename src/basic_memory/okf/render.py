@@ -37,6 +37,7 @@ class ExportSnapshot:
     project: str
     files: tuple[ExportFile, ...]
     changes: tuple[RecordedChange, ...] = ()
+    permalinks_include_project: bool = True
 
 
 def markdown_link(label: str, path: str, fragment: str = "") -> str:
@@ -48,7 +49,14 @@ def markdown_link(label: str, path: str, fragment: str = "") -> str:
     return f"[{escaped}]({href})"
 
 
-def convert_wikilinks(body: str, source: str, targets: dict[str, str], project: str) -> str:
+def convert_wikilinks(
+    body: str,
+    source: str,
+    targets: dict[str, str],
+    project: str,
+    *,
+    include_project: bool = True,
+) -> str:
     """Use MarkdownIt's code/escape/link rules while retaining untouched source bytes."""
     body = body.replace("\r\n", "\n").replace("\r", "\n")
     project = generate_permalink(project)
@@ -82,21 +90,27 @@ def convert_wikilinks(body: str, source: str, targets: dict[str, str], project: 
         resolved = None
         # Explicit relative links bind to their source directory before semantic aliases.
         relative = markdown_link_target(target, source)
-        if "/" in target and generate_permalink(target.partition("/")[0]) == project:
+        if (
+            include_project
+            and "/" in target
+            and generate_permalink(target.partition("/")[0]) == project
+        ):
             relative = None
         if "/" in target and relative:
             resolved = targets.get(relative.lstrip("/"))
             if resolved is None:
                 resolved = targets.get(relative.lstrip("/") + ".md")
         if resolved is None:
-            for candidate in build_permalink_resolution_candidates(target, project):
+            for candidate in build_permalink_resolution_candidates(
+                target, project, include_project
+            ):
                 if candidate in targets:
                     resolved = targets[candidate]
                     break
         if resolved is None:
             # Forgiving filename spelling is a last resort after exact identities.
             candidates = ([relative] if relative else []) + build_permalink_resolution_candidates(
-                target, project
+                target, project, include_project
             )
             for candidate in candidates:
                 path = candidate.lstrip("/")
@@ -136,16 +150,21 @@ def convert_wikilinks(body: str, source: str, targets: dict[str, str], project: 
         source_line = first
         for inline_line in token.content.splitlines(keepends=True):
             text = inline_line.rstrip("\n")
+            # MarkdownIt expands continuation indentation tabs. Match the text
+            # after indentation while keeping replacement endpoints in raw bytes.
+            stripped = text.lstrip(" \t")
+            indentation = len(text) - len(stripped)
             column = -1
             while source_line < last:
-                column = lines[source_line].find(text)
+                column = lines[source_line].find(stripped)
                 if column >= 0:
                     break
                 source_line += 1
             if source_line == last:
                 raise ValueError(f"{source}: cannot locate wikilink source span")
             offset = line_offsets[source_line] + column
-            offsets.extend(range(offset, offset + len(inline_line)))
+            offsets.extend([offset] * indentation)
+            offsets.extend(range(offset, offset + len(inline_line) - indentation))
             source_line += 1
         for start, end, replacement in replacements:
             document_replacements.append((offsets[start], offsets[end - 1] + 1, replacement))
@@ -212,7 +231,13 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
             **existing,
             "okf_export": {"version": 1, "relations": relations},
         }
-        body = convert_wikilinks(document.body, file.path, targets, snapshot.project)
+        body = convert_wikilinks(
+            document.body,
+            file.path,
+            targets,
+            snapshot.project,
+            include_project=snapshot.permalinks_include_project,
+        )
         content = "---\n" + yaml.safe_dump(metadata, allow_unicode=True, sort_keys=False)
         content += "---\n" + body
         output.append(ExportFile(file.path, content.encode("utf-8")))

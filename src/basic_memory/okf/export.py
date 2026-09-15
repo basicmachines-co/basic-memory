@@ -102,9 +102,9 @@ def snapshot_files(root: Path) -> tuple[ExportFile, ...]:
             document = parse_document(content.decode("utf-8"), source=True)
             bm = document.metadata.get("bm")
             # Never silently discard user-authored concepts at reserved names.
-            if not (isinstance(bm, dict) and bm.get("profile") == "wiki/1") and set(
-                document.metadata
-            ) != {"okf_version"}:
+            if not (isinstance(bm, dict) and bm.get("profile") == "wiki/1") and not (
+                path == "index.md" and set(document.metadata) == {"okf_version"}
+            ):
                 raise ValueError(
                     f"{path}: reserved OKF filename contains a concept; rename it first"
                 )
@@ -141,7 +141,9 @@ async def export_project(
         raise ValueError("Destination exists; use --replace to replace a directory bundle")
     history = await recorded_history(config, project, root)
     files = snapshot_files(root)
-    snapshot = ExportSnapshot(project, files, history)
+    snapshot = ExportSnapshot(
+        project, files, history, permalinks_include_project=config.permalinks_include_project
+    )
     rendered = render_bundle(snapshot)
     destination.parent.mkdir(parents=True, exist_ok=True)
     # A sibling staging directory keeps rename on the same filesystem. On a failed
