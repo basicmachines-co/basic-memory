@@ -9,11 +9,15 @@ import json
 from contextlib import nullcontext
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Response
+from fastapi import APIRouter, Depends, Path, Response
 
 import logfire
 from basic_memory import db
-from basic_memory.api.v2.utils import load_temporal_metadata, to_search_results
+from basic_memory.api.v2.utils import (
+    load_temporal_metadata,
+    search_error_boundary,
+    to_search_results,
+)
 from basic_memory.deps import (
     EntityServiceV2ExternalDep,
     MemoryTimeIndexRepositoryV2ExternalDep,
@@ -32,12 +36,6 @@ from basic_memory.read_cache import (
     read_cache_request_digest,
 )
 from basic_memory.read_cache.policy import SEARCH_READ_CACHE_TTL_SECONDS
-from basic_memory.repository.semantic_errors import (
-    RerankProviderContractError,
-    RerankTransientError,
-    SemanticDependenciesMissingError,
-    SemanticSearchDisabledError,
-)
 from basic_memory.schemas.search import SearchQuery, SearchResponse, SearchRetrievalMode
 from basic_memory.services.search_guidance import unspaced_script_query_hint
 
@@ -91,6 +89,7 @@ async def search(
     session_maker: SessionMakerDep,
     read_cache: SearchReadCacheDep,
     response: Response,
+    internal_project_id: ProjectExternalIdPathDep,
     project_id: str = Path(..., description="Project external UUID"),
     page: int = 1,
     page_size: int = 10,
@@ -157,7 +156,7 @@ async def search(
 
             offset = (page - 1) * page_size
             exact_count_available = query.retrieval_mode == SearchRetrievalMode.FTS
-            try:
+            with search_error_boundary():
                 with logfire.span(
                     "api.search.search.execute_query",
                     domain="search",
@@ -176,21 +175,6 @@ async def search(
                             query, limit=page_size + 1, offset=offset
                         )
                         total = 0
-            except SemanticSearchDisabledError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            except SemanticDependenciesMissingError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            except RerankTransientError as exc:
-                # Returning raw retrieval order would make pagination inconsistent with
-                # earlier reranked pages. Preserve ordering semantics and make the outage
-                # explicitly retryable instead.
-                raise HTTPException(status_code=503, detail=str(exc)) from exc
-            except RerankProviderContractError as exc:
-                # Upstream reranker returned a malformed response — an upstream fault, not a
-                # client error and not a transient outage (those map to a retryable 503).
-                raise HTTPException(status_code=502, detail=str(exc)) from exc
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
 
             with logfire.span(
                 "api.search.search.paginate_results",
@@ -228,7 +212,10 @@ async def search(
                             temporal_repository, session, results
                         )
                 search_results = await to_search_results(
-                    entity_service, results, temporal_by_source=temporal_by_source
+                    entity_service,
+                    results,
+                    temporal_by_source=temporal_by_source,
+                    project_external_ids={internal_project_id: project_id},
                 )
             with logfire.span(
                 "api.search.search.build_response",

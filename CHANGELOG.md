@@ -4,6 +4,16 @@
 
 ### Features
 
+- **#1558**: `QUERY /v2/search/` (and `POST /v2/search/` for clients that cannot send
+  QUERY) searches an explicit set of projects in one database with one query. The body
+  is the project search body plus `project_ids`, a required list of internal ids the
+  caller has already authorized; an empty list answers no rows and there is no way to
+  ask for every project. Full-text, vector, and hybrid retrieval run the same reader
+  the project route runs, so one project here ranks exactly as its own route does, and
+  results are one ranking over the union rather than merged per-project pages. Hits are
+  hydrated only from projects in scope. Every search result, on both routes, now
+  carries `project_id` and `project_external_id`.
+
 - **#1512**: Word, PowerPoint, and CSV files get the same sidecar Markdown note a
   PDF gets. `bm import document <path>` indexes the project, extracts the file,
   and writes `<file>.<ext>.md` next to it plus a run note under

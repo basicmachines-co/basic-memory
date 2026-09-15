@@ -6,7 +6,7 @@ The search system supports three primary modes:
 3. Full-text search across content
 """
 
-from typing import Optional, List, Union, Any
+from typing import Annotated, Optional, List, Union, Any
 from datetime import datetime
 from enum import Enum
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
@@ -227,6 +227,17 @@ class SearchQuery(BaseModel):
         return any(pattern in text for pattern in boolean_patterns)
 
 
+class ScopedSearchQuery(SearchQuery):
+    """A search over an explicit set of projects in one database.
+
+    ``project_ids`` are internal ids the caller has already authorized; the caller
+    decides what is visible and this route never widens it. The set is required and
+    may be empty, which answers no rows. There is no spelling for every project.
+    """
+
+    project_ids: list[Annotated[int, Field(strict=True, gt=0)]]
+
+
 class TemporalRangeValue(BaseModel):
     """One authored interval, as a caller sees it.
 
@@ -298,6 +309,12 @@ class SearchResult(BaseModel):
     # one: the MVP parser reads one qualifier per observation, but multiple assertions
     # of multiple kinds must not be a schema break later.
     temporal: Optional[List[TemporalResultMetadata]] = None
+
+    # The project this hit belongs to. The project route fills both from its path;
+    # the database-scoped route fills them from each row, since one page can span
+    # several projects.
+    project_id: Optional[int] = None
+    project_external_id: Optional[str] = None
 
 
 class SearchResponse(BaseModel):

@@ -11,6 +11,7 @@ from typing import Any, List, Optional, Set, Dict
 from dateparser import parse
 from fastapi import BackgroundTasks
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import logfire
@@ -24,6 +25,7 @@ from basic_memory.repository.search_repository import (
     SearchRepository,
 )
 from basic_memory.repository.search_query import PreparedSearchQuery, relaxed_query_words
+from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.search_trace import SearchTraceCollector
 from basic_memory.schemas.base import normalize_note_type
 from basic_memory.schemas.search import SearchQuery, SearchItemType, SearchRetrievalMode
@@ -140,6 +142,132 @@ def _strip_nul(value: str) -> str:
     return value.replace("\x00", "")
 
 
+def prepare_search_query(query: SearchQuery) -> PreparedSearchQuery | None:
+    """Normalize a ``SearchQuery`` into the prepared form every reader consumes.
+
+    Returns ``None`` when the query names no criteria at all, so callers can answer
+    an empty page without touching storage.
+    """
+    search_text = query.text
+    tags = query.tags
+
+    # Support tag:<tag> shorthand by mapping to tags filter.
+    if search_text is not None:
+        search_text = search_text.strip() or None
+        if search_text and search_text.lower().startswith("tag:"):
+            tag_values = re.split(r"[,\s]+", search_text[4:].strip())
+            parsed_tags = [t for t in tag_values if t]
+            if parsed_tags:
+                tags = parsed_tags
+                search_text = None
+
+    after_date = (
+        (query.after_date if isinstance(query.after_date, datetime) else parse(query.after_date))
+        if query.after_date
+        else None
+    )
+
+    # Merge structured metadata filters (explicit + convenience fields).
+    metadata_filters: Optional[Dict[str, Any]] = None
+    if query.metadata_filters or tags or query.status:
+        metadata_filters = dict(query.metadata_filters or {})
+        if tags:
+            metadata_filters.setdefault("tags", tags)
+        if query.status:
+            metadata_filters.setdefault("status", query.status)
+
+    prepared = PreparedSearchQuery(
+        search_text=search_text,
+        permalink=query.permalink,
+        permalink_match=query.permalink_match,
+        title=query.title,
+        note_types=(
+            [normalize_note_type(note_type) for note_type in query.note_types]
+            if query.note_types
+            else None
+        ),
+        search_item_types=query.entity_types,
+        categories=query.categories,
+        after_date=after_date,
+        metadata_filters=metadata_filters,
+        file_path_prefix=query.file_path_prefix,
+        temporal=build_temporal_filter(query),
+        retrieval_mode=query.retrieval_mode or SearchRetrievalMode.FTS,
+        min_similarity=query.min_similarity,
+    )
+
+    has_criteria = bool(
+        prepared.search_text
+        or prepared.permalink
+        or prepared.permalink_match
+        or prepared.title
+        or prepared.note_types
+        or prepared.search_item_types
+        or prepared.categories
+        or prepared.after_date
+        or prepared.metadata_filters
+        # Normalized by SearchQuery, so only a real subtree reaches here.
+        or prepared.file_path_prefix
+        or prepared.temporal
+    )
+    if not has_criteria:
+        logger.debug("no criteria passed to query")
+        return None
+    return prepared
+
+
+async def include_legacy_note_type_spellings(
+    session_maker: async_sessionmaker[AsyncSession],
+    scope: ProjectScope,
+    prepared: PreparedSearchQuery,
+    *,
+    session: AsyncSession | None = None,
+) -> PreparedSearchQuery:
+    """Expand canonical note-type filters to the exact legacy spellings stored in ``scope``.
+
+    Search rows written before canonicalization preserve the owning entity's exact
+    type spelling. Including those spellings alongside the canonical values keeps an
+    upgrade searchable without requiring an eager full reindex. Only spellings from
+    projects in scope are read, so a scope cannot learn what another project stores.
+    """
+    if not prepared.note_types:
+        return prepared
+
+    canonical_note_types = set(prepared.note_types)
+    async with db.scoped_session(session_maker, session) as active_session:
+        stored_types = await active_session.scalars(
+            select(Entity.note_type).where(Entity.project_id.in_(scope.project_ids)).distinct()
+        )
+        compatible_note_types = canonical_note_types | {
+            stored_type
+            for stored_type in stored_types.all()
+            if stored_type and normalize_note_type(stored_type) in canonical_note_types
+        }
+    return replace(prepared, note_types=sorted(compatible_note_types))
+
+
+def relaxed_fts_fallback_eligible(
+    query: SearchQuery,
+    search_text: str | None,
+    retrieval_mode: SearchRetrievalMode,
+) -> bool:
+    """Whether a zero-result strict full-text query may retry with OR-joined terms."""
+    if retrieval_mode != SearchRetrievalMode.FTS:
+        return False
+    if not search_text or not search_text.strip():
+        return False
+    if '"' in search_text:
+        return False
+    if query.has_boolean_operators():
+        return False
+    # Trigger: query has too few safe relaxed terms, explicit numeric identifiers,
+    # or only terms that would over-broaden under OR.
+    # Why: the shared helper preserves the old English guard while allowing
+    # whitespace-separated CJK terms that ASCII tokenization cannot see.
+    # Outcome: retry only when there is a backend-safe relaxed OR query.
+    return relaxed_query_words(search_text) is not None
+
+
 class SearchService:
     """Service for search operations.
 
@@ -196,76 +324,7 @@ class SearchService:
 
     def prepare_query(self, query: SearchQuery) -> PreparedSearchQuery | None:
         """Normalize a SearchQuery into repository arguments."""
-        search_text = query.text
-        tags = query.tags
-
-        # Support tag:<tag> shorthand by mapping to tags filter.
-        if search_text is not None:
-            search_text = search_text.strip() or None
-            if search_text and search_text.lower().startswith("tag:"):
-                tag_values = re.split(r"[,\s]+", search_text[4:].strip())
-                parsed_tags = [t for t in tag_values if t]
-                if parsed_tags:
-                    tags = parsed_tags
-                    search_text = None
-
-        after_date = (
-            (
-                query.after_date
-                if isinstance(query.after_date, datetime)
-                else parse(query.after_date)
-            )
-            if query.after_date
-            else None
-        )
-
-        # Merge structured metadata filters (explicit + convenience fields).
-        metadata_filters: Optional[Dict[str, Any]] = None
-        if query.metadata_filters or tags or query.status:
-            metadata_filters = dict(query.metadata_filters or {})
-            if tags:
-                metadata_filters.setdefault("tags", tags)
-            if query.status:
-                metadata_filters.setdefault("status", query.status)
-
-        prepared = PreparedSearchQuery(
-            search_text=search_text,
-            permalink=query.permalink,
-            permalink_match=query.permalink_match,
-            title=query.title,
-            note_types=(
-                [normalize_note_type(note_type) for note_type in query.note_types]
-                if query.note_types
-                else None
-            ),
-            search_item_types=query.entity_types,
-            categories=query.categories,
-            after_date=after_date,
-            metadata_filters=metadata_filters,
-            file_path_prefix=query.file_path_prefix,
-            temporal=build_temporal_filter(query),
-            retrieval_mode=query.retrieval_mode or SearchRetrievalMode.FTS,
-            min_similarity=query.min_similarity,
-        )
-
-        has_criteria = bool(
-            prepared.search_text
-            or prepared.permalink
-            or prepared.permalink_match
-            or prepared.title
-            or prepared.note_types
-            or prepared.search_item_types
-            or prepared.categories
-            or prepared.after_date
-            or prepared.metadata_filters
-            # Normalized by SearchQuery, so only a real subtree reaches here.
-            or prepared.file_path_prefix
-            or prepared.temporal
-        )
-        if not has_criteria:
-            logger.debug("no criteria passed to query")
-            return None
-        return prepared
+        return prepare_search_query(query)
 
     @staticmethod
     def _prepared_has_filters(prepared: PreparedSearchQuery) -> bool:
@@ -286,27 +345,12 @@ class SearchService:
         session: AsyncSession | None = None,
     ) -> PreparedSearchQuery:
         """Expand canonical note-type filters to exact legacy entity spellings."""
-        if not prepared.note_types:
-            return prepared
-
-        canonical_note_types = set(prepared.note_types)
-        async with db.scoped_session(self.session_maker, session) as active_session:
-            stored_types_query = self.entity_repository.select(Entity.note_type).distinct()
-            stored_types_result = await self.entity_repository.execute_query(
-                active_session,
-                stored_types_query,
-                use_query_options=False,
-            )
-
-        # Search rows written before canonicalization preserve the owning entity's
-        # exact type spelling. Include those spellings alongside canonical values
-        # so an upgrade remains searchable without requiring an eager full reindex.
-        compatible_note_types = canonical_note_types | {
-            stored_type
-            for stored_type in stored_types_result.scalars().all()
-            if stored_type and normalize_note_type(stored_type) in canonical_note_types
-        }
-        return replace(prepared, note_types=sorted(compatible_note_types))
+        return await include_legacy_note_type_spellings(
+            self.session_maker,
+            ProjectScope.single(self.repository.project_id),
+            prepared,
+            session=session,
+        )
 
     async def _search_repository(
         self,
@@ -482,20 +526,7 @@ class SearchService:
         retrieval_mode: SearchRetrievalMode,
     ) -> bool:
         """Check whether we should run relaxed OR fallback after strict FTS returns empty."""
-        if retrieval_mode != SearchRetrievalMode.FTS:
-            return False
-        if not search_text or not search_text.strip():
-            return False
-        if '"' in search_text:
-            return False
-        if query.has_boolean_operators():
-            return False
-        # Trigger: query has too few safe relaxed terms, explicit numeric identifiers,
-        # or only terms that would over-broaden under OR.
-        # Why: the shared helper preserves the old English guard while allowing
-        # whitespace-separated CJK terms that ASCII tokenization cannot see.
-        # Outcome: retry only when there is a backend-safe relaxed OR query.
-        return relaxed_query_words(search_text) is not None
+        return relaxed_fts_fallback_eligible(query, search_text, retrieval_mode)
 
     @staticmethod
     def _generate_variants(text: str) -> Set[str]:

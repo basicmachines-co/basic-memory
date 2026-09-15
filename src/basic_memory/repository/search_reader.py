@@ -615,6 +615,9 @@ class SemanticSearch:
         ``candidate_limit`` is supplied only by a composed retrieval stage that
         already sized the shared candidate pool.
         """
+        # An empty scope admits no rows; embedding the query would buy nothing.
+        if self.scope.is_empty:
+            return []
         query_text = (query.search_text or "").strip()
         if candidate_limit is None:
             candidate_limit = self._candidate_limit(limit, offset, query_text)
@@ -833,6 +836,8 @@ class SemanticSearch:
         ``max(vec, fts) + FUSION_BONUS * min(vec, fts)`` preserves
         the dominant signal and rewards dual-source agreement.
         """
+        if self.scope.is_empty:
+            return []
         query_text = (query.search_text or "").strip()
         rerank = self._active_rerank(query_text)
         query_start = time.perf_counter()

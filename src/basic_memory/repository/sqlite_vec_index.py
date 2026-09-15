@@ -79,7 +79,18 @@ class SQLiteVecIndex:
                     "basic-memory under uv-managed or Homebrew Python, or disable "
                     "semantic search."
                 )
-            await driver_connection.enable_load_extension(True)
+            try:
+                await driver_connection.enable_load_extension(True)
+            except AttributeError as exc:
+                # aiosqlite exposes the wrapper method even when the wrapped
+                # sqlite3.Connection was built without extension support, so
+                # calling it is the authoritative probe (#711).
+                raise SemanticDependenciesMissingError(
+                    "This Python build does not support SQLite extension loading "
+                    "(no enable_load_extension on sqlite3.Connection). Reinstall "
+                    "basic-memory under uv-managed or Homebrew Python, or disable "
+                    "semantic search."
+                ) from exc
             await driver_connection.load_extension(sqlite_vec.loadable_path())
             await driver_connection.enable_load_extension(False)
             await session.execute(text("SELECT vec_version()"))

@@ -14,6 +14,7 @@ from basic_memory.api.v2.routers import (
     knowledge_router as v2_knowledge,
     project_router as v2_project,
     memory_router as v2_memory,
+    scoped_search_router as v2_scoped_search,
     search_router as v2_search,
     resource_router as v2_resource,
     directory_router as v2_directory,
@@ -136,6 +137,8 @@ app.include_router(v2_importer, prefix="/v2/projects/{project_id}")
 app.include_router(v2_schema, prefix="/v2/projects/{project_id}")
 app.include_router(v2_inspect, prefix="/v2/projects/{project_id}")
 app.include_router(v2_project, prefix="/v2")
+# Database-scoped search: one query over an explicit set of projects.
+app.include_router(v2_scoped_search, prefix="/v2")
 
 # Legacy web app proxy paths (compat with /proxy/projects/projects)
 app.include_router(v2_project, prefix="/proxy/projects")

@@ -281,3 +281,20 @@ async def test_hybrid_trace_records_the_stable_pool_refetch():
 
     assert trace.stable_pool_refetched is True
     assert [row.id for row in page] == [4]
+
+
+@pytest.mark.asyncio
+async def test_empty_scope_answers_nothing_without_embedding_or_lexical_work() -> None:
+    """An empty scope admits no rows, so neither leg runs and the query is never embedded."""
+    fts = FakeFts([FakeRow(id=1)])
+    embed_query = AsyncMock(side_effect=AssertionError("must not embed for an empty scope"))
+    semantic = SemanticSearch(
+        cast(Any, None), ProjectScope.of([]), fts, fake_vector_retrieval(embed_query=embed_query)
+    )
+    vector_query = PreparedSearchQuery(
+        search_text="auth", retrieval_mode=SearchRetrievalMode.VECTOR
+    )
+
+    assert await semantic.vector_only(vector_query, limit=10, offset=0) == []
+    assert await semantic.hybrid(HYBRID_QUERY, limit=10, offset=0) == []
+    assert fts.queries == []
