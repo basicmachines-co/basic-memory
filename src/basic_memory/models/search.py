@@ -223,11 +223,18 @@ ON search_vector_chunks (project_id, entity_id, chunk_key)
 
 
 def create_sqlite_search_vector_embeddings(dimensions: int) -> DDL:
-    """Build sqlite-vec virtual table DDL for the configured embedding dimension."""
+    """Build sqlite-vec virtual table DDL for the configured embedding dimension.
+
+    ``project_id`` is a vec0 partition key: a scoped nearest-neighbour query reads
+    only the partitions in scope, instead of ranking every project's vectors in the
+    database and discarding the out-of-scope ones afterwards, which left a small
+    project with an under-filled window whenever a larger neighbour sat closer.
+    """
     return DDL(
         f"""
 CREATE VIRTUAL TABLE IF NOT EXISTS search_vector_embeddings
 USING vec0(
+    project_id integer partition key,
     embedding float[{dimensions}],
     +source_hash text
 )

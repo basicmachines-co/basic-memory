@@ -9,7 +9,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from basic_memory.repository import pgvector_index as pgvector_index_module
-from basic_memory.repository.pgvector_index import PgVectorIndex
+from basic_memory.repository.pgvector_index import (
+    PgVectorIndex,
+    hnsw_ef_search_for,
+    pgvector_supports_iterative_scan,
+)
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.semantic_vector_index import (
@@ -40,6 +44,10 @@ class FakeResult:
     def scalar_one_or_none(self) -> object | None:
         return self._scalar
 
+    def scalar_one(self) -> object:
+        assert self._scalar is not None
+        return self._scalar
+
     def mappings(self) -> FakeResult:
         return self
 
@@ -59,6 +67,7 @@ class FakeSession:
         chunk_rows: list[dict[str, object]] | None = None,
         search_rows: list[dict[str, object]] | None = None,
         fail_extension: bool = False,
+        pgvector_version: str = "0.8.0",
     ) -> None:
         self.table_exists = table_exists
         self.dimensions = dimensions
@@ -66,6 +75,7 @@ class FakeSession:
         self.chunk_rows = chunk_rows or []
         self.search_rows = search_rows or []
         self.fail_extension = fail_extension
+        self.pgvector_version = pgvector_version
         self.calls: list[tuple[str, dict[str, object] | None]] = []
         self.commit_count = 0
 
@@ -78,6 +88,8 @@ class FakeSession:
         self.calls.append((sql, params))
         if "CREATE EXTENSION" in sql and self.fail_extension:
             raise RuntimeError("extension unavailable")
+        if "SELECT extversion" in sql:
+            return FakeResult(scalar=self.pgvector_version)
         if "information_schema.tables" in sql:
             return FakeResult(fetchone=(1,) if self.table_exists else None)
         if "attname = 'source_hash'" in sql:
@@ -330,7 +342,7 @@ async def test_search_returns_normalized_stable_matches(monkeypatch) -> None:
         (15, 0.0),
     ]
     search_call = next(call for call in session.calls if "AS similarity" in call[0])
-    assert "c.entity_id ASC, c.chunk_key ASC" in search_call[0]
+    assert "ORDER BY distance ASC, entity_id ASC, chunk_key ASC" in search_call[0]
     assert search_call[1] == {
         "query": "[1,0,0,0]",
         "scope_0": 7,
@@ -356,3 +368,73 @@ async def test_search_binds_every_project_in_scope(monkeypatch) -> None:
     assert "AND c.project_id IN (:scope_0, :scope_1)" in sql
     assert params["scope_0"] == 7
     assert params["scope_1"] == 9
+
+
+def _settings(session: FakeSession) -> list[tuple[str, dict[str, object] | None]]:
+    return [call for call in session.calls if "set_config" in call[0]]
+
+
+@pytest.mark.parametrize(
+    ("extversion", "expected"),
+    [("0.7.4", False), ("0.8.0", True), ("0.8.1", True), ("1.0.0", True), ("garbage", False)],
+)
+def test_iterative_scan_arrived_in_pgvector_0_8(extversion: str, expected: bool) -> None:
+    assert pgvector_supports_iterative_scan(extversion) is expected
+
+
+def test_ef_search_is_sized_to_the_window_within_the_server_bounds() -> None:
+    assert hnsw_ef_search_for(5) == 40
+    assert hnsw_ef_search_for(40) == 40
+    assert hnsw_ef_search_for(250) == 250
+    assert hnsw_ef_search_for(5000) == 1000
+
+
+@pytest.mark.asyncio
+async def test_initialize_requires_a_pgvector_that_can_keep_scanning(monkeypatch) -> None:
+    """An extension too old to fill a filtered window is a deployment error, not a quiet gap."""
+    older = FakeSession(pgvector_version="0.7.4")
+    _install_session(monkeypatch, older)
+    index = PgVectorIndex(MagicMock(), _scope())
+
+    with pytest.raises(SemanticDependenciesMissingError, match="pgvector 0.7.4 predates"):
+        await index.initialize()
+
+    assert not any("CREATE TABLE" in sql for sql in _sql_calls(older))
+    assert index._initialized is False
+
+
+@pytest.mark.asyncio
+async def test_search_sizes_the_scan_to_the_window_it_must_fill(monkeypatch) -> None:
+    """A 250-row candidate window asks HNSW for 250 candidates, not the default 40."""
+    session = FakeSession(search_rows=[])
+    _install_session(monkeypatch, session)
+    index = PgVectorIndex(MagicMock(), _scope())
+    index._initialized = True
+
+    await index.search([1.0, 0.0, 0.0, 0.0], limit=250, projects=PROJECTS)
+
+    ef_search = next(call for call in _settings(session) if "hnsw.ef_search" in call[0])
+    assert "set_config('hnsw.ef_search', :ef_search, true)" in ef_search[0]
+    assert ef_search[1] == {"ef_search": "250"}
+    search_sql = next(sql for sql, _params in session.calls if "AS similarity" in sql)
+    # The window is taken by distance inside the CTE, then re-sorted with tie-breaks.
+    assert "ORDER BY e.embedding <=> CAST(:query AS vector) LIMIT :limit" in search_sql
+
+
+@pytest.mark.asyncio
+async def test_search_keeps_scanning_until_the_window_fills(monkeypatch) -> None:
+    session = FakeSession(search_rows=[])
+    _install_session(monkeypatch, session)
+    index = PgVectorIndex(MagicMock(), _scope())
+    index._initialized = True
+
+    await index.search([1.0, 0.0, 0.0, 0.0], limit=5, projects=PROJECTS)
+
+    settings = [sql for sql, _params in _settings(session)]
+    assert any("'hnsw.ef_search'" in sql for sql in settings)
+    assert any("'hnsw.iterative_scan', 'relaxed_order', true" in sql for sql in settings)
+    # Settings precede the scan they configure, inside the same session.
+    ordered = [sql for sql, _params in session.calls]
+    assert max(ordered.index(sql) for sql in settings) < next(
+        position for position, sql in enumerate(ordered) if "AS similarity" in sql
+    )

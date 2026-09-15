@@ -23,6 +23,19 @@
   database is skipped with a warning and an inexact total, and a retryable outage
   or a server too old to attribute its results fails the whole page.
 
+- **#1558**: Vector retrieval reads only the projects in scope and fills the window it
+  asks for. The sqlite-vec table gains a `project_id` partition key, so a scoped
+  nearest-neighbour query ranks each project's own vectors instead of taking the k
+  nearest across the whole database and discarding the out-of-scope ones, which
+  could leave a small project with an empty page for a query its notes answered.
+  Existing local storage is carried into the partitioned table without re-embedding.
+  On Postgres the nearest-neighbour statement now runs on the HNSW index (its
+  tie-break sort keys had kept the planner on an exact scan of every vector), with
+  `hnsw.ef_search` sized to the candidate window and an iterative scan that keeps
+  going until the scope and manifest filters have admitted enough rows. That scan
+  needs pgvector 0.8 or later; an older extension is reported as a dependency error
+  instead of quietly returning short windows.
+
 - **#1512**: Word, PowerPoint, and CSV files get the same sidecar Markdown note a
   PDF gets. `bm import document <path>` indexes the project, extracts the file,
   and writes `<file>.<ext>.md` next to it plus a run note under
