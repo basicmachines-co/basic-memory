@@ -182,6 +182,27 @@ class HydratedChunk:
     similarity: float
 
 
+@dataclass(frozen=True, slots=True)
+class CandidateWindow:
+    """The search rows one vector candidate window resolved to, in adapter order.
+
+    ``similarity_by_key`` holds the best chunk similarity of every row above the
+    threshold; ``rows`` holds those of them that exist and that the query's filters
+    admit, so a key present in the first and absent from the second was rejected.
+    """
+
+    similarity_by_key: dict[SearchIndexKey, float]
+    chunks_by_key: dict[SearchIndexKey, list[tuple[float, str]]]
+    rows: dict[SearchIndexKey, SearchIndexRow]
+    chunk_count: int
+    vector_query_ms: float = 0.0
+    hydrate_ms: float = 0.0
+
+    @property
+    def admitted(self) -> int:
+        return sum(1 for key in self.similarity_by_key if key in self.rows)
+
+
 # --- Vector and hybrid retrieval ---
 
 
@@ -626,33 +647,26 @@ class SemanticSearch:
         with logfire.span("search.embed_query", query_chars=len(query_text)):
             query_embedding = await self.vector.embedding_provider.embed_query(query_text)
         embed_ms = (time.perf_counter() - embed_start) * 1000
-        vector_query_start = time.perf_counter()
+        # Per-query min_similarity overrides the configured default.
+        effective_min_similarity = (
+            query.min_similarity if query.min_similarity is not None else self.vector.min_similarity
+        )
 
-        # Constraint: vector adapters may open their own session, while the SQLite
-        # test/runtime pool can contain only one connection. A plain AsyncSession
-        # defers checkout until hydration runs after adapter search has released it.
-        async with self.session_maker() as session:
-            vector_rows = await self._run_vector_query(
-                session,
-                query_embedding,
-                candidate_limit,
-                trace=trace,
-            )
-        vector_query_ms = (time.perf_counter() - vector_query_start) * 1000
-        vector_row_count = len(vector_rows)
-        hydrate_ms = 0.0
+        window = await self._candidate_window(
+            query,
+            query_embedding,
+            candidate_limit,
+            min_similarity=effective_min_similarity,
+            trace=trace,
+        )
 
         if trace is not None:
             trace.vector = build_vector_stage(
                 previous=trace.vector,
-                effective_min_similarity=(
-                    query.min_similarity
-                    if query.min_similarity is not None
-                    else self.vector.min_similarity
-                ),
+                effective_min_similarity=effective_min_similarity,
                 min_similarity_source=("query" if query.min_similarity is not None else "config"),
                 embed_ms=embed_ms,
-                vector_query_ms=vector_query_ms,
+                vector_query_ms=window.vector_query_ms,
             )
 
         def _log_vector_summary() -> None:
@@ -671,92 +685,20 @@ class SemanticSearch:
                     retrieval_mode="vector",
                     query_length=len(query_text),
                     candidate_limit=candidate_limit,
-                    vector_row_count=vector_row_count,
+                    vector_row_count=window.chunk_count,
                     embed_ms=embed_ms,
-                    vector_query_ms=vector_query_ms,
-                    hydrate_ms=hydrate_ms,
+                    vector_query_ms=window.vector_query_ms,
+                    hydrate_ms=window.hydrate_ms,
                     total_ms=total_ms,
                 )
 
-        if not vector_rows:
+        if not window.similarity_by_key:
             _log_vector_summary()
             return []
-
-        hydrate_start = time.perf_counter()
-        # Build per-search_index_row similarity scores from chunk-level results.
-        # Each chunk_key encodes the search_index row type and id; keep both as the
-        # key because different row types can share the same numeric id (#982).
-        # Track the best similarity per row (for ranking) and all chunks (for context).
-        similarity_by_si_key: dict[SearchIndexKey, float] = {}
-        chunks_by_si_key: dict[SearchIndexKey, list[tuple[float, str]]] = {}
-        for chunk in vector_rows:
-            try:
-                si_key = parse_chunk_key(chunk.chunk_key)
-            except (ValueError, IndexError):
-                # A chunk without a parseable key names no search row to rank.
-                continue
-            current = similarity_by_si_key.get(si_key)
-            if current is None or chunk.similarity > current:
-                similarity_by_si_key[si_key] = chunk.similarity
-            chunks_by_si_key.setdefault(si_key, []).append((chunk.similarity, chunk.chunk_text))
-
-        if not similarity_by_si_key:
-            hydrate_ms = (time.perf_counter() - hydrate_start) * 1000
-            _log_vector_summary()
-            return []
-
-        # Filter out results below the minimum similarity threshold.
-        # Per-query min_similarity overrides the configured default.
-        effective_min_similarity = (
-            query.min_similarity if query.min_similarity is not None else self.vector.min_similarity
-        )
-        if effective_min_similarity > 0.0:
-            if trace is not None:
-                threshold_rejections = tuple(
-                    BelowThreshold(key=key, similarity=value, threshold=effective_min_similarity)
-                    for key, value in similarity_by_si_key.items()
-                    if value < effective_min_similarity
-                )
-                trace.vector = build_vector_stage(
-                    previous=trace.vector,
-                    threshold_rejections=threshold_rejections,
-                )
-            similarity_by_si_key = {
-                k: v for k, v in similarity_by_si_key.items() if v >= effective_min_similarity
-            }
-            if not similarity_by_si_key:
-                hydrate_ms = (time.perf_counter() - hydrate_start) * 1000
-                _log_vector_summary()
-                return []
-
-        # Fetch the actual search_index rows. Colliding (type, id) keys share one
-        # bare id, so deduplicate while preserving first-seen order.
-        si_ids = list(dict.fromkeys(si_id for _, si_id in similarity_by_si_key))
-        search_index_rows = await self._fetch_search_index_rows_by_ids(si_ids)
-        if trace is not None:
-            trace.vector = build_vector_stage(
-                previous=trace.vector,
-                missing_search_rows=tuple(
-                    MissingSearchRow(key=key)
-                    for key in similarity_by_si_key
-                    if key not in search_index_rows
-                ),
-            )
-
-        if query.has_filters:
-            allowed_keys = await self._filter_candidate_keys(list(search_index_rows), query)
-            if trace is not None:
-                trace.vector = build_vector_stage(
-                    previous=trace.vector,
-                    filter_rejections=tuple(
-                        FilteredOut(key=key) for key in search_index_rows if key not in allowed_keys
-                    ),
-                )
-            search_index_rows = {k: v for k, v in search_index_rows.items() if k in allowed_keys}
 
         ranked_rows: list[SearchIndexRow] = []
-        for si_key, similarity in similarity_by_si_key.items():
-            row = search_index_rows.get(si_key)
+        for si_key, similarity in window.similarity_by_key.items():
+            row = window.rows.get(si_key)
             if row is None:
                 continue
 
@@ -766,7 +708,7 @@ class SemanticSearch:
             if content_snippet and len(content_snippet) <= SMALL_NOTE_CONTENT_LIMIT:
                 matched_chunk_text = content_snippet
             else:
-                si_chunks = chunks_by_si_key.get(si_key, [])
+                si_chunks = window.chunks_by_key.get(si_key, [])
                 si_chunks.sort(key=lambda c: c[0], reverse=True)
                 top_texts = [chunk_text for _, chunk_text in si_chunks[:TOP_CHUNKS_PER_RESULT]]
                 matched_chunk_text = "\n---\n".join(top_texts) if top_texts else None
@@ -780,7 +722,6 @@ class SemanticSearch:
             )
 
         ranked_rows.sort(key=lambda item: item.score or 0.0, reverse=True)
-        hydrate_ms = (time.perf_counter() - hydrate_start) * 1000
         # Rerank over the wide candidate pool, then slice to the page. Suppressed when
         # hybrid calls this internally (apply_rerank=False): hybrid reranks its own
         # fused result, and _rerank_and_paginate is a plain slice without a reranker.
@@ -816,6 +757,128 @@ class SemanticSearch:
         # the slow-query warning entirely.
         _log_vector_summary()
         return output
+
+    async def _candidate_window(
+        self,
+        query: PreparedSearchQuery,
+        query_embedding: list[float],
+        candidate_limit: int,
+        *,
+        min_similarity: float,
+        trace: SearchTraceCollector | None = None,
+    ) -> CandidateWindow:
+        """Resolve the nearest chunks to admitted search rows, widening past rejections.
+
+        Trigger: the query carries structured filters the adapter cannot evaluate.
+        Why: the adapter ranks by similarity alone, so a window taken straight from
+            its ranking can hold few admitted rows while more sit just past it, and a
+            page built from that window comes up short although matches exist.
+        Outcome: the window is re-read with a bounded geometric overfetch until it
+            holds ``candidate_limit`` admitted rows, the ranking is exhausted, or its
+            tail has fallen below the similarity threshold, past which nothing further
+            can qualify. A query without filters resolves its window once.
+        """
+        scan_limit = candidate_limit
+        scanned = -1
+        vector_query_ms = 0.0
+        hydrate_ms = 0.0
+        while True:
+            vector_query_start = time.perf_counter()
+            # Constraint: vector adapters may open their own session, while the SQLite
+            # test/runtime pool can contain only one connection. A plain AsyncSession
+            # defers checkout until hydration runs after adapter search has released it.
+            async with self.session_maker() as session:
+                chunks = await self._run_vector_query(
+                    session, query_embedding, scan_limit, trace=trace
+                )
+            vector_query_ms += (time.perf_counter() - vector_query_start) * 1000
+            hydrate_start = time.perf_counter()
+            window = await self._resolve_rows(chunks, query, min_similarity, trace=trace)
+            hydrate_ms += (time.perf_counter() - hydrate_start) * 1000
+
+            exhausted = (
+                len(chunks) < scan_limit
+                or len(chunks) <= scanned
+                or scan_limit >= VECTOR_FILTER_SCAN_LIMIT
+            )
+            tail_below_threshold = bool(chunks) and chunks[-1].similarity < min_similarity
+            if (
+                not query.has_filters
+                or window.admitted >= candidate_limit
+                or exhausted
+                or tail_below_threshold
+            ):
+                return replace(window, vector_query_ms=vector_query_ms, hydrate_ms=hydrate_ms)
+            scanned = len(chunks)
+            scan_limit = min(scan_limit * 2, VECTOR_FILTER_SCAN_LIMIT)
+
+    async def _resolve_rows(
+        self,
+        chunks: list[HydratedChunk],
+        query: PreparedSearchQuery,
+        min_similarity: float,
+        *,
+        trace: SearchTraceCollector | None = None,
+    ) -> CandidateWindow:
+        """Turn ranked chunks into the search rows above threshold that the filters admit."""
+        # Build per-search_index_row similarity scores from chunk-level results.
+        # Each chunk_key encodes the search_index row type and id; keep both as the
+        # key because different row types can share the same numeric id (#982).
+        # Track the best similarity per row (for ranking) and all chunks (for context).
+        similarity_by_key: dict[SearchIndexKey, float] = {}
+        chunks_by_key: dict[SearchIndexKey, list[tuple[float, str]]] = {}
+        for chunk in chunks:
+            try:
+                si_key = parse_chunk_key(chunk.chunk_key)
+            except (ValueError, IndexError):
+                # A chunk without a parseable key names no search row to rank.
+                continue
+            current = similarity_by_key.get(si_key)
+            if current is None or chunk.similarity > current:
+                similarity_by_key[si_key] = chunk.similarity
+            chunks_by_key.setdefault(si_key, []).append((chunk.similarity, chunk.chunk_text))
+
+        # Filter out results below the minimum similarity threshold.
+        if min_similarity > 0.0:
+            if trace is not None:
+                threshold_rejections = tuple(
+                    BelowThreshold(key=key, similarity=value, threshold=min_similarity)
+                    for key, value in similarity_by_key.items()
+                    if value < min_similarity
+                )
+                trace.vector = build_vector_stage(
+                    previous=trace.vector,
+                    threshold_rejections=threshold_rejections,
+                )
+            similarity_by_key = {k: v for k, v in similarity_by_key.items() if v >= min_similarity}
+        if not similarity_by_key:
+            return CandidateWindow(similarity_by_key, chunks_by_key, {}, len(chunks))
+
+        # Fetch the actual search_index rows. Colliding (type, id) keys share one
+        # bare id, so deduplicate while preserving first-seen order.
+        si_ids = list(dict.fromkeys(si_id for _, si_id in similarity_by_key))
+        search_index_rows = await self._fetch_search_index_rows_by_ids(si_ids)
+        if trace is not None:
+            trace.vector = build_vector_stage(
+                previous=trace.vector,
+                missing_search_rows=tuple(
+                    MissingSearchRow(key=key)
+                    for key in similarity_by_key
+                    if key not in search_index_rows
+                ),
+            )
+
+        if query.has_filters:
+            allowed_keys = await self._filter_candidate_keys(list(search_index_rows), query)
+            if trace is not None:
+                trace.vector = build_vector_stage(
+                    previous=trace.vector,
+                    filter_rejections=tuple(
+                        FilteredOut(key=key) for key in search_index_rows if key not in allowed_keys
+                    ),
+                )
+            search_index_rows = {k: v for k, v in search_index_rows.items() if k in allowed_keys}
+        return CandidateWindow(similarity_by_key, chunks_by_key, search_index_rows, len(chunks))
 
     # --- Hybrid score-based fusion ---
 
