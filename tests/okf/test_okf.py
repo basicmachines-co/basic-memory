@@ -497,11 +497,11 @@ def test_ambiguous_bare_title_does_not_fall_through_to_filename():
         (
             ExportFile("Same.md", b"---\ntitle: Same\n---\n"),
             ExportFile("other.md", b"---\ntitle: Same\npermalink: same\n---\n"),
-            ExportFile("source.md", b"[[Same]] and [[Same.md]]"),
+            ExportFile("source.md", b"[[Same]] and [[Same.md]] and [[./Same.md]]"),
         ),
     )
     source = next(file.content for file in render_bundle(snapshot) if file.path == "source.md")
-    assert b"[Same](/Same) and [Same.md](/Same.md)" in source
+    assert b"[Same](/Same) and [Same.md](/other.md) and [./Same.md](/Same.md)" in source
 
 
 @pytest.mark.parametrize(
@@ -619,3 +619,32 @@ def test_scalar_permalink_aliases_preserve_authored_metadata(yaml_permalink, tar
 )
 def test_wikilink_delimiters_use_canonical_escape_rules(body, target, expected):
     assert convert_wikilinks(body, "source.md", {target: "note.md"}, "p") == expected
+
+
+@pytest.mark.parametrize("permalink", ["foo.md", "foo"])
+def test_permalink_precedes_file_alias_but_explicit_relative_path_stays_a_path(
+    permalink, test_project
+):
+    from basic_memory.models import Entity
+    from basic_memory.services.bulk_link_resolver import ProjectEntityIdentityIndex
+
+    owner = Entity(title="Owner", file_path="owner.md", permalink=permalink)
+    index = ProjectEntityIdentityIndex.from_entities(
+        test_project, [Entity(title="foo", file_path="foo.md"), owner]
+    )
+    assert (
+        index.resolve_strict(
+            "foo.md", include_project_permalinks=True, workspace_permalink=None
+        ).entity
+        is owner
+    )
+    snapshot = ExportSnapshot(
+        "p",
+        (
+            ExportFile("foo.md", b"# File"),
+            ExportFile("owner.md", f"---\npermalink: {permalink}\n---\n# Permalink owner".encode()),
+            ExportFile("source.md", b"[[foo.md]] and [[./foo.md]]"),
+        ),
+    )
+    source = next(file.content for file in render_bundle(snapshot) if file.path == "source.md")
+    assert b"[foo.md](/owner.md) and [./foo.md](/foo.md)" in source

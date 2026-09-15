@@ -63,6 +63,7 @@ def convert_wikilinks(
     *,
     include_project: bool = True,
     ambiguous_aliases: frozenset[str] = frozenset(),
+    permalinks: dict[str, str] | None = None,
 ) -> str:
     """Use MarkdownIt's code/escape/link rules while retaining untouched source bytes."""
     body = body.replace("\r\n", "\n").replace("\r", "\n")
@@ -114,6 +115,16 @@ def convert_wikilinks(
             resolved = targets.get(relative.lstrip("/"))
             if resolved is None:
                 resolved = targets.get(relative.lstrip("/") + ".md")
+        if resolved is None and permalinks:
+            # Semantic addresses precede title/path aliases, even when they look like filenames.
+            for candidate in build_permalink_resolution_candidates(
+                target, project, include_project
+            ):
+                if target in ambiguous_aliases and candidate != target:
+                    break
+                if candidate in permalinks:
+                    resolved = permalinks[candidate]
+                    break
         if resolved is None:
             for candidate in build_permalink_resolution_candidates(
                 target, project, include_project
@@ -195,6 +206,7 @@ def convert_wikilinks(
 def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
     """Preserve frontmatter and prose; attach only semantics lost by link conversion."""
     targets: dict[str, str] = {}
+    permalinks: dict[str, str] = {}
     ambiguous: set[str] = set()
     documents: dict[str, Document] = {}
     titles: dict[str, str] = {}
@@ -220,7 +232,7 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
         aliases = {file.path, str(PurePosixPath(file.path).with_suffix("")), title}
         permalink = normalize_frontmatter_value(source_metadata.get("permalink"))
         if isinstance(permalink, str) and permalink:
-            aliases.add(permalink)
+            permalinks[permalink] = file.path
         for alias in aliases:
             if alias in targets and targets[alias] != file.path:
                 ambiguous.add(alias)
@@ -268,6 +280,7 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
             snapshot.project,
             include_project=snapshot.permalinks_include_project,
             ambiguous_aliases=frozenset(ambiguous),
+            permalinks=permalinks,
         )
         content = "---\n" + yaml.safe_dump(metadata, allow_unicode=True, sort_keys=False)
         content += "---\n" + body
