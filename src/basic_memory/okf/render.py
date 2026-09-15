@@ -20,7 +20,11 @@ from basic_memory.markdown.plugins import _is_escaped
 from basic_memory.repository.entity_repository import file_path_alias
 from basic_memory.services.bulk_link_resolver import RelationTargetReference
 from basic_memory.services.link_resolver import normalize_link_text
-from basic_memory.utils import build_permalink_resolution_candidates, generate_permalink
+from basic_memory.utils import (
+    build_canonical_permalink,
+    build_permalink_resolution_candidates,
+    generate_permalink,
+)
 
 from basic_memory.okf.validation import Document, parse_document
 
@@ -279,6 +283,10 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
         else:
             title_targets[title] = file.path
         permalink = normalize_frontmatter_value(source_metadata.get("permalink"))
+        if not isinstance(permalink, str) or not permalink:
+            permalink = build_canonical_permalink(
+                snapshot.project, file.path, include_project=snapshot.permalinks_include_project
+            )
         if isinstance(permalink, str) and permalink:
             # Offline files can violate the indexed uniqueness rule; never choose a winner.
             if permalink in permalinks:

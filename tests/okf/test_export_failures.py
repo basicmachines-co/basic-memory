@@ -301,3 +301,28 @@ async def test_file_stat_failure_preserves_replacement_destination(
     with pytest.raises(PermissionError, match="stat unavailable"):
         await export_project(source_config, "export", destination, replace=True)
     assert (destination / "keep").read_bytes() == b"previous bundle"
+
+
+@pytest.mark.asyncio
+async def test_staging_path_collision_preserves_destination(source_config, tmp_path, monkeypatch):
+    import basic_memory.okf.export as exporting
+
+    destination = tmp_path / "bundle"
+    destination.mkdir()
+    (destination / "keep").write_bytes(b"previous bundle")
+    original_open = Path.open
+
+    def case_insensitive_staging_open(path, mode="r", *args, **kwargs):
+        if mode == "xb":
+            path = path.with_name(path.name.lower())
+        return original_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", case_insensitive_staging_open)
+    monkeypatch.setattr(
+        exporting,
+        "render_bundle",
+        lambda snapshot: (ExportFile("A.md", b"first"), ExportFile("a.md", b"second")),
+    )
+    with pytest.raises(FileExistsError):
+        await export_project(source_config, "export", destination, replace=True)
+    assert (destination / "keep").read_bytes() == b"previous bundle"

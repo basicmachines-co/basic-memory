@@ -693,7 +693,7 @@ def test_unique_title_precedes_filename_and_rooted_links_remain_literal(test_pro
 
     owner = Entity(title="foo.md", file_path="owner.md")
     index = ProjectEntityIdentityIndex.from_entities(
-        test_project, [Entity(title="foo", file_path="foo.md"), owner]
+        test_project, [Entity(title="foo", file_path="foo.md", permalink="custom"), owner]
     )
     assert (
         index.resolve_strict(
@@ -704,7 +704,7 @@ def test_unique_title_precedes_filename_and_rooted_links_remain_literal(test_pro
     snapshot = ExportSnapshot(
         "p",
         (
-            ExportFile("foo.md", b"# File"),
+            ExportFile("foo.md", b"---\npermalink: custom\n---\n# File"),
             ExportFile("owner.md", b"---\ntitle: foo.md\n---\n# Title owner"),
             ExportFile("source.md", b"[[foo.md]] [[/foo]] [[/foo.md]]"),
         ),
@@ -824,3 +824,17 @@ def test_unordered_identity_metadata_fails_explicitly(field, value):
     snapshot = ExportSnapshot("p", (ExportFile("a.md", f"---\n{field}: {value}\n---\n".encode()),))
     with pytest.raises(ValueError, match=f"a.md: {field} cannot contain an unordered YAML set"):
         render_bundle(snapshot)
+
+
+@pytest.mark.parametrize("include_project", [False, True])
+def test_missing_authored_permalink_uses_canonical_generated_address(include_project):
+    snapshot = ExportSnapshot(
+        "p",
+        (
+            ExportFile("folder/foo.md", b"# Foo"),
+            ExportFile("source.md", b"[[p/folder/foo]]"),
+        ),
+        permalinks_include_project=include_project,
+    )
+    source = next(file.content for file in render_bundle(snapshot) if file.path == "source.md")
+    assert b"[p/folder/foo](/folder/foo.md)" in source

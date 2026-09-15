@@ -154,7 +154,10 @@ async def export_project(
         for file in rendered:
             target = staging / file.path
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(file.content)
+            # Destination filesystems may collapse distinct source spellings.
+            # Exclusive creation detects collisions before any bundle is published.
+            with target.open("xb") as output:
+                output.write(file.content)
         report = check_bundle(staging)
         if not report.success:
             return report
