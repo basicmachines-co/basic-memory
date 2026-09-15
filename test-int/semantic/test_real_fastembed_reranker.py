@@ -6,6 +6,8 @@ import math
 from typing import cast
 
 import pytest
+from fastembed.rerank.cross_encoder import TextCrossEncoder
+from fastembed.rerank.cross_encoder.onnx_text_cross_encoder import OnnxTextCrossEncoder
 
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.repository.fastembed_rerank_provider import FastEmbedRerankProvider
@@ -120,3 +122,26 @@ async def test_real_fastembed_reranker_scores_and_hybrid_search(
 
     assert results
     assert results[0].permalink == SMOKE_DOCUMENTS[0].permalink
+
+
+@pytest.mark.asyncio
+@pytest.mark.semantic
+async def test_real_reranker_small_batches_preserve_all_candidate_scores() -> None:
+    """Exercise the actual ONNX options and score a pool larger than one batch."""
+    provider = FastEmbedRerankProvider(threads=1)
+    documents = [document.content for document in SMOKE_DOCUMENTS] * 3 + [
+        document.content for document in SMOKE_DOCUMENTS[:3]
+    ]
+    scores = await provider.rerank(SMOKE_QUERY, documents)
+    model = await provider._load_model()
+    assert isinstance(model.model, OnnxTextCrossEncoder)
+    assert model.model.model is not None
+    assert model.model.model.get_session_options().enable_cpu_mem_arena is False
+
+    baseline = TextCrossEncoder(model_name=provider.model_name, threads=1)
+    baseline_logits = list(baseline.rerank(SMOKE_QUERY, documents, batch_size=64))
+    baseline_scores = [1 / (1 + math.exp(-float(value))) for value in baseline_logits]
+
+    assert len(scores) == 21
+    assert scores == pytest.approx(baseline_scores, abs=1e-5)
+    assert max(range(len(scores)), key=scores.__getitem__) % len(SMOKE_DOCUMENTS) == 0
