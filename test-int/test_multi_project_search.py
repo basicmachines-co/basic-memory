@@ -529,3 +529,113 @@ async def test_compare_project_pipelines_on_same_corpus(
                 }
             )
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["fts", "hybrid"])
+@pytest.mark.parametrize("query", ["Did nebula go hiking at sunrise?", "foo<nebula baz qux"])
+async def test_relaxed_route_preserves_scope_counts_and_pages(
+    corpus: Corpus, client: AsyncClient, mode: str, query: str
+) -> None:
+    ids = [project.id for project in corpus.projects[:2]]
+    # Remove the vector channel so a hybrid success proves lexical recovery.
+    async with db.scoped_session(corpus.session_maker) as session:
+        await session.execute(text("UPDATE search_vector_chunks SET embedding_status = 'pending'"))
+        await session.commit()
+    body = {"project_ids": ids, "text": query, "retrieval_mode": mode}
+    complete = await client.request("QUERY", "/v2/search/", json=body)
+    assert complete.status_code == 200, complete.text
+    expected = complete.json()["results"]
+    assert len(expected) == 6
+    assert {row["project_id"] for row in expected} == set(ids)
+    if mode == "fts":
+        assert complete.json()["total"] == 6
+    pages = []
+    for page in range(1, 5):
+        response = await client.request(
+            "QUERY", "/v2/search/", json=body, params={"page": page, "page_size": 2}
+        )
+        assert response.status_code == 200, response.text
+        pages.extend(response.json()["results"])
+        assert response.json()["has_more"] == (page < 3)
+    assert pages == expected
+    assert corpus.provider.query_calls == (5 if mode == "hybrid" else 0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["fts", "hybrid"])
+async def test_relaxation_keeps_strict_matches_on_deep_pages(
+    corpus: Corpus, client: AsyncClient, mode: str
+) -> None:
+    # Three terms permit relaxation, but strict matches anywhere in the selected
+    # scope must suppress it even after the final page.
+    body = {
+        "project_ids": [project.id for project in corpus.projects[:2]],
+        "text": "shared nebula observation",
+        "retrieval_mode": mode,
+        "min_similarity": 1,
+    }
+    async with db.scoped_session(corpus.session_maker) as session:
+        await session.execute(text("UPDATE search_vector_chunks SET embedding_status = 'pending'"))
+        await session.commit()
+    first = await client.request("QUERY", "/v2/search/", json=body)
+    assert first.status_code == 200, first.text
+    assert len(first.json()["results"]) == 2
+    later = await client.request("QUERY", "/v2/search/", json=body, params={"page": 2})
+    assert later.status_code == 200, later.text
+    assert later.json()["results"] == []
+    if mode == "fts":
+        assert later.json()["total"] == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["package", "extension"])
+async def test_sqlite_semantic_dependency_errors_are_actionable(
+    corpus: Corpus, client: AsyncClient, monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    if corpus.config.database_backend == DatabaseBackend.POSTGRES:
+        pytest.skip("SQLite connection capability boundary")
+    import sys
+    import aiosqlite
+
+    if failure == "package":
+        monkeypatch.setitem(sys.modules, "sqlite_vec", None)
+    else:
+
+        async def unavailable(_self, _enabled):
+            raise AttributeError("enable_load_extension")
+
+        monkeypatch.setattr(aiosqlite.Connection, "enable_load_extension", unavailable)
+    for mode in ("vector", "hybrid"):
+        response = await client.request(
+            "QUERY",
+            "/v2/search/",
+            json={"project_ids": [corpus.projects[0].id], "text": "nebula", "retrieval_mode": mode},
+        )
+        assert response.status_code == 400, response.text
+        assert ("sqlite-vec" if failure == "package" else "extension loading") in response.json()[
+            "detail"
+        ]
+    response = await client.request(
+        "QUERY", "/v2/search/", json={"project_ids": [corpus.projects[0].id], "text": "nebula"}
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["total"] == 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("query", ["foo<bar", "nebula AND unavailable"])
+@pytest.mark.parametrize("mode", ["fts", "hybrid"])
+async def test_invalid_or_explicit_fts_does_not_broaden_lexical_channel(
+    corpus: Corpus, client: AsyncClient, query: str, mode: str
+) -> None:
+    response = await client.request(
+        "QUERY",
+        "/v2/search/",
+        json={"project_ids": [corpus.projects[0].id], "text": query, "retrieval_mode": mode},
+    )
+    assert response.status_code == 200, response.text
+    assert len(response.json()["results"]) == (3 if mode == "hybrid" else 0)
+    if mode == "fts":
+        assert response.json()["total"] == 0
+    assert corpus.provider.query_calls == int(mode == "hybrid")

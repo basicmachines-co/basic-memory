@@ -6,24 +6,32 @@ this reader rejects them for vector/hybrid retrieval without opening an adapter.
 """
 
 import json
+import re
 from collections.abc import Sequence
 from dataclasses import replace
 from typing import Any
 
 import logfire
-from sqlalchemy import text
+from sqlalchemy import Result, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.postgres_search_query import PostgresSearchQuery
+from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
+from basic_memory.repository.script_ngrams import analyze_script_query
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_query import PreparedSearchQuery
 from basic_memory.repository.search_repository_base import FUSION_BONUS, TOP_CHUNKS_PER_RESULT
-from basic_memory.repository.semantic_errors import SemanticSearchDisabledError
+from basic_memory.repository.semantic_errors import (
+    SemanticDependenciesMissingError,
+    SemanticSearchDisabledError,
+)
 from basic_memory.repository.semantic_vector_index_factory import semantic_embedding_identity
-from basic_memory.repository.sqlite_search_query import SQLiteSearchQuery
+from basic_memory.repository.sqlite_search_query import SQLITE_WORD_COLUMNS, SQLiteSearchQuery
+from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.schemas.search import SearchRetrievalMode
 
 
@@ -96,16 +104,72 @@ class MultiProjectSearchRepository:
             temporal=query.temporal,
         )
 
+    async def _fts_ctes(self, query: PreparedSearchQuery) -> tuple[str, dict[str, Any], str]:
+        source, where, params, order, score = await self._parts(query, lexical=True)
+        columns = ", ".join(f"search_index.{name}" for name in _RESULT_COLUMNS)
+        selection = f"SELECT {columns}, {score} AS score FROM {source} WHERE {where}"
+        params["fts_enabled"] = True
+        selection += " AND :fts_enabled"
+        ctes = f"fts_strict AS MATERIALIZED ({selection})"
+        word_text = (
+            analyze_script_query(query.search_text.strip()).word_text if query.search_text else None
+        )
+        if isinstance(self.compiler, PostgresSearchQuery):
+            relaxed = self.compiler._relaxed_tsquery_text(word_text)
+        else:
+            relaxed = self.compiler._relaxed_fts_text(word_text)
+            if relaxed and "script_text" in params:
+                relaxed = f"{SQLITE_WORD_COLUMNS}: ({relaxed})"
+        if relaxed and params.get("text"):
+            # Decide relaxation over the complete scope, before pagination. A deep
+            # empty page must never switch to a different candidate set.
+            params["relaxed_text"] = relaxed
+            relaxed_selection = re.sub(r":text\b", ":relaxed_text", selection)
+            ctes += f""", fts AS MATERIALIZED (
+                SELECT * FROM fts_strict UNION ALL
+                {relaxed_selection} AND NOT EXISTS (SELECT 1 FROM fts_strict)
+            )"""
+        else:
+            ctes += ", fts AS MATERIALIZED (SELECT * FROM fts_strict)"
+        return ctes, params, order.replace("search_index.", "")
+
+    async def _execute(
+        self, session: AsyncSession, sql: str, params: dict[str, Any]
+    ) -> Result[Any]:
+        try:
+            if not self.postgres or "fts_enabled" not in params:
+                return await session.execute(text(sql), params)
+            # A PostgreSQL syntax failure aborts its transaction. The savepoint
+            # keeps the same connection usable for the guarded lexical retry.
+            async with session.begin_nested():
+                return await session.execute(text(sql), params)
+        except DBAPIError as exc:
+            syntax_error = (
+                PostgresSearchRepository._is_tsquery_syntax_error(exc)
+                if self.postgres
+                else SQLiteSearchRepository._is_fts5_syntax_error(exc)
+            )
+            if not syntax_error:
+                raise
+            retry = dict(params)
+            if self.postgres and params.get("relaxed_text"):
+                retry["text"] = params["relaxed_text"]
+            else:
+                # Preserve the established empty lexical channel for invalid
+                # explicit syntax; a hybrid request still retains vector matches.
+                retry.update(fts_enabled=False, text="" if self.postgres else '""')
+                if "title_text" in retry:
+                    retry["title_text"] = retry["text"]
+            return await session.execute(text(sql), retry)
+
     async def count(self, query: PreparedSearchQuery) -> int:
         if query.retrieval_mode != SearchRetrievalMode.FTS:
             raise ValueError("Exact counts are only supported for full-text search retrieval.")
         if not self.project_ids:
             return 0
-        source, where, params, _, _ = await self._parts(query, lexical=True)
+        ctes, params, _ = await self._fts_ctes(query)
         async with db.scoped_session(self.session_maker) as session:
-            result = await session.execute(
-                text(f"SELECT COUNT(*) FROM {source} WHERE {where}"), params
-            )
+            result = await self._execute(session, f"WITH {ctes} SELECT COUNT(*) FROM fts", params)
             return int(result.scalar_one())
 
     async def search(
@@ -116,21 +180,18 @@ class MultiProjectSearchRepository:
         if not self.project_ids:
             return []
         mode = query.retrieval_mode
-        result_columns = ", ".join(f"search_index.{name}" for name in _RESULT_COLUMNS)
         if mode == SearchRetrievalMode.FTS:
-            source, where, params, order, score = await self._parts(query, lexical=True)
+            ctes, params, order = await self._fts_ctes(query)
             direction = "DESC" if self.postgres else "ASC"
             sql = f"""
-                SELECT {result_columns}, {score} AS score
-                FROM {source} WHERE {where}
-                ORDER BY score {direction} {order}, search_index.project_id,
-                         search_index.type, search_index.id
+                WITH {ctes} SELECT * FROM fts
+                ORDER BY score {direction} {order}, project_id, type, id
                 LIMIT :limit OFFSET :offset
             """
             params.update(limit=limit, offset=offset)
             async with db.scoped_session(self.session_maker) as session:
                 with logfire.span("search.fts", project_count=len(self.project_ids)):
-                    result = await session.execute(text(sql), params)
+                    result = await self._execute(session, sql, params)
                 return [SearchIndexRow.from_mapping(row._asdict()) for row in result]
 
         expected_index = "pgvector" if self.postgres else "sqlite-vec"
@@ -210,19 +271,16 @@ class MultiProjectSearchRepository:
         """
         ranking = "SELECT project_id, type, id, score FROM vector_scores"
         if mode == SearchRetrievalMode.HYBRID:
-            fts_source, fts_where, fts_params, _, fts_score = await self._parts(query, lexical=True)
+            fts_ctes, fts_params, _ = await self._fts_ctes(query)
             params.update(fts_params)
             ctes += f""",
-                fts AS MATERIALIZED (
-                    SELECT search_index.project_id, search_index.type, search_index.id,
-                           ABS({fts_score}) AS score FROM {fts_source} WHERE {fts_where}
-                ),
+                {fts_ctes},
                 channels AS (
                     SELECT project_id, type, id, score AS vector_score, 0.0 AS fts_score
                     FROM vector_scores
                     UNION ALL
                     SELECT project_id, type, id, 0.0,
-                           COALESCE(score / NULLIF(MAX(score) OVER (), 0), 0) FROM fts
+                           COALESCE(ABS(score) / NULLIF(MAX(ABS(score)) OVER (), 0), 0) FROM fts
                 )
             """
             params["fusion_bonus"] = FUSION_BONUS
@@ -260,13 +318,24 @@ class MultiProjectSearchRepository:
             if not self.postgres:
                 # Connection setup only: this reader never calls adapter.initialize(),
                 # which may recreate storage and invalidate manifests on schema mismatch.
-                import sqlite_vec
+                try:
+                    import sqlite_vec
+                except ImportError as exc:
+                    raise SemanticDependenciesMissingError(
+                        "sqlite-vec package is missing. Install/update basic-memory."
+                    ) from exc
 
                 connection = await session.connection()
                 raw = await connection.get_raw_connection()
                 driver = raw.driver_connection
                 assert driver is not None
-                await driver.enable_load_extension(True)
+                try:
+                    await driver.enable_load_extension(True)
+                except AttributeError as exc:
+                    raise SemanticDependenciesMissingError(
+                        "This Python build does not support SQLite extension loading. "
+                        "Use a Python build with extension support or request FTS."
+                    ) from exc
                 try:
                     await driver.load_extension(sqlite_vec.loadable_path())
                 finally:
@@ -276,7 +345,7 @@ class MultiProjectSearchRepository:
                 project_count=len(self.project_ids),
                 retrieval_mode=mode.value,
             ):
-                result = await session.execute(text(sql), params)
+                result = await self._execute(session, sql, params)
             rows: dict[tuple[int, str, int], SearchIndexRow] = {}
             chunks: dict[tuple[int, str, int], list[str]] = {}
             for record in result:
