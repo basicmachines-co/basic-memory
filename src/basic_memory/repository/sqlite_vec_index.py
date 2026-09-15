@@ -115,6 +115,7 @@ class SQLiteVecIndex:
                 expected_dimensions = f"float[{self.scope.dimensions}]"
                 dimensions_changed = bool(vector_sql and expected_dimensions not in vector_sql)
                 source_hash_missing = bool(vector_sql and "+source_hash text" not in vector_sql)
+                partitions_missing = bool(vector_sql and "partition key" not in vector_sql)
                 if dimensions_changed or source_hash_missing:
                     logger.warning(
                         "SQLite vector storage schema mismatch "
@@ -124,6 +125,19 @@ class SQLiteVecIndex:
                         source_hash_missing=source_hash_missing,
                     )
                     await session.execute(text("DROP TABLE IF EXISTS search_vector_embeddings"))
+                elif partitions_missing:
+                    # Trigger: storage predates the project_id partition key, and its
+                    #   vectors are otherwise current.
+                    # Why: vec0 cannot add a column in place, and re-embedding a whole
+                    #   vault only to change how rows are partitioned would cost every
+                    #   local user a full embedding pass for nothing new.
+                    # Outcome: the vectors are carried into partitioned storage, each
+                    #   keyed by the project its manifest row names; manifests stay ready.
+                    logger.info(
+                        "SQLite vector storage predates project partitions; "
+                        "carrying vectors into partitioned storage"
+                    )
+                    await self._partition_existing_storage(session)
 
                 await session.execute(create_sqlite_search_vector_embeddings(self.scope.dimensions))
                 # Missing or dimension-rebuilt vec storage has no vectors, so ready
@@ -137,6 +151,35 @@ class SQLiteVecIndex:
                     )
                 await session.commit()
             self._initialized = True
+
+    async def _partition_existing_storage(self, session: AsyncSession) -> None:
+        """Rebuild vec storage with the partition key, keeping every current vector.
+
+        SQLite DDL is transactional, so the copy out, drop, recreate, and copy back
+        either all land or none do. A vector whose manifest row is gone has no
+        project to file under and is left behind, which is what the orphan sweep
+        would have done to it anyway.
+        """
+        await session.execute(
+            text(
+                "CREATE TEMP TABLE search_vector_embeddings_carry AS "
+                "SELECT e.rowid AS id, c.project_id AS project_id, "
+                "e.embedding AS embedding, e.source_hash AS source_hash "
+                "FROM search_vector_embeddings e "
+                "JOIN search_vector_chunks c ON c.id = e.rowid"
+            )
+        )
+        await session.execute(text("DROP TABLE search_vector_embeddings"))
+        await session.execute(create_sqlite_search_vector_embeddings(self.scope.dimensions))
+        await session.execute(
+            text(
+                "INSERT INTO search_vector_embeddings "
+                "(rowid, project_id, embedding, source_hash) "
+                "SELECT id, project_id, embedding, source_hash "
+                "FROM search_vector_embeddings_carry"
+            )
+        )
+        await session.execute(text("DROP TABLE search_vector_embeddings_carry"))
 
     async def upsert(self, project_id: int, records: Sequence[VectorRecord]) -> None:
         if not records:
@@ -192,12 +235,14 @@ class SQLiteVecIndex:
             )
             await session.execute(
                 text(
-                    "INSERT INTO search_vector_embeddings (rowid, embedding, source_hash) "
-                    "VALUES (:rowid, :embedding, :source_hash)"
+                    "INSERT INTO search_vector_embeddings "
+                    "(rowid, project_id, embedding, source_hash) "
+                    "VALUES (:rowid, :project_id, :embedding, :source_hash)"
                 ),
                 [
                     {
                         "rowid": rowids_by_key[record.key],
+                        "project_id": project_id,
                         "embedding": json.dumps(record.values),
                         "source_hash": record.source_hash,
                     }
@@ -323,21 +368,24 @@ class SQLiteVecIndex:
             "embedding_identity": self.scope.embedding_identity,
             "limit": limit,
         }
-        chunks_in_scope = projects.predicate("c.project_id", params)
+        # vec0 ranks the k nearest within each partition in scope, so a small
+        # project is never crowded out of its own window by a larger neighbour that
+        # shares the database; the outer ORDER BY merges the partitions.
+        partitions_in_scope = projects.predicate("project_id", params)
         async with db.scoped_session(self._session_maker) as session:
             await self._ensure_loaded(session)
             result = await session.execute(
                 text(
                     "WITH vector_matches AS MATERIALIZED ("
                     " SELECT rowid, distance, source_hash FROM search_vector_embeddings "
-                    " WHERE embedding MATCH :query AND k = :vector_k"
+                    f" WHERE {partitions_in_scope} "
+                    " AND embedding MATCH :query AND k = :vector_k"
                     ") "
                     "SELECT c.entity_id, c.chunk_key, vector_matches.distance "
                     "FROM vector_matches "
                     "JOIN search_vector_chunks c ON c.id = vector_matches.rowid "
                     "AND c.source_hash = vector_matches.source_hash "
-                    f"WHERE {chunks_in_scope} "
-                    "AND c.vector_index = 'sqlite-vec' "
+                    "WHERE c.vector_index = 'sqlite-vec' "
                     "AND c.embedding_status = 'ready' "
                     "AND c.embedding_model = :embedding_identity "
                     "ORDER BY vector_matches.distance ASC, "

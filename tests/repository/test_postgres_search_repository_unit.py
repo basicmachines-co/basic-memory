@@ -225,10 +225,13 @@ class TestEnsureVectorTablesSchemaBootstrapping:
         )
         missing_table = MagicMock()
         missing_table.fetchone.return_value = None
+        pgvector_version = MagicMock()
+        pgvector_version.scalar_one.return_value = "0.8.0"
         session.execute.side_effect = [
             MagicMock(),
             MagicMock(),
             MagicMock(),
+            pgvector_version,
             missing_table,
             MagicMock(),
             MagicMock(),

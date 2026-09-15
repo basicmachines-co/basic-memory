@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Sequence
 
 from loguru import logger
@@ -21,6 +22,32 @@ from basic_memory.repository.semantic_vector_index import (
     validate_query_dimensions,
     validate_vector_dimensions,
 )
+
+
+# pgvector's HNSW scan hands back at most ``hnsw.ef_search`` rows, 40 by default,
+# whatever the LIMIT asks for; the server caps the setting at 1000.
+HNSW_EF_SEARCH_DEFAULT = 40
+HNSW_EF_SEARCH_MAX = 1000
+
+_PGVECTOR_VERSION = re.compile(r"^(\d+)\.(\d+)")
+
+
+def pgvector_supports_iterative_scan(extversion: str) -> bool:
+    """Whether this pgvector keeps scanning an HNSW index until the LIMIT is filled.
+
+    Iterative index scans arrived in pgvector 0.8.0. Before that, a scan stops at
+    ``hnsw.ef_search`` candidates, and a filter applied afterwards (the manifest
+    join, a scope narrower than the table) leaves the window under-filled, so the
+    adapter cannot promise the nearest ``limit`` rows in scope. A version string
+    the pattern cannot read counts as older.
+    """
+    match = _PGVECTOR_VERSION.match(extversion)
+    return match is not None and (int(match.group(1)), int(match.group(2))) >= (0, 8)
+
+
+def hnsw_ef_search_for(limit: int) -> int:
+    """The candidate-list size that lets one HNSW scan return ``limit`` rows."""
+    return min(max(limit, HNSW_EF_SEARCH_DEFAULT), HNSW_EF_SEARCH_MAX)
 
 
 class PgVectorIndex:
@@ -56,6 +83,19 @@ class PgVectorIndex:
                     raise SemanticDependenciesMissingError(
                         "pgvector extension is unavailable for this Postgres database."
                     ) from exc
+                version = await session.execute(
+                    text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
+                )
+                extversion = str(version.scalar_one())
+                # Trigger: the installed pgvector predates iterative index scans.
+                # Why: without them a scoped query silently returns fewer rows than
+                #   the window asked for; a deployment gap should read as one.
+                # Outcome: a typed dependency error the API reports as a bad request.
+                if not pgvector_supports_iterative_scan(extversion):
+                    raise SemanticDependenciesMissingError(
+                        f"pgvector {extversion} predates iterative index scans; semantic "
+                        "search needs pgvector 0.8 or later (ALTER EXTENSION vector UPDATE)."
+                    )
 
                 existing_dimensions = await self._existing_dimensions(session)
                 storage_missing = existing_dimensions is None
@@ -322,10 +362,25 @@ class PgVectorIndex:
         embeddings_in_scope = projects.predicate("e.project_id", params)
         chunks_in_scope = projects.predicate("c.project_id", params)
         async with db.scoped_session(self._session_maker) as session:
+            # Both settings are transaction-local, so they last exactly as long as
+            # this scoped session. The scan is sized to the window it must fill
+            # and continues past that until the scope and manifest filters have
+            # admitted enough rows, instead of stopping at the first ef_search
+            # candidates and returning whatever of them survived.
+            await session.execute(
+                text("SELECT set_config('hnsw.ef_search', :ef_search, true)"),
+                {"ef_search": str(hnsw_ef_search_for(limit))},
+            )
+            await session.execute(
+                text("SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true)")
+            )
+            # A relaxed iterative scan may hand rows back slightly out of distance
+            # order, so the window is taken by distance alone and sorted once more.
             result = await session.execute(
                 text(
+                    "WITH nearest AS MATERIALIZED ("
                     "SELECT c.entity_id, c.chunk_key, "
-                    "1 - (e.embedding <=> CAST(:query AS vector)) AS similarity "
+                    "e.embedding <=> CAST(:query AS vector) AS distance "
                     "FROM search_vector_embeddings e "
                     "JOIN search_vector_chunks c ON c.id = e.chunk_id "
                     f"WHERE {embeddings_in_scope} "
@@ -335,9 +390,12 @@ class PgVectorIndex:
                     "AND c.embedding_status = 'ready' "
                     "AND c.embedding_model = :embedding_identity "
                     "AND e.source_hash = c.source_hash "
-                    "ORDER BY e.embedding <=> CAST(:query AS vector), "
-                    "c.entity_id ASC, c.chunk_key ASC "
+                    "ORDER BY e.embedding <=> CAST(:query AS vector) "
                     "LIMIT :limit"
+                    ") "
+                    "SELECT entity_id, chunk_key, 1 - distance AS similarity "
+                    "FROM nearest "
+                    "ORDER BY distance ASC, entity_id ASC, chunk_key ASC"
                 ),
                 params,
             )
