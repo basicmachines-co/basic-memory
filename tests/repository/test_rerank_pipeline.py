@@ -5,11 +5,13 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from logfire.testing import CaptureLogfire, capfire as capfire
 
 import basic_memory.repository.postgres_search_repository as postgres_search_repository_module
 import basic_memory.repository.search_repository as search_repository_module
 import basic_memory.repository.sqlite_search_repository as sqlite_search_repository_module
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
+from basic_memory.api.v2.utils import to_search_results
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.rerank_provider import (
@@ -26,6 +28,7 @@ from basic_memory.repository.semantic_errors import (
 )
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
+from basic_memory.services.entity_service import EntityService
 
 type BackendSearchRepository = SQLiteSearchRepository | PostgresSearchRepository
 
@@ -672,6 +675,68 @@ async def test_hybrid_search_reranks_once(rerank_search_repository):
     scores = [r.score for r in results if r.score is not None]
     assert scores == sorted(scores, reverse=True)
     assert reranker.calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rerank_enabled", [False, True])
+async def test_hybrid_fts_only_preview_stays_bounded_through_api_hydration(
+    rerank_search_repository: BackendSearchRepository,
+    entity_service: EntityService,
+    rerank_enabled: bool,
+    capfire: CaptureLogfire,
+) -> None:
+    """Large lexical-only notes cannot bypass the public preview via matched_chunk."""
+    repo = rerank_search_repository
+    await _index_two_auth_notes(repo)
+    content = "auth session token archive " * 5_000
+    await repo.index_item(
+        _entity_row(
+            project_id=repo.project_id,
+            row_id=403,
+            title="Auth archive",
+            permalink="specs/archive",
+            content=content,
+        )
+    )
+    # Leave this note unembedded so its real FTS hit has no vector chunk.
+    reranker = _FakeReranker({"archive": 0.95, "Alpha": 0.8, "Bravo": 0.7})
+    repo._rerank_provider = reranker if rerank_enabled else None
+    capfire.exporter.clear()
+
+    rows = await repo.search(
+        search_text="auth session token",
+        retrieval_mode=SearchRetrievalMode.HYBRID,
+        limit=5,
+    )
+    results = await to_search_results(entity_service, rows)
+
+    lexical = next(result for result in results if result.permalink == "specs/archive")
+    assert lexical.content == content[:4000]
+    assert lexical.content_length == len(content)
+    assert lexical.content_truncated is True
+    assert lexical.matched_chunk is None
+    assert len(lexical.model_dump_json().encode("utf-8")) < 6000
+    vector = next(result for result in results if result.permalink == "specs/alpha")
+    assert vector.matched_chunk == "auth login session token overview"
+    if rerank_enabled:
+        assert reranker.calls == 1
+        assert all(len(document) <= 2000 for document in reranker.document_batches[0])
+
+    spans = capfire.exporter.exported_spans_as_dict()
+    names = {span["name"] for span in spans}
+    assert {
+        "search.fts",
+        "search.embed_query",
+        "search.vector_query",
+        "search.vector_manifest_hydration",
+        "search.fetch_candidate_rows",
+        "search.fusion",
+        "search.hydrate_results",
+    } <= names
+    assert ("search.rerank" in names) is rerank_enabled
+    fusion = next(span for span in spans if span["name"] == "search.fusion")
+    assert fusion["attributes"]["result_count"] == 3
+    assert all("auth session token" not in str(span["attributes"]) for span in spans)
 
 
 @pytest.mark.asyncio

@@ -299,8 +299,8 @@ async def test_cross_type_id_collision_keeps_both_results():
 
 
 @pytest.mark.asyncio
-async def test_fts_only_result_gets_matched_chunk_from_content_snippet():
-    """FTS-only results should have matched_chunk_text populated from content_snippet."""
+async def test_fts_only_result_does_not_copy_content_into_matched_chunk():
+    """FTS-only hits use the API content preview instead of a second full-note field."""
     repo = ConcreteSearchRepo()
 
     content = "This is the full note content with the answer we need to find."
@@ -318,7 +318,8 @@ async def test_fts_only_result_gets_matched_chunk_from_content_snippet():
         results = await repo._search_hybrid(**HYBRID_KWARGS)
 
     assert len(results) == 1
-    assert results[0].matched_chunk_text == content
+    assert results[0].matched_chunk_text is None
+    assert results[0].content_snippet == content
 
 
 @pytest.mark.asyncio
