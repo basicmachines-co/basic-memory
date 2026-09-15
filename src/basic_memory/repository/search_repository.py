@@ -16,14 +16,25 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.repository.embedding_provider_factory import create_embedding_provider
 from basic_memory.repository.rerank_provider_factory import create_rerank_provider
+from basic_memory.repository.postgres_search_query import PostgresFts
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
+from basic_memory.repository.search_filters import FtsBackend
 from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.repository.search_reader import (
+    Reranking,
+    SearchReader,
+    SemanticSearch,
+    VectorRetrieval,
+)
 from basic_memory.repository.search_repository_base import ChunkManifestRow, SearchIndexKey
+from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.search_trace import SearchTraceCollector
 from basic_memory.repository.semantic_vector_index_factory import (
     create_semantic_vector_index,
     resolve_semantic_vector_index_name,
+    semantic_embedding_identity,
 )
+from basic_memory.repository.sqlite_search_query import SQLiteFts
 from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
@@ -265,8 +276,60 @@ def create_search_repository(
         )
 
 
+def create_search_reader(
+    session_maker: async_sessionmaker[AsyncSession],
+    scope: ProjectScope,
+    app_config: BasicMemoryConfig,
+    database_backend: Optional[DatabaseBackend] = None,
+) -> SearchReader:
+    """Compose the read path over an explicit scope, with no project repository.
+
+    Resolves the same shared embedding provider, vector adapter, and reranker that
+    ``create_search_repository`` hands a project repository, so a scoped search runs
+    the pipeline a project's own route runs, over a wider scope. Whether semantic
+    retrieval is available is decided here, once, from configuration; a semantic
+    query against a reader built without it fails as a disabled feature.
+    """
+    backend = database_backend or app_config.database_backend
+    fts: FtsBackend = (
+        PostgresFts(session_maker)
+        if backend == DatabaseBackend.POSTGRES
+        else SQLiteFts(session_maker)
+    )
+    if not app_config.semantic_search_enabled:
+        return SearchReader(scope, fts)
+
+    embedding_provider = create_embedding_provider(app_config)
+    vector_index_name, vector_index = create_semantic_vector_index(
+        session_maker=session_maker,
+        app_config=app_config,
+        database_backend=backend,
+        embedding_provider=embedding_provider,
+    )
+    vector = VectorRetrieval(
+        index=vector_index,
+        index_name=vector_index_name,
+        embedding_provider=embedding_provider,
+        embedding_model=semantic_embedding_identity(embedding_provider),
+        vector_k=app_config.semantic_vector_k,
+        min_similarity=app_config.semantic_min_similarity,
+    )
+    rerank_provider = create_rerank_provider(app_config)
+    rerank = (
+        Reranking(
+            provider=rerank_provider,
+            candidates=app_config.reranker_candidates,
+            max_document_chars=app_config.reranker_max_document_chars,
+        )
+        if rerank_provider is not None
+        else None
+    )
+    return SearchReader(scope, fts, SemanticSearch(session_maker, scope, fts, vector, rerank))
+
+
 __all__ = [
     "SearchRepository",
     "SearchIndexRow",
+    "create_search_reader",
     "create_search_repository",
 ]
