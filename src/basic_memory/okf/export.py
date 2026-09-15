@@ -82,7 +82,7 @@ def snapshot_files(root: Path) -> tuple[ExportFile, ...]:
     from basic_memory.index.local_wiki_projection import _is_projector_owned
     from basic_memory.runtime.storage import runtime_file_path_is_markdown_note
 
-    scan = scan_local_project_index_files(root)
+    scan = scan_local_project_index_files(root, strict=True)
     if scan.unreadable_directories:
         raise OSError("Incomplete project scan: " + ", ".join(scan.unreadable_directories))
     files = []

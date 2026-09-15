@@ -279,3 +279,25 @@ def test_reserved_directory_is_rejected_before_staging(source_config, directory)
     (parent / "a.md").write_text("---\ntype: note\n---\n# A")
     with pytest.raises(ValueError, match="reserved OKF directory name; rename it first"):
         snapshot_files(root)
+
+
+@pytest.mark.asyncio
+async def test_file_stat_failure_preserves_replacement_destination(
+    source_config, tmp_path, monkeypatch
+):
+    root = Path(source_config.projects["export"].path)
+    source = root / "a.md"
+    destination = tmp_path / "bundle"
+    destination.mkdir()
+    (destination / "keep").write_bytes(b"previous bundle")
+    original_lstat = Path.lstat
+
+    def failing_lstat(path, *args, **kwargs):
+        if path == source:
+            raise PermissionError(13, "stat unavailable", str(path))
+        return original_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", failing_lstat)
+    with pytest.raises(PermissionError, match="stat unavailable"):
+        await export_project(source_config, "export", destination, replace=True)
+    assert (destination / "keep").read_bytes() == b"previous bundle"

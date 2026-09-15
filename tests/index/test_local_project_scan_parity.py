@@ -159,7 +159,8 @@ def test_local_project_index_file_paths_aborts_when_root_unreadable(tmp_path: Pa
         local_project_index_file_paths(missing_root, ignore_patterns=set())
 
 
-def test_local_project_index_file_paths_skips_symlinked_files(tmp_path: Path) -> None:
+@pytest.mark.parametrize("strict", [False, True])
+def test_local_project_index_file_paths_skips_symlinked_files(tmp_path: Path, strict: bool) -> None:
     """Symlinked files must not be indexed (their target may be outside the project)."""
     project_root = (tmp_path / "project").resolve()
     project_root.mkdir()
@@ -171,7 +172,21 @@ def test_local_project_index_file_paths_skips_symlinked_files(tmp_path: Path) ->
     except (OSError, NotImplementedError):
         pytest.skip("symlinks not supported on this platform")
 
-    assert local_project_index_file_paths(project_root, ignore_patterns=set()) == ("keep.md",)
+    assert scan_local_project_index_files(
+        project_root, ignore_patterns=set(), strict=strict
+    ).file_paths == ("keep.md",)
+
+
+def test_strict_scan_rejects_partial_walk(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / "a.md").write_text("# A", encoding="utf-8")
+
+    def partial_walk(*args, **kwargs):
+        yield str(tmp_path), [], ["a.md"]
+        raise PermissionError("walk failed after a file")
+
+    monkeypatch.setattr(local_project.os, "walk", partial_walk)
+    with pytest.raises(PermissionError, match="walk failed after a file"):
+        scan_local_project_index_files(tmp_path, ignore_patterns=set(), strict=True)
 
 
 @pytest.mark.asyncio
