@@ -1,5 +1,11 @@
 """Shared full-text query preparation rules."""
 
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
+from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
+from basic_memory.temporal import TemporalFilter
+
 import re
 import unicodedata
 
@@ -300,3 +306,22 @@ def relaxed_query_words(search_text: str | None) -> list[str] | None:
         return None
     pruned_words = [token for token in tokens if token not in RELAXATION_STOPWORDS]
     return _emit_relaxation_terms(pruned_words or tokens) or None
+
+
+@dataclass(frozen=True)
+class PreparedSearchQuery:
+    """Normalized query inputs shared by search and count."""
+
+    search_text: str | None
+    permalink: str | None
+    permalink_match: str | None
+    title: str | None
+    note_types: list[str] | None
+    search_item_types: list[SearchItemType] | None
+    categories: list[str] | None
+    after_date: datetime | None
+    metadata_filters: dict[str, Any] | None
+    file_path_prefix: str | None
+    temporal: TemporalFilter | None
+    retrieval_mode: SearchRetrievalMode
+    min_similarity: float | None

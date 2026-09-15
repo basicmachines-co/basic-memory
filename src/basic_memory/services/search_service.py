@@ -4,7 +4,7 @@ import asyncio
 import ast
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import datetime
 from typing import Any, List, Optional, Set, Dict
 
@@ -23,7 +23,10 @@ from basic_memory.repository.search_repository import (
     SearchIndexRow,
     SearchRepository,
 )
-from basic_memory.repository.search_query import relaxed_query_words
+from basic_memory.repository.search_query import (
+    PreparedSearchQuery as PreparedSearchQuery,
+    relaxed_query_words,
+)
 from basic_memory.repository.search_trace import SearchTraceCollector
 from basic_memory.schemas.base import normalize_note_type
 from basic_memory.schemas.search import SearchQuery, SearchItemType, SearchRetrievalMode
@@ -40,25 +43,6 @@ from basic_memory.temporal import (
 # Maximum size for content_stems field to stay under Postgres's 8KB index row limit.
 # We use 6000 characters to leave headroom for other indexed columns and overhead.
 MAX_CONTENT_STEMS_SIZE = 6000
-
-
-@dataclass(frozen=True)
-class PreparedSearchQuery:
-    """Normalized query inputs shared by search and count."""
-
-    search_text: str | None
-    permalink: str | None
-    permalink_match: str | None
-    title: str | None
-    note_types: list[str] | None
-    search_item_types: list[SearchItemType] | None
-    categories: list[str] | None
-    after_date: datetime | None
-    metadata_filters: dict[str, Any] | None
-    file_path_prefix: str | None
-    temporal: TemporalFilter | None
-    retrieval_mode: SearchRetrievalMode
-    min_similarity: float | None
 
 
 def entity_embeddings_enabled(entity: Entity) -> bool:
@@ -213,7 +197,8 @@ class SearchService:
 
         logger.info("Reindex complete")
 
-    def prepare_query(self, query: SearchQuery) -> PreparedSearchQuery | None:
+    @staticmethod
+    def prepare_query(query: SearchQuery) -> PreparedSearchQuery | None:
         """Normalize a SearchQuery into repository arguments."""
         search_text = query.text
         tags = query.tags

@@ -84,7 +84,9 @@ def _not_window_ends_before_source(window: TemporalRange) -> str | None:
     return f"({' OR '.join(clauses)})"
 
 
-def build_temporal_predicate(temporal: TemporalFilter, params: dict[str, Any]) -> str:
+def build_temporal_predicate(
+    temporal: TemporalFilter, params: dict[str, Any], *, project_scope_sql: str = "= :project_id"
+) -> str:
     """Build the WHERE-clause fragment restricting search rows by authored valid time.
 
     Two intervals overlap exactly when neither lies entirely before the other, which
@@ -105,7 +107,7 @@ def build_temporal_predicate(temporal: TemporalFilter, params: dict[str, Any]) -
         # false constant is both correct and cheaper than running the subquery.
         return _MATCHES_NOTHING
 
-    conditions = [f"{TEMPORAL_INDEX_TABLE}.project_id = :project_id"]
+    conditions = [f"{TEMPORAL_INDEX_TABLE}.project_id {project_scope_sql}"]
 
     if temporal.kind is not None:
         params["tq_kind"] = temporal.kind.value
@@ -138,8 +140,8 @@ def build_temporal_predicate(temporal: TemporalFilter, params: dict[str, Any]) -
     # (type, id) is the search row's own identity and the address this projection
     # stores, so the pair joins the two without a correlated reference.
     return (
-        "(search_index.type, search_index.id) IN (\n"
-        f"  SELECT {TEMPORAL_INDEX_TABLE}.source_type, {TEMPORAL_INDEX_TABLE}.source_id\n"
+        "(search_index.project_id, search_index.type, search_index.id) IN (\n"
+        f"  SELECT {TEMPORAL_INDEX_TABLE}.project_id, {TEMPORAL_INDEX_TABLE}.source_type, {TEMPORAL_INDEX_TABLE}.source_id\n"
         f"    FROM {TEMPORAL_INDEX_TABLE}\n"
         f"   WHERE {where_clause})"
     )

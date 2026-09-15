@@ -9,6 +9,9 @@ from loguru import logger
 
 from basic_memory import __version__ as version
 from basic_memory.api.container import ApiContainer, set_container
+from basic_memory.api.v2.routers.multi_project_search_router import (
+    router as multi_project_search_router,
+)
 from basic_memory.api.v2.routers import (
     accepted_content_router as v2_accepted_content,
     knowledge_router as v2_knowledge,
@@ -136,6 +139,7 @@ app.include_router(v2_importer, prefix="/v2/projects/{project_id}")
 app.include_router(v2_schema, prefix="/v2/projects/{project_id}")
 app.include_router(v2_inspect, prefix="/v2/projects/{project_id}")
 app.include_router(v2_project, prefix="/v2")
+app.include_router(multi_project_search_router, prefix="/v2")
 
 # Legacy web app proxy paths (compat with /proxy/projects/projects)
 app.include_router(v2_project, prefix="/proxy/projects")

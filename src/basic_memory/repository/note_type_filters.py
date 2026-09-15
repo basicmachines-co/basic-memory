@@ -50,6 +50,7 @@ def build_note_type_predicate(
     params: dict[str, Any],
     *,
     note_type_value: str,
+    project_scope_sql: str = "= :project_id",
 ) -> str:
     """Build the WHERE-clause fragment restricting rows to notes of the given types.
 
@@ -66,10 +67,10 @@ def build_note_type_predicate(
         placeholders.append(f":{name}")
 
     return (
-        f"{SEARCH_TABLE}.entity_id IN (\n"
-        f"  SELECT {_OWNER}.id\n"
+        f"({SEARCH_TABLE}.project_id, {SEARCH_TABLE}.entity_id) IN (\n"
+        f"  SELECT {_OWNER}.project_id, {_OWNER}.id\n"
         f"    FROM {SEARCH_TABLE} AS {_OWNER}\n"
         f"   WHERE {_OWNER}.type = '{SearchItemType.ENTITY.value}'\n"
-        f"     AND {_OWNER}.project_id = :project_id\n"
+        f"     AND {_OWNER}.project_id {project_scope_sql}\n"
         f"     AND LOWER({note_type_value}) IN ({', '.join(placeholders)}))"
     )
