@@ -382,3 +382,55 @@ async def test_exact_project_name_precedes_normalized_alias(source_config, tmp_p
     assert report.success and report.concepts == 1
     assert (destination / "chosen.md").is_file()
     assert not (destination / "a.md").exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ignore_name", [".gitignore", ".bmignore"])
+async def test_unreadable_ignore_file_aborts_publication(
+    source_config, tmp_path, monkeypatch, ignore_name
+):
+    from basic_memory.ignore_utils import get_bmignore_path
+
+    root = Path(source_config.projects["export"].path)
+    ignore = root / ignore_name if ignore_name == ".gitignore" else get_bmignore_path()
+    ignore.parent.mkdir(parents=True, exist_ok=True)
+    ignore.write_text("credentials.json\n", encoding="utf-8")
+    (root / "credentials.json").write_text("excluded bytes", encoding="utf-8")
+    destination = tmp_path / "bundle"
+    destination.mkdir()
+    (destination / "keep").write_bytes(b"previous bundle")
+    original_read = Path.read_text
+
+    def denied_read(path, *args, **kwargs):
+        if path == ignore:
+            raise PermissionError(13, "ignore rules unreadable", str(path))
+        return original_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", denied_read)
+    with pytest.raises(PermissionError, match="ignore rules unreadable"):
+        await export_project(source_config, "export", destination, replace=True)
+    assert (destination / "keep").read_bytes() == b"previous bundle"
+    monkeypatch.setattr(Path, "read_text", original_read)
+    assert (await export_project(source_config, "export", destination, replace=True)).success
+    assert not (destination / "credentials.json").exists()
+
+
+@pytest.mark.parametrize("empty_bmignore", [False, True])
+def test_strict_ignore_defaults_do_not_create_files(tmp_path, monkeypatch, empty_bmignore):
+    from basic_memory.ignore_utils import (
+        DEFAULT_IGNORE_PATTERNS,
+        create_default_bmignore,
+        load_gitignore_patterns,
+    )
+
+    bmignore = tmp_path / ".bmignore"
+    monkeypatch.setattr("basic_memory.ignore_utils.get_bmignore_path", lambda: bmignore)
+    if empty_bmignore:
+        bmignore.write_text("# no custom rules\n", encoding="utf-8")
+    assert load_gitignore_patterns(tmp_path, use_gitignore=False, strict=True) == (
+        DEFAULT_IGNORE_PATTERNS
+    )
+    assert bmignore.exists() is empty_bmignore
+    if empty_bmignore:
+        create_default_bmignore()
+        assert bmignore.read_text(encoding="utf-8") == "# no custom rules\n"

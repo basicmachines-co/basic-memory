@@ -861,3 +861,27 @@ def test_network_path_wikilinks_remain_literal():
     assert convert_wikilinks(body, "source.md", {"a.md": "a.md"}, "p") == (
         "[[//example.com/a]] [[//example.com/a|alias]] [/a.md](/a.md)"
     )
+
+
+@pytest.mark.parametrize("duplicate", [False, True])
+def test_nested_resource_titles_resolve_with_ambiguity_handling(test_project, duplicate):
+    from basic_memory.models import Entity
+    from basic_memory.services.bulk_link_resolver import ProjectEntityIdentityIndex
+
+    owner = Entity(title="paper.pdf", file_path="refs/paper.pdf")
+    entities = [owner]
+    files = [ExportFile("refs/paper.pdf", b"pdf"), ExportFile("source.md", b"[[paper.pdf]]")]
+    if duplicate:
+        entities.append(Entity(title="paper.pdf", file_path="other/paper.pdf"))
+        files.append(ExportFile("other/paper.pdf", b"other pdf"))
+    index = ProjectEntityIdentityIndex.from_entities(test_project, entities)
+    resolved = index.resolve_strict(
+        "paper.pdf", include_project_permalinks=True, workspace_permalink=None
+    ).entity
+    assert resolved is (None if duplicate else owner)
+    source = next(
+        file.content
+        for file in render_bundle(ExportSnapshot("p", tuple(files)))
+        if file.path == "source.md"
+    )
+    assert (b"[paper.pdf](/paper.pdf)" if duplicate else b"[paper.pdf](/refs/paper.pdf)") in source

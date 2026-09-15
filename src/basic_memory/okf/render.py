@@ -286,10 +286,6 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
             if note_type is not None
             else "note"
         )
-        if title in title_targets and title_targets[title] != file.path:
-            ambiguous.add(title)
-        else:
-            title_targets[title] = file.path
         permalink = normalize_frontmatter_value(source_metadata.get("permalink"))
         if not isinstance(permalink, str) or not permalink:
             permalink = build_canonical_permalink(
@@ -303,6 +299,13 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
                     f"{permalinks[permalink]}"
                 )
             permalinks[permalink] = file.path
+    # Resources use their full filename as the canonical indexed title.
+    for file in snapshot.files:
+        title = titles.get(file.path, PurePosixPath(file.path).name)
+        if title in title_targets and title_targets[title] != file.path:
+            ambiguous.add(title)
+        else:
+            title_targets[title] = file.path
     for alias in ambiguous:
         title_targets.pop(alias)
     # Relative path resolution uses exact file identities, separate from semantic names.
