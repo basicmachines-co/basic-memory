@@ -351,7 +351,16 @@ async def test_filesystem_identical_source_containment_is_rejected(
             path = actual / path.relative_to(alias)
         return original_stat(path, *args, **kwargs)
 
+    def case_insensitive_exists(path):
+        try:
+            case_insensitive_stat(path)
+        except FileNotFoundError:
+            return False
+        return True
+
     monkeypatch.setattr(Path, "stat", case_insensitive_stat)
+    # Python 3.14 exists() uses os.path.exists directly, bypassing Path.stat.
+    monkeypatch.setattr(Path, "exists", case_insensitive_exists)
     before = (root / "a.md").read_bytes()
     with pytest.raises(ValueError, match="Destination must be outside"):
         await export_project(source_config, "export", destination, replace=True)
