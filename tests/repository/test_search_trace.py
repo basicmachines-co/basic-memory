@@ -847,7 +847,7 @@ async def test_fts_vector_hybrid_and_rerank_trace_variants(
     )
     assert isinstance(reranked_trace, VectorQueryTrace)
     assert reranked_trace.rerank is not None
-    assert reranked_trace.rerank.stable_pool_refetched is True
+    assert reranked_trace.rerank.stable_pool_refetched is False
     assert reranked_trace.rerank.entries[0].key == ("entity", 3)
     alpha_rerank = next(
         entry for entry in reranked_trace.rerank.entries if entry.key == ("entity", 1)

@@ -211,7 +211,7 @@ async def test_postgres_hybrid_preserves_candidate_windows(
 
     assert growing_prefix_results
     assert reranker.calls == 2
-    assert candidate_limits == [90, 80]
+    assert candidate_limits == [90]
 
     candidate_limits.clear()
     large_page_with_probe = await search_service.search(
@@ -226,7 +226,7 @@ async def test_postgres_hybrid_preserves_candidate_windows(
 
     assert len(large_page_with_probe) == 101
     assert reranker.calls == 3
-    assert candidate_limits == [890, 80]
+    assert candidate_limits == [890]
 
     # A larger retrieval window must extend the same sequence rather than
     # reordering rows already exposed by an earlier deep page.
@@ -243,7 +243,7 @@ async def test_postgres_hybrid_preserves_candidate_windows(
     )
 
     assert len(stable_window) == 40
-    assert candidate_limits == [280, 80]
+    assert candidate_limits == [280]
 
     candidate_limits.clear()
     third_page = await search_service.search(
@@ -256,7 +256,7 @@ async def test_postgres_hybrid_preserves_candidate_windows(
         limit=10,
         offset=20,
     )
-    assert candidate_limits == [180, 80]
+    assert candidate_limits == [180]
 
     candidate_limits.clear()
     fourth_page = await search_service.search(
@@ -269,7 +269,7 @@ async def test_postgres_hybrid_preserves_candidate_windows(
         limit=10,
         offset=30,
     )
-    assert candidate_limits == [280, 80]
+    assert candidate_limits == [280]
 
     assert [row.permalink for row in third_page] == [row.permalink for row in stable_window[20:30]]
     assert [row.permalink for row in fourth_page] == [row.permalink for row in stable_window[30:40]]

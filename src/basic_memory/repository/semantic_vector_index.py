@@ -53,6 +53,9 @@ class VectorMatch:
 
     key: VectorKey
     similarity: float
+    # Zero-based position before adapter-side filtering, when filtering consumes
+    # top-k slots (sqlite-vec). Other adapters use their returned match order.
+    candidate_rank: int | None = None
 
 
 @runtime_checkable

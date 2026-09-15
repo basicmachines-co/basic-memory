@@ -327,25 +327,34 @@ class SQLiteVecIndex:
         query: Sequence[float],
         *,
         limit: int,
+        stable_prefix: bool = False,
     ) -> list[VectorMatch]:
         if not query or limit <= 0:
             return []
         validate_query_dimensions(self.scope, query)
         await self.initialize()
         vector_k = min(limit, SQLITE_VEC_MAX_K)
+        # vec0's equal-distance membership changes with k. Reranking needs one
+        # repeatable universe to reconstruct smaller prefixes without a second query.
+        # Reuse the adapter's existing ceiling; only the requested slots survive SQL.
+        query_k = str(SQLITE_VEC_MAX_K) if stable_prefix else ":vector_k"
         async with db.scoped_session(self._session_maker) as session:
             await self._ensure_loaded(session)
             result = await session.execute(
                 text(
                     "WITH vector_matches AS MATERIALIZED ("
                     " SELECT rowid, distance, source_hash FROM search_vector_embeddings "
-                    " WHERE embedding MATCH :query AND k = :vector_k"
-                    ") "
-                    "SELECT c.entity_id, c.chunk_key, vector_matches.distance "
-                    "FROM vector_matches "
+                    f" WHERE embedding MATCH :query AND k = {query_k}"
+                    "), ranked_matches AS MATERIALIZED ("
+                    " SELECT *, ROW_NUMBER() OVER (ORDER BY distance, rowid) - 1 AS candidate_rank"
+                    " FROM vector_matches) "
+                    "SELECT c.entity_id, c.chunk_key, vector_matches.distance, "
+                    "vector_matches.candidate_rank "
+                    "FROM ranked_matches AS vector_matches "
                     "JOIN search_vector_chunks c ON c.id = vector_matches.rowid "
                     "AND c.source_hash = vector_matches.source_hash "
                     "WHERE c.project_id = :project_id "
+                    "AND vector_matches.candidate_rank < :vector_k "
                     "AND c.vector_index = 'sqlite-vec' "
                     "AND c.embedding_status = 'ready' "
                     "AND c.embedding_model = :embedding_identity "
@@ -366,6 +375,7 @@ class SQLiteVecIndex:
                     entity_id=int(row["entity_id"]),
                     chunk_key=str(row["chunk_key"]),
                 ),
+                candidate_rank=int(row["candidate_rank"]),
                 similarity=max(
                     0.0,
                     min(1.0, 1.0 - (float(row["distance"]) ** 2) / 2.0),

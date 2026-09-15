@@ -620,7 +620,7 @@ async def test_vector_search_expands_tail_from_stable_rerank_pool(
     )
 
     assert [row.permalink for row in results] == ["specs/bravo", "specs/alpha"]
-    assert candidate_limits == [18, 8]
+    assert candidate_limits == [18]
 
 
 @pytest.mark.asyncio
@@ -795,7 +795,7 @@ async def test_hybrid_search_preserves_candidate_windows(
 
     assert growing_prefix_results
     assert reranker.calls == 2
-    assert candidate_limits == [90, 80]
+    assert candidate_limits == [90]
 
 
 @pytest.mark.asyncio

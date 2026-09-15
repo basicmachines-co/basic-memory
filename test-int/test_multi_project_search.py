@@ -193,9 +193,11 @@ async def test_explicit_scope_one_pipeline_and_read_only(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("mode", list(SearchRetrievalMode))
+@pytest.mark.parametrize("reranker_enabled", [False, True])
 async def test_global_pagination_is_independent_of_page_size(
-    corpus: Corpus, mode: SearchRetrievalMode
+    corpus: Corpus, mode: SearchRetrievalMode, reranker_enabled: bool
 ) -> None:
+    corpus.config.reranker_enabled = reranker_enabled
     repo = corpus.repository([project.id for project in corpus.projects[:2]])
     query = SearchService.prepare_query(SearchQuery(text="nebula", retrieval_mode=mode))
     assert query is not None
@@ -209,6 +211,8 @@ async def test_global_pagination_is_independent_of_page_size(
         (r.project_id, r.type, r.id, r.score) for r in complete
     ]
     assert await repo.search(query, offset=100) == []
+    # This database-scoped reader never invokes the single-project rerank pipeline.
+    assert corpus.provider.query_calls == (5 if mode != SearchRetrievalMode.FTS else 0)
 
 
 @pytest.mark.asyncio

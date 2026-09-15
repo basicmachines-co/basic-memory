@@ -5,7 +5,7 @@ import time
 from abc import ABC, abstractmethod
 from collections.abc import Iterable, Mapping, Sequence
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Literal, Optional, cast
 
@@ -77,6 +77,7 @@ from basic_memory.repository.semantic_vector_sync import (
     StagedVectorDeletion as _StagedVectorDeletion,
     VectorChunkState,
 )
+from basic_memory.repository.sqlite_vec_index import SQLiteVecIndex
 from basic_memory.runtime.storage import RUNTIME_MARKDOWN_CONTENT_TYPE
 from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.schemas.search import (
@@ -126,6 +127,14 @@ _BUILT_IN_VECTOR_INDEX_NAMES = frozenset({"pgvector", "sqlite-vec"})
 # the vector/hybrid retrieval path must key rows by (type, id) to avoid collisions.
 type SearchIndexKey = tuple[str, int]
 type StoredEmbeddingStatus = Literal["pending", "ready"]
+
+
+@dataclass(slots=True)
+class _VectorCandidateWindow:
+    """Request-local prefix rows and original chunk ranks needed by hybrid fusion."""
+
+    stable_rows: list[SearchIndexRow] = field(default_factory=list)
+    source_ranks: dict[SearchIndexKey, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -580,10 +589,18 @@ class SearchRepositoryBase(ABC):
 
         external_vector_index = self._semantic_vector_index_name not in _BUILT_IN_VECTOR_INDEX_NAMES
         if not external_vector_index:
-            matches = await self._semantic_vector_index.search(
-                query_embedding,
-                limit=candidate_limit,
-            )
+            if (
+                isinstance(self._semantic_vector_index, SQLiteVecIndex)
+                and self._rerank_provider is not None
+            ):
+                matches = await self._semantic_vector_index.search(
+                    query_embedding, limit=candidate_limit, stable_prefix=True
+                )
+            else:
+                matches = await self._semantic_vector_index.search(
+                    query_embedding,
+                    limit=candidate_limit,
+                )
             if trace is not None:
                 trace.readiness = await read_manifest_readiness(
                     session,
@@ -768,8 +785,11 @@ class SearchRepositoryBase(ABC):
                 "chunk_key": match.key.chunk_key,
                 "chunk_text": chunks_by_key[match.key],
                 "best_similarity": match.similarity,
+                "candidate_rank": match.candidate_rank
+                if match.candidate_rank is not None
+                else rank,
             }
-            for match in matches
+            for rank, match in enumerate(matches)
             if match.key in chunks_by_key
         ]
         if trace is not None:
@@ -2461,6 +2481,7 @@ class SearchRepositoryBase(ABC):
         candidate_limit: int | None = None,
         _emit_observability_log: bool = True,
         _apply_rerank: bool = True,
+        _candidate_window: _VectorCandidateWindow | None = None,
         trace: SearchTraceCollector | None = None,
     ) -> List[SearchIndexRow]:
         """Run vector-only search returning chunk-level results.
@@ -2470,7 +2491,9 @@ class SearchRepositoryBase(ABC):
         result, not collapsed into its parent entity.
 
         ``candidate_limit`` is supplied only by a composed retrieval stage that
-        already sized the shared candidate pool.
+        already sized the shared candidate pool. ``_candidate_window`` collects the
+        fixed prefix and original chunk ranks for hybrid fusion, without another
+        retrieval or hydration pass. It is owned by this request, never the repository.
         """
         self._assert_semantic_available()
         await self._ensure_vector_tables()
@@ -2570,7 +2593,9 @@ class SearchRepositoryBase(ABC):
         # Track the best similarity per row (for ranking) and all chunks (for context).
         similarity_by_si_key: dict[SearchIndexKey, float] = {}
         chunks_by_si_key: dict[SearchIndexKey, list[tuple[float, str]]] = {}
-        for row in vector_rows:
+        stable_chunks: dict[SearchIndexKey, list[tuple[float, str]]] = {}
+        stable_limit = self._rerank_candidate_limit() if self._should_rerank(query_text) else 0
+        for rank, row in enumerate(vector_rows):
             chunk_key = row.get("chunk_key", "")
             if "best_similarity" in row:
                 similarity = float(row["best_similarity"])
@@ -2588,6 +2613,20 @@ class SearchRepositoryBase(ABC):
             if current is None or similarity > current:
                 similarity_by_si_key[si_key] = similarity
             chunks_by_si_key.setdefault(si_key, []).append((similarity, chunk_text))
+            # Built-in indexes limit adapter matches before manifest hydration. A
+            # dropped match must still consume its original prefix slot. External
+            # adapters instead fill the requested window with live hydrated chunks.
+            prefix_rank = (
+                int(row.get("candidate_rank", rank))
+                if self._semantic_vector_index_name in _BUILT_IN_VECTOR_INDEX_NAMES
+                else rank
+            )
+            if prefix_rank < stable_limit:
+                stable_chunks.setdefault(si_key, []).append((similarity, chunk_text))
+            if _candidate_window is not None:
+                _candidate_window.source_ranks[si_key] = min(
+                    _candidate_window.source_ranks.get(si_key, prefix_rank), prefix_rank
+                )
 
         if not similarity_by_si_key:
             hydrate_ms = (time.perf_counter() - hydrate_start) * 1000
@@ -2671,63 +2710,40 @@ class SearchRepositoryBase(ABC):
                 )
             search_index_rows = {k: v for k, v in search_index_rows.items() if k in allowed_keys}
 
-        ranked_rows: list[SearchIndexRow] = []
-        for si_key, similarity in similarity_by_si_key.items():
-            row = search_index_rows.get(si_key)
-            if row is None:
-                continue
-
-            # Small notes: return full content so the answer is always present.
-            # Large notes: return top-N most relevant chunks for richer context.
-            content_snippet = row.content_snippet or ""
-            if content_snippet and len(content_snippet) <= SMALL_NOTE_CONTENT_LIMIT:
-                matched_chunk_text = content_snippet
-            else:
-                si_chunks = chunks_by_si_key.get(si_key, [])
-                si_chunks.sort(key=lambda c: c[0], reverse=True)
-                top_texts = [text for _, text in si_chunks[:TOP_CHUNKS_PER_RESULT]]
-                matched_chunk_text = "\n---\n".join(top_texts) if top_texts else None
-
-            ranked_rows.append(
-                replace(
-                    row,
-                    score=similarity,
-                    matched_chunk_text=matched_chunk_text,
+        def materialize_chunks(
+            chunks: dict[SearchIndexKey, list[tuple[float, str]]],
+        ) -> list[SearchIndexRow]:
+            ranked_rows: list[SearchIndexRow] = []
+            for si_key, si_chunks in chunks.items():
+                row = search_index_rows.get(si_key)
+                if row is None or si_key not in similarity_by_si_key:
+                    continue
+                si_chunks.sort(key=lambda chunk: chunk[0], reverse=True)
+                similarity = si_chunks[0][0]
+                if effective_min_similarity > 0.0 and similarity < effective_min_similarity:
+                    continue
+                content_snippet = row.content_snippet or ""
+                if content_snippet and len(content_snippet) <= SMALL_NOTE_CONTENT_LIMIT:
+                    matched_chunk_text = content_snippet
+                else:
+                    matched_chunk_text = "\n---\n".join(
+                        text for _, text in si_chunks[:TOP_CHUNKS_PER_RESULT]
+                    )
+                ranked_rows.append(
+                    replace(row, score=similarity, matched_chunk_text=matched_chunk_text)
                 )
-            )
+            ranked_rows.sort(key=lambda item: item.score or 0.0, reverse=True)
+            return ranked_rows
 
-        ranked_rows.sort(key=lambda item: item.score or 0.0, reverse=True)
+        ranked_rows = materialize_chunks(chunks_by_si_key)
+        stable_rows = materialize_chunks(stable_chunks) if stable_limit else ranked_rows
+        if _candidate_window is not None:
+            _candidate_window.stable_rows.extend(stable_rows)
         hydrate_ms = (time.perf_counter() - hydrate_start) * 1000
         # Rerank over the wide candidate pool, then slice to the page. Suppressed when
         # hybrid calls this internally (_apply_rerank=False) — hybrid reranks its own
         # fused result; _rerank_and_paginate no-ops back to a plain slice otherwise.
         if _apply_rerank:
-            stable_rows = ranked_rows
-            if self._should_rerank(query_text):
-                stable_candidate_limit = self._rerank_candidate_limit()
-                if candidate_limit > stable_candidate_limit:
-                    if trace is not None:
-                        trace.stable_pool_refetched = True
-                    stable_rows = await self._search_vector_only(
-                        search_text=search_text,
-                        permalink=permalink,
-                        permalink_match=permalink_match,
-                        title=title,
-                        note_types=note_types,
-                        after_date=after_date,
-                        search_item_types=search_item_types,
-                        categories=categories,
-                        metadata_filters=metadata_filters,
-                        file_path_prefix=file_path_prefix,
-                        temporal=temporal,
-                        min_similarity=min_similarity,
-                        limit=stable_candidate_limit,
-                        offset=0,
-                        candidate_limit=stable_candidate_limit,
-                        _emit_observability_log=False,
-                        _apply_rerank=False,
-                        trace=None,
-                    )
             output = await self._rerank_and_paginate(
                 query_text,
                 ranked_rows,
@@ -2852,9 +2868,6 @@ class SearchRepositoryBase(ABC):
         min_similarity: Optional[float] = None,
         limit: int,
         offset: int,
-        _candidate_limit_override: int | None = None,
-        _apply_rerank: bool = True,
-        _emit_observability_log: bool = True,
         trace: SearchTraceCollector | None = None,
     ) -> List[SearchIndexRow]:
         """Fuse FTS and vector results using score-based fusion.
@@ -2866,13 +2879,8 @@ class SearchRepositoryBase(ABC):
         self._assert_semantic_available()
         query_text = search_text.strip()
         rerank_configured = self._should_rerank(query_text)
-        rerank_enabled = _apply_rerank and rerank_configured
         query_start = time.perf_counter()
-        candidate_limit = (
-            _candidate_limit_override
-            if _candidate_limit_override is not None
-            else self._candidate_limit(limit, offset, query_text)
-        )
+        candidate_limit = self._candidate_limit(limit, offset, query_text)
         fts_start = time.perf_counter()
         # allow_relaxed: question-form queries rarely AND-match, and a dead FTS
         # branch silently degrades hybrid to vector-only ranking. Fusion plus
@@ -2899,6 +2907,7 @@ class SearchRepositoryBase(ABC):
             fts_span.set_attribute("result_count", len(fts_results))
         fts_ms = (time.perf_counter() - fts_start) * 1000
         vector_start = time.perf_counter()
+        vector_window = _VectorCandidateWindow()
         vector_results = await self._search_vector_only(
             search_text=search_text,
             permalink=permalink,
@@ -2921,6 +2930,7 @@ class SearchRepositoryBase(ABC):
             candidate_limit=candidate_limit if rerank_configured else None,
             _emit_observability_log=False,
             _apply_rerank=False,
+            _candidate_window=vector_window if rerank_configured else None,
             trace=trace,
         )
         vector_ms = (time.perf_counter() - vector_start) * 1000
@@ -3019,7 +3029,7 @@ class SearchRepositoryBase(ABC):
                 f = fts_scores.get(row_key, 0.0)
                 fused_scores[row_key] = max(v, f) + FUSION_BONUS * min(v, f)
 
-            ranked = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)
+            ranked = sorted(fused_scores.items(), key=lambda item: (-item[1], item[0]))
             fusion_span.set_attribute("result_count", len(ranked))
         fusion_ms = (time.perf_counter() - fusion_start) * 1000
         if trace is not None:
@@ -3045,33 +3055,33 @@ class SearchRepositoryBase(ABC):
         # we materialize the whole candidate list (cheap next to a cross-encoder call)
         # and hand it to the shared paginate helper; the disabled path stays cheap by
         # materializing only the requested page.
-        if rerank_enabled:
+        if rerank_configured:
             candidates = [_materialize(entry) for entry in ranked]
             stable_candidates = candidates
             stable_candidate_limit = self._rerank_candidate_limit()
             if candidate_limit > stable_candidate_limit:
-                if trace is not None:
-                    trace.stable_pool_refetched = True
-                stable_candidates = await self._search_hybrid(
-                    search_text=search_text,
-                    permalink=permalink,
-                    permalink_match=permalink_match,
-                    title=title,
-                    note_types=note_types,
-                    after_date=after_date,
-                    search_item_types=search_item_types,
-                    categories=categories,
-                    metadata_filters=metadata_filters,
-                    file_path_prefix=file_path_prefix,
-                    temporal=temporal,
-                    min_similarity=min_similarity,
-                    limit=stable_candidate_limit,
-                    offset=0,
-                    _candidate_limit_override=stable_candidate_limit,
-                    _apply_rerank=False,
-                    _emit_observability_log=False,
-                    trace=None,
-                )
+                # Reconstruct the fixed fusion universe from each source's original
+                # prefix. New second-source evidence may affect the tail, but cannot
+                # change prefix scores, membership, or the text sent to the reranker.
+                stable_fts = fts_results[:stable_candidate_limit]
+                # Both backends order lexical results by score, so expansion keeps
+                # the same normalization maximum and already-gated prefix scores.
+                stable_fts_scores = {
+                    (row.type, row.id): fts_scores[(row.type, row.id)] for row in stable_fts
+                }
+                stable_vectors = {(row.type, row.id): row for row in vector_window.stable_rows}
+                stable_sources = {(row.type, row.id): row for row in stable_fts} | stable_vectors
+                stable_scores: dict[SearchIndexKey, float] = {}
+                for key in stable_sources:
+                    f = stable_fts_scores.get(key, 0.0)
+                    v = (stable_vectors[key].score or 0.0) if key in stable_vectors else 0.0
+                    stable_scores[key] = max(v, f) + FUSION_BONUS * min(v, f)
+                stable_candidates = [
+                    replace(stable_sources[key], score=score)
+                    for key, score in sorted(
+                        stable_scores.items(), key=lambda item: (-item[1], item[0])
+                    )[:stable_candidate_limit]
+                ]
                 stable_keys = {(row.type, row.id) for row in stable_candidates}
                 expanded_tail = [entry for entry in ranked if entry[0] not in stable_keys]
 
@@ -3079,13 +3089,16 @@ class SearchRepositoryBase(ABC):
                 # Why: score fusion can strengthen an existing row when its second
                 # signal appears later, moving it across a page already returned.
                 # Outcome: freeze the fixed fused universe, then order newly admitted
-                # rows by their earliest source rank. That rank cannot improve after a
-                # row first appears, so each larger window only appends to the tail.
+                # rows by their earliest source rank, using chunk rank before vector
+                # collapse. A later chunk may be only the second unique document;
+                # its collapsed rank would wrongly move it ahead of an earlier page.
                 expanded_tail.sort(
                     key=lambda entry: (
                         min(
                             fts_ranks.get(entry[0], candidate_limit),
-                            vec_ranks.get(entry[0], candidate_limit),
+                            vector_window.source_ranks.get(entry[0], candidate_limit)
+                            if entry[0] in vec_scores
+                            else candidate_limit,
                         ),
                         entry[0],
                     )
@@ -3102,7 +3115,7 @@ class SearchRepositoryBase(ABC):
         else:
             output = [_materialize(entry) for entry in ranked[offset : offset + limit]]
         total_ms = (time.perf_counter() - query_start) * 1000
-        if _emit_observability_log and total_ms > 2500:
+        if total_ms > 2500:
             logger.warning(
                 "[SEMANTIC_SLOW_QUERY] Semantic query timing: project_id={project_id} "
                 "retrieval_mode={retrieval_mode} query_length={query_length} "
