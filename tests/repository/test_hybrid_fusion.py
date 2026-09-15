@@ -6,6 +6,8 @@ Verifies that the fusion formula (max + FUSION_BONUS * min):
 3. Produces zero fused score when the source score is zero
 """
 
+from sqlalchemy.ext.asyncio import AsyncSession
+from basic_memory.repository.search_scope import ProjectScope
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -62,6 +64,7 @@ class ConcreteSearchRepo(SearchRepositoryBase):
         self._vector_tables_initialized = True
         self.session_maker = None
         self.project_id = 1
+        self.scope = ProjectScope.single(1)
 
     @override
     async def init_search_index(self):
@@ -90,6 +93,7 @@ class ConcreteSearchRepo(SearchRepositoryBase):
         limit: int = 10,
         offset: int = 0,
         allow_relaxed: bool = False,
+        session: AsyncSession | None = None,
         *,
         candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,

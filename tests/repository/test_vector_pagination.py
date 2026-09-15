@@ -4,6 +4,8 @@ Verifies that page 1 results always have scores >= page 2 results,
 which requires a sufficiently large candidate_limit multiplier.
 """
 
+from sqlalchemy.ext.asyncio import AsyncSession
+from basic_memory.repository.search_scope import ProjectScope
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -46,6 +48,7 @@ class ConcreteSearchRepo(SearchRepositoryBase):
         self._vector_tables_initialized = True
         self.session_maker = None
         self.project_id = 1
+        self.scope = ProjectScope.single(1)
 
     @override
     async def init_search_index(self):
@@ -74,6 +77,7 @@ class ConcreteSearchRepo(SearchRepositoryBase):
         limit: int = 10,
         offset: int = 0,
         allow_relaxed: bool = False,
+        session: AsyncSession | None = None,
         *,
         candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,

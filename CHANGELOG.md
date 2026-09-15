@@ -121,6 +121,16 @@
   `(project_id, ...)` identity. Project repositories call the compilers with a scope of
   one; no query behavior changes. First step of the shared single/multi-project reader.
 
+- **#1558**: Full-text execution leaves the project repositories. `SQLiteFts` and
+  `PostgresFts` run a compiled statement for any `ProjectScope` and own their engine's
+  failure semantics (FTS5 syntax errors answer empty, Postgres retries a malformed strict
+  tsquery relaxed inside a savepoint). `SearchRepositoryBase.search` and `count` are
+  concrete: shared vector/hybrid dispatch, then the engine's `FtsBackend`. The base read
+  path binds every statement to the repository's scope (manifest hydration, candidate row
+  fetch, readiness and drop classification). `PreparedSearchQuery` moves to the repository
+  layer with defaults, and the filter helpers both backends share move from the base into
+  `search_filters`. No query behavior changes.
+
 
 ## v0.23.2 (2026-08-25)
 

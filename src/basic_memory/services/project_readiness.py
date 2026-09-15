@@ -24,7 +24,8 @@ from basic_memory.models import Entity, Project
 from basic_memory.repository.embedding_provider_factory import (
     configured_embedding_provider_identity,
 )
-from basic_memory.repository.search_repository_base import CURRENT_VECTOR_MANIFEST_PREDICATE
+from basic_memory.repository.search_repository_base import current_vector_manifest_predicate
+from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_vector_index_factory import (
     resolve_semantic_vector_index_name,
 )
@@ -310,10 +311,21 @@ class ProjectReadinessService:
         # embedded -- the third time a count and the thing it measures disagreed
         # (#1440 review). The marker is written by the sharded sync itself, in
         # `record_entity_vector_deferrals`, so the two cannot drift.
+        manifest_params: dict[str, object] = {
+            "project_id": project_id,
+            "vector_index": resolve_semantic_vector_index_name(
+                self.app_config,
+                self.app_config.database_backend,
+            ),
+            "embedding_model": configured_embedding_provider_identity(self.app_config),
+        }
+        manifest_predicate = current_vector_manifest_predicate(
+            ProjectScope.single(project_id), manifest_params
+        )
         usable_result = await session.execute(
             text(
                 "SELECT DISTINCT entity_id FROM search_vector_chunks "
-                "WHERE " + CURRENT_VECTOR_MANIFEST_PREDICATE + " "
+                "WHERE " + manifest_predicate + " "
                 # Applied as a subquery so the shared predicate is used verbatim
                 # rather than rewritten to carry a table alias.
                 "AND entity_id NOT IN ("
@@ -321,14 +333,7 @@ class ProjectReadinessService:
                 "  AND vector_sync_deferred_at IS NOT NULL"
                 ")"
             ),
-            {
-                "project_id": project_id,
-                "vector_index": resolve_semantic_vector_index_name(
-                    self.app_config,
-                    self.app_config.database_backend,
-                ),
-                "embedding_model": configured_embedding_provider_identity(self.app_config),
-            },
+            manifest_params,
         )
         usable_entity_ids = {int(entity_id) for entity_id in usable_result.scalars().all()}
         return len(owed_entity_ids), len(owed_entity_ids & usable_entity_ids)

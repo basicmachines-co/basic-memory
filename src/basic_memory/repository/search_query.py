@@ -2,6 +2,36 @@
 
 import re
 import unicodedata
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
+
+from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
+from basic_memory.temporal import TemporalFilter
+
+
+@dataclass(frozen=True)
+class PreparedSearchQuery:
+    """Normalized query inputs shared by search and count.
+
+    Built once at the service boundary from the API's ``SearchQuery``; every layer
+    below reads the same value instead of threading thirteen keyword arguments.
+    """
+
+    search_text: str | None = None
+    permalink: str | None = None
+    permalink_match: str | None = None
+    title: str | None = None
+    note_types: list[str] | None = None
+    search_item_types: list[SearchItemType] | None = None
+    categories: list[str] | None = None
+    after_date: datetime | None = None
+    metadata_filters: dict[str, Any] | None = None
+    file_path_prefix: str | None = None
+    temporal: TemporalFilter | None = None
+    retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS
+    min_similarity: float | None = None
+
 
 # Interrogative/function words contribute lexical noise when a strict
 # full-text query is relaxed: "when OR did OR a" matches loud wrong documents

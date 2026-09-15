@@ -14,13 +14,13 @@ from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 import basic_memory.repository.search_repository_base as search_repository_base_module
 from basic_memory.repository.litellm_provider import LiteLLMEmbeddingProvider
 import basic_memory.repository.postgres_search_query as postgres_search_query_module
-import basic_memory.repository.postgres_search_repository as postgres_search_repository_module
 from basic_memory.repository.postgres_search_query import (
     compile_fts_filter,
     prepare_search_term,
     prepare_single_term,
     relaxed_tsquery_text,
 )
+from basic_memory.repository.search_query import PreparedSearchQuery
 from basic_memory.repository.postgres_search_repository import (
     PostgresSearchRepository,
     _strip_nul_from_row,
@@ -276,19 +276,22 @@ async def test_postgres_search_repository_bulk_index_items_and_prepare_terms(
     assert prepare_single_term("   ") == "   "
     assert prepare_single_term("coffee", is_prefix=False) == "coffee"
 
-    indexed = compile_fts_filter(repo.scope, search_text="coffee brewing", allow_relaxed=True)
+    indexed = compile_fts_filter(
+        repo.scope, PreparedSearchQuery(search_text="coffee brewing"), allow_relaxed=True
+    )
     assert "FROM search_index AS candidate_parent" in indexed.from_clause
     assert "FROM search_index_fts_chunks AS candidate_chunk" in indexed.from_clause
     assert "querytree(to_tsquery('english', :text))" in indexed.from_clause
     assert indexed.params["text_candidate"] == "coffee:* | brewing:*"
 
     filtered = compile_fts_filter(
-        repo.scope, search_text="coffee brewing", metadata_filters={"status": "active"}
+        repo.scope,
+        PreparedSearchQuery(search_text="coffee brewing", metadata_filters={"status": "active"}),
     )
     assert "AS fts_candidate" in filtered.from_clause
     assert "JOIN entity ON search_index.entity_id = entity.id" in filtered.from_clause
 
-    negated = compile_fts_filter(repo.scope, search_text="coffee NOT brewing")
+    negated = compile_fts_filter(repo.scope, PreparedSearchQuery(search_text="coffee NOT brewing"))
     assert "AS fts_candidate" in negated.from_clause
     assert "FROM search_index AS candidate_all" in negated.from_clause
     assert negated.params["text_candidate"] == "coffee | brewing"
@@ -1273,7 +1276,7 @@ async def test_postgres_relaxes_after_strict_tsquery_syntax_error(
     )
 
     syntax_errors: list[Exception] = []
-    real_is_syntax_error = postgres_search_repository_module.is_tsquery_syntax_error
+    real_is_syntax_error = postgres_search_query_module.is_tsquery_syntax_error
 
     def record_syntax_error(exc: Exception) -> bool:
         is_syntax_error = real_is_syntax_error(exc)
@@ -1281,9 +1284,9 @@ async def test_postgres_relaxes_after_strict_tsquery_syntax_error(
             syntax_errors.append(exc)
         return is_syntax_error
 
-    # The repository module binds the classifier at import; patch it where it is read.
+    # PostgresFts binds the classifier at import; patch it where it is read.
     monkeypatch.setattr(
-        postgres_search_repository_module, "is_tsquery_syntax_error", record_syntax_error
+        postgres_search_query_module, "is_tsquery_syntax_error", record_syntax_error
     )
 
     query = "foo<bar baz qux"

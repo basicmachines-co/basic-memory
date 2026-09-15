@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-import basic_memory.repository.postgres_search_repository as postgres_search_repository_module
+import basic_memory.repository.postgres_search_query as postgres_search_query_module
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.search_index_row import SearchIndexRow
 
@@ -61,7 +61,7 @@ async def test_quoted_or_phrases_complete_without_tsquery_recovery(
     )
 
     syntax_errors: list[Exception] = []
-    real_is_syntax_error = postgres_search_repository_module.is_tsquery_syntax_error
+    real_is_syntax_error = postgres_search_query_module.is_tsquery_syntax_error
 
     def record_syntax_error(exception: Exception) -> bool:
         is_syntax_error = real_is_syntax_error(exception)
@@ -69,9 +69,9 @@ async def test_quoted_or_phrases_complete_without_tsquery_recovery(
             syntax_errors.append(exception)
         return is_syntax_error
 
-    # The repository module binds the classifier at import; patch it where it is read.
+    # PostgresFts binds the classifier at import; patch it where it is read.
     monkeypatch.setattr(
-        postgres_search_repository_module, "is_tsquery_syntax_error", record_syntax_error
+        postgres_search_query_module, "is_tsquery_syntax_error", record_syntax_error
     )
 
     query = '"incident response" OR "database recovery"'

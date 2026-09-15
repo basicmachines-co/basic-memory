@@ -32,7 +32,9 @@ from basic_memory.repository.rerank_provider import (
     demote_tail_scores,
     validate_rerank_scores,
 )
-from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.repository.search_filters import FtsBackend
+from basic_memory.repository.search_index_row import SearchIndexKey, SearchIndexRow
+from basic_memory.repository.search_query import PreparedSearchQuery
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.script_ngrams import build_script_ngrams
 from basic_memory.repository.search_trace import (
@@ -78,12 +80,10 @@ from basic_memory.repository.semantic_vector_sync import (
     StagedVectorDeletion as _StagedVectorDeletion,
     VectorChunkState,
 )
-from basic_memory.runtime.storage import RUNTIME_MARKDOWN_CONTENT_TYPE
 from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.schemas.search import (
     SearchItemType,
     SearchRetrievalMode,
-    normalize_file_path_prefix,
 )
 from basic_memory.temporal import TemporalFilter
 from basic_memory.utils import ensure_timezone_aware
@@ -102,13 +102,19 @@ VECTOR_HYDRATION_BATCH_SIZE = 250
 # vector-index change, or one still pending. Readiness reporting must apply the same
 # predicate — calling such a row "embedded" would report an index settled that
 # retrieval cannot answer from, which is the class of lie #1414 exists to remove.
-# Both callers bind :project_id, :vector_index, and :embedding_model.
-CURRENT_VECTOR_MANIFEST_PREDICATE = (
-    "project_id = :project_id "
-    "AND vector_index = :vector_index "
-    "AND embedding_model = :embedding_model "
-    "AND embedding_status = 'ready'"
-)
+# Callers bind :vector_index and :embedding_model; the scope binds its own IDs.
+
+
+def current_vector_manifest_predicate(scope: ProjectScope, params: dict[str, Any]) -> str:
+    """SQL admitting only manifest rows retrieval can answer from, within ``scope``."""
+    return (
+        f"{scope.predicate('project_id', params)} "
+        "AND vector_index = :vector_index "
+        "AND embedding_model = :embedding_model "
+        "AND embedding_status = 'ready'"
+    )
+
+
 # Over-fetch factor for the rerank candidate chunk pool: chunks collapse to unique
 # (type, id) rows before reranking, so fetch several times reranker_candidates chunks
 # to keep enough unique documents in the rerank window.
@@ -122,10 +128,6 @@ OVERSIZED_ENTITY_VECTOR_SHARD_SIZE = semantic_vector_sync.OVERSIZED_ENTITY_VECTO
 _SQLITE_MAX_PREPARE_WINDOW = semantic_vector_sync.SQLITE_MAX_PREPARE_WINDOW
 _BUILT_IN_VECTOR_INDEX_NAMES = frozenset({"pgvector", "sqlite-vec"})
 
-# Entity, observation, and relation rows in search_index carry ids from independent
-# auto-increment sequences, so a bare id is ambiguous across row types. Every map in
-# the vector/hybrid retrieval path must key rows by (type, id) to avoid collisions.
-type SearchIndexKey = tuple[str, int]
 type StoredEmbeddingStatus = Literal["pending", "ready"]
 
 
@@ -173,158 +175,6 @@ class ChunkManifestRow:
         if isinstance(updated_at, str):
             updated_at = datetime.fromisoformat(updated_at)
         object.__setattr__(self, "updated_at", ensure_timezone_aware(updated_at))
-
-
-def file_path_prefix_condition(
-    file_path_prefix: Optional[str],
-    params: Dict[str, Any],
-) -> Optional[str]:
-    """Build the SQL scoping search rows to one directory subtree of the project.
-
-    One implementation, shared verbatim by both backends: a subtree scope that
-    means different things on SQLite and Postgres would report an exact total
-    for a match set the other dialect never produces.
-
-    Boundary: the compared prefix carries its trailing separator, so "specs"
-    admits "specs/api.md" and never "specs-archive/api.md".
-
-    Why an explicit-length comparison rather than ``file_path LIKE 'specs/%'``:
-    LIKE reads "_" and "%" as wildcards and both are ordinary characters in a
-    directory name, so "my_notes" would silently also admit "my-notes"; and
-    LIKE case-folds differently per backend — SQLite's is ASCII-case-insensitive
-    while Postgres's is case-sensitive — so one filter would answer two
-    different questions. SUBSTR equality has no pattern language to escape and
-    compares under each backend's deterministic default text collation, which is
-    byte equality on both, so the dialects match exactly the same rows.
-    """
-    normalized = normalize_file_path_prefix(file_path_prefix)
-    if normalized is None:
-        return None
-    prefix = f"{normalized}/"
-    params["file_path_prefix"] = prefix
-    params["file_path_prefix_length"] = len(prefix)
-    return "SUBSTR(search_index.file_path, 1, :file_path_prefix_length) = :file_path_prefix"
-
-
-def metadata_filter_content_type_condition(params: Dict[str, Any]) -> str:
-    """Build the SQL restricting a metadata-filtered query to Markdown notes.
-
-    Frontmatter is a Markdown-only construct, but every indexed file — PDF,
-    image, binary — gets its own ENTITY row whose ``entity_metadata`` carries no
-    keys at all. A positive predicate can never match one, so this constraint
-    was invisible until ``{"key": None}`` arrived: ``IS NULL`` is satisfied by
-    the *absence* of a key, which is exactly the state every regular file is in,
-    and the whole non-note half of a project counted into an exact total.
-
-    Applied to any metadata filter, not just the null one, so the
-    frontmatter-only contract is a property of the clause rather than of which
-    operator happened to be used. Shared by both backends for the same reason
-    the subtree scope is: a filter that admits different rows per dialect would
-    report an exact total for a match set the other never produces.
-    """
-    params["metadata_filter_content_type"] = RUNTIME_MARKDOWN_CONTENT_TYPE
-    return "entity.content_type = :metadata_filter_content_type"
-
-
-# SQLite's LIKE has no default escape character, and Postgres's is already the
-# backslash, so naming this one explicitly in every pattern is what lets a single
-# escaped pattern mean the same thing on both backends.
-_LIKE_ESCAPE_CHARACTER = "\\"
-
-
-def metadata_contains_like_condition(
-    extract_expr: str,
-    value: Any,
-    *,
-    param_prefix: str,
-    params: Dict[str, Any],
-) -> str:
-    """Build the compatibility half of an array-contains metadata filter.
-
-    The primary half of a ``{"tags": ["security"]}`` filter asks JSON whether the
-    array holds the element — ``json_each`` on SQLite, ``@>`` on Postgres — and
-    answers only when the stored value really is a JSON array. Frontmatter
-    written before tags were normalized can hold the array's *text* instead,
-    either JSON-quoted ('["security", "auth"]') or as a Python repr
-    ("['security', 'auth']"), and only a substring match finds an element inside
-    those. Hence a pattern per quote style, and hence the pattern-language
-    problem this function exists to solve.
-
-    LIKE reads "%" and "_" in the searched-for value as wildcards, so
-    interpolating the value raw turned `tags has 100%` into a pattern that also
-    matched "100-percent" — a wrong hit and an inflated exact total, produced by
-    the branch the caller only meant as a fallback. Escaping both wildcards and
-    the escape character itself makes the value literal again.
-
-    Shared by both backends for the same reason the subtree scope is: a filter
-    that admits different rows per dialect would report an exact total for a
-    match set the other never produces.
-    """
-    escaped = (
-        str(value)
-        .replace(_LIKE_ESCAPE_CHARACTER, _LIKE_ESCAPE_CHARACTER * 2)
-        .replace("%", f"{_LIKE_ESCAPE_CHARACTER}%")
-        .replace("_", f"{_LIKE_ESCAPE_CHARACTER}_")
-    )
-    double_quoted_param = f"{param_prefix}_like"
-    single_quoted_param = f"{param_prefix}_like_single"
-    params[double_quoted_param] = f'%"{escaped}"%'
-    params[single_quoted_param] = f"%'{escaped}'%"
-    escape_clause = f" ESCAPE '{_LIKE_ESCAPE_CHARACTER}'"
-    return (
-        f"{extract_expr} LIKE :{double_quoted_param}{escape_clause} "
-        f"OR {extract_expr} LIKE :{single_quoted_param}{escape_clause}"
-    )
-
-
-def candidate_key_restriction_condition(
-    candidate_keys: Sequence[SearchIndexKey],
-    params: Dict[str, Any],
-) -> str:
-    """Build the SQL restricting a filter query to an explicit set of search rows.
-
-    This is what turns the vector/hybrid filter pass from "give me a page of everything
-    the filter admits" into "of *these* candidates, which does the filter admit". The
-    first question has an answer the size of the project and had to be capped, and every
-    candidate outside the cap was then read as disallowed (#1431). The second question's
-    answer is bounded by the candidate set itself, so no cap is needed and none of the
-    candidates can fall off the end.
-
-    Keys are grouped by row type rather than emitted as one ``(type, id)`` pair per
-    branch: entity, observation, and relation ids come from independent sequences, so the
-    type is part of the identity, but a handful of type-scoped ``IN`` lists binds one
-    parameter per key instead of two and leaves the id list in the shape both planners
-    can drive an index from. PostgreSQL's ``search_index`` primary key is
-    ``(id, type, project_id)``.
-
-    An empty candidate set is a real state, not a caller error — a vector search whose
-    every hit was already dropped — and it admits nothing, so it yields a false
-    predicate rather than the vacuous truth an empty ``OR`` would collapse to.
-
-    Shared verbatim by both backends for the same reason the subtree scope is: a
-    restriction that admitted different rows per dialect would give semantic search a
-    different candidate set depending on which database happened to be underneath.
-    """
-    ids_by_type: dict[str, list[int]] = {}
-    for row_type, row_id in candidate_keys:
-        ids_by_type.setdefault(row_type, []).append(row_id)
-
-    branches: list[str] = []
-    for type_index, (row_type, row_ids) in enumerate(ids_by_type.items()):
-        type_param = f"candidate_type_{type_index}"
-        params[type_param] = row_type
-        id_params: list[str] = []
-        for id_index, row_id in enumerate(dict.fromkeys(row_ids)):
-            id_param = f"candidate_id_{type_index}_{id_index}"
-            params[id_param] = row_id
-            id_params.append(f":{id_param}")
-        branches.append(
-            f"(search_index.type = :{type_param} AND search_index.id IN ({', '.join(id_params)}))"
-        )
-
-    if not branches:
-        return "1 = 0"
-    return f"({' OR '.join(branches)})"
 
 
 async def purge_stale_search_index_rows(
@@ -390,6 +240,8 @@ class SearchRepositoryBase(ABC):
     _vector_tables_initialized: bool
     _semantic_vector_index: SemanticVectorIndex
     _semantic_vector_index_name: str = ""
+    # Runs compiled full-text statements for this repository's engine.
+    _fts: FtsBackend
 
     def __init__(self, session_maker: async_sessionmaker[AsyncSession], project_id: int):
         """Initialize with session maker and project_id filter.
@@ -458,7 +310,6 @@ class SearchRepositoryBase(ABC):
         """
         pass
 
-    @abstractmethod
     async def search(
         self,
         search_text: Optional[str] = None,
@@ -477,42 +328,71 @@ class SearchRepositoryBase(ABC):
         limit: int = 10,
         offset: int = 0,
         allow_relaxed: bool = False,
+        session: AsyncSession | None = None,
         *,
         candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
     ) -> List[SearchIndexRow]:
-        """Search across all indexed content.
+        """Search this repository's project.
 
-        Args:
-            search_text: Full-text search across title and content
-            permalink: Exact permalink match
-            permalink_match: Permalink pattern match (supports *)
-            title: Title search
-            note_types: Filter by note types (from metadata.note_type)
-            after_date: Filter by created_at > after_date
-            search_item_types: Filter by SearchItemType (ENTITY, OBSERVATION, RELATION)
-            categories: Filter observations by exact category (e.g. "requirement")
-            metadata_filters: Structured frontmatter metadata filters
-            file_path_prefix: Directory subtree scope, matched against file_path
-            temporal: Authored valid-time filter. Unlike after_date, which reads the
-                note's edit bookkeeping, this reads the time an observation claims to
-                be true of the world. Sources without such a claim are excluded.
-            limit: Maximum results to return
-            offset: Number of results to skip
-            candidate_keys: Restrict results to these ``(type, id)`` search rows. ``None``
-                searches the whole project; an empty sequence matches nothing. Honored by
-                the full-text pass, which is where vector and hybrid retrieval evaluate
-                their structured filters: that pass asks which of a known candidate set a
-                filter admits instead of paging the filter's whole match set (#1431).
+        ``candidate_keys`` restricts results to those ``(type, id)`` search rows.
+        ``None`` searches the whole scope; an empty sequence matches nothing. Honored by
+        the full-text pass, which is where vector and hybrid retrieval evaluate their
+        structured filters: that pass asks which of a known candidate set a filter
+        admits instead of paging the filter's whole match set (#1431).
 
-        Returns:
-            List of SearchIndexRow results with relevance scores
-
-        Backend-specific implementations:
-        - SQLite: Uses MATCH operator and bm25() for scoring
-        - Postgres: Uses @@ operator and ts_rank() for scoring
+        ``allow_relaxed=True`` retries a zero-result strict multi-word query with
+        OR-joined content terms. Only the hybrid path opts in: its FTS branch otherwise
+        contributes nothing for question-form queries.
         """
-        pass
+        # --- Vector and hybrid: shared retrieval over this repository's scope ---
+        dispatched = await self._dispatch_retrieval_mode(
+            search_text=search_text,
+            permalink=permalink,
+            permalink_match=permalink_match,
+            title=title,
+            note_types=note_types,
+            after_date=after_date,
+            search_item_types=search_item_types,
+            categories=categories,
+            metadata_filters=metadata_filters,
+            file_path_prefix=file_path_prefix,
+            temporal=temporal,
+            retrieval_mode=retrieval_mode,
+            min_similarity=min_similarity,
+            limit=limit,
+            offset=offset,
+            trace=trace,
+        )
+        if dispatched is not None:
+            return dispatched
+
+        # --- Full text: the engine runs the compiled statement ---
+        query = PreparedSearchQuery(
+            search_text=search_text,
+            permalink=permalink,
+            permalink_match=permalink_match,
+            title=title,
+            note_types=note_types,
+            search_item_types=search_item_types,
+            categories=categories,
+            after_date=after_date,
+            metadata_filters=metadata_filters,
+            file_path_prefix=file_path_prefix,
+            temporal=temporal,
+            retrieval_mode=retrieval_mode,
+            min_similarity=min_similarity,
+        )
+        return await self._fts.search(
+            self.scope,
+            query,
+            limit=limit,
+            offset=offset,
+            allow_relaxed=allow_relaxed,
+            session=session,
+            candidate_keys=candidate_keys,
+            trace=trace,
+        )
 
     async def count(
         self,
@@ -531,10 +411,25 @@ class SearchRepositoryBase(ABC):
         min_similarity: Optional[float] = None,
         allow_relaxed: bool = False,
     ) -> int:
-        """Count results when a backend-specific COUNT query is available."""
+        """Count full-text matches with the same filters as ``search``."""
         if retrieval_mode != SearchRetrievalMode.FTS:
             raise ValueError("Exact counts are only supported for full-text search retrieval.")
-        raise NotImplementedError("Backend search repositories must implement full-text counts.")
+        query = PreparedSearchQuery(
+            search_text=search_text,
+            permalink=permalink,
+            permalink_match=permalink_match,
+            title=title,
+            note_types=note_types,
+            search_item_types=search_item_types,
+            categories=categories,
+            after_date=after_date,
+            metadata_filters=metadata_filters,
+            file_path_prefix=file_path_prefix,
+            temporal=temporal,
+            retrieval_mode=retrieval_mode,
+            min_similarity=min_similarity,
+        )
+        return await self._fts.count(self.scope, query, allow_relaxed=allow_relaxed)
 
     # ------------------------------------------------------------------
     # Abstract methods — semantic search (backend-specific DB operations)
@@ -573,7 +468,7 @@ class SearchRepositoryBase(ABC):
             if trace is not None:
                 trace.readiness = await read_manifest_readiness(
                     session,
-                    self.project_id,
+                    self.scope,
                     self._semantic_vector_index_name,
                     self._embedding_model_key(),
                 )
@@ -588,7 +483,7 @@ class SearchRepositoryBase(ABC):
             if trace is not None and trace.readiness is None:
                 trace.readiness = await read_manifest_readiness(
                     session,
-                    self.project_id,
+                    self.scope,
                     self._semantic_vector_index_name,
                     self._embedding_model_key(),
                 )
@@ -715,11 +610,11 @@ class SearchRepositoryBase(ABC):
         chunks_by_key: dict[VectorKey, str] = {}
         for batch_start in range(0, len(matches), VECTOR_HYDRATION_BATCH_SIZE):
             batch = matches[batch_start : batch_start + VECTOR_HYDRATION_BATCH_SIZE]
-            params: dict[str, object] = {
-                "project_id": self.project_id,
+            params: dict[str, Any] = {
                 "vector_index": self._semantic_vector_index_name,
                 "embedding_model": self._embedding_model_key(),
             }
+            manifest_predicate = current_vector_manifest_predicate(self.scope, params)
             predicates: list[str] = []
             for index, match in enumerate(batch):
                 params[f"entity_id_{index}"] = match.key.entity_id
@@ -734,7 +629,7 @@ class SearchRepositoryBase(ABC):
             result = await session.execute(
                 text(
                     "SELECT entity_id, chunk_key, chunk_text FROM search_vector_chunks "
-                    "WHERE " + CURRENT_VECTOR_MANIFEST_PREDICATE + " "
+                    "WHERE " + manifest_predicate + " "
                     "AND (" + " OR ".join(predicates) + ")"
                 ),
                 params,
@@ -770,7 +665,7 @@ class SearchRepositoryBase(ABC):
                 for match in matches
                 if match.key not in chunks_by_key
             ]
-            drops = await classify_hydration_drops(session, self.project_id, dropped_keys)
+            drops = await classify_hydration_drops(session, self.scope, dropped_keys)
             chunk_matches: dict[SearchIndexKey, list[tuple[str, float, int | None]]] = {}
             malformed_drops: list[HydrationDropped] = []
             for row in hydrated:
@@ -2796,17 +2691,15 @@ class SearchRepositoryBase(ABC):
         if not row_ids:
             return {}
         placeholders = ",".join(f":id_{idx}" for idx in range(len(row_ids)))
-        params: dict[str, Any] = {
-            **{f"id_{idx}": rid for idx, rid in enumerate(row_ids)},
-            "project_id": self.project_id,
-        }
+        params: dict[str, Any] = {f"id_{idx}": rid for idx, rid in enumerate(row_ids)}
+        scope_predicate = self.scope.predicate("project_id", params)
         sql = f"""
             SELECT
                 project_id, id, title, permalink, file_path, type, metadata,
                 from_id, to_id, relation_type, entity_id, content_snippet,
                 category, created_at, updated_at, 0 as score
             FROM search_index
-            WHERE project_id = :project_id
+            WHERE {scope_predicate}
               AND id IN ({placeholders})
         """
         result: dict[SearchIndexKey, SearchIndexRow] = {}
