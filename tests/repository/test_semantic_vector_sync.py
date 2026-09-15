@@ -79,17 +79,6 @@ class _TestRepository(SearchRepositoryBase):
         pass
 
     @override
-    async def _run_vector_query(
-        self,
-        session,
-        query_embedding,
-        candidate_limit,
-        *,
-        trace: SearchTraceCollector | None = None,
-    ):
-        return []
-
-    @override
     async def _write_embeddings(self, session, jobs, embeddings):
         pass
 
@@ -107,10 +96,6 @@ class _TestRepository(SearchRepositoryBase):
         expected_deletions=None,
     ):
         return []
-
-    @override
-    def _distance_to_similarity(self, distance: float) -> float:
-        return 1.0 / (1.0 + max(distance, 0.0))
 
 
 def _pending_job(

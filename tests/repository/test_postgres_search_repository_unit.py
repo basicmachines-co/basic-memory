@@ -262,7 +262,7 @@ class TestRunVectorQueryEmpty:
             embedding_provider=StubEmbeddingProvider(),
         )
         session = AsyncMock()
-        result = await repo._run_vector_query(session, [], 10)
+        result = await repo._semantic_search()._run_vector_query(session, [], 10)
         assert result == []
 
 

@@ -30,10 +30,14 @@ from sqlalchemy import text
 from basic_memory import db
 from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.search_filters import candidate_key_restriction_condition
-from basic_memory.repository.search_repository_base import (
+from basic_memory.repository.search_query import PreparedSearchQuery
+from basic_memory.repository.search_reader import (
     VECTOR_FILTER_SCAN_LIMIT,
     VECTOR_HYDRATION_BATCH_SIZE,
+    HydratedChunk,
+    SemanticSearch,
 )
+from basic_memory.repository.semantic_vector_index import SemanticVectorIndex
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
 # The scope the admitted rows share, plus a sibling scope the filter must reject.
@@ -138,7 +142,11 @@ def _fake_embedding_provider() -> EmbeddingProvider:
         type(
             "EP",
             (),
-            {"embed_query": AsyncMock(return_value=[0.0] * 384), "dimensions": 384},
+            {
+                "embed_query": AsyncMock(return_value=[0.0] * 384),
+                "dimensions": 384,
+                "model_name": "stub",
+            },
         )(),
     )
 
@@ -148,18 +156,20 @@ def _semantic_repo(search_repository):
     search_repository._semantic_enabled = True
     search_repository._semantic_min_similarity = 0.0
     search_repository._embedding_provider = _fake_embedding_provider()
+    # The nearest-neighbour stage is stubbed below, so the adapter is never consulted.
+    search_repository._semantic_vector_index = cast(SemanticVectorIndex, object())
     return search_repository
 
 
-def _vector_chunks(row_ids: list[int]) -> list[dict[str, Any]]:
+def _vector_chunks(row_ids: list[int]) -> list[HydratedChunk]:
     """One vector hit per row, ranked in the order given."""
     return [
-        {
-            "chunk_key": f"{SearchItemType.ENTITY.value}:{row_id}:0",
-            "best_similarity": 0.99 - index * 0.001,
-            "chunk_text": TARGET_CONTENT,
-            "entity_id": row_id,
-        }
+        HydratedChunk(
+            entity_id=row_id,
+            chunk_key=f"{SearchItemType.ENTITY.value}:{row_id}:0",
+            chunk_text=TARGET_CONTENT,
+            similarity=0.99 - index * 0.001,
+        )
         for index, row_id in enumerate(row_ids)
     ]
 
@@ -174,9 +184,8 @@ async def test_filtered_vector_search_keeps_a_candidate_past_the_scan_window(
 
     with (
         patch.object(repo, "_ensure_vector_tables", new_callable=AsyncMock),
-        patch.object(repo, "_prepare_vector_session", new_callable=AsyncMock),
         patch.object(
-            repo,
+            SemanticSearch,
             "_run_vector_query",
             new_callable=AsyncMock,
             return_value=_vector_chunks([TARGET_ROW_ID]),
@@ -210,36 +219,28 @@ async def test_filter_pass_answers_every_candidate_within_the_bind_bound(
     assert len(candidates) > VECTOR_HYDRATION_BATCH_SIZE
 
     batched_key_counts: list[int] = []
-    original_search = repo.search
+    original_search = repo._fts.search
 
-    async def recording_search(*args, **kwargs):
+    async def recording_search(scope, query, **kwargs):
         if kwargs.get("candidate_keys") is not None:
             batched_key_counts.append(len(kwargs["candidate_keys"]))
-        return await original_search(*args, **kwargs)
+        return await original_search(scope, query, **kwargs)
 
     with (
-        patch.object(repo, "_ensure_vector_tables", new_callable=AsyncMock),
-        patch.object(repo, "_prepare_vector_session", new_callable=AsyncMock),
         patch.object(
-            repo,
+            SemanticSearch,
             "_run_vector_query",
             new_callable=AsyncMock,
             return_value=_vector_chunks(candidates),
         ),
-        patch.object(repo, "search", recording_search),
+        patch.object(repo._fts, "search", recording_search),
     ):
-        results = await repo._search_vector_only(
-            search_text="the answer",
-            permalink=None,
-            permalink_match=None,
-            title=None,
-            note_types=None,
-            after_date=None,
-            search_item_types=None,
-            categories=None,
-            metadata_filters=None,
-            file_path_prefix=SCOPE,
-            temporal=None,
+        results = await repo._semantic_search().vector_only(
+            PreparedSearchQuery(
+                search_text="the answer",
+                file_path_prefix=SCOPE,
+                retrieval_mode=SearchRetrievalMode.VECTOR,
+            ),
             limit=len(candidates),
             offset=0,
         )

@@ -8,16 +8,21 @@ from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime
 from types import SimpleNamespace
-from typing import override, Any
+from typing import override, Any, cast
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
 import basic_memory.repository.search_repository_base as search_repository_base_module
+from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.fastembed_provider import FastEmbedEmbeddingProvider
-from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.repository.search_index_row import SearchIndexKey, SearchIndexRow
+from basic_memory.repository.search_reader import (
+    HydratedChunk,
+    SemanticSearch,
+    VectorRetrieval,
+)
 from basic_memory.repository.search_repository_base import (
-    SearchIndexKey,
     SearchRepositoryBase,
     _PreparedEntityVectorSync,
 )
@@ -37,6 +42,7 @@ from basic_memory.repository.semantic_vector_index import (
 from basic_memory.repository.semantic_vector_sync import PendingEmbeddingJob
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 from basic_memory.temporal import TemporalFilter
+from tests.repository.test_hybrid_fusion import FakeFts
 
 
 # --- Helpers ---
@@ -67,6 +73,7 @@ class _ConcreteRepo(SearchRepositoryBase):
         self.session_maker = None
         self.project_id = 1
         self.scope = ProjectScope.single(1)
+        self._fts = FakeFts()
 
     @override
     async def init_search_index(self):
@@ -114,17 +121,6 @@ class _ConcreteRepo(SearchRepositoryBase):
         pass
 
     @override
-    async def _run_vector_query(
-        self,
-        session,
-        query_embedding,
-        candidate_limit,
-        *,
-        trace: SearchTraceCollector | None = None,
-    ):
-        return []
-
-    @override
     async def _write_embeddings(self, session, jobs, embeddings):
         pass
 
@@ -145,10 +141,6 @@ class _ConcreteRepo(SearchRepositoryBase):
 
     async def _update_timestamp_sql(self):
         return "CURRENT_TIMESTAMP"
-
-    @override
-    def _distance_to_similarity(self, distance: float) -> float:
-        return 1.0 / (1.0 + max(distance, 0.0))
 
 
 class _RecordingVectorIndex:
@@ -185,12 +177,25 @@ class _RecordingVectorIndex:
         return []
 
 
+def _semantic_search(*, index_name: str, adapter: Any = None) -> SemanticSearch:
+    """The vector pipeline over an adapter the test controls."""
+    vector = VectorRetrieval(
+        index=adapter if adapter is not None else _RecordingVectorIndex(),
+        index_name=index_name,
+        embedding_provider=cast(
+            EmbeddingProvider, SimpleNamespace(model_name="stub", dimensions=4)
+        ),
+        embedding_model="stub:4",
+        vector_k=100,
+        min_similarity=0.0,
+    )
+    return SemanticSearch(cast(Any, None), ProjectScope.single(1), FakeFts(), vector)
+
+
 @pytest.mark.asyncio
 async def test_vector_match_hydration_batches_large_adapter_results() -> None:
     """Deep vector pages must not create an unbounded SQL bind-parameter list."""
-    repo = _ConcreteRepo()
-    repo._semantic_vector_index_name = "milvus"
-    repo._embedding_provider = SimpleNamespace(model_name="stub", dimensions=4)
+    semantic = _semantic_search(index_name="milvus")
     matches = [
         VectorMatch(
             key=VectorKey(entity_id=entity_id, chunk_key=f"entity:{entity_id}:0"),
@@ -214,11 +219,11 @@ async def test_vector_match_hydration_batches_large_adapter_results() -> None:
 
     session.execute.side_effect = hydrated_batch
 
-    hydrated = await repo._hydrate_vector_matches(session, matches)
+    hydrated = await semantic._hydrate_vector_matches(session, matches)
 
     assert session.execute.await_count == 3
     assert max(len(call.args[1]) for call in session.execute.await_args_list) == 503
-    assert [row["entity_id"] for row in hydrated] == list(range(600))
+    assert [chunk.entity_id for chunk in hydrated] == list(range(600))
 
 
 @pytest.mark.asyncio
@@ -226,8 +231,6 @@ async def test_external_vector_query_overfetches_past_stale_adapter_hits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Stale top-k extension hits must not crowd live manifest rows out."""
-    repo = _ConcreteRepo()
-    repo._semantic_vector_index_name = "milvus"
 
     def matches(count: int) -> list[VectorMatch]:
         return [
@@ -239,15 +242,15 @@ async def test_external_vector_query_overfetches_past_stale_adapter_hits(
         ]
 
     adapter: Any = SimpleNamespace(search=AsyncMock(side_effect=[matches(2), matches(4)]))
-    repo._semantic_vector_index = adapter
+    semantic = _semantic_search(index_name="milvus", adapter=adapter)
     live_rows = [
-        {"entity_id": 2, "chunk_key": "entity:2:0", "best_similarity": 0.9},
-        {"entity_id": 3, "chunk_key": "entity:3:0", "best_similarity": 0.8},
+        HydratedChunk(entity_id=2, chunk_key="entity:2:0", chunk_text="two", similarity=0.9),
+        HydratedChunk(entity_id=3, chunk_key="entity:3:0", chunk_text="three", similarity=0.8),
     ]
     hydrate = AsyncMock(side_effect=[[], live_rows])
-    monkeypatch.setattr(repo, "_hydrate_vector_matches", hydrate)
+    monkeypatch.setattr(semantic, "_hydrate_vector_matches", hydrate)
 
-    result = await SearchRepositoryBase._run_vector_query(repo, AsyncMock(), [0.1], 2)
+    result = await semantic._run_vector_query(AsyncMock(), [0.1], 2)
 
     assert result == live_rows
     assert [call.kwargs["limit"] for call in adapter.search.await_args_list] == [2, 4]

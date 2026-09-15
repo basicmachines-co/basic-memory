@@ -131,6 +131,18 @@
   layer with defaults, and the filter helpers both backends share move from the base into
   `search_filters`. No query behavior changes.
 
+- **#1558**: Retrieval leaves `SearchRepositoryBase`. `SearchReader` runs one prepared
+  query over one `ProjectScope` in whichever mode it asks for, and `SemanticSearch` owns
+  vector and hybrid retrieval (adapter lookup, manifest hydration, the structured filter
+  pass, score fusion, reranking, pagination) over a `VectorRetrieval` that is present or
+  absent rather than probed with `hasattr`. The repository keeps what only it knows
+  (whether semantic search is enabled and its vector tables exist) and builds a reader
+  per call from its current state. Hydrated chunks are a typed `HydratedChunk`, which
+  retires the `best_distance` compatibility branch and the per-backend
+  `_distance_to_similarity` hooks the adapters had already replaced. Test doubles
+  construct the pipeline directly instead of subclassing the repository. No query
+  behavior changes.
+
 
 ## v0.23.2 (2026-08-25)
 
