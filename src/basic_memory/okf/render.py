@@ -18,6 +18,7 @@ from basic_memory.markdown.entity_parser import (
 from basic_memory.markdown.path_links import markdown_link_target
 from basic_memory.markdown.plugins import _is_escaped
 from basic_memory.repository.entity_repository import file_path_alias
+from basic_memory.services.bulk_link_resolver import RelationTargetReference
 from basic_memory.services.link_resolver import normalize_link_text
 from basic_memory.utils import build_permalink_resolution_candidates, generate_permalink
 
@@ -34,6 +35,17 @@ def represent_set(dumper: ExportDumper, values: set[object]) -> yaml.nodes.Mappi
 
 
 ExportDumper.add_representer(set, represent_set)
+
+
+def has_unordered_values(value: object) -> bool:
+    """Identity strings cannot use hash-dependent representations of nested sets."""
+    if isinstance(value, set):
+        return True
+    if isinstance(value, dict):
+        return any(has_unordered_values(item) for item in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(has_unordered_values(item) for item in value)
+    return False
 
 
 @dataclass(frozen=True)
@@ -78,7 +90,7 @@ def convert_wikilinks(
     permalinks: dict[str, str] | None = None,
     title_targets: dict[str, str] | None = None,
 ) -> str:
-    """Use MarkdownIt's code/escape/link rules while retaining untouched source bytes."""
+    """Normalize export line endings to LF and rewrite only prose wikilink spans."""
     body = body.replace("\r\n", "\n").replace("\r", "\n")
     project = generate_permalink(project)
     replacements: list[tuple[int, int, str]] = []
@@ -114,6 +126,14 @@ def convert_wikilinks(
         raw = state.src[start + 2 : end]
         target, alias = normalize_link_text(raw)
         target, _, fragment = target.partition("#")
+        label = alias or target or fragment
+        reference = RelationTargetReference.parse(target)
+        if reference.explicitly_qualified:
+            prefix, remainder = reference.project_path()
+            # Explicit foreign-project references cannot bind to this bundle's aliases.
+            if prefix is None or generate_permalink(prefix) != project:
+                return False
+            target = remainder
         rooted = target.startswith("/")
         resolved = None
         # Explicit relative links bind to their source directory before semantic aliases.
@@ -123,6 +143,8 @@ def convert_wikilinks(
         # Keep that unresolved reference literal rather than inventing a portable edge.
         if relative is None and ".." in PurePosixPath(target).parts:
             return False
+        if reference.explicitly_qualified:
+            relative = None
         if (
             include_project
             and "/" in target
@@ -169,9 +191,7 @@ def convert_wikilinks(
         # A missing target stays a broken link, not a guessed edge to another concept.
         # Rooted links already name exact portable file paths; never infer an extension.
         href = target if rooted else "/" + (resolved or target or source)
-        replacements.append(
-            (start, end + 2, markdown_link(alias or target or fragment, href, fragment))
-        )
+        replacements.append((start, end + 2, markdown_link(label, href, fragment)))
         state.push("text", "", 0).content = raw
         state.pos = end + 2
         return True
@@ -242,6 +262,9 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
         source_metadata = (
             parse_frontmatter(file.content.decode("utf-8")) if document.has_frontmatter else {}
         )
+        for field in ("title", "type"):
+            if has_unordered_values(source_metadata.get(field)):
+                raise ValueError(f"{file.path}: {field} cannot contain an unordered YAML set")
         title = _coerce_to_string(normalize_frontmatter_value(source_metadata.get("title")))
         title = title if title and title != "None" else PurePosixPath(file.path).stem
         titles[file.path] = title

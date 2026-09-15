@@ -797,3 +797,30 @@ def test_yaml_sets_are_deterministic_across_processes():
     assert outputs[0] == outputs[1] == expected + "\n"
     assert parse_document(outputs[0]).metadata["custom"] == {"alpha", "beta", "gamma"}
     assert outputs[0].index("type: note") < outputs[0].index("custom:")
+
+
+def test_explicit_project_qualifiers_cannot_bind_to_foreign_local_aliases():
+    snapshot = ExportSnapshot(
+        "p",
+        (
+            ExportFile("trap.md", b"---\npermalink: q/foo\n---\n"),
+            ExportFile("target.md", b"---\npermalink: foo\n---\n"),
+            ExportFile("folder/target.md", b"---\npermalink: local\n---\n"),
+            ExportFile("folder/source.md", b"[[q::foo]] [[p::foo]] [[p::target.md]]"),
+        ),
+    )
+    source = next(
+        file.content for file in render_bundle(snapshot) if file.path == "folder/source.md"
+    )
+    assert b"[[q::foo]] [p::foo](/target.md) [p::target.md](/target.md)" in source
+
+
+@pytest.mark.parametrize("field", ["title", "type"])
+@pytest.mark.parametrize(
+    "value",
+    ["!!set {alpha: null, beta: null}", "[!!set {alpha: null}]", "{nested: !!set {a: null}}"],
+)
+def test_unordered_identity_metadata_fails_explicitly(field, value):
+    snapshot = ExportSnapshot("p", (ExportFile("a.md", f"---\n{field}: {value}\n---\n".encode()),))
+    with pytest.raises(ValueError, match=f"a.md: {field} cannot contain an unordered YAML set"):
+        render_bundle(snapshot)
