@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import PurePosixPath
 from urllib.parse import quote
+from uuid import UUID
 
 from markdown_it import MarkdownIt
 from markdown_it.rules_inline import StateInline
@@ -138,6 +139,14 @@ def convert_wikilinks(
             if prefix is None or generate_permalink(prefix) != project:
                 return False
             target = remainder
+        # External IDs outrank semantic aliases but are not carried by filesystem bytes.
+        # Keep their references literal rather than binding to a lower-priority name.
+        try:
+            UUID(target)
+        except ValueError:
+            pass
+        else:
+            return False
         # Network-path URIs would turn unresolved file identities into external links.
         if target.startswith("//"):
             return False

@@ -885,3 +885,47 @@ def test_nested_resource_titles_resolve_with_ambiguity_handling(test_project, du
         if file.path == "source.md"
     )
     assert (b"[paper.pdf](/paper.pdf)" if duplicate else b"[paper.pdf](/refs/paper.pdf)") in source
+
+
+@pytest.mark.parametrize(
+    "identifier",
+    [
+        "24a6c931-e246-4a48-947d-99b1bcfab3b5",
+        "24A6C931-E246-4A48-947D-99B1BCFAB3B5",
+        "24a6c931e2464a48947d99b1bcfab3b5",
+        "{24a6c931-e246-4a48-947d-99b1bcfab3b5}",
+    ],
+)
+def test_external_id_links_cannot_bind_to_semantic_aliases(identifier, test_project):
+    from basic_memory.models import Entity
+    from basic_memory.services.bulk_link_resolver import (
+        BulkLinkResolutionSnapshot,
+        ProjectEntityIdentityIndex,
+        ProjectReferenceIndex,
+        RelationTargetReference,
+    )
+
+    owner = Entity(
+        external_id="24a6c931-e246-4a48-947d-99b1bcfab3b5", title="Owner", file_path="owner.md"
+    )
+    trap = Entity(title=identifier, permalink=identifier, file_path="trap.md")
+    index = ProjectEntityIdentityIndex.from_entities(test_project, [owner, trap])
+    resolver = BulkLinkResolutionSnapshot(
+        current_project_id=test_project.id,
+        projects=ProjectReferenceIndex.from_projects([test_project]),
+        entity_indexes={test_project.id: index},
+        include_project_permalinks=True,
+        workspace_permalink=None,
+    )
+    assert resolver.resolve(RelationTargetReference.parse(identifier)) is owner
+    body = f"[[{identifier}]] [[{identifier}|owner]] [[p::{identifier}]]"
+    files = (
+        ExportFile("trap.md", f"---\npermalink: '{identifier}'\n---\n".encode()),
+        ExportFile("source.md", body.encode()),
+    )
+    source = next(
+        file.content.decode()
+        for file in render_bundle(ExportSnapshot("p", files))
+        if file.path == "source.md"
+    )
+    assert parse_document(source).body == body
