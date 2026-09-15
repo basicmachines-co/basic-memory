@@ -72,10 +72,6 @@ class ConcreteSearchRepo(SearchRepositoryBase):
         return None  # physical storage is not inspectable in this double
 
     @override
-    def _prepare_search_term(self, term, is_prefix=True):
-        return term  # pragma: no cover
-
-    @override
     async def search(
         self,
         search_text: Optional[str] = None,

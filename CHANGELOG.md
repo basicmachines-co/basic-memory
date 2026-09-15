@@ -109,6 +109,18 @@
   Frontmatter is now classified once, by the parser, as present, absent, or
   malformed, and only the first two are ever written to.
 
+### Internal
+
+- **#1558**: Search filter compilation now runs over an explicit `ProjectScope` instead of
+  a repository-bound `project_id`. FTS term preparation and filter compilation moved out
+  of the SQLite and Postgres repositories into `sqlite_search_query` and
+  `postgres_search_query` as pure functions returning a `CompiledFilter`, and the filters
+  both backends share (scope, permalink, directory, item type, category, note type,
+  `after_date`, valid time, candidate keys) are compiled once in `search_filters`. The
+  note-type and valid-time predicates match search rows on their full
+  `(project_id, ...)` identity. Project repositories call the compilers with a scope of
+  one; no query behavior changes. First step of the shared single/multi-project reader.
+
 
 ## v0.23.2 (2026-08-25)
 

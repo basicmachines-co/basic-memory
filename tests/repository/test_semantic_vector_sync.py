@@ -46,10 +46,6 @@ class _TestRepository(SearchRepositoryBase):
         return None  # physical storage is not inspectable in this double
 
     @override
-    def _prepare_search_term(self, term, is_prefix=True):
-        return term
-
-    @override
     async def search(
         self,
         search_text: str | None = None,

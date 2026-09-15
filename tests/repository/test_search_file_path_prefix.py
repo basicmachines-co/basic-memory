@@ -335,7 +335,7 @@ async def test_semantic_retrieval_honors_the_scope(
 def test_condition_is_one_shared_predicate_for_both_dialects():
     """The SQL text and its parameters are backend-independent by construction.
 
-    Both `_build_fts_query_parts` implementations call this one helper, so the
+    Both `compile_fts_filter` implementations call this one helper, so the
     identical-behavior claim above is structural rather than a coincidence two
     hand-written predicates happen to share.
     """

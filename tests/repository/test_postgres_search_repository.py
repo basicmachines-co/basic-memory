@@ -13,6 +13,14 @@ from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 import basic_memory.repository.search_repository_base as search_repository_base_module
 from basic_memory.repository.litellm_provider import LiteLLMEmbeddingProvider
+import basic_memory.repository.postgres_search_query as postgres_search_query_module
+import basic_memory.repository.postgres_search_repository as postgres_search_repository_module
+from basic_memory.repository.postgres_search_query import (
+    compile_fts_filter,
+    prepare_search_term,
+    prepare_single_term,
+    relaxed_tsquery_text,
+)
 from basic_memory.repository.postgres_search_repository import (
     PostgresSearchRepository,
     _strip_nul_from_row,
@@ -261,35 +269,29 @@ async def test_postgres_search_repository_bulk_index_items_and_prepare_terms(
     await repo.bulk_index_items([])
 
     # Exercise term preparation helpers
-    assert "&" in repo._prepare_search_term("coffee AND brewing")
-    assert repo._prepare_search_term("coff*") == "coff:*"
-    assert repo._prepare_search_term("()&!:") == "NOSPECIALCHARS:*"
-    assert repo._prepare_search_term("coffee brewing") == "coffee:* & brewing:*"
-    assert repo._prepare_single_term("   ") == "   "
-    assert repo._prepare_single_term("coffee", is_prefix=False) == "coffee"
+    assert "&" in prepare_search_term("coffee AND brewing")
+    assert prepare_search_term("coff*") == "coff:*"
+    assert prepare_search_term("()&!:") == "NOSPECIALCHARS:*"
+    assert prepare_search_term("coffee brewing") == "coffee:* & brewing:*"
+    assert prepare_single_term("   ") == "   "
+    assert prepare_single_term("coffee", is_prefix=False) == "coffee"
 
-    indexed_from, _where, indexed_params, _order, _score = await repo._build_fts_query_parts(
-        search_text="coffee brewing",
-        allow_relaxed=True,
-    )
-    assert "FROM search_index AS candidate_parent" in indexed_from
-    assert "FROM search_index_fts_chunks AS candidate_chunk" in indexed_from
-    assert "querytree(to_tsquery('english', :text))" in indexed_from
-    assert indexed_params["text_candidate"] == "coffee:* | brewing:*"
+    indexed = compile_fts_filter(repo.scope, search_text="coffee brewing", allow_relaxed=True)
+    assert "FROM search_index AS candidate_parent" in indexed.from_clause
+    assert "FROM search_index_fts_chunks AS candidate_chunk" in indexed.from_clause
+    assert "querytree(to_tsquery('english', :text))" in indexed.from_clause
+    assert indexed.params["text_candidate"] == "coffee:* | brewing:*"
 
-    filtered_from, _where, _params, _order, _score = await repo._build_fts_query_parts(
-        search_text="coffee brewing",
-        metadata_filters={"status": "active"},
+    filtered = compile_fts_filter(
+        repo.scope, search_text="coffee brewing", metadata_filters={"status": "active"}
     )
-    assert "AS fts_candidate" in filtered_from
-    assert "JOIN entity ON search_index.entity_id = entity.id" in filtered_from
+    assert "AS fts_candidate" in filtered.from_clause
+    assert "JOIN entity ON search_index.entity_id = entity.id" in filtered.from_clause
 
-    negated_from, _where, negated_params, _order, _score = await repo._build_fts_query_parts(
-        search_text="coffee NOT brewing",
-    )
-    assert "AS fts_candidate" in negated_from
-    assert "FROM search_index AS candidate_all" in negated_from
-    assert negated_params["text_candidate"] == "coffee | brewing"
+    negated = compile_fts_filter(repo.scope, search_text="coffee NOT brewing")
+    assert "AS fts_candidate" in negated.from_clause
+    assert "FROM search_index AS candidate_all" in negated.from_clause
+    assert negated.params["text_candidate"] == "coffee | brewing"
 
     now = datetime.now(timezone.utc)
     rows = [
@@ -374,7 +376,11 @@ async def test_postgres_search_repository_tsquery_syntax_error_returns_empty(
     # Isolate database-error handling from the user parser, which deliberately
     # repairs malformed trailing operators before they reach PostgreSQL.
     with monkeypatch.context() as syntax_error:
-        syntax_error.setattr(repo, "_prepare_search_term", lambda *_args, **_kwargs: "coffee &")
+        syntax_error.setattr(
+            postgres_search_query_module,
+            "prepare_search_term",
+            lambda *_args, **_kwargs: "coffee &",
+        )
         results = await repo.search(search_text="coffee")
         assert results == []
         assert await repo.count(search_text="coffee") == 0
@@ -420,8 +426,8 @@ async def test_postgres_search_tsquery_error_does_not_poison_caller_session(
         # without the savepoint it aborts the caller's transaction.
         with monkeypatch.context() as syntax_error:
             syntax_error.setattr(
-                repo,
-                "_prepare_search_term",
+                postgres_search_query_module,
+                "prepare_search_term",
                 lambda *_args, **_kwargs: "coffee &",
             )
             results = await repo.search(search_text="coffee", session=session)
@@ -1193,21 +1199,21 @@ async def test_postgres_question_punctuation_and_relaxation(session_maker, test_
     and a strict all-AND miss had no relaxed retry, silently disabling the FTS
     half of hybrid search for natural-language questions.
     """
-    repo = PostgresSearchRepository(session_maker, project_id=test_project.id)
+    PostgresSearchRepository(session_maker, project_id=test_project.id)
 
     # Edge punctuation stripped before lexeme formatting.
-    prepared = repo._prepare_search_term("When did Melanie paint a sunrise?")
+    prepared = prepare_search_term("When did Melanie paint a sunrise?")
     assert "?" not in prepared
     assert "sunrise:*" in prepared
 
     # Relaxation drops stopwords and OR-joins content terms.
-    relaxed = repo._relaxed_tsquery_text("When did Melanie paint a sunrise?")
+    relaxed = relaxed_tsquery_text("When did Melanie paint a sunrise?")
     assert relaxed == "melanie:* | paint:* | sunrise:*"
 
     # User intent is not second-guessed.
-    assert repo._relaxed_tsquery_text("alpha AND beta") is None
-    assert repo._relaxed_tsquery_text('"exact phrase"') is None
-    assert repo._relaxed_tsquery_text(None) is None
+    assert relaxed_tsquery_text("alpha AND beta") is None
+    assert relaxed_tsquery_text('"exact phrase"') is None
+    assert relaxed_tsquery_text(None) is None
 
 
 @pytest.mark.asyncio
@@ -1267,7 +1273,7 @@ async def test_postgres_relaxes_after_strict_tsquery_syntax_error(
     )
 
     syntax_errors: list[Exception] = []
-    real_is_syntax_error = repo._is_tsquery_syntax_error
+    real_is_syntax_error = postgres_search_repository_module.is_tsquery_syntax_error
 
     def record_syntax_error(exc: Exception) -> bool:
         is_syntax_error = real_is_syntax_error(exc)
@@ -1275,7 +1281,10 @@ async def test_postgres_relaxes_after_strict_tsquery_syntax_error(
             syntax_errors.append(exc)
         return is_syntax_error
 
-    monkeypatch.setattr(repo, "_is_tsquery_syntax_error", record_syntax_error)
+    # The repository module binds the classifier at import; patch it where it is read.
+    monkeypatch.setattr(
+        postgres_search_repository_module, "is_tsquery_syntax_error", record_syntax_error
+    )
 
     query = "foo<bar baz qux"
     async with db.scoped_session(session_maker) as caller_session:
