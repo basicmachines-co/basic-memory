@@ -559,6 +559,7 @@ class SearchRepositoryBase(ABC):
         """Create backend-specific vector chunk and embedding tables."""
         pass
 
+    @logfire.instrument("search.vector_query", extract_args=False)
     async def _run_vector_query(
         self,
         session: AsyncSession,
@@ -713,6 +714,7 @@ class SearchRepositoryBase(ABC):
                     )
             await session.commit()
 
+    @logfire.instrument("search.vector_manifest_hydration", extract_args=False)
     async def _hydrate_vector_matches(
         self,
         session: AsyncSession,
@@ -2401,10 +2403,15 @@ class SearchRepositoryBase(ABC):
         # back to retrieval order. A prior page may already have returned reranked
         # order, so degrading here can duplicate one result and omit another.
         rerank_start = time.perf_counter() if trace is not None else None
-        scores = validate_rerank_scores(
-            await self._rerank_provider.rerank(query_text, documents),
-            len(pool),
-        )
+        with logfire.span(
+            "search.rerank",
+            candidate_count=len(pool),
+            document_chars=sum(map(len, documents)),
+        ):
+            scores = validate_rerank_scores(
+                await self._rerank_provider.rerank(query_text, documents),
+                len(pool),
+            )
 
         order = sorted(range(len(pool)), key=lambda i: scores[i], reverse=True)
         reranked = [replace(pool[i], score=scores[i]) for i in order]
@@ -2473,7 +2480,8 @@ class SearchRepositoryBase(ABC):
             candidate_limit = self._candidate_limit(limit, offset, query_text)
         query_start = time.perf_counter()
         embed_start = time.perf_counter()
-        query_embedding = await self._embedding_provider.embed_query(query_text)
+        with logfire.span("search.embed_query", query_chars=len(query_text)):
+            query_embedding = await self._embedding_provider.embed_query(query_text)
         embed_ms = (time.perf_counter() - embed_start) * 1000
         vector_query_start = time.perf_counter()
 
@@ -2736,6 +2744,7 @@ class SearchRepositoryBase(ABC):
         _log_vector_summary()
         return output
 
+    @logfire.instrument("search.filter_candidates", extract_args=False)
     async def _filter_candidate_keys(
         self,
         candidate_keys: Sequence[SearchIndexKey],
@@ -2789,6 +2798,7 @@ class SearchRepositoryBase(ABC):
             allowed_keys.update((row.type, row.id) for row in filtered_rows if row.id is not None)
         return allowed_keys
 
+    @logfire.instrument("search.fetch_candidate_rows", extract_args=False)
     async def _fetch_search_index_rows_by_ids(
         self, row_ids: list[int]
     ) -> dict[SearchIndexKey, SearchIndexRow]:
@@ -2867,24 +2877,26 @@ class SearchRepositoryBase(ABC):
         # allow_relaxed: question-form queries rarely AND-match, and a dead FTS
         # branch silently degrades hybrid to vector-only ranking. Fusion plus
         # bm25 keep relaxed lexical candidates from dominating precision.
-        fts_results = await self.search(
-            search_text=search_text,
-            permalink=permalink,
-            permalink_match=permalink_match,
-            title=title,
-            note_types=note_types,
-            after_date=after_date,
-            search_item_types=search_item_types,
-            categories=categories,
-            metadata_filters=metadata_filters,
-            file_path_prefix=file_path_prefix,
-            temporal=temporal,
-            retrieval_mode=SearchRetrievalMode.FTS,
-            limit=candidate_limit,
-            offset=0,
-            allow_relaxed=True,
-            trace=trace,
-        )
+        with logfire.span("search.fts", candidate_limit=candidate_limit) as fts_span:
+            fts_results = await self.search(
+                search_text=search_text,
+                permalink=permalink,
+                permalink_match=permalink_match,
+                title=title,
+                note_types=note_types,
+                after_date=after_date,
+                search_item_types=search_item_types,
+                categories=categories,
+                metadata_filters=metadata_filters,
+                file_path_prefix=file_path_prefix,
+                temporal=temporal,
+                retrieval_mode=SearchRetrievalMode.FTS,
+                limit=candidate_limit,
+                offset=0,
+                allow_relaxed=True,
+                trace=trace,
+            )
+            fts_span.set_attribute("result_count", len(fts_results))
         fts_ms = (time.perf_counter() - fts_start) * 1000
         vector_start = time.perf_counter()
         vector_results = await self._search_vector_only(
@@ -2943,68 +2955,72 @@ class SearchRepositoryBase(ABC):
                 )
         fusion_start = time.perf_counter()
 
-        # --- Score-based fusion keyed on (type, id) ---
-        # A bare row id collides across row types (independent id sequences), so
-        # fusion must key on (type, id) or distinct rows would merge (#982).
-        # FTS scores are normalized to [0, 1] (BM25 is unbounded).
-        # Vector scores are used raw — already calibrated [0, 1] by _distance_to_similarity().
-        rows_by_key: dict[SearchIndexKey, SearchIndexRow] = {}
+        with logfire.span(
+            "search.fusion", fts_count=len(fts_results), vector_count=len(vector_results)
+        ) as fusion_span:
+            # --- Score-based fusion keyed on (type, id) ---
+            # A bare row id collides across row types (independent id sequences), so
+            # fusion must key on (type, id) or distinct rows would merge (#982).
+            # FTS scores are normalized to [0, 1] (BM25 is unbounded).
+            # Vector scores are used raw — already calibrated [0, 1] by _distance_to_similarity().
+            rows_by_key: dict[SearchIndexKey, SearchIndexRow] = {}
 
-        # Normalize FTS scores to [0, 1] — handles both SQLite (negative bm25)
-        # and Postgres (positive ts_rank) by using absolute values
-        fts_abs = [abs(row.score or 0.0) for row in fts_results]
-        fts_max = max(fts_abs) if fts_abs else 1.0
+            # Normalize FTS scores to [0, 1] — handles both SQLite (negative bm25)
+            # and Postgres (positive ts_rank) by using absolute values
+            fts_abs = [abs(row.score or 0.0) for row in fts_results]
+            fts_max = max(fts_abs) if fts_abs else 1.0
 
-        fts_scores: dict[SearchIndexKey, float] = {}
-        fts_ranks: dict[SearchIndexKey, int] = {}
-        for rank, row in enumerate(fts_results):
-            if row.id is None:
-                continue
-            row_key = (row.type, row.id)
-            norm = abs(row.score or 0.0) / fts_max if fts_max > 0 else 0.0
-            # Gate: FTS scores below threshold contribute zero
-            if norm < FTS_GATE_THRESHOLD:
-                norm = 0.0
-            fts_scores[row_key] = norm
-            fts_ranks.setdefault(row_key, rank)
-            rows_by_key[row_key] = row
+            fts_scores: dict[SearchIndexKey, float] = {}
+            fts_ranks: dict[SearchIndexKey, int] = {}
+            for rank, row in enumerate(fts_results):
+                if row.id is None:
+                    continue
+                row_key = (row.type, row.id)
+                norm = abs(row.score or 0.0) / fts_max if fts_max > 0 else 0.0
+                # Gate: FTS scores below threshold contribute zero
+                if norm < FTS_GATE_THRESHOLD:
+                    norm = 0.0
+                fts_scores[row_key] = norm
+                fts_ranks.setdefault(row_key, rank)
+                rows_by_key[row_key] = row
 
-        if trace is not None:
-            relaxed_fallback_used = (
-                trace.fts.relaxed_fallback_used if trace.fts is not None else False
-            )
-            trace.fts = build_fts_page_stage(
-                [((row.type, row.id), row.score or 0.0) for row in fts_results],
-                normalized_scores=fts_scores,
-                entity_ids={(row.type, row.id): row.entity_id for row in fts_results},
-                fts_max_abs=fts_max,
-                relaxed_fallback_used=relaxed_fallback_used,
-                fts_ms=fts_ms,
-            )
+            if trace is not None:
+                relaxed_fallback_used = (
+                    trace.fts.relaxed_fallback_used if trace.fts is not None else False
+                )
+                trace.fts = build_fts_page_stage(
+                    [((row.type, row.id), row.score or 0.0) for row in fts_results],
+                    normalized_scores=fts_scores,
+                    entity_ids={(row.type, row.id): row.entity_id for row in fts_results},
+                    fts_max_abs=fts_max,
+                    relaxed_fallback_used=relaxed_fallback_used,
+                    fts_ms=fts_ms,
+                )
 
-        vec_scores: dict[SearchIndexKey, float] = {}
-        vec_ranks: dict[SearchIndexKey, int] = {}
-        for rank, row in enumerate(vector_results):
-            if row.id is None:
-                continue
-            row_key = (row.type, row.id)
-            # Trigger: no re-normalization by vec_max
-            # Why: vector similarity is already calibrated [0, 1]; re-normalizing
-            # inflates weak matches when the entire result set is mediocre
-            vec_scores[row_key] = row.score or 0.0
-            vec_ranks.setdefault(row_key, rank)
-            rows_by_key[row_key] = row
+            vec_scores: dict[SearchIndexKey, float] = {}
+            vec_ranks: dict[SearchIndexKey, int] = {}
+            for rank, row in enumerate(vector_results):
+                if row.id is None:
+                    continue
+                row_key = (row.type, row.id)
+                # Trigger: no re-normalization by vec_max
+                # Why: vector similarity is already calibrated [0, 1]; re-normalizing
+                # inflates weak matches when the entire result set is mediocre
+                vec_scores[row_key] = row.score or 0.0
+                vec_ranks.setdefault(row_key, rank)
+                rows_by_key[row_key] = row
 
-        # Fuse: max(v, f) + FUSION_BONUS * min(v, f)
-        # Preserves the dominant signal; bonus rewards dual-source agreement.
-        # Output range: [0, 1.3] for dual-source, [0, 1.0] for single-source.
-        fused_scores: dict[SearchIndexKey, float] = {}
-        for row_key in fts_scores.keys() | vec_scores.keys():
-            v = vec_scores.get(row_key, 0.0)
-            f = fts_scores.get(row_key, 0.0)
-            fused_scores[row_key] = max(v, f) + FUSION_BONUS * min(v, f)
+            # Fuse: max(v, f) + FUSION_BONUS * min(v, f)
+            # Preserves the dominant signal; bonus rewards dual-source agreement.
+            # Output range: [0, 1.3] for dual-source, [0, 1.0] for single-source.
+            fused_scores: dict[SearchIndexKey, float] = {}
+            for row_key in fts_scores.keys() | vec_scores.keys():
+                v = vec_scores.get(row_key, 0.0)
+                f = fts_scores.get(row_key, 0.0)
+                fused_scores[row_key] = max(v, f) + FUSION_BONUS * min(v, f)
 
-        ranked = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)
+            ranked = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)
+            fusion_span.set_attribute("result_count", len(ranked))
         fusion_ms = (time.perf_counter() - fusion_start) * 1000
         if trace is not None:
             trace.fusion = build_fusion_stage(
@@ -3021,11 +3037,8 @@ class SearchRepositoryBase(ABC):
         def _materialize(entry: tuple[SearchIndexKey, float]) -> SearchIndexRow:
             row_key, fused_score = entry
             row = rows_by_key[row_key]
-            # Trigger: FTS-only results have no matched_chunk_text from vector search.
-            # Why: without chunk text, API falls back to truncated content, losing answer text.
-            # Outcome: FTS-only results get full content_snippet as matched_chunk.
-            if row.matched_chunk_text is None and row.content_snippet:
-                row = replace(row, matched_chunk_text=row.content_snippet)
+            # FTS-only hits use the bounded content preview and its truncation metadata.
+            # Copying the full note into matched_chunk bypasses that response bound.
             return replace(row, score=fused_score)
 
         # Rerank the top fused candidates before paginating. When reranking is active

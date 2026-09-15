@@ -85,7 +85,8 @@ class ModelReadCache[ModelT: BaseModel]:
                 }
             )
             try:
-                lookup = await self.backend.lookup(key)
+                with logfire.span("read_cache.lookup", operation=key.operation.value):
+                    lookup = await self.backend.lookup(key)
             except ReadCacheUnavailable:
                 # Trigger: Redis is unreachable or timed out.
                 # Why: the database or storage path remains authoritative.
@@ -114,7 +115,8 @@ class ModelReadCache[ModelT: BaseModel]:
                 if lookup.remaining_ttl_seconds is not None:
                     lookup_attributes["cache.remaining_ttl_seconds"] = lookup.remaining_ttl_seconds
                 try:
-                    cached_value = self.model_type.model_validate_json(lookup.payload)
+                    with logfire.span("read_cache.deserialize", payload_bytes=len(lookup.payload)):
+                        cached_value = self.model_type.model_validate_json(lookup.payload)
                 except ValidationError:
                     # Trigger: the cache envelope is valid but its typed response payload is not.
                     # Why: treating invalid data as a hit hides corruption and leaves misleading
@@ -143,7 +145,9 @@ class ModelReadCache[ModelT: BaseModel]:
                 span.set_attribute("cache.store.outcome", "ineligible")
                 return
 
-            payload = value.model_dump_json().encode("utf-8")
+            with logfire.span("read_cache.serialize") as serialization_span:
+                payload = value.model_dump_json().encode("utf-8")
+                serialization_span.set_attribute("payload_bytes", len(payload))
             if len(payload) > self.max_payload_bytes:
                 _record_event(key, "oversize")
                 span.set_attributes(
@@ -155,12 +159,13 @@ class ModelReadCache[ModelT: BaseModel]:
                 return
 
             try:
-                store_status = await self.backend.store(
-                    key,
-                    lookup,
-                    payload,
-                    ttl_seconds=self.ttl_seconds,
-                )
+                with logfire.span("read_cache.store", operation=key.operation.value):
+                    store_status = await self.backend.store(
+                        key,
+                        lookup,
+                        payload,
+                        ttl_seconds=self.ttl_seconds,
+                    )
             except ReadCacheUnavailable:
                 _record_event(key, "store_unavailable")
                 span.set_attribute("cache.store.outcome", "unavailable")

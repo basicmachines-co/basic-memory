@@ -692,6 +692,42 @@ The dominant signal (whichever source scored higher) is preserved, and dual-sour
 
 Vector and hybrid modes return individual observations and relations as first-class search results, not just parent entities. This means a search for "water temperature for brewing" can surface the specific observation about 205°F without returning the entire "Coffee Brewing Methods" entity.
 
+### Result Content
+
+Search results include a `content` preview of up to 4,000 characters, with
+`content_length` and `content_truncated` describing the indexed content. Vector
+matches also include `matched_chunk`, containing the existing relevant passages.
+Hybrid results found only by full-text search leave `matched_chunk` empty and use
+the bounded preview. Use `read_note` to retrieve the complete note when needed;
+the preview is the beginning of the content, not a query-centered excerpt.
+
+This response change requires no reindex. Existing cached responses can retain
+their previous content until invalidation or expiry (search cache TTL: 30 minutes).
+
+### Search Timing Spans
+
+When Logfire is configured, search exposes these stages for latency breakdown:
+
+| Span | Work measured |
+|---|---|
+| `search.fts` | Hybrid full-text candidate retrieval |
+| `search.embed_query` | Query embedding |
+| `search.vector_query` | Vector lookup and manifest hydration |
+| `search.vector_manifest_hydration` | Resolve vector hits against the ready manifest |
+| `search.fetch_candidate_rows` | Load candidate search rows |
+| `search.filter_candidates` | Apply structured filters to vector candidates |
+| `search.fusion` | Normalize and combine lexical and vector scores |
+| `search.rerank` | Await the reranker and validate candidate scores |
+| `search.hydrate_results` | Shape the public result page, including entity lookup |
+| `read_cache.lookup` / `read_cache.store` | Cache backend operations |
+| `read_cache.deserialize` / `read_cache.serialize` | Decode or encode cached response models |
+
+These spans record counts and sizes without query or document text. Stages that
+do no work, such as reranking on a cache hit, have no span. Nested span durations
+overlap: manifest hydration is included in vector-query time. Deeper pages may
+repeat retrieval to preserve the fixed reranked prefix, so inspect every stage
+in the trace rather than assuming one span per search.
+
 ## Database Backends
 
 ### SQLite (local)
