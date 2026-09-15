@@ -115,7 +115,8 @@ async def test_export_real_project(tmp_path):
     pdf = b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n%%EOF\n"
     (root / "references/paper.pdf").write_bytes(pdf)
     (root / "index.md").write_text(
-        "---\nbm: {profile: wiki/1}\n---\n[[Live Wiki]]\n", encoding="utf-8"
+        "---\nbm: {profile: wiki/1}\ngenerated: {by: Basic Memory Wiki Projector}\n---\n[[Live Wiki]]\n",
+        encoding="utf-8",
     )
     source_paths = ["notes/source.md", "Target.md", "references/paper.pdf", "index.md"]
     before = {path: (root / path).read_bytes() for path in source_paths}

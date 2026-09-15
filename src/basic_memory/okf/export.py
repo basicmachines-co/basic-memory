@@ -79,6 +79,7 @@ async def recorded_history(
 
 def snapshot_files(root: Path) -> tuple[ExportFile, ...]:
     from basic_memory.index.local_project import scan_local_project_index_files
+    from basic_memory.index.local_wiki_projection import _is_projector_owned
     from basic_memory.runtime.storage import runtime_file_path_is_markdown_note
 
     scan = scan_local_project_index_files(root)
@@ -100,9 +101,8 @@ def snapshot_files(root: Path) -> tuple[ExportFile, ...]:
         content = (root / path).read_bytes()
         if PurePosixPath(path).name in {"index.md", "log.md"}:
             document = parse_document(content.decode("utf-8"), source=True)
-            bm = document.metadata.get("bm")
             # Never silently discard user-authored concepts at reserved names.
-            if not (isinstance(bm, dict) and bm.get("profile") == "wiki/1") and not (
+            if not _is_projector_owned(path, content) and not (
                 path == "index.md" and set(document.metadata) == {"okf_version"}
             ):
                 raise ValueError(

@@ -139,10 +139,10 @@ def convert_wikilinks(
 
     parser = MarkdownIt()
     parser.inline.ruler.before("link", "okf_wikilink", wikilink)
-    lines = body.splitlines(keepends=True)
+    lines = body.split("\n")
     line_offsets = [0]
     for line in lines:
-        line_offsets.append(line_offsets[-1] + len(line))
+        line_offsets.append(line_offsets[-1] + len(line) + 1)
     document_replacements: list[tuple[int, int, str]] = []
     # Each inline block is parsed separately: backticks in another paragraph must
     # not turn this paragraph into code. Map token text back past list/quote prefixes.
@@ -156,8 +156,7 @@ def convert_wikilinks(
         offsets: list[int] = []
         first, last = token.map
         source_line = first
-        for inline_line in token.content.splitlines(keepends=True):
-            text = inline_line.rstrip("\n")
+        for text in token.content.split("\n"):
             # MarkdownIt expands continuation indentation tabs. Match the text
             # after indentation while keeping replacement endpoints in raw bytes.
             stripped = text.lstrip(" \t")
@@ -172,7 +171,7 @@ def convert_wikilinks(
                 raise ValueError(f"{source}: cannot locate wikilink source span")
             offset = line_offsets[source_line] + column
             offsets.extend([offset] * indentation)
-            offsets.extend(range(offset, offset + len(inline_line) - indentation))
+            offsets.extend(range(offset, offset + len(text) - indentation + 1))
             source_line += 1
         for start, end, replacement in replacements:
             document_replacements.append((offsets[start], offsets[end - 1] + 1, replacement))
@@ -188,6 +187,7 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
     ambiguous: set[str] = set()
     documents: dict[str, Document] = {}
     titles: dict[str, str] = {}
+    note_types: dict[str, str] = {}
     for file in snapshot.files:
         if PurePosixPath(file.path).suffix != ".md":
             continue
@@ -200,6 +200,12 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
         title = _coerce_to_string(normalize_frontmatter_value(source_metadata.get("title")))
         title = title if title and title != "None" else PurePosixPath(file.path).stem
         titles[file.path] = title
+        note_type = source_metadata.get("type")
+        note_types[file.path] = (
+            _coerce_to_string(normalize_frontmatter_value(note_type))
+            if note_type is not None
+            else "note"
+        )
         aliases = {file.path, str(PurePosixPath(file.path).with_suffix("")), title}
         permalink = document.metadata.get("permalink")
         if isinstance(permalink, str) and permalink:
@@ -224,7 +230,7 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
             continue
         document = documents[file.path]
         metadata = dict(document.metadata)
-        metadata.setdefault("type", "note")
+        metadata["type"] = note_types[file.path]
         metadata.setdefault("tags", [])
         semantic_setting = metadata.get("bm_parse_semantics")
         if not (

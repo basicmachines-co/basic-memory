@@ -171,8 +171,12 @@ async def test_failed_validation_leaves_destination_intact(export_config, tmp_pa
 
 def test_reserved_source_and_ignore_rules(export_config):
     root = Path(export_config.projects["export"].path)
-    (root / "index.md").write_text("---\nbm: {profile: wiki/1}\n---\n[[Live Wiki]]")
-    (root / "log.md").write_text("---\nbm: {profile: wiki/1}\n---\n# old log")
+    (root / "index.md").write_text(
+        "---\nbm: {profile: wiki/1}\ngenerated: {by: Basic Memory Wiki Projector}\n---\n[[Live Wiki]]"
+    )
+    (root / "log.md").write_text(
+        "---\nbm: {profile: wiki/1}\ngenerated: {by: Basic Memory Wiki Projector}\n---\n# old log"
+    )
     (root / ".secret").write_text("secret")
     (root / "paper.pdf").write_bytes(b"pdf")
     assert {file.path for file in snapshot_files(root)} == {"a.md", "paper.pdf"}
@@ -525,3 +529,34 @@ def test_source_title_normalization_preserves_authored_metadata(yaml_title, targ
         == parse_document(authored).metadata["title"]
     )
     assert f"[{target}](note.md)" in files["index.md"]
+
+
+@pytest.mark.parametrize("separator", ["\u2028", "\u2029", "\f"])
+def test_unicode_separators_are_not_markdown_line_boundaries(separator):
+    body = f"Prose{separator}[[A]] and [[A]]"
+    assert convert_wikilinks(body, "source.md", {"A": "a.md"}, "p") == body.replace(
+        "[[A]]", "[A](/a.md)"
+    )
+
+
+@pytest.mark.parametrize(
+    "yaml_type,expected",
+    [("123", "123"), ("false", "False"), ("[My, Type]", "My, Type"), ("null", "note")],
+)
+def test_export_uses_canonical_bm_type(yaml_type, expected):
+    snapshot = ExportSnapshot(
+        "p", (ExportFile("a.md", f"---\ntype: {yaml_type}\n---\nBody".encode()),)
+    )
+    content = next(file.content.decode() for file in render_bundle(snapshot) if file.path == "a.md")
+    assert parse_document(content).metadata["type"] == expected
+    assert check_document("a.md", content) == []
+
+
+@pytest.mark.parametrize("name", ["index.md", "log.md"])
+def test_wiki_profile_alone_does_not_establish_ownership(export_config, name):
+    root = Path(export_config.projects["export"].path)
+    source = root / name
+    source.write_text("---\nbm: {profile: wiki/1}\n---\nAuthored body")
+    with pytest.raises(ValueError, match="rename it first"):
+        snapshot_files(root)
+    assert "Authored body" in source.read_text()

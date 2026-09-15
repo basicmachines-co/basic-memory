@@ -28,8 +28,9 @@ such as PDFs retain their relative paths. Symlinks are not exported.
 Concept filenames must use lowercase `.md`; supported BM alternatives such as
 `.markdown` or `.MD` must be renamed before export so OKF readers cannot skip them.
 
-Concept frontmatter is preserved, with absent `type` defaulting to `note`
-and absent `tags` to an empty list. Wikilinks become standard Markdown links.
+Concept frontmatter is retained, with `type` using BM's canonical string value
+and defaulting to `note` when absent or null. Absent `tags` default to an empty
+list. Other metadata values are preserved. Wikilinks become standard Markdown links.
 Exact file paths, titles, and permalinks resolve within the exported snapshot;
 unresolved links remain broken links. Ambiguous aliases are not guessed.
 Code examples retain literal wikilinks.
