@@ -24,6 +24,18 @@ from basic_memory.utils import build_permalink_resolution_candidates, generate_p
 from basic_memory.okf.validation import Document, parse_document
 
 
+class ExportDumper(yaml.SafeDumper):
+    """Retain YAML mapping order while making unordered sets deterministic."""
+
+
+def represent_set(dumper: ExportDumper, values: set[object]) -> yaml.nodes.MappingNode:
+    ordered = sorted(values, key=lambda value: yaml.safe_dump(value, sort_keys=True))
+    return dumper.represent_mapping("tag:yaml.org,2002:set", [(value, None) for value in ordered])
+
+
+ExportDumper.add_representer(set, represent_set)
+
+
 @dataclass(frozen=True)
 class ExportFile:
     path: str
@@ -107,6 +119,10 @@ def convert_wikilinks(
         # Explicit relative links bind to their source directory before semantic aliases.
         # Wikilink paths are literal identifiers, so URL decoding must round-trip them.
         relative = markdown_link_target(quote(target, safe="/"), source)
+        # A root-relative URI with escaping dot segments could normalize to a real note.
+        # Keep that unresolved reference literal rather than inventing a portable edge.
+        if relative is None and ".." in PurePosixPath(target).parts:
+            return False
         if (
             include_project
             and "/" in target
@@ -131,7 +147,15 @@ def convert_wikilinks(
             resolved = title_targets.get(target)
         if not rooted and resolved is None:
             resolved = targets.get(target)
-        if not rooted and resolved is None and target not in ambiguous_aliases:
+        if (
+            not rooted
+            and resolved is None
+            and (
+                target not in ambiguous_aliases
+                or "/" in target
+                or target.casefold().endswith(".md")
+            )
+        ):
             # Forgiving filename spelling is a last resort after exact identities.
             candidates = ([relative] if relative and "/" in target else []) + [target]
             for candidate in candidates:
@@ -285,7 +309,9 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
             permalinks=permalinks,
             title_targets=title_targets,
         )
-        content = "---\n" + yaml.safe_dump(metadata, allow_unicode=True, sort_keys=False)
+        content = "---\n" + yaml.dump(
+            metadata, Dumper=ExportDumper, allow_unicode=True, sort_keys=False
+        )
         content += "---\n" + body
         output.append(ExportFile(file.path, content.encode("utf-8")))
 

@@ -736,3 +736,64 @@ def test_permalink_compatibility_candidates_are_not_filename_aliases(test_projec
     )
     source = next(file.content for file in render_bundle(snapshot) if file.path == "source.md")
     assert b"[p/foo](/p/foo) and [foo](/foo.md)" in source
+
+
+def test_escaping_wikilink_stays_literal_instead_of_normalizing_to_a_real_note():
+    body = "[[../../a.md]] and [[../a.md]]"
+    assert convert_wikilinks(body, "folder/source.md", {"a.md": "a.md"}, "p") == (
+        "[[../../a.md]] and [../a.md](/a.md)"
+    )
+
+
+def test_ambiguous_slash_title_still_allows_exact_filename_inference(test_project):
+    from basic_memory.models import Entity
+    from basic_memory.services.bulk_link_resolver import ProjectEntityIdentityIndex
+
+    owner = Entity(title="p/foo", file_path="p/foo.md")
+    index = ProjectEntityIdentityIndex.from_entities(
+        test_project, [owner, Entity(title="p/foo", file_path="other.md")]
+    )
+    assert (
+        index.resolve_strict(
+            "p/foo", include_project_permalinks=True, workspace_permalink=None
+        ).entity
+        is owner
+    )
+    snapshot = ExportSnapshot(
+        "p",
+        (
+            ExportFile("p/foo.md", b"---\ntitle: p/foo\n---\n"),
+            ExportFile("other.md", b"---\ntitle: p/foo\n---\n"),
+            ExportFile("source.md", b"[[p/foo]]"),
+        ),
+    )
+    source = next(file.content for file in render_bundle(snapshot) if file.path == "source.md")
+    assert b"[p/foo](/p/foo.md)" in source
+
+
+def test_yaml_sets_are_deterministic_across_processes():
+    import os
+    import subprocess
+    import sys
+
+    source = b"---\ntype: note\ncustom: !!set {alpha: null, beta: null, gamma: null}\n---\n"
+    expected = next(
+        file.content.decode()
+        for file in render_bundle(ExportSnapshot("p", (ExportFile("a.md", source),)))
+        if file.path == "a.md"
+    )
+    script = (
+        "from basic_memory.okf.render import ExportFile, ExportSnapshot, render_bundle\n"
+        f"source = {source!r}\n"
+        "print(next(f.content.decode() for f in render_bundle(ExportSnapshot('p', "
+        "(ExportFile('a.md', source),))) if f.path == 'a.md'))\n"
+    )
+    outputs = [
+        subprocess.check_output(
+            [sys.executable, "-c", script], env={**os.environ, "PYTHONHASHSEED": seed}, text=True
+        )
+        for seed in ("1", "2")
+    ]
+    assert outputs[0] == outputs[1] == expected + "\n"
+    assert parse_document(outputs[0]).metadata["custom"] == {"alpha", "beta", "gamma"}
+    assert outputs[0].index("type: note") < outputs[0].index("custom:")
