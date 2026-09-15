@@ -1,6 +1,7 @@
 """Search tools for Basic Memory MCP server."""
 
 import re
+from dataclasses import dataclass
 from textwrap import dedent
 from typing import Annotated, List, Optional, Dict, Any, Literal, cast
 from uuid import UUID
@@ -11,7 +12,7 @@ from loguru import logger
 from fastmcp import Context
 from pydantic import AliasChoices, BeforeValidator, Field
 
-from basic_memory.config import ConfigManager, has_cloud_credentials
+from basic_memory.config import ConfigManager
 from basic_memory.utils import (
     build_canonical_permalink,
     coerce_dict,
@@ -19,11 +20,7 @@ from basic_memory.utils import (
     parse_tags,
     strict_search_tags,
 )
-from basic_memory.mcp.async_client import (
-    _explicit_routing,
-    _force_local_mode,
-    is_factory_mode,
-)
+from basic_memory.mcp.async_client import get_client
 from basic_memory.mcp.container import get_container
 from basic_memory.mcp.index_readiness import project_index_required
 from basic_memory.mcp.project_context import (
@@ -33,6 +30,7 @@ from basic_memory.mcp.project_context import (
 )
 from basic_memory.mcp.server import mcp
 from basic_memory.schemas.base import normalize_note_type
+from basic_memory.schemas.project_info import ProjectItem
 from basic_memory.schemas.search import (
     SearchItemType,
     SearchQuery,
@@ -43,6 +41,118 @@ from basic_memory.schemas.search import (
 from basic_memory.temporal import TemporalQualifierError, parse_temporal_filter
 
 _SERVICE_UNAVAILABLE_HEADING = "# Search Failed - Service Temporarily Unavailable"
+_NO_SEARCH_CRITERIA_MESSAGE = (
+    "# No Search Criteria\n\n"
+    "Please provide at least one of: `query`, `metadata_filters`, "
+    "`tags`, `status`, `note_types`, `entity_types`, `categories`, "
+    "`after_date`, `valid_at`, `valid_overlaps`, or `time_kind`."
+)
+# Alias common column/model names to their frontmatter key equivalents. Users often
+# pass "note_type" (the entity model column) when the frontmatter field is "type".
+_METADATA_KEY_ALIASES = {"note_type": "type"}
+_VALID_SEARCH_TYPES = ("hybrid", "permalink", "semantic", "text", "title", "vector")
+
+
+def _build_search_query(
+    *,
+    query: str | None,
+    search_type: str,
+    note_types: list[str],
+    entity_types: list[str],
+    categories: list[str],
+    after_date: str | None,
+    metadata_filters: dict[str, Any] | None,
+    tags: list[str] | None,
+    status: str | None,
+    min_similarity: float | None,
+    valid_at: str | None,
+    valid_overlaps: str | None,
+    time_kind: str | None,
+) -> SearchQuery | None:
+    """Map tool parameters onto one ``SearchQuery``; ``None`` when nothing narrows the search.
+
+    Shared by the project search and the all-projects search so both ask the API
+    the same question for the same parameters.
+    """
+    search_query = SearchQuery()
+
+    # Only map search_type to query fields when there is an actual query string.
+    # When query is None/empty, skip the search mode block: filters-only path.
+    effective_query = (query or "").strip()
+    if effective_query:
+        if search_type == "text":
+            search_query.text = effective_query
+            search_query.retrieval_mode = SearchRetrievalMode.FTS
+        elif search_type in ("vector", "semantic"):
+            search_query.text = effective_query
+            search_query.retrieval_mode = SearchRetrievalMode.VECTOR
+        elif search_type == "hybrid":
+            search_query.text = effective_query
+            search_query.retrieval_mode = SearchRetrievalMode.HYBRID
+        elif search_type == "title":
+            search_query.title = effective_query
+        elif search_type == "permalink" and "*" in effective_query:
+            search_query.permalink_match = effective_query
+        elif search_type == "permalink":
+            search_query.permalink = effective_query
+        else:
+            raise ValueError(
+                f"Invalid search_type '{search_type}'. "
+                f"Valid options: {', '.join(_VALID_SEARCH_TYPES)}"
+            )
+
+    # Add optional filters if provided (empty lists are treated as no filter)
+    if entity_types:
+        search_query.entity_types = [SearchItemType(t) for t in entity_types]
+    if categories:
+        search_query.categories = categories
+    if note_types:
+        search_query.note_types = note_types
+    if after_date:
+        search_query.after_date = after_date
+    if metadata_filters:
+        search_query.metadata_filters = {
+            _METADATA_KEY_ALIASES.get(key, key): value for key, value in metadata_filters.items()
+        }
+    if tags:
+        search_query.tags = tags
+    if status:
+        search_query.status = status
+    if min_similarity is not None:
+        search_query.min_similarity = min_similarity
+    # Presence, not truthiness, for the same reason as everywhere else on this path:
+    # these are assigned after construction, so the model's own blank guard never
+    # runs here, and a blank has already been refused by the tool.
+    if valid_at is not None:
+        search_query.valid_at = valid_at
+    if valid_overlaps is not None:
+        search_query.valid_overlaps = valid_overlaps
+    if time_kind is not None:
+        search_query.time_kind = time_kind
+
+    if search_query.no_criteria():
+        return None
+
+    # Default to entity-level results to avoid returning individual
+    # observations/relations as separate search results (see issue #31).
+    # Applied after no_criteria() so that the implicit default doesn't
+    # mask a truly empty search request.
+    if not search_query.entity_types:
+        # Trigger: a category or valid-time filter was supplied without an
+        #          explicit entity_types.
+        # Why: both only exist on observations. Categories live on observation
+        #      rows, and temporal assertions are projected against an
+        #      observation's (type, id). Defaulting to "entity" would AND either
+        #      filter against entity rows and return nothing, defeating the
+        #      whole query.
+        # Outcome: scope the implicit default to observations so
+        #          search_notes(categories=[...]) and search_notes(valid_at=...)
+        #          return the matching bullets.
+        if search_query.categories or search_query.has_temporal_filter():
+            search_query.entity_types = [SearchItemType("observation")]
+        else:
+            search_query.entity_types = [SearchItemType("entity")]
+    return search_query
 
 
 def _compact_search_response(response: SearchResponse) -> SearchResponse:
@@ -474,8 +584,28 @@ def _matches_constrained_project(project: dict[str, Any], constrained_project: o
     return constrained_project in candidates
 
 
-def _search_project_refs(projects_payload: object) -> list[dict[str, str | None]]:
-    """Extract project routing refs for optional account-scoped search."""
+@dataclass(frozen=True)
+class SearchProjectRef:
+    """One project an all-projects search may read, and the database it lives in.
+
+    ``name`` is the routable spelling (``workspace/project`` for a cloud project),
+    which is also the prefix results are qualified with. ``workspace_tenant_id`` is
+    ``None`` for the local database; every cloud workspace is its own database.
+    """
+
+    name: str
+    external_id: str
+    id: int
+    workspace_tenant_id: str | None
+    path: str
+
+    @property
+    def bare_name(self) -> str:
+        return self.name.rsplit("/", 1)[-1]
+
+
+def _search_project_refs(projects_payload: object) -> list[SearchProjectRef]:
+    """Extract the projects an all-projects search can read from the project list."""
     if not isinstance(projects_payload, dict):
         return []
 
@@ -484,8 +614,8 @@ def _search_project_refs(projects_payload: object) -> list[dict[str, str | None]
     if not isinstance(projects, list):
         return []
 
-    refs: list[dict[str, str | None]] = []
-    seen: set[tuple[str | None, str | None]] = set()
+    refs: list[SearchProjectRef] = []
+    seen: set[str] = set()
     constrained_project = payload.get("constrained_project")
     for item in projects:
         if not isinstance(item, dict) or not _matches_constrained_project(
@@ -494,40 +624,62 @@ def _search_project_refs(projects_payload: object) -> list[dict[str, str | None]
             continue
 
         project = item.get("qualified_name") or item.get("name")
-        project_name = project if isinstance(project, str) and project.strip() else None
-        project_id = _valid_project_id(item.get("external_id"))
-        if project_name is None and project_id is None:
+        external_id = _valid_project_id(item.get("external_id"))
+        internal_id = item.get("id")
+        # A scoped search addresses a project by its id and attributes hits by its
+        # external id; a list row missing either cannot be searched this way.
+        if (
+            not isinstance(project, str)
+            or not project.strip()
+            or external_id is None
+            or not isinstance(internal_id, int)
+            or isinstance(internal_id, bool)
+        ):
             continue
-
-        key = (project_name, project_id)
-        if key in seen:
+        if external_id in seen:
             continue
-        seen.add(key)
-        refs.append({"project": project_name, "project_id": project_id})
+        seen.add(external_id)
+        tenant = item.get("workspace_tenant_id")
+        refs.append(
+            SearchProjectRef(
+                name=project,
+                external_id=external_id,
+                id=internal_id,
+                workspace_tenant_id=tenant if isinstance(tenant, str) and tenant else None,
+                path=str(item.get("path") or ""),
+            )
+        )
     return refs
 
 
-async def _load_search_project_refs(context: Context | None = None) -> list[dict[str, str | None]]:
+def _select_project_refs(
+    refs: list[SearchProjectRef], projects: list[str]
+) -> list[SearchProjectRef]:
+    """Keep the projects a caller named, by name, workspace-qualified name, or external id."""
+    selected: list[SearchProjectRef] = []
+    unknown: list[str] = []
+    for requested in projects:
+        token = requested.strip()
+        matches = [ref for ref in refs if token in (ref.name, ref.bare_name, ref.external_id)]
+        if not matches:
+            unknown.append(token)
+            continue
+        for ref in matches:
+            if ref not in selected:
+                selected.append(ref)
+    if unknown:
+        available = ", ".join(sorted(ref.name for ref in refs)) or "none"
+        raise ValueError(
+            f"Unknown project(s): {', '.join(unknown)}. Available projects: {available}"
+        )
+    return selected
+
+
+async def _load_search_project_refs(context: Context | None = None) -> list[SearchProjectRef]:
     """Load accessible projects for search_all_projects without coupling the wrapper tool."""
     from basic_memory.mcp.tools.project_management import list_memory_projects
 
     return _search_project_refs(await list_memory_projects(output_format="json", context=context))
-
-
-def _raw_results_from_search_payload(
-    results: SearchResponse | list[SearchResult | dict[str, Any]] | dict[str, Any],
-) -> list[SearchResult | dict[str, Any]]:
-    """Return the result list from any search_notes JSON-compatible payload."""
-    if isinstance(results, SearchResponse):
-        return list(results.results)
-    if isinstance(results, dict):
-        nested_results = results.get("results")
-        return (
-            cast(list[SearchResult | dict[str, Any]], nested_results)
-            if isinstance(nested_results, list)
-            else []
-        )
-    return list(results)
 
 
 def _result_score(result: SearchResult | dict[str, Any]) -> float:
@@ -561,51 +713,57 @@ def _qualify_permalink_for_project(permalink: object, project: str | None) -> ob
     )
 
 
-def _qualify_results_for_project(
-    results: list[SearchResult | dict[str, Any]],
-    project_ref: dict[str, str | None],
+def _qualify_result_for_project(
+    result: SearchResult,
+    project: str,
     *,
     compact: bool = False,
+) -> dict[str, Any]:
+    """Attach the searched workspace/project prefix to one result's permalink."""
+    result_data = result.model_dump()
+    if compact and result_data.get("type") == SearchItemType.OBSERVATION:
+        # This is an exact file read target, not a generated permalink:
+        # retain its extension, spaces, and case under the local project or
+        # workspace/project route.
+        result_data["permalink"] = f"{project.strip('/')}/{result_data['file_path'].lstrip('/')}"
+    else:
+        result_data["permalink"] = _qualify_permalink_for_project(
+            result_data.get("permalink"), project
+        )
+    return result_data
+
+
+def _attribute_results(
+    results: list[SearchResult],
+    refs: list[SearchProjectRef],
+    *,
+    compact: bool,
 ) -> list[dict[str, Any]]:
-    """Attach the searched workspace/project prefix to each result permalink."""
-    qualified: list[dict[str, Any]] = []
+    """Qualify each hit's permalink with the project the server says it came from."""
+    refs_by_external_id = {ref.external_id: ref for ref in refs}
+    attributed: list[dict[str, Any]] = []
     for result in results:
-        if isinstance(result, SearchResult):
-            result_data = result.model_dump()
-        else:
-            result_data = dict(result)
-        project = project_ref.get("project")
-        if compact and result_data.get("type") == SearchItemType.OBSERVATION and project:
-            # This is an exact file read target, not a generated permalink:
-            # retain its extension, spaces, and case under the local project or
-            # workspace/project route.
-            result_data["permalink"] = (
-                f"{project.strip('/')}/{result_data['file_path'].lstrip('/')}"
+        ref = refs_by_external_id.get(result.project_external_id or "")
+        if ref is None:
+            raise ValueError(
+                "The search API returned a result it did not attribute to a project in "
+                "the requested scope. The server is likely older than this client; "
+                "upgrade it before searching across projects."
             )
-        else:
-            result_data["permalink"] = _qualify_permalink_for_project(
-                result_data.get("permalink"), project
-            )
-        qualified.append(result_data)
-    return qualified
+        attributed.append(_qualify_result_for_project(result, ref.name, compact=compact))
+    return attributed
 
 
-def _result_total(results: dict[str, Any], raw_results: list[SearchResult | dict[str, Any]]) -> int:
-    """Return the best available total for a per-project search payload."""
-    total = results.get("total")
-    if isinstance(total, int) and total > 0:
-        return total
-    return len(raw_results) + (1 if results.get("has_more") is True else 0)
+def _database_label(tenant_id: str | None, refs: list[SearchProjectRef]) -> str:
+    """Name one searched database for logs and error responses."""
+    if tenant_id is None:
+        return "local projects"
+    return f"workspace {refs[0].name.split('/', 1)[0]}"
 
 
-def _result_total_is_exact(results: dict[str, Any]) -> bool:
-    """Return whether a per-project payload explicitly guarantees an exact total."""
-    return results.get("total_is_exact") is True
-
-
-def _project_ref_label(project_ref: dict[str, str | None]) -> str:
-    """Return a stable log label for a project search ref."""
-    return project_ref.get("project") or project_ref.get("project_id") or "<unknown project>"
+def _project_item(ref: SearchProjectRef) -> ProjectItem:
+    """The project shape the readiness check reads (external id and name)."""
+    return ProjectItem(id=ref.id, external_id=ref.external_id, name=ref.bare_name, path=ref.path)
 
 
 async def _search_all_projects(
@@ -628,20 +786,24 @@ async def _search_all_projects(
     time_kind: str | None,
     context: Context | None,
     compact: bool = False,
+    projects: list[str] | None = None,
 ) -> dict[str, Any] | str:
-    """Search every accessible project when the caller explicitly opts in."""
+    """Search every accessible project, one query per database.
+
+    Projects that share a database are searched with one scoped query, so within that
+    database the answer is one ranking rather than per-project pages merged after the
+    fact. The local database is one group and each cloud workspace is another; only
+    the merge across databases happens in this process, by score.
+    """
     requested_page = max(page, 1)
     requested_page_size = max(page_size, 1)
-    # Each per-project call runs through search_notes -> SearchClient, which refuses a
-    # response that does not confirm the filter ran. So a project either honored the
-    # valid-time filter or was dropped with a warning below; the merged answer never
-    # silently mixes filtered and unfiltered rows. The filter itself is already known to
-    # be well formed -- search_notes parses it before reaching here -- which is what
-    # makes "dropped with a warning" mean an unavailable project and nothing else.
     # Presence, not truthiness: a blank value is refused by `parse_temporal_filter`
     # before any project is searched, so anything not None is a real question here.
     temporal_requested = valid_at is not None or valid_overlaps is not None or time_kind is not None
     project_refs = await _load_search_project_refs(context=context)
+    if projects:
+        project_refs = _select_project_refs(project_refs, projects)
+    scope_label = ", ".join(ref.name for ref in project_refs) if projects else "all projects"
     if not project_refs:
         response = SearchResponse(
             results=[],
@@ -654,110 +816,110 @@ async def _search_all_projects(
         )
         if output_format == "json":
             return response.model_dump(mode="json", exclude_none=True)
-        return _format_search_markdown(response, "all projects", query)
+        return _format_search_markdown(response, scope_label, query)
 
-    per_project_page_size = requested_page * requested_page_size
+    effective_search_type = search_type or _default_search_type()
+    search_query = _build_search_query(
+        query=query,
+        search_type=effective_search_type,
+        note_types=note_types,
+        entity_types=entity_types,
+        categories=categories,
+        after_date=after_date,
+        metadata_filters=metadata_filters,
+        tags=tags,
+        status=status,
+        min_similarity=min_similarity,
+        valid_at=valid_at,
+        valid_overlaps=valid_overlaps,
+        time_kind=time_kind,
+    )
+    if search_query is None:
+        return _NO_SEARCH_CRITERIA_MESSAGE
+    query_payload = search_query.model_dump()
+
+    # Import here to avoid circular import (tools -> clients -> utils -> tools)
+    from basic_memory.mcp.clients import ScopedSearchClient
+
+    databases: dict[str | None, list[SearchProjectRef]] = {}
+    for ref in project_refs:
+        databases.setdefault(ref.workspace_tenant_id, []).append(ref)
+
+    # Each database answers the whole prefix this page needs, so the merge across
+    # databases can slice it without a second round of requests.
+    per_database_page_size = requested_page * requested_page_size
     merged_results: list[dict[str, Any]] = []
     total = 0
     total_is_exact = True
-    any_project_has_more = False
-    # How many projects actually answered. A leg that fails is skipped with a warning,
-    # so without this the caller cannot tell "no note matched" from "nothing ran".
-    projects_answered = 0
+    any_database_has_more = False
+    # How many databases actually answered. A database that fails is skipped with a
+    # warning, so without this the caller cannot tell "no note matched" from
+    # "nothing ran".
+    databases_answered = 0
+    failures: list[str] = []
     query_hint: str | None = None
 
-    # Trigger: caller asked for an account-wide search.
-    # Why: project_id (external UUID) routes through the cloud v2 API path,
-    #      which 401s on local installs because there's no JWT to present.
-    #      Project names route through the local-ASGI path and work for both
-    #      backends — cloud disambiguates names via the workspace/project
-    #      qualified_name already baked into project_ref["project"].
-    # Outcome: forward project_id only when the same signals get_project_client
-    #          uses to pick a cloud route are present. Mirrors the cloud_available
-    #          composite in project_context.get_project_client (single source of
-    #          truth for "can we route to cloud?").
-    config = ConfigManager().config
-    use_cloud_routing = (
-        is_factory_mode()
-        or (_explicit_routing() and not _force_local_mode())
-        or has_cloud_credentials(config)
-    )
-
-    for project_ref in project_refs:
-        recursive_project_id = project_ref["project_id"] if use_cloud_routing else None
+    for tenant_id, refs in databases.items():
+        label = _database_label(tenant_id, refs)
         try:
-            results = await search_notes(
-                query=query,
-                project=project_ref["project"],
-                project_id=recursive_project_id,
-                page=1,
-                page_size=per_project_page_size,
-                search_type=search_type,
-                output_format="json",
-                note_types=note_types or None,
-                entity_types=entity_types or None,
-                categories=categories or None,
-                after_date=after_date,
-                metadata_filters=metadata_filters,
-                tags=tags,
-                status=status,
-                min_similarity=min_similarity,
-                valid_at=valid_at,
-                valid_overlaps=valid_overlaps,
-                time_kind=time_kind,
-                search_all_projects=False,
-                context=context,
-                # Project qualification below must run after compact replaces
-                # observation excerpt permalinks with their owning file paths.
-                compact=compact,
-            )
+            async with get_client(workspace=tenant_id) as client:
+                response = await ScopedSearchClient(client).search(
+                    query_payload,
+                    project_ids=[ref.id for ref in refs],
+                    page=1,
+                    page_size=per_database_page_size,
+                )
+                if not response.results:
+                    # An empty page is a trustworthy miss only after an index pass.
+                    for ref in refs:
+                        guidance = await project_index_required(client, _project_item(ref))
+                        if guidance is not None:
+                            return guidance
         except Exception as exc:
-            logger.warning(
-                f"Multi-project search failed for project {_project_ref_label(project_ref)}: {exc}"
-            )
+            if _is_service_unavailable_error(exc):
+                return _format_service_unavailable_response(label, str(exc), query or "")
+            logger.warning(f"Multi-project search failed for {label}: {exc}")
+            failures.append(f"{label}: {exc}")
             total_is_exact = False
             continue
 
-        if isinstance(results, str):
-            if results.startswith(_SERVICE_UNAVAILABLE_HEADING):
-                return results
-            if not results.startswith("# Search Failed"):
-                return results
-            logger.warning(
-                "Multi-project search failed for project "
-                f"{_project_ref_label(project_ref)}: {results}"
-            )
-            total_is_exact = False
-            continue
-
-        projects_answered += 1
-        if isinstance(results.get("query_hint"), str):
-            query_hint = results["query_hint"]
-        raw_results = _raw_results_from_search_payload(results)
-        total += _result_total(results, raw_results)
-        total_is_exact = total_is_exact and _result_total_is_exact(results)
-        any_project_has_more = any_project_has_more or results.get("has_more") is True
-        merged_results.extend(
-            _qualify_results_for_project(raw_results, project_ref, compact=compact)
+        databases_answered += 1
+        if compact:
+            response = _compact_search_response(response)
+        if response.query_hint:
+            query_hint = response.query_hint
+        total += (
+            response.total
+            if response.total > 0
+            else len(response.results) + (1 if response.has_more else 0)
         )
+        total_is_exact = total_is_exact and response.total_is_exact
+        any_database_has_more = any_database_has_more or response.has_more
+        merged_results.extend(_attribute_results(response.results, refs, compact=compact))
 
-    # Trigger: a valid-time filter was requested and not one project answered.
-    # Why: each leg confirms the filter through SearchClient or is refused by it, and a
-    #   refusal is caught above, logged, and skipped -- so a fleet of servers predating
-    #   SPEC-82 drops every leg and arrives here indistinguishable from "no note matched".
-    #   Claiming `temporal_applied` on that would confirm a filter that ran nowhere, which
-    #   is the version skew the client's own check exists to make loud.
+    # Trigger: a valid-time filter was requested and not one database answered.
+    # Why: each database confirms the filter through the client or is refused by it,
+    #   and a refusal is caught above, logged, and skipped -- so a fleet of servers
+    #   predating SPEC-82 drops every database and arrives here indistinguishable from
+    #   "no note matched". Claiming `temporal_applied` on that would confirm a filter
+    #   that ran nowhere, which is the version skew the client's own check exists to
+    #   make loud.
     # Outcome: the skew is propagated as one error naming it, rather than returning an
     #   empty result wearing the shape of a successful filtered search.
-    if temporal_requested and projects_answered == 0:
+    if temporal_requested and databases_answered == 0:
         raise ValueError(
             "No project applied the requested valid-time filter: every project was "
             "skipped, so the filter ran nowhere and an empty result would not mean "
             "'no matches'. The servers are likely older than this client; upgrade them "
             "or drop valid_at / valid_overlaps / time_kind from the query."
         )
+    if databases_answered == 0:
+        # Every database failed. That is a failed search, not an empty one.
+        return _format_search_error_response(
+            scope_label, "; ".join(failures), query or "", effective_search_type
+        )
 
-    # Each project owns retrieval and optional reranking behind its typed API client.
+    # Each database owns retrieval and optional reranking behind its typed API client.
     # The MCP process only merges returned scores; it must not instantiate repository
     # providers with local credentials for content fetched through another route.
     sorted_results = sorted(merged_results, key=_result_score, reverse=True)
@@ -767,17 +929,17 @@ async def _search_all_projects(
     response = SearchResponse.model_validate(
         {
             "results": paged_results,
-            # Only propagate query guidance when every project answered and the
-            # aggregate is empty; one empty leg must not label a successful search.
+            # Only propagate query guidance when every database answered and the
+            # aggregate is empty; one empty database must not label a successful search.
             "query_hint": query_hint
-            if requested_page == 1 and not merged_results and projects_answered == len(project_refs)
+            if requested_page == 1 and not merged_results and databases_answered == len(databases)
             else None,
             "current_page": requested_page,
             "page_size": requested_page_size,
             "total": total,
             "total_is_exact": total_is_exact,
-            "has_more": any_project_has_more or total > end or len(sorted_results) > end,
-            # Confirmed only because a project answered: `projects_answered` is
+            "has_more": any_database_has_more or total > end or len(sorted_results) > end,
+            # Confirmed only because a database answered: `databases_answered` is
             # non-zero here for any temporal query, guarded immediately above.
             "temporal_applied": True if temporal_requested else None,
         }
@@ -785,7 +947,7 @@ async def _search_all_projects(
 
     if output_format == "json":
         return response.model_dump(mode="json", exclude_none=True)
-    return _format_search_markdown(response, "all projects", query)
+    return _format_search_markdown(response, scope_label, query)
 
 
 @mcp.tool(
@@ -817,6 +979,7 @@ async def search_notes(
             validation_alias=AliasChoices("search_all_projects", "all_projects"),
         ),
     ] = False,
+    projects: Optional[List[str]] = None,
     # `offset` is intentionally NOT aliased to `page`: offset is item-indexed
     # (skip N items) while page is 1-indexed page-number. Direct aliasing would
     # silently return the wrong slice.
@@ -941,8 +1104,8 @@ async def search_notes(
     Project Resolution:
     Server resolves projects in this order: Single Project Mode → project parameter → default project.
     If project unknown, use list_memory_projects() or recent_activity() first.
-    Set search_all_projects=True to search every accessible project; this is opt-in because it
-    performs one search per project.
+    Set search_all_projects=True to search every accessible project, or pass projects=[...] to
+    search a chosen subset. Either runs one scoped query per database the projects live in.
 
     ## Search Syntax Examples
 
@@ -1083,6 +1246,10 @@ async def search_notes(
                 workspaces. Takes precedence over `project`. Get from list_memory_projects().
         search_all_projects: Optional opt-in to search every accessible project. Ignored when
                 `project` or `project_id` is supplied.
+        projects: Optional list of project names or external ids to search together. Names
+                are matched exactly as list_memory_projects() reports them (cloud projects
+                by their workspace-qualified name). Ignored when `project` or `project_id`
+                is supplied; an unknown name is an error rather than a silent skip.
         page: The page number of results to return (default 1).
             Aliases: page_number.
         page_size: The number of results to return per page (default 10).
@@ -1236,6 +1403,7 @@ async def search_notes(
     # Outcome: comma-split/list normalization applies on every path; parse_str_list is
     #          idempotent, so MCP-validated input passes through unchanged.
     note_types = parse_str_list(note_types) if note_types is not None else []
+    projects = parse_str_list(projects) if projects is not None else None
     entity_types = parse_str_list(entity_types) if entity_types is not None else []
     categories = parse_str_list(categories) if categories is not None else []
 
@@ -1290,7 +1458,7 @@ async def search_notes(
     # already provide a concrete project route.
     # Why: multi-project fan-out can be slow, so default search remains project-scoped.
     # Outcome: run one normal search per accessible project and merge ranked results.
-    if search_all_projects and project is None and project_id is None:
+    if (search_all_projects or projects) and project is None and project_id is None:
         all_projects_result = await _search_all_projects(
             query=query,
             page=page,
@@ -1310,6 +1478,7 @@ async def search_notes(
             time_kind=time_kind,
             context=context,
             compact=compact,
+            projects=projects,
         )
         return all_projects_result
 
@@ -1365,104 +1534,24 @@ async def search_notes(
                 effective_search_type = "permalink"
 
             try:
-                # Create a SearchQuery object based on the parameters
-                search_query = SearchQuery()
-
-                # Only map search_type to query fields when there is an actual query string.
-                # When query is None/empty, skip the search mode block — filters-only path.
+                search_query = _build_search_query(
+                    query=query,
+                    search_type=effective_search_type,
+                    note_types=note_types,
+                    entity_types=entity_types,
+                    categories=categories,
+                    after_date=after_date,
+                    metadata_filters=metadata_filters,
+                    tags=tags,
+                    status=status,
+                    min_similarity=min_similarity,
+                    valid_at=valid_at,
+                    valid_overlaps=valid_overlaps,
+                    time_kind=time_kind,
+                )
+                if search_query is None:
+                    return _NO_SEARCH_CRITERIA_MESSAGE
                 effective_query = (query or "").strip()
-                if effective_query:
-                    valid_search_types = {
-                        "text",
-                        "title",
-                        "permalink",
-                        "vector",
-                        "semantic",
-                        "hybrid",
-                    }
-                    if effective_search_type == "text":
-                        search_query.text = effective_query
-                        search_query.retrieval_mode = SearchRetrievalMode.FTS
-                    elif effective_search_type in ("vector", "semantic"):
-                        search_query.text = effective_query
-                        search_query.retrieval_mode = SearchRetrievalMode.VECTOR
-                    elif effective_search_type == "hybrid":
-                        search_query.text = effective_query
-                        search_query.retrieval_mode = SearchRetrievalMode.HYBRID
-                    elif effective_search_type == "title":
-                        search_query.title = effective_query
-                    elif effective_search_type == "permalink" and "*" in effective_query:
-                        search_query.permalink_match = effective_query
-                    elif effective_search_type == "permalink":
-                        search_query.permalink = effective_query
-                    else:
-                        raise ValueError(
-                            f"Invalid search_type '{effective_search_type}'. "
-                            f"Valid options: {', '.join(sorted(valid_search_types))}"
-                        )
-
-                # Add optional filters if provided (empty lists are treated as no filter)
-                if entity_types:
-                    search_query.entity_types = [SearchItemType(t) for t in entity_types]
-                if categories:
-                    search_query.categories = categories
-                if note_types:
-                    search_query.note_types = note_types
-                if after_date:
-                    search_query.after_date = after_date
-                if metadata_filters:
-                    # Alias common column/model names to their frontmatter key equivalents.
-                    # Users often pass "note_type" (the entity model column) when the
-                    # frontmatter field is actually "type".
-                    _METADATA_KEY_ALIASES = {"note_type": "type"}
-                    metadata_filters = {
-                        _METADATA_KEY_ALIASES.get(k, k): v for k, v in metadata_filters.items()
-                    }
-                    search_query.metadata_filters = metadata_filters
-                if tags:
-                    search_query.tags = tags
-                if status:
-                    search_query.status = status
-                if min_similarity is not None:
-                    search_query.min_similarity = min_similarity
-                # Presence, not truthiness, for the same reason as everywhere else on
-                # this path: these are assigned after construction, so the model's own
-                # blank guard never runs here, and a blank has already been refused above.
-                if valid_at is not None:
-                    search_query.valid_at = valid_at
-                if valid_overlaps is not None:
-                    search_query.valid_overlaps = valid_overlaps
-                if time_kind is not None:
-                    search_query.time_kind = time_kind
-
-                # Reject searches with no criteria at all
-                if search_query.no_criteria():
-                    return (
-                        "# No Search Criteria\n\n"
-                        "Please provide at least one of: `query`, `metadata_filters`, "
-                        "`tags`, `status`, `note_types`, `entity_types`, `categories`, "
-                        "`after_date`, `valid_at`, `valid_overlaps`, or `time_kind`."
-                    )
-
-                # Default to entity-level results to avoid returning individual
-                # observations/relations as separate search results (see issue #31).
-                # Applied after no_criteria() so that the implicit default doesn't
-                # mask a truly empty search request.
-                if not search_query.entity_types:
-                    # Trigger: a category or valid-time filter was supplied without an
-                    #          explicit entity_types.
-                    # Why: both only exist on observations — categories live on observation
-                    #      rows, and temporal assertions are projected against an
-                    #      observation's (type, id). Defaulting to "entity" would AND either
-                    #      filter against entity rows and return nothing, defeating the
-                    #      whole query.
-                    # Outcome: scope the implicit default to observations so
-                    #          search_notes(categories=[...]) and search_notes(valid_at=...)
-                    #          return the matching bullets.
-                    if search_query.categories or search_query.has_temporal_filter():
-                        search_query.entity_types = [SearchItemType("observation")]
-                    else:
-                        search_query.entity_types = [SearchItemType("entity")]
 
                 logger.debug(
                     f"Search request: project={active_project.name} "

@@ -14,6 +14,15 @@
   hydrated only from projects in scope. Every search result, on both routes, now
   carries `project_id` and `project_external_id`.
 
+- **#1558**: `search_notes(search_all_projects=True)` runs one scoped query per database
+  instead of one search per project, so a local vault with many projects is one
+  query, and each cloud workspace is one query, with results attributed to their
+  project by the server rather than by which request they came back on. A new
+  `projects` parameter searches a chosen subset by name or external id; an unknown
+  name is an error. Cross-database results are still merged by score, one failing
+  database is skipped with a warning and an inexact total, and a retryable outage
+  or a server too old to attribute its results fails the whole page.
+
 - **#1512**: Word, PowerPoint, and CSV files get the same sidecar Markdown note a
   PDF gets. `bm import document <path>` indexes the project, extracts the file,
   and writes `<file>.<ext>.md` next to it plus a run note under
