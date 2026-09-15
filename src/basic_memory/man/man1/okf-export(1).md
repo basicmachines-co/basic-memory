@@ -16,7 +16,7 @@ generated: cli
 ## SYNOPSIS
 
 ```
-bm okf export DESTINATION [--project PROJECT] [--replace] [--json]
+bm okf export DESTINATION --project PROJECT [--replace] [--json]
 ```
 
 ## DESCRIPTION

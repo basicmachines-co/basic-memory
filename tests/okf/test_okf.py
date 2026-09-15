@@ -571,3 +571,21 @@ def test_bare_filename_alias_does_not_prefer_source_directory():
         convert_wikilinks("[[./my-note]]", "folder/source.md", targets, "p")
         == "[./my-note](/folder/My_Note.md)"
     )
+
+
+@pytest.mark.parametrize(
+    "label",
+    ["![alt [[A]]](img)", "[caption [[A]]][ref]", "![alt [[A]]][ref]"],
+)
+def test_image_and_reference_labels_keep_literal_wikilinks(label):
+    body = label + " and [[A]]\n\n[ref]: /existing.md"
+    expected = label + " and [A](/a.md)\n\n[ref]: /existing.md"
+    assert convert_wikilinks(body, "source.md", {"A": "a.md"}, "p") == expected
+
+
+def test_relative_wikilink_percent_sequences_are_literal():
+    targets = {path: path for path in ("folder/sub/A%20B.md", "folder/sub/A B.md")}
+    assert (
+        convert_wikilinks("[[sub/A%20B.md]]", "folder/source.md", targets, "p")
+        == "[sub/A%20B.md](/folder/sub/A%2520B.md)"
+    )

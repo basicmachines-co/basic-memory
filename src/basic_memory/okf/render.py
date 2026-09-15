@@ -67,6 +67,7 @@ def convert_wikilinks(
     body = body.replace("\r\n", "\n").replace("\r", "\n")
     project = generate_permalink(project)
     replacements: list[tuple[int, int, str]] = []
+    inline_source = ""
     path_aliases: dict[str, list[str]] = {}
     for path in sorted(set(targets.values())):
         path_aliases.setdefault(file_path_alias(path), []).append(path)
@@ -75,7 +76,8 @@ def convert_wikilinks(
         start = state.pos
         if not state.src.startswith("[[", start):
             return False
-        if silent or state.linkLevel:
+        # Image labels use a nested source with different offsets; keep them literal.
+        if silent or state.linkLevel or state.src != inline_source:
             return False
         depth = 1
         end = start + 2
@@ -95,7 +97,8 @@ def convert_wikilinks(
         target, _, fragment = target.partition("#")
         resolved = None
         # Explicit relative links bind to their source directory before semantic aliases.
-        relative = markdown_link_target(target, source)
+        # Wikilink paths are literal identifiers, so URL decoding must round-trip them.
+        relative = markdown_link_target(quote(target, safe="/"), source)
         if (
             include_project
             and "/" in target
@@ -146,11 +149,14 @@ def convert_wikilinks(
     document_replacements: list[tuple[int, int, str]] = []
     # Each inline block is parsed separately: backticks in another paragraph must
     # not turn this paragraph into code. Map token text back past list/quote prefixes.
-    for token in MarkdownIt().parse(body):
+    environment: dict[str, object] = {}
+    for token in MarkdownIt().parse(body, environment):
         if token.type != "inline" or not token.map or "[[" not in token.content:
             continue
         replacements.clear()
-        parser.parseInline(token.content)
+        inline_source = token.content
+        # Retain document references so link labels remain existing Markdown links.
+        parser.parseInline(token.content, environment)
         if not replacements:
             continue
         offsets: list[int] = []
