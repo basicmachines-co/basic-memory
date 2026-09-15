@@ -3,7 +3,7 @@
 Exercises the uncovered code paths in PostgresSearchRepository:
 - _ensure_vector_tables (lines 258-352): pgvector extension, table creation,
   dimension mismatch detection
-- _run_vector_query (lines 389-429): vector similarity query with cosine distance
+- SemanticSearch._run_vector_query: vector similarity query with cosine distance
 - _write_embeddings (lines 431-458): embedding upsert into pgvector table
 - Metadata filters in FTS search (lines 682-745): JSONB filter operators
   (eq, in, contains, gt/gte/lt/lte, between)
@@ -19,6 +19,7 @@ import pytest
 
 from basic_memory import db
 from basic_memory.config import DatabaseBackend
+from basic_memory.repository.search_reader import HydratedChunk, SemanticSearch
 from basic_memory.schemas.search import SearchItemType, SearchQuery, SearchRetrievalMode
 
 from semantic.conftest import (
@@ -104,7 +105,7 @@ async def test_postgres_vector_table_setup_and_query(postgres_engine_factory, tm
 async def test_postgres_hybrid_search(postgres_engine_factory, tmp_path):
     """Exercise the hybrid (score-based fusion) code path on Postgres.
 
-    This covers the full _search_hybrid path including both FTS and vector
+    This covers the full SemanticSearch.hybrid path including both FTS and vector
     retrieval with score-based fusion.
     """
     skip_if_needed(PG_FASTEMBED)
@@ -118,7 +119,7 @@ async def test_postgres_hybrid_search(postgres_engine_factory, tmp_path):
 
     await seed_benchmark_notes(search_service, note_count=20)
 
-    # Hybrid search — exercises _search_hybrid score-based fusion
+    # Hybrid search — exercises SemanticSearch.hybrid score-based fusion
     results = await search_service.search(
         SearchQuery(
             text="database migration schema",
@@ -158,17 +159,20 @@ async def test_postgres_hybrid_preserves_candidate_windows(
     repo._reranker_candidates = 100
 
     candidate_limits: list[int] = []
-    run_vector_query = repo._run_vector_query
+    run_vector_query = SemanticSearch._run_vector_query
 
     async def record_vector_query(
+        self: SemanticSearch,
         session: Any,
         query_embedding: list[float],
         candidate_limit: int,
-    ) -> list[dict[str, Any]]:
+        *,
+        trace: Any = None,
+    ) -> list[HydratedChunk]:
         candidate_limits.append(candidate_limit)
-        return await run_vector_query(session, query_embedding, candidate_limit)
+        return await run_vector_query(self, session, query_embedding, candidate_limit, trace=trace)
 
-    monkeypatch.setattr(repo, "_run_vector_query", record_vector_query)
+    monkeypatch.setattr(SemanticSearch, "_run_vector_query", record_vector_query)
 
     baseline_results = await search_service.search(
         SearchQuery(

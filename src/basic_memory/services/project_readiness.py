@@ -24,7 +24,7 @@ from basic_memory.models import Entity, Project
 from basic_memory.repository.embedding_provider_factory import (
     configured_embedding_provider_identity,
 )
-from basic_memory.repository.search_repository_base import current_vector_manifest_predicate
+from basic_memory.repository.search_reader import current_vector_manifest_predicate
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_vector_index_factory import (
     resolve_semantic_vector_index_name,

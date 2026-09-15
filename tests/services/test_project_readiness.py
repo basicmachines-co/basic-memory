@@ -16,7 +16,7 @@ from basic_memory.models import Project
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory.repository.search_repository import create_search_repository
-from basic_memory.repository.search_repository_base import VECTOR_HYDRATION_BATCH_SIZE
+from basic_memory.repository.search_reader import VECTOR_HYDRATION_BATCH_SIZE
 from basic_memory.repository.embedding_provider_factory import (
     configured_embedding_provider_identity,
 )

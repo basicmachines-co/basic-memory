@@ -407,15 +407,6 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             await session.commit()
         self._vector_tables_initialized = False
 
-    @override
-    def _distance_to_similarity(self, distance: float) -> float:
-        """Convert L2 distance to cosine similarity for normalized embeddings.
-
-        sqlite-vec vec0 returns Euclidean (L2) distance by default.
-        For unit-normalized vectors: L2² = 2·(1 - cos_sim), so cos_sim = 1 - L2²/2.
-        """
-        return max(0.0, 1.0 - (distance * distance) / 2.0)
-
     @asynccontextmanager
     @override
     async def _prepare_entity_write_scope(self):

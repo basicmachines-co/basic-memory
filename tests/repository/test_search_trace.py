@@ -14,7 +14,7 @@ from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.search_index_row import SearchIndexRow
-from basic_memory.repository.search_repository_base import FUSION_BONUS
+from basic_memory.repository.search_reader import FUSION_BONUS
 from basic_memory.repository.search_trace import (
     BelowThreshold,
     FilteredOut,
@@ -751,7 +751,7 @@ async def test_classify_hydration_drop_observes_pending_to_ready_transition(
         )
         await session.commit()
     async with db.scoped_session(session_maker) as session:
-        assert await repository._hydrate_vector_matches(session, [match]) == []
+        assert await repository._semantic_search()._hydrate_vector_matches(session, [match]) == []
 
     async with db.scoped_session(session_maker) as session:
         await session.execute(

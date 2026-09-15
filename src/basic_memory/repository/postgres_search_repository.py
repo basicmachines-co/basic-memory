@@ -491,15 +491,6 @@ class PostgresSearchRepository(SearchRepositoryBase):
         )
 
     @override
-    def _distance_to_similarity(self, distance: float) -> float:
-        """Convert pgvector cosine distance to cosine similarity.
-
-        pgvector's <=> operator returns cosine distance in [0, 2],
-        where cos_distance = 1 - cos_similarity.
-        """
-        return max(0.0, 1.0 - distance)
-
-    @override
     def _timestamp_now_expr(self) -> str:
         return "NOW()"
 

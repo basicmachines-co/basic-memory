@@ -6,26 +6,26 @@ Verifies that the fusion formula (max + FUSION_BONUS * min):
 3. Produces zero fused score when the source score is zero
 """
 
-from sqlalchemy.ext.asyncio import AsyncSession
-from basic_memory.repository.search_scope import ProjectScope
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime
-from typing import override, Any, Optional, cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory.repository.embedding_provider import EmbeddingProvider
-from basic_memory.repository.search_index_row import SearchIndexRow
-from basic_memory.repository.search_repository_base import (
+from basic_memory.repository.search_index_row import SearchIndexKey, SearchIndexRow
+from basic_memory.repository.search_query import PreparedSearchQuery
+from basic_memory.repository.search_reader import (
     FUSION_BONUS,
-    SearchIndexKey,
-    SearchRepositoryBase,
+    SemanticSearch,
+    VectorRetrieval,
 )
+from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.search_trace import SearchTraceCollector
-from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
-from basic_memory.temporal import TemporalFilter
+from basic_memory.repository.semantic_vector_index import SemanticVectorIndex
+from basic_memory.schemas.search import SearchRetrievalMode
 
 
 @dataclass
@@ -51,159 +51,108 @@ class FakeRow:
     matched_chunk_text: str | None = None
 
 
-class ConcreteSearchRepo(SearchRepositoryBase):
-    """Minimal concrete subclass for testing hybrid fusion logic."""
+class FakeFts:
+    """An ``FtsBackend`` that answers every pass with fixed rows and records what it was asked.
 
-    def __init__(self):
-        self._semantic_enabled = True
-        self._semantic_vector_k = 100
-        self._semantic_min_similarity = 0.0
-        # _search_hybrid calls _assert_semantic_available which checks this
-        self._embedding_provider = _fake_embedding_provider()
-        self._vector_dimensions = 384
-        self._vector_tables_initialized = True
-        self.session_maker = None
-        self.project_id = 1
-        self.scope = ProjectScope.single(1)
+    ``rows`` is the answer, or a function of the requested ``limit`` when a test needs
+    the lexical leg to widen with the candidate window.
+    """
 
-    @override
-    async def init_search_index(self):
-        pass  # pragma: no cover
+    def __init__(self, rows: Sequence[Any] | Callable[[int], Sequence[Any]] = ()) -> None:
+        if isinstance(rows, Sequence):
+            fixed = list(rows)
+            self.answer: Callable[[int], Sequence[Any]] = lambda _limit: fixed
+        else:
+            self.answer = rows
+        self.queries: list[PreparedSearchQuery] = []
+        self.calls: list[dict[str, Any]] = []
 
-    @override
-    async def get_entity_physical_chunk_keys(self, entity_id: int) -> set[str] | None:
-        return None  # physical storage is not inspectable in this double
-
-    @override
     async def search(
         self,
-        search_text: Optional[str] = None,
-        permalink: Optional[str] = None,
-        permalink_match: Optional[str] = None,
-        title: Optional[str] = None,
-        note_types: Optional[list[str]] = None,
-        after_date: Optional[datetime] = None,
-        search_item_types: Optional[list[SearchItemType]] = None,
-        categories: Optional[list[str]] = None,
-        metadata_filters: Optional[dict[str, Any]] = None,
-        file_path_prefix: Optional[str] = None,
-        temporal: Optional[TemporalFilter] = None,
-        retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
-        min_similarity: Optional[float] = None,
-        limit: int = 10,
-        offset: int = 0,
+        scope: ProjectScope,
+        query: PreparedSearchQuery,
+        *,
+        limit: int,
+        offset: int,
         allow_relaxed: bool = False,
         session: AsyncSession | None = None,
-        *,
         candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
     ) -> list[SearchIndexRow]:
-        return []  # pragma: no cover
-
-    @override
-    async def _ensure_vector_tables(self):
-        pass  # pragma: no cover
-
-    @override
-    async def _run_vector_query(
-        self,
-        session,
-        query_embedding,
-        candidate_limit,
-        *,
-        trace: SearchTraceCollector | None = None,
-    ):
-        return []  # pragma: no cover
-
-    @override
-    async def _write_embeddings(self, session, jobs, embeddings):
-        pass  # pragma: no cover
-
-    @override
-    async def _delete_entity_chunks(self, session, entity_id, *, expected_deletions=None):
-        return []  # pragma: no cover
-
-    @override
-    async def _delete_stale_chunks(
-        self,
-        session,
-        stale_ids,
-        entity_id,
-        *,
-        expected_deletions=None,
-    ):
-        return []  # pragma: no cover
-
-    async def _update_timestamp_sql(self):
-        return "CURRENT_TIMESTAMP"  # pragma: no cover
-
-    @override
-    def _distance_to_similarity(self, distance: float) -> float:
-        return 1.0 / (1.0 + max(distance, 0.0))  # pragma: no cover
-
-
-def _fake_embedding_provider() -> EmbeddingProvider:
-    return cast(
-        EmbeddingProvider,
-        type(
-            "EP",
-            (),
+        self.queries.append(query)
+        self.calls.append(
             {
-                "model_name": "fake",
-                "dimensions": 384,
-                "embed_query": AsyncMock(return_value=[0.0] * 384),
-                "embed_documents": AsyncMock(return_value=[]),
-                "runtime_log_attrs": lambda self: {},
-            },
-        )(),
+                "limit": limit,
+                "offset": offset,
+                "allow_relaxed": allow_relaxed,
+                "candidate_keys": candidate_keys,
+            }
+        )
+        return cast(list[SearchIndexRow], list(self.answer(limit)))
+
+    async def count(
+        self,
+        scope: ProjectScope,
+        query: PreparedSearchQuery,
+        *,
+        allow_relaxed: bool = False,
+    ) -> int:
+        return len(self.answer(0))
+
+
+def fake_vector_retrieval(
+    *,
+    vector_k: int = 100,
+    min_similarity: float = 0.0,
+    embed_query: AsyncMock | None = None,
+) -> VectorRetrieval:
+    """A semantic stack whose adapter is never consulted: tests stub the neighbour stage."""
+    provider = type(
+        "EP",
+        (),
+        {
+            "model_name": "fake",
+            "dimensions": 384,
+            "embed_query": embed_query or AsyncMock(return_value=[0.0] * 384),
+            "embed_documents": AsyncMock(return_value=[]),
+            "runtime_log_attrs": lambda self: {},
+        },
+    )()
+    return VectorRetrieval(
+        index=cast(SemanticVectorIndex, object()),
+        index_name="sqlite-vec",
+        embedding_provider=cast(EmbeddingProvider, provider),
+        embedding_model="fake:384",
+        vector_k=vector_k,
+        min_similarity=min_similarity,
     )
 
 
-HYBRID_KWARGS: dict[str, Any] = dict(
-    search_text="test",
-    permalink=None,
-    permalink_match=None,
-    title=None,
-    note_types=None,
-    after_date=None,
-    search_item_types=None,
-    categories=None,
-    metadata_filters=None,
-    file_path_prefix=None,
-    temporal=None,
-    limit=10,
-    offset=0,
-)
+HYBRID_QUERY = PreparedSearchQuery(search_text="test", retrieval_mode=SearchRetrievalMode.HYBRID)
+
+
+async def fuse(
+    fts_results: list[Any],
+    vector_results: list[Any],
+    *,
+    query: PreparedSearchQuery = HYBRID_QUERY,
+) -> list[SearchIndexRow]:
+    """Run hybrid with both legs answering fixed rows, so only fusion is under test."""
+    semantic = SemanticSearch(
+        cast(Any, None), ProjectScope.single(1), FakeFts(fts_results), fake_vector_retrieval()
+    )
+    with patch.object(semantic, "vector_only", new_callable=AsyncMock, return_value=vector_results):
+        return await semantic.hybrid(query, limit=10, offset=0)
 
 
 @pytest.mark.asyncio
 async def test_high_fts_score_boosts_ranking():
     """FTS-only: a high normalized score should outscore a low normalized score."""
-    repo = ConcreteSearchRepo()
-
-    # Two FTS results with very different scores
     high_score_row = FakeRow(id=1, score=10.0, title="high")
     low_score_row = FakeRow(id=2, score=0.5, title="low")
-    fts_results = [high_score_row, low_score_row]
 
     # No vector results — isolate FTS weighting behavior
-    vector_results = []
-
-    with (
-        patch.object(
-            repo,
-            "search",
-            new_callable=AsyncMock,
-            return_value=fts_results,
-        ),
-        patch.object(
-            repo,
-            "_search_vector_only",
-            new_callable=AsyncMock,
-            return_value=vector_results,
-        ),
-    ):
-        results = await repo._search_hybrid(**HYBRID_KWARGS)
+    results = await fuse([high_score_row, low_score_row], [])
 
     assert len(results) == 2
     # After normalization: id=1 → 1.0, id=2 → 0.05
@@ -215,8 +164,6 @@ async def test_high_fts_score_boosts_ranking():
 @pytest.mark.asyncio
 async def test_dual_source_ranks_higher_than_single():
     """A result in both FTS and vector should rank above single-source results."""
-    repo = ConcreteSearchRepo()
-
     # Row 1 in both (fts=5.0→norm 1.0, vec=0.9), Row 2 FTS-only (fts=5.0→norm 1.0),
     # Row 3 vec-only (0.8)
     fts_results = [
@@ -228,13 +175,7 @@ async def test_dual_source_ranks_higher_than_single():
         FakeRow(id=3, score=0.8, title="vec-only"),
     ]
 
-    with (
-        patch.object(repo, "search", new_callable=AsyncMock, return_value=fts_results),
-        patch.object(
-            repo, "_search_vector_only", new_callable=AsyncMock, return_value=vector_results
-        ),
-    ):
-        results = await repo._search_hybrid(**HYBRID_KWARGS)
+    results = await fuse(fts_results, vector_results)
 
     result_ids = [r.id for r in results]
     # Row 1 (dual-source) should rank first, then Row 2 (FTS 1.0), then Row 3 (vec 0.8)
@@ -251,19 +192,7 @@ async def test_dual_source_ranks_higher_than_single():
 @pytest.mark.asyncio
 async def test_zero_score_produces_zero_fused():
     """A zero-score FTS result with no vector match produces a zero fused score."""
-    repo = ConcreteSearchRepo()
-
-    # FTS result with score 0.0
-    fts_results = [FakeRow(id=1, score=0.0, title="zero-score")]
-    vector_results = []
-
-    with (
-        patch.object(repo, "search", new_callable=AsyncMock, return_value=fts_results),
-        patch.object(
-            repo, "_search_vector_only", new_callable=AsyncMock, return_value=vector_results
-        ),
-    ):
-        results = await repo._search_hybrid(**HYBRID_KWARGS)
+    results = await fuse([FakeRow(id=1, score=0.0, title="zero-score")], [])
 
     assert len(results) == 1
     # Zero FTS score, no vector → fused = max(0, 0) + 0.3 * min(0, 0) = 0.0
@@ -277,18 +206,10 @@ async def test_cross_type_id_collision_keeps_both_results():
     search_index row types have independent id sequences, so fusing on a bare
     row id merged unrelated rows into one result and dropped the other.
     """
-    repo = ConcreteSearchRepo()
-
     fts_results = [FakeRow(id=1, type="entity", score=5.0, title="entity-row")]
     vector_results = [FakeRow(id=1, type="relation", score=0.8, title="relation-row")]
 
-    with (
-        patch.object(repo, "search", new_callable=AsyncMock, return_value=fts_results),
-        patch.object(
-            repo, "_search_vector_only", new_callable=AsyncMock, return_value=vector_results
-        ),
-    ):
-        results = await repo._search_hybrid(**HYBRID_KWARGS)
+    results = await fuse(fts_results, vector_results)
 
     assert {(r.type, r.id) for r in results} == {("entity", 1), ("relation", 1)}
     # Single-source scores must not earn the dual-source fusion bonus across types.
@@ -301,21 +222,9 @@ async def test_cross_type_id_collision_keeps_both_results():
 @pytest.mark.asyncio
 async def test_fts_only_result_does_not_copy_content_into_matched_chunk():
     """FTS-only hits use the API content preview instead of a second full-note field."""
-    repo = ConcreteSearchRepo()
-
     content = "This is the full note content with the answer we need to find."
-    fts_results = [
-        FakeRow(id=1, score=5.0, title="fts-hit", content_snippet=content),
-    ]
-    vector_results = []
 
-    with (
-        patch.object(repo, "search", new_callable=AsyncMock, return_value=fts_results),
-        patch.object(
-            repo, "_search_vector_only", new_callable=AsyncMock, return_value=vector_results
-        ),
-    ):
-        results = await repo._search_hybrid(**HYBRID_KWARGS)
+    results = await fuse([FakeRow(id=1, score=5.0, title="fts-hit", content_snippet=content)], [])
 
     assert len(results) == 1
     assert results[0].matched_chunk_text is None
@@ -325,20 +234,7 @@ async def test_fts_only_result_does_not_copy_content_into_matched_chunk():
 @pytest.mark.asyncio
 async def test_fts_only_result_with_null_content_keeps_null_matched_chunk():
     """FTS-only results with no content_snippet should keep matched_chunk_text as None."""
-    repo = ConcreteSearchRepo()
-
-    fts_results = [
-        FakeRow(id=1, score=5.0, title="fts-hit", content_snippet=None),
-    ]
-    vector_results = []
-
-    with (
-        patch.object(repo, "search", new_callable=AsyncMock, return_value=fts_results),
-        patch.object(
-            repo, "_search_vector_only", new_callable=AsyncMock, return_value=vector_results
-        ),
-    ):
-        results = await repo._search_hybrid(**HYBRID_KWARGS)
+    results = await fuse([FakeRow(id=1, score=5.0, title="fts-hit", content_snippet=None)], [])
 
     assert len(results) == 1
     assert results[0].matched_chunk_text is None
@@ -347,8 +243,6 @@ async def test_fts_only_result_with_null_content_keeps_null_matched_chunk():
 @pytest.mark.asyncio
 async def test_dual_source_result_keeps_vector_matched_chunk():
     """Dual-source results should keep matched_chunk_text from vector search, not overwrite."""
-    repo = ConcreteSearchRepo()
-
     content = "Full note content from FTS."
     vector_chunk = "Specific chunk matched by vector search."
     fts_results = [
@@ -364,14 +258,22 @@ async def test_dual_source_result_keeps_vector_matched_chunk():
         ),
     ]
 
-    with (
-        patch.object(repo, "search", new_callable=AsyncMock, return_value=fts_results),
-        patch.object(
-            repo, "_search_vector_only", new_callable=AsyncMock, return_value=vector_results
-        ),
-    ):
-        results = await repo._search_hybrid(**HYBRID_KWARGS)
+    results = await fuse(fts_results, vector_results)
 
     assert len(results) == 1
-    # Vector result overwrites the FTS row in rows_by_id, so matched_chunk_text is preserved
+    # Vector result overwrites the FTS row in rows_by_key, so matched_chunk_text is preserved
     assert results[0].matched_chunk_text == vector_chunk
+
+
+@pytest.mark.asyncio
+async def test_hybrid_fts_leg_runs_in_fts_mode_with_relaxation():
+    """The lexical leg is the same prepared query in FTS mode, allowed to relax."""
+    fts = FakeFts([FakeRow(id=1, score=5.0)])
+    semantic = SemanticSearch(cast(Any, None), ProjectScope.single(1), fts, fake_vector_retrieval())
+
+    with patch.object(semantic, "vector_only", new_callable=AsyncMock, return_value=[]):
+        await semantic.hybrid(HYBRID_QUERY, limit=10, offset=0)
+
+    assert [query.retrieval_mode for query in fts.queries] == [SearchRetrievalMode.FTS]
+    assert fts.queries[0].search_text == "test"
+    assert fts.calls[0]["allow_relaxed"] is True

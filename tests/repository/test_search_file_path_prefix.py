@@ -10,6 +10,7 @@ a match set the other backend never produces.
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock
 
 import pytest
@@ -18,6 +19,8 @@ from basic_memory import db
 from basic_memory.models.knowledge import Entity
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_filters import file_path_prefix_condition
+from basic_memory.repository.search_reader import HydratedChunk, SemanticSearch
+from basic_memory.repository.semantic_vector_index import SemanticVectorIndex
 from basic_memory.schemas.search import (
     SearchItemType,
     SearchRetrievalMode,
@@ -305,18 +308,24 @@ async def test_semantic_retrieval_honors_the_scope(
         ),
     )
     monkeypatch.setattr(search_repository, "_ensure_vector_tables", AsyncMock())
-    monkeypatch.setattr(search_repository, "_prepare_vector_session", AsyncMock())
+    # The nearest-neighbour stage is stubbed, so the adapter is never consulted.
     monkeypatch.setattr(
         search_repository,
+        "_semantic_vector_index",
+        cast(SemanticVectorIndex, object()),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        SemanticSearch,
         "_run_vector_query",
         AsyncMock(
             return_value=[
-                {
-                    "entity_id": row_id,
-                    "chunk_key": f"entity:{row_id}:0",
-                    "chunk_text": "subtree scope fixture",
-                    "best_similarity": 0.9,
-                }
+                HydratedChunk(
+                    entity_id=row_id,
+                    chunk_key=f"entity:{row_id}:0",
+                    chunk_text="subtree scope fixture",
+                    similarity=0.9,
+                )
                 for row_id in seeded_paths.values()
             ]
         ),

@@ -32,6 +32,28 @@ class PreparedSearchQuery:
     retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS
     min_similarity: float | None = None
 
+    @property
+    def has_filters(self) -> bool:
+        """Whether any predicate beyond the text itself narrows the result set.
+
+        Vector retrieval cannot evaluate these itself; when any is present it asks
+        the full-text pass which of its candidates the filters admit.
+        """
+        return any(
+            (
+                self.permalink,
+                self.permalink_match,
+                self.title,
+                self.note_types,
+                self.after_date,
+                self.search_item_types,
+                self.categories,
+                self.metadata_filters,
+                self.file_path_prefix,
+                self.temporal,
+            )
+        )
+
 
 # Interrogative/function words contribute lexical noise when a strict
 # full-text query is relaxed: "when OR did OR a" matches loud wrong documents

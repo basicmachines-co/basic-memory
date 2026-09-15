@@ -18,7 +18,7 @@ from basic_memory.models.search import (
     create_sqlite_search_vector_embeddings,
 )
 from basic_memory.repository.semantic_chunking import split_text_into_chunks
-from basic_memory.repository.search_repository_base import SMALL_NOTE_CONTENT_LIMIT
+from basic_memory.repository.search_reader import SMALL_NOTE_CONTENT_LIMIT
 from basic_memory.schemas.search import SearchRetrievalMode
 
 from semantic.multilingual_benchmark import (
