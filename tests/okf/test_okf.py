@@ -589,3 +589,21 @@ def test_relative_wikilink_percent_sequences_are_literal():
         convert_wikilinks("[[sub/A%20B.md]]", "folder/source.md", targets, "p")
         == "[sub/A%20B.md](/folder/sub/A%2520B.md)"
     )
+
+
+@pytest.mark.parametrize("yaml_permalink,target", [("123", "123"), ("false", "False")])
+def test_scalar_permalink_aliases_preserve_authored_metadata(yaml_permalink, target):
+    authored = f"---\npermalink: {yaml_permalink}\n---\n# Note"
+    snapshot = ExportSnapshot(
+        "p",
+        (
+            ExportFile("note.md", authored.encode()),
+            ExportFile("source.md", f"[[{target}]]".encode()),
+        ),
+    )
+    files = {file.path: file.content.decode() for file in render_bundle(snapshot)}
+    assert f"[{target}](/note.md)" in files["source.md"]
+    assert (
+        parse_document(files["note.md"]).metadata["permalink"]
+        == parse_document(authored).metadata["permalink"]
+    )

@@ -213,7 +213,7 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
             else "note"
         )
         aliases = {file.path, str(PurePosixPath(file.path).with_suffix("")), title}
-        permalink = document.metadata.get("permalink")
+        permalink = normalize_frontmatter_value(source_metadata.get("permalink"))
         if isinstance(permalink, str) and permalink:
             aliases.add(permalink)
         for alias in aliases:
