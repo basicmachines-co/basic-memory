@@ -113,11 +113,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     )
                 vector_index = PgVectorIndex(
                     session_maker,
-                    build_vector_index_scope(
-                        self._app_config,
-                        self._embedding_provider,
-                        project_id,
-                    ),
+                    build_vector_index_scope(self._app_config, self._embedding_provider),
                 )
             self._semantic_vector_index_name = effective_name
             self._semantic_vector_index = vector_index
@@ -314,11 +310,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             self._semantic_vector_index_name = "pgvector"
             self._semantic_vector_index = PgVectorIndex(
                 self.session_maker,
-                build_vector_index_scope(
-                    self._app_config,
-                    self._embedding_provider,
-                    self.project_id,
-                ),
+                build_vector_index_scope(self._app_config, self._embedding_provider),
             )
         if self._vector_tables_initialized:
             return

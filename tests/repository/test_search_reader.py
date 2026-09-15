@@ -233,7 +233,7 @@ async def test_built_in_adapter_reads_manifest_readiness_when_tracing(monkeypatc
 
     assert trace.readiness is readiness
     read_readiness.assert_awaited_once_with(session, SCOPE, "sqlite-vec", "fake:384")
-    adapter.search.assert_awaited_once_with([0.1], limit=5)
+    adapter.search.assert_awaited_once_with([0.1], limit=5, projects=SCOPE)
 
 
 @pytest.mark.asyncio

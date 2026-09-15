@@ -235,7 +235,6 @@ def create_search_repository(
         embedding_provider = create_embedding_provider(config)
         vector_index_name, vector_index = create_semantic_vector_index(
             session_maker=session_maker,
-            project_id=project_id,
             app_config=config,
             database_backend=database_backend,
             embedding_provider=embedding_provider,

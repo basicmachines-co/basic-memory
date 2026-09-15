@@ -85,11 +85,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             self._vector_dimensions = self._embedding_provider.dimensions
             self._semantic_vector_index = vector_index or SQLiteVecIndex(
                 session_maker,
-                build_vector_index_scope(
-                    self._app_config,
-                    self._embedding_provider,
-                    project_id,
-                ),
+                build_vector_index_scope(self._app_config, self._embedding_provider),
             )
 
     @override
@@ -269,11 +265,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
             assert self._embedding_provider is not None
             self._semantic_vector_index = SQLiteVecIndex(
                 self.session_maker,
-                build_vector_index_scope(
-                    self._app_config,
-                    self._embedding_provider,
-                    self.project_id,
-                ),
+                build_vector_index_scope(self._app_config, self._embedding_provider),
             )
         if self._vector_tables_initialized:
             return

@@ -621,7 +621,7 @@ class SearchRepositoryBase(ABC):
                 # the authoritative SQL database. Hold its manifest lock across
                 # adapter I/O so a newer prepare cannot advance this generation
                 # before the external write and ready transition complete.
-                await self._semantic_vector_index.upsert(records)
+                await self._semantic_vector_index.upsert(self.project_id, records)
                 await self._mark_embedding_jobs_ready(
                     session,
                     params=params,
@@ -632,7 +632,7 @@ class SearchRepositoryBase(ABC):
 
         # Built-in adapters share the authoritative database. They verify and lock
         # each record's source_hash inside the same transaction as their vector write.
-        await self._semantic_vector_index.upsert(records)
+        await self._semantic_vector_index.upsert(self.project_id, records)
         async with db.scoped_session(self.session_maker) as session:
             await self._mark_embedding_jobs_ready(
                 session,
@@ -834,7 +834,7 @@ class SearchRepositoryBase(ABC):
                 ]
                 if not current_deletions:
                     return
-                await self._semantic_vector_index.delete(current_deletions)
+                await self._semantic_vector_index.delete(self.project_id, current_deletions)
                 await session.execute(
                     text(
                         "DELETE FROM search_vector_chunks "
@@ -846,7 +846,7 @@ class SearchRepositoryBase(ABC):
                 await session.commit()
             return
 
-        await self._semantic_vector_index.delete(deletions)
+        await self._semantic_vector_index.delete(self.project_id, deletions)
         if self._semantic_vector_index_name in BUILT_IN_VECTOR_INDEX_NAMES:
             return
         async with db.scoped_session(self.session_maker) as session:
@@ -1209,7 +1209,7 @@ class SearchRepositoryBase(ABC):
 
         await self._semantic_vector_index.initialize()
         for entity_id in deleted_entity_ids:
-            await self._semantic_vector_index.delete_entity(entity_id)
+            await self._semantic_vector_index.delete_entity(self.project_id, entity_id)
 
     async def _delete_project_builtin_vector_rows(self, session: AsyncSession) -> None:
         """Delete backend-owned vector rows before their SQL manifest is removed."""
@@ -1479,11 +1479,11 @@ class SearchRepositoryBase(ABC):
             ]
 
             if external_vector_index:
-                await self._semantic_vector_index.delete_orphans(live_keys)
+                await self._semantic_vector_index.delete_orphans(self.project_id, live_keys)
                 await session.commit()
                 return
 
-        await self._semantic_vector_index.delete_orphans(live_keys)
+        await self._semantic_vector_index.delete_orphans(self.project_id, live_keys)
 
     # ------------------------------------------------------------------
     # Shared semantic search: guard, text processing, chunking

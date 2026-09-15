@@ -143,6 +143,15 @@
   construct the pipeline directly instead of subclassing the repository. No query
   behavior changes.
 
+- **#1558**: Vector adapters are bound to the database, not to a project. `VectorIndexScope`
+  is the database namespace plus embedding schema; every write names the project it
+  touches (`upsert(project_id, ...)`, `delete(project_id, ...)`,
+  `delete_entity(project_id, ...)`, `delete_orphans(project_id, ...)`) and `search` takes
+  a `ProjectScope`, so one sqlite-vec or pgvector adapter answers a query across any set
+  of projects with one statement. Milvus keeps a collection per project and searches the
+  collections in scope. `SemanticSearch` passes its scope through, so a project
+  repository's vector search is unchanged. No query behavior changes.
+
 
 ## v0.23.2 (2026-08-25)
 

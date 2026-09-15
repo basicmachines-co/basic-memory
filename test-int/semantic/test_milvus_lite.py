@@ -11,6 +11,7 @@ pytest.importorskip("pymilvus", reason="install basic-memory[milvus] to test Mil
 
 from basic_memory.repository.milvus_config import MilvusSettings
 from basic_memory.repository.milvus_index import MilvusVectorIndex
+from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_vector_index import (
     VectorDeletion,
     VectorIndexScope,
@@ -23,6 +24,9 @@ pytestmark = [
     pytest.mark.skipif(sys.platform == "win32", reason="Milvus Lite does not support Windows"),
 ]
 
+PROJECT = 7
+PROJECTS = ProjectScope.single(PROJECT)
+
 
 _RESTART_SCRIPT = """
 import asyncio
@@ -30,6 +34,7 @@ import sys
 
 from basic_memory.repository.milvus_config import MilvusSettings
 from basic_memory.repository.milvus_index import MilvusVectorIndex
+from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_vector_index import (
     VectorIndexScope,
     VectorKey,
@@ -41,7 +46,6 @@ async def main() -> None:
     phase, database_path = sys.argv[1:]
     scope = VectorIndexScope(
         namespace="restart-database",
-        project_id=7,
         embedding_identity="Stub:model",
         dimensions=3,
     )
@@ -50,18 +54,19 @@ async def main() -> None:
 
     if phase == "write":
         await index.upsert(
+            7,
             [
                 VectorRecord(
                     key=key,
                     source_hash="auth-v1",
                     values=(1.0, 0.0, 0.0),
                 )
-            ]
+            ],
         )
         return
 
-    await index.delete_orphans([key])
-    matches = await index.search((1.0, 0.0, 0.0), limit=1)
+    await index.delete_orphans(7, [key])
+    matches = await index.search((1.0, 0.0, 0.0), limit=1, projects=ProjectScope.single(7))
     assert [match.key for match in matches] == [key]
 
 
@@ -83,7 +88,6 @@ def _run_restart_phase(phase: str, database_path: str) -> None:
 async def test_milvus_lite_vector_lifecycle(tmp_path) -> None:
     scope = VectorIndexScope(
         namespace="integration-database",
-        project_id=7,
         embedding_identity="Stub:model",
         dimensions=3,
     )
@@ -94,6 +98,7 @@ async def test_milvus_lite_vector_lifecycle(tmp_path) -> None:
     auth_key = VectorKey(entity_id=1, chunk_key="summary:0")
     database_key = VectorKey(entity_id=2, chunk_key="summary:0")
     await index.upsert(
+        PROJECT,
         [
             VectorRecord(
                 key=auth_key,
@@ -105,21 +110,23 @@ async def test_milvus_lite_vector_lifecycle(tmp_path) -> None:
                 source_hash="database-v1",
                 values=(0.0, 1.0, 0.0),
             ),
-        ]
+        ],
     )
 
-    matches = await index.search((1.0, 0.0, 0.0), limit=2)
+    matches = await index.search((1.0, 0.0, 0.0), limit=2, projects=PROJECTS)
     assert matches[0].key == auth_key
     assert matches[0].similarity == pytest.approx(1.0)
 
-    await index.delete([VectorDeletion(key=auth_key, source_hash="stale-generation")])
-    assert (await index.search((1.0, 0.0, 0.0), limit=2))[0].key == auth_key
+    await index.delete(PROJECT, [VectorDeletion(key=auth_key, source_hash="stale-generation")])
+    assert (await index.search((1.0, 0.0, 0.0), limit=2, projects=PROJECTS))[0].key == auth_key
 
-    await index.delete([VectorDeletion(key=auth_key, source_hash="auth-v1")])
-    assert [match.key for match in await index.search((1.0, 0.0, 0.0), limit=2)] == [database_key]
+    await index.delete(PROJECT, [VectorDeletion(key=auth_key, source_hash="auth-v1")])
+    assert [
+        match.key for match in await index.search((1.0, 0.0, 0.0), limit=2, projects=PROJECTS)
+    ] == [database_key]
 
-    await index.delete_orphans([])
-    assert await index.search((1.0, 0.0, 0.0), limit=2) == []
+    await index.delete_orphans(PROJECT, [])
+    assert await index.search((1.0, 0.0, 0.0), limit=2, projects=PROJECTS) == []
 
 
 def test_milvus_lite_reloads_collection_after_process_restart(tmp_path) -> None:

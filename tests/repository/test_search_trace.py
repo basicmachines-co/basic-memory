@@ -68,11 +68,10 @@ class _TraceEmbeddingProvider:
 
 
 class _TraceVectorIndex:
-    def __init__(self, project_id: int) -> None:
+    def __init__(self) -> None:
         self.matches: list[VectorMatch] = []
         self.scope = VectorIndexScope(
             namespace="trace-test",
-            project_id=project_id,
             embedding_identity="trace-embedding",
             dimensions=4,
         )
@@ -80,16 +79,18 @@ class _TraceVectorIndex:
     async def initialize(self) -> None:
         return None
 
-    async def upsert(self, records: Sequence[VectorRecord]) -> None:
+    async def upsert(self, project_id: int, records: Sequence[VectorRecord]) -> None:
         return None
 
-    async def delete(self, records: Sequence[VectorDeletion]) -> None:
+    async def delete(self, project_id: int, records: Sequence[VectorDeletion]) -> None:
         return None
 
-    async def delete_entity(self, entity_id: int) -> None:
+    async def delete_entity(self, project_id: int, entity_id: int) -> None:
         return None
 
-    async def search(self, query: Sequence[float], *, limit: int) -> list[VectorMatch]:
+    async def search(
+        self, query: Sequence[float], *, limit: int, projects: ProjectScope
+    ) -> list[VectorMatch]:
         return self.matches[:limit]
 
 
@@ -525,7 +526,7 @@ def _repository(
             "semantic_vector_k": 10,
         }
     )
-    vector_index = _TraceVectorIndex(test_project.id)
+    vector_index = _TraceVectorIndex()
     repository_type = (
         PostgresSearchRepository
         if config.database_backend == DatabaseBackend.POSTGRES
