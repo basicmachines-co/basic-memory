@@ -1,5 +1,6 @@
 """Execution-native search trace builders and repository integration."""
 
+from basic_memory.repository.search_scope import ProjectScope
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -685,10 +686,10 @@ async def test_vector_trace_captures_drops_threshold_filter_and_missing_on_same_
     assert all("auth retrieval" not in match.chunk_key for match in collector.vector.chunk_matches)
 
     async with db.scoped_session(repository.session_maker) as session:
-        assert await classify_hydration_drops(session, repository.project_id, ()) == ()
+        assert await classify_hydration_drops(session, repository.scope, ()) == ()
         readiness_race = await classify_hydration_drops(
             session,
-            repository.project_id,
+            repository.scope,
             (
                 HydrationDropKey(
                     entity_id=1,
@@ -722,7 +723,7 @@ async def test_classify_hydration_drops_batches_large_unhealthy_candidate_set(
     async with db.scoped_session(session_maker) as session:
         classified = await classify_hydration_drops(
             session,
-            test_project.id,
+            ProjectScope.single(test_project.id),
             dropped_keys,
         )
 
@@ -764,7 +765,7 @@ async def test_classify_hydration_drop_observes_pending_to_ready_transition(
     async with db.scoped_session(session_maker) as session:
         classified = await classify_hydration_drops(
             session,
-            test_project.id,
+            ProjectScope.single(test_project.id),
             (
                 HydrationDropKey(
                     entity_id=1,

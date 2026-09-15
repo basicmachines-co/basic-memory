@@ -17,7 +17,7 @@ import pytest
 from basic_memory import db
 from basic_memory.models.knowledge import Entity
 from basic_memory.repository.search_index_row import SearchIndexRow
-from basic_memory.repository.search_repository_base import file_path_prefix_condition
+from basic_memory.repository.search_filters import file_path_prefix_condition
 from basic_memory.schemas.search import (
     SearchItemType,
     SearchRetrievalMode,

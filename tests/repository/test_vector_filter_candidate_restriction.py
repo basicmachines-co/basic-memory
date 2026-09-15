@@ -29,10 +29,10 @@ from sqlalchemy import text
 
 from basic_memory import db
 from basic_memory.repository.embedding_provider import EmbeddingProvider
+from basic_memory.repository.search_filters import candidate_key_restriction_condition
 from basic_memory.repository.search_repository_base import (
     VECTOR_FILTER_SCAN_LIMIT,
     VECTOR_HYDRATION_BATCH_SIZE,
-    candidate_key_restriction_condition,
 )
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 

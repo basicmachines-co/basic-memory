@@ -156,3 +156,9 @@ class SearchIndexRow:
             "updated_at": self.updated_at if self.updated_at else None,
             "project_id": self.project_id,
         }
+
+
+# Entity, observation, and relation rows carry ids from independent auto-increment
+# sequences, so a bare id is ambiguous across row types. Every map in the retrieval
+# path keys rows by (type, id) to avoid collisions.
+type SearchIndexKey = tuple[str, int]

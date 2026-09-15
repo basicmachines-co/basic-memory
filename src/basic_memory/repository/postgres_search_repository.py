@@ -2,12 +2,9 @@
 
 import asyncio
 import json
-import time
 from collections.abc import Sequence
-from datetime import datetime
-from typing import Any, override, List, Optional
+from typing import Any, override, List
 
-import logfire
 from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,23 +17,13 @@ from basic_memory.repository.embedding_provider_factory import create_embedding_
 from basic_memory.repository.rerank_provider import RerankProvider
 from basic_memory.repository.rerank_provider_factory import create_rerank_provider
 from basic_memory.repository.search_index_row import SearchIndexRow
-from basic_memory.repository.search_query import relaxed_query_words
 from basic_memory.repository.script_ngrams import build_script_ngrams
 from basic_memory.repository.semantic_chunking import VectorChunkRecord
 from basic_memory.repository.search_repository_base import (
-    SearchIndexKey,
     SearchRepositoryBase,
     VectorChunkState,
 )
-from basic_memory.repository.search_trace import (
-    SearchTraceCollector,
-    build_fts_page_stage,
-)
-from basic_memory.repository.postgres_search_query import (
-    compile_fts_filter,
-    is_tsquery_syntax_error,
-    relaxed_tsquery_text,
-)
+from basic_memory.repository.postgres_search_query import PostgresFts
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.semantic_vector_index import SemanticVectorIndex
 from basic_memory.repository.semantic_vector_sync import (
@@ -49,8 +36,6 @@ from basic_memory.repository.semantic_vector_index_factory import (
 )
 from basic_memory.repository.pgvector_index import PgVectorIndex
 from basic_memory.repository.postgres_fts_chunks import split_postgres_fts_chunks
-from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
-from basic_memory.temporal import TemporalFilter
 
 
 def _strip_nul_from_row(row_data: dict[str, Any]) -> dict[str, Any]:
@@ -89,6 +74,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         rerank_provider: RerankProvider | None = None,
     ):
         super().__init__(session_maker, project_id)
+        self._fts = PostgresFts(session_maker)
         self._app_config = app_config or ConfigManager().config
         self._semantic_enabled = self._app_config.semantic_search_enabled
         self._semantic_vector_k = self._app_config.semantic_vector_k
@@ -387,22 +373,6 @@ class PostgresSearchRepository(SearchRepositoryBase):
             self._vector_tables_initialized = True
 
     @override
-    async def _run_vector_query(
-        self,
-        session: AsyncSession,
-        query_embedding: list[float],
-        candidate_limit: int,
-        *,
-        trace: SearchTraceCollector | None = None,
-    ) -> list[dict[str, Any]]:
-        return await super()._run_vector_query(
-            session,
-            query_embedding,
-            candidate_limit,
-            trace=trace,
-        )
-
-    @override
     def _vector_prepare_window_size(self) -> int:
         """Use a bounded config-driven prepare window for Postgres vector sync."""
         return self._semantic_postgres_prepare_concurrency
@@ -611,296 +581,3 @@ class PostgresSearchRepository(SearchRepositoryBase):
             await self._replace_fts_chunks(session, search_index_rows)
             logger.debug(f"Bulk indexed {len(search_index_rows)} rows")
             await session.commit()
-
-    # ------------------------------------------------------------------
-    # FTS search (Postgres-specific)
-    # ------------------------------------------------------------------
-
-    @override
-    async def search(
-        self,
-        search_text: Optional[str] = None,
-        permalink: Optional[str] = None,
-        permalink_match: Optional[str] = None,
-        title: Optional[str] = None,
-        note_types: Optional[List[str]] = None,
-        after_date: Optional[datetime] = None,
-        search_item_types: Optional[List[SearchItemType]] = None,
-        categories: Optional[List[str]] = None,
-        metadata_filters: Optional[dict[str, Any]] = None,
-        file_path_prefix: Optional[str] = None,
-        temporal: Optional[TemporalFilter] = None,
-        retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
-        min_similarity: Optional[float] = None,
-        limit: int = 10,
-        offset: int = 0,
-        allow_relaxed: bool = False,
-        session: AsyncSession | None = None,
-        *,
-        candidate_keys: Sequence[SearchIndexKey] | None = None,
-        trace: SearchTraceCollector | None = None,
-    ) -> List[SearchIndexRow]:
-        """Search across all indexed content using PostgreSQL tsvector."""
-        # --- Dispatch vector / hybrid modes (shared logic) ---
-        dispatched = await self._dispatch_retrieval_mode(
-            search_text=search_text,
-            permalink=permalink,
-            permalink_match=permalink_match,
-            title=title,
-            note_types=note_types,
-            after_date=after_date,
-            search_item_types=search_item_types,
-            categories=categories,
-            metadata_filters=metadata_filters,
-            file_path_prefix=file_path_prefix,
-            temporal=temporal,
-            retrieval_mode=retrieval_mode,
-            min_similarity=min_similarity,
-            limit=limit,
-            offset=offset,
-            trace=trace,
-        )
-        if dispatched is not None:
-            return dispatched
-
-        # --- FTS mode (Postgres-specific) ---
-        compiled = compile_fts_filter(
-            self.scope,
-            search_text=search_text,
-            permalink=permalink,
-            permalink_match=permalink_match,
-            title=title,
-            note_types=note_types,
-            after_date=after_date,
-            search_item_types=search_item_types,
-            categories=categories,
-            metadata_filters=metadata_filters,
-            file_path_prefix=file_path_prefix,
-            temporal=temporal,
-            allow_relaxed=allow_relaxed,
-            candidate_keys=candidate_keys,
-        )
-        params = compiled.params
-        params["limit"] = limit
-        params["offset"] = offset
-
-        sql = f"""
-            SELECT
-                search_index.project_id,
-                search_index.id,
-                search_index.title,
-                search_index.permalink,
-                search_index.file_path,
-                search_index.type,
-                search_index.metadata,
-                search_index.from_id,
-                search_index.to_id,
-                search_index.relation_type,
-                search_index.entity_id,
-                search_index.content_snippet,
-                search_index.category,
-                search_index.created_at,
-                search_index.updated_at,
-                {compiled.score_expression} as score
-            FROM {compiled.from_clause}
-            WHERE {compiled.where_clause}
-            ORDER BY score DESC {compiled.order_by_clause}, search_index.id ASC
-            LIMIT :limit
-            OFFSET :offset
-        """
-
-        logger.trace(f"Search {sql} params: {params}")
-        fts_started_at = time.perf_counter() if trace is not None else None
-
-        use_savepoint = session is not None or allow_relaxed
-
-        async def execute_rows(active_session: AsyncSession, query_params: dict[str, Any]):
-            # PostgreSQL leaves a transaction unusable after invalid tsquery syntax.
-            # Scope retryable or caller-owned attempts to a savepoint so a relaxed
-            # retry—and any caller continuing to use its session—starts healthy.
-            if use_savepoint:
-                async with active_session.begin_nested():
-                    result = await active_session.execute(text(sql), query_params)
-                    return result.fetchall()
-            result = await active_session.execute(text(sql), query_params)
-            return result.fetchall()
-
-        async def run_search(active_session: AsyncSession):
-            relaxed = relaxed_tsquery_text(search_text) if allow_relaxed else None
-            strict_syntax_error = False
-            relaxed_fallback_used = False
-            try:
-                rows = await execute_rows(active_session, params)
-            except Exception as exc:
-                if not (is_tsquery_syntax_error(exc) and relaxed and params.get("text")):
-                    raise
-                strict_syntax_error = True
-                rows = []
-
-            # Trigger: multi-word natural-language query matched nothing
-            # under the default all-terms-AND tsquery semantics, or its punctuation
-            # produced invalid strict tsquery syntax.
-            # Why: questions rarely have every word in one document;
-            # without relaxation the FTS half of hybrid search contributes zero
-            # candidates. The relaxed renderer also tokenizes punctuation safely.
-            # Outcome: one retry with OR-joined prefix lexemes; ts_rank
-            # still ranks multi-term matches first.
-            if relaxed and not rows and params.get("text"):
-                relaxed_fallback_used = True
-                retry_reason = "invalid syntax" if strict_syntax_error else "0 results"
-                logger.debug(
-                    f"Strict Postgres FTS returned {retry_reason}; retrying relaxed FTS query "
-                    f"strict='{search_text}' relaxed='{relaxed}'"
-                )
-                with logfire.span(
-                    "search.relaxed_fts_retry",
-                    backend="postgres",
-                    reason="syntax_error" if strict_syntax_error else "empty_result",
-                    token_count=len(relaxed_query_words(search_text) or ()),
-                    limit=limit,
-                    offset=offset,
-                ):
-                    rows = await execute_rows(
-                        active_session,
-                        {**params, "text": relaxed},
-                    )
-            return rows, relaxed_fallback_used
-
-        try:
-            if session is not None:
-                rows, relaxed_fallback_used = await run_search(session)
-            else:
-                async with db.scoped_session(self.session_maker) as owned_session:
-                    rows, relaxed_fallback_used = await run_search(owned_session)
-        except Exception as e:
-            if is_tsquery_syntax_error(e):
-                logger.warning(f"tsquery syntax error for search term: {search_text}, error: {e}")
-                if trace is not None:
-                    trace.fts = build_fts_page_stage(
-                        [],
-                        relaxed_fallback_used=False,
-                        fts_ms=(
-                            (time.perf_counter() - fts_started_at) * 1000
-                            if fts_started_at is not None
-                            else None
-                        ),
-                    )
-                return []
-
-            # Re-raise other database errors
-            logger.error(f"Database error during search: {e}")
-            raise
-
-        results = [SearchIndexRow.from_mapping(row._asdict()) for row in rows]
-        if trace is not None:
-            trace.fts = build_fts_page_stage(
-                [((row.type, row.id), row.score or 0.0) for row in results],
-                relaxed_fallback_used=relaxed_fallback_used,
-                fts_ms=(
-                    (time.perf_counter() - fts_started_at) * 1000
-                    if fts_started_at is not None
-                    else None
-                ),
-            )
-
-        logger.trace(f"Found {len(results)} search results")
-        for r in results:
-            logger.trace(
-                f"Search result: project_id: {r.project_id} type:{r.type} title: {r.title} permalink: {r.permalink} score: {r.score}"
-            )
-
-        return results
-
-    @override
-    async def count(
-        self,
-        search_text: Optional[str] = None,
-        permalink: Optional[str] = None,
-        permalink_match: Optional[str] = None,
-        title: Optional[str] = None,
-        note_types: Optional[List[str]] = None,
-        after_date: Optional[datetime] = None,
-        search_item_types: Optional[List[SearchItemType]] = None,
-        categories: Optional[List[str]] = None,
-        metadata_filters: Optional[dict[str, Any]] = None,
-        file_path_prefix: Optional[str] = None,
-        temporal: Optional[TemporalFilter] = None,
-        retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
-        min_similarity: Optional[float] = None,
-        allow_relaxed: bool = False,
-    ) -> int:
-        """Count indexed content matching the Postgres FTS query."""
-        if retrieval_mode != SearchRetrievalMode.FTS:
-            return await super().count(
-                search_text=search_text,
-                permalink=permalink,
-                permalink_match=permalink_match,
-                title=title,
-                note_types=note_types,
-                after_date=after_date,
-                search_item_types=search_item_types,
-                categories=categories,
-                metadata_filters=metadata_filters,
-                file_path_prefix=file_path_prefix,
-                temporal=temporal,
-                retrieval_mode=retrieval_mode,
-                min_similarity=min_similarity,
-            )
-
-        compiled = compile_fts_filter(
-            self.scope,
-            search_text=search_text,
-            permalink=permalink,
-            permalink_match=permalink_match,
-            title=title,
-            note_types=note_types,
-            after_date=after_date,
-            search_item_types=search_item_types,
-            categories=categories,
-            metadata_filters=metadata_filters,
-            file_path_prefix=file_path_prefix,
-            temporal=temporal,
-            allow_relaxed=allow_relaxed,
-        )
-        params = compiled.params
-        sql = f"SELECT COUNT(*) FROM {compiled.from_clause} WHERE {compiled.where_clause}"
-        logger.trace(f"Count {sql} params: {params}")
-
-        async def execute_count(active_session: AsyncSession, query_params: dict[str, Any]) -> int:
-            if allow_relaxed:
-                async with active_session.begin_nested():
-                    result = await active_session.execute(text(sql), query_params)
-                    return int(result.scalar_one())
-            result = await active_session.execute(text(sql), query_params)
-            return int(result.scalar_one())
-
-        try:
-            async with db.scoped_session(self.session_maker) as session:
-                relaxed = relaxed_tsquery_text(search_text) if allow_relaxed else None
-                strict_syntax_error = False
-                try:
-                    total = await execute_count(session, params)
-                except Exception as exc:
-                    if not (is_tsquery_syntax_error(exc) and relaxed and params.get("text")):
-                        raise
-                    strict_syntax_error = True
-                    total = 0
-
-                if relaxed and total == 0 and params.get("text"):
-                    with logfire.span(
-                        "search.count.relaxed_fts_retry",
-                        backend="postgres",
-                        reason="syntax_error" if strict_syntax_error else "empty_result",
-                        token_count=len(relaxed_query_words(search_text) or ()),
-                    ):
-                        total = await execute_count(
-                            session,
-                            {**params, "text": relaxed},
-                        )
-                return total
-        except Exception as e:
-            if is_tsquery_syntax_error(e):
-                logger.warning(f"tsquery syntax error for search term: {search_text}, error: {e}")
-                return 0
-            logger.error(f"Database error during search count: {e}")
-            raise

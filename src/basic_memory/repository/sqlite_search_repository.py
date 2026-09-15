@@ -1,13 +1,10 @@
 """SQLite FTS5-based search repository implementation."""
 
 import asyncio
-import time
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
-from datetime import datetime
-from typing import Any, override, List, Optional
+from typing import override, List
 
-import logfire
 from loguru import logger
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError as SAOperationalError
@@ -26,29 +23,15 @@ from basic_memory.repository.embedding_provider_factory import create_embedding_
 from basic_memory.repository.rerank_provider import RerankProvider
 from basic_memory.repository.rerank_provider_factory import create_rerank_provider
 from basic_memory.repository.search_index_row import SearchIndexRow
-from basic_memory.repository.search_query import relaxed_query_words
 from basic_memory.repository.search_repository_base import (
-    SearchIndexKey,
     SearchRepositoryBase,
 )
-from basic_memory.repository.script_ngrams import analyze_script_query
-from basic_memory.repository.search_trace import (
-    SearchTraceCollector,
-    build_fts_page_stage,
-)
-from basic_memory.repository.sqlite_search_query import (
-    SQLITE_WORD_COLUMNS,
-    compile_fts_filter,
-    is_fts5_syntax_error,
-    relaxed_fts_text,
-)
+from basic_memory.repository.sqlite_search_query import SQLiteFts
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.semantic_vector_index import SemanticVectorIndex
 from basic_memory.repository.semantic_vector_sync import StagedVectorDeletion
 from basic_memory.repository.semantic_vector_index_factory import build_vector_index_scope
 from basic_memory.repository.sqlite_vec_index import SQLiteVecIndex
-from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
-from basic_memory.temporal import TemporalFilter
 
 
 class SQLiteSearchRepository(SearchRepositoryBase):
@@ -72,7 +55,7 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         rerank_provider: RerankProvider | None = None,
     ):
         super().__init__(session_maker, project_id)
-        self._entity_columns: set[str] | None = None
+        self._fts = SQLiteFts(session_maker)
         self._app_config = app_config or ConfigManager().config
         self._semantic_enabled = self._app_config.semantic_search_enabled
         self._semantic_vector_k = self._app_config.semantic_vector_k
@@ -108,13 +91,6 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                     project_id,
                 ),
             )
-
-    async def _get_entity_columns(self) -> set[str]:
-        if self._entity_columns is None:
-            async with db.scoped_session(self.session_maker) as session:
-                result = await session.execute(text("PRAGMA table_info(entity)"))
-                self._entity_columns = {row[1] for row in result.fetchall()}
-        return self._entity_columns
 
     @override
     async def init_search_index(self):
@@ -358,25 +334,6 @@ class SQLiteSearchRepository(SearchRepositoryBase):
         """Load sqlite-vec extension for the session."""
         await self._ensure_sqlite_vec_loaded(session)
 
-    # sqlite-vec hard limit for knn k parameter
-    SQLITE_VEC_MAX_K = 4096
-
-    @override
-    async def _run_vector_query(
-        self,
-        session: AsyncSession,
-        query_embedding: list[float],
-        candidate_limit: int,
-        *,
-        trace: SearchTraceCollector | None = None,
-    ) -> list[dict[str, Any]]:
-        return await super()._run_vector_query(
-            session,
-            query_embedding,
-            candidate_limit,
-            trace=trace,
-        )
-
     @override
     async def _delete_entity_chunks(
         self,
@@ -492,280 +449,3 @@ class SQLiteSearchRepository(SearchRepositoryBase):
     async def bulk_index_items(self, search_index_rows: List[SearchIndexRow]) -> None:
         """Index multiple rows in FTS only."""
         await super().bulk_index_items(search_index_rows)
-
-    # ------------------------------------------------------------------
-    # FTS search (backend-specific)
-    # ------------------------------------------------------------------
-
-    @override
-    async def search(
-        self,
-        search_text: Optional[str] = None,
-        permalink: Optional[str] = None,
-        permalink_match: Optional[str] = None,
-        title: Optional[str] = None,
-        note_types: Optional[List[str]] = None,
-        after_date: Optional[datetime] = None,
-        search_item_types: Optional[List[SearchItemType]] = None,
-        categories: Optional[List[str]] = None,
-        metadata_filters: Optional[dict[str, Any]] = None,
-        file_path_prefix: Optional[str] = None,
-        temporal: Optional[TemporalFilter] = None,
-        retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
-        min_similarity: Optional[float] = None,
-        limit: int = 10,
-        offset: int = 0,
-        allow_relaxed: bool = False,
-        session: AsyncSession | None = None,
-        *,
-        candidate_keys: Sequence[SearchIndexKey] | None = None,
-        trace: SearchTraceCollector | None = None,
-    ) -> List[SearchIndexRow]:
-        """Search across all indexed content using SQLite FTS5.
-
-        ``allow_relaxed=True`` retries a zero-result strict multi-word query
-        with OR-joined content terms. Only the hybrid path opts in: its FTS
-        branch otherwise contributes nothing for question-form queries.
-        Service-level FTS searches keep their own conservative fallback.
-        """
-        # --- Dispatch vector / hybrid modes (shared logic) ---
-        dispatched = await self._dispatch_retrieval_mode(
-            search_text=search_text,
-            permalink=permalink,
-            permalink_match=permalink_match,
-            title=title,
-            note_types=note_types,
-            after_date=after_date,
-            search_item_types=search_item_types,
-            categories=categories,
-            metadata_filters=metadata_filters,
-            file_path_prefix=file_path_prefix,
-            temporal=temporal,
-            retrieval_mode=retrieval_mode,
-            min_similarity=min_similarity,
-            limit=limit,
-            offset=offset,
-            trace=trace,
-        )
-        if dispatched is not None:
-            return dispatched
-
-        # --- FTS mode (SQLite-specific) ---
-        # Generated frontmatter columns are read only when a metadata filter needs them.
-        entity_columns = await self._get_entity_columns() if metadata_filters else frozenset()
-        compiled = compile_fts_filter(
-            self.scope,
-            entity_columns=entity_columns,
-            search_text=search_text,
-            permalink=permalink,
-            permalink_match=permalink_match,
-            title=title,
-            note_types=note_types,
-            after_date=after_date,
-            search_item_types=search_item_types,
-            categories=categories,
-            metadata_filters=metadata_filters,
-            file_path_prefix=file_path_prefix,
-            temporal=temporal,
-            candidate_keys=candidate_keys,
-        )
-        params = compiled.params
-        params["limit"] = limit
-        params["offset"] = offset
-        relaxed_search_text = search_text
-        if search_text and "script_text" in params:
-            relaxed_search_text = analyze_script_query(search_text.strip()).word_text
-
-        sql = f"""
-            SELECT
-                search_index.project_id,
-                search_index.id,
-                search_index.title,
-                search_index.permalink,
-                search_index.file_path,
-                search_index.type,
-                search_index.metadata,
-                search_index.from_id,
-                search_index.to_id,
-                search_index.relation_type,
-                search_index.entity_id,
-                search_index.content_snippet,
-                search_index.category,
-                search_index.created_at,
-                search_index.updated_at,
-                {compiled.score_expression} as score
-            FROM {compiled.from_clause}
-            WHERE {compiled.where_clause}
-            ORDER BY score ASC {compiled.order_by_clause}
-            LIMIT :limit
-            OFFSET :offset
-        """
-
-        logger.trace(f"Search {sql} params: {params}")
-        fts_started_at = time.perf_counter() if trace is not None else None
-
-        async def run_search(active_session: AsyncSession):
-            result = await active_session.execute(text(sql), params)
-            rows = result.fetchall()
-            relaxed_fallback_used = False
-            # Trigger: multi-word natural-language query matched nothing
-            # under the default all-terms-AND semantics.
-            # Why: questions ("when did X do Y") rarely have every word in
-            # one document; without relaxation the FTS half of hybrid
-            # search contributes zero candidates and ranking degrades to
-            # vector-only.
-            # Outcome: one retry with OR-joined prefix terms; bm25 still
-            # ranks multi-term matches first.
-            relaxed = relaxed_fts_text(relaxed_search_text) if allow_relaxed and not rows else None
-            if relaxed and params.get("text"):
-                relaxed_fallback_used = True
-                params["text"] = (
-                    f"{SQLITE_WORD_COLUMNS}: ({relaxed})" if "script_text" in params else relaxed
-                )
-                logger.debug(
-                    "Strict SQLite FTS returned 0 results; retrying relaxed FTS query "
-                    f"strict='{search_text}' relaxed='{relaxed}'"
-                )
-                with logfire.span(
-                    "search.relaxed_fts_retry",
-                    backend="sqlite",
-                    token_count=len(relaxed_query_words(relaxed_search_text) or ()),
-                    limit=limit,
-                    offset=offset,
-                ):
-                    result = await active_session.execute(text(sql), params)
-                    rows = result.fetchall()
-            return rows, relaxed_fallback_used
-
-        try:
-            if session is not None:
-                rows, relaxed_fallback_used = await run_search(session)
-            else:
-                async with db.scoped_session(self.session_maker) as owned_session:
-                    rows, relaxed_fallback_used = await run_search(owned_session)
-        except Exception as e:
-            # Handle FTS5 syntax errors and provide user-friendly feedback
-            if is_fts5_syntax_error(e):  # pragma: no cover
-                logger.warning(f"FTS5 syntax error for search term: {search_text}, error: {e}")
-                # Return empty results rather than crashing
-                if trace is not None:
-                    trace.fts = build_fts_page_stage(
-                        [],
-                        relaxed_fallback_used=False,
-                        fts_ms=(
-                            (time.perf_counter() - fts_started_at) * 1000
-                            if fts_started_at is not None
-                            else None
-                        ),
-                    )
-                return []
-            else:
-                # Re-raise other database errors
-                logger.error(f"Database error during search: {e}")
-                raise
-
-        results = [SearchIndexRow.from_mapping(row._asdict()) for row in rows]
-        if trace is not None:
-            trace.fts = build_fts_page_stage(
-                [((row.type, row.id), row.score or 0.0) for row in results],
-                relaxed_fallback_used=relaxed_fallback_used,
-                fts_ms=(
-                    (time.perf_counter() - fts_started_at) * 1000
-                    if fts_started_at is not None
-                    else None
-                ),
-            )
-
-        logger.trace(f"Found {len(results)} search results")
-        for r in results:
-            logger.trace(
-                f"Search result: project_id: {r.project_id} type:{r.type} title: {r.title} permalink: {r.permalink} score: {r.score}"
-            )
-
-        return results
-
-    @override
-    async def count(
-        self,
-        search_text: Optional[str] = None,
-        permalink: Optional[str] = None,
-        permalink_match: Optional[str] = None,
-        title: Optional[str] = None,
-        note_types: Optional[List[str]] = None,
-        after_date: Optional[datetime] = None,
-        search_item_types: Optional[List[SearchItemType]] = None,
-        categories: Optional[List[str]] = None,
-        metadata_filters: Optional[dict[str, Any]] = None,
-        file_path_prefix: Optional[str] = None,
-        temporal: Optional[TemporalFilter] = None,
-        retrieval_mode: SearchRetrievalMode = SearchRetrievalMode.FTS,
-        min_similarity: Optional[float] = None,
-        allow_relaxed: bool = False,
-    ) -> int:
-        """Count indexed content matching the SQLite FTS query."""
-        if retrieval_mode != SearchRetrievalMode.FTS:
-            return await super().count(
-                search_text=search_text,
-                permalink=permalink,
-                permalink_match=permalink_match,
-                title=title,
-                note_types=note_types,
-                after_date=after_date,
-                search_item_types=search_item_types,
-                categories=categories,
-                metadata_filters=metadata_filters,
-                file_path_prefix=file_path_prefix,
-                temporal=temporal,
-                retrieval_mode=retrieval_mode,
-                min_similarity=min_similarity,
-            )
-
-        entity_columns = await self._get_entity_columns() if metadata_filters else frozenset()
-        compiled = compile_fts_filter(
-            self.scope,
-            entity_columns=entity_columns,
-            search_text=search_text,
-            permalink=permalink,
-            permalink_match=permalink_match,
-            title=title,
-            note_types=note_types,
-            after_date=after_date,
-            search_item_types=search_item_types,
-            categories=categories,
-            metadata_filters=metadata_filters,
-            file_path_prefix=file_path_prefix,
-            temporal=temporal,
-        )
-        params = compiled.params
-        sql = f"SELECT COUNT(*) FROM {compiled.from_clause} WHERE {compiled.where_clause}"
-        logger.trace(f"Count {sql} params: {params}")
-        relaxed_search_text = search_text
-        if search_text and "script_text" in params:
-            relaxed_search_text = analyze_script_query(search_text.strip()).word_text
-        try:
-            async with db.scoped_session(self.session_maker) as session:
-                result = await session.execute(text(sql), params)
-                total = int(result.scalar_one())
-                relaxed = (
-                    relaxed_fts_text(relaxed_search_text) if allow_relaxed and total == 0 else None
-                )
-                if relaxed and params.get("text"):
-                    params["text"] = (
-                        f"{SQLITE_WORD_COLUMNS}: ({relaxed})"
-                        if "script_text" in params
-                        else relaxed
-                    )
-                    with logfire.span(
-                        "search.count.relaxed_fts_retry",
-                        backend="sqlite",
-                        token_count=len(relaxed_query_words(relaxed_search_text) or ()),
-                    ):
-                        result = await session.execute(text(sql), params)
-                        total = int(result.scalar_one())
-                return total
-        except Exception as e:
-            if is_fts5_syntax_error(e):  # pragma: no cover
-                logger.warning(f"FTS5 syntax error for search term: {search_text}, error: {e}")
-                return 0
-            logger.error(f"Database error during search count: {e}")
-            raise

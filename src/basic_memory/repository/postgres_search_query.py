@@ -1,32 +1,40 @@
-"""PostgreSQL tsquery preparation: term syntax and filter compilation.
+"""PostgreSQL tsquery preparation and execution.
 
-Pure functions over a ``ProjectScope`` and the caller's filters. Nothing here opens
-a session or owns an index.
+Term preparation and filter compilation are pure functions over a ``ProjectScope`` and
+a ``PreparedSearchQuery``. ``PostgresFts`` runs the compiled statement and owns
+tsquery's failure semantics. Nothing here initializes or mutates an index.
 """
 
 import json
 import re
+import time
 from collections.abc import Sequence
-from datetime import datetime
 from typing import Any
 
+import logfire
+from loguru import logger
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from basic_memory import db
 from basic_memory.repository.metadata_filters import parse_metadata_filters
 from basic_memory.repository.script_ngrams import analyze_script_query
 from basic_memory.repository.search_filters import (
     AFTER_DATE_ORDER_BY,
     POSTGRES_FILTER_DIALECT,
     CompiledFilter,
-    shared_filter_conditions,
-)
-from basic_memory.repository.search_query import relaxation_word_tokens, relaxed_query_words
-from basic_memory.repository.search_repository_base import (
-    SearchIndexKey,
     metadata_contains_like_condition,
     metadata_filter_content_type_condition,
+    shared_filter_conditions,
+)
+from basic_memory.repository.search_index_row import SearchIndexKey, SearchIndexRow
+from basic_memory.repository.search_query import (
+    PreparedSearchQuery,
+    relaxation_word_tokens,
+    relaxed_query_words,
 )
 from basic_memory.repository.search_scope import ProjectScope
-from basic_memory.schemas.search import SearchItemType
-from basic_memory.temporal import TemporalFilter
+from basic_memory.repository.search_trace import SearchTraceCollector, build_fts_page_stage
 
 _TSQUERY_OPERAND_PATTERN = re.compile(r"'(?:''|[^'])*'(?::\*)?|[^\s&|!()]+")
 _TSQUERY_WORD_PATTERN = re.compile(r"[^\W_]+(?:'[^\W_]+)?", re.UNICODE)
@@ -35,6 +43,24 @@ _BOOLEAN_WORDS = frozenset({"AND", "OR", "NOT"})
 _TSQUERY_METACHARACTERS = frozenset("&|!:<>")
 # tsquery special characters that must not reach the parser as text.
 _TSQUERY_SPECIAL_CHARS = ("&", "|", "!", "(", ")", ":")
+
+# Every FTS statement returns these columns plus a score.
+_RESULT_COLUMNS = """
+                search_index.project_id,
+                search_index.id,
+                search_index.title,
+                search_index.permalink,
+                search_index.file_path,
+                search_index.type,
+                search_index.metadata,
+                search_index.from_id,
+                search_index.to_id,
+                search_index.relation_type,
+                search_index.entity_id,
+                search_index.content_snippet,
+                search_index.category,
+                search_index.created_at,
+                search_index.updated_at"""
 
 
 # --- Term preparation ---
@@ -436,18 +462,8 @@ def _script_candidate_from_clause(scope: ProjectScope, params: dict[str, Any]) -
 
 def compile_fts_filter(
     scope: ProjectScope,
+    query: PreparedSearchQuery,
     *,
-    search_text: str | None = None,
-    permalink: str | None = None,
-    permalink_match: str | None = None,
-    title: str | None = None,
-    note_types: Sequence[str] | None = None,
-    after_date: datetime | None = None,
-    search_item_types: Sequence[SearchItemType] | None = None,
-    categories: Sequence[str] | None = None,
-    metadata_filters: dict[str, Any] | None = None,
-    file_path_prefix: str | None = None,
-    temporal: TemporalFilter | None = None,
     allow_relaxed: bool = False,
     candidate_keys: Sequence[SearchIndexKey] | None = None,
 ) -> CompiledFilter:
@@ -458,21 +474,12 @@ def compile_fts_filter(
     """
     params: dict[str, Any] = {}
     conditions = shared_filter_conditions(
-        scope,
-        params,
-        dialect=POSTGRES_FILTER_DIALECT,
-        permalink=permalink,
-        file_path_prefix=file_path_prefix,
-        candidate_keys=candidate_keys,
-        search_item_types=search_item_types,
-        categories=categories,
-        note_types=note_types,
-        after_date=after_date,
-        temporal=temporal,
+        scope, params, dialect=POSTGRES_FILTER_DIALECT, query=query, candidate_keys=candidate_keys
     )
     from_clause = "search_index"
     document_vector: str | None = None
     script_tsqueries: list[str] = []
+    search_text = query.search_text
 
     # Wildcard-only and blank text add no text condition: every row matches.
     if search_text and search_text.strip() not in ("", "*"):
@@ -525,15 +532,15 @@ def compile_fts_filter(
                 for index in range(len(script_tsqueries))
             )
 
-    if title:
-        params["title_text"] = prepare_search_term(title.strip(), is_prefix=False)
+    if query.title:
+        params["title_text"] = prepare_search_term(query.title.strip(), is_prefix=False)
         conditions.append(
             "to_tsvector('english', search_index.title) @@ to_tsquery('english', :title_text)"
         )
 
-    if permalink_match:
-        permalink_text = permalink_match.lower().strip()
-        if "*" in permalink_match:
+    if query.permalink_match:
+        permalink_text = query.permalink_match.lower().strip()
+        if "*" in query.permalink_match:
             # ``*`` becomes the LIKE wildcard.
             params["permalink"] = permalink_text.replace("*", "%")
             conditions.append("search_index.permalink LIKE :permalink")
@@ -543,8 +550,8 @@ def compile_fts_filter(
 
     # Structured metadata filters use jsonb_extract_path_text() / jsonb_extract_path()
     # with parameterized path parts instead of #>> / #> with interpolated paths.
-    if metadata_filters:
-        parsed_filters = parse_metadata_filters(metadata_filters)
+    if query.metadata_filters:
+        parsed_filters = parse_metadata_filters(query.metadata_filters)
         from_clause = f"{from_clause} JOIN entity ON search_index.entity_id = entity.id"
         # Frontmatter filters answer for notes only; see
         # metadata_filter_content_type_condition for why every regular file would
@@ -662,6 +669,193 @@ def compile_fts_filter(
         from_clause=from_clause,
         where_clause=" AND ".join(conditions),
         params=params,
-        order_by_clause=AFTER_DATE_ORDER_BY if after_date else "",
+        order_by_clause=AFTER_DATE_ORDER_BY if query.after_date else "",
         score_expression=score_expression,
     )
+
+
+# --- Execution ---
+
+
+class PostgresFts:
+    """Run tsquery statements for any scope in one database."""
+
+    def __init__(self, session_maker: async_sessionmaker[AsyncSession]) -> None:
+        self._session_maker = session_maker
+
+    async def search(
+        self,
+        scope: ProjectScope,
+        query: PreparedSearchQuery,
+        *,
+        limit: int,
+        offset: int,
+        allow_relaxed: bool = False,
+        session: AsyncSession | None = None,
+        candidate_keys: Sequence[SearchIndexKey] | None = None,
+        trace: SearchTraceCollector | None = None,
+    ) -> list[SearchIndexRow]:
+        """Run one tsquery page, retrying a malformed or empty strict query relaxed."""
+        search_text = query.search_text
+        compiled = compile_fts_filter(
+            scope, query, allow_relaxed=allow_relaxed, candidate_keys=candidate_keys
+        )
+        params = compiled.params
+        params["limit"] = limit
+        params["offset"] = offset
+
+        sql = f"""
+            SELECT{_RESULT_COLUMNS},
+                {compiled.score_expression} as score
+            FROM {compiled.from_clause}
+            WHERE {compiled.where_clause}
+            ORDER BY score DESC {compiled.order_by_clause}, search_index.id ASC
+            LIMIT :limit
+            OFFSET :offset
+        """
+
+        logger.trace(f"Search {sql} params: {params}")
+        fts_started_at = time.perf_counter() if trace is not None else None
+
+        use_savepoint = session is not None or allow_relaxed
+
+        async def execute_rows(active_session: AsyncSession, query_params: dict[str, Any]):
+            # PostgreSQL leaves a transaction unusable after invalid tsquery syntax.
+            # Scope retryable or caller-owned attempts to a savepoint so a relaxed
+            # retry, and any caller continuing to use its session, starts healthy.
+            if use_savepoint:
+                async with active_session.begin_nested():
+                    result = await active_session.execute(text(sql), query_params)
+                    return result.fetchall()
+            result = await active_session.execute(text(sql), query_params)
+            return result.fetchall()
+
+        async def run_search(active_session: AsyncSession):
+            relaxed = relaxed_tsquery_text(search_text) if allow_relaxed else None
+            strict_syntax_error = False
+            relaxed_fallback_used = False
+            try:
+                rows = await execute_rows(active_session, params)
+            except Exception as exc:
+                if not (is_tsquery_syntax_error(exc) and relaxed and params.get("text")):
+                    raise
+                strict_syntax_error = True
+                rows = []
+
+            # Trigger: multi-word natural-language query matched nothing under the
+            # default all-terms-AND tsquery semantics, or its punctuation produced
+            # invalid strict tsquery syntax.
+            # Why: questions rarely have every word in one document; without
+            # relaxation the FTS half of hybrid search contributes zero candidates.
+            # The relaxed renderer also tokenizes punctuation safely.
+            # Outcome: one retry with OR-joined prefix lexemes; ts_rank still ranks
+            # multi-term matches first.
+            if relaxed and not rows and params.get("text"):
+                relaxed_fallback_used = True
+                retry_reason = "invalid syntax" if strict_syntax_error else "0 results"
+                logger.debug(
+                    f"Strict Postgres FTS returned {retry_reason}; retrying relaxed FTS query "
+                    f"strict='{search_text}' relaxed='{relaxed}'"
+                )
+                with logfire.span(
+                    "search.relaxed_fts_retry",
+                    backend="postgres",
+                    reason="syntax_error" if strict_syntax_error else "empty_result",
+                    token_count=len(relaxed_query_words(search_text) or ()),
+                    limit=limit,
+                    offset=offset,
+                ):
+                    rows = await execute_rows(active_session, {**params, "text": relaxed})
+            return rows, relaxed_fallback_used
+
+        try:
+            if session is not None:
+                rows, relaxed_fallback_used = await run_search(session)
+            else:
+                async with db.scoped_session(self._session_maker) as owned_session:
+                    rows, relaxed_fallback_used = await run_search(owned_session)
+        except Exception as e:
+            if is_tsquery_syntax_error(e):
+                logger.warning(f"tsquery syntax error for search term: {search_text}, error: {e}")
+                if trace is not None:
+                    trace.fts = build_fts_page_stage(
+                        [],
+                        relaxed_fallback_used=False,
+                        fts_ms=(
+                            (time.perf_counter() - fts_started_at) * 1000
+                            if fts_started_at is not None
+                            else None
+                        ),
+                    )
+                return []
+            logger.error(f"Database error during search: {e}")
+            raise
+
+        results = [SearchIndexRow.from_mapping(row._asdict()) for row in rows]
+        if trace is not None:
+            trace.fts = build_fts_page_stage(
+                [((row.type, row.id), row.score or 0.0) for row in results],
+                relaxed_fallback_used=relaxed_fallback_used,
+                fts_ms=(
+                    (time.perf_counter() - fts_started_at) * 1000
+                    if fts_started_at is not None
+                    else None
+                ),
+            )
+
+        logger.trace(f"Found {len(results)} search results")
+        for r in results:
+            logger.trace(
+                f"Search result: project_id: {r.project_id} type:{r.type} title: {r.title} permalink: {r.permalink} score: {r.score}"
+            )
+        return results
+
+    async def count(
+        self,
+        scope: ProjectScope,
+        query: PreparedSearchQuery,
+        *,
+        allow_relaxed: bool = False,
+    ) -> int:
+        """Count rows matching the tsquery, with the same relaxed retry as search."""
+        search_text = query.search_text
+        compiled = compile_fts_filter(scope, query, allow_relaxed=allow_relaxed)
+        params = compiled.params
+        sql = f"SELECT COUNT(*) FROM {compiled.from_clause} WHERE {compiled.where_clause}"
+        logger.trace(f"Count {sql} params: {params}")
+
+        async def execute_count(active_session: AsyncSession, query_params: dict[str, Any]) -> int:
+            if allow_relaxed:
+                async with active_session.begin_nested():
+                    result = await active_session.execute(text(sql), query_params)
+                    return int(result.scalar_one())
+            result = await active_session.execute(text(sql), query_params)
+            return int(result.scalar_one())
+
+        try:
+            async with db.scoped_session(self._session_maker) as session:
+                relaxed = relaxed_tsquery_text(search_text) if allow_relaxed else None
+                strict_syntax_error = False
+                try:
+                    total = await execute_count(session, params)
+                except Exception as exc:
+                    if not (is_tsquery_syntax_error(exc) and relaxed and params.get("text")):
+                        raise
+                    strict_syntax_error = True
+                    total = 0
+
+                if relaxed and total == 0 and params.get("text"):
+                    with logfire.span(
+                        "search.count.relaxed_fts_retry",
+                        backend="postgres",
+                        reason="syntax_error" if strict_syntax_error else "empty_result",
+                        token_count=len(relaxed_query_words(search_text) or ()),
+                    ):
+                        total = await execute_count(session, {**params, "text": relaxed})
+                return total
+        except Exception as e:
+            if is_tsquery_syntax_error(e):
+                logger.warning(f"tsquery syntax error for search term: {search_text}, error: {e}")
+                return 0
+            logger.error(f"Database error during search count: {e}")
+            raise

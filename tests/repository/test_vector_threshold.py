@@ -1,5 +1,7 @@
 """Tests for semantic_min_similarity threshold filtering in vector search."""
 
+from sqlalchemy.ext.asyncio import AsyncSession
+from basic_memory.repository.search_scope import ProjectScope
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -46,6 +48,7 @@ class ConcreteSearchRepo(SearchRepositoryBase):
         self._vector_tables_initialized = True
         self.session_maker = None
         self.project_id = 1
+        self.scope = ProjectScope.single(1)
 
     # --- Abstract method stubs (not exercised by these tests) ---
 
@@ -76,6 +79,7 @@ class ConcreteSearchRepo(SearchRepositoryBase):
         limit: int = 10,
         offset: int = 0,
         allow_relaxed: bool = False,
+        session: AsyncSession | None = None,
         *,
         candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,

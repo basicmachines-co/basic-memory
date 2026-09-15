@@ -1,5 +1,7 @@
 """Tests for semantic search orchestration in SearchRepositoryBase."""
 
+from sqlalchemy.ext.asyncio import AsyncSession
+from basic_memory.repository.search_scope import ProjectScope
 import asyncio
 import hashlib
 from collections.abc import Sequence
@@ -64,6 +66,7 @@ class _ConcreteRepo(SearchRepositoryBase):
         # Bypass parent __init__ since we don't need a real session_maker for unit tests
         self.session_maker = None
         self.project_id = 1
+        self.scope = ProjectScope.single(1)
 
     @override
     async def init_search_index(self):
@@ -99,6 +102,7 @@ class _ConcreteRepo(SearchRepositoryBase):
         limit: int = 10,
         offset: int = 0,
         allow_relaxed: bool = False,
+        session: AsyncSession | None = None,
         *,
         candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
