@@ -260,7 +260,9 @@ class SemanticSearch:
             return []
 
         if not self.vector.external:
-            matches = await self.vector.index.search(query_embedding, limit=candidate_limit)
+            matches = await self.vector.index.search(
+                query_embedding, limit=candidate_limit, projects=self.scope
+            )
             if trace is not None:
                 trace.readiness = await read_manifest_readiness(
                     session,
@@ -272,7 +274,9 @@ class SemanticSearch:
 
         scan_limit = min(candidate_limit, VECTOR_FILTER_SCAN_LIMIT)
         while True:
-            matches = await self.vector.index.search(query_embedding, limit=scan_limit)
+            matches = await self.vector.index.search(
+                query_embedding, limit=scan_limit, projects=self.scope
+            )
             if trace is not None and trace.readiness is None:
                 trace.readiness = await read_manifest_readiness(
                     session,

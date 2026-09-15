@@ -23,6 +23,7 @@ from basic_memory.repository.milvus_index import (
     MilvusVectorIndex,
     collection_name,
 )
+from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_vector_index import (
     SemanticVectorIndex,
     SemanticVectorIndexReconciler,
@@ -34,6 +35,11 @@ from basic_memory.repository.semantic_vector_index import (
 from basic_memory.repository.semantic_vector_index_factory import (
     create_semantic_vector_index,
 )
+
+PROJECT = 42
+OTHER_PROJECT = 43
+PROJECTS = ProjectScope.single(PROJECT)
+QUERY = [1.0, 0.0, 0.0]
 
 
 class FakeRepository:
@@ -57,6 +63,8 @@ class FakeRepository:
         self.ids: list[str] = []
         self.id_deletes: list[tuple[str, list[str]]] = []
         self.matches: list[MilvusStoredMatch] = []
+        # Per-collection answers; ``matches`` is the answer for any collection not listed.
+        self.matches_by_collection: dict[str, list[MilvusStoredMatch]] = {}
         self.searches: list[tuple[str, list[float], int]] = []
         self.closed = 0
 
@@ -103,7 +111,7 @@ class FakeRepository:
         limit: int,
     ) -> list[MilvusStoredMatch]:
         self.searches.append((collection_name, list(query), limit))
-        return self.matches
+        return self.matches_by_collection.get(collection_name, self.matches)
 
     def close(self) -> None:
         self.closed += 1
@@ -172,7 +180,6 @@ class StubEmbeddingProvider:
 def scope() -> VectorIndexScope:
     return VectorIndexScope(
         namespace="basic-memory-database",
-        project_id=42,
         embedding_identity="Provider:model-a",
         dimensions=3,
     )
@@ -195,84 +202,99 @@ def _index(
     )
 
 
-def test_collection_name_uses_only_stable_scope_identity(
+def test_collection_name_uses_only_stable_project_identity(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
     changed_schema = VectorIndexScope(
         namespace=scope.namespace,
-        project_id=scope.project_id,
         embedding_identity="Provider:model-b",
         dimensions=9,
     )
-    other_project = VectorIndexScope(
-        namespace=scope.namespace,
-        project_id=43,
-        embedding_identity=scope.embedding_identity,
-        dimensions=scope.dimensions,
-    )
 
-    assert collection_name(settings, scope) == collection_name(settings, changed_schema)
-    assert collection_name(settings, scope) != collection_name(settings, other_project)
-    assert collection_name(settings, scope).startswith("basic_memory_")
+    assert collection_name(settings, scope, PROJECT) == collection_name(
+        settings, changed_schema, PROJECT
+    )
+    assert collection_name(settings, scope, PROJECT) != collection_name(
+        settings, scope, OTHER_PROJECT
+    )
+    assert collection_name(settings, scope, PROJECT).startswith("basic_memory_")
+
+
+# --- Collection validation happens on a project's first use ---
 
 
 @pytest.mark.asyncio
-async def test_initialize_creates_missing_collection_once(
+async def test_initialize_prepares_nothing_shared(
+    scope: VectorIndexScope,
+    settings: MilvusSettings,
+) -> None:
+    """Collections are per project, so the database-wide hook has nothing to create."""
+    repository = FakeRepository()
+
+    await _index(scope, settings, repository).initialize()
+
+    assert repository.created == []
+    assert repository.closed == 0
+
+
+@pytest.mark.asyncio
+async def test_first_use_creates_missing_collection_once(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
     repository = FakeRepository()
     index = _index(scope, settings, repository)
 
-    await index.initialize()
-    await index.initialize()
+    await index.search(QUERY, limit=1, projects=PROJECTS)
+    await index.search(QUERY, limit=1, projects=PROJECTS)
 
-    assert repository.created == [(collection_name(settings, scope), scope.dimensions)]
-    assert repository.closed == 1
+    assert repository.created == [(collection_name(settings, scope, PROJECT), scope.dimensions)]
+    # One validation plus one search per call.
+    assert repository.closed == 3
 
 
 @pytest.mark.asyncio
-async def test_initialize_accepts_compatible_collection_create_race(
+async def test_first_use_accepts_compatible_collection_create_race(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
     repository = FakeRepository(create_result=False, race_dimensions=scope.dimensions)
 
-    await _index(scope, settings, repository).initialize()
+    await _index(scope, settings, repository).search(QUERY, limit=1, projects=PROJECTS)
 
-    assert repository.created == [(collection_name(settings, scope), scope.dimensions)]
+    assert repository.created == [(collection_name(settings, scope, PROJECT), scope.dimensions)]
     assert repository.dimensions == scope.dimensions
-    assert repository.loaded == [collection_name(settings, scope)]
+    assert repository.loaded == [collection_name(settings, scope, PROJECT)]
 
 
 @pytest.mark.asyncio
-async def test_initialize_rejects_incompatible_collection_create_race(
+async def test_first_use_rejects_incompatible_collection_create_race(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
     repository = FakeRepository(create_result=False, race_dimensions=99)
 
     with pytest.raises(RuntimeError, match="Refusing to replace shared vector storage"):
-        await _index(scope, settings, repository).initialize()
+        await _index(scope, settings, repository).search(QUERY, limit=1, projects=PROJECTS)
 
     assert repository.dimensions == 99
     assert repository.loaded == []
 
 
 @pytest.mark.asyncio
-async def test_initialize_rejects_collection_disappearing_after_create_race(
+async def test_first_use_rejects_collection_disappearing_after_create_race(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
     repository = FakeRepository(create_result=False)
 
     with pytest.raises(RuntimeError, match="disappeared after a concurrent create"):
-        await _index(scope, settings, repository).initialize()
+        await _index(scope, settings, repository).search(QUERY, limit=1, projects=PROJECTS)
 
 
 @pytest.mark.asyncio
-async def test_initialize_preserves_collection_on_dimension_mismatch(
+async def test_first_use_preserves_collection_on_dimension_mismatch(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
@@ -280,7 +302,7 @@ async def test_initialize_preserves_collection_on_dimension_mismatch(
     index = _index(scope, settings, repository)
 
     with pytest.raises(RuntimeError, match="Refusing to replace shared vector storage"):
-        await index.initialize()
+        await index.search(QUERY, limit=1, projects=PROJECTS)
 
     assert repository.created == []
     assert repository.dimensions == 99
@@ -288,34 +310,37 @@ async def test_initialize_preserves_collection_on_dimension_mismatch(
 
 
 @pytest.mark.asyncio
-async def test_initialize_accepts_matching_collection(
+async def test_first_use_accepts_matching_collection(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
     repository = FakeRepository(dimensions=scope.dimensions)
 
-    await _index(scope, settings, repository).initialize()
+    await _index(scope, settings, repository).search(QUERY, limit=1, projects=PROJECTS)
 
     assert repository.created == []
-    assert repository.loaded == [collection_name(settings, scope)]
+    assert repository.loaded == [collection_name(settings, scope, PROJECT)]
 
 
 @pytest.mark.asyncio
-async def test_concurrent_initialize_rechecks_state_inside_lock(
+async def test_concurrent_first_use_rechecks_state_inside_lock(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
     repository = FakeRepository()
     index = _index(scope, settings, repository)
-    await index._initialize_lock.acquire()
-    waiting_initialize = asyncio.create_task(index.initialize())
+    await index._collection_lock.acquire()
+    waiting = asyncio.create_task(index._ensure_collection(PROJECT))
     await asyncio.sleep(0)
 
-    index._initialized = True
-    index._initialize_lock.release()
-    await waiting_initialize
+    index._ready_projects.add(PROJECT)
+    index._collection_lock.release()
+    assert await waiting == collection_name(settings, scope, PROJECT)
 
     assert repository.closed == 0
+
+
+# --- Writes ---
 
 
 @pytest.mark.asyncio
@@ -331,9 +356,10 @@ async def test_upsert_preserves_stable_key_generation_and_values(
         values=(1.0, 0.0, -1.0),
     )
 
-    await index.upsert([record])
+    await index.upsert(PROJECT, [record])
 
-    _, stored_records = repository.upserts[0]
+    collection, stored_records = repository.upserts[0]
+    assert collection == collection_name(settings, scope, PROJECT)
     assert len(stored_records) == 1
     assert stored_records[0].entity_id == 7
     assert stored_records[0].chunk_key == "summary:0"
@@ -352,13 +378,14 @@ async def test_upsert_rejects_wrong_dimensions_before_milvus_call(
 
     with pytest.raises(ValueError, match="expected 3, got 2"):
         await index.upsert(
+            PROJECT,
             [
                 VectorRecord(
                     key=VectorKey(entity_id=7, chunk_key="summary:0"),
                     source_hash="source-a",
                     values=(1.0, 0.0),
                 )
-            ]
+            ],
         )
 
     assert repository.upserts == []
@@ -378,14 +405,14 @@ async def test_mutations_finish_before_propagating_cancellation(
 
     if operation == "upsert":
         mutation = index.upsert(
-            [VectorRecord(key=key, source_hash="source-a", values=(1.0, 0.0, 0.0))]
+            PROJECT, [VectorRecord(key=key, source_hash="source-a", values=(1.0, 0.0, 0.0))]
         )
     elif operation == "delete":
-        mutation = index.delete([VectorDeletion(key=key, source_hash="source-a")])
+        mutation = index.delete(PROJECT, [VectorDeletion(key=key, source_hash="source-a")])
     elif operation == "delete_entity":
-        mutation = index.delete_entity(key.entity_id)
+        mutation = index.delete_entity(PROJECT, key.entity_id)
     else:
-        mutation = index.delete_orphans([])
+        mutation = index.delete_orphans(PROJECT, [])
 
     mutation_task = asyncio.create_task(mutation)
     async with asyncio.timeout(2):
@@ -415,24 +442,29 @@ async def test_delete_forwards_source_generation(
     index = _index(scope, settings, repository)
     key = VectorKey(entity_id=7, chunk_key="summary:0")
 
-    await index.delete([VectorDeletion(key=key, source_hash="source-a")])
+    await index.delete(PROJECT, [VectorDeletion(key=key, source_hash="source-a")])
 
-    _, deletions = repository.record_deletes[0]
+    collection, deletions = repository.record_deletes[0]
+    assert collection == collection_name(settings, scope, PROJECT)
     assert deletions[0][1] == "source-a"
     assert len(deletions[0][0]) == 64
 
 
 @pytest.mark.asyncio
-async def test_delete_entity_uses_project_collection(
+async def test_delete_entity_uses_the_named_project_collection(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
     repository = FakeRepository(dimensions=scope.dimensions)
     index = _index(scope, settings, repository)
 
-    await index.delete_entity(77)
+    await index.delete_entity(PROJECT, 77)
+    await index.delete_entity(OTHER_PROJECT, 78)
 
-    assert repository.entity_deletes == [(collection_name(settings, scope), 77)]
+    assert repository.entity_deletes == [
+        (collection_name(settings, scope, PROJECT), 77),
+        (collection_name(settings, scope, OTHER_PROJECT), 78),
+    ]
 
 
 @pytest.mark.asyncio
@@ -446,18 +478,19 @@ async def test_reconciliation_deletes_only_absent_stable_keys(
     stale_key = VectorKey(entity_id=2, chunk_key="stale")
 
     await index.upsert(
+        PROJECT,
         [
             VectorRecord(key=live_key, source_hash="a", values=(1.0, 0.0, 0.0)),
             VectorRecord(key=stale_key, source_hash="b", values=(0.0, 1.0, 0.0)),
-        ]
+        ],
     )
     _, stored_records = repository.upserts[0]
     repository.ids = [record.record_id for record in stored_records]
 
-    await index.delete_orphans([live_key])
+    await index.delete_orphans(PROJECT, [live_key])
 
     assert repository.id_deletes == [
-        (collection_name(settings, scope), [stored_records[1].record_id])
+        (collection_name(settings, scope, PROJECT), [stored_records[1].record_id])
     ]
 
 
@@ -469,7 +502,7 @@ async def test_reconciliation_is_noop_without_orphans(
     repository = FakeRepository(dimensions=scope.dimensions)
     index = _index(scope, settings, repository)
 
-    await index.delete_orphans([])
+    await index.delete_orphans(PROJECT, [])
 
     assert repository.id_deletes == []
 
@@ -483,9 +516,12 @@ async def test_reconciliation_deletes_orphans_incrementally(
     repository.ids = [f"orphan-{index}" for index in range(600)]
     index = _index(scope, settings, repository)
 
-    await index.delete_orphans([])
+    await index.delete_orphans(PROJECT, [])
 
     assert [len(record_ids) for _, record_ids in repository.id_deletes] == [256, 256, 88]
+
+
+# --- Search ---
 
 
 @pytest.mark.asyncio
@@ -502,25 +538,60 @@ async def test_search_clamps_milvus_cosine_scores_and_orders_ties(
     ]
     index = _index(scope, settings, repository)
 
-    matches = await index.search([1.0, 0.0, 0.0], limit=4)
+    matches = await index.search(QUERY, limit=4, projects=PROJECTS)
 
     assert [match.similarity for match in matches] == [1.0, 1.0, 0.1, 0.0]
     assert [match.key.entity_id for match in matches] == [0, 1, 2, 3]
-    assert repository.searches == [(collection_name(settings, scope), [1.0, 0.0, 0.0], 4)]
+    assert repository.searches == [(collection_name(settings, scope, PROJECT), QUERY, 4)]
 
 
 @pytest.mark.asyncio
-async def test_empty_operations_do_not_initialize(
+async def test_search_merges_the_collections_in_scope(
+    scope: VectorIndexScope,
+    settings: MilvusSettings,
+) -> None:
+    """Milvus has no cross-collection search, so a wider scope merges per-project answers."""
+    repository = FakeRepository(dimensions=scope.dimensions)
+    first = collection_name(settings, scope, PROJECT)
+    second = collection_name(settings, scope, OTHER_PROJECT)
+    repository.matches_by_collection = {
+        first: [
+            MilvusStoredMatch(entity_id=1, chunk_key="a", score=0.9),
+            MilvusStoredMatch(entity_id=2, chunk_key="a", score=0.3),
+        ],
+        second: [
+            MilvusStoredMatch(entity_id=3, chunk_key="a", score=0.8),
+            MilvusStoredMatch(entity_id=4, chunk_key="a", score=0.7),
+        ],
+    }
+    index = _index(scope, settings, repository)
+
+    matches = await index.search(QUERY, limit=3, projects=ProjectScope.of([OTHER_PROJECT, PROJECT]))
+
+    assert [(match.key.entity_id, match.similarity) for match in matches] == [
+        (1, 0.9),
+        (3, 0.8),
+        (4, 0.7),
+    ]
+    # Each project's collection is asked for its own top ``limit`` before the merge.
+    assert repository.searches == [(first, QUERY, 3), (second, QUERY, 3)]
+    # Both collections were validated before being searched.
+    assert repository.loaded == [first, second]
+
+
+@pytest.mark.asyncio
+async def test_empty_operations_do_not_touch_milvus(
     scope: VectorIndexScope,
     settings: MilvusSettings,
 ) -> None:
     repository = FakeRepository()
     index = _index(scope, settings, repository)
 
-    await index.upsert([])
-    await index.delete([])
-    assert await index.search([], limit=10) == []
-    assert await index.search([1.0, 0.0, 0.0], limit=0) == []
+    await index.upsert(PROJECT, [])
+    await index.delete(PROJECT, [])
+    assert await index.search([], limit=10, projects=PROJECTS) == []
+    assert await index.search(QUERY, limit=0, projects=PROJECTS) == []
+    assert await index.search(QUERY, limit=10, projects=ProjectScope.of([])) == []
 
     assert repository.closed == 0
 
@@ -535,7 +606,6 @@ def test_first_party_factory_loads_milvus() -> None:
 
     name, index = create_semantic_vector_index(
         session_maker=session_maker,
-        project_id=42,
         app_config=app_config,
         database_backend=DatabaseBackend.POSTGRES,
         embedding_provider=StubEmbeddingProvider(),
@@ -545,4 +615,4 @@ def test_first_party_factory_loads_milvus() -> None:
     assert isinstance(index, MilvusVectorIndex)
     assert isinstance(index, SemanticVectorIndex)
     assert isinstance(index, SemanticVectorIndexReconciler)
-    assert index.scope.project_id == 42
+    assert index.scope.dimensions == 3

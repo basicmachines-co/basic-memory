@@ -13,6 +13,7 @@ from basic_memory.repository.milvus_repository import (
     MilvusStoredRecord,
     create_repository,
 )
+from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_vector_index import (
     VectorDeletion,
     VectorIndexScope,
@@ -33,10 +34,10 @@ def _record_id(key: VectorKey) -> str:
     return hashlib.sha256(stable_key).hexdigest()
 
 
-def collection_name(settings: MilvusSettings, scope: VectorIndexScope) -> str:
-    """Return a stable project collection name independent of embedding schema."""
+def collection_name(settings: MilvusSettings, scope: VectorIndexScope, project_id: int) -> str:
+    """Return one project's stable collection name, independent of embedding schema."""
     namespace_digest = hashlib.sha256(scope.namespace.encode()).hexdigest()[:24]
-    return f"{settings.collection_prefix}_{namespace_digest}_{scope.project_id}"
+    return f"{settings.collection_prefix}_{namespace_digest}_{project_id}"
 
 
 def _normalize_cosine_score(score: float) -> float:
@@ -45,7 +46,7 @@ def _normalize_cosine_score(score: float) -> float:
 
 
 class MilvusVectorIndex:
-    """Persist and query one Basic Memory project's vectors in Milvus."""
+    """Persist and query Basic Memory vectors in Milvus, one collection per project."""
 
     def __init__(
         self,
@@ -56,10 +57,10 @@ class MilvusVectorIndex:
     ) -> None:
         self.scope = scope
         self._settings = settings
-        self._collection_name = collection_name(settings, scope)
         self._repository_factory = repository_factory
-        self._initialized = False
-        self._initialize_lock = asyncio.Lock()
+        # Projects whose collection has been created or validated by this instance.
+        self._ready_projects: set[int] = set()
+        self._collection_lock = asyncio.Lock()
 
     def _with_repository[T](self, operation: Callable[[MilvusRepository], T]) -> T:
         repository = self._repository_factory(self._settings)
@@ -68,27 +69,27 @@ class MilvusVectorIndex:
         finally:
             repository.close()
 
-    def _initialize_blocking(self) -> None:
+    def _collection(self, project_id: int) -> str:
+        return collection_name(self._settings, self.scope, project_id)
+
+    def _validate_collection_blocking(self, collection: str) -> None:
         def initialize_repository(repository: MilvusRepository) -> None:
-            dimensions = repository.collection_dimensions(self._collection_name)
+            dimensions = repository.collection_dimensions(collection)
             if dimensions is None:
-                created = repository.create_collection(
-                    self._collection_name,
-                    self.scope.dimensions,
-                )
+                created = repository.create_collection(collection, self.scope.dimensions)
                 if created:
                     return
-                dimensions = repository.collection_dimensions(self._collection_name)
+                dimensions = repository.collection_dimensions(collection)
                 if dimensions is None:
                     raise RuntimeError(
-                        f"Milvus collection '{self._collection_name}' disappeared after "
+                        f"Milvus collection '{collection}' disappeared after "
                         "a concurrent create operation."
                     )
             if dimensions == self.scope.dimensions:
                 # Milvus Lite releases persisted collections when the owning process exits.
                 # Load only after the scope check so migrations do not load incompatible
                 # remote collections before Basic Memory refuses to use them.
-                repository.load_collection(self._collection_name)
+                repository.load_collection(collection)
                 return
 
             # Trigger: an existing project collection uses another embedding dimension.
@@ -96,7 +97,7 @@ class MilvusVectorIndex:
             # repeatedly erase each other's vectors during a rolling deployment.
             # Outcome: preserve the collection until an operator coordinates migration.
             raise RuntimeError(
-                f"Milvus collection '{self._collection_name}' has {dimensions} dimensions, "
+                f"Milvus collection '{collection}' has {dimensions} dimensions, "
                 f"but Basic Memory is configured for {self.scope.dimensions}. Refusing to "
                 "replace shared vector storage automatically; stop all writers and coordinate "
                 "the collection migration before reindexing."
@@ -106,12 +107,13 @@ class MilvusVectorIndex:
 
     def _search_blocking(
         self,
+        collection: str,
         query: Sequence[float],
         limit: int,
     ) -> list[MilvusStoredMatch]:
         repository = self._repository_factory(self._settings)
         try:
-            return repository.search(self._collection_name, query, limit)
+            return repository.search(collection, query, limit)
         finally:
             repository.close()
 
@@ -135,19 +137,28 @@ class MilvusVectorIndex:
             raise
 
     async def initialize(self) -> None:
-        if self._initialized:
-            return
-        async with self._initialize_lock:
-            if self._initialized:
-                return
-            await self._run_blocking_mutation(self._initialize_blocking)
-            self._initialized = True
+        """Nothing is shared across projects: each collection is validated on first use."""
+        return None
 
-    async def upsert(self, records: Sequence[VectorRecord]) -> None:
+    async def _ensure_collection(self, project_id: int) -> str:
+        """Create or validate one project's collection once per adapter instance."""
+        collection = self._collection(project_id)
+        if project_id in self._ready_projects:
+            return collection
+        async with self._collection_lock:
+            if project_id in self._ready_projects:
+                return collection
+            await self._run_blocking_mutation(
+                lambda: self._validate_collection_blocking(collection)
+            )
+            self._ready_projects.add(project_id)
+        return collection
+
+    async def upsert(self, project_id: int, records: Sequence[VectorRecord]) -> None:
         if not records:
             return
         validate_vector_dimensions(self.scope, records)
-        await self.initialize()
+        collection = await self._ensure_collection(project_id)
         stored_records = [
             MilvusStoredRecord(
                 record_id=_record_id(record.key),
@@ -160,47 +171,44 @@ class MilvusVectorIndex:
         ]
         await self._run_blocking_mutation(
             lambda: self._with_repository(
-                lambda repository: repository.upsert(self._collection_name, stored_records)
+                lambda repository: repository.upsert(collection, stored_records)
             )
         )
 
-    async def delete(self, records: Sequence[VectorDeletion]) -> None:
+    async def delete(self, project_id: int, records: Sequence[VectorDeletion]) -> None:
         if not records:
             return
-        await self.initialize()
+        collection = await self._ensure_collection(project_id)
         stored_deletions = [(_record_id(record.key), record.source_hash) for record in records]
         await self._run_blocking_mutation(
             lambda: self._with_repository(
-                lambda repository: repository.delete_records(
-                    self._collection_name,
-                    stored_deletions,
-                )
+                lambda repository: repository.delete_records(collection, stored_deletions)
             )
         )
 
-    async def delete_entity(self, entity_id: int) -> None:
-        await self.initialize()
+    async def delete_entity(self, project_id: int, entity_id: int) -> None:
+        collection = await self._ensure_collection(project_id)
         await self._run_blocking_mutation(
             lambda: self._with_repository(
-                lambda repository: repository.delete_entity(self._collection_name, entity_id)
+                lambda repository: repository.delete_entity(collection, entity_id)
             )
         )
 
-    async def delete_orphans(self, live_keys: Sequence[VectorKey]) -> None:
-        await self.initialize()
+    async def delete_orphans(self, project_id: int, live_keys: Sequence[VectorKey]) -> None:
+        collection = await self._ensure_collection(project_id)
         live_ids = {_record_id(key) for key in live_keys}
 
         def delete_missing(repository: MilvusRepository) -> None:
             orphan_ids: list[str] = []
-            for record_id in repository.iter_ids(self._collection_name):
+            for record_id in repository.iter_ids(collection):
                 if record_id in live_ids:
                     continue
                 orphan_ids.append(record_id)
                 if len(orphan_ids) == _ORPHAN_DELETE_BATCH_SIZE:
-                    repository.delete_ids(self._collection_name, orphan_ids)
+                    repository.delete_ids(collection, orphan_ids)
                     orphan_ids.clear()
             if orphan_ids:
-                repository.delete_ids(self._collection_name, orphan_ids)
+                repository.delete_ids(collection, orphan_ids)
 
         await self._run_blocking_mutation(lambda: self._with_repository(delete_missing))
 
@@ -209,28 +217,32 @@ class MilvusVectorIndex:
         query: Sequence[float],
         *,
         limit: int,
+        projects: ProjectScope,
     ) -> list[VectorMatch]:
-        if not query or limit <= 0:
+        if not query or limit <= 0 or projects.is_empty:
             return []
         validate_query_dimensions(self.scope, query)
-        await self.initialize()
 
-        stored_matches = await asyncio.to_thread(self._search_blocking, query, limit)
-        matches = [
-            VectorMatch(
-                key=VectorKey(
-                    entity_id=match.entity_id,
-                    chunk_key=match.chunk_key,
-                ),
-                similarity=_normalize_cosine_score(match.score),
+        # Milvus has no cross-collection search, so a scope wider than one project
+        # asks each project's collection for its own top ``limit`` and merges them.
+        matches: list[VectorMatch] = []
+        for project_id in projects.project_ids:
+            collection = await self._ensure_collection(project_id)
+            stored_matches = await asyncio.to_thread(
+                self._search_blocking, collection, query, limit
             )
-            for match in stored_matches
-        ]
-        return sorted(
-            matches,
+            matches.extend(
+                VectorMatch(
+                    key=VectorKey(entity_id=match.entity_id, chunk_key=match.chunk_key),
+                    similarity=_normalize_cosine_score(match.score),
+                )
+                for match in stored_matches
+            )
+        matches.sort(
             key=lambda match: (
                 -match.similarity,
                 match.key.entity_id,
                 match.key.chunk_key,
-            ),
+            )
         )
+        return matches[:limit]

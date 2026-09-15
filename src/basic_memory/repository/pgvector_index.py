@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
+from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.semantic_vector_index import (
     VectorDeletion,
@@ -151,37 +152,7 @@ class PgVectorIndex:
         )
         return result.scalar_one_or_none() is not None
 
-    async def _chunk_ids_by_key(
-        self,
-        session: AsyncSession,
-        keys: Sequence[VectorKey],
-    ) -> dict[VectorKey, int]:
-        if not keys:
-            return {}
-
-        params: dict[str, object] = {"project_id": self.scope.project_id}
-        predicates: list[str] = []
-        for index, key in enumerate(keys):
-            params[f"entity_id_{index}"] = key.entity_id
-            params[f"chunk_key_{index}"] = key.chunk_key
-            predicates.append(
-                f"(entity_id = :entity_id_{index} AND chunk_key = :chunk_key_{index})"
-            )
-        result = await session.execute(
-            text(
-                "SELECT id, entity_id, chunk_key FROM search_vector_chunks "
-                "WHERE project_id = :project_id AND (" + " OR ".join(predicates) + ")"
-            ),
-            params,
-        )
-        return {
-            VectorKey(entity_id=int(row["entity_id"]), chunk_key=str(row["chunk_key"])): int(
-                row["id"]
-            )
-            for row in result.mappings().all()
-        }
-
-    async def upsert(self, records: Sequence[VectorRecord]) -> None:
+    async def upsert(self, project_id: int, records: Sequence[VectorRecord]) -> None:
         if not records:
             return
         validate_vector_dimensions(self.scope, records)
@@ -189,7 +160,7 @@ class PgVectorIndex:
 
         async with db.scoped_session(self._session_maker) as session:
             keys = [record.key for record in records]
-            params: dict[str, object] = {"project_id": self.scope.project_id}
+            params: dict[str, object] = {"project_id": project_id}
             predicates: list[str] = []
             for index, key in enumerate(keys):
                 params[f"entity_id_{index}"] = key.entity_id
@@ -224,7 +195,7 @@ class PgVectorIndex:
             if not current_records:
                 return
 
-            params = {"project_id": self.scope.project_id}
+            params = {"project_id": project_id}
             values: list[str] = []
             for index, record in enumerate(current_records):
                 params[f"chunk_id_{index}"] = manifest_by_key[record.key][0]
@@ -252,12 +223,12 @@ class PgVectorIndex:
             )
             await session.commit()
 
-    async def delete(self, records: Sequence[VectorDeletion]) -> None:
+    async def delete(self, project_id: int, records: Sequence[VectorDeletion]) -> None:
         if not records:
             return
         await self.initialize()
         async with db.scoped_session(self._session_maker) as session:
-            params: dict[str, object] = {"project_id": self.scope.project_id}
+            params: dict[str, object] = {"project_id": project_id}
             predicates: list[str] = []
             for index, record in enumerate(records):
                 params[f"entity_id_{index}"] = record.key.entity_id
@@ -294,7 +265,7 @@ class PgVectorIndex:
                 )
                 await session.commit()
 
-    async def delete_entity(self, entity_id: int) -> None:
+    async def delete_entity(self, project_id: int, entity_id: int) -> None:
         await self.initialize()
         async with db.scoped_session(self._session_maker) as session:
             await session.execute(
@@ -303,12 +274,12 @@ class PgVectorIndex:
                     "SELECT id FROM search_vector_chunks "
                     "WHERE project_id = :project_id AND entity_id = :entity_id)"
                 ),
-                {"project_id": self.scope.project_id, "entity_id": entity_id},
+                {"project_id": project_id, "entity_id": entity_id},
             )
             await session.commit()
 
-    async def delete_orphans(self, _live_keys: Sequence[VectorKey]) -> None:
-        """Remove pgvector rows absent from the current ready manifest scope."""
+    async def delete_orphans(self, project_id: int, _live_keys: Sequence[VectorKey]) -> None:
+        """Remove pgvector rows absent from one project's current ready manifest."""
         await self.initialize()
         async with db.scoped_session(self._session_maker) as session:
             await session.execute(
@@ -324,7 +295,7 @@ class PgVectorIndex:
                     "AND chunks.embedding_status = 'ready')"
                 ),
                 {
-                    "project_id": self.scope.project_id,
+                    "project_id": project_id,
                     "embedding_identity": self.scope.embedding_identity,
                 },
             )
@@ -335,11 +306,21 @@ class PgVectorIndex:
         query: Sequence[float],
         *,
         limit: int,
+        projects: ProjectScope,
     ) -> list[VectorMatch]:
-        if not query or limit <= 0:
+        if not query or limit <= 0 or projects.is_empty:
             return []
         validate_query_dimensions(self.scope, query)
         await self.initialize()
+        params: dict[str, object] = {
+            "query": self._format_vector(query),
+            "dimensions": self.scope.dimensions,
+            "embedding_identity": self.scope.embedding_identity,
+            "limit": limit,
+        }
+        # The scope binds its ids once; both predicates reference the same names.
+        embeddings_in_scope = projects.predicate("e.project_id", params)
+        chunks_in_scope = projects.predicate("c.project_id", params)
         async with db.scoped_session(self._session_maker) as session:
             result = await session.execute(
                 text(
@@ -347,9 +328,9 @@ class PgVectorIndex:
                     "1 - (e.embedding <=> CAST(:query AS vector)) AS similarity "
                     "FROM search_vector_embeddings e "
                     "JOIN search_vector_chunks c ON c.id = e.chunk_id "
-                    "WHERE e.project_id = :project_id "
+                    f"WHERE {embeddings_in_scope} "
                     "AND e.embedding_dims = :dimensions "
-                    "AND c.project_id = :project_id "
+                    f"AND {chunks_in_scope} "
                     "AND c.vector_index = 'pgvector' "
                     "AND c.embedding_status = 'ready' "
                     "AND c.embedding_model = :embedding_identity "
@@ -358,13 +339,7 @@ class PgVectorIndex:
                     "c.entity_id ASC, c.chunk_key ASC "
                     "LIMIT :limit"
                 ),
-                {
-                    "query": self._format_vector(query),
-                    "project_id": self.scope.project_id,
-                    "dimensions": self.scope.dimensions,
-                    "embedding_identity": self.scope.embedding_identity,
-                    "limit": limit,
-                },
+                params,
             )
         return [
             VectorMatch(

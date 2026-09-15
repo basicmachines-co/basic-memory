@@ -148,7 +148,6 @@ class _RecordingVectorIndex:
 
     scope = VectorIndexScope(
         namespace="basic-memory-test",
-        project_id=1,
         embedding_identity="stub:4",
         dimensions=4,
     )
@@ -159,13 +158,13 @@ class _RecordingVectorIndex:
     async def initialize(self) -> None:
         return None
 
-    async def upsert(self, records: Sequence[VectorRecord]) -> None:
+    async def upsert(self, project_id: int, records: Sequence[VectorRecord]) -> None:
         self.upserted_records.extend(records)
 
-    async def delete(self, records: Sequence[VectorDeletion]) -> None:
+    async def delete(self, project_id: int, records: Sequence[VectorDeletion]) -> None:
         return None
 
-    async def delete_entity(self, entity_id: int) -> None:
+    async def delete_entity(self, project_id: int, entity_id: int) -> None:
         return None
 
     async def search(
@@ -173,6 +172,7 @@ class _RecordingVectorIndex:
         query: Sequence[float],
         *,
         limit: int,
+        projects: ProjectScope,
     ) -> list[VectorMatch]:
         return []
 
@@ -475,7 +475,9 @@ async def test_external_reconciliation_holds_project_lock_through_orphan_cleanup
     events: list[str] = []
     adapter: Any = SimpleNamespace(
         scope=_RecordingVectorIndex.scope,
-        delete_orphans=AsyncMock(side_effect=lambda _live_keys: events.append("delete_orphans")),
+        delete_orphans=AsyncMock(
+            side_effect=lambda _project_id, _live_keys: events.append("delete_orphans")
+        ),
     )
     repo._semantic_vector_index = adapter
     session = AsyncMock()
@@ -508,7 +510,7 @@ async def test_external_reconciliation_holds_project_lock_through_orphan_cleanup
 
     assert events == ["project_lock", "manifest_read", "delete_orphans", "commit"]
     adapter.delete_orphans.assert_awaited_once_with(
-        [VectorKey(entity_id=41, chunk_key="entity:41:0")]
+        1, [VectorKey(entity_id=41, chunk_key="entity:41:0")]
     )
 
 
@@ -654,7 +656,9 @@ async def test_project_vector_cleanup_uses_available_adapter(
     events: list[str] = []
     adapter: Any = SimpleNamespace(
         initialize=AsyncMock(side_effect=lambda: events.append("initialize")),
-        delete_entity=AsyncMock(side_effect=lambda _entity_id: events.append("delete")),
+        delete_entity=AsyncMock(
+            side_effect=lambda _project_id, _entity_id: events.append("delete")
+        ),
     )
     repo._semantic_vector_index = adapter
     repo._semantic_vector_index_name = "milvus"
@@ -697,8 +701,8 @@ async def test_project_vector_cleanup_uses_available_adapter(
 
     adapter.initialize.assert_awaited_once()
     assert adapter.delete_entity.await_args_list == [
-        ((41,), {}),
-        ((42,), {}),
+        ((1, 41), {}),
+        ((1, 42), {}),
     ]
     expected_events = [
         "project_lock",
@@ -912,7 +916,9 @@ async def test_external_entity_cleanup_uses_matching_project_adapter(monkeypatch
     events: list[str] = []
     adapter: Any = SimpleNamespace(
         initialize=AsyncMock(side_effect=lambda: events.append("initialize")),
-        delete_entity=AsyncMock(side_effect=lambda _entity_id: events.append("delete")),
+        delete_entity=AsyncMock(
+            side_effect=lambda _project_id, _entity_id: events.append("delete")
+        ),
     )
     repo._semantic_vector_index = adapter
     repo._semantic_vector_index_name = "milvus"
@@ -948,7 +954,7 @@ async def test_external_entity_cleanup_uses_matching_project_adapter(monkeypatch
     )
 
     adapter.initialize.assert_awaited_once()
-    assert adapter.delete_entity.await_args_list == [((41,), {}), ((42,), {})]
+    assert adapter.delete_entity.await_args_list == [((1, 41), {}), ((1, 42), {})]
     assert events == [
         "project_lock",
         "ownership_read",
