@@ -485,3 +485,43 @@ async def test_disabled_project_prefix_policy_reaches_export(export_config, tmp_
     destination = tmp_path / "bundle"
     assert (await export_project(export_config, "export", destination)).success
     assert "[export/foo](/folder/export/foo.md)" in (destination / "folder/source.md").read_text()
+
+
+def test_ambiguous_bare_title_does_not_fall_through_to_filename():
+    snapshot = ExportSnapshot(
+        "p",
+        (
+            ExportFile("Same.md", b"---\ntitle: Same\n---\n"),
+            ExportFile("other.md", b"---\ntitle: Same\npermalink: same\n---\n"),
+            ExportFile("source.md", b"[[Same]] and [[Same.md]]"),
+        ),
+    )
+    source = next(file.content for file in render_bundle(snapshot) if file.path == "source.md")
+    assert b"[Same](/Same) and [Same.md](/Same.md)" in source
+
+
+@pytest.mark.parametrize(
+    "yaml_title,target",
+    [
+        ("123", "123"),
+        ("[My, Note]", "My, Note"),
+        ("false", "False"),
+        ("2026-01-01T00:00:00Z", "2026-01-01T00:00:00+00:00"),
+    ],
+)
+def test_source_title_normalization_preserves_authored_metadata(yaml_title, target):
+    authored = f"---\ntitle: {yaml_title}\n---\n# Note"
+    snapshot = ExportSnapshot(
+        "p",
+        (
+            ExportFile("note.md", authored.encode()),
+            ExportFile("source.md", f"[[{target}]]".encode()),
+        ),
+    )
+    files = {file.path: file.content.decode() for file in render_bundle(snapshot)}
+    assert f"[{target}](/note.md)" in files["source.md"]
+    assert (
+        parse_document(files["note.md"]).metadata["title"]
+        == parse_document(authored).metadata["title"]
+    )
+    assert f"[{target}](note.md)" in files["index.md"]

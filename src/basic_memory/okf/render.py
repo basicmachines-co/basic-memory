@@ -9,7 +9,12 @@ from markdown_it import MarkdownIt
 from markdown_it.rules_inline import StateInline
 import yaml
 
-from basic_memory.markdown.entity_parser import parse
+from basic_memory.file_utils import parse_frontmatter
+from basic_memory.markdown.entity_parser import (
+    _coerce_to_string,
+    normalize_frontmatter_value,
+    parse,
+)
 from basic_memory.markdown.path_links import markdown_link_target
 from basic_memory.repository.entity_repository import file_path_alias
 from basic_memory.services.link_resolver import normalize_link_text
@@ -56,6 +61,7 @@ def convert_wikilinks(
     project: str,
     *,
     include_project: bool = True,
+    ambiguous_aliases: frozenset[str] = frozenset(),
 ) -> str:
     """Use MarkdownIt's code/escape/link rules while retaining untouched source bytes."""
     body = body.replace("\r\n", "\n").replace("\r", "\n")
@@ -104,10 +110,12 @@ def convert_wikilinks(
             for candidate in build_permalink_resolution_candidates(
                 target, project, include_project
             ):
+                if target in ambiguous_aliases and candidate != target:
+                    break
                 if candidate in targets:
                     resolved = targets[candidate]
                     break
-        if resolved is None:
+        if resolved is None and target not in ambiguous_aliases:
             # Forgiving filename spelling is a last resort after exact identities.
             candidates = ([relative] if relative else []) + build_permalink_resolution_candidates(
                 target, project, include_project
@@ -179,18 +187,23 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
     targets: dict[str, str] = {}
     ambiguous: set[str] = set()
     documents: dict[str, Document] = {}
+    titles: dict[str, str] = {}
     for file in snapshot.files:
         if PurePosixPath(file.path).suffix != ".md":
             continue
         document = parse_document(file.content.decode("utf-8"), source=True)
         documents[file.path] = document
-        aliases = {file.path, str(PurePosixPath(file.path).with_suffix(""))}
-        if not document.metadata.get("title"):
-            aliases.add(PurePosixPath(file.path).stem)
-        for key in ("permalink", "title"):
-            value = document.metadata.get(key)
-            if isinstance(value, str) and value:
-                aliases.add(value)
+        # Resolve using BM's normalized title, but retain authored YAML values in output.
+        source_metadata = (
+            parse_frontmatter(file.content.decode("utf-8")) if document.has_frontmatter else {}
+        )
+        title = _coerce_to_string(normalize_frontmatter_value(source_metadata.get("title")))
+        title = title if title and title != "None" else PurePosixPath(file.path).stem
+        titles[file.path] = title
+        aliases = {file.path, str(PurePosixPath(file.path).with_suffix("")), title}
+        permalink = document.metadata.get("permalink")
+        if isinstance(permalink, str) and permalink:
+            aliases.add(permalink)
         for alias in aliases:
             if alias in targets and targets[alias] != file.path:
                 ambiguous.add(alias)
@@ -237,6 +250,7 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
             targets,
             snapshot.project,
             include_project=snapshot.permalinks_include_project,
+            ambiguous_aliases=frozenset(ambiguous),
         )
         content = "---\n" + yaml.safe_dump(metadata, allow_unicode=True, sort_keys=False)
         content += "---\n" + body
@@ -249,9 +263,7 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
         for file in sorted(snapshot.files, key=lambda file: file.path):
             path = PurePosixPath(file.path)
             if path.parent == directory:
-                document = documents.get(file.path)
-                title = document.metadata.get("title") if document else None
-                label = title if isinstance(title, str) else path.stem
+                label = titles.get(file.path, path.stem)
                 lines.append("- " + markdown_link(label, path.name))
         for child in sorted(directories):
             if child != directory and child.parent == directory:
