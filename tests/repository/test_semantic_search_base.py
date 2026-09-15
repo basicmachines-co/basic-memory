@@ -81,10 +81,6 @@ class _ConcreteRepo(SearchRepositoryBase):
         # in tests/services/test_project_readiness.py
 
     @override
-    def _prepare_search_term(self, term, is_prefix=True):
-        return term
-
-    @override
     async def search(
         self,
         search_text: str | None = None,

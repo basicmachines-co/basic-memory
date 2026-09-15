@@ -33,6 +33,7 @@ from basic_memory.repository.rerank_provider import (
     validate_rerank_scores,
 )
 from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.script_ngrams import build_script_ngrams
 from basic_memory.repository.search_trace import (
     BelowThreshold,
@@ -405,6 +406,8 @@ class SearchRepositoryBase(ABC):
 
         self.session_maker = session_maker
         self.project_id = project_id
+        # Every statement this repository compiles reads exactly one project.
+        self.scope = ProjectScope.single(project_id)
 
     async def semantic_effectively_enabled(self) -> bool:
         """Return whether semantic retrieval can actually run for this repository.
@@ -452,23 +455,6 @@ class SearchRepositoryBase(ABC):
         Backend-specific implementations:
         - SQLite: CREATE VIRTUAL TABLE using FTS5
         - Postgres: CREATE TABLE with tsvector column and GIN indexes
-        """
-        pass
-
-    @abstractmethod
-    def _prepare_search_term(self, term: str, is_prefix: bool = True) -> str:
-        """Prepare a search term for backend-specific query syntax.
-
-        Args:
-            term: The search term to prepare
-            is_prefix: Whether to add prefix search capability
-
-        Returns:
-            Formatted search term for the backend
-
-        Backend-specific implementations:
-        - SQLite: Quotes FTS5 special characters, adds * wildcards
-        - Postgres: Converts to tsquery syntax with :* prefix operator
         """
         pass
 
