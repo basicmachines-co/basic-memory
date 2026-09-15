@@ -326,3 +326,50 @@ async def test_staging_path_collision_preserves_destination(source_config, tmp_p
     with pytest.raises(FileExistsError):
         await export_project(source_config, "export", destination, replace=True)
     assert (destination / "keep").read_bytes() == b"previous bundle"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("relation", ["same", "child", "parent"])
+async def test_filesystem_identical_source_containment_is_rejected(
+    source_config, tmp_path, monkeypatch, relation
+):
+    root = Path(source_config.projects["export"].path).resolve()
+    alias = root.with_name(root.name.upper())
+    destination = {"same": alias, "child": alias / "new" / "bundle", "parent": alias.parent}[
+        relation
+    ]
+    if relation == "parent":
+        destination = root.parent.with_name(root.parent.name.upper())
+        alias = destination
+        actual = root.parent
+    else:
+        actual = root
+    original_stat = Path.stat
+
+    def case_insensitive_stat(path, *args, **kwargs):
+        if path.is_relative_to(alias):
+            path = actual / path.relative_to(alias)
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", case_insensitive_stat)
+    before = (root / "a.md").read_bytes()
+    with pytest.raises(ValueError, match="Destination must be outside"):
+        await export_project(source_config, "export", destination, replace=True)
+    assert (root / "a.md").read_bytes() == before
+    assert not list(tmp_path.rglob("*.bm-okf-backup-*"))
+
+
+@pytest.mark.asyncio
+async def test_exact_project_name_precedes_normalized_alias(source_config, tmp_path):
+    other = tmp_path / "other-project"
+    other.mkdir()
+    (other / "chosen.md").write_text("# Exact project", encoding="utf-8")
+    source_config.projects = {
+        "my-project": source_config.projects["export"],
+        "My Project": ProjectEntry(path=str(other)),
+    }
+    destination = tmp_path / "bundle"
+    report = await export_project(source_config, "My Project", destination)
+    assert report.success and report.concepts == 1
+    assert (destination / "chosen.md").is_file()
+    assert not (destination / "a.md").exists()

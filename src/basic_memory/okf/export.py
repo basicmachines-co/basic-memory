@@ -116,11 +116,12 @@ def snapshot_files(root: Path) -> tuple[ExportFile, ...]:
 async def export_project(
     config: BasicMemoryConfig, project: str, destination: Path, *, replace: bool = False
 ) -> CheckReport:
-    requested_permalink = generate_permalink(project)
-    project = next(
-        (name for name in config.projects if generate_permalink(name) == requested_permalink),
-        project,
-    )
+    if project not in config.projects:
+        requested_permalink = generate_permalink(project)
+        project = next(
+            (name for name in config.projects if generate_permalink(name) == requested_permalink),
+            project,
+        )
     entry = config.projects.get(project)
     if entry is None or entry.mode != ProjectMode.LOCAL:
         raise ValueError(
@@ -133,7 +134,11 @@ async def export_project(
         raise ValueError(f"Project directory does not exist: {root}")
     destination = destination.expanduser().absolute()
     resolved = destination.resolve()
-    if resolved.is_relative_to(root) or root.is_relative_to(resolved):
+    # Path spelling does not establish containment on case-insensitive filesystems.
+    # Compare existing directory identities in both directions before any writes.
+    if any(
+        ancestor.exists() and ancestor.samefile(root) for ancestor in (resolved, *resolved.parents)
+    ) or (resolved.exists() and any(resolved.samefile(ancestor) for ancestor in root.parents)):
         raise ValueError("Destination must be outside, and must not contain, the source project")
     if destination.is_symlink():
         raise ValueError("Destination must not be a symlink")
