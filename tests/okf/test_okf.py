@@ -460,7 +460,13 @@ def test_project_permalink_prefix_is_not_source_relative(prefix):
         "folder/my-project/foo.md": "folder/my-project/foo.md",
     }
     assert (
-        convert_wikilinks(f"[[{prefix}/foo]]", "folder/source.md", targets, "My Project")
+        convert_wikilinks(
+            f"[[{prefix}/foo]]",
+            "folder/source.md",
+            targets,
+            "My Project",
+            permalinks={"my-project/foo": "foo.md"},
+        )
         == f"[{prefix}/foo](/foo.md)"
     )
 
@@ -705,3 +711,28 @@ def test_unique_title_precedes_filename_and_rooted_links_remain_literal(test_pro
     )
     source = next(file.content for file in render_bundle(snapshot) if file.path == "source.md")
     assert b"[foo.md](/owner.md) [/foo](/foo) [/foo.md](/foo.md)" in source
+
+
+def test_permalink_compatibility_candidates_are_not_filename_aliases(test_project):
+    from basic_memory.models import Entity
+    from basic_memory.services.bulk_link_resolver import ProjectEntityIdentityIndex
+
+    test_project.name = "p"
+    index = ProjectEntityIdentityIndex.from_entities(
+        test_project, [Entity(title="foo", file_path="foo.md", permalink="custom")]
+    )
+    assert (
+        index.resolve_strict(
+            "p/foo", include_project_permalinks=True, workspace_permalink=None
+        ).entity
+        is None
+    )
+    snapshot = ExportSnapshot(
+        "p",
+        (
+            ExportFile("foo.md", b"---\npermalink: custom\n---\n# File"),
+            ExportFile("source.md", b"[[p/foo]] and [[foo]]"),
+        ),
+    )
+    source = next(file.content for file in render_bundle(snapshot) if file.path == "source.md")
+    assert b"[p/foo](/p/foo) and [foo](/foo.md)" in source

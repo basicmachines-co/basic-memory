@@ -130,19 +130,10 @@ def convert_wikilinks(
         if not rooted and resolved is None and title_targets:
             resolved = title_targets.get(target)
         if not rooted and resolved is None:
-            for candidate in build_permalink_resolution_candidates(
-                target, project, include_project
-            ):
-                if target in ambiguous_aliases and candidate != target:
-                    break
-                if candidate in targets:
-                    resolved = targets[candidate]
-                    break
+            resolved = targets.get(target)
         if not rooted and resolved is None and target not in ambiguous_aliases:
             # Forgiving filename spelling is a last resort after exact identities.
-            candidates = (
-                [relative] if relative and "/" in target else []
-            ) + build_permalink_resolution_candidates(target, project, include_project)
+            candidates = ([relative] if relative and "/" in target else []) + [target]
             for candidate in candidates:
                 path = candidate.lstrip("/")
                 if not path.casefold().endswith(".md"):
