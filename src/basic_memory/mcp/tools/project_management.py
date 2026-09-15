@@ -124,6 +124,7 @@ def _merge_projects(
             {
                 "name": name,
                 "external_id": external_id,
+                "id": proj.id if proj else None,
                 "path": path,
                 "local_path": local_path,
                 "cloud_path": cloud_path,
@@ -258,6 +259,7 @@ def _merge_workspace_projects(
             {
                 "name": cloud_proj.name,
                 "external_id": cloud_proj.external_id,
+                "id": cloud_proj.id,
                 "path": local_path or cloud_path,
                 "local_path": local_path,
                 "cloud_path": cloud_path,
@@ -283,6 +285,7 @@ def _merge_workspace_projects(
                 {
                     "name": project.name,
                     "external_id": project.external_id,
+                    "id": project.id,
                     "path": project.path,
                     "local_path": project.path,
                     "cloud_path": None,

@@ -12,7 +12,7 @@ Usage:
 """
 
 from basic_memory.mcp.clients.knowledge import KnowledgeClient
-from basic_memory.mcp.clients.search import SearchClient
+from basic_memory.mcp.clients.search import ScopedSearchClient, SearchClient
 from basic_memory.mcp.clients.memory import MemoryClient
 from basic_memory.mcp.clients.directory import DirectoryClient
 from basic_memory.mcp.clients.resource import ResourceClient
@@ -22,6 +22,7 @@ from basic_memory.mcp.clients.inspect import InspectClient
 
 __all__ = [
     "KnowledgeClient",
+    "ScopedSearchClient",
     "SearchClient",
     "MemoryClient",
     "DirectoryClient",
