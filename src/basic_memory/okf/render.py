@@ -117,9 +117,9 @@ def convert_wikilinks(
                     break
         if resolved is None and target not in ambiguous_aliases:
             # Forgiving filename spelling is a last resort after exact identities.
-            candidates = ([relative] if relative else []) + build_permalink_resolution_candidates(
-                target, project, include_project
-            )
+            candidates = (
+                [relative] if relative and "/" in target else []
+            ) + build_permalink_resolution_candidates(target, project, include_project)
             for candidate in candidates:
                 path = candidate.lstrip("/")
                 if not path.casefold().endswith(".md"):

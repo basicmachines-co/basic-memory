@@ -560,3 +560,14 @@ def test_wiki_profile_alone_does_not_establish_ownership(export_config, name):
     with pytest.raises(ValueError, match="rename it first"):
         snapshot_files(root)
     assert "Authored body" in source.read_text()
+
+
+def test_bare_filename_alias_does_not_prefer_source_directory():
+    targets = {"folder/My_Note.md": "folder/My_Note.md", "other/My_Note.md": "other/My_Note.md"}
+    assert (
+        convert_wikilinks("[[my-note]]", "folder/source.md", targets, "p") == "[my-note](/my-note)"
+    )
+    assert (
+        convert_wikilinks("[[./my-note]]", "folder/source.md", targets, "p")
+        == "[./my-note](/folder/My_Note.md)"
+    )
