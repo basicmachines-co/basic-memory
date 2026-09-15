@@ -9,7 +9,7 @@ from markdown_it import MarkdownIt
 from markdown_it.rules_inline import StateInline
 import yaml
 
-from basic_memory.file_utils import parse_frontmatter
+from basic_memory.file_utils import has_frontmatter, parse_frontmatter
 from basic_memory.markdown.entity_parser import (
     _coerce_to_string,
     normalize_frontmatter_value,
@@ -138,6 +138,9 @@ def convert_wikilinks(
             if prefix is None or generate_permalink(prefix) != project:
                 return False
             target = remainder
+        # Network-path URIs would turn unresolved file identities into external links.
+        if target.startswith("//"):
+            return False
         rooted = target.startswith("/")
         resolved = None
         # Explicit relative links bind to their source directory before semantic aliases.
@@ -260,7 +263,12 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
     for file in snapshot.files:
         if PurePosixPath(file.path).suffix != ".md":
             continue
-        document = parse_document(file.content.decode("utf-8"), source=True)
+        content = file.content.decode("utf-8")
+        document = parse_document(content, source=True)
+        # Malformed notes can retain an indexed identity absent from their moved file.
+        # A filesystem snapshot cannot infer that identity safely.
+        if has_frontmatter(content) and not document.has_frontmatter:
+            raise ValueError(f"{file.path}: repair malformed frontmatter before export")
         documents[file.path] = document
         # Resolve using BM's normalized title, but retain authored YAML values in output.
         source_metadata = (

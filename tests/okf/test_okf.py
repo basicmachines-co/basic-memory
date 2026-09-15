@@ -440,9 +440,7 @@ def test_unique_filename_alias_follows_exact_identity():
     )
 
 
-@pytest.mark.parametrize(
-    "source", ["---\n# Thematic break", "---\n- scalar\n---\nBody", "---\nbad: [\n---\nBody"]
-)
+@pytest.mark.parametrize("source", ["---\n# Thematic break"])
 def test_non_frontmatter_source_blocks_remain_body(source):
     files = render_bundle(ExportSnapshot("p", (ExportFile("a.md", source.encode()),)))
     exported = next(file.content.decode() for file in files if file.path == "a.md")
@@ -838,3 +836,28 @@ def test_missing_authored_permalink_uses_canonical_generated_address(include_pro
     )
     source = next(file.content for file in render_bundle(snapshot) if file.path == "source.md")
     assert b"[p/folder/foo](/folder/foo.md)" in source
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["---\n- scalar\n---\nBody", "---\nbad: [\n---\nBody"])
+async def test_malformed_note_identity_fails_before_replacing_bundle(
+    export_config, tmp_path, source
+):
+    root = Path(export_config.projects["export"].path)
+    note = root / "new.md"
+    note.write_text(source, encoding="utf-8")
+    (root / "a.md").write_text("[[export/old]] and [[export/new]]", encoding="utf-8")
+    destination = tmp_path / "bundle"
+    destination.mkdir()
+    (destination / "keep").write_bytes(b"previous bundle")
+    with pytest.raises(ValueError, match="new.md: repair malformed frontmatter before export"):
+        await export_project(export_config, "export", destination, replace=True)
+    assert (destination / "keep").read_bytes() == b"previous bundle"
+    assert note.read_text(encoding="utf-8") == source
+
+
+def test_network_path_wikilinks_remain_literal():
+    body = "[[//example.com/a]] [[//example.com/a|alias]] [[/a.md]]"
+    assert convert_wikilinks(body, "source.md", {"a.md": "a.md"}, "p") == (
+        "[[//example.com/a]] [[//example.com/a|alias]] [/a.md](/a.md)"
+    )
