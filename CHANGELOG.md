@@ -36,6 +36,15 @@
   needs pgvector 0.8 or later; an older extension is reported as a dependency error
   instead of quietly returning short windows.
 
+- **#1558**: A vector or hybrid search with structured filters (note types, dates,
+  categories, metadata, path prefixes, valid time) now fills its candidate window.
+  The vector index ranks by similarity alone, so a window taken straight from it and
+  filtered afterwards could hold few admitted rows while more sat just past it, and
+  the page came back short although matches existed. The reader re-reads the window
+  with a bounded geometric overfetch until it holds enough admitted rows, the ranking
+  is exhausted, or its tail falls below the similarity threshold. Unfiltered searches
+  read their window once, as before.
+
 - **#1512**: Word, PowerPoint, and CSV files get the same sidecar Markdown note a
   PDF gets. `bm import document <path>` indexes the project, extracts the file,
   and writes `<file>.<ext>.md` next to it plus a run note under

@@ -600,6 +600,69 @@ async def test_sqlite_vec_scope_is_a_partition_not_a_filter_on_the_nearest(searc
 
 
 @pytest.mark.asyncio
+async def test_filtered_vector_search_fills_its_window_past_nearer_rejected_rows(
+    search_repository,
+):
+    """Rows the filter rejects can sit in front of the ones it admits without hiding them.
+
+    Twelve archive rows are nearer the query than three notes rows. With a candidate
+    window of ten chunks, a filter on the notes prefix used to see ten rejected
+    candidates and answer with nothing, although three notes matched.
+    """
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec search behavior is local SQLite-only.")
+
+    _enable_semantic(search_repository)
+    await search_repository.init_search_index()
+    index = cast(SQLiteVecIndex, search_repository._semantic_vector_index)
+    project = search_repository.project_id
+    # limit 1 with vector_k 4 sizes the first window at ten chunks.
+    search_repository._semantic_vector_k = 4
+    search_repository._semantic_min_similarity = 0.0
+
+    nearer = list(range(1101, 1113))
+    farther = [1121, 1122, 1123]
+    for row_id in nearer:
+        await search_repository.index_item(
+            _entity_row(
+                project_id=project,
+                row_id=row_id,
+                entity_id=row_id,
+                title=f"Archive {row_id}",
+                permalink=f"archive/entry-{row_id}",
+                content_stems="auth token archive",
+            )
+        )
+    for row_id in farther:
+        await search_repository.index_item(
+            _entity_row(
+                project_id=project,
+                row_id=row_id,
+                entity_id=row_id,
+                title=f"Note {row_id}",
+                permalink=f"notes/entry-{row_id}",
+                content_stems="schema note",
+            )
+        )
+    # The query embeds to [1,0,0,0]; archive rows sit nearer it than notes rows.
+    await _seed_ready_vectors(
+        search_repository,
+        index,
+        [(row_id, project, f"[1,{(row_id - 1100) / 100:.2f},0,0]") for row_id in nearer]
+        + [(row_id, project, f"[0.5,1,{(row_id - 1120) / 100:.2f},0]") for row_id in farther],
+    )
+
+    results = await search_repository.search(
+        search_text="auth",
+        file_path_prefix="notes",
+        retrieval_mode=SearchRetrievalMode.VECTOR,
+        limit=1,
+    )
+
+    assert [row.id for row in results] == [1121]
+
+
+@pytest.mark.asyncio
 async def test_sqlite_vec_partitions_legacy_storage_without_re_embedding(search_repository):
     """Storage from before the partition key is carried over, vectors and readiness intact."""
     if not isinstance(search_repository, SQLiteSearchRepository):
