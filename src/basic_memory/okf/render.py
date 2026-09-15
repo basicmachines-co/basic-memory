@@ -64,6 +64,7 @@ def convert_wikilinks(
     include_project: bool = True,
     ambiguous_aliases: frozenset[str] = frozenset(),
     permalinks: dict[str, str] | None = None,
+    title_targets: dict[str, str] | None = None,
 ) -> str:
     """Use MarkdownIt's code/escape/link rules while retaining untouched source bytes."""
     body = body.replace("\r\n", "\n").replace("\r", "\n")
@@ -101,6 +102,7 @@ def convert_wikilinks(
         raw = state.src[start + 2 : end]
         target, alias = normalize_link_text(raw)
         target, _, fragment = target.partition("#")
+        rooted = target.startswith("/")
         resolved = None
         # Explicit relative links bind to their source directory before semantic aliases.
         # Wikilink paths are literal identifiers, so URL decoding must round-trip them.
@@ -111,11 +113,11 @@ def convert_wikilinks(
             and generate_permalink(target.partition("/")[0]) == project
         ):
             relative = None
-        if "/" in target and relative:
+        if not rooted and "/" in target and relative:
             resolved = targets.get(relative.lstrip("/"))
             if resolved is None:
                 resolved = targets.get(relative.lstrip("/") + ".md")
-        if resolved is None and permalinks:
+        if not rooted and resolved is None and permalinks:
             # Semantic addresses precede title/path aliases, even when they look like filenames.
             for candidate in build_permalink_resolution_candidates(
                 target, project, include_project
@@ -125,7 +127,9 @@ def convert_wikilinks(
                 if candidate in permalinks:
                     resolved = permalinks[candidate]
                     break
-        if resolved is None:
+        if not rooted and resolved is None and title_targets:
+            resolved = title_targets.get(target)
+        if not rooted and resolved is None:
             for candidate in build_permalink_resolution_candidates(
                 target, project, include_project
             ):
@@ -134,7 +138,7 @@ def convert_wikilinks(
                 if candidate in targets:
                     resolved = targets[candidate]
                     break
-        if resolved is None and target not in ambiguous_aliases:
+        if not rooted and resolved is None and target not in ambiguous_aliases:
             # Forgiving filename spelling is a last resort after exact identities.
             candidates = (
                 [relative] if relative and "/" in target else []
@@ -148,7 +152,8 @@ def convert_wikilinks(
                     resolved = matches[0]
                     break
         # A missing target stays a broken link, not a guessed edge to another concept.
-        href = "/" + (resolved or target.lstrip("/") or source)
+        # Rooted links already name exact portable file paths; never infer an extension.
+        href = target if rooted else "/" + (resolved or target or source)
         replacements.append(
             (start, end + 2, markdown_link(alias or target or fragment, href, fragment))
         )
@@ -158,7 +163,8 @@ def convert_wikilinks(
 
     parser = MarkdownIt()
     parser.inline.ruler.before("link", "okf_wikilink", wikilink)
-    lines = body.split("\n")
+    # MarkdownIt substitutes U+FFFD for NUL one-for-one, preserving source offsets.
+    lines = body.replace("\0", "\ufffd").split("\n")
     line_offsets = [0]
     for line in lines:
         line_offsets.append(line_offsets[-1] + len(line) + 1)
@@ -207,6 +213,7 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
     """Preserve frontmatter and prose; attach only semantics lost by link conversion."""
     targets: dict[str, str] = {}
     permalinks: dict[str, str] = {}
+    title_targets: dict[str, str] = {}
     ambiguous: set[str] = set()
     documents: dict[str, Document] = {}
     titles: dict[str, str] = {}
@@ -229,7 +236,10 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
             if note_type is not None
             else "note"
         )
-        aliases = {file.path, str(PurePosixPath(file.path).with_suffix("")), title}
+        if title in title_targets and title_targets[title] != file.path:
+            ambiguous.add(title)
+        else:
+            title_targets[title] = file.path
         permalink = normalize_frontmatter_value(source_metadata.get("permalink"))
         if isinstance(permalink, str) and permalink:
             # Offline files can violate the indexed uniqueness rule; never choose a winner.
@@ -239,14 +249,9 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
                     f"{permalinks[permalink]}"
                 )
             permalinks[permalink] = file.path
-        for alias in aliases:
-            if alias in targets and targets[alias] != file.path:
-                ambiguous.add(alias)
-            else:
-                targets[alias] = file.path
     for alias in ambiguous:
-        targets.pop(alias)
-    # Exact file identities (including assets) cannot be shadowed by display titles.
+        title_targets.pop(alias)
+    # Relative path resolution uses exact file identities, separate from semantic names.
     targets.update({file.path: file.path for file in snapshot.files})
 
     output: list[ExportFile] = []
@@ -287,6 +292,7 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
             include_project=snapshot.permalinks_include_project,
             ambiguous_aliases=frozenset(ambiguous),
             permalinks=permalinks,
+            title_targets=title_targets,
         )
         content = "---\n" + yaml.safe_dump(metadata, allow_unicode=True, sort_keys=False)
         content += "---\n" + body

@@ -80,7 +80,7 @@ def test_filesystem_check_includes_hidden_files_and_assets(tmp_path):
     [
         ("See [[A|alias]] and [[missing]].", "See [alias](/a.md) and [missing](/missing)."),
         ("[[../a#heading]]", "[../a](/a.md#heading)"),
-        ("[[/a]]", "[/a](/a.md)"),
+        ("[[/a]]", "[/a](/a)"),
         ("[[#here]]", "[here](/folder/source.md#here)"),
         ("[[broken", "[[broken"),
         (r"\[[A]]", r"\[[A]]"),
@@ -229,9 +229,27 @@ def test_conversion_respects_inline_block_boundaries(body, expected):
     assert convert_wikilinks(body, "source.md", {"A": "a.md"}, "p") == expected
 
 
-def test_unlocatable_normalized_source_fails_instead_of_rewriting_wrong_span():
+def test_nul_normalization_preserves_raw_source_and_link_offsets():
+    assert convert_wikilinks("before\0 [[A]]", "source.md", {"A": "a.md"}, "p") == (
+        "before\0 [A](/a.md)"
+    )
+
+
+def test_unrecognized_parser_normalization_fails_without_rewriting_wrong_span(monkeypatch):
+    from markdown_it import MarkdownIt
+
+    original_parse = MarkdownIt.parse
+
+    def altered_parse(parser, source, env=None):
+        tokens = original_parse(parser, source, env)
+        for token in tokens:
+            if token.type == "inline":
+                token.content = "unmappable " + token.content
+        return tokens
+
+    monkeypatch.setattr(MarkdownIt, "parse", altered_parse)
     with pytest.raises(ValueError, match="cannot locate wikilink source span"):
-        convert_wikilinks("\0 [[A]]", "source.md", {}, "p")
+        convert_wikilinks("[[A]]", "source.md", {"A": "a.md"}, "p")
 
 
 def test_asset_links_and_reserved_casing(export_config):
@@ -661,3 +679,29 @@ async def test_duplicate_offline_permalinks_fail_before_replacing_bundle(export_
     with pytest.raises(ValueError, match="b.md: duplicate permalink 'same' also declared by a.md"):
         await export_project(export_config, "export", destination, replace=True)
     assert (destination / "keep").read_bytes() == b"previous bundle"
+
+
+def test_unique_title_precedes_filename_and_rooted_links_remain_literal(test_project):
+    from basic_memory.models import Entity
+    from basic_memory.services.bulk_link_resolver import ProjectEntityIdentityIndex
+
+    owner = Entity(title="foo.md", file_path="owner.md")
+    index = ProjectEntityIdentityIndex.from_entities(
+        test_project, [Entity(title="foo", file_path="foo.md"), owner]
+    )
+    assert (
+        index.resolve_strict(
+            "foo.md", include_project_permalinks=True, workspace_permalink=None
+        ).entity
+        is owner
+    )
+    snapshot = ExportSnapshot(
+        "p",
+        (
+            ExportFile("foo.md", b"# File"),
+            ExportFile("owner.md", b"---\ntitle: foo.md\n---\n# Title owner"),
+            ExportFile("source.md", b"[[foo.md]] [[/foo]] [[/foo.md]]"),
+        ),
+    )
+    source = next(file.content for file in render_bundle(snapshot) if file.path == "source.md")
+    assert b"[foo.md](/owner.md) [/foo](/foo) [/foo.md](/foo.md)" in source
