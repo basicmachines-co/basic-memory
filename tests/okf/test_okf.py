@@ -648,3 +648,16 @@ def test_permalink_precedes_file_alias_but_explicit_relative_path_stays_a_path(
     )
     source = next(file.content for file in render_bundle(snapshot) if file.path == "source.md")
     assert b"[foo.md](/owner.md) and [./foo.md](/foo.md)" in source
+
+
+@pytest.mark.asyncio
+async def test_duplicate_offline_permalinks_fail_before_replacing_bundle(export_config, tmp_path):
+    root = Path(export_config.projects["export"].path)
+    for name in ("a.md", "b.md"):
+        (root / name).write_text("---\npermalink: same\n---\n[[same]]")
+    destination = tmp_path / "bundle"
+    destination.mkdir()
+    (destination / "keep").write_bytes(b"previous bundle")
+    with pytest.raises(ValueError, match="b.md: duplicate permalink 'same' also declared by a.md"):
+        await export_project(export_config, "export", destination, replace=True)
+    assert (destination / "keep").read_bytes() == b"previous bundle"

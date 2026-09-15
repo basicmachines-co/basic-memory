@@ -232,6 +232,12 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
         aliases = {file.path, str(PurePosixPath(file.path).with_suffix("")), title}
         permalink = normalize_frontmatter_value(source_metadata.get("permalink"))
         if isinstance(permalink, str) and permalink:
+            # Offline files can violate the indexed uniqueness rule; never choose a winner.
+            if permalink in permalinks:
+                raise ValueError(
+                    f"{file.path}: duplicate permalink {permalink!r} also declared by "
+                    f"{permalinks[permalink]}"
+                )
             permalinks[permalink] = file.path
         for alias in aliases:
             if alias in targets and targets[alias] != file.path:
