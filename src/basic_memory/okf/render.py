@@ -16,6 +16,7 @@ from basic_memory.markdown.entity_parser import (
     parse,
 )
 from basic_memory.markdown.path_links import markdown_link_target
+from basic_memory.markdown.plugins import _is_escaped
 from basic_memory.repository.entity_repository import file_path_alias
 from basic_memory.services.link_resolver import normalize_link_text
 from basic_memory.utils import build_permalink_resolution_candidates, generate_permalink
@@ -82,6 +83,10 @@ def convert_wikilinks(
         depth = 1
         end = start + 2
         while end < len(state.src) - 1:
+            # Escaped brackets belong to the target, matching the canonical scanner.
+            if _is_escaped(state.src, end):
+                end += 1
+                continue
             pair = state.src[end : end + 2]
             if pair == "[[":
                 depth += 1

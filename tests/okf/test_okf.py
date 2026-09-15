@@ -607,3 +607,15 @@ def test_scalar_permalink_aliases_preserve_authored_metadata(yaml_permalink, tar
         parse_document(files["note.md"]).metadata["permalink"]
         == parse_document(authored).metadata["permalink"]
     )
+
+
+@pytest.mark.parametrize(
+    "body,target,expected",
+    [
+        (r"[[A\]]B]]", r"A\]]B", r"[A\\\]\]B](/note.md)"),
+        (r"[[A\[[B]]", r"A\[[B", r"[A\\\[\[B](/note.md)"),
+        (r"[[A\\]] tail", r"A\\", r"[A\\\\](/note.md) tail"),
+    ],
+)
+def test_wikilink_delimiters_use_canonical_escape_rules(body, target, expected):
+    assert convert_wikilinks(body, "source.md", {target: "note.md"}, "p") == expected
