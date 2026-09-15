@@ -10,60 +10,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory import db
 from basic_memory.config import DatabaseBackend
-from basic_memory.models import Entity
 from basic_memory.repository.search_index_row import SearchIndexRow
 from basic_memory.repository.search_trace import SearchTraceCollector
 from basic_memory.schemas.search import SearchRetrievalMode
-from tests.repository.test_rerank_pipeline import (
+from semantic_search_helpers import (
     BackendSearchRepository,
     _FakeReranker,
     _entity_row,
+    pagination_repository as pagination_repository,
     rerank_search_repository as rerank_search_repository,
 )
-
-
-@pytest.fixture
-async def pagination_repository(
-    rerank_search_repository: BackendSearchRepository,
-) -> BackendSearchRepository:
-    repo = rerank_search_repository
-    repo._semantic_vector_k = 8
-    repo._reranker_candidates = 2
-    repo._reranker_max_document_chars = 2000
-    await repo.init_search_index()
-    for index in range(32):
-        # Distinct chunk passages straddle the fixed prefix. Some rows have only
-        # lexical evidence, others only vector evidence, and one is filter-rejected.
-        content = "auth session token " + ("deep " if index % 2 else "")
-        if index < 2:
-            content = "\n\n".join(f"{content}passage {n} " + "detail " * 160 for n in range(3))
-        if index == 30:
-            content = "oauth related concepts without lexical terms"
-        row = _entity_row(
-            project_id=repo.project_id,
-            row_id=700 + index,
-            title=f"Note {index:02d}",
-            permalink=f"{'excluded' if index == 31 else 'notes'}/{index:02d}",
-            content=content,
-        )
-        async with db.scoped_session(repo.session_maker) as session:
-            session.add(
-                Entity(
-                    id=row.id,
-                    project_id=repo.project_id,
-                    title=row.title,
-                    note_type="spec",
-                    content_type="text/markdown",
-                    permalink=row.permalink,
-                    file_path=row.file_path,
-                    entity_metadata={"status": "active"},
-                )
-            )
-            await session.commit()
-        await repo.index_item(row)
-        if index != 29:
-            await repo.sync_entity_vectors(row.id)
-    return repo
 
 
 @pytest.mark.asyncio

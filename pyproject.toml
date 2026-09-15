@@ -192,6 +192,10 @@ style = "pep440"
 bump = true
 fallback-version = "0.0.0"
 
+[tool.ty.environment]
+# Shared test helpers use the same import root as pytest's pythonpath above.
+extra-paths = ["tests"]
+
 [tool.ty.rules]
 all = "error"
 

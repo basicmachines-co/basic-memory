@@ -14,12 +14,10 @@ from basic_memory import db
 from basic_memory.deps.services import get_search_service_v2_external
 from basic_memory.models import Project
 from basic_memory.services.search_service import SearchService
-from tests.repository.test_rerank_pipeline import (
+from semantic_search_helpers import (
     BackendSearchRepository,
     _FakeReranker,
     rerank_search_repository as rerank_search_repository,
-)
-from tests.repository.test_stable_rerank_pagination import (
     pagination_repository as pagination_repository,
 )
 
