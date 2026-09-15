@@ -429,3 +429,27 @@ def test_non_frontmatter_source_blocks_remain_body(source):
     assert document.body == source
     assert check_document("a.md", exported) == []
     assert check_document("a.md", source)[0].rule == "frontmatter"
+
+
+@pytest.mark.parametrize("prefix", ["my-project", "My Project"])
+def test_project_permalink_prefix_is_not_source_relative(prefix):
+    targets = {
+        "my-project/foo": "foo.md",
+        "folder/my-project/foo.md": "folder/my-project/foo.md",
+    }
+    assert (
+        convert_wikilinks(f"[[{prefix}/foo]]", "folder/source.md", targets, "My Project")
+        == f"[{prefix}/foo](/foo.md)"
+    )
+
+
+def test_cli_export_resolves_configured_display_name(export_config, tmp_path):
+    export_config.projects = {"My Project": export_config.projects["export"]}
+    set_container(CliContainer(export_config, RuntimeMode.TEST))
+    destination = tmp_path / "bundle"
+    result = CliRunner().invoke(
+        app, ["okf", "export", str(destination), "--project", "my-project", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["concepts"] == 1
+    assert "# My Project" in (destination / "index.md").read_text()

@@ -62,8 +62,8 @@ async def test_export_real_project(tmp_path):
     (config_dir / "config.json").write_text(
         json.dumps(
             {
-                "projects": {"export": {"path": str(root)}},
-                "default_project": "export",
+                "projects": {"My Project": {"path": str(root)}},
+                "default_project": "My Project",
                 "semantic_search_enabled": False,
                 "index_changes": False,
                 "env": "dev",
@@ -108,7 +108,7 @@ async def test_export_real_project(tmp_path):
         "--content",
         "# Target\n",
         "--project",
-        "export",
+        "My Project",
         "--local",
     )
     (root / "references").mkdir()
@@ -120,7 +120,7 @@ async def test_export_real_project(tmp_path):
     source_paths = ["notes/source.md", "Target.md", "references/paper.pdf", "index.md"]
     before = {path: (root / path).read_bytes() for path in source_paths}
     destination = tmp_path / "bundle"
-    report = json.loads(cli("okf", "export", str(destination), "--project", "export", "--json"))
+    report = json.loads(cli("okf", "export", str(destination), "--project", "my-project", "--json"))
     assert report["diagnostics"] == []
     assert report["concepts"] == upstream_concept_count(destination) == 2
     assert (destination / "references/paper.pdf").read_bytes() == pdf
@@ -133,12 +133,14 @@ async def test_export_real_project(tmp_path):
     assert not log.startswith("---")
     assert "\n## " in log and "Target.md" in log
     assert parse_document((destination / "index.md").read_text()).metadata == {"okf_version": "0.2"}
+    # The normal write command persists the canonical project name in config.
+    assert "# my-project" in (destination / "index.md").read_text()
     assert not parse_document((destination / "notes/index.md").read_text()).has_frontmatter
     assert before == {path: (root / path).read_bytes() for path in source_paths}
     first = {
         p.relative_to(destination): p.read_bytes() for p in destination.rglob("*") if p.is_file()
     }
-    cli("okf", "export", str(destination), "--project", "export", "--replace", "--json")
+    cli("okf", "export", str(destination), "--project", "my-project", "--replace", "--json")
     assert first == {
         p.relative_to(destination): p.read_bytes() for p in destination.rglob("*") if p.is_file()
     }

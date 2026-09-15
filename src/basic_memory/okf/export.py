@@ -8,6 +8,7 @@ from uuid import uuid4
 from basic_memory.config import APP_DATABASE_NAME, BasicMemoryConfig, DatabaseBackend, ProjectMode
 from basic_memory.okf.render import ExportFile, ExportSnapshot, RecordedChange, render_bundle
 from basic_memory.okf.validation import CheckReport, check_bundle, parse_document
+from basic_memory.utils import generate_permalink
 
 
 async def recorded_history(
@@ -115,6 +116,11 @@ def snapshot_files(root: Path) -> tuple[ExportFile, ...]:
 async def export_project(
     config: BasicMemoryConfig, project: str, destination: Path, *, replace: bool = False
 ) -> CheckReport:
+    requested_permalink = generate_permalink(project)
+    project = next(
+        (name for name in config.projects if generate_permalink(name) == requested_permalink),
+        project,
+    )
     entry = config.projects.get(project)
     if entry is None or entry.mode != ProjectMode.LOCAL:
         raise ValueError(

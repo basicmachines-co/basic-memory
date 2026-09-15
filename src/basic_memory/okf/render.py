@@ -13,7 +13,7 @@ from basic_memory.markdown.entity_parser import parse
 from basic_memory.markdown.path_links import markdown_link_target
 from basic_memory.repository.entity_repository import file_path_alias
 from basic_memory.services.link_resolver import normalize_link_text
-from basic_memory.utils import build_permalink_resolution_candidates
+from basic_memory.utils import build_permalink_resolution_candidates, generate_permalink
 
 from basic_memory.okf.validation import Document, parse_document
 
@@ -51,6 +51,7 @@ def markdown_link(label: str, path: str, fragment: str = "") -> str:
 def convert_wikilinks(body: str, source: str, targets: dict[str, str], project: str) -> str:
     """Use MarkdownIt's code/escape/link rules while retaining untouched source bytes."""
     body = body.replace("\r\n", "\n").replace("\r", "\n")
+    project = generate_permalink(project)
     replacements: list[tuple[int, int, str]] = []
     path_aliases: dict[str, list[str]] = {}
     for path in sorted(set(targets.values())):
@@ -81,7 +82,9 @@ def convert_wikilinks(body: str, source: str, targets: dict[str, str], project: 
         resolved = None
         # Explicit relative links bind to their source directory before semantic aliases.
         relative = markdown_link_target(target, source)
-        if "/" in target and not target.startswith(project + "/") and relative:
+        if "/" in target and generate_permalink(target.partition("/")[0]) == project:
+            relative = None
+        if "/" in target and relative:
             resolved = targets.get(relative.lstrip("/"))
             if resolved is None:
                 resolved = targets.get(relative.lstrip("/") + ".md")
