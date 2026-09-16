@@ -6,6 +6,7 @@ import pytest
 from fastmcp import Client
 
 from basic_memory import db
+from basic_memory.indexing.models import RelationTargetRequest
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.relation_repository import RelationRepository
 from basic_memory.services.bulk_link_resolver import BulkLinkResolver
@@ -15,10 +16,14 @@ from basic_memory.services.bulk_link_resolver import BulkLinkResolver
 async def test_markdown_paths_are_indexed_and_resolved_exactly(
     mcp_server, app, app_config, test_project, engine_factory
 ):
-    body = "See [target](../targets/Guide.md#details) and [web](https://example.com).\n"
+    body = (
+        "See [target](../targets/Guide.md#details), [[../targets/Sibling.md]] "
+        "and [web](https://example.com).\n"
+    )
     async with Client(mcp_server) as client:
         for title, directory, content in [
             ("Guide", "targets", "# Guide\n\n## Details\nContent."),
+            ("Sibling", "targets", "# Sibling"),
             ("Source", "notes", body),
         ]:
             result = await client.call_tool(
@@ -37,18 +42,29 @@ async def test_markdown_paths_are_indexed_and_resolved_exactly(
     relations = RelationRepository(project_id=test_project.id)
     async with db.scoped_session(session_maker) as session:
         target = await entities.get_by_file_path(session, "targets/Guide.md")
-        assert target is not None
+        sibling = await entities.get_by_file_path(session, "targets/Sibling.md")
+        assert target is not None and sibling is not None
         edges = await relations.find_by_type(session, "links_to")
-        assert [edge.to_name for edge in edges] == ["/targets/Guide.md"]
-        assert edges[0].to_id == target.id
+        # The graph keeps the author's spelling; both link kinds are paths here.
+        assert sorted(edge.to_name for edge in edges) == [
+            "../targets/Guide.md",
+            "../targets/Sibling.md",
+        ]
+        assert {edge.to_name: edge.to_id for edge in edges} == {
+            "../targets/Guide.md": target.id,
+            "../targets/Sibling.md": sibling.id,
+        }
+        from_source = RelationTargetRequest("../targets/Guide.md", "notes/Source.md")
+        by_permalink = RelationTargetRequest("/Guide")
+        wrong_case = RelationTargetRequest("/targets/guide.md")
         resolved = await BulkLinkResolver(entities, app_config).resolve_relation_targets(
-            [edges[0].to_name, "/Guide", "/targets/guide.md"], session=session
+            [from_source, by_permalink, wrong_case], session=session
         )
-        resolved_target = resolved[edges[0].to_name]
+        resolved_target = resolved[from_source]
         assert resolved_target is not None
         assert resolved_target.id == target.id
-        assert resolved["/Guide"] is None
-        assert resolved["/targets/guide.md"] is None
+        assert resolved[by_permalink] is None
+        assert resolved[wrong_case] is None
 
     assert body.strip() in (Path(test_project.path) / "notes" / "Source.md").read_text()
 
@@ -77,5 +93,5 @@ async def test_markdown_self_link_is_resolved_when_written(
             session, "links_to"
         )
         assert len(edges) == 1
-        assert edges[0].to_name == "/notes/Self.md"
+        assert edges[0].to_name == "./Self.md"
         assert edges[0].to_id == source.id

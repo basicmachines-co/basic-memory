@@ -97,6 +97,17 @@
 
 ### Bug Fixes
 
+- **#1514**: Markdown path links resolve against the note's own path at resolution
+  time, the way wikilinks do, instead of at parse time from the file's location
+  on disk. The parser had derived the note's project path with `relative_to` on the
+  filesystem path, which raised for content parsed from anywhere outside the project
+  root (a hosted note read from object storage, for one) and gave a wrong base for
+  any other temporary location. The graph now stores the path as authored
+  (`../guides/Guide.md`, `./same.md`, `/root.md`); both resolvers turn it into a
+  project path from the source note, and background resolution keys path targets
+  by their source note. Wikilinks spelled `[[../x.md]]` or `[[./x.md]]` resolve
+  by the same rule.
+
 - **#1558**: `search_notes(search_all_projects=True)` and `projects=[...]` rank merged
   full-text hits by score strength instead of raw value. SQLite bm25 scores are
   negative with lower meaning better, so sorting raw values put the weakest hit first

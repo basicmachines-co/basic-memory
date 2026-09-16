@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.indexing.accepted_note_search import accepted_search_content_from_markdown
-from basic_memory.indexing.models import IndexFileJobStatus
+from basic_memory.indexing.models import IndexFileJobStatus, RelationTargetRequest
+from basic_memory.markdown.path_links import is_path_target
 from basic_memory.models import Entity
 from basic_memory.repository.relation_repository import (
     PendingRelationSearchRefresh,
@@ -194,10 +195,10 @@ class RelationTargetBatchResolver(Protocol):
 
     async def resolve_relation_targets(
         self,
-        link_texts: Sequence[str],
+        requests: Sequence[RelationTargetRequest],
         *,
         session: AsyncSession,
-    ) -> Mapping[str, ResolvedRelationTarget | None]:
+    ) -> Mapping[RelationTargetRequest, ResolvedRelationTarget | None]:
         """Resolve strict link targets without per-target database round-trips."""
 
 
@@ -257,6 +258,16 @@ class RepositoryRelationResolutionRuntime:
         async with db.scoped_session(self.session_maker) as session:
             return len(await self.relation_repository.find_unresolved_relations(session))
 
+    async def _source_paths(
+        self,
+        session: AsyncSession,
+        relations: Sequence[UnresolvedRelation],
+    ) -> dict[EntityId, str]:
+        """Return the project path of every note that carries one of ``relations``."""
+        source_ids = sorted({relation.from_id for relation in relations})
+        sources = await self.entity_repository.find_by_ids(session, source_ids)
+        return {source.id: source.file_path for source in sources}
+
     async def resolve_relations(
         self,
         entity_id: EntityId | None = None,
@@ -280,15 +291,25 @@ class RepositoryRelationResolutionRuntime:
                     count=len(unresolved_relations),
                 )
 
-            target_names = list(
-                dict.fromkeys(relation.to_name for relation in unresolved_relations)
+            # A path target (``./``, ``../``, ``/``) names a file relative to the note
+            # that carries it, so it is keyed by that note's path as well; identity
+            # targets stay keyed by text alone and resolve once for every source.
+            source_paths = (
+                await self._source_paths(session, unresolved_relations)
+                if any(is_path_target(relation.to_name) for relation in unresolved_relations)
+                else {}
             )
-            resolved_targets_by_link_text = (
+            requests = list(
+                dict.fromkeys(
+                    _target_request(relation, source_paths) for relation in unresolved_relations
+                )
+            )
+            resolved_targets_by_request = (
                 await self.target_resolver.resolve_relation_targets(
-                    target_names,
+                    requests,
                     session=session,
                 )
-                if target_names
+                if requests
                 else {}
             )
 
@@ -300,7 +321,7 @@ class RepositoryRelationResolutionRuntime:
                 f"from_id={relation.from_id} "
                 f"to_name={relation.to_name}"
             )
-            resolved_entity = resolved_targets_by_link_text[relation.to_name]
+            resolved_entity = resolved_targets_by_request[_target_request(relation, source_paths)]
             if resolved_entity is None or resolved_entity.id == relation.from_id:
                 continue
 
@@ -404,6 +425,18 @@ class RepositoryRelationResolutionRuntime:
                 )
 
         return affected_entity_ids
+
+
+def _target_request(
+    relation: UnresolvedRelation,
+    source_paths: Mapping[EntityId, str],
+) -> RelationTargetRequest:
+    return RelationTargetRequest(
+        link_text=relation.to_name,
+        source_path=(
+            source_paths.get(relation.from_id) if is_path_target(relation.to_name) else None
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig
+from basic_memory.markdown.path_links import is_path_target, resolve_project_path
 from basic_memory.models import Entity, Project
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.project_repository import ProjectRepository
@@ -135,6 +136,10 @@ class LinkResolver:
         repository. This is the target-project contract used by entity read and mutation flows.
         """
         clean_text, _ = self._normalize_link_text(identifier)
+        if is_path_target(clean_text):
+            return await self._resolve_path_target(
+                clean_text, source_path, load_relations=load_relations, session=session
+            )
 
         async with db.scoped_session(self.session_maker, session) as active_session:
             try:
@@ -183,16 +188,12 @@ class LinkResolver:
         """
         logger.trace(f"Resolving link: {link_text} (source: {source_path})")
 
-        # Markdown hrefs are normalized to project-root paths by the parser.
-        # They must not fall through to aliases, titles or another project.
-        if link_text.startswith("/"):
-            async with db.scoped_session(self.session_maker, session) as active_session:
-                return await self.entity_repository.get_by_file_path(
-                    active_session, link_text[1:], load_relations=load_relations
-                )
-
         # Clean link text and extract any alias
         clean_text, alias = self._normalize_link_text(link_text)
+        if is_path_target(clean_text):
+            return await self._resolve_path_target(
+                clean_text, source_path, load_relations=load_relations, session=session
+            )
         explicit_project_reference = "::" in clean_text
         clean_text = normalize_project_reference(clean_text)
 
@@ -281,6 +282,27 @@ class LinkResolver:
                 source_path=None,
                 project_permalink=project.permalink,
                 load_relations=load_relations,
+            )
+
+    async def _resolve_path_target(
+        self,
+        target: str,
+        source_path: Optional[str],
+        *,
+        load_relations: bool,
+        session: AsyncSession | None,
+    ) -> Optional[Entity]:
+        """Resolve a path target (``/``, ``./``, ``../``) to the one file it names.
+
+        The path is taken relative to the note that carries the link. It never falls
+        through to titles, permalinks, filename aliases or another project.
+        """
+        project_path = resolve_project_path(target, source_path)
+        if project_path is None:
+            return None
+        async with db.scoped_session(self.session_maker, session) as active_session:
+            return await self.entity_repository.get_by_file_path(
+                active_session, project_path[1:], load_relations=load_relations
             )
 
     def _normalize_link_text(self, link_text: str) -> Tuple[str, Optional[str]]:

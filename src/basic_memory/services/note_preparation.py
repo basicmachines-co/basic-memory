@@ -29,6 +29,7 @@ from basic_memory.markdown.entity_parser import (
     _coerce_to_string,
     normalize_frontmatter_metadata,
 )
+from basic_memory.markdown.path_links import is_path_target, resolve_project_path
 from basic_memory.markdown.utils import schema_to_markdown
 from basic_memory.models import Entity
 from basic_memory.repository import (
@@ -953,10 +954,15 @@ async def resolve_deferred_self_relation(
     entity: Entity,
     session: AsyncSession | None = None,
 ) -> Entity | None:
-    # Background resolution excludes self-edges, so exact Markdown paths must
-    # resolve here before wikilink alias parsing can reinterpret filename bytes.
-    if target.startswith("/"):
-        return entity if target[1:] == entity.file_path else None
+    # Background resolution excludes self-edges, so path targets must resolve
+    # here, against this note's own path, before wikilink alias parsing can
+    # reinterpret filename bytes.
+    if is_path_target(target):
+        return (
+            entity
+            if resolve_project_path(target, entity.file_path) == f"/{entity.file_path}"
+            else None
+        )
     clean_target = target.strip()
     if clean_target.startswith("[[") and clean_target.endswith("]]"):
         clean_target = clean_target[2:-2].strip()

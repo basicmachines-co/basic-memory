@@ -107,6 +107,19 @@ class IndexFrontmatterWriteResult:
 
 
 @dataclass(frozen=True, slots=True)
+class RelationTargetRequest:
+    """One relation target to resolve, and the note a path target is relative to.
+
+    Identity targets (titles, permalinks, external ids) mean the same thing from
+    every note, so they carry no source and one lookup serves them all. A path
+    target means one file per source note, so its source path is part of the key.
+    """
+
+    link_text: str
+    source_path: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class IndexedRelation:
     """One parsed outgoing relation waiting for generation-owned publication."""
 

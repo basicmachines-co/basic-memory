@@ -14,8 +14,16 @@ Markdown links work too.
 
 These are exact file paths. Basic Memory does not guess a title, add `.md`, apply
 filename aliases, or search another project when the target is missing. The graph
-stores a normalized project-root target such as `/guides/Getting Started.md`;
-missing targets remain unresolved and can resolve when indexed later.
+stores the path as the author wrote it, relative to the note: `../guides/Getting
+Started.md`, `./same.md` (a bare `same.md` is stored with the `./` mark), or a
+rooted `/guides/Getting Started.md`. Resolution turns it into a project path
+against the note's own location, so a note parsed from remote storage or moved
+later resolves the same way; missing targets remain unresolved and can resolve
+when indexed later.
+
+Wikilinks spelled as explicit paths follow the same rule: `[[../guides/Getting
+Started.md]]` and `[[./same.md]]` resolve relative to the note and only to that
+exact file. Other wikilinks keep their title, permalink, and alias resolution.
 
 External URLs, `mailto:` and `file:` links, fragment-only links, paths that escape
 the project, images, and links inside code do not create relations. Ordinary
