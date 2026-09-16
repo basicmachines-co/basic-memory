@@ -54,6 +54,7 @@ from basic_memory.indexing.project_index_maintenance import (
     ProjectIndexMoveRun,
     StoreProjectIndexMaintenanceRunner,
 )
+from basic_memory.indexing.models import RelationTargetRequest
 from basic_memory.indexing.relation_resolution import (
     RepositoryRelationResolutionRuntime,
     ResolvedRelationTarget,
@@ -2668,11 +2669,11 @@ class RuntimeFactoryRelationRepository:
 class RuntimeFactoryLinkResolver:
     async def resolve_relation_targets(
         self,
-        link_texts: Sequence[str],
+        requests: Sequence[RelationTargetRequest],
         *,
         session: AsyncSession,
-    ) -> Mapping[str, ResolvedRelationTarget | None]:
-        return {link_text: None for link_text in link_texts}
+    ) -> Mapping[RelationTargetRequest, ResolvedRelationTarget | None]:
+        return {request: None for request in requests}
 
 
 class RuntimeFactoryEntityService:

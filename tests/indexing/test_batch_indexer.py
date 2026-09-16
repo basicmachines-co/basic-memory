@@ -1512,9 +1512,9 @@ async def test_batch_indexer_uses_exact_bulk_resolution_for_deferred_relations(
     original_resolve_targets = target_resolver_type.resolve_relation_targets
     seen_target_batches: list[tuple[str, ...]] = []
 
-    async def spy_resolve_targets(self, link_texts, *, session):
-        seen_target_batches.append(tuple(link_texts))
-        return await original_resolve_targets(self, link_texts, session=session)
+    async def spy_resolve_targets(self, requests, *, session):
+        seen_target_batches.append(tuple(request.link_text for request in requests))
+        return await original_resolve_targets(self, requests, session=session)
 
     monkeypatch.setattr(target_resolver_type, "resolve_relation_targets", spy_resolve_targets)
 
