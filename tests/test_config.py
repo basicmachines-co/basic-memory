@@ -284,6 +284,73 @@ class TestBasicMemoryConfig:
         assert config.data_dir_path == config_home / ".basic-memory"
         assert config.app_database_path == config_home / ".basic-memory" / "memory.db"
 
+    def test_app_database_path_from_sqlite_database_url_relative(self, config_home, monkeypatch):
+        """A relative sqlite database_url resolves against the cwd (issue #539).
+
+        Three slashes = relative path, per SQLAlchemy's own URL convention -
+        this is what lets a git worktree point BASIC_MEMORY_DATABASE_URL at a
+        project-local index instead of sharing ~/.basic-memory/memory.db.
+        """
+        monkeypatch.delenv("BASIC_MEMORY_CONFIG_DIR", raising=False)
+        project_dir = config_home / "worktree"
+        project_dir.mkdir()
+        monkeypatch.chdir(project_dir)
+
+        config = BasicMemoryConfig(database_url="sqlite+aiosqlite:///.basic-memory/memory.db")
+
+        assert config.app_database_path == Path(".basic-memory/memory.db")
+        assert (project_dir / ".basic-memory" / "memory.db").exists()
+
+    def test_app_database_path_from_sqlite_database_url_absolute(self, config_home, monkeypatch):
+        """An absolute sqlite database_url (four slashes) is used verbatim (issue #539)."""
+        monkeypatch.delenv("BASIC_MEMORY_CONFIG_DIR", raising=False)
+        custom_db = config_home / "custom-index" / "memory.db"
+
+        config = BasicMemoryConfig(database_url=f"sqlite+aiosqlite:///{custom_db}")
+
+        assert config.app_database_path == custom_db
+        assert custom_db.exists()
+        # The default location must not have been touched.
+        assert not (config_home / ".basic-memory" / "memory.db").exists()
+
+    def test_app_database_path_ignores_database_url_for_postgres_backend(
+        self, config_home, monkeypatch
+    ):
+        """database_url only overrides the SQLite path when database_backend='sqlite'.
+
+        Postgres deployments keep consuming database_url directly in db.py; this
+        property must not be repurposed for them (out of scope for #539's
+        SQLite-only half).
+        """
+        monkeypatch.delenv("BASIC_MEMORY_CONFIG_DIR", raising=False)
+        config = BasicMemoryConfig(
+            database_backend="postgres",
+            database_url="postgresql+asyncpg://user:pass@localhost/db",
+            skip_initialization_sync=True,
+        )
+
+        assert config.app_database_path == config_home / ".basic-memory" / "memory.db"
+
+    def test_app_database_path_rejects_non_sqlite_url_for_sqlite_backend(
+        self, config_home, monkeypatch
+    ):
+        """A non-sqlite database_url with the (default) sqlite backend is a clear config error."""
+        monkeypatch.delenv("BASIC_MEMORY_CONFIG_DIR", raising=False)
+        config = BasicMemoryConfig(
+            database_url="postgresql+asyncpg://user:pass@localhost/db",
+        )
+
+        with pytest.raises(ValueError, match="sqlite driver"):
+            _ = config.app_database_path
+
+    def test_app_database_path_rejects_sqlite_url_without_path(self, config_home, monkeypatch):
+        """An in-memory sqlite database_url has no file path - reject it clearly."""
+        monkeypatch.delenv("BASIC_MEMORY_CONFIG_DIR", raising=False)
+        config = BasicMemoryConfig(database_url="sqlite+aiosqlite://")
+
+        with pytest.raises(ValueError, match="must include a file path"):
+            _ = config.app_database_path
+
     def test_semantic_embedding_cache_dir_field_stays_none_by_default(
         self, config_home, monkeypatch
     ):
