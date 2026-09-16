@@ -1,6 +1,7 @@
 """Search tools for Basic Memory MCP server."""
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from textwrap import dedent
 from typing import Annotated, List, Optional, Dict, Any, Literal, cast
@@ -478,12 +479,18 @@ Error searching for '{query}': {error_message}
 
 
 def _format_search_markdown(
-    result: SearchResponse, project: str, query: str | None, project_id: str | None = None
+    result: SearchResponse,
+    project: str,
+    query: str | None,
+    project_id: str | None = None,
+    project_names: Mapping[str, str] | None = None,
 ) -> str:
     """Format SearchResponse as compact markdown text.
 
     Produces a human-readable markdown representation suitable for LLM
-    consumption when structured data isn't needed.
+    consumption when structured data isn't needed. ``project_names`` maps a
+    project's external id to the name a hit should be labelled with when the
+    page spans several projects.
     """
     if not result.results:
         # Empty search is usually "no match for this query," not "empty knowledge base," so we
@@ -526,6 +533,11 @@ def _format_search_markdown(
     for r in result.results:
         parts.append(f"### {r.title}")
         parts.append(f"- permalink: {r.permalink}")
+        # A page over several projects must say which one each hit lives in, or the
+        # reader cannot route the next call; single-project pages already know.
+        project_name = (project_names or {}).get(r.project_external_id or "")
+        if project_name is not None:
+            parts.append(f"- project: {project_name}")
         # external_id is the note's stable identifier. Emitting it lets the hosted MCP layer
         # deep-link each hit to the web app from the final (post-merge) result the caller sees,
         # which matters for all-projects search where the displayed page is decided after the
@@ -683,11 +695,17 @@ async def _load_search_project_refs(context: Context | None = None) -> list[Sear
 
 
 def _result_score(result: SearchResult | dict[str, Any]) -> float:
-    """Return a comparable search score for merged project results."""
-    if isinstance(result, SearchResult):
-        return result.score
-    score = result.get("score")
-    return float(score) if isinstance(score, int | float) else 0.0
+    """Return the strength of one hit, comparable across databases and modes.
+
+    Vector similarity and fused hybrid scores are positive with higher meaning
+    better. Full-text scores are not: SQLite bm25 is negative with lower meaning
+    better, Postgres ts_rank positive with higher meaning better. Every backend
+    orders its own page by strength, and the magnitude is that strength in all of
+    them, so the merge ranks by magnitude and a stable sort keeps each database's
+    own order among equals.
+    """
+    score = result.score if isinstance(result, SearchResult) else result.get("score")
+    return abs(float(score)) if isinstance(score, int | float) else 0.0
 
 
 def _qualify_permalink_for_project(permalink: object, project: str | None) -> object:
@@ -945,9 +963,13 @@ async def _search_all_projects(
         }
     )
 
+    project_names = {ref.external_id: ref.name for ref in project_refs}
     if output_format == "json":
-        return response.model_dump(mode="json", exclude_none=True)
-    return _format_search_markdown(response, scope_label, query)
+        payload = response.model_dump(mode="json", exclude_none=True)
+        for item in payload["results"]:
+            item["project"] = project_names[item["project_external_id"]]
+        return payload
+    return _format_search_markdown(response, scope_label, query, project_names=project_names)
 
 
 @mcp.tool(
