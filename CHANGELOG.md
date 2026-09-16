@@ -97,6 +97,13 @@
 
 ### Bug Fixes
 
+- **#1558**: `search_notes(search_all_projects=True)` and `projects=[...]` rank merged
+  full-text hits by score strength instead of raw value. SQLite bm25 scores are
+  negative with lower meaning better, so sorting raw values put the weakest hit first
+  and cut every page from the wrong end of the ranking; page two repeated page one.
+  Every hit on a page that spans projects now carries `project` (JSON) or a
+  `- project:` line (text), so the next call can be routed to the right project.
+
 - **#1458**: A note whose file stem equals its project's name is now readable by its bare
   identifier. `split_project_permalink_prefix` matches a leading path segment against a
   project's permalink via `generate_permalink`, which drops file extensions -- so a single

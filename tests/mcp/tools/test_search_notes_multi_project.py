@@ -268,6 +268,73 @@ async def test_each_database_answers_the_whole_prefix_the_page_needs(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_full_text_hits_keep_the_server_order_and_page_from_the_strongest(monkeypatch):
+    """bm25 scores are negative with lower meaning better; the merge ranks by strength.
+
+    Sorting the raw values put the weakest hit first and made page two repeat page
+    one, because every page was cut from the wrong end of the same ranking.
+    """
+    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+
+    def answer(workspace, project_ids, page, page_size):
+        # The server's own order: strongest (most negative) first.
+        ranked = [("strongest", -4.8), ("middle", -4.5), ("weakest", -4.0)]
+        return _page(
+            [_result(ALPHA, title=title, score=score) for title, score in ranked[:page_size]],
+            page,
+            page_size,
+            total=3,
+        )
+
+    _install_scoped_search(monkeypatch, [ALPHA, BETA], answer)
+
+    first = await search_mod.search_notes(
+        query="notes", search_all_projects=True, output_format="json", page=1, page_size=2
+    )
+    second = await search_mod.search_notes(
+        query="notes", search_all_projects=True, output_format="json", page=2, page_size=2
+    )
+
+    assert isinstance(first, dict) and isinstance(second, dict)
+    assert [item["title"] for item in first["results"]] == ["strongest", "middle"]
+    assert [item["title"] for item in second["results"]] == ["weakest"]
+
+
+@pytest.mark.asyncio
+async def test_every_hit_names_the_project_it_lives_in(monkeypatch):
+    """A page over several projects labels each hit, so the next call can be routed."""
+    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+
+    def answer(workspace, project_ids, page, page_size):
+        return _page(
+            [
+                _result(BETA, title="In beta", score=0.9),
+                _result(ALPHA, title="In alpha", score=0.5),
+            ],
+            page,
+            page_size,
+        )
+
+    _install_scoped_search(monkeypatch, [ALPHA, BETA], answer)
+
+    as_json = await search_mod.search_notes(
+        query="notes", search_all_projects=True, output_format="json"
+    )
+    as_text = await search_mod.search_notes(
+        query="notes", search_all_projects=True, output_format="text"
+    )
+
+    assert isinstance(as_json, dict)
+    assert [(item["title"], item["project"]) for item in as_json["results"]] == [
+        ("In beta", "beta"),
+        ("In alpha", "alpha"),
+    ]
+    assert isinstance(as_text, str)
+    assert "### In beta\n- permalink: notes/example\n- project: beta\n" in as_text
+    assert "### In alpha\n- permalink: notes/example\n- project: alpha\n" in as_text
+
+
+@pytest.mark.asyncio
 async def test_multi_project_search_is_opt_in(monkeypatch):
     """Default search_notes calls stay scoped to the resolved project."""
     clients_mod = importlib.import_module("basic_memory.mcp.clients")
