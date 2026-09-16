@@ -201,7 +201,9 @@ def load_bmignore_patterns() -> Set[str]:
     return patterns
 
 
-def load_gitignore_patterns(base_path: Path, use_gitignore: bool = True) -> Set[str]:
+def load_gitignore_patterns(
+    base_path: Path, use_gitignore: bool = True, *, strict: bool = False
+) -> Set[str]:
     """Load gitignore patterns from .gitignore file and .bmignore.
 
     Combines patterns from:
@@ -212,10 +214,30 @@ def load_gitignore_patterns(base_path: Path, use_gitignore: bool = True) -> Set[
     Args:
         base_path: The base directory to search for .gitignore file
         use_gitignore: If False, only load patterns from .bmignore (default: True)
+        strict: Read without creating files; only missing ignore files permit defaults.
 
     Returns:
         Set of patterns to ignore
     """
+    if strict:
+        # Publishing a snapshot must never silently include files excluded by unreadable rules.
+        patterns: set[str] = set()
+        bmignore_path = get_bmignore_path()
+        paths = [bmignore_path, base_path / ".gitignore"] if use_gitignore else [bmignore_path]
+        for path in paths:
+            try:
+                content = path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                content = ""
+            patterns.update(
+                pattern
+                for line in content.splitlines()
+                if (pattern := _parse_ignore_pattern_line(line)) is not None
+            )
+            if path == bmignore_path and not patterns:
+                patterns.update(DEFAULT_IGNORE_PATTERNS)
+        return patterns
+
     # Start with patterns from .bmignore
     patterns = load_bmignore_patterns()
 

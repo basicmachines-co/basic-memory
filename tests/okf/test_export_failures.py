@@ -1,0 +1,436 @@
+"""Publication fault injection and read-only journal boundaries."""
+
+from datetime import UTC, datetime
+from pathlib import Path
+
+import pytest
+
+from basic_memory import db
+from basic_memory.config import BasicMemoryConfig, ProjectEntry
+from basic_memory.models.project import AcceptedProjectNoteChange
+from basic_memory.okf.export import export_project, recorded_history, snapshot_files
+from basic_memory.okf.render import ExportFile, ExportSnapshot, render_bundle
+from basic_memory.okf.validation import check_bundle
+
+
+@pytest.fixture
+def source_config(config_home):
+    root = config_home / "source"
+    root.mkdir()
+    (root / "a.md").write_text("---\ntype: note\n---\nA")
+    return BasicMemoryConfig(projects={"export": ProjectEntry(path=str(root))})
+
+
+@pytest.mark.asyncio
+async def test_source_and_destination_changes_abort(source_config, tmp_path, monkeypatch):
+    import basic_memory.okf.export as exporting
+
+    root = Path(source_config.projects["export"].path)
+    destination = tmp_path / "bundle"
+    original_check = exporting.check_bundle
+
+    def mutate_source(staging):
+        (root / "a.md").write_text("changed")
+        return original_check(staging)
+
+    monkeypatch.setattr(exporting, "check_bundle", mutate_source)
+    with pytest.raises(ValueError, match="Project changed"):
+        await export_project(source_config, "export", destination)
+    assert not destination.exists()
+
+    def create_destination(staging):
+        destination.mkdir()
+        (destination / "keep").write_text("keep")
+        return original_check(staging)
+
+    monkeypatch.setattr(exporting, "check_bundle", create_destination)
+    with pytest.raises(ValueError, match="appeared"):
+        await export_project(source_config, "export", destination)
+    assert (destination / "keep").read_text() == "keep"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_restore", [False, True])
+async def test_publish_failure_preserves_previous_bundle(
+    source_config, tmp_path, monkeypatch, fail_restore
+):
+    destination = tmp_path / "bundle"
+    destination.mkdir()
+    (destination / "keep").write_text("keep")
+    rename = Path.rename
+
+    def fail_publish(path, target):
+        if path.name == "bundle" and path != destination:
+            raise OSError("publish failed")
+        if fail_restore and ".bm-okf-backup-" in path.name:
+            raise OSError("restore failed")
+        return rename(path, target)
+
+    monkeypatch.setattr(Path, "rename", fail_publish)
+    with pytest.raises(OSError, match="failed"):
+        await export_project(source_config, "export", destination, replace=True)
+    if fail_restore:
+        backups = list(tmp_path.glob(".bundle.bm-okf-backup-*"))
+        assert len(backups) == 1
+        assert (backups[0] / "keep").read_text() == "keep"
+    else:
+        assert (destination / "keep").read_text() == "keep"
+    assert not list(tmp_path.glob(".bm-okf-*"))
+
+
+@pytest.mark.asyncio
+async def test_symlink_and_missing_source_are_rejected(source_config, tmp_path, monkeypatch):
+    root = Path(source_config.projects["export"].path)
+    destination = tmp_path / "bundle"
+    other = tmp_path / "other"
+    other.mkdir()
+    destination.symlink_to(other, target_is_directory=True)
+    with pytest.raises(ValueError, match="symlink"):
+        await export_project(source_config, "export", destination)
+    destination.unlink()
+    import basic_memory.okf.export as exporting
+
+    original_check = exporting.check_bundle
+
+    def create_symlink(staging):
+        destination.symlink_to(other, target_is_directory=True)
+        return original_check(staging)
+
+    monkeypatch.setattr(exporting, "check_bundle", create_symlink)
+    with pytest.raises(ValueError, match="became a symlink"):
+        await export_project(source_config, "export", destination, replace=True)
+    (root / "a.md").unlink()
+    root.rmdir()
+    with pytest.raises(ValueError, match="does not exist"):
+        await export_project(source_config, "export", destination)
+    source_config.projects["export"].path = "relative"
+    with pytest.raises(ValueError, match="absolute"):
+        await export_project(source_config, "export", destination)
+
+
+def test_unreadable_subtree_is_a_failure(tmp_path, monkeypatch):
+    import os
+
+    def failed_walk(root, *, onerror, **kwargs):
+        onerror(PermissionError(13, "denied", str(root / "sub")))
+        yield str(root), [], []
+
+    monkeypatch.setattr(os, "walk", failed_walk)
+    assert check_bundle(tmp_path).diagnostics[0].rule == "filesystem.read"
+    with pytest.raises(OSError, match="Incomplete project scan"):
+        snapshot_files(tmp_path)
+
+
+@pytest.mark.parametrize("bm", ["broken", "{okf_export: {version: 1}}"])
+def test_extension_collision_is_not_overwritten(bm):
+    snapshot = ExportSnapshot("p", (ExportFile("a.md", f"---\nbm: {bm}\n---\n".encode()),))
+    with pytest.raises(ValueError, match="extension collision"):
+        render_bundle(snapshot)
+
+
+def test_ambiguous_alias_and_semantic_opt_out():
+    snapshot = ExportSnapshot(
+        "p",
+        (
+            ExportFile("one/a.md", b"---\ntitle: Same\n---\n"),
+            ExportFile("two/a.md", b"---\ntitle: Same\n---\n"),
+            ExportFile("source.md", b"---\nbm_parse_semantics: false\n---\n[[Same]]"),
+        ),
+    )
+    output = {file.path: file.content for file in render_bundle(snapshot)}
+    assert b"[Same](/Same)" in output["source.md"]
+    assert b"relations: []" in output["source.md"]
+    assert b"[one](one/index.md)" in output["index.md"]
+
+
+@pytest.mark.asyncio
+async def test_journal_materialization_and_identity(app_config, test_project, engine_factory):
+    _, session_maker = engine_factory
+    root = Path(test_project.path).resolve()
+    assert await recorded_history(app_config, "missing", root) == ()
+    with pytest.raises(ValueError, match="differs"):
+        await recorded_history(app_config, test_project.name, root / "wrong")
+    accepted_at = datetime(2026, 9, 14, tzinfo=UTC)
+    async with db.scoped_session(session_maker) as session:
+        project = await session.get(type(test_project), test_project.id)
+        assert project is not None
+        project.partition_position = 1
+        session.add(
+            AcceptedProjectNoteChange(
+                project_id=project.id,
+                project_external_id=project.external_id,
+                partition_position=1,
+                entity_id=1,
+                note_external_id="note",
+                permalink="a",
+                title="A",
+                operation="create",
+                file_path="a.md",
+                accepted_at=accepted_at,
+                source="cli",
+            )
+        )
+    # Journal acceptance remains useful even when its materialization marker lags.
+    assert len(await recorded_history(app_config, test_project.name, root)) == 1
+    async with db.scoped_session(session_maker) as session:
+        from sqlalchemy import select
+
+        change = (await session.execute(select(AcceptedProjectNoteChange))).scalar_one()
+        change.materialized_at = accepted_at
+    history = await recorded_history(app_config, test_project.name, root)
+    assert len(history) == 1
+    assert history[0].path == "a.md"
+    assert history[0].accepted_at.date() == accepted_at.date()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("partial_journal", [False, True])
+async def test_pre_journal_database_exports_without_migration(
+    source_config, tmp_path, monkeypatch, partial_journal
+):
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from basic_memory.config import APP_DATABASE_NAME, DatabaseBackend
+
+    source_config.database_backend = DatabaseBackend.SQLITE
+    database_path = source_config.data_dir_path / APP_DATABASE_NAME
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    engine = create_async_engine(f"sqlite+aiosqlite:///{database_path}")
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(text("CREATE TABLE project (id INTEGER PRIMARY KEY)"))
+            if partial_journal:
+                await connection.execute(
+                    text("CREATE TABLE accepted_project_note_change (id INTEGER PRIMARY KEY)")
+                )
+
+        async def existing_db(**kwargs):
+            assert kwargs["ensure_migrations"] is False
+            return engine, async_sessionmaker(engine)
+
+        monkeypatch.setattr(db, "get_or_create_db", existing_db)
+        before = database_path.read_bytes()
+        destination = tmp_path / "bundle"
+        report = await export_project(source_config, "export", destination)
+        assert report.success and report.concepts == 1
+        assert database_path.read_bytes() == before
+        assert "\n## " not in (destination / "log.md").read_text()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_history_reads_only_legacy_project_identity(source_config, monkeypatch):
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from basic_memory.config import APP_DATABASE_NAME, DatabaseBackend
+
+    source_config.database_backend = DatabaseBackend.SQLITE
+    path = source_config.data_dir_path / APP_DATABASE_NAME
+    path.parent.mkdir(parents=True, exist_ok=True)
+    root = Path(source_config.projects["export"].path)
+    engine = create_async_engine(f"sqlite+aiosqlite:///{path}")
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "CREATE TABLE project (id INTEGER PRIMARY KEY, name TEXT, path TEXT, partition_position INTEGER)"
+                )
+            )
+            await connection.execute(
+                text("INSERT INTO project VALUES (1, 'export', :path, 1)"), {"path": str(root)}
+            )
+            await connection.run_sync(AcceptedProjectNoteChange.metadata.create_all)
+        session_maker = async_sessionmaker(engine)
+        async with session_maker.begin() as session:
+            session.add(
+                AcceptedProjectNoteChange(
+                    project_id=1,
+                    project_external_id="p",
+                    partition_position=1,
+                    entity_id=1,
+                    note_external_id="n",
+                    permalink="a",
+                    title="A",
+                    operation="create",
+                    file_path="a.md",
+                    accepted_at=datetime(2026, 1, 1, tzinfo=UTC),
+                    source="cli",
+                )
+            )
+
+        async def existing_db(**kwargs):
+            return engine, session_maker
+
+        monkeypatch.setattr(db, "get_or_create_db", existing_db)
+        before = path.read_bytes()
+        history = await recorded_history(source_config, "export", root)
+        assert len(history) == 1 and history[0].path == "a.md"
+        assert path.read_bytes() == before
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.parametrize("directory", ["index.md", "log.md", "nested/Index.md"])
+def test_reserved_directory_is_rejected_before_staging(source_config, directory):
+    root = Path(source_config.projects["export"].path)
+    parent = root / directory
+    parent.mkdir(parents=True)
+    (parent / "a.md").write_text("---\ntype: note\n---\n# A")
+    with pytest.raises(ValueError, match="reserved OKF directory name; rename it first"):
+        snapshot_files(root)
+
+
+@pytest.mark.asyncio
+async def test_file_stat_failure_preserves_replacement_destination(
+    source_config, tmp_path, monkeypatch
+):
+    root = Path(source_config.projects["export"].path)
+    source = root / "a.md"
+    destination = tmp_path / "bundle"
+    destination.mkdir()
+    (destination / "keep").write_bytes(b"previous bundle")
+    original_lstat = Path.lstat
+
+    def failing_lstat(path, *args, **kwargs):
+        if path == source:
+            raise PermissionError(13, "stat unavailable", str(path))
+        return original_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", failing_lstat)
+    with pytest.raises(PermissionError, match="stat unavailable"):
+        await export_project(source_config, "export", destination, replace=True)
+    assert (destination / "keep").read_bytes() == b"previous bundle"
+
+
+@pytest.mark.asyncio
+async def test_staging_path_collision_preserves_destination(source_config, tmp_path, monkeypatch):
+    import basic_memory.okf.export as exporting
+
+    destination = tmp_path / "bundle"
+    destination.mkdir()
+    (destination / "keep").write_bytes(b"previous bundle")
+    original_open = Path.open
+
+    def case_insensitive_staging_open(path, mode="r", *args, **kwargs):
+        if mode == "xb":
+            path = path.with_name(path.name.lower())
+        return original_open(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", case_insensitive_staging_open)
+    monkeypatch.setattr(
+        exporting,
+        "render_bundle",
+        lambda snapshot: (ExportFile("A.md", b"first"), ExportFile("a.md", b"second")),
+    )
+    with pytest.raises(FileExistsError):
+        await export_project(source_config, "export", destination, replace=True)
+    assert (destination / "keep").read_bytes() == b"previous bundle"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("relation", ["same", "child", "parent"])
+async def test_filesystem_identical_source_containment_is_rejected(
+    source_config, tmp_path, monkeypatch, relation
+):
+    root = Path(source_config.projects["export"].path).resolve()
+    alias = root.with_name(root.name.upper())
+    destination = {"same": alias, "child": alias / "new" / "bundle", "parent": alias.parent}[
+        relation
+    ]
+    if relation == "parent":
+        destination = root.parent.with_name(root.parent.name.upper())
+        alias = destination
+        actual = root.parent
+    else:
+        actual = root
+    original_stat = Path.stat
+
+    def case_insensitive_stat(path, *args, **kwargs):
+        if path.is_relative_to(alias):
+            path = actual / path.relative_to(alias)
+        return original_stat(path, *args, **kwargs)
+
+    def case_insensitive_exists(path):
+        try:
+            case_insensitive_stat(path)
+        except FileNotFoundError:
+            return False
+        return True
+
+    monkeypatch.setattr(Path, "stat", case_insensitive_stat)
+    # Python 3.14 exists() uses os.path.exists directly, bypassing Path.stat.
+    monkeypatch.setattr(Path, "exists", case_insensitive_exists)
+    before = (root / "a.md").read_bytes()
+    with pytest.raises(ValueError, match="Destination must be outside"):
+        await export_project(source_config, "export", destination, replace=True)
+    assert (root / "a.md").read_bytes() == before
+    assert not list(tmp_path.rglob("*.bm-okf-backup-*"))
+
+
+@pytest.mark.asyncio
+async def test_exact_project_name_precedes_normalized_alias(source_config, tmp_path):
+    other = tmp_path / "other-project"
+    other.mkdir()
+    (other / "chosen.md").write_text("# Exact project", encoding="utf-8")
+    source_config.projects = {
+        "my-project": source_config.projects["export"],
+        "My Project": ProjectEntry(path=str(other)),
+    }
+    destination = tmp_path / "bundle"
+    report = await export_project(source_config, "My Project", destination)
+    assert report.success and report.concepts == 1
+    assert (destination / "chosen.md").is_file()
+    assert not (destination / "a.md").exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ignore_name", [".gitignore", ".bmignore"])
+async def test_unreadable_ignore_file_aborts_publication(
+    source_config, tmp_path, monkeypatch, ignore_name
+):
+    from basic_memory.ignore_utils import get_bmignore_path
+
+    root = Path(source_config.projects["export"].path)
+    ignore = root / ignore_name if ignore_name == ".gitignore" else get_bmignore_path()
+    ignore.parent.mkdir(parents=True, exist_ok=True)
+    ignore.write_text("credentials.json\n", encoding="utf-8")
+    (root / "credentials.json").write_text("excluded bytes", encoding="utf-8")
+    destination = tmp_path / "bundle"
+    destination.mkdir()
+    (destination / "keep").write_bytes(b"previous bundle")
+    original_read = Path.read_text
+
+    def denied_read(path, *args, **kwargs):
+        if path == ignore:
+            raise PermissionError(13, "ignore rules unreadable", str(path))
+        return original_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", denied_read)
+    with pytest.raises(PermissionError, match="ignore rules unreadable"):
+        await export_project(source_config, "export", destination, replace=True)
+    assert (destination / "keep").read_bytes() == b"previous bundle"
+    monkeypatch.setattr(Path, "read_text", original_read)
+    assert (await export_project(source_config, "export", destination, replace=True)).success
+    assert not (destination / "credentials.json").exists()
+
+
+@pytest.mark.parametrize("empty_bmignore", [False, True])
+def test_strict_ignore_defaults_do_not_create_files(tmp_path, monkeypatch, empty_bmignore):
+    from basic_memory.ignore_utils import (
+        DEFAULT_IGNORE_PATTERNS,
+        create_default_bmignore,
+        load_gitignore_patterns,
+    )
+
+    bmignore = tmp_path / ".bmignore"
+    monkeypatch.setattr("basic_memory.ignore_utils.get_bmignore_path", lambda: bmignore)
+    if empty_bmignore:
+        bmignore.write_text("# no custom rules\n", encoding="utf-8")
+    assert load_gitignore_patterns(tmp_path, use_gitignore=False, strict=True) == (
+        DEFAULT_IGNORE_PATTERNS
+    )
+    assert bmignore.exists() is empty_bmignore
+    if empty_bmignore:
+        create_default_bmignore()
+        assert bmignore.read_text(encoding="utf-8") == "# no custom rules\n"

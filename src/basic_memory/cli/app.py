@@ -41,6 +41,10 @@ def app_callback(
 ) -> None:
     """Basic Memory - Local-first personal knowledge management."""
 
+    # OKF check is filesystem-only; export resolves config lazily without source repair.
+    if ctx.invoked_subcommand == "okf":
+        return
+
     command_name = ctx.invoked_subcommand or "root"
 
     # Host installation only copies packaged resources. Broken DB/config state
