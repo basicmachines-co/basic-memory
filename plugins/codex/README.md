@@ -87,6 +87,10 @@ ref. All refs are updated together with
 
 ## Requirements
 
+- **[Basic Memory](https://docs.basicmemory.com/)** - required: install it with
+  `uv tool install basic-memory`. The persistent `basic-memory` executable runs
+  the MCP server, so an active Codex session does not depend on uv's removable
+  package cache.
 - **[uv](https://docs.astral.sh/uv/)** — required: the hooks are PEP 723
   scripts executed via `uv run --script`, which installs their pinned Basic
   Memory revision. Install per platform:
