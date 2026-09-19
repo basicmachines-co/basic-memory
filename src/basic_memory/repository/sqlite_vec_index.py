@@ -27,6 +27,7 @@ from basic_memory.repository.semantic_vector_index import (
 
 
 SQLITE_VEC_MAX_K = 4096
+SQLITE_DELETE_BATCH_SIZE = 500
 
 
 class SQLiteVecIndex:
@@ -321,33 +322,36 @@ class SQLiteVecIndex:
                 )
             )
             orphan_rowids = [int(rowid) for rowid in orphan_result.scalars().all()]
-            if orphan_rowids:
-                params = {
-                    f"orphan_rowid_{index}": rowid for index, rowid in enumerate(orphan_rowids)
-                }
-                placeholders = ", ".join(
-                    f":orphan_rowid_{index}" for index in range(len(orphan_rowids))
-                )
-                await session.execute(
-                    text(f"DELETE FROM search_vector_embeddings WHERE rowid IN ({placeholders})"),
-                    params,
-                )
-            await session.execute(
+            stale_result = await session.execute(
                 text(
-                    "DELETE FROM search_vector_embeddings WHERE rowid IN ("
-                    "SELECT id FROM search_vector_chunks "
-                    "WHERE project_id = :project_id AND NOT ("
-                    "vector_index = 'sqlite-vec' "
-                    "AND embedding_model = :embedding_identity "
-                    "AND search_vector_embeddings.source_hash = "
-                    "search_vector_chunks.source_hash "
-                    "AND embedding_status = 'ready'))"
+                    "SELECT chunks.id FROM search_vector_chunks AS chunks "
+                    "JOIN search_vector_embeddings AS embeddings "
+                    "ON embeddings.rowid = chunks.id "
+                    "WHERE chunks.project_id = :project_id AND NOT ("
+                    "chunks.vector_index = 'sqlite-vec' "
+                    "AND chunks.embedding_model = :embedding_identity "
+                    "AND embeddings.source_hash = chunks.source_hash "
+                    "AND chunks.embedding_status = 'ready')"
                 ),
                 {
                     "project_id": project_id,
                     "embedding_identity": self.scope.embedding_identity,
                 },
             )
+            stale_rowids = [int(rowid) for rowid in stale_result.scalars().all()]
+
+            # sqlite-vec evaluates a correlated DELETE by repeatedly scanning the
+            # virtual table. Resolve rowids from the indexed manifest first, then
+            # delete by primary rowid in bounded batches.
+            rowids = orphan_rowids + stale_rowids
+            for offset in range(0, len(rowids), SQLITE_DELETE_BATCH_SIZE):
+                batch = rowids[offset : offset + SQLITE_DELETE_BATCH_SIZE]
+                params = {f"rowid_{index}": rowid for index, rowid in enumerate(batch)}
+                placeholders = ", ".join(f":rowid_{index}" for index in range(len(batch)))
+                await session.execute(
+                    text(f"DELETE FROM search_vector_embeddings WHERE rowid IN ({placeholders})"),
+                    params,
+                )
             await session.commit()
 
     async def search(
