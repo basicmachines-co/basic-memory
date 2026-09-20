@@ -81,6 +81,10 @@ QUERY_TIMEOUT_SECONDS = 10.0
 MAX_SHARED = 6
 CODING_SESSION_PROFILE = "coding"
 CURRENT_DECISION_STATUSES = ("active", "open")
+# Decisions/tasks are one-line standing context; sessions are bulkier and
+# recency-ordered, so they keep the tighter bound.
+STANDING_CONTEXT_LIMIT = 12
+SESSION_BRIEF_LIMIT = 5
 DEFAULT_CAPTURE_EVENTS = True
 CODEX_DEFAULT_CHECKPOINT_ON_COMPACT = True
 CODEX_CHECKPOINT_PROMPT = (
@@ -640,7 +644,7 @@ async def _gather_context(
         recall_session_types.append("checkpoint")
     session_queries.append(_query(project, note_types=recall_session_types, after_date=timeframe))
     decision_queries = [
-        _query(project, note_types=["decision"], status=status)
+        _query(project, note_types=["decision"], status=status, page_size=20)
         for status in CURRENT_DECISION_STATUSES
     ]
     shared_decision_queries = [
@@ -649,7 +653,7 @@ async def _gather_context(
         for status in CURRENT_DECISION_STATUSES
     ]
     results = await asyncio.gather(
-        _query(project, note_types=["task"], status="active"),
+        _query(project, note_types=["task"], status="active", page_size=20),
         *decision_queries,
         *session_queries,
         *shared_decision_queries,
@@ -666,8 +670,10 @@ async def _gather_context(
         for index, ref in enumerate(shared_refs)
     }
     return _BriefContext(
-        tasks=results[0],
-        decisions=_merge_search_results(results[1:decision_end]),
+        tasks=_merge_search_results([results[0]], limit=STANDING_CONTEXT_LIMIT),
+        decisions=_merge_search_results(
+            results[1:decision_end], limit=STANDING_CONTEXT_LIMIT
+        ),
         sessions=_merge_search_results(results[decision_end:session_end]),
         shared=shared,
     )
@@ -677,7 +683,9 @@ def _rows(result: dict[str, Any] | None) -> list[dict[str, Any]]:
     return (result or {}).get("results") or []
 
 
-def _merge_search_results(results: list[dict[str, Any] | None]) -> dict[str, Any] | None:
+def _merge_search_results(
+    results: list[dict[str, Any] | None], limit: int = SESSION_BRIEF_LIMIT
+) -> dict[str, Any] | None:
     """Merge bounded recall queries while preserving their priority order."""
     if all(result is None for result in results):
         return None
@@ -691,7 +699,7 @@ def _merge_search_results(results: list[dict[str, Any] | None]) -> dict[str, Any
                 continue
             seen.add(identity)
             merged.append(row)
-            if len(merged) == 5:
+            if len(merged) == limit:
                 return {"results": merged}
     return {"results": merged}
 
