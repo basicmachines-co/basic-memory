@@ -186,6 +186,34 @@ def test_coding_recall_filters_by_repository_and_merges_codex_sessions() -> None
     assert all(query.get("note_types") != ["codex_session", "session"] for query in queries)
 
 
+def test_general_recall_includes_checkpoints_and_current_decisions() -> None:
+    queries: list[dict[str, object]] = []
+
+    async def fake_query(project: str | None, **filters: object) -> dict[str, Any]:
+        queries.append({"project": project, **filters})
+        if filters.get("note_types") == ["codex_session", "checkpoint"]:
+            return {"results": [{"title": "Recent checkpoint", "permalink": "codex/recent"}]}
+        if filters.get("note_types") == ["decision"] and filters.get("status") == "active":
+            return {"results": [{"title": "Active decision", "permalink": "decisions/active"}]}
+        if filters.get("note_types") == ["decision"] and filters.get("status") == "open":
+            return {"results": [{"title": "Open decision", "permalink": "decisions/open"}]}
+        return {"results": []}
+
+    profile = hook_module.PROFILES[hook_module.Harness.codex]
+    with patch.object(hook_module, "_query", side_effect=fake_query):
+        context = asyncio.run(hook_module._gather_context(profile, "demo", "7d", []))
+
+    assert [row["title"] for row in hook_module._rows(context.sessions)] == ["Recent checkpoint"]
+    assert [row["title"] for row in hook_module._rows(context.decisions)] == [
+        "Active decision",
+        "Open decision",
+    ]
+    assert any(query.get("note_types") == ["codex_session", "checkpoint"] for query in queries)
+    assert {
+        query.get("status") for query in queries if query.get("note_types") == ["decision"]
+    } == {"active", "open"}
+
+
 def test_coding_recall_requires_configured_repository() -> None:
     profile = hook_module.PROFILES[hook_module.Harness.codex]
     with patch.object(hook_module, "_gather_context") as gather_context:

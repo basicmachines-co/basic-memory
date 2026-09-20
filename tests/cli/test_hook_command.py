@@ -174,7 +174,8 @@ def test_session_start_configured_but_unreachable_signals_status(
 def test_session_start_brief_is_fenced_and_labeled(bm_home: Path, claude_project: Path) -> None:
     results = [
         _search_result("Ship login fix"),  # active tasks
-        _search_result("Use SQLite WAL"),  # open decisions
+        _search_result("Use SQLite WAL"),  # active decisions
+        SEARCH_EMPTY,  # open decisions
         _search_result("Session 2026-07-14"),  # recent sessions
     ]
     with patch("basic_memory.mcp.tools.search_notes", new_callable=AsyncMock, side_effect=results):
@@ -192,7 +193,7 @@ def test_session_start_brief_is_fenced_and_labeled(bm_home: Path, claude_project
     fenced = result.stdout.split("`````")[1]
     assert "## Active tasks (1)" in fenced
     assert "- Ship login fix — notes/ship-login-fix" in fenced
-    assert "## Open decisions (1)" in fenced
+    assert "## Current decisions (1)" in fenced
     assert "## Recent sessions (1) — where you left off" in fenced
     # Placement guidance and the recall prompt stay outside the fence.
     assert "## Where to write" in result.stdout
@@ -269,7 +270,7 @@ def test_session_start_reads_shared_projects_and_conventions(
 
     assert "reading 2 shared project(s)" in result.stdout
     assert "## From shared projects (read-only)" in result.stdout
-    assert "### team-notes — open decisions" in result.stdout
+    assert "### team-notes — current decisions" in result.stdout
     assert "Decision from platform" in result.stdout
     assert "decisions in decisions/" in result.stdout
 
@@ -441,13 +442,15 @@ def test_session_start_codex_profile(bm_home: Path, tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     # Codex recalls durable checkpoints, not locally archived lifecycle trace.
-    session_query = mock_search.await_args_list[2].kwargs
-    assert session_query["note_types"] == ["codex_session"]
+    session_query = mock_search.await_args_list[3].kwargs
+    assert session_query["note_types"] == ["codex_session", "checkpoint"]
     assert session_query["after_date"] == "7d"
     assert "codex/" in result.stdout
 
 
-def test_session_start_codex_does_not_query_lifecycle_trace(bm_home: Path, tmp_path: Path) -> None:
+def test_session_start_codex_recalls_checkpoints_not_lifecycle_trace(
+    bm_home: Path, tmp_path: Path
+) -> None:
     project = tmp_path / "codex-proj"
     (project / ".codex").mkdir(parents=True)
     (project / ".codex" / "basic-memory.json").write_text(
@@ -465,7 +468,7 @@ def test_session_start_codex_does_not_query_lifecycle_trace(bm_home: Path, tmp_p
         )
 
     assert result.exit_code == 0
-    assert mock_search.await_args_list[2].kwargs["note_types"] == ["codex_session"]
+    assert mock_search.await_args_list[3].kwargs["note_types"] == ["codex_session", "checkpoint"]
 
 
 def test_session_start_pi_profile_reads_project_config(bm_home: Path, tmp_path: Path) -> None:
@@ -487,9 +490,9 @@ def test_session_start_pi_profile_reads_project_config(bm_home: Path, tmp_path: 
         )
 
     assert result.exit_code == 0
-    session_query = mock_search.await_args_list[2].kwargs
+    session_query = mock_search.await_args_list[3].kwargs
     assert session_query["project"] == "demo"
-    assert session_query["note_types"] == ["pi_session"]
+    assert session_query["note_types"] == ["pi_session", "checkpoint"]
     assert session_query["after_date"] == "2d"
     assert "pi/sessions/" in result.stdout
 

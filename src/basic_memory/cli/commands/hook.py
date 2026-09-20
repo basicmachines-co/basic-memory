@@ -80,6 +80,7 @@ QUERY_TIMEOUT_SECONDS = 10.0
 # Cap how many shared projects we read per session — bounds latency and output.
 MAX_SHARED = 6
 CODING_SESSION_PROFILE = "coding"
+CURRENT_DECISION_STATUSES = ("active", "open")
 DEFAULT_CAPTURE_EVENTS = True
 CODEX_DEFAULT_CHECKPOINT_ON_COMPACT = True
 CODEX_CHECKPOINT_PROMPT = (
@@ -631,22 +632,44 @@ async def _gather_context(
             )
         )
     # General checkpoints are a lower-priority path because coding_session
-    # results carry repository identity and are therefore merged first.
-    session_queries.append(
-        _query(project, note_types=list(profile.recall_session_types), after_date=timeframe)
-    )
+    # results carry repository identity and are therefore merged first. A
+    # generic checkpoint has no repository boundary, so only recall it for a
+    # general session rather than leaking another checkout into coding context.
+    recall_session_types = list(profile.recall_session_types)
+    if repository is None:
+        recall_session_types.append("checkpoint")
+    session_queries.append(_query(project, note_types=recall_session_types, after_date=timeframe))
+    decision_queries = [
+        _query(project, note_types=["decision"], status=status)
+        for status in CURRENT_DECISION_STATUSES
+    ]
+    shared_decision_queries = [
+        _query(ref, note_types=["decision"], status=status)
+        for ref in shared_refs
+        for status in CURRENT_DECISION_STATUSES
+    ]
     results = await asyncio.gather(
         _query(project, note_types=["task"], status="active"),
-        _query(project, note_types=["decision"], status="open"),
+        *decision_queries,
         *session_queries,
-        *[_query(ref, note_types=["decision"], status="open") for ref in shared_refs],
+        *shared_decision_queries,
     )
-    session_end = 2 + len(session_queries)
+    decision_end = 1 + len(decision_queries)
+    session_end = decision_end + len(session_queries)
+    shared = {
+        ref: _merge_search_results(
+            results[
+                session_end + index * len(CURRENT_DECISION_STATUSES) : session_end
+                + (index + 1) * len(CURRENT_DECISION_STATUSES)
+            ]
+        )
+        for index, ref in enumerate(shared_refs)
+    }
     return _BriefContext(
         tasks=results[0],
-        decisions=results[1],
-        sessions=_merge_search_results(results[2:session_end]),
-        shared=dict(zip(shared_refs, results[session_end:])),
+        decisions=_merge_search_results(results[1:decision_end]),
+        sessions=_merge_search_results(results[decision_end:session_end]),
+        shared=shared,
     )
 
 
@@ -780,7 +803,11 @@ def _build_brief(
     if task_rows:
         data_lines += ["", f"## Active tasks ({len(task_rows)})", *map(_label, task_rows)]
     if decision_rows:
-        data_lines += ["", f"## Open decisions ({len(decision_rows)})", *map(_label, decision_rows)]
+        data_lines += [
+            "",
+            f"## Current decisions ({len(decision_rows)})",
+            *map(_label, decision_rows),
+        ]
     if session_rows:
         session_lines = [
             line
@@ -802,7 +829,7 @@ def _build_brief(
     if shared_sections:
         data_lines += ["", "## From shared projects (read-only)"]
         for ref, items in shared_sections:
-            data_lines += [f"### {_readable(ref)} — open decisions", *map(_label, items)]
+            data_lines += [f"### {_readable(ref)} — current decisions", *map(_label, items)]
         data_lines += [
             "",
             "_Shared-project context is read-only. Your captures stay in this project; "
