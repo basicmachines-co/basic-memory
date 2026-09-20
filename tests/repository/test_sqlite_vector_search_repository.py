@@ -381,7 +381,7 @@ async def test_disabled_semantic_cleanup_deletes_sqlite_vec_rows(search_reposito
 
 @pytest.mark.asyncio
 async def test_sqlite_vec_reconciliation_is_project_scoped(search_repository):
-    """Reconciliation removes orphan/local stale rows without touching another project."""
+    """Reconciliation removes stale rows without touching another project."""
     if not isinstance(search_repository, SQLiteSearchRepository):
         pytest.skip("sqlite-vec reconciliation behavior is local SQLite-only.")
 
@@ -398,8 +398,8 @@ async def test_sqlite_vec_reconciliation_is_project_scoped(search_repository):
                 "id, entity_id, project_id, chunk_key, chunk_text, source_hash, "
                 "entity_fingerprint, embedding_model, vector_index, embedding_status"
                 ") VALUES ("
-                ":id, :entity_id, :project_id, :chunk_key, 'text', 'hash', "
-                "'fingerprint', :embedding_model, 'sqlite-vec', :embedding_status)"
+                ":id, :entity_id, :project_id, :chunk_key, 'text', :source_hash, "
+                "'fingerprint', :embedding_model, :vector_index, :embedding_status)"
             ),
             [
                 {
@@ -407,7 +407,9 @@ async def test_sqlite_vec_reconciliation_is_project_scoped(search_repository):
                     "entity_id": 901,
                     "project_id": search_repository.project_id,
                     "chunk_key": "entity:901:0",
+                    "source_hash": "pending",
                     "embedding_model": embedding_identity,
+                    "vector_index": "sqlite-vec",
                     "embedding_status": "pending",
                 },
                 {
@@ -415,25 +417,79 @@ async def test_sqlite_vec_reconciliation_is_project_scoped(search_repository):
                     "entity_id": 902,
                     "project_id": search_repository.project_id,
                     "chunk_key": "entity:902:0",
+                    "source_hash": "ready",
                     "embedding_model": embedding_identity,
+                    "vector_index": "sqlite-vec",
                     "embedding_status": "ready",
                 },
                 {
                     "id": 903,
                     "entity_id": 903,
-                    "project_id": search_repository.project_id + 1,
+                    "project_id": search_repository.project_id,
                     "chunk_key": "entity:903:0",
+                    "source_hash": "stale",
                     "embedding_model": embedding_identity,
+                    "vector_index": "sqlite-vec",
+                    "embedding_status": "ready",
+                },
+                {
+                    "id": 904,
+                    "entity_id": 904,
+                    "project_id": search_repository.project_id,
+                    "chunk_key": "entity:904:0",
+                    "source_hash": "ready",
+                    "embedding_model": "other-model",
+                    "vector_index": "sqlite-vec",
+                    "embedding_status": "ready",
+                },
+                {
+                    "id": 905,
+                    "entity_id": 905,
+                    "project_id": search_repository.project_id,
+                    "chunk_key": "entity:905:0",
+                    "source_hash": "ready",
+                    "embedding_model": embedding_identity,
+                    "vector_index": "other-index",
+                    "embedding_status": "ready",
+                },
+                {
+                    "id": 906,
+                    "entity_id": 906,
+                    "project_id": search_repository.project_id + 1,
+                    "chunk_key": "entity:906:0",
+                    "source_hash": "other-project",
+                    "embedding_model": "other-model",
+                    "vector_index": "other-index",
                     "embedding_status": "pending",
                 },
             ],
         )
         await session.execute(
             text(
-                "INSERT INTO search_vector_embeddings (rowid, embedding) "
-                "VALUES (:rowid, :embedding)"
+                "INSERT INTO search_vector_embeddings (rowid, project_id, embedding, source_hash) "
+                "VALUES (:rowid, :project_id, :embedding, :source_hash)"
             ),
-            [{"rowid": rowid, "embedding": "[1,0,0,0]"} for rowid in (901, 902, 903, 904)],
+            [
+                {
+                    "rowid": rowid,
+                    "project_id": (
+                        search_repository.project_id
+                        if rowid != 906
+                        else search_repository.project_id + 1
+                    ),
+                    "embedding": "[1,0,0,0]",
+                    "source_hash": source_hash,
+                }
+                for rowid, source_hash in (
+                    (901, "pending"),
+                    (902, "ready"),
+                    (903, "stored"),
+                    (904, "ready"),
+                    (905, "ready"),
+                    (906, "other-project"),
+                    (907, "orphan"),
+                )
+            ],
         )
         await session.commit()
 
@@ -443,10 +499,10 @@ async def test_sqlite_vec_reconciliation_is_project_scoped(search_repository):
         remaining = await session.execute(
             text(
                 "SELECT rowid FROM search_vector_embeddings "
-                "WHERE rowid IN (901, 902, 903, 904) ORDER BY rowid"
+                "WHERE rowid IN (901, 902, 903, 904, 905, 906, 907) ORDER BY rowid"
             )
         )
-        assert remaining.scalars().all() == [902, 903]
+        assert remaining.scalars().all() == [902, 906]
 
 
 @pytest.mark.asyncio
