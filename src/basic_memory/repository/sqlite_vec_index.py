@@ -335,13 +335,13 @@ class SQLiteVecIndex:
             await session.execute(
                 text(
                     "DELETE FROM search_vector_embeddings WHERE rowid IN ("
-                    "SELECT id FROM search_vector_chunks "
-                    "WHERE project_id = :project_id AND NOT ("
-                    "vector_index = 'sqlite-vec' "
-                    "AND embedding_model = :embedding_identity "
-                    "AND search_vector_embeddings.source_hash = "
-                    "search_vector_chunks.source_hash "
-                    "AND embedding_status = 'ready'))"
+                    "SELECT chunks.id FROM search_vector_chunks AS chunks "
+                    "JOIN search_vector_embeddings AS vectors ON vectors.rowid = chunks.id "
+                    "WHERE chunks.project_id = :project_id AND NOT ("
+                    "chunks.vector_index = 'sqlite-vec' "
+                    "AND chunks.embedding_model = :embedding_identity "
+                    "AND vectors.source_hash = chunks.source_hash "
+                    "AND chunks.embedding_status = 'ready'))"
                 ),
                 {
                     "project_id": project_id,
