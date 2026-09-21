@@ -29,7 +29,6 @@ Basic Memory provides the MCP server — tools like `write_note`, `search_notes`
 | **memory-continue** | Resume prior work by rebuilding context from the knowledge graph — `build_context` via `memory://` URLs, recent activity, and search, then read the key notes. | Starting a session, or when the user says "continue with...", "back to...", or "where were we?" |
 | **memory-onboarding** | Guided onboarding for people new to Basic Memory — interview, blueprint, approval gate, then build a full system: schemas, templates, instruction notes, a startup router, indexes, and real seed notes, plus assistant setup so the rules load every session. | When a user is new to Basic Memory, doesn't know what to use it for, wants structure in an empty or messy project, or wants their assistant to follow consistent rules across sessions. |
 
-
 `memory-research` asks the agent to search the web. Basic Memory does not ship that tool. If the host already has web search, keep using it. If not, [Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp#cursor) is an optional free setup (no account or API key, lower rate limits). It does not receive notes, and the agent still asks before saving one.
 
 ## Basic Memory Cloud
