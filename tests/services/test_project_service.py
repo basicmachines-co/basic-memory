@@ -14,7 +14,7 @@ from basic_memory.schemas import (
     ActivityMetrics,
     SystemStatus,
 )
-from basic_memory.services.project_service import ProjectService
+from basic_memory.services.project_service import ProjectService, project_permalink
 from basic_memory.config import ConfigManager, DatabaseBackend
 from typing import Any
 
@@ -239,6 +239,41 @@ async def test_add_project_rejects_names_without_a_permalink(
     with tempfile.TemporaryDirectory() as temp_dir:
         with pytest.raises(ValueError, match="no usable permalink"):
             await project_service.add_project(name, temp_dir)
+
+
+@pytest.mark.parametrize(
+    ("name", "top_level", "expected"),
+    [
+        ("Research", True, "research"),
+        ("Research/2026", False, "research/2026"),
+    ],
+)
+def test_project_permalink_addresses_the_project(name: str, top_level: bool, expected: str):
+    assert project_permalink(name, top_level=top_level) == expected
+
+
+def test_project_permalink_keeps_projects_under_a_shared_root_top_level():
+    """A '/' under a shared root would put one project's directory inside another's."""
+    with pytest.raises(ValueError, match="cannot contain '/'"):
+        project_permalink("Research/2026", top_level=True)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Project root constraints only tested on POSIX systems")
+@pytest.mark.asyncio
+async def test_add_project_under_a_project_root_rejects_a_nested_name(
+    project_service: ProjectService, monkeypatch
+):
+    with tempfile.TemporaryDirectory() as temp_dir:
+        monkeypatch.setenv("BASIC_MEMORY_PROJECT_ROOT", temp_dir)
+        from basic_memory import config as config_module
+
+        config_module._CONFIG_CACHE = None
+        config_module._CONFIG_MTIME = None
+        config_module._CONFIG_SIZE = None
+
+        with pytest.raises(ValueError, match="cannot contain '/'"):
+            await project_service.add_project("Research/2026", "ignored")
+        assert "Research/2026" not in project_service.projects
 
 
 @pytest.mark.asyncio

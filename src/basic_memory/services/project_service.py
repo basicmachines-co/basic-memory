@@ -71,6 +71,47 @@ def _is_cloud_only(entry: ProjectEntry) -> bool:
     return not (local_copy and os.path.isabs(local_copy))
 
 
+def project_permalink(name: str, *, top_level: bool) -> str:
+    """Return the permalink that addresses a new project, or refuse the name.
+
+    Every runtime that creates projects calls this, so a name one of them accepts
+    is a name all of them accept. ``top_level`` is true where each project owns one
+    directory directly under a shared root (a configured project root, and Cloud,
+    where that root is the tenant bucket).
+    """
+    permalink = generate_permalink(name)
+    # Trigger: a name whose permalink has an empty segment — pure punctuation
+    #   or emoji ('!!!', '💥') reduce to "", and a leading slash ('/foo')
+    #   leaves an empty first segment.
+    # Why: the permalink is the project's address, and the resolver matches
+    #   it segment by segment against a path whose leading slashes are
+    #   already stripped. An empty segment means no path can ever match it:
+    #   '' advertises at the root as '/', indistinguishable from every other
+    #   such project, and '/foo' advertises '//foo' and cannot be entered.
+    #   Either way the mount view lists something unaddressable (#1421).
+    # Outcome: refused at the boundary that creates projects, so an
+    #   unaddressable mount cannot exist rather than being handled downstream.
+    if not all(permalink.split("/")):
+        raise ValueError(
+            f"Project name '{name}' has no usable permalink. Names need at least one "
+            "letter, digit, or CJK character in every path segment, and may not start "
+            "with '/', so the project has an address."
+        )
+    # Trigger: 'Research/2026' under a shared root.
+    # Why: the permalink becomes the project's directory, so a '/' puts it inside
+    #   another project's directory ('research/2026' under 'research'). Anything
+    #   that treats a project directory as the project's own, such as deleting
+    #   it with the project, would then reach into the nested one.
+    # Outcome: projects under a shared root stay one directory deep. Local
+    #   projects choose their own paths and may still use '/' in their names.
+    if top_level and "/" in permalink:
+        raise ValueError(
+            f"Project name '{name}' contains '/'. Projects under a shared project root "
+            "are top-level directories, so their names cannot contain '/'."
+        )
+    return permalink
+
+
 class ProjectService:
     """Service for managing Basic Memory projects."""
 
@@ -226,26 +267,9 @@ class ProjectService:
             ValueError: If the project already exists, the name has no permalink,
                 or the path collides with an existing project
         """
-        # Trigger: a name whose permalink has an empty segment — pure punctuation
-        #   or emoji ('!!!', '💥') reduce to "", and a leading slash ('/foo')
-        #   leaves an empty first segment.
-        # Why: the permalink is the project's address, and the resolver matches
-        #   it segment by segment against a path whose leading slashes are
-        #   already stripped. An empty segment means no path can ever match it:
-        #   '' advertises at the root as '/', indistinguishable from every other
-        #   such project, and '/foo' advertises '//foo' and cannot be entered.
-        #   Either way the mount view lists something unaddressable (#1421).
-        # Outcome: refused at the one boundary that creates projects, so an
-        #   unaddressable mount cannot exist rather than being handled downstream.
-        if not all(generate_permalink(name).split("/")):
-            raise ValueError(
-                f"Project name '{name}' has no usable permalink. Names need at least one "
-                "letter, digit, or CJK character in every path segment, and may not start "
-                "with '/', so the project has an address."
-            )
-
         # If project_root is set, constrain all projects to that directory
         project_root = self.config_manager.config.project_root
+        name_permalink = project_permalink(name, top_level=project_root is not None)
         sanitized_name = None
         if project_root:
             base_path = Path(project_root)
@@ -253,7 +277,7 @@ class ProjectService:
             # In cloud mode (when project_root is set), ignore user's path completely
             # and use sanitized project name as the directory name
             # This ensures flat structure: /app/data/test-bisync instead of /app/data/documents/test bisync
-            sanitized_name = generate_permalink(name)
+            sanitized_name = name_permalink
 
             # Construct path using sanitized project name only
             resolved_path = (base_path / sanitized_name).resolve().as_posix()
@@ -278,7 +302,6 @@ class ProjectService:
             #   path and the resolver can only pick one, leaving the other
             #   unreachable and its paths reading the wrong project's content.
             # Outcome: refused here, where the second one would be created.
-            name_permalink = generate_permalink(name)
             for existing in existing_projects:
                 if existing.name != name and generate_permalink(existing.name) == name_permalink:
                     raise ValueError(
