@@ -222,7 +222,7 @@ async def test_get_project_info(project_service: ProjectService, test_graph, tes
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("name", ["💥", "!!!", "---", "/", "/foo", "/a/b"])
+@pytest.mark.parametrize("name", ["💥", "!!!", "---", "/", "/foo", "/a/b", ".", "..", "a/.."])
 async def test_add_project_rejects_names_without_a_permalink(
     project_service: ProjectService, name: str
 ):
@@ -274,6 +274,27 @@ async def test_add_project_under_a_project_root_rejects_a_nested_name(
         with pytest.raises(ValueError, match="cannot contain '/'"):
             await project_service.add_project("Research/2026", "ignored")
         assert "Research/2026" not in project_service.projects
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Project root constraints only tested on POSIX systems")
+@pytest.mark.asyncio
+async def test_add_project_with_an_empty_project_root_keeps_local_names(
+    project_service: ProjectService, monkeypatch
+):
+    """An empty BASIC_MEMORY_PROJECT_ROOT is no root, so local '/' names still work."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        monkeypatch.setenv("BASIC_MEMORY_PROJECT_ROOT", "")
+        from basic_memory import config as config_module
+
+        config_module._CONFIG_CACHE = None
+        config_module._CONFIG_MTIME = None
+        config_module._CONFIG_SIZE = None
+
+        await project_service.add_project("Research/2026", temp_dir)
+        try:
+            assert project_service.projects["Research/2026"] == Path(temp_dir).as_posix()
+        finally:
+            await project_service.remove_project("Research/2026")
 
 
 @pytest.mark.asyncio

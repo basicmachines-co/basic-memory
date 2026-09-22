@@ -80,18 +80,21 @@ def project_permalink(name: str, *, top_level: bool) -> str:
     where that root is the tenant bucket).
     """
     permalink = generate_permalink(name)
-    # Trigger: a name whose permalink has an empty segment — pure punctuation
-    #   or emoji ('!!!', '💥') reduce to "", and a leading slash ('/foo')
-    #   leaves an empty first segment.
+    # Trigger: a name whose permalink has a segment with nothing but dots and
+    #   hyphens — pure punctuation or emoji ('!!!', '💥') reduce to "", a
+    #   leading slash ('/foo') leaves an empty first segment, and '.' or '..'
+    #   survive as themselves because periods are kept.
     # Why: the permalink is the project's address, and the resolver matches
     #   it segment by segment against a path whose leading slashes are
     #   already stripped. An empty segment means no path can ever match it:
     #   '' advertises at the root as '/', indistinguishable from every other
     #   such project, and '/foo' advertises '//foo' and cannot be entered.
-    #   Either way the mount view lists something unaddressable (#1421).
+    #   Either way the mount view lists something unaddressable (#1421). A '.'
+    #   or '..' segment is worse: as a directory it names the parent or the
+    #   root itself, so deleting that project's files would delete the root.
     # Outcome: refused at the boundary that creates projects, so an
     #   unaddressable mount cannot exist rather than being handled downstream.
-    if not all(permalink.split("/")):
+    if not all(segment.strip(".-") for segment in permalink.split("/")):
         raise ValueError(
             f"Project name '{name}' has no usable permalink. Names need at least one "
             "letter, digit, or CJK character in every path segment, and may not start "
@@ -269,7 +272,7 @@ class ProjectService:
         """
         # If project_root is set, constrain all projects to that directory
         project_root = self.config_manager.config.project_root
-        name_permalink = project_permalink(name, top_level=project_root is not None)
+        name_permalink = project_permalink(name, top_level=bool(project_root))
         sanitized_name = None
         if project_root:
             base_path = Path(project_root)
