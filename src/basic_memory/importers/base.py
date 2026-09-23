@@ -64,7 +64,7 @@ class Importer[T: ImportResult]:
         """Import data from source file to destination folder.
 
         Args:
-            source_path: Path to the source file.
+            source_data: Parsed data loaded from the source file.
             destination_folder: Destination folder within the project.
             **kwargs: Additional keyword arguments for specific import types.
 

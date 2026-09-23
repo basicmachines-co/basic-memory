@@ -104,11 +104,11 @@ class ClaudeConversationsImporter(Importer[ChatImportResult]):
         """Convert chat messages to Basic Memory entity format.
 
         Args:
-            folder: Destination folder name (relative path).
             name: Chat name.
             messages: List of chat messages.
             created_at: Creation timestamp.
             modified_at: Modification timestamp.
+            permalink: Permalink assigned to the conversation entity.
 
         Returns:
             EntityMarkdown instance representing the conversation.
