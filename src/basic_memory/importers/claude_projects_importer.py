@@ -35,7 +35,7 @@ class ClaudeProjectsImporter(Importer[ProjectImportResult]):
         """Import projects from Claude JSON export.
 
         Args:
-            source_path: Path to the Claude projects.json file.
+            source_data: Parsed projects from the Claude projects.json export.
             destination_folder: Base folder for projects within the project.
             **kwargs: Additional keyword arguments.
 
@@ -109,7 +109,7 @@ class ClaudeProjectsImporter(Importer[ProjectImportResult]):
         Args:
             project: Project data.
             doc: Document data.
-            destination_folder: Optional destination folder prefix.
+            permalink: Permalink assigned to the document entity.
 
         Returns:
             EntityMarkdown instance representing the document.
@@ -144,7 +144,7 @@ class ClaudeProjectsImporter(Importer[ProjectImportResult]):
 
         Args:
             project: Project data.
-            destination_folder: Optional destination folder prefix.
+            permalink: Permalink assigned to the prompt entity.
 
         Returns:
             EntityMarkdown instance representing the prompt template, or None if

@@ -41,7 +41,7 @@ class ChatGPTImporter(Importer[ChatImportResult]):
         """Import conversations from ChatGPT JSON export.
 
         Args:
-            source_path: Path to the ChatGPT conversations.json file.
+            source_data: Parsed conversations from the ChatGPT conversations.json export.
             destination_folder: Destination folder within the project.
             **kwargs: Additional keyword arguments.
 
