@@ -644,6 +644,9 @@ def _render_index(
         generated_at=snapshot.source_accepted_at,
         body="\n".join(body),
         include_okf_version=not scope,
+        # An index body is only wikilinks to the notes and sections it lists,
+        # so those links should become relations in the graph.
+        parse_semantics=True,
     )
 
 
@@ -691,6 +694,9 @@ def _render_log(
         generated_at=snapshot.source_accepted_at,
         body="\n".join(body),
         include_okf_version=False,
+        # A log links to changed notes, including deleted ones; it must stay
+        # graph-silent so history never shows up as relations.
+        parse_semantics=False,
     )
 
 
@@ -730,13 +736,12 @@ def _render_document(
     generated_at: datetime,
     body: str,
     include_okf_version: bool,
+    parse_semantics: bool,
 ) -> bytes:
-    frontmatter = [
-        "---",
-        f"type: {note_type}",
-        "bm_parse_semantics: false",
-        f"permalink: {json.dumps(permalink, ensure_ascii=False)}",
-    ]
+    frontmatter = ["---", f"type: {note_type}"]
+    if not parse_semantics:
+        frontmatter.append("bm_parse_semantics: false")
+    frontmatter.append(f"permalink: {json.dumps(permalink, ensure_ascii=False)}")
     if include_okf_version:
         frontmatter.append(f'okf_version: "{OKF_VERSION}"')
     frontmatter.extend(

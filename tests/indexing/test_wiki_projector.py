@@ -26,6 +26,7 @@ from basic_memory.indexing.wiki_projector import (
     plan_wiki_folder_creation,
     plan_wiki_projection,
 )
+from basic_memory.markdown.entity_parser import EntityParser
 
 ACCEPTED_AT = datetime(2026, 8, 29, 18, 30, tzinfo=timezone.utc)
 
@@ -392,14 +393,39 @@ def test_projection_renders_root_and_affected_directory_indexes_and_logs() -> No
     assert "[[guides/index|Guides]]" in rendered["index.md"]
     assert "[[overview|Overview]]" in rendered["index.md"]
     assert "Updated [[guides/setup|Setup]]" in rendered["guides/log.md"]
-    assert "bm_parse_semantics: false" in rendered["index.md"]
+    assert "bm_parse_semantics" not in rendered["index.md"]
+    assert "bm_parse_semantics" not in rendered["guides/index.md"]
     assert "bm_parse_semantics: false" in rendered["log.md"]
+    assert "bm_parse_semantics: false" in rendered["guides/log.md"]
     assert 'permalink: "index"' in rendered["index.md"]
     assert 'permalink: "guides/log"' in rendered["guides/log.md"]
     assert plan.result.source_watermark == 3
     assert plan.result.output_watermark == 3
     assert plan.result.created == 4
     assert plan.result.state == WikiProjectionState.current
+
+
+@pytest.mark.asyncio
+async def test_projected_index_links_become_relations_and_logs_stay_graph_silent(
+    tmp_path: Path,
+) -> None:
+    plan = plan_wiki_projection(_request(), _snapshot())
+    rendered = {write.path: write.content.decode() for write in plan.writes}
+    parser = EntityParser(tmp_path)
+
+    guides_index = await parser.parse_markdown_content(
+        tmp_path / "guides" / "index.md", rendered["guides/index.md"]
+    )
+    guides_log = await parser.parse_markdown_content(
+        tmp_path / "guides" / "log.md", rendered["guides/log.md"]
+    )
+
+    # Targets keep the wikilink alias; the link resolver strips it at resolution time.
+    assert {relation.target for relation in guides_index.relations} == {
+        "guides/deep/index|Deep",
+        "guides/setup|Setup",
+    }
+    assert guides_log.relations == []
 
 
 def test_requested_empty_folder_links_parent_indexes() -> None:
