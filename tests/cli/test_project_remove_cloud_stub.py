@@ -49,6 +49,11 @@ def _projects(config_file: Path) -> dict[str, dict[str, object]]:
     return json.loads(config_file.read_text())["projects"]
 
 
+def _flat(output: str) -> str:
+    """Collapse whitespace so assertions survive Rich wrapping at the console width."""
+    return " ".join(output.split())
+
+
 @pytest.fixture
 def config_file(tmp_path, monkeypatch):
     """A local default plus a cloud-only routing entry."""
@@ -171,8 +176,7 @@ def test_auto_routed_cloud_delete_cleans_local_sync_artifacts(
     assert result.exit_code == 0, result.stdout
     assert not bisync_state.exists(), "stale bisync state would let a recreated name skip --resync"
     assert local_sync.exists(), "the local sync directory stays without --delete-local-files"
-    # Rich wraps the long temp path across lines, so match the message alone.
-    assert "Local files kept at" in result.stdout
+    assert "Local files kept at" in _flat(result.stdout)
     assert "research" not in _projects(config_file)
 
 
@@ -262,9 +266,9 @@ def test_cloud_remove_warns_and_declining_deletes_nothing(runner, config_file, c
     result = runner.invoke(app, ["project", "remove", "openclaw-demo"], input="n\n")
 
     assert result.exit_code == 0, result.stdout
-    assert "permanently deletes all of its files" in result.stdout
-    assert "recovered only from a cloud snapshot" in result.stdout
-    assert "Remove cancelled - nothing deleted" in result.stdout
+    assert "permanently deletes all of its files" in _flat(result.stdout)
+    assert "recovered only from a cloud snapshot" in _flat(result.stdout)
+    assert "Remove cancelled - nothing deleted" in _flat(result.stdout)
     assert "deleted" not in cloud_delete, "no delete request after a declined prompt"
     assert "openclaw-demo" in _projects(config_file)
 
@@ -276,7 +280,7 @@ def test_cloud_remove_confirmed_interactively_deletes_cloud_files(
 
     assert result.exit_code == 0, result.stdout
     assert cloud_delete["delete_notes"] is True
-    assert "Cloud file deletion queued." in result.stdout
+    assert "Cloud file deletion queued." in _flat(result.stdout)
 
 
 def test_cloud_remove_without_a_tty_answer_aborts(runner, config_file, cloud_delete):
@@ -296,8 +300,8 @@ def test_delete_notes_on_a_cloud_project_keeps_the_local_sync_directory(
     assert result.exit_code == 0, result.stdout
     assert cloud_delete["delete_notes"] is True
     assert (synced_cloud_project / "note.md").exists()
-    assert "will be kept" in result.stdout
-    assert "Local files kept at" in result.stdout
+    assert "will be kept" in _flat(result.stdout)
+    assert "Local files kept at" in _flat(result.stdout)
 
 
 def test_delete_local_files_removes_the_local_sync_directory(
@@ -308,8 +312,8 @@ def test_delete_local_files_removes_the_local_sync_directory(
     assert result.exit_code == 0, result.stdout
     assert cloud_delete["delete_notes"] is True
     assert not synced_cloud_project.exists()
-    assert "will also be deleted" in result.stdout
-    assert "Removed local sync directory" in result.stdout
+    assert "will also be deleted" in _flat(result.stdout)
+    assert "Removed local sync directory" in _flat(result.stdout)
 
 
 def test_unregistered_project_routes_to_cloud_and_deletes_cloud_files(
@@ -324,7 +328,7 @@ def test_unregistered_project_routes_to_cloud_and_deletes_cloud_files(
 
     assert result.exit_code == 0, result.stdout
     assert cloud_delete["delete_notes"] is True
-    assert "recovered only from a cloud snapshot" in result.stdout
+    assert "recovered only from a cloud snapshot" in _flat(result.stdout)
 
 
 def test_delete_local_files_is_rejected_for_a_local_route(
@@ -342,7 +346,7 @@ def test_delete_local_files_is_rejected_for_a_local_route(
     result = runner.invoke(app, ["project", "remove", "research", "--delete-local-files"])
 
     assert result.exit_code == 1
-    assert "--delete-local-files applies only to cloud projects" in result.stdout
+    assert "--delete-local-files applies only to cloud projects" in _flat(result.stdout)
     assert "deleted" not in cloud_delete
 
 
@@ -366,4 +370,4 @@ def test_cloud_remove_reports_the_backend_file_delete_status(
     result = runner.invoke(app, ["project", "remove", "openclaw-demo", "--yes"])
 
     assert result.exit_code == 0, result.stdout
-    assert expected in result.stdout
+    assert expected in _flat(result.stdout)
