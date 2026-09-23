@@ -81,6 +81,7 @@ QUERY_TIMEOUT_SECONDS = 10.0
 MAX_SHARED = 6
 CODING_SESSION_PROFILE = "coding"
 CURRENT_DECISION_STATUSES = ("active", "open")
+CURRENT_TASK_STATUSES = ("active", "open")
 # Decisions/tasks are one-line standing context; sessions are bulkier and
 # recency-ordered, so they keep the tighter bound.
 STANDING_CONTEXT_LIMIT = 12
@@ -652,13 +653,18 @@ async def _gather_context(
         for ref in shared_refs
         for status in CURRENT_DECISION_STATUSES
     ]
+    task_queries = [
+        _query(project, note_types=["task"], status=status, page_size=20)
+        for status in CURRENT_TASK_STATUSES
+    ]
     results = await asyncio.gather(
-        _query(project, note_types=["task"], status="active", page_size=20),
+        *task_queries,
         *decision_queries,
         *session_queries,
         *shared_decision_queries,
     )
-    decision_end = 1 + len(decision_queries)
+    task_end = len(task_queries)
+    decision_end = task_end + len(decision_queries)
     session_end = decision_end + len(session_queries)
     shared = {
         ref: _merge_search_results(
@@ -670,9 +676,9 @@ async def _gather_context(
         for index, ref in enumerate(shared_refs)
     }
     return _BriefContext(
-        tasks=_merge_search_results([results[0]], limit=STANDING_CONTEXT_LIMIT),
+        tasks=_merge_search_results(results[:task_end], limit=STANDING_CONTEXT_LIMIT),
         decisions=_merge_search_results(
-            results[1:decision_end], limit=STANDING_CONTEXT_LIMIT
+            results[task_end:decision_end], limit=STANDING_CONTEXT_LIMIT
         ),
         sessions=_merge_search_results(results[decision_end:session_end]),
         shared=shared,
@@ -809,7 +815,7 @@ def _build_brief(
     decision_rows = _rows(context.decisions)
     session_rows = _rows(context.sessions)
     if task_rows:
-        data_lines += ["", f"## Active tasks ({len(task_rows)})", *map(_label, task_rows)]
+        data_lines += ["", f"## Unfinished tasks ({len(task_rows)})", *map(_label, task_rows)]
     if decision_rows:
         data_lines += [
             "",
@@ -830,7 +836,10 @@ def _build_brief(
             *session_lines,
         ]
     if not (task_rows or decision_rows or session_rows):
-        data_lines += ["", "_No active tasks, open decisions, or recent sessions in this project._"]
+        data_lines += [
+            "",
+            "_No unfinished tasks, open decisions, or recent sessions in this project._",
+        ]
 
     shared_sections = [(ref, _rows(context.shared.get(ref))) for ref in shared_refs]
     shared_sections = [(ref, items) for ref, items in shared_sections if items]
