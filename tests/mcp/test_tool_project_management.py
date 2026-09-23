@@ -514,7 +514,10 @@ async def test_create_memory_project_constrained_with_workspace_returns_disabled
 @pytest.mark.parametrize("delete_notes", [False, True])
 async def test_delete_project_resolves_workspace_slug(app, delete_notes):
     """A friendly workspace slug resolves to the tenant id used for delete routing,
-    and delete_notes is passed through to the typed client (#1034)."""
+    and a cloud-routed delete always requests file deletion (#1597).
+
+    The cloud backend is mocked: unit tests have no cloud service to delete from.
+    """
     from basic_memory.mcp.clients import ProjectClient
     from basic_memory.schemas.project_info import ProjectStatusResponse
 
@@ -537,7 +540,7 @@ async def test_delete_project_resolves_workspace_slug(app, delete_notes):
         default=False,
         old_project=target_project,
         deletion_status="pending",
-        file_delete_status="pending" if delete_notes else "skipped",
+        file_delete_status="pending",
         job_id="28993",
     )
 
@@ -583,17 +586,16 @@ async def test_delete_project_resolves_workspace_slug(app, delete_notes):
 
     mock_resolve_workspace.assert_awaited_once_with(workspace="team-paul", context=None)
     assert captured["workspace"] == "tenant-abc-123"
-    mock_delete_project.assert_awaited_once_with("project-uuid", delete_notes=delete_notes)
+    # The cloud service deletes files on every project delete (basic-memory-cloud#2117),
+    # so the request says so whatever the caller passed.
+    mock_delete_project.assert_awaited_once_with("project-uuid", delete_notes=True)
     assert result.startswith("✓")
     assert "Project deletion status: pending" in result
     assert "Deletion job ID: 28993" in result
-    # Cloud-routed delete: result text must not claim "files remain on disk" (#1034).
-    if delete_notes:
-        assert "Note-file deletion in cloud storage was queued and is pending" in result
-        assert "were deleted" not in result
-    else:
-        assert "Note files remain in cloud storage" in result
-        assert "Re-add the project" in result
+    assert "Note-file deletion in cloud storage was queued and is pending" in result
+    assert "recovered only from a cloud snapshot" in result
+    assert "were deleted" not in result
+    assert "remain in cloud storage" not in result
 
 
 @pytest.mark.asyncio

@@ -743,8 +743,8 @@ def _routes_to_cloud(workspace_id: str | None) -> bool:
     """Mirror get_client's non-project routing for project lifecycle operations.
 
     Trigger: project creation and deletion need backend-specific behavior.
-    Why: cloud indexing must be asynchronous, and delete output must describe
-        whether retained files live on local disk or in cloud storage.
+    Why: cloud indexing must be asynchronous, and cloud deletes always delete
+        the project's files while local deletes keep them by default.
     Outcome: True when get_client(workspace=...) serves the request from a
         cloud backend (factory mode, explicit --cloud, or a workspace selector).
     """
@@ -794,15 +794,15 @@ async def delete_project(
     """Delete a Basic Memory project.
 
     Removes a project from Basic Memory's configuration and database records.
-    By default the project's note files are retained: local projects keep
-    their files on disk, cloud projects keep their files in cloud storage.
-    Pass delete_notes=True to also delete the note files themselves.
+    Local projects keep their note files on disk unless delete_notes=True.
+    Cloud projects always have their note files deleted from cloud storage;
+    those files can be recovered only from a cloud snapshot.
 
     Args:
         project_name: Name of the project to delete
-        delete_notes: Also delete the project's note files (from local disk
-            for local projects, from cloud storage for cloud projects).
-            Defaults to False, which only stops tracking the project.
+        delete_notes: Local projects only: also delete the note files from
+            disk. Defaults to False, which only stops tracking the project.
+            Ignored for cloud projects, whose files are always deleted.
         workspace: Optional cloud workspace selector to delete the project from.
             Slug is preferred for AI callers, but tenant_id and unique name are
             also accepted. When omitted, the connection's default workspace is
@@ -820,9 +820,11 @@ async def delete_project(
         delete_project("team-project", workspace="team-paul")
 
     Warning:
-        This action cannot be undone. With delete_notes=False the project must
-        be re-added to access its content through Basic Memory again; with
-        delete_notes=True the note files themselves are permanently deleted.
+        This action cannot be undone. For a local project with
+        delete_notes=False the project must be re-added to access its content
+        again; with delete_notes=True its note files are permanently deleted.
+        For a cloud project the note files are always deleted and can be
+        recovered only from a cloud snapshot.
     """
     # Trigger: MCP server is constrained to a single project.
     # Why: constrained sessions cannot delete projects, and workspace selectors
@@ -863,9 +865,19 @@ async def delete_project(
                 f"Project '{project_name}' not found. Available projects: {', '.join(available_projects)}"
             )
 
+        # Trigger: the delete is served by a cloud backend.
+        # Why: the cloud service always deletes a project's files on delete
+        #   (basic-memory-cloud#2117); files kept under a deleted project were
+        #   unreachable. Sending delete_notes=True makes the request say what
+        #   the server does.
+        # Outcome: local deletes honor delete_notes; cloud deletes always
+        #   request file deletion.
+        cloud_routed = _routes_to_cloud(workspace_id)
+        files_deleted = delete_notes or cloud_routed
+
         # Delete project using project external_id
         status_response = await project_client.delete_project(
-            target_project.external_id, delete_notes=delete_notes
+            target_project.external_id, delete_notes=files_deleted
         )
         from basic_memory.mcp.project_context import invalidate_project_caches
 
@@ -886,13 +898,14 @@ async def delete_project(
             if status_response.job_id:
                 result += f"• Deletion job ID: {status_response.job_id}\n"
 
-        cloud_routed = _routes_to_cloud(workspace_id)
         files_location = "in cloud storage" if cloud_routed else "on disk"
-        if delete_notes:
+        if files_deleted:
             result += _format_note_file_delete_result(
                 status_response.file_delete_status,
                 files_location=files_location,
             )
+            if cloud_routed:
+                result += "Deleted cloud files can be recovered only from a cloud snapshot.\n"
         else:
             result += (
                 f"Note files remain {files_location} but the project is no longer "
