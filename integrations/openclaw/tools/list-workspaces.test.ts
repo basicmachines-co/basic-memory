@@ -24,8 +24,9 @@ describe("workspace list tool", () => {
       expect.objectContaining({
         name: "list_workspaces",
         label: "List Workspaces",
-        description:
+        description: expect.stringContaining(
           "List all Basic Memory workspaces (personal and organization) accessible to this user",
+        ),
         parameters: expect.objectContaining({
           type: "object",
           properties: {},

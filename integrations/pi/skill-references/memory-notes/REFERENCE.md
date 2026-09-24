@@ -56,7 +56,7 @@ permalink: custom-path     # optional — auto-generated from title if omitted
 - The `title` must match the `# Heading` in the body
 - Tags are searchable and help with discovery
 - Custom `type` values (Task, Meeting, Person, etc.) work with the schema system. See the **memory-schema** skill for defining schemas, validating notes against them, and detecting drift.
-- The `permalink` is auto-generated from the `title` and `directory`. For example, title "API Design Decisions" in directory "specs" produces permalink `specs/api-design-decisions` and memory URL `memory://specs/api-design-decisions`. If no directory is specified, the permalink is just the kebab-cased title. Permalinks stay stable across file moves. You rarely need to set one manually.
+- The `permalink` is auto-generated from the `title` and `directory`. For example, title "API Design Decisions" in directory "specs" produces permalink `specs/api-design-decisions` and memory URL `memory://specs/api-design-decisions`. If no directory is specified, the permalink is just the kebab-cased title. By default permalinks stay stable across file moves (unless the project enables `update_permalinks_on_move`). You rarely need to set one manually.
 
 > **Note:** When using `write_note`, you don't write frontmatter yourself. The `title`, `tags`, `note_type`, and `metadata` are separate parameters — Basic Memory generates the frontmatter automatically. Your `content` parameter is just the markdown body starting with `# Heading`.
 
@@ -106,7 +106,7 @@ A few examples to illustrate the range:
 - **One fact per observation.** Don't pack multiple ideas into one line.
 - **Be specific.** `[decision] Use JWT` is less useful than `[decision] Use JWT with 15-minute expiry for API auth`.
 - **Use tags for cross-cutting concerns.** `[risk] Rate limiting needed #api #security` makes this findable under both topics.
-- **Categories are queryable.** `search_notes("[decision]")` finds all decisions across your knowledge base.
+- **Categories are queryable.** `search_notes(entity_types=["observation"], categories=["decision"])` returns every decision observation across your knowledge base.
 
 ## Relations
 
@@ -225,10 +225,10 @@ For people, try full name and last name. For organizations, try the full name an
 When a note already exists, make targeted edits instead of rewriting the whole file:
 
 ```python
-# Append a new observation to an existing note
+# Add a new observation under the existing Observations heading
 edit_note(
   identifier="API Design Decisions",
-  operation="append",
+  operation="insert_after_section",
   section="Observations",
   content="- [decision] Switched to OpenAPI 3.1 for spec generation #api"
 )
@@ -244,7 +244,7 @@ edit_note(
 # Add a new relation
 edit_note(
   identifier="API Design Decisions",
-  operation="append",
+  operation="insert_after_section",
   section="Relations",
   content="- depends_on [[Rate Limiter]]"
 )
@@ -283,16 +283,20 @@ Basic Memory auto-generates frontmatter (including the permalink and memory URL)
 
 ### Editing an Existing Note
 
-Use `edit_note` to update a note in place — four operations:
+Use `edit_note` to update a note in place — six operations: `append`, `prepend`,
+`find_replace`, `replace_section`, `insert_before_section`, `insert_after_section`.
 
 ```python
-# append / prepend — add to the end or start (use for time-ordered logs)
+# insert_after_section / insert_before_section — add lines at an existing heading
 edit_note(
   identifier="API Design Decisions",
-  operation="append",
+  operation="insert_after_section",
   section="Observations",
   content="- [decision] Use OpenAPI 3.1 for spec generation #api"
 )
+
+# append / prepend — add to the end of the note or the start of the body
+# (use for time-ordered logs; neither one targets a section)
 edit_note(
   identifier="API Design Decisions",
   operation="prepend",
@@ -330,7 +334,7 @@ move_note(
 )
 ```
 
-The permalink stays the same after a move, so all `[[wiki-links]]` and `memory://` URLs continue to resolve.
+By default the permalink stays the same after a move, so links keep resolving. Projects with `update_permalinks_on_move` enabled rewrite it from the new path.
 
 ## Best Practices
 
@@ -340,10 +344,8 @@ The permalink stays the same after a move, so all `[[wiki-links]]` and `memory:/
 
 3. **Build incrementally.** Add to existing notes rather than creating duplicates. Use `edit_note` to append new observations or relations as you learn more.
 
-4. **Review AI-generated content.** When an AI writes notes for you, review them for accuracy. The AI captures structure well but may miss nuance.
+4. **Use consistent titles.** Note titles are identifiers in the knowledge graph. `API Design Decisions` and `Api Design decisions` are different entities. Pick a convention and stick with it.
 
-5. **Use consistent titles.** Note titles are identifiers in the knowledge graph. `API Design Decisions` and `Api Design decisions` are different entities. Pick a convention and stick with it.
+5. **Link related concepts.** The value of a knowledge graph compounds with connections. A note with zero relations is an island — useful, but not as powerful as a connected one.
 
-6. **Link related concepts.** The value of a knowledge graph compounds with connections. A note with zero relations is an island — useful, but not as powerful as a connected one.
-
-7. **Let the graph grow naturally.** Don't try to design a perfect taxonomy upfront. Write notes as you work, add relations as connections emerge, and periodically use `/reflect` or `/defrag` to consolidate.
+6. **Let the graph grow naturally.** Don't try to design a perfect taxonomy upfront. Write notes as you work, add relations as connections emerge, and periodically use the **memory-reflect** or **memory-defrag** skills to consolidate.

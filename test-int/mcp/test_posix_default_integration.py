@@ -29,7 +29,7 @@ async def test_posix_registration_over_mcp(mcp_server, config_manager, setting, 
             instructions = client.instructions
             assert instructions is not None
             assert "When available in your tool list" in instructions
-            assert "If they are absent, use the existing rich tools instead" in instructions
+            assert "If they are absent, use the note tools" in instructions
             if setting is False:
                 assert POSIX_TOOLS.isdisjoint(tools)
                 hidden = await client.call_tool("man", {}, raise_on_error=False)

@@ -49,19 +49,10 @@ The two rules that matter across a 100+ chapter run:
   they save is context, not I/O — a long chapter or a full source text costs you the tokens of
   the relevant part, not of the whole file.
 
-These compound. In measured runs, predicate queries replaced 28-call scans with a single
-call; across 138 chapters that difference is the run.
-
-Three sharp edges to know before you write a query. The first two fail *quietly* — a wrong
-answer, exit 0, no warning — so learn them here rather than from a graph you thought you had
+Two sharp edges to know before you write a query. The first fails *quietly* — a short
+answer, exit 0, no warning — so learn it here rather than from a graph you thought you had
 audited:
 
-- **`--meta` matches case-sensitively, and the stored value is always snake_case.** `note_type`
-  is an alias for the frontmatter `type:` key, compared with SQL `=`. `write_note` normalizes
-  `note_type` through `to_snake_case` before writing, so a note authored as `note_type="Chapter"`
-  is stored as `type: chapter` — the casing you author with is *not* the casing on disk. Query
-  the snake_case form: `--meta 'note_type=chapter'`. The capitalized spelling returns zero rows
-  and exit 0. The value a result row displays is the value to query with.
 - **`find` pages, and the default page is 10.** Any query whose answer is "all N chapters"
   needs `--page-size 200` (the maximum) — see [Coverage Checks](#coverage-checks).
 - **`--name` cannot combine with `--meta`.** The metadata search has no filename glob. Scope a
@@ -80,7 +71,7 @@ If the POSIX verbs are unavailable, every step below still works with `search_no
 ### Create the Project
 
 ```python
-create_memory_project(name="<work-name>", path="~/basic-memory/<work-name>")
+create_memory_project(project_name="<work-name>", project_path="~/basic-memory/<work-name>")
 ```
 
 Use a kebab-case slug of the work's title (e.g., `great-gatsby`, `hamlet`, `beloved`).
@@ -353,10 +344,8 @@ bm cat moby-dick/moby-dick.txt --lines 4200-4890 --plain   # one chapter, not th
 
 `grep -n` here is the shell's grep on a filesystem path (this is the map-building step, and
 it needs the file). `bm cat` then takes the *note identifier* and returns exactly that slice plus a
-`lines 4200-4890 of N` footer. **Spell the identifier project-qualified:**
-`<work>/<work>.txt`. The bare `moby-dick.txt` fails with `names a project, not a note`,
-because the prefix check drops the extension and the stem then equals the project name —
-which this layout guarantees (#1458). `bm head moby-dick/moby-dick.txt -n 40` is the cheap
+`lines 4200-4890 of N` footer. Spell the identifier project-qualified
+(`<work>/<work>.txt`) so it routes to the right project. `bm head moby-dick/moby-dick.txt -n 40` is the cheap
 way to eyeball the heading format before writing the grep pattern.
 
 Store the map in the project (a note or a small JSON file) so later batches — and a resumed
@@ -426,24 +415,16 @@ write_note(
 ```python
 edit_note(
   identifier="characters/major/<character-slug>",
-  operation="append",
-  heading="Observations",
+  operation="insert_after_section",
+  section="Observations",
   content="""- [arc] Ch.<N>: <What happens to this character>
 - [quote] "<Attributed quote>" (Ch.<N>)"""
 )
 ```
 
-**3b. After the first batch, check where the enrichment landed.** On a 206-note graph built
-with this pipeline, every character's `append` under `heading="Observations"` had gone under
-`## Relations`, and the prose prepends had landed above the H1, so `cat <note> --section
-Observations` returned the seed stub for every major character. One check catches it:
-
-```bash
-bm cat characters/major/<slug> --section Observations --project <work>   # the new lines, or the stub?
-bm cat characters/major/<slug> --section Relations --project <work>      # the lines that should not be here
-```
-
-Fix the heading discipline before batch two; a section read is only as good as the headings.
+`append` and `prepend` do not target a section — they write at the end of the note and the
+start of the body. Use `insert_after_section` / `insert_before_section` to land lines under a
+heading; they fail loudly if the heading is missing.
 
 **4. Track progress** using the memory-tasks skill to create a processing task that survives context compaction.
 
@@ -470,7 +451,7 @@ As each chapter is processed, append observations to relevant entities:
 
 ### Adding Prose and Interpretation
 
-After the structured observations are in place, consider adding interpretive prose to major entity notes. Prepend 2-4 paragraphs of critical essay before the Observations section using `edit_note(operation="prepend")`. This prose should:
+After the structured observations are in place, consider adding interpretive prose to major entity notes. Insert 2-4 paragraphs of critical essay before the Observations section with `edit_note(operation="insert_before_section", section="Observations", content=...)`. This prose should:
 
 - Argue for a reading of the character, theme, or symbol — not just describe it
 - Connect the entity to the work's larger concerns and to literary tradition
@@ -497,9 +478,8 @@ A field a note never set comes back as a blank cell (`null` under `--json`), so 
 blanks are the work queue. This turns "audit the graph" from a read of every note into one
 call per question.
 
-Note the lowercase `chapter`/`character` — `write_note` snake-cases `note_type` before the
-note is written, so that is the value on disk no matter how your Phase 0 schemas spelled it.
-Match it exactly; the capitalized spelling returns zero rows and exit 0. And `--page-size 200`
+`write_note` snake-cases `note_type` (`Chapter` is stored as `chapter`), and `--meta`
+type predicates are normalized the same way, so either spelling matches. `--page-size 200`
 is not decoration: without it these return the first 10 rows and the work queue looks ten
 items long.
 
@@ -552,18 +532,18 @@ During chapter processing, new minor characters, locations, and symbols will eme
 
 ```python
 # Validate each entity type
-schema_validate(noteType="Character")
-schema_validate(noteType="Theme")
-schema_validate(noteType="Chapter")
-schema_validate(noteType="Location")
-schema_validate(noteType="Symbol")
-schema_validate(noteType="LiteraryDevice")
+schema_validate(note_type="Character")
+schema_validate(note_type="Theme")
+schema_validate(note_type="Chapter")
+schema_validate(note_type="Location")
+schema_validate(note_type="Symbol")
+schema_validate(note_type="LiteraryDevice")
 ```
 
 ### Drift Detection
 
 ```python
-schema_diff(noteType="Character")
+schema_diff(note_type="Character")
 # ... for each type
 ```
 
@@ -596,8 +576,8 @@ Read the count off the footer, not off the rows you can see. In a terminal every
 result reports `page 1 • total 138`, and appends `• more available (--page)` when the page
 truncated the answer — that suffix appearing is the check *failing*, whatever the visible
 rows say. **The footer is a TTY feature.** Piped output without `--plain` is JSON, which
-carries `total` and `has_more`; `--plain` prints the rows and nothing else (#1457). An agent
-should read `has_more` from `--json` rather than look for a footer it will not get.
+carries `total` and `has_more`; with `--plain` the rows go to stdout and a has-more notice
+goes to stderr. For scripts, read `has_more` from `--json`.
 
 For the sequence gap — the failure that a count alone cannot catch — take the numbers from
 `--json`, which carries `total`, `total_is_exact`, and `has_more`:
@@ -627,9 +607,9 @@ with more than 200 chapters — and rerunning it with `--page 2` *replaces* the 
 than accumulating them, which reports chapters 1-200 as missing on a corpus that is complete.
 Walk until `has_more` is false and check the union.
 
-`--fields` returns every value as a string — `chapter_number: 63` comes back as `"63"`
-(#1456) — while `--meta` predicates compare numerically. The `tostring | test(...) |
-tonumber` handling above is load-bearing, not defensive; drop it and the check breaks.
+`--fields` returns YAML-native types, so `chapter_number: 63` comes back as `63`. The
+`tostring | test(...) | tonumber` guard still catches hand-typed values such as `"63"` or
+`"12a"`.
 
 Pass the work's **actual** chapter count as `$expected` — deriving the range from the highest
 number found lets an incomplete graph pass. With 138 rows numbered 1..137 plus one duplicate,
@@ -662,9 +642,7 @@ bm orphans          # entities with no relations in the graph
 ```
 
 `orphans` finds notes with no relations. It does not find a `[[target]]` that resolves to
-nothing — a misspelled or renamed entity name — and on this graph `[[Moby Dick (White
-Whale)]]` was unresolved in ten chapters while the symbol note lived under another title.
-Check a chapter's links with `bm tool build-context memory://chapters/<slug> --depth 1
+nothing — a misspelled or renamed entity name. Check a chapter's links with `bm tool build-context memory://chapters/<slug> --depth 1
 --project <work> --json` and look for relations whose `to_entity_id` is `null`; fix the
 spelling or add the alias, then re-run the chapter.
 
@@ -682,8 +660,8 @@ bm grep -F "doubloon" --page-size 100 --project <work>                # every me
 ```
 
 "Which characters share the most chapters" is the first line plus a local parse of each
-row's `content` for `features [[...]]` — on a 138-chapter graph that one call replaced 136
-reads. Do not reach for `bm tool build-context 'memory://characters/major/*'` here: a
+row's `content` for `features [[...]]` — one call instead of a read per chapter. Do not
+reach for `bm tool build-context 'memory://characters/major/*'` here: a
 wildcard context is capped at 100 related rows across all primaries and returns one primary
 row per indexed observation, so it neither enumerates the cast nor walks the web.
 `build-context` on a *single* note is the right tool for a different question, below.
@@ -695,9 +673,9 @@ symbol tracing, pass `-F` for literal matching and raise `--page-size`; the mean
 are hunting are usually in the later occurrences, which the default would have dropped.
 
 Two more facts about `grep` rows. Matching is case-insensitive and note-level: a hit is a
-note, not a line, and there is no `-n` or context. And each row's `content` is the note body
-cut at 4000 characters with no marker (#1455), so a long note's tail — on this graph, the
-final chapter's `follows`/`precedes` relations — is silently absent from a grep-driven scan.
+note, not a line, and there is no `-n` or context. And each row's `content` is capped at
+4000 characters; `content_truncated: true` marks a cut row, so a long note's tail (such as a
+final chapter's `follows`/`precedes` relations) may be missing from a grep-driven scan.
 When a parse depends on the end of a note, `cat` that note.
 
 `--page-size` raises the ceiling, it does not remove it. A symbol in a long work can exceed
@@ -707,8 +685,7 @@ answer, exit 0, and no sign that the tail is missing.
 
 And `grep` searches **your notes, not the source**. The `<work>.txt` is indexed as an entity,
 but its body is not in the searchable text, so an occurrence you never carried into a note is
-unreachable — verified: a word present only in the source returns `total: 0` while a word in
-both returns just the note. So this answers "where have I written about the doubloon", not
+unreachable: a word present only in the source returns `total: 0`. So this answers "where have I written about the doubloon", not
 "where does the doubloon appear in the book". For the latter, search the file itself and use
 the [chapter offset map](#source-text-preparation) to turn a hit into a chapter.
 
@@ -754,7 +731,7 @@ This pipeline works for any literary text. Adjust schemas for genre:
 - **Batch for sanity.** Processing ~10 chapters at a time balances depth with momentum. Track progress with a Task note.
 - **Read the source text.** Don't rely on memory or summaries. Read (or re-read) the actual text for each batch before creating notes. Textual evidence is everything.
 - **Read narrowly.** Keep the source text in the project as `.txt`, index it once, build the chapter offset map once, then read chapters by line range and notes by section. On a long work, whole files landing in context are the largest avoidable cost in the pipeline.
-- **Query, don't scan.** When you need to know which notes have a field, ask with `--meta` predicates and `--fields` projection. Reading notes to check frontmatter is the mistake this pipeline makes at scale. Two ways these queries lie quietly: `--meta` is case-sensitive against the frontmatter `type:` your schemas authored, and `find` returns 10 rows unless you pass `--page-size`.
+- **Query, don't scan.** When you need to know which notes have a field, ask with `--meta` predicates and `--fields` projection. Reading notes to check frontmatter is the mistake this pipeline makes at scale. One way these queries lie quietly: `find` returns 10 rows unless you pass `--page-size`.
 - **Observations are your index.** The knowledge graph's value comes from categorized observations. Be generous with categories and specific with content.
 - **Relations are your web.** Every chapter should link to characters, themes, locations, and devices. Every entity should link back to chapters where it appears.
 - **Enrich iteratively.** Entity notes grow richer with each chapter. Don't try to write the perfect character note upfront — append as you go.

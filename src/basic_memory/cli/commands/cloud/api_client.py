@@ -66,7 +66,7 @@ async def get_authenticated_headers(auth: CLIAuth | None = None) -> dict[str, st
     token = await auth_obj.get_valid_token()
     if not token:
         console.print(
-            "[red]Not authenticated. Run 'bm cloud set-key <key>' or 'bm cloud login' first.[/red]"
+            "[red]Not authenticated. Run 'bm cloud api-key save <key>' or 'bm cloud login' first.[/red]"
         )
         raise typer.Exit(1)
 

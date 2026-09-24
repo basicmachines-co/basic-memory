@@ -1,6 +1,6 @@
 ---
 name: memory-onboarding
-description: "Guide someone new to Basic Memory through designing and building a complete personal knowledge system — interview them about what they want to track, propose a structure, build it with schemas and instruction notes, teach them to use it, and set up their AI assistant to load it automatically. Use this skill whenever a user says they're new to Basic Memory, wants to 'get started', 'set up', or 'onboard' with Basic Memory, doesn't know what to use it for, asks how to organize their memory project or knowledge base, wants help designing folders/schemas/conventions, or asks how to make their assistant remember context between sessions. Also use it when a user has an empty or messy Basic Memory project and wants structure."
+description: "Guide someone new to Basic Memory through designing and building a personal knowledge system: interview them, propose a structure, build it with schemas and instruction notes, teach them to use it, and set up their assistant to load it every session. Use when a user is new to Basic Memory or wants help getting started, asks how to structure a project (folders, schemas, conventions), has an empty or messy project that needs structure, or wants their assistant to remember context between sessions."
 ---
 
 # Basic Memory Onboarding

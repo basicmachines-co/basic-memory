@@ -348,7 +348,15 @@ delete_note("{identifier}")
 
 @mcp.tool(
     title="Move Note",
-    description="Move a note or directory to a new location, updating database and maintaining links.",
+    description=(
+        "Move a note, or a whole directory with is_directory=true, to a new path within the "
+        "same project; cross-project moves are refused. For a file, give either "
+        "`destination_path` (project-relative, with the same file extension as the source, "
+        'e.g. "archive/note.md") or `destination_folder` (keeps the filename). The file '
+        "moves on disk and its index entry, observations, and relations move with it. The "
+        "permalink stays the same unless the server's update_permalinks_on_move setting is "
+        "on, so links that use it keep resolving; other notes' text is not rewritten."
+    ),
     tags={"notes"},
     annotations={
         "title": "Move Note",
@@ -409,8 +417,8 @@ async def move_note(
         project_id: Project external_id (UUID). Prefer this over `project` when known —
                 it routes to the exact project regardless of name collisions across cloud
                 workspaces. Takes precedence over `project`. Get from list_memory_projects().
-        output_format: "text" returns existing markdown guidance/success text. "json"
-            returns machine-readable move metadata.
+        output_format: "text" returns a markdown success or failure message. "json"
+            returns machine-readable move metadata, with an error code on failure.
         context: Optional FastMCP context for performance caching.
 
     Returns:

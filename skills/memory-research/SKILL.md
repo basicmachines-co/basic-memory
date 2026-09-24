@@ -7,19 +7,6 @@ description: "Research an external subject using web search, synthesize findings
 
 Research an external subject, synthesize what you find, and create a structured Basic Memory entity — with the user's approval.
 
-## When to Use
-
-**Explicit triggers:**
-- "Research [subject]"
-- "Look up [subject]"
-- "What do you know about [subject]?"
-- "Evaluate [subject]"
-
-**Implicit triggers (also activate this skill):**
-- A bare name: "Terraform"
-- A URL: "https://example.com"
-- A name with context: "Acme Corp — saw them at the conference"
-
 ## Workflow
 
 ### Step 1: Web Research
@@ -215,7 +202,7 @@ If the user provided context with their request, capture it in the entity:
 # User said: "Acme Corp — saw their demo at the conference last week"
 edit_note(
   identifier="Acme Corp",
-  operation="append",
+  operation="insert_after_section",
   section="Observations",
   content="- [context] Saw their demo at conference, week of 2026-02-17"
 )

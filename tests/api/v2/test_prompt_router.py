@@ -141,7 +141,8 @@ async def test_search_prompt_no_results(
     prompt = result["prompt"]
     assert 'Search Results for: "NonExistentQuery12345"' in prompt
     assert "I couldn't find any results for this query" in prompt
-    assert "Opportunity to Capture Knowledge" in prompt
+    assert "offer to start a note with `write_note`" in prompt
+    assert "Opportunity to Capture Knowledge" not in prompt
 
 
 @pytest.mark.asyncio

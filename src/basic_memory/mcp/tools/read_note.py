@@ -60,7 +60,11 @@ def _exact_external_id(identifier: str) -> str | None:
 
 @mcp.tool(
     title="Read Note",
-    description="Read a markdown note by title or permalink, optionally a numbered line range.",
+    description=(
+        "Read a markdown note by title or permalink, optionally a numbered line range. "
+        "If the identifier doesn't resolve exactly, it falls back to title and text "
+        "search and returns suggested matches instead of content."
+    ),
     tags={"notes"},
     # TODO: re-enable once MCP client rendering is working
     # meta={"ui/resourceUri": "ui://basic-memory/note-preview"},
@@ -112,9 +116,11 @@ async def read_note(
     3. Text search as last resort
 
     Args:
-        project: Project name to read from. Optional - server will resolve using the
-                hierarchy above. If unknown, use list_memory_projects() to discover
-                available projects.
+        project: Project name to read from. Optional - when omitted, a project prefix
+                on a memory:// URL or permalink identifier routes the read; otherwise the
+                server uses the session's active project, then the configured default
+                project. If unknown, use list_memory_projects() to discover available
+                projects.
         project_id: Project external_id (UUID). Prefer this over `project` when known —
                 it routes to the exact project regardless of name collisions across cloud
                 workspaces. Takes precedence over `project`. Get from list_memory_projects().
@@ -536,58 +542,25 @@ async def read_note(
 
 
 def format_not_found_message(project: str | None, identifier: str) -> str:
-    """Format a helpful message when no note was found."""
+    """Format the not-found result: what failed and the lookups that can recover it."""
     return dedent(f"""
         # Note Not Found in {project}: "{identifier}"
 
-        I couldn't find any notes matching "{identifier}". Here are some suggestions:
+        No note matches "{identifier}" in {project}. Titles and permalinks must match
+        exactly; title and text search found nothing either.
 
-        ## Check Identifier Type
-        - If you provided a title, try using the exact permalink instead
-        - If you provided a permalink, check for typos or try a broader search
-
-        ## Search Instead
-        Try searching for related content:
-        ```
-        search_notes(project="{project}", query="{identifier}")
-        ```
-
-        ## Recent Activity
-        Check recently modified notes:
-        ```
-        recent_activity(timeframe="7d")
-        ```
-
-        ## Create New Note
-        This might be a good opportunity to create a new note on this topic:
-        ```
-        write_note(
-            project="{project}",
-            title="{identifier.capitalize()}",
-            content='''
-            # {identifier.capitalize()}
-
-            ## Overview
-            [Your content here]
-
-            ## Observations
-            - [category] [Observation about {identifier}]
-
-            ## Relations
-            - relates_to [[Related Topic]]
-            ''',
-            folder="notes"
-        )
-        ```
+        To look further, try `search_notes(query="{identifier}", project="{project}")` or
+        `recent_activity(timeframe="7d", project="{project}")`. If the user wants this note
+        created, use `write_note`.
     """)
 
 
 def format_related_results(project: str | None, identifier: str, results) -> str:
-    """Format a helpful message with related results when an exact match wasn't found."""
+    """Format the not-found result with the related notes the fallback search returned."""
     message = dedent(f"""
         # Note Not Found in {project}: "{identifier}"
 
-        I couldn't find an exact match for "{identifier}", but I found some related notes:
+        No exact match for "{identifier}" in {project}. Related notes:
 
         """)
 
@@ -614,33 +587,11 @@ def format_related_results(project: str | None, identifier: str, results) -> str
             - **Type**: {normalized_type or "entity"}
             - **Permalink**: {permalink or "unknown"}
 
-            You can read this note with:
-            ```
-            read_note(project="{project}", identifier="{permalink or ""}")
-            ```
-
             """)
 
     message += dedent(f"""
-        ## Try More Specific Lookup
-        For exact matches, try using the full permalink from one of the results above.
-
-        ## Search For More Results
-        To see more related content:
-        ```
-        search_notes(project="{project}", query="{identifier}")
-        ```
-
-        ## Create New Note
-        If none of these match what you're looking for, consider creating a new note:
-        ```
-        write_note(
-            project="{project}",
-            title="[Your title]",
-            content="[Your content]",
-            folder="notes"
-        )
-        ```
+        Read one with `read_note(identifier="<permalink>", project="{project}")`, or search
+        further with `search_notes(query="{identifier}", project="{project}")`.
     """)
 
     return message

@@ -72,27 +72,8 @@ async def recent_activity_prompt(
 
         ## Capture Opportunity
 
-        If you notice patterns or insights from this activity, consider documenting them:
-
-        ```python
-        write_note(
-            title="Activity Insights - {timeframe}",
-            content='''
-            # Activity Insights
-
-            ## Patterns Observed
-            - [trend] [Pattern you noticed in the activity]
-
-            ## Key Developments
-            - [insight] [Important development worth tracking]
-
-            ## Relations
-            - summarizes [[Recent Work]]
-            ''',
-            folder="insights",
-            project="{project or "default"}"
-        )
-        ```
+        If this activity shows a pattern or development worth tracking, offer to record it
+        with `write_note` (for example in an `insights` directory).
     """)
 
     return prompt_guidance

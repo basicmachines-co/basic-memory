@@ -32,7 +32,7 @@ bm project list        # richer table, includes routing and sync columns
 
 ## PARAMETERS
 
-- **output_format** (string, optional, default: "text") — "text" returns the existing human-readable project list. "json" returns structured project metadata.
+- **output_format** (string, optional, default: "text") — "text" returns a human-readable project list. "json" returns structured project metadata.
 
 ## DESCRIPTION
 

@@ -22,13 +22,12 @@ Inspired by sleep-time compute — the idea that memory formation happens best *
 Find what changed recently, then read the relevant files:
 
 ```python
-# Find recently modified notes — use json format for the complete list
-# (text format truncates to ~5 items in the summary)
+# Find recently modified notes — json gives structured rows; text output
+# across all projects shows only the top items
 recent_activity(timeframe="2d", output_format="json")
 
 # Read specific daily notes
-read_note(identifier="memory/2026-02-27")
-read_note(identifier="memory/2026-02-26")
+read_note(identifier="memory/<YYYY-MM-DD>")
 
 # Check active tasks
 search_notes(note_types=["task"], status="active")
@@ -70,4 +69,3 @@ Append a brief entry to today's daily note:
 - **Merge, don't append.** If MEMORY.md already has a section about a topic, update it in place rather than adding a duplicate entry.
 - **Flag uncertainty.** If something seems important but you're not sure, add it with a note like "(needs confirmation)" rather than skipping it entirely.
 - **Restructure over time.** If MEMORY.md is a chronological dump, restructure it into topical sections during reflection. Curated knowledge > raw logs.
-- **Check for filesystem issues.** Look for recursive nesting (memory/memory/memory/...), orphaned files, or bloat while gathering material.

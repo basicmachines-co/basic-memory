@@ -24,7 +24,9 @@ describe("project list tool", () => {
       expect.objectContaining({
         name: "list_memory_projects",
         label: "List Projects",
-        description: "List all Basic Memory projects accessible to this agent",
+        description: expect.stringContaining(
+          "List Basic Memory projects accessible to this agent",
+        ),
         parameters: expect.objectContaining({
           type: "object",
           properties: expect.objectContaining({

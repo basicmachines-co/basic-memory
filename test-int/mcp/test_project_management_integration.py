@@ -23,12 +23,11 @@ async def test_list_projects_basic_operation(mcp_server, app, test_project):
         assert len(list_result.content) == 1
         list_text = list_result.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
 
-        # Should show available projects with new session guidance format
+        # Should show available projects plus the routing contract
         assert "Available projects:" in list_text
         assert "test-project" in list_text  # Our test project
-        # Check for new session guidance instead of CLI default
-        assert "Next: Ask which project to use for this session." in list_text
-        assert "Session reminder: Track the selected project" in list_text
+        assert "Pass a project name (or its [external_id] as project_id)" in list_text
+        assert "session's active project, then the configured default" in list_text
 
 
 @pytest.mark.asyncio
