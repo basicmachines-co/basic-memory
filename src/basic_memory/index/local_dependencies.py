@@ -301,7 +301,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
         source: str,
     ) -> FileIndexResult:
         """Read, persist, search-index, and reconcile one markdown file."""
-        logger.info("Indexing markdown file: {}", file_path)
+        logger.debug("Indexing markdown file: {}", file_path)
 
         async with db.scoped_session(self.session_maker) as session:
             existing = await self.entity_repository.get_by_file_path(
@@ -370,7 +370,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
                 entity_id=synced.entity.id,
             )
 
-        logger.info(
+        logger.debug(
             "Indexed markdown file: {}",
             file_path,
             entity_id=synced.entity.id,

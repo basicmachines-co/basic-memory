@@ -586,7 +586,7 @@ async def edit_note(
             client,
             active_project,
         ):
-            logger.info(
+            logger.debug(
                 f"MCP tool call tool=edit_note project={active_project.name} "
                 f"identifier={identifier} operation={operation} output_format={output_format}"
             )
@@ -844,7 +844,7 @@ async def edit_note(
                     if unresolved:
                         summary.append(f"- Unresolved: {unresolved}")
 
-                logger.info(
+                logger.debug(
                     f"MCP tool response: tool=edit_note project={active_project.name} "
                     f"operation={operation} permalink={result.permalink} "
                     f"observations_count={len(result.observations)} "

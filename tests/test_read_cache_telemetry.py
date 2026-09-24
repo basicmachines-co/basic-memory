@@ -142,12 +142,7 @@ async def test_hit_telemetry_reports_lookup_details_without_store(
     async with cache.read(key=_key()) as cached:
         assert cached.value == CachedValue(title="cached")
 
-    assert [span.name for span in spans] == [
-        "read_cache.read_through",
-        "read_cache.lookup",
-        "read_cache.deserialize",
-    ]
-    assert spans[-1].attributes == {"payload_bytes": len(payload)}
+    assert [span.name for span in spans] == ["read_cache.read_through"]
     assert spans[0].attributes == {
         "operation": "entity",
         "cache.operation": "entity",
@@ -181,13 +176,7 @@ async def test_miss_telemetry_keeps_lookup_and_store_outcomes_separate(
         cached.value = CachedValue(title="authoritative")
 
     payload = CachedValue(title="authoritative").model_dump_json().encode("utf-8")
-    assert [span.name for span in spans] == [
-        "read_cache.read_through",
-        "read_cache.lookup",
-        "read_cache.serialize",
-        "read_cache.store",
-    ]
-    assert spans[2].attributes == {"payload_bytes": len(payload)}
+    assert [span.name for span in spans] == ["read_cache.read_through"]
     assert spans[0].attributes == {
         "operation": "entity",
         "cache.operation": "entity",

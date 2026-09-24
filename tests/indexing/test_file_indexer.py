@@ -269,7 +269,7 @@ async def test_file_indexer_reindexes_current_file_after_anchor_becomes_stale() 
     sink_id = logger.add(
         lambda message: rendered_messages.append(str(message).strip()),
         format="{message}",
-        level="INFO",
+        level="DEBUG",
     )
     try:
         result = await file_indexer.index_markdown_file(file_path, bound_logger=logger)
@@ -446,7 +446,7 @@ async def test_file_indexer_reports_refreshed_derived_counts_after_unchanged_rep
     )
 
     assert result.entity_id == refreshed_entity.id
-    final_log = bound_logger.info.call_args_list[-1]
+    final_log = bound_logger.debug.call_args_list[-1]
     assert final_log.args == ("Indexed markdown file: {}", "notes/note.md")
     assert final_log.kwargs["observation_count"] == 2
     assert final_log.kwargs["relation_count"] == 1

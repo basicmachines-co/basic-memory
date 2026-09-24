@@ -169,7 +169,7 @@ async def search(
         logger.warning("Rejected ChatGPT search request from non-OpenAI MCP client")
         return _unsupported_search_client_response()
 
-    logger.info(f"ChatGPT search request: query='{query}'")
+    logger.debug(f"ChatGPT search request: query='{query}'")
 
     try:
         # Keep this adapter tiny: the real search behavior lives in search_notes.
@@ -210,7 +210,7 @@ async def search(
             "total_count": len(raw_results),  # Use actual count from results
             "query": query,
         }
-        logger.info(f"Search completed: {len(formatted_results)} results returned")
+        logger.debug(f"Search completed: {len(formatted_results)} results returned")
 
         # Return in MCP content array format as required by OpenAI
         return _text_content(search_results)
@@ -254,7 +254,7 @@ async def fetch(
         logger.warning("Rejected ChatGPT fetch request from non-OpenAI MCP client")
         return _unsupported_fetch_client_response(id)
 
-    logger.info(f"ChatGPT fetch request: id='{id}'")
+    logger.debug(f"ChatGPT fetch request: id='{id}'")
 
     try:
         # Let read_note resolve the default project via get_project_client(),
@@ -269,7 +269,7 @@ async def fetch(
         # Format the document for ChatGPT
         document = _format_document_for_chatgpt(content, id)
 
-        logger.info(f"Fetch completed: id='{id}', content_length={len(document.get('text', ''))}")
+        logger.debug(f"Fetch completed: id='{id}', content_length={len(document.get('text', ''))}")
 
         # Return in MCP content array format as required by OpenAI
         return _text_content(document)

@@ -278,7 +278,7 @@ class RepositoryRelationResolutionRuntime:
                 unresolved_relations = await self.relation_repository.find_unresolved_relations(
                     session
                 )
-                logger.info("Resolving all forward references", count=len(unresolved_relations))
+                logger.debug("Resolving all forward references", count=len(unresolved_relations))
             else:
                 unresolved_relations = (
                     await self.relation_repository.find_unresolved_relations_for_entity(
@@ -286,8 +286,9 @@ class RepositoryRelationResolutionRuntime:
                         entity_id,
                     )
                 )
-                logger.info(
-                    f"Resolving forward references for entity {entity_id}",
+                logger.debug(
+                    "Resolving forward references for entity {}",
+                    entity_id,
                     count=len(unresolved_relations),
                 )
 

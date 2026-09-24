@@ -345,7 +345,7 @@ async def build_context(
             client,
             active_project,
         ):
-            logger.info(
+            logger.debug(
                 f"MCP tool call tool=build_context project={active_project.name} "
                 f"url={url} depth={depth} timeframe={timeframe} output_format={output_format}"
             )
@@ -372,7 +372,7 @@ async def build_context(
                 max_related=max_related,
             )
 
-            logger.info(
+            logger.debug(
                 f"MCP tool response: tool=build_context project={active_project.name} "
                 f"uri={graph.metadata.uri or resolved_path} "
                 f"primary_count={graph.metadata.primary_count or 0} "

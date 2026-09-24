@@ -204,7 +204,7 @@ async def recent_activity(
     if resolved_project is None:
         # Discovery Mode: Get activity across all projects
         # Uses plain get_client() since we iterate across all projects (no single project routing)
-        logger.info(
+        logger.debug(
             f"Getting recent activity across all projects: type={type}, depth={depth}, timeframe={timeframe}"
         )
 
@@ -324,7 +324,7 @@ async def recent_activity(
             # Why: active_project.name is the canonical, display-safe project name regardless
             #      of whether routing was by name or by external_id.
             # Outcome: logs and the formatted text header always show the project name.
-            logger.info(
+            logger.debug(
                 f"Getting recent activity from project {active_project.name}: "
                 f"type={type}, depth={depth}, timeframe={timeframe}"
             )

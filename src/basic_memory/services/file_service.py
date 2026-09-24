@@ -90,18 +90,12 @@ class FileService:
         """
         logger.debug(f"Reading entity content, entity_id={entity.id}, permalink={entity.permalink}")
 
-        with logfire.span(
-            "file_service.read_content",
-            domain="file_service",
-            action="read_content",
-            phase="read_content",
-        ):
-            if self.markdown_processor is None:
-                raise ValueError("markdown_processor is required for read_entity_content")
+        if self.markdown_processor is None:
+            raise ValueError("markdown_processor is required for read_entity_content")
 
-            file_path = self.get_entity_path(entity)
-            markdown = await self.markdown_processor.read_file(file_path)
-            return markdown.content or ""
+        file_path = self.get_entity_path(entity)
+        markdown = await self.markdown_processor.read_file(file_path)
+        return markdown.content or ""
 
     async def delete_entity_file(self, entity: EntityModel) -> None:
         """Delete entity file from filesystem.
@@ -217,7 +211,7 @@ class FileService:
             ):
                 await self.ensure_directory(full_path.parent)
 
-                logger.info(
+                logger.debug(
                     "Writing file: "
                     f"path={path_obj}, "
                     f"content_length={len(content)}, "
@@ -267,24 +261,16 @@ class FileService:
         full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
 
         try:
-            with logfire.span(
-                "file_service.read_content",
-                domain="file_service",
-                action="read_content",
-                phase="read_content",
-            ):
-                logger.debug(
-                    "Reading file content", operation="read_file_content", path=str(full_path)
-                )
-                async with aiofiles.open(full_path, mode="r", encoding="utf-8") as f:
-                    content = await f.read()
+            logger.debug("Reading file content", operation="read_file_content", path=str(full_path))
+            async with aiofiles.open(full_path, mode="r", encoding="utf-8") as f:
+                content = await f.read()
 
-                logger.debug(
-                    "File read completed",
-                    path=str(full_path),
-                    content_length=len(content),
-                )
-                return content
+            logger.debug(
+                "File read completed",
+                path=str(full_path),
+                content_length=len(content),
+            )
+            return content
 
         except FileNotFoundError:
             # Preserve FileNotFoundError so callers (e.g. sync) can treat it as deletion.
@@ -317,22 +303,16 @@ class FileService:
         full_path = path_obj if path_obj.is_absolute() else self.base_path / path_obj
 
         try:
-            with logfire.span(
-                "file_service.read_content",
-                domain="file_service",
-                action="read_content",
-                phase="read_content",
-            ):
-                logger.debug("Reading file bytes", operation="read_file_bytes", path=str(full_path))
-                async with aiofiles.open(full_path, mode="rb") as f:
-                    content = await f.read()
+            logger.debug("Reading file bytes", operation="read_file_bytes", path=str(full_path))
+            async with aiofiles.open(full_path, mode="rb") as f:
+                content = await f.read()
 
-                logger.debug(
-                    "File read completed",
-                    path=str(full_path),
-                    content_length=len(content),
-                )
-                return content
+            logger.debug(
+                "File read completed",
+                path=str(full_path),
+                content_length=len(content),
+            )
+            return content
 
         except Exception as e:
             logger.exception("File read error", path=str(full_path), error=str(e))
