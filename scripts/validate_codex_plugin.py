@@ -173,8 +173,10 @@ def validate_plugin(plugin_dir: Path) -> None:
     basic_memory = servers["basic-memory"]
     if not isinstance(basic_memory, dict):
         raise SystemExit(".mcp.json: basic-memory server must be an object")
-    if basic_memory.get("command") not in {"uvx", "basic-memory", "bm"}:
-        raise SystemExit(".mcp.json: basic-memory server uses an unexpected command")
+    if basic_memory.get("command") != "basic-memory":
+        raise SystemExit(".mcp.json: basic-memory server must use the persistent CLI")
+    if basic_memory.get("args") != ["mcp"]:
+        raise SystemExit(".mcp.json: basic-memory server must pass only the mcp command")
 
     # --- Hooks ---
     hooks_json = read_json(plugin_dir / "hooks" / "hooks.json")

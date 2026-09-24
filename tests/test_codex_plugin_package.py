@@ -27,6 +27,14 @@ def test_codex_plugin_mcp_config_is_tracked_and_not_ignored() -> None:
     assert tracked.returncode == 0, tracked.stderr
 
 
+def test_codex_plugin_mcp_uses_persistent_cli() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    config = json.loads((repo_root / "plugins/codex/.mcp.json").read_text(encoding="utf-8"))
+
+    server = config["mcpServers"]["basic-memory"]
+    assert server == {"command": "basic-memory", "args": ["mcp"]}
+
+
 def test_codex_plugin_hooks_are_zero_logic_uv_scripts() -> None:
     # The plugin ships configuration plus launchers only: the hook bodies live
     # in the basic-memory package behind `bm hook` (SPEC-55); each launcher is
