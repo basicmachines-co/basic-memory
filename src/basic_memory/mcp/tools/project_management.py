@@ -336,13 +336,11 @@ def _format_project_list_text(merged: list[dict[str, Any]]) -> str:
         result += f"- {label} ({source}){id_suffix}{usage_suffix}\n"
 
     result += "\n" + "─" * 40 + "\n"
-    result += "Next: Ask which project to use for this session.\n"
-    result += "Example: 'Which project should I use for this task?'\n\n"
     result += (
-        "Session reminder: Track the selected project for all subsequent "
-        "operations in this conversation.\n"
+        "Pass a project name (or its [external_id] as project_id) on tool calls to "
+        "target a project. Calls without one use the session's active project, then "
+        "the configured default."
     )
-    result += "The user can say 'switch to [project]' to change projects."
     return result
 
 
@@ -385,7 +383,7 @@ async def list_memory_projects(
     exists in more than one workspace.
 
     Args:
-        output_format: "text" returns the existing human-readable project list.
+        output_format: "text" returns a human-readable project list.
             "json" returns structured project metadata.
         context: Optional FastMCP context for progress/status logging.
     """
@@ -574,8 +572,8 @@ async def create_memory_project(
             When omitted, the connection's default workspace is used. Discover values
             via `list_workspaces`. A workspace selector implies cloud routing:
             without cloud credentials the call fails fast instead of silently
-            creating a local project (#954).
-        output_format: "text" returns the existing human-readable result text.
+            creating a local project.
+        output_format: "text" returns human-readable result text.
             "json" returns structured project creation metadata.
         context: Optional FastMCP context for progress/status logging.
 
@@ -808,7 +806,7 @@ async def delete_project(
             also accepted. When omitted, the connection's default workspace is
             used. A workspace selector implies cloud routing: without cloud
             credentials the call fails fast, matching create_memory_project
-            behavior (#954).
+            behavior.
 
     Returns:
         Confirmation message describing what was deleted and whether note

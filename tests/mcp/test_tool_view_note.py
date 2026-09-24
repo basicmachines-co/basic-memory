@@ -144,8 +144,8 @@ async def test_view_note_not_found(app, test_project):
     assert "# Note Not Found" in result
     assert "NonExistent Note" in result
     assert "Display this note as a markdown artifact" not in result  # No artifact for errors
-    assert "Check Identifier Type" in result
-    assert "Search Instead" in result
+    assert "Titles and permalinks must match" in result
+    assert 'search_notes(query="NonExistent Note"' in result
 
 
 @pytest.mark.asyncio

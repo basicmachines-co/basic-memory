@@ -41,6 +41,8 @@ async def test_recent_activity_prompt_discovery_mode(monkeypatch):
     assert "Recent Activity Context" in out
     assert "Next Steps" in out
     assert "Capture Opportunity" in out
+    # Discovery mode has no project; the guidance must not invent a "default" project name.
+    assert 'project="default"' not in out
 
 
 @pytest.mark.asyncio

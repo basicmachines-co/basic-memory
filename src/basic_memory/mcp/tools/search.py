@@ -974,7 +974,22 @@ async def _search_all_projects(
 
 @mcp.tool(
     title="Search Notes",
-    description="Search across all content in the knowledge base with advanced syntax support.",
+    description=(
+        "Search notes, observations, and relations in one project, or in several with "
+        "`projects` / `search_all_projects`. The query supports quoted phrases, AND/OR/NOT "
+        "with parentheses, and `tag:name` (converted to a tags filter). A plain multi-term "
+        "query first requires every term and may fall back to any-term matching when that "
+        "returns nothing. `search_type` selects text, title, permalink (a `*` glob matched "
+        "against the full permalink path), vector/semantic, or hybrid; the default is hybrid "
+        "when semantic search is enabled, otherwise text. Omit `query` to search by filters "
+        "alone (metadata_filters, tags, status, note_types). Results are whole notes by "
+        "default; a `categories` or valid-time filter switches the default to observations. "
+        "`after_date` filters by when content was last updated. `valid_at` / "
+        "`valid_overlaps` / `time_kind` filter by dates written inside notes (e.g. "
+        "`@effective[2026-06-10,2026-07-27)`) and exclude undated content. Returns ranked, "
+        "paginated results; read full content with read_note or cat. Syntax reference: "
+        "memory://man/search-notes(3)."
+    ),
     tags={"search"},
     # TODO: re-enable once MCP client rendering is working
     # meta={"ui/resourceUri": "ui://basic-memory/search-results"},
@@ -1279,13 +1294,17 @@ async def search_notes(
         search_type: Type of search to perform, one of:
                     "text", "title", "permalink", "vector", "semantic", "hybrid".
                     Default is dynamic: "hybrid" when semantic search is enabled, otherwise "text".
-        output_format: "text" preserves existing structured search response behavior.
-            "json" returns a machine-readable dictionary payload.
-        note_types: Optional list of note types to search (e.g., ["note", "person"])
-        entity_types: Optional list of entity types to filter by (e.g., ["entity", "observation"])
-        categories: Optional list of observation categories for exact matching (e.g.,
-                   ["requirement"]). Pair with entity_types=["observation"] to return only
-                   observations whose category matches exactly.
+        output_format: "text" returns a formatted markdown result list. "json" returns a
+            machine-readable dictionary payload.
+        note_types: Filter by the frontmatter `type` field (e.g. "note", "person").
+            Case-insensitive. Accepts a list, a comma-separated string, or a JSON-array string.
+        entity_types: Knowledge-graph item types to return: "entity" (whole notes),
+            "observation", "relation". Defaults to entity, or to observation when categories
+            or a valid-time filter is given. Not the frontmatter `type` (use note_types for
+            that). Accepts a list, a comma-separated string, or a JSON-array string.
+        categories: Observation categories to match exactly (e.g. ["requirement"]). Implies
+            observation results unless entity_types is set. Accepts a list, a
+            comma-separated string, or a JSON-array string.
         after_date: Optional date filter for recent content (e.g., "1 week", "2d", "2024-01-01")
         metadata_filters: Optional structured frontmatter filters (e.g., {"status": "in-progress"}).
                 Integer values match integer YAML fields ({"section": 3} works).

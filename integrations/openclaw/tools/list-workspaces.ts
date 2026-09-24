@@ -20,7 +20,9 @@ export function registerWorkspaceListTool(
       name: "list_workspaces",
       label: "List Workspaces",
       description:
-        "List all Basic Memory workspaces (personal and organization) accessible to this user",
+        "List all Basic Memory workspaces (personal and organization) accessible to this user. " +
+        "Use it to find the workspace to pass to list_memory_projects when the same " +
+        "project name may exist in more than one workspace.",
       parameters: Type.Object({}),
       async execute(_toolCallId: string, _params: Record<string, never>) {
         log.debug("list_workspaces")

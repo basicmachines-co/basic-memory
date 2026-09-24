@@ -55,7 +55,7 @@ Accepted identifier forms (all verified):
 ## PARAMETERS
 
 - **identifier** (string, required) — The title or permalink of the note to read. Can be a full memory:// URL, a permalink, a title, or search text. From the CLI this is a positional argument, not a flag.
-- **project** (string | null, optional, default: None) — Project name to read from. Optional - server will resolve using the hierarchy above. If unknown, use list_memory_projects() to discover available projects.
+- **project** (string | null, optional, default: None) — Project name to read from. Optional - when omitted, a project prefix on a memory:// URL or permalink identifier routes the read; otherwise the server uses the session's active project, then the configured default project. If unknown, use list_memory_projects() to discover available projects.
 - **project_id** (string | null, optional, default: None) — Project external_id (UUID). Prefer this over `project` when known — it routes to the exact project regardless of name collisions across cloud workspaces. Takes precedence over `project`. Get from list_memory_projects().
 - **page** (integer, optional, default: 1) — Page of fallback-search results to use when the identifier does not resolve to a note directly (default: 1). A direct or exact-title match returns the note content — page/page_size never chunk the note itself, and the title-match lookup pages through fixed-size pages of title results until an exact match is found or results are exhausted, regardless of page or page_size. Aliases: page_number.
 - **page_size** (integer, optional, default: 10) — Number of fallback-search results per page (default: 10). When no match is found, this caps how many related-note suggestions are listed. Aliases: limit, per_page.

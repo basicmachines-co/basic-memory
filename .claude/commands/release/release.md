@@ -96,23 +96,15 @@ After PyPI release is published, update the MCP registry:
 
 2. **Publish to MCP Registry**
    ```bash
-   # from the basic-memory repo root
-   mcp-publisher publish
+   gh workflow run mcp-registry-publish.yml
    ```
-
-   If not authenticated:
-   ```bash
-   mcp-publisher login github
-   # Follow device authentication flow
-   mcp-publisher publish
-   ```
+   The workflow authenticates with GitHub Actions OIDC. Do not run `mcp-publisher`
+   locally; the manual `mcp-publisher login github` path is unreliable for this namespace.
 
 3. **Verify Publication**
    ```bash
    curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=basic-memory"
    ```
-
-**Note:** The `mcp-publisher` CLI can be installed via Homebrew (`brew install mcp-publisher`) or from GitHub releases.
 
 #### Website Updates
 
@@ -120,10 +112,8 @@ After PyPI release is published, update the MCP registry:
 `basicmachines-co/basicmemory.com`, formerly `basicmachines.co`)
    - **No version bump needed.** The marketing site is an Astro + React app and
      carries **no hardcoded Basic Memory version number** anywhere in its UI
-     (`hero.tsx` and the rest of the site have no version string). The old
-     instruction to bump `src/components/sections/hero.tsx` is obsolete — that
-     file no longer holds a version. Release announcements are dated blog posts,
-     not an in-place edit.
+     (`hero.tsx` and the rest of the site have no version string). Release
+     announcements are dated blog posts, not an in-place edit.
    - **Skip entirely for patch releases.**
    - **Significant releases only — optional announcement post**:
      1. Pull latest from GitHub: `git pull origin main`
@@ -217,5 +207,5 @@ Users can now upgrade:
 - Triggers automated GitHub release with changelog
 - Package is published to PyPI for `pip` and `uv` users
 - Homebrew formula is automatically updated for stable releases
-- MCP Registry is updated manually via `mcp-publisher publish`
+- MCP Registry is published by dispatching the `MCP Registry Publish` workflow
 - Supports multiple installation methods (uv, pip, Homebrew)

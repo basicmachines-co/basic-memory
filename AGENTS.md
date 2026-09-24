@@ -86,6 +86,7 @@ Before opening or updating a PR, run the checks that mirror the common required 
 - Sign commits with `git commit -s` so DCO passes. If a PR branch already has unsigned commits, rewrite the branch with signed-off commits before asking for review.
 - Use a semantic PR title accepted by `.github/workflows/pr-title.yml`: `type(scope): summary`.
 - Use one of the allowed scopes: `core`, `cli`, `api`, `mcp`, `sync`, `ui`, `ci`, `deps`, `installer`, `plugins`, `skills`, `integrations`.
+- Use one of the allowed types: `feat`, `fix`, `chore`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`. Example: `fix(cli): propagate cloud workspace routing`.
 
 ### Test Structure
 
@@ -366,11 +367,11 @@ just release v0.21.3
 
 The recipe runs `just lint` + `just typecheck`, then updates every release manifest through `scripts/update_versions.py`: `src/basic_memory/__init__.py`, `server.json`, the root Claude marketplace, the Claude Code plugin manifest and local marketplace, the Hermes `plugin.yaml`, and the OpenClaw `package.json`. It commits as `chore: update version to X.Y.Z for vX.Y.Z release` on a `release/vX.Y.Z` branch, lands it on `main` via a rebase-merged PR, then tags the rebased commit and pushes the tag. After the tag lands, the `Release` workflow builds the Python package, publishes to PyPI, creates the GitHub release with auto-generated notes, publishes the OpenClaw npm package, and updates the Homebrew formula. The recipe finishes by printing the post-release tasks the workflow doesn't cover.
 
-**Beta release:** `just beta v0.21.3b1` — same flow with a beta-suffixed tag. PyPI consumers install with `pip install basic-memory --pre`. While `pyproject.toml` pins a FastMCP pre-release, the recipe refuses to publish a beta: every documented install runs with `--prerelease=allow`, which uv applies to basic-memory itself, so a beta on PyPI would become the default install for stable users (#1338). Override deliberately with `BASIC_MEMORY_ALLOW_BETA_WITH_PRERELEASE_DEPS=1`.
+**Beta release:** `just beta v0.21.3b1` — same flow with a beta-suffixed tag. PyPI consumers install with `pip install basic-memory --pre`. The recipe refuses a beta whenever `pyproject.toml` pins a FastMCP pre-release (`fastmcp==X.Y.ZbN`): installs then need `--prerelease=allow`, which uv also applies to basic-memory itself, so a beta on PyPI would become the default install for stable users. Override deliberately with `BASIC_MEMORY_ALLOW_BETA_WITH_PRERELEASE_DEPS=1`.
 
 **Release dry run:** `just release-dry-run v0.21.4` previews the consolidated version update without writing files.
 
-**Development builds are not published.** `main` commits used to publish `0.23.3.devN`-style versions to PyPI via a `dev-release.yml` workflow. That stopped with #1338: every documented install now passes `--prerelease=allow` (required by the FastMCP pre-release pin), and uv applies it to basic-memory itself, so a dev build on PyPI outranked the stable release for every fresh install. To try unreleased `main`, install from git: `uv tool install "basic-memory @ git+https://github.com/basicmachines-co/basic-memory" --prerelease=allow`. Any `.dev` versions still on PyPI from before the change must stay yanked.
+**Development builds are not published to PyPI.** Documented installs pass `--prerelease=allow` (published releases through v0.23.2 pin a FastMCP pre-release), and uv applies that flag to basic-memory itself, so a `.devN` build on PyPI would outrank the stable release for every fresh install. To try unreleased `main`, install from git: `uv tool install "basic-memory @ git+https://github.com/basicmachines-co/basic-memory" --prerelease=allow`. Keep any old `.dev` versions on PyPI yanked.
 
 **Do not tag releases by hand.** A bare `git tag vX.Y.Z` skips the in-code version bump. Package metadata is still correct (uv-dynamic-versioning derives it from the git tag) but `basic-memory --version` reports the previous release, which is what happened with v0.21.2 → v0.21.3.
 
@@ -382,7 +383,7 @@ The recipe runs `just lint` + `just typecheck`, then updates every release manif
   significant release, optionally add a dated announcement post under
   `src/content/blog/` (model it on an existing `basic-memory-vX-Y-Z-release.md`).
   Skip entirely for routine patch releases.
-- MCP Registry — `mcp-publisher publish` from the repo root
+- MCP Registry — after the version is live on PyPI, dispatch `.github/workflows/mcp-registry-publish.yml` (`gh workflow run mcp-registry-publish.yml`); do not run `mcp-publisher` locally
 
 See `.claude/commands/release/release.md` (and `beta.md`, `release-check.md`, `changelog.md` alongside it) for the full release + post-release runbook, including the slash commands.
 
@@ -410,7 +411,6 @@ See `.claude/commands/release/release.md` (and `beta.md`, `release-check.md`, `c
 - Import from ChatGPT: `basic-memory import chatgpt`
 - Import from Memory JSON: `basic-memory import memory-json`
 - Tool access: `basic-memory tool` (provides CLI access to MCP tools)
-    - Continue: `basic-memory tool continue-conversation --topic="search"`
 
 **Config Management:**
 - List all settings (effective values, env overrides marked): `basic-memory config list`
@@ -424,17 +424,15 @@ See `.claude/commands/release/release.md` (and `beta.md`, `release-check.md`, `c
 - Project info: `basic-memory project info`
 - Set cloud mode: `basic-memory project set-cloud "name"`
 - Set local mode: `basic-memory project set-local "name"`
-- One-way sync (local -> cloud): `basic-memory project sync`
-- Bidirectional sync: `basic-memory project bisync`
-- Integrity check: `basic-memory project check`
 
 **Cloud Commands (requires subscription):**
 - Authenticate (global): `basic-memory cloud login`
 - Logout (global): `basic-memory cloud logout`
 - Check cloud status: `basic-memory cloud status`
 - Setup cloud sync: `basic-memory cloud setup`
-- Save API key: `basic-memory cloud set-key bmc_...`
-- Create API key: `basic-memory cloud create-key "name"`
+- Save API key: `basic-memory cloud api-key save bmc_...`
+- Create API key: `basic-memory cloud api-key create "name"`
+- Integrity check (local vs cloud): `basic-memory cloud check --name "name"`
 - Manage snapshots: `basic-memory cloud snapshot [create|list|delete|show|browse]`
 - Restore from snapshot: `basic-memory cloud restore <path> --snapshot <id>`
 
@@ -447,39 +445,10 @@ See `.claude/commands/release/release.md` (and `beta.md`, `release-check.md`, `c
 
 ### MCP Capabilities
 
-- Basic Memory exposes these MCP tools to LLMs:
-
-  **Content Management:**
-    - `write_note(title, content, directory, tags)` - Create/update markdown notes with semantic observations and relations
-    - `read_note(identifier, page, page_size)` - Read notes by title, permalink, or memory:// URL with knowledge graph awareness
-    - `read_content(path)` - Read raw file content (text, images, binaries) without knowledge graph processing
-    - `view_note(identifier, page, page_size)` - View notes as formatted artifacts for better readability
-    - `edit_note(identifier, operation, content)` - Edit notes incrementally (append, prepend, find/replace, replace_section)
-    - `move_note(identifier, destination_path, is_directory)` - Move notes or directories to new locations, updating database and maintaining links
-    - `delete_note(identifier, is_directory)` - Delete notes or directories from the knowledge base
-
-  **Knowledge Graph Navigation:**
-    - `build_context(url, depth, timeframe)` - Navigate the knowledge graph via memory:// URLs for conversation continuity
-    - `recent_activity(type, depth, timeframe)` - Get recently updated information with specified timeframe (e.g., "1d", "1 week")
-    - `list_directory(dir_name, depth, file_name_glob)` - Browse directory contents with filtering and depth control
-
-  **Search & Discovery:**
-    - `search_notes(query, page, page_size, search_type, types, entity_types, after_date)` - Full-text search across all content with advanced filtering options
-
-  **Project Management:**
-    - `list_memory_projects()` - List all available projects with their status
-    - `create_memory_project(project_name, project_path, set_default)` - Create new Basic Memory projects
-    - `delete_project(project_name)` - Delete a project from configuration
-
-  **ChatGPT-Compatible Tools:**
-    - `search(query)` - Search across knowledge base (OpenAI actions compatible)
-    - `fetch(id)` - Fetch full content of a search result document
-
-- MCP Prompts for better AI interaction:
-    - `ai_assistant_guide()` - Guidance on effectively using Basic Memory tools for AI assistants
-    - `continue_conversation(topic, timeframe)` - Continue previous conversations with relevant historical context
-    - `search(query, after_date)` - Search with detailed, formatted results for better context understanding
-    - `recent_activity(timeframe)` - View recently changed items with formatted output
+MCP tools live in `src/basic_memory/mcp/tools/` (the registry is `tools/__init__.py`) and
+MCP prompts live in `src/basic_memory/mcp/prompts/`. Every tool has a manual page
+(`bm man <tool>`, or the `memory://man` resource). Treat the registry and the manual as the
+source of truth for tool names and signatures rather than a list in this file.
 
 ### Cloud Features (v0.15.0+)
 
@@ -494,7 +463,6 @@ Basic Memory now supports cloud synchronization and storage (requires active sub
 - rclone bisync integration for two-way synchronization
 - Conflict resolution and integrity verification
 - Real-time sync with change detection
-- Mount/unmount cloud storage for direct file access
 
 **Cloud Project Management:**
 - Create and manage projects in the cloud
@@ -515,7 +483,7 @@ Individual projects can be routed through the cloud while others stay local, usi
 
 ```bash
 # Save API key and set project to cloud mode
-basic-memory cloud set-key bmc_abc123...
+basic-memory cloud api-key save bmc_abc123...
 basic-memory project set-cloud research    # route through cloud
 basic-memory project set-local research    # revert to local
 ```
@@ -539,68 +507,6 @@ basic-memory project info my-project --cloud
 Key behaviors:
 - The local MCP server (`basic-memory mcp`) automatically uses local routing
 - This allows simultaneous use of local Claude Desktop and cloud-based clients
-- Some commands (like `project default`, `project sync-config`, `project move`) require `--local` in cloud mode since they modify local configuration
+- Some commands (like `project default`, `project move`) require `--local` in cloud mode since they modify local configuration
 - Environment variable `BASIC_MEMORY_FORCE_LOCAL=true` forces local routing globally
 - Per-project cloud routing via API key works independently of global cloud mode
-
-## AI-Human Collaborative Development
-
-Basic Memory emerged from and enables a new kind of development process that combines human and AI capabilities. Instead
-of using AI just for code generation, we've developed a true collaborative workflow:
-
-1. AI (LLM) writes initial implementation based on specifications and context
-2. Human reviews, runs tests, and commits code with any necessary adjustments
-3. Knowledge persists across conversations using Basic Memory's knowledge graph
-4. Development continues seamlessly across different AI sessions with consistent context
-5. Results improve through iterative collaboration and shared understanding
-
-This approach has allowed us to tackle more complex challenges and build a more robust system than either humans or AI
-could achieve independently.
-
-**Problem-Solving Guidance:**
-- If a solution isn't working after reasonable effort, suggest alternative approaches
-- Don't persist with a problematic library or pattern when better alternatives exist
-- Example: When py-pglite caused cascading test failures, switching to testcontainers-postgres was the right call
-
-## GitHub Integration
-
-Basic Memory has taken AI-Human collaboration to the next level by integrating Claude directly into the development workflow through GitHub:
-
-### GitHub MCP Tools
-
-Using the GitHub Model Context Protocol server, Claude can now:
-
-- **Repository Management**:
-  - View repository files and structure
-  - Read file contents
-  - Create new branches
-  - Create and update files
-
-- **Issue Management**:
-  - Create new issues
-  - Comment on existing issues
-  - Close and update issues
-  - Search across issues
-
-- **Pull Request Workflow**:
-  - Create pull requests
-  - Review code changes
-  - Add comments to PRs
-
-This integration enables Claude to participate as a full team member in the development process, not just as a code generation tool. Claude's GitHub account ([bm-claudeai](https://github.com/bm-claudeai)) is a member of the Basic Machines organization with direct contributor access to the codebase.
-
-### Collaborative Development Process
-
-With GitHub integration, the development workflow includes:
-
-1. **Direct code review** - Claude can analyze PRs and provide detailed feedback
-2. **Contribution tracking** - All of Claude's contributions are properly attributed in the Git history
-3. **Branch management** - Claude can create feature branches for implementations
-4. **Documentation maintenance** - Claude can keep documentation updated as the code evolves
-5. **Code Commits**: ALWAYS sign off commits with `git commit -s`
-6. **Pull Request Titles**: PR titles must follow the semantic format enforced by `.github/workflows/pr-title.yml`: `type(scope): summary`
-   - Allowed types: `feat`, `fix`, `chore`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`
-   - Allowed scopes: `core`, `cli`, `api`, `mcp`, `sync`, `ui`, `ci`, `deps`, `installer`, `plugins`, `skills`, `integrations`
-   - Example: `fix(cli): propagate cloud workspace routing`
-
-This level of integration represents a new paradigm in AI-human collaboration, where the AI assistant becomes a full-fledged team member rather than just a tool for generating code snippets.

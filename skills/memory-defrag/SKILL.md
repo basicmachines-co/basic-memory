@@ -38,7 +38,6 @@ Look for these common issues:
 | **Orphan files** | Files in memory/ never referenced or updated | Review, merge, or remove |
 | **Inconsistencies** | Contradictory information across files | Resolve to ground truth |
 | **Poor organization** | Related info scattered across files | Restructure by topic |
-| **Recursive nesting** | `memory/memory/memory/...` directories | Delete nested dirs (indexer bug artifact) |
 
 ### 3. Plan Changes
 
@@ -46,7 +45,7 @@ Before making edits, write a brief plan:
 ```markdown
 ## Defrag Plan
 - [ ] Split MEMORY.md "Key People" section → memory/people.md
-- [ ] Remove completed tasks older than 30 days from memory/tasks/
+- [ ] Remove completed tasks past the retention window from memory/tasks/
 - [ ] Merge memory/bm-marketing-ideas.md into memory/competitive/
 - [ ] Update stale project status entries in MEMORY.md
 ```

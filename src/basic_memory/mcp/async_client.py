@@ -445,7 +445,7 @@ async def get_client(
             raise RuntimeError(
                 f"A cloud workspace was requested ('{workspace}') but no cloud "
                 "credentials were found. Run 'bm cloud login' or "
-                "'bm cloud set-key <key>' first, or omit the workspace selector "
+                "'bm cloud api-key save <key>' first, or omit the workspace selector "
                 "for a local operation."
             )
         logger.debug(f"Workspace selector '{workspace}' provided - using cloud proxy client")

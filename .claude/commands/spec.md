@@ -37,15 +37,8 @@ Execute the spec command: `/spec $ARGUMENTS`
 
 ### If command is "review":
 1. Read the specified spec and its "How to Evaluate" section
-2. Review current implementation against success criteria with careful evaluation of:
-   - **Functional completeness** - All specified features working
-   - **Test coverage analysis** - Actual test files and coverage percentage
-     - Count existing test files vs required components/APIs/composables
-     - Verify unit tests, integration tests, and end-to-end tests
-     - Check for missing test categories (component, API, workflow)
-   - **Code quality metrics** - TypeScript compilation, linting, performance
-   - **Architecture compliance** - Component isolation, state management patterns
-   - **Documentation completeness** - Implementation matches specification
-3. Provide honest, accurate assessment - do not overstate completeness
-4. Document findings and update spec with review results using mcp__basic-memory__edit_note
-5. If gaps found, clearly identify what still needs to be implemented/tested
+2. Review the implementation against each success criterion: which specified behavior works,
+   which tests cover it (`tests/`, `test-int/`), and whether `just check` and the relevant
+   `just test-*` targets pass.
+3. Update the spec with the findings via mcp__basic-memory__edit_note, marking each criterion
+   met or unmet with evidence; list unmet criteria as remaining work.

@@ -157,8 +157,11 @@ def optimize_image(img, content_length, max_output_bytes=350000):
 @mcp.tool(
     title="Read Content",
     description=(
-        "Read a file's raw content by path or permalink. Paths resolve against the Basic "
-        "Memory knowledge base API — see https://docs.basicmemory.com/local/mcp-tools-local"
+        "Read a file's raw bytes by path, permalink, or memory:// URL, without "
+        'knowledge-graph processing. Text and JSON come back as {"type": "text"}; '
+        "images are re-encoded as JPEG and downscaled to about 350 KB; other binaries come "
+        'back base64 as {"type": "document"} and are refused above 350 KB. Use '
+        "read_note for markdown notes when you want note resolution and fallback search."
     ),
     tags={"notes"},
     annotations={

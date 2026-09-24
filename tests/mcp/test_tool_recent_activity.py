@@ -513,7 +513,7 @@ def test_recent_activity_format_discovery_output_includes_other_active_projects_
         projects_activity=projects_activity,
         summary=summary,
         timeframe="7d",
-        guidance="Session reminder: Remember their project choice throughout this conversation.",
+        guidance="Suggested project: 'A' (most active with 2 items)",
     )
     assert "Most Active Project:" in out
     assert "Other Active Projects:" in out

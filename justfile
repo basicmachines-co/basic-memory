@@ -803,7 +803,7 @@ release version:
     echo "      and bump the badge in content/index.md (see that repo's CLAUDE.md)"
     echo "   2. basicmemory.com - No version number in the site UI; for a significant"
     echo "      release optionally add a post under src/content/blog/. Skip for patches."
-    echo "   3. MCP Registry - Run: mcp-publisher publish"
+    echo "   3. MCP Registry - once PyPI is live: gh workflow run mcp-registry-publish.yml"
     echo "   See: .claude/commands/release/release.md for detailed instructions"
 
 # Create a beta release (e.g., just beta v0.13.2b1)
