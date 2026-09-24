@@ -202,7 +202,12 @@ def _compose_workspace_project_route(
 
 @mcp.tool(
     title="Write Note",
-    description="Create a markdown note. If the note already exists, returns an error by default — pass overwrite=True to replace.",
+    description=(
+        "Create a markdown note. If the note already exists, returns an error by default "
+        "— pass overwrite=True to replace. directory is required. For incremental changes "
+        "to an existing note use edit_note. A new note's result may list similar existing "
+        "notes; that is advisory and does not block the write."
+    ),
     tags={"notes"},
     annotations={
         "title": "Write Note",
@@ -278,10 +283,10 @@ async def write_note(
                    Use forward slashes (/) as separators. Use "/" or "" to write to project root.
                    Examples: "notes", "projects/2025", "research/ml", "/" (root).
                    MCP accepts the aliases folder, dir, and path; the CLI flag is --folder.
-        project: Project name to write to. Optional - server will resolve using the
-                hierarchy above. Omitting both project and project_id writes to the
-                session's active project (the last one this session touched), and only
-                falls back to the configured default project when there is none — so
+        project: Project name to write to. Optional. Omitting both project and project_id
+                writes to the session's active project (the last one this session
+                touched), and only falls back to the configured default project when there
+                is none — so
                 after working in another project, pass project explicitly. Use
                 "workspace/project" to route to a project in a specific cloud workspace.
                 A bare name that exists in multiple workspaces resolves to the default
@@ -304,7 +309,7 @@ async def write_note(
                   beyond title/type/tags. Nested dicts are supported. Not available from the CLI.
         overwrite: If True, replace existing note on conflict. If False, error on conflict.
                    If None (default), consult write_note_overwrite_default config setting.
-        output_format: "text" returns the existing markdown summary. "json" returns
+        output_format: "text" returns a markdown summary. "json" returns
                        machine-readable metadata; on conflict it returns action: "conflict"
                        with an error code instead of raising.
         context: Optional FastMCP context for performance caching.

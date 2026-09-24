@@ -66,8 +66,8 @@ async def continue_conversation(
 
         This is a memory retrieval session.
 
-        Please use the available basic-memory tools to gather relevant context before responding.
-        Start by executing one of the suggested commands below to retrieve content.
+        The notes below came from Basic Memory. Open a note with `read_note` or its linked notes
+        with `build_context` when a snippet is not enough to respond.
 
         {context_text}
 
@@ -84,18 +84,15 @@ async def continue_conversation(
             2. **Build context** - Use `build_context("memory://path")` to see relationships
             3. **Search deeper** - Use `search_notes("{topic}")` with different filters
 
-            > **Knowledge Capture:** As you continue this conversation, actively look for
-            > opportunities to record new information, decisions, or insights using `write_note()`.
+            If this conversation produces a decision or insight worth keeping, offer to save it
+            with `write_note`.
         """)
     elif topic:
         prompt += dedent(f"""
             No previous context found for '{topic}'.
 
-            This is an opportunity to start documenting this topic:
-
-            1. **Create a new note** - Use `write_note(title="{topic}", content="...")` to start
-            2. **Search with variations** - Try `search_notes("{topic}")` with different terms
-            3. **Check recent activity** - Use `recent_activity(timeframe="7d")` to see what's new
+            Try `search_notes` with related terms or check `recent_activity`. If the user wants this
+            topic tracked, offer to start a note with `write_note`.
         """)
     else:
         prompt += dedent("""

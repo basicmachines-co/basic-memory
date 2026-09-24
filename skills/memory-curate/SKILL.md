@@ -31,6 +31,8 @@ read_note(identifier="note-to-check")
 # Orphans have an empty (or missing) Relations section
 ```
 
+If the `bm` CLI is available, `bm orphans` lists notes with no relations in one call.
+
 **What to do with orphans:**
 - Suggest relations based on content similarity
 - Ask whether they should connect to existing topics
@@ -66,7 +68,7 @@ Add a confirmed relation with `edit_note`:
 ```python
 edit_note(
     identifier="API Design Decisions",
-    operation="append",
+    operation="insert_after_section",
     section="Relations",
     content="- depends_on [[Rate Limiter]]",
 )
@@ -91,7 +93,7 @@ search_notes(query="topic keywords")
 # Point an older note at the one that replaces it
 edit_note(
     identifier="DB Schema v1",
-    operation="append",
+    operation="insert_after_section",
     section="Relations",
     content="- updates [[DB Schema v2]]",
 )
@@ -106,7 +108,7 @@ list_directory(dir_name="/", depth=3)
 Look for overcrowded folders, single-note folders, inconsistent naming, and notes
 that belong elsewhere. Suggest grouping related notes into topic folders, adding
 subfolders for large categories, and a consistent naming convention. Move misplaced
-notes with `move_note` — the permalink stays stable, so wiki-links keep resolving.
+notes with `move_note`. By default the permalink stays the same after a move, so links keep resolving. Projects with `update_permalinks_on_move` enabled rewrite it from the new path.
 
 ```python
 move_note(
@@ -173,42 +175,17 @@ context, suggest adding background. Apply with `edit_note`.
 
 ## Curation Workflows
 
-### Quick Health Check
-
-A fast overview of knowledge base status:
-
-1. Count total notes
-2. Identify orphan count
-3. List recently modified (`recent_activity`)
-4. Check for obvious duplicates
-5. Report folder distribution
-
-### Deep Organization Session
-
-Thorough review and improvement:
-
-1. **Audit** — catalog all notes, identify issues
-2. **Orphans** — address unlinked notes
-3. **Relations** — suggest new connections
-4. **Duplicates** — merge or differentiate similar notes
-5. **Structure** — reorganize folders if needed
-6. **Index** — create hub notes for major topics
-
-### Topic-Focused Organization
-
-Organize around a specific subject:
-
-1. Find all notes related to the topic (`search_notes`)
-2. Map existing relations with `build_context(url="memory://...")`
-3. Identify gaps in the topic graph
-4. Suggest new notes to fill them
-5. Create a topic index note
+Scale the pass to the request. A health check reports orphans, likely duplicates,
+recent activity (`recent_activity`), and folder distribution. A deep session works
+through the capabilities above in whatever order the findings suggest. A topic pass
+maps one subject with `search_notes` and `build_context`, fills the gaps it finds, and
+ends with a hub note.
 
 ## Best Practices
 
 1. **Work incrementally.** Don't reorganize everything at once.
 2. **Confirm before changing.** Always ask before moving, merging, or editing notes.
-3. **Preserve permalinks.** Moving a note is fine; changing its permalink breaks inbound links.
+3. **Preserve permalinks.** Changing a permalink breaks inbound `memory://` links. Moves keep the permalink by default (unless the project enables `update_permalinks_on_move`).
 4. **Explain suggestions.** Say *why* a relation or merge makes sense.
 5. **Respect the existing system.** Enhance the user's organization — don't impose a new taxonomy.
 6. **Show the graph.** Use `build_context` to help the user see how notes connect.

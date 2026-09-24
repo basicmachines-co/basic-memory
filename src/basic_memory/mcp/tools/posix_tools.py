@@ -335,7 +335,14 @@ def _grep_retrieval_mode(literal: bool) -> SearchRetrievalMode:
 
 @mcp.tool(
     title="Grep",
-    description="Search note content for a pattern. Requires 'project' when several are addressable.",
+    description=(
+        "Search note content in one project and return ranked matching notes. Not a regex: "
+        "by default `pattern` is matched with hybrid semantic plus full-text search when "
+        "semantic search is enabled, otherwise full-text only. `literal=True` forces "
+        "full-text matching; add `context_lines` to get case-insensitive matching lines "
+        "with surrounding context and line numbers. Requires 'project' when several "
+        "projects are addressable."
+    ),
     tags={POSIX_TOOLS_TAG, "search"},
     annotations={
         "title": "Grep",
@@ -359,7 +366,8 @@ async def grep(
 
     Args:
         pattern: Text to search for.
-        literal: Force literal full-text matching instead of semantic search.
+        literal: Use full-text keyword matching instead of the default semantic/hybrid
+            retrieval. Required for context_lines.
         page: Page number (1-indexed).
         page_size: Results per page (maximum 100 in line-scanning mode).
         context_lines: Return compact literal match windows with 0-10 surrounding lines

@@ -25,7 +25,11 @@ export function registerProjectListTool(
     {
       name: "list_memory_projects",
       label: "List Projects",
-      description: "List all Basic Memory projects accessible to this agent",
+      description:
+        "List Basic Memory projects accessible to this agent, optionally filtered by " +
+        "workspace. Returns each project's name, path, default flag, and workspace. " +
+        "Call this before passing `project` to another tool when the user names a " +
+        "project that isn't the default.",
       parameters: Type.Object({
         workspace: Type.Optional(
           Type.String({

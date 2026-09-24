@@ -12,7 +12,12 @@ from basic_memory.mcp.tools.read_note import read_note
 
 @mcp.tool(
     title="View Note",
-    description="View a note as a formatted artifact for better readability.",
+    description=(
+        "Read a note (same resolution as read_note) and return it wrapped in an instruction "
+        "to display it to the user as a markdown artifact. Use when the user wants to see the "
+        "note rendered; use read_note when you need the content yourself. Not-found results "
+        "are returned unwrapped."
+    ),
     tags={"notes"},
     annotations={
         "title": "View Note",

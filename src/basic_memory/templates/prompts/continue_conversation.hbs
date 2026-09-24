@@ -1,10 +1,8 @@
 # Continuing conversation on: {{ topic }}
 
-This is a memory retrieval session. 
+This is a memory retrieval session.
 
-Please use the available basic-memory tools to gather relevant context before responding. Start by executing one of the suggested commands below to retrieve content.
-
-> **Knowledge Capture Recommendation:** As you continue this conversation, actively look for opportunities to record new information, decisions, or insights that emerge. Use `write_note()` to document important context.
+The notes below came from Basic Memory. Open a note with `read_note` or its linked notes with `build_context` when a snippet is not enough to respond.
 
 Here's what I found from previous conversations:
 
@@ -46,7 +44,7 @@ You can read this document with: `read_note("{{ primary_result.permalink }}")`
 {{#if permalink}}
 You can view this document with: `read_note("{{ permalink }}")`
 {{else}}
-You can view this file with: `read_file("{{ file_path }}")`
+You can view this file with: `read_content("{{ file_path }}")`
 {{/if}}
 </related>
 {{/each}}
@@ -57,54 +55,13 @@ You can view this file with: `read_file("{{ file_path }}")`
 {{else}}
 The supplied query did not return any information specifically on this topic.
 
-## Opportunity to Capture New Knowledge!
-
-This is an excellent chance to start documenting this topic:
-
-```python
-await write_note(
-    title="{{ topic }}",
-    content=f'''
-# {{ topic }}
-
-## Overview
-[Summary of what we know about {{ topic }}]
-
-## Key Points
-[Main aspects or components of {{ topic }}]
-
-## Observations
-- [category] [First important observation about {{ topic }}]
-- [category] [Second observation about {{ topic }}]
-
-## Relations
-- relates_to [[Related Topic]]
-- part_of [[Broader Context]]
-'''
-)
-```
-
-## Other Options
-
-Please use the available basic-memory tools to gather relevant context before responding.
-You can also:
-- Try a different search term
-- Check recent activity with `recent_activity(timeframe="1w")`
+Try a different search term or check `recent_activity`. If the user wants this topic tracked, offer to start a note with `write_note`.
 {{/if}}
 ## Next Steps
 <instructions>
 You can:
 - Explore more with: `search_notes("{{ topic }}")`
 - See what's changed: `recent_activity(timeframe="{{default timeframe "7d"}}")`
-- **Record new learnings or decisions from this conversation:** `write_note(folder="[Choose a folder]" title="[Create a meaningful title]", content="[Content with observations and relations]")`
 
-## Knowledge Capture Recommendation
-
-As you continue this conversation, **actively look for opportunities to:**
-1. Record key information, decisions, or insights that emerge
-2. Link new knowledge to existing topics 
-3. Suggest capturing important context when appropriate
-4. Create forward references to topics that might be created later
-
-Remember that capturing knowledge during conversations is one of the most valuable aspects of Basic Memory.
+If this conversation produces a decision or insight worth keeping, offer to save it with `write_note`.
 </instructions>

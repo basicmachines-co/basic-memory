@@ -175,7 +175,8 @@ export function registerMemoryProvider(
       description:
         "Search across all memory sources: MEMORY.md (working memory), " +
         "Basic Memory knowledge graph (long-term archive), and active tasks. " +
-        "Returns composited results from all sources.",
+        "Returns composited results from all sources. Use it for broad recall; use " +
+        "search_notes when you need metadata, tag, or status filters or a specific project.",
       parameters: Type.Object({
         query: Type.String({
           description: "Search query — natural language or keywords",

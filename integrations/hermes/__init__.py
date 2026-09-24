@@ -89,7 +89,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "name": "bm_search",
         "description": (
             "Search the Basic Memory knowledge graph for notes, decisions, observations. "
-            "Use BEFORE answering questions about prior work — context may already exist."
+            "Use it before answering questions about prior work, since the answer may "
+            "already be documented. Returns ranked notes; follow up with bm_read for "
+            "full content."
         ),
         "parameters": {
             "type": "object",
@@ -106,7 +108,11 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "bm_read",
-        "description": "Read a specific note by title, permalink, or memory:// URL.",
+        "description": (
+            "Read a specific note by title, permalink, or memory:// URL. Returns the "
+            "full markdown body with observations and relations. Permalinks returned "
+            "by bm_write carry their own project routing."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
@@ -186,21 +192,39 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
     },
     {
         "name": "bm_delete",
-        "description": "Delete a note from the knowledge graph.",
+        "description": (
+            "Permanently delete a note: removes its markdown file and index entries. "
+            "Use only when the user asks to remove a note; use bm_move to relocate "
+            "and bm_edit to change content."
+        ),
         "parameters": {
             "type": "object",
-            "properties": {"identifier": {"type": "string"}},
+            "properties": {
+                "identifier": {
+                    "type": "string",
+                    "description": "Note title, permalink, or memory:// URL.",
+                },
+            },
             "required": ["identifier"],
         },
     },
     {
         "name": "bm_move",
-        "description": "Move a note to a different folder.",
+        "description": (
+            "Move a note to another folder in the same project. The content is "
+            "preserved; only the location changes."
+        ),
         "parameters": {
             "type": "object",
             "properties": {
-                "identifier": {"type": "string"},
-                "new_folder": {"type": "string"},
+                "identifier": {
+                    "type": "string",
+                    "description": "Note title, permalink, or memory:// URL.",
+                },
+                "new_folder": {
+                    "type": "string",
+                    "description": "Project-relative destination folder, e.g. 'archive/2026'.",
+                },
             },
             "required": ["identifier", "new_folder"],
         },
@@ -1107,31 +1131,14 @@ class BasicMemoryProvider(MemoryProvider):
             "## Basic Memory Knowledge Graph\n"
             f"Active project: `{self._project}` ({self._mode}).\n"
             "\n"
-            "**Use the `bm_*` tools below directly — do not shell out to the `bm` CLI.** "
+            "**Use the `bm_*` tools directly — do not shell out to the `bm` CLI.** "
             "These tools route through a persistent MCP connection "
             "(~0.1s/call); running `bm` from the shell spawns a fresh Python "
             "process per call (~1-2s) and bypasses Hermes's automatic per-turn "
             "capture.\n"
             "\n"
-            "- `bm_search(query)` — call BEFORE answering about prior decisions, "
-            "projects, meetings, or anything that might already be documented\n"
-            "- `bm_read(identifier)` — fetch a note by title, permalink, or "
-            "memory:// URL\n"
-            "- `bm_context(url)` — navigate via memory:// URLs to find related "
-            "notes\n"
-            "- `bm_write(title, content, folder)` — capture decisions, insights, "
-            "meeting outcomes worth preserving\n"
-            "- `bm_edit(identifier, operation, content)` — append, prepend, "
-            "find_replace, replace_section\n"
-            "- `bm_delete(identifier)` / `bm_move(identifier, new_folder)` — "
-            "maintenance\n"
-            "- `bm_recent(timeframe)` — list notes updated within a window "
-            "(default 7d) when there's no specific query yet\n"
-            "- `bm_projects()` — list available projects (local + cloud) with "
-            "their UUIDs; call when the user names a project that isn't the "
-            "active one\n"
-            "- `bm_workspaces()` — list BM Cloud workspaces; pair with "
-            "`bm_projects` to disambiguate same-named projects\n"
+            "Use `bm_search` before answering about prior decisions, projects, "
+            "meetings, or anything that might already be documented.\n"
             "\n"
             "**Saves must be real.** When the user asks you to remember, "
             "record, save, or note something, call `bm_write` (or `bm_edit`) "

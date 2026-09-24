@@ -33,7 +33,7 @@ move_note(identifier, destination_path="", destination_folder=None,
 - **is_directory** (boolean, optional, default: False) — If True, moves an entire directory and all its contents. When True, identifier and destination_path should be directory paths (without file extensions). Defaults to False.
 - **project** (string | null, optional, default: None) — Project name to move within. Optional - server will resolve using hierarchy. If unknown, use list_memory_projects() to discover available projects.
 - **project_id** (string | null, optional, default: None) — Project external_id (UUID). Prefer this over `project` when known — it routes to the exact project regardless of name collisions across cloud workspaces. Takes precedence over `project`. Get from list_memory_projects().
-- **output_format** (string, optional, default: "text") — "text" returns existing markdown guidance/success text. "json" returns machine-readable move metadata.
+- **output_format** (string, optional, default: "text") — "text" returns a markdown success or failure message. "json" returns machine-readable move metadata, with an error code on failure.
 
 ## DESCRIPTION
 

@@ -354,7 +354,19 @@ Error editing note '{identifier}': {error_message}
 
 @mcp.tool(
     title="Edit Note",
-    description="Edit an existing markdown note using various operations like append, prepend, find_replace, replace_section, insert_before_section, or insert_after_section. Pass metadata to merge YAML frontmatter fields independent of the operation.",
+    description=(
+        "Edit a note in place. `operation` picks the edit: append or prepend `content` "
+        "(prepend lands after frontmatter; both create the note if it does not exist); "
+        "find_replace (replaces every exact, case-sensitive occurrence of `find_text`, and "
+        "writes nothing unless the count equals `expected_replacements`, default 1); "
+        "replace_section (replaces the content under the `section` heading, including its "
+        "subsections unless replace_subsections=false); insert_before_section / "
+        "insert_after_section (adds content beside the `section` heading). The heading must "
+        "match exactly and appear once; a heading without leading `#` is treated as `##`. A "
+        "missing or duplicate heading, or missing find_text, fails without writing. "
+        "`identifier` must resolve exactly; there is no fuzzy matching. Pass `metadata` to "
+        "merge frontmatter fields in the same call."
+    ),
     tags={"notes"},
     annotations={
         "title": "Edit Note",
@@ -434,9 +446,11 @@ async def edit_note(
         project_id: Project external_id (UUID). Prefer this over `project` when known —
                 it routes to the exact project regardless of name collisions across cloud
                 workspaces. Takes precedence over `project`. Get from list_memory_projects().
-        section: For replace_section operation - the markdown header to replace content under (e.g., "## Notes", "### Implementation")
-        find_text: For find_replace operation - the text to find and replace
-        expected_replacements: For find_replace operation - the expected number of replacements (validation will fail if actual doesn't match)
+        section: Heading for replace_section, insert_before_section, and
+            insert_after_section (e.g. "## Notes", "### Implementation"). Must match exactly.
+        find_text: For find_replace operation - the exact, case-sensitive text to replace
+        expected_replacements: For find_replace: required occurrence count of find_text
+            (default 1). A mismatch fails without writing.
         replace_subsections: For replace_section operation. Default (true): the section
             spans everything through the next heading of the same or higher level in the
             original note, so replacing "## Section" also replaces its "###" subsections —
@@ -449,8 +463,9 @@ async def edit_note(
             combined with any operation in the same call. `title` and `permalink` are
             ignored since those have their own dedicated handling; `type` is applied like
             any other frontmatter field. Key deletion is not supported.
-        output_format: "text" returns the existing markdown summary. "json" returns
-            machine-readable edit metadata.
+        output_format: "text" returns a markdown summary of the edit and the note's
+            resulting observations and relations. "json" returns machine-readable edit
+            metadata.
         context: Optional FastMCP context for performance caching.
 
     Returns:
