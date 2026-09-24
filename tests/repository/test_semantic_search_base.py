@@ -1448,7 +1448,7 @@ async def test_sync_entity_vectors_batch_logs_resolved_fastembed_runtime_setting
         info_calls.append((message, kwargs))
 
     monkeypatch.setattr(repo, "_prepare_entity_vector_jobs_window", _stub_prepare_window)
-    monkeypatch.setattr(search_repository_base_module.logger, "info", _capture_info)
+    monkeypatch.setattr(search_repository_base_module.logger, "debug", _capture_info)
 
     result = await repo.sync_entity_vectors_batch([1])
 

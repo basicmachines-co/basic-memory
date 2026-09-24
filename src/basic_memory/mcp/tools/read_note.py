@@ -256,8 +256,10 @@ async def read_note(
                 return f"# Error\n\nIdentifier '{identifier}' is not allowed - paths must stay within project boundaries"
 
             # Get the file via REST API - first try direct identifier resolution
-            logger.info(
-                f"Attempting to read note from Project: {active_project.name} identifier: {entity_path}"
+            logger.debug(
+                "Attempting to read note from Project: {} identifier: {}",
+                active_project.name,
+                entity_path,
             )
 
             # Import here to avoid circular import
@@ -420,7 +422,7 @@ async def read_note(
                         raise
                     logger.info(f"Direct lookup failed for '{entity_path}': {error}")
                 else:
-                    logger.info(
+                    logger.debug(
                         "Returning JSON read_note result from entity: {path}",
                         path=entity_path,
                     )
@@ -431,7 +433,7 @@ async def read_note(
                     entity_id = await knowledge_client.resolve_entity(entity_path, strict=True)
                     response = await resource_client.read(entity_id)
                     if response.status_code == 200:
-                        logger.info(
+                        logger.debug(
                             "Returning read_note result from resource: {path}",
                             path=entity_path,
                         )
@@ -444,7 +446,7 @@ async def read_note(
             # A single page is not enough: when more than _TITLE_LOOKUP_PAGE_SIZE
             # higher-ranked fuzzy titles contain the queried phrase, the exact
             # title lands on a later page and a one-page lookup would miss it.
-            logger.info(f"Search title for: {identifier}")
+            logger.debug(f"Search title for: {identifier}")
             result: dict[str, object] | None = None
             for lookup_page in range(1, _TITLE_LOOKUP_MAX_PAGES + 1):
                 title_results = await _search_candidates(
@@ -487,7 +489,7 @@ async def read_note(
                         _result_permalink(result) or "", strict=True
                     )
                 if entity_id is not None:
-                    logger.info(f"Found note by exact title search: {_result_permalink(result)}")
+                    logger.debug(f"Found note by exact title search: {_result_permalink(result)}")
                     return await _read_resolved_note(entity_id)
             elif result is not None and _result_permalink(result):
                 try:
@@ -496,7 +498,7 @@ async def read_note(
                     )
                     response = await resource_client.read(entity_id)
                     if response.status_code == 200:
-                        logger.info(
+                        logger.debug(
                             f"Found note by exact title search: {_result_permalink(result)}"
                         )
                         return response.text

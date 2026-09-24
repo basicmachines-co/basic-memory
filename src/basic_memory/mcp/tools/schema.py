@@ -303,7 +303,7 @@ async def schema_validate(
         client,
         active_project,
     ):
-        logger.info(
+        logger.debug(
             f"MCP tool call tool=schema_validate project={active_project.name} "
             f"note_type={note_type} identifier={identifier}"
         )
@@ -317,7 +317,7 @@ async def schema_validate(
                 identifier=identifier,
             )
 
-            logger.info(
+            logger.debug(
                 f"MCP tool response: tool=schema_validate project={active_project.name} "
                 f"total={result.total_notes} valid={result.valid_count} "
                 f"warnings={result.warning_count} errors={result.error_count}"
@@ -436,7 +436,7 @@ async def schema_infer(
         client,
         active_project,
     ):
-        logger.info(
+        logger.debug(
             f"MCP tool call tool=schema_infer project={active_project.name} "
             f"note_type={note_type} threshold={threshold}"
         )
@@ -447,7 +447,7 @@ async def schema_infer(
             schema_client = SchemaClient(client, active_project.external_id)
             result = await schema_client.infer(note_type, threshold=threshold)
 
-            logger.info(
+            logger.debug(
                 f"MCP tool response: tool=schema_infer project={active_project.name} "
                 f"note_type={note_type} notes_analyzed={result.notes_analyzed} "
                 f"required={len(result.suggested_required)} "
@@ -558,7 +558,7 @@ async def schema_diff(
         client,
         active_project,
     ):
-        logger.info(
+        logger.debug(
             f"MCP tool call tool=schema_diff project={active_project.name} note_type={note_type}"
         )
 
@@ -568,7 +568,7 @@ async def schema_diff(
             schema_client = SchemaClient(client, active_project.external_id)
             result = await schema_client.diff(note_type)
 
-            logger.info(
+            logger.debug(
                 f"MCP tool response: tool=schema_diff project={active_project.name} "
                 f"note_type={note_type} schema_found={result.schema_found} "
                 f"new_fields={len(result.new_fields)} "

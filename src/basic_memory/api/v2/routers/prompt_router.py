@@ -54,7 +54,7 @@ async def continue_conversation(
     Returns:
         Formatted continuation prompt with context
     """
-    logger.info(
+    logger.debug(
         f"V2 Generating continue conversation prompt for project {project_id}, "
         f"topic: {request.topic}, timeframe: {request.timeframe}"
     )
@@ -220,7 +220,7 @@ async def search_prompt(
     Returns:
         Formatted search results prompt with context
     """
-    logger.info(
+    logger.debug(
         f"V2 Generating search prompt for project {project_id}, "
         f"query: {request.query}, timeframe: {request.timeframe}"
     )
