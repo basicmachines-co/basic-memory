@@ -61,12 +61,12 @@ permalink, or memory:// URL — there is no fuzzy fallback for edits.
 - **project** (string | null, optional, default: None) — Project name to edit in. Optional - server will resolve using hierarchy. Use "workspace/project" to route to a project in a specific cloud workspace. If unknown, use list_memory_projects() to discover available projects.
 - **workspace** (string | null, optional, default: None) — Workspace slug, name, or tenant_id. When provided with `project`, routes as `workspace/project`. Cannot be combined with `project_id`.
 - **project_id** (string | null, optional, default: None) — Project external_id (UUID). Prefer this over `project` when known — it routes to the exact project regardless of name collisions across cloud workspaces. Takes precedence over `project`. Get from list_memory_projects().
-- **section** (string | null, optional, default: None) — For replace_section operation - the markdown header to replace content under (e.g., "## Notes", "### Implementation")
-- **find_text** (string | null, optional, default: None) — For find_replace operation - the text to find and replace
-- **expected_replacements** (integer | null, optional, default: None) — For find_replace operation - the expected number of replacements (validation will fail if actual doesn't match)
+- **section** (string | null, optional, default: None) — Heading for replace_section, insert_before_section, and insert_after_section (e.g. "## Notes", "### Implementation"). Must match exactly.
+- **find_text** (string | null, optional, default: None) — For find_replace operation - the exact, case-sensitive text to replace
+- **expected_replacements** (integer | null, optional, default: None) — For find_replace: required occurrence count of find_text (default 1). A mismatch fails without writing.
 - **replace_subsections** (boolean | null, optional, default: None) — For replace_section operation. Default (true): the section spans everything through the next heading of the same or higher level in the original note, so replacing "## Section" also replaces its "###" subsections — the replacement content may freely introduce new headings. Set to false to replace only the immediate content under the header, stopping at the next heading of any level and preserving subsections.
 - **metadata** (object | null, optional, default: None) — Optional dict of frontmatter fields to merge, independent of `operation`. Provided keys overwrite existing frontmatter values (or are added if new); unrelated frontmatter keys and the note body are left untouched. Can be combined with any operation in the same call. `title` and `permalink` are ignored since those have their own dedicated handling; `type` is applied like any other frontmatter field. Key deletion is not supported.
-- **output_format** (string, optional, default: "text") — "text" returns the existing markdown summary. "json" returns machine-readable edit metadata.
+- **output_format** (string, optional, default: "text") — "text" returns a markdown summary of the edit and the note's resulting observations and relations. "json" returns machine-readable edit metadata.
 
 ## MCP USAGE
 

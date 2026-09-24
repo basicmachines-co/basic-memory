@@ -128,7 +128,7 @@ async def test_read_note_returns_related_results_when_text_search_finds_matches(
     monkeypatch.setattr(read_note_module, "search_notes", fake_search_notes_fn)
 
     result = await read_note("missing-note", project=test_project.name)
-    assert "I couldn't find an exact match" in result
+    assert "No exact match for" in result
     assert "## 1. Related One" in result
     assert "## 2. Related Two" in result
 
@@ -1001,7 +1001,7 @@ async def test_read_note_memory_url_fallback_uses_search_tool_normalization(
         ("title", fallback_memory_url, test_project.name),
         ("text", fallback_memory_url, test_project.name),
     ]
-    assert "I couldn't find an exact match" in result
+    assert "No exact match for" in result
     assert "Memory URL Fallback Note" in result
 
 

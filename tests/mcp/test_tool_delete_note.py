@@ -18,18 +18,17 @@ class TestDeleteNoteErrorFormatting:
 
         assert "# Delete Failed - Note Not Found" in result
         assert "The note 'test-note' could not be found" in result
-        assert 'search_notes("test-project", "test-note")' in result
-        assert "Already deleted" in result
-        assert "Wrong identifier" in result
+        assert 'search_notes(query="test-note", project="test-project")' in result
+        assert 'delete_note(identifier="...", project="test-project")' in result
+        assert "already be deleted" in result
 
     def test_format_delete_error_permission_denied(self, test_project):
         """Test formatting for permission errors."""
         result = _format_delete_error_response(test_project.name, "permission denied", "test-note")
 
         assert "# Delete Failed - Permission Error" in result
-        assert "You don't have permission to delete 'test-note'" in result
-        assert "Check permissions" in result
-        assert "File locks" in result
+        assert "No write access to delete 'test-note'" in result
+        assert "locked by another application" in result
         assert "list_memory_projects()" in result
 
     def test_format_delete_error_access_forbidden(self, test_project):
@@ -37,7 +36,7 @@ class TestDeleteNoteErrorFormatting:
         result = _format_delete_error_response(test_project.name, "access forbidden", "test-note")
 
         assert "# Delete Failed - Permission Error" in result
-        assert "You don't have permission to delete 'test-note'" in result
+        assert "No write access to delete 'test-note'" in result
 
     def test_format_delete_error_server_error(self, test_project):
         """Test formatting for server errors."""
@@ -47,8 +46,8 @@ class TestDeleteNoteErrorFormatting:
 
         assert "# Delete Failed - System Error" in result
         assert "A system error occurred while deleting 'test-note'" in result
-        assert "Try again" in result
-        assert "Check file status" in result
+        assert 'read_note(identifier="test-note", project="test-project")' in result
+        assert "support@basicmemory.com" in result
 
     def test_format_delete_error_filesystem_error(self, test_project):
         """Test formatting for filesystem errors."""
@@ -70,8 +69,8 @@ class TestDeleteNoteErrorFormatting:
 
         assert "# Delete Failed - Database Error" in result
         assert "A database error occurred while deleting 'test-note'" in result
-        assert "Sync conflict" in result
-        assert "Database lock" in result
+        assert "out of sync" in result
+        assert "database lock" in result
 
     def test_format_delete_error_sync_error(self, test_project):
         """Test formatting for sync errors."""
@@ -85,9 +84,8 @@ class TestDeleteNoteErrorFormatting:
         result = _format_delete_error_response(test_project.name, "unknown error", "test-note")
 
         assert "# Delete Failed" in result
-        assert "Error deleting note 'test-note': unknown error" in result
-        assert "General troubleshooting" in result
-        assert "Verify the note exists" in result
+        assert "Error deleting note 'test-note' in test-project: unknown error" in result
+        assert 'search_notes(query="test-note", project="test-project")' in result
 
     def test_format_delete_error_with_complex_identifier(self, test_project):
         """Test formatting with complex identifiers (permalinks)."""
@@ -95,7 +93,7 @@ class TestDeleteNoteErrorFormatting:
             test_project.name, "entity not found", "folder/note-title"
         )
 
-        assert 'search_notes("test-project", "note-title")' in result
+        assert 'search_notes(query="note-title", project="test-project")' in result
         assert "Note Title" in result  # Title format
         assert "folder/note-title" in result  # Permalink format
 

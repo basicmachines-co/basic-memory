@@ -10,7 +10,7 @@ You have access to a persistent knowledge graph backed by Basic Memory. The grap
 
 ## Use `bm_*`, not the `bm` CLI
 
-**Always invoke the `bm_*` tools directly. Do not shell out to the `bm` CLI for note operations.**
+Use the `bm_*` tools for note operations rather than shelling out to the `bm` CLI.
 
 The `bm_*` tools route through a persistent MCP connection — roughly 0.1 seconds per call. Running `bm` from the shell spawns a fresh Python process per call (1-2 seconds of cold-start every time) and bypasses Hermes's automatic per-turn capture, so the session-transcript and summary notes won't reflect what you did.
 
@@ -113,7 +113,7 @@ A permalink is the canonical, URL-friendly identifier for a note. Three shapes e
 | **Project-qualified** | `main/decisions/auth-strategy` | `project-name/folder/note-slug`. Carries enough context to route without a separate `project` arg. |
 | **Workspace-qualified** | `personal/main/decisions/auth-strategy` | `workspace-slug/project-name/folder/note-slug`. Fully routes, including across cloud workspaces with same-named projects. |
 
-**Important: the permalink returned by `bm_write` already encodes the routing it needs for follow-up reads.** If you wrote with `project="personal/main"`, you get back `personal/main/folder/note-slug` and can call `bm_read({ identifier: <that permalink> })` with no `project` arg. The permalink self-routes.
+The permalink returned by `bm_write` already encodes the routing it needs for follow-up reads. If you wrote with `project="personal/main"`, you get back `personal/main/folder/note-slug` and can call `bm_read({ identifier: <that permalink> })` with no `project` arg. The permalink self-routes.
 
 `memory://` URLs follow the same shapes: `memory://personal/main/decisions/auth-strategy` is valid. The `memory://` prefix is optional for `bm_read` (any of the three permalink shapes works directly); `bm_context` expects the prefix.
 
@@ -139,41 +139,7 @@ bm_write({ title: "...", folder: "...", content: "...", project_id: "bf2a4c1e-d7
 
 `bm_projects` and `bm_workspaces` themselves do **not** take routing — they list across everything.
 
-## Recipe: writing an existing file into a specific project
-
-When the user asks something like *"save this markdown file to my personal `main` project, return the permalink"*:
-
-1. **Discover the project.** Call `bm_projects()` and find the entry matching the user's described project + workspace. You can route by either the workspace-qualified name (`personal/main`) or the UUID (`external_id`).
-
-   ```
-   bm_projects()
-   # → [{name: "main", external_id: "bf2a4c1e-d77f-4b7a-9c3e-5d8a1f0e2b6d", workspace: "Personal", ...}, ...]
-   ```
-
-   If a project name appears in multiple workspaces, use `bm_workspaces()` to confirm which slug you want.
-
-2. **Read the file from disk.** Use Hermes's filesystem tool (not a `bm_*` tool — local files aren't in the graph yet).
-
-3. **Write the note with explicit routing.** Either form works; the workspace-qualified name reads cleaner in logs, the UUID is more durable.
-
-   ```
-   bm_write({
-     title: "StartWithDrew Level 9 Task Queue",
-     folder: "startwithdrew",
-     content: <file body>,
-     project: "personal/main"
-   })
-   # → returns "personal/main/startwithdrew/start-with-drew-level-9-task-queue"
-   # (the returned permalink is workspace-qualified — carries its own routing)
-   ```
-
-4. **Verify by reading back.** No `project` arg needed — the workspace-qualified permalink routes itself.
-
-   ```
-   bm_read({ identifier: "personal/main/startwithdrew/start-with-drew-level-9-task-queue" })
-   ```
-
-Return the permalink (and the project name for clarity) to the user.
+To save into a named project: find it with `bm_projects`, write with explicit `project` or `project_id`, and return the permalink `bm_write` gives back — it routes follow-up reads by itself.
 
 ## When to use each tool
 

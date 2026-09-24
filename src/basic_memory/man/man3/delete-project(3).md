@@ -33,7 +33,7 @@ bm project remove NAME
 
 - **project_name** (string, required) — Name of the project to delete
 - **delete_notes** (boolean, optional, default: False) — Local projects only: also delete the note files from disk. Defaults to False, which only stops tracking the project. Ignored for cloud projects, whose files are always deleted.
-- **workspace** (string | null, optional, default: None) — Optional cloud workspace selector to delete the project from. Slug is preferred for AI callers, but tenant_id and unique name are also accepted. When omitted, the connection's default workspace is used. A workspace selector implies cloud routing: without cloud credentials the call fails fast, matching create_memory_project behavior (#954).
+- **workspace** (string | null, optional, default: None) — Optional cloud workspace selector to delete the project from. Slug is preferred for AI callers, but tenant_id and unique name are also accepted. When omitted, the connection's default workspace is used. A workspace selector implies cloud routing: without cloud credentials the call fails fast, matching create_memory_project behavior.
 
 ## DESCRIPTION
 

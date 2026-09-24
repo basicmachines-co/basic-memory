@@ -110,8 +110,8 @@ async def recent_activity(
             - Points in time: "2024-01-01", "January 1st"
             - Standard format: "7d", "24h"
             Aliases: since, time_range, lookback.
-        project: Project name to query. Optional - server will resolve using the
-                hierarchy above: omitted, the active or default project is used, and
+        project: Project name to query. Optional - when omitted, the server uses the
+                session's active project, then the configured default project, and
                 discovery mode across all projects applies only when neither resolves.
                 If unknown, use list_memory_projects() to discover available projects.
         project_id: Project external_id (UUID). Prefer this over `project` when known —
@@ -269,19 +269,13 @@ async def recent_activity(
             total_observations=total_observations,
         )
 
-        # Generate guidance for the assistant
+        # Summarize where activity is; which project to use stays the caller's call.
         guidance_lines = ["\n" + "─" * 40]
 
         if active_projects == 0:
-            # No recent activity
-            guidance_lines.extend(
-                [
-                    "No recent activity found in any project.",
-                    "Consider: Ask which project to use or if they want to create a new one.",
-                ]
-            )
+            guidance_lines.append("No recent activity found in any project.")
         else:
-            # At least one project has activity: suggest the most active project.
+            # At least one project has activity: name the most active project.
             suggested_project = most_active_project or next(
                 (name for name, activity in projects_activity.items() if activity.item_count > 0),
                 None,
@@ -291,21 +285,6 @@ async def recent_activity(
                     f"(most active with {most_active_count} items)" if most_active_count > 0 else ""
                 )
                 guidance_lines.append(f"Suggested project: '{suggested_project}' {suffix}".strip())
-                if active_projects == 1:
-                    guidance_lines.append(
-                        f"Ask user: 'Should I use {suggested_project} for this task?'"
-                    )
-                else:
-                    guidance_lines.append(
-                        f"Ask user: 'Should I use {suggested_project} for this task, or would you prefer a different project?'"
-                    )
-
-        guidance_lines.extend(
-            [
-                "",
-                "Session reminder: Remember their project choice throughout this conversation.",
-            ]
-        )
 
         guidance = "\n".join(guidance_lines)
 

@@ -142,7 +142,11 @@ def _format_document_for_chatgpt(
 
 @mcp.tool(
     title="Search Knowledge Base",
-    description="Search for content across the knowledge base",
+    description=(
+        "OpenAI/ChatGPT connector search adapter. Returns one text item holding JSON "
+        "{results, total_count, query} for the top 10 search_notes matches. Other MCP "
+        "clients receive an unsupported-client error; use search_notes instead."
+    ),
     tags={"search"},
     annotations={
         "title": "Search Knowledge Base",
@@ -227,7 +231,12 @@ async def search(
 
 @mcp.tool(
     title="Fetch Document",
-    description="Fetch the full contents of a search result document",
+    description=(
+        "OpenAI/ChatGPT connector fetch adapter. Takes an id from search results "
+        "(permalink, title, or memory:// URL) and returns one text item holding JSON "
+        "{id, title, text, url, metadata}. Other MCP clients receive an "
+        "unsupported-client error; use read_note instead."
+    ),
     tags={"search", "notes"},
     annotations={
         "title": "Fetch Document",

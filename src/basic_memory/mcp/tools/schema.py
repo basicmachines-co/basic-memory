@@ -238,7 +238,11 @@ def _no_schema_guidance(note_type: str, tool_name: str) -> str:
 
 @mcp.tool(
     title="Validate Schema",
-    description="Validate notes against their Picoschema definitions.",
+    description=(
+        "Validate notes against their Picoschema definitions. With neither note_type nor "
+        "identifier it validates every note type that has a schema. "
+        "A schema is a note with type: schema whose entity field names the note type it describes."
+    ),
     tags={"schema"},
     annotations={
         "title": "Validate Schema",
@@ -377,7 +381,10 @@ async def schema_validate(
 
 @mcp.tool(
     title="Infer Schema",
-    description="Analyze existing notes and suggest a Picoschema definition.",
+    description=(
+        "Analyze existing notes of one type and suggest a Picoschema definition. "
+        "A schema is a note with type: schema whose entity field names the note type it describes."
+    ),
     tags={"schema"},
     annotations={
         "title": "Infer Schema",
@@ -505,7 +512,10 @@ async def schema_infer(
 
 @mcp.tool(
     title="Schema Diff",
-    description="Detect drift between a schema definition and actual note usage.",
+    description=(
+        "Detect drift between a schema definition and actual note usage. "
+        "A schema is a note with type: schema whose entity field names the note type it describes."
+    ),
     tags={"schema"},
     annotations={
         "title": "Schema Diff",

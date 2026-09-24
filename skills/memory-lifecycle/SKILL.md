@@ -96,31 +96,25 @@ move_note(
 )
 ```
 
-The permalink stays the same, so all existing `[[wiki-links]]` and `memory://` URLs continue to resolve.
+By default the permalink stays the same after a move, so links keep resolving. Projects with `update_permalinks_on_move` enabled rewrite it from the new path.
 
 ### 3. Update Frontmatter
 
-After moving, update the status in frontmatter to match:
+After moving, merge the new status (and completion date, if the type tracks one) into
+frontmatter with the `metadata` parameter. An `append` with empty `content` changes only
+the frontmatter:
 
 ```python
 edit_note(
   identifier="quarterly-report",
-  operation="find_replace",
-  find_text="status: active",
-  content="status: completed"
+  operation="append",
+  content="",
+  metadata={"status": "completed", "completed": "2026-02-22"}
 )
 ```
 
-If there's a completion date field, set it:
-
-```python
-edit_note(
-  identifier="quarterly-report",
-  operation="find_replace",
-  find_text="completed:",
-  content="completed: 2026-02-22"
-)
-```
+If the note also carries a `- [status]` observation, update it too (for example with
+`find_replace` on `- [status] active`).
 
 ### 4. Confirm
 
@@ -156,9 +150,9 @@ move_note(
 
 edit_note(
   identifier="quarterly-report",
-  operation="find_replace",
-  find_text="status: completed",
-  content="status: active"
+  operation="append",
+  content="",
+  metadata={"status": "active"}
 )
 ```
 
@@ -176,7 +170,7 @@ Some status changes don't require a folder move — "paused" or "blocked" items 
 
 - **Archive, never delete.** The knowledge graph benefits from historical context.
 - **Move first, then update frontmatter.** This order ensures the file is in the right place even if the edit step fails.
-- **Permalinks survive moves.** Links to the entity keep working after a `move_note`.
+- **Permalinks survive moves by default.** Links to the entity keep working after a `move_note` unless the project enables `update_permalinks_on_move`.
 - **Be concise in confirmations.** The user knows their system — just report what changed.
 - **Ask when ambiguous.** If multiple entities match or the target folder isn't clear, ask rather than guess.
 - **Batch operations are fine.** If the user says "archive all completed tasks", find them all, confirm the list, then move them in sequence.

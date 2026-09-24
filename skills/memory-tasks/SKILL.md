@@ -16,7 +16,7 @@ Manage work-in-progress using Basic Memory's schema system. Tasks are just notes
 
 ## Task Schema
 
-Tasks use the BM schema system (SPEC-SCHEMA). The schema note lives at `memory/schema/Task.md`:
+Tasks use the BM schema system. The schema note lives at `schema/Task.md`:
 
 ```yaml
 ---
@@ -52,6 +52,7 @@ write_note(
   metadata={
     "status": "active",
     "priority": "high",
+    "assigned_to": "claude",
     "current_step": 1,
     "steps": ["First step", "Second step", "Third step"]
   },
@@ -85,7 +86,7 @@ What future-you needs to pick up this work. Include:
 - **Steps are concrete and checkable** — "Implement X in file Y", not "figure out stuff"
 - **Context is for post-amnesia resumption** — Write it as if explaining to a smart person who knows nothing about what you've been doing
 - **Relations link to other entities** — `parent_task [[Other Task]]`, `related_to [[Some Note]]`
-- **`note_types` is case-sensitive** — `write_note(note_type="Task")` stores the type as lowercase `task` in frontmatter. Use `note_types=["task"]` (lowercase) in search queries.
+- **Note types are normalized to snake_case** — `write_note(note_type="Task")` stores `type: task`, and `note_types=["Task"]` or `note_types=["task"]` both match it.
 
 ## Resuming After Compaction
 
@@ -116,9 +117,14 @@ As work progresses, update the task note:
 Updated context reflecting current state...
 ```
 
-Update frontmatter too:
-```yaml
-current_step: 3
+Update frontmatter too, with the `metadata` parameter (empty `content` leaves the body alone):
+```python
+edit_note(
+  identifier="tasks/descriptive-task-name",
+  operation="append",
+  content="",
+  metadata={"current_step": 3}
+)
 ```
 
 ## Completing Tasks
@@ -140,7 +146,7 @@ When a compaction event is imminent:
    - `current_step` to reflect actual progress
    - `context` with everything needed to resume
    - Step checkboxes to show what's done
-3. This is **critical** — context not written down is context lost
+3. Context that isn't written down is lost at compaction
 
 ## Querying Tasks
 
@@ -153,14 +159,14 @@ With BM's schema system, tasks are fully queryable:
 | `search_notes(note_types=["task"], status="blocked")` | Blocked tasks |
 | `search_notes(note_types=["task"], metadata_filters={"assigned_to": "claude"})` | My tasks |
 | `search_notes("blockers", note_types=["task"])` | Tasks with blockers |
-| `schema_validate(noteType="Task")` | Validate all tasks against schema |
-| `schema_diff(noteType="Task")` | Detect drift between schema and actual task notes |
+| `schema_validate(note_type="Task")` | Validate all tasks against schema |
+| `schema_diff(note_type="Task")` | Detect drift between schema and actual task notes |
 
 ## Guidelines
 
 - **One task per unit of work** — Don't cram multiple projects into one task
-- **Externalize early** — If you think "I should remember this", write it down NOW
+- **Externalize early** — write things down when you notice them
 - **Context > steps** — Steps tell you what to do; context tells you why and how
 - **Close finished tasks** — Don't leave completed work as `active`
 - **Link related tasks** — Use `parent_task [[X]]` or relations to connect related work
-- **Schema validation is your friend** — Run `schema_validate(noteType="Task")` periodically to catch incomplete tasks
+- **Schema validation is your friend** — Run `schema_validate(note_type="Task")` periodically to catch incomplete tasks

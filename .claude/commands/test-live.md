@@ -34,23 +34,23 @@ When the user runs `/project:test-live`, execute comprehensive test plan:
 7. **build_context** - Conversation continuity via memory:// URLs
 8. **create_memory_project** - Essential for project setup
 9. **move_note** - Knowledge organization
-10. **sync_status** - Understanding system state
-11. **delete_project** - Project lifecycle management
+10. **delete_project** - Project lifecycle management
 
 ### **Tier 3: Enhanced Functionality (Sometimes Test)**
-12. **view_note** - Claude Desktop artifact display
-13. **read_content** - Raw content access
-14. **delete_note** - Content removal
-15. **list_directory** - File system exploration
-16. **edit_note** (advanced modes) - Complex find/replace operations
+11. **view_note** - Claude Desktop artifact display
+12. **read_content** - Raw content access
+13. **delete_note** - Content removal
+14. **list_directory** - File system exploration
+15. **edit_note** (advanced modes) - Complex find/replace operations
+16. **POSIX & schema** - `ls`, `find`, `grep`, `cat`, `tail`, `man`, `list_workspaces`, `schema_validate`/`schema_infer`/`schema_diff`
 
 ### **Tier 4: Specialized (Rarely Test)**
 17. **MCP Prompts** - Enhanced UX tools (ai_assistant_guide, continue_conversation)
 
 ## Stateless Architecture Testing
 
-### **Project Discovery Workflow (CRITICAL)**
-Test the new stateless project selection flow:
+### **Project Discovery Workflow**
+Test project selection:
 
 1. **Initial Discovery**
    - Call `list_memory_projects()` without knowing which project to use
@@ -71,7 +71,7 @@ Test the new stateless project selection flow:
    - Verify all operations constrained to specified project
    - Test project override behavior in constrained mode
 
-### **Explicit Project Parameters (CRITICAL)**
+### **Explicit Project Parameters**
 All tools must require explicit project parameters:
 
 1. **Parameter Validation**
@@ -213,39 +213,33 @@ Test essential MCP tools that form the foundation of Basic Memory:
 - ✅ Database consistency validation
 - ⚠️ Special characters in paths
 
-**10. sync_status Tests (Important):**
-- ✅ Background operation monitoring
-- ✅ File synchronization status
-- ✅ Project sync state reporting
-- ⚠️ Error state handling
-
 ### Phase 3: Enhanced Functionality (Tier 3 Tools)
 
-**11. view_note Tests (Enhanced):**
+**10. view_note Tests (Enhanced):**
 - ✅ Claude Desktop artifact display
 - ✅ Title extraction from frontmatter
 - ✅ Unicode and emoji content rendering
 - ⚠️ Error handling for non-existent notes
 
-**12. read_content Tests (Enhanced):**
+**11. read_content Tests (Enhanced):**
 - ✅ Raw file content access
 - ✅ Binary file handling
 - ✅ Image file reading
 - ⚠️ Large file performance
 
-**13. delete_note Tests (Enhanced):**
+**12. delete_note Tests (Enhanced):**
 - ✅ Single note deletion
 - ✅ Database consistency after deletion
 - ⚠️ Non-existent note handling
 - ✅ Confirmation of successful deletion
 
-**14. list_directory Tests (Enhanced):**
+**13. list_directory Tests (Enhanced):**
 - ✅ Directory content listing
 - ✅ Depth control and filtering
 - ✅ File name globbing
 - ⚠️ Empty directory handling
 
-**15. delete_project Tests (Enhanced):**
+**14. delete_project Tests (Enhanced):**
 - ✅ Project removal from config
 - ✅ Database cleanup
 - ⚠️ Default project protection
@@ -307,7 +301,7 @@ Test essential MCP tools that form the foundation of Basic Memory:
 
 ### Phase 6: Specialized Tools Testing (Tier 4)
 
-**16. MCP Prompts Tests (Specialized):**
+**15. MCP Prompts Tests (Specialized):**
 - ✅ ai_assistant_guide output
 - ✅ continue_conversation functionality
 - ✅ Formatted search results
@@ -370,7 +364,7 @@ Record ALL observations immediately as Basic Memory notes:
 ```markdown
 ---
 title: Test Session [Phase] YYYY-MM-DD HH:MM
-tags: [testing, v0.13.0, live-testing, [phase]]
+tags: [testing, [installed-version], live-testing, [phase]]
 permalink: test-session-[phase]-[timestamp]
 ---
 
@@ -406,7 +400,7 @@ permalink: test-session-[phase]-[timestamp]
 - Memory usage: [observed levels]
 
 ## Relations
-- tests [[Basic Memory v0.13.0]]
+- tests [[Basic Memory [installed-version]]]
 - part_of [[Live Testing Suite]]
 - found_issues [[Bug Report: Unicode Search]]
 - discovered [[Performance Optimization Opportunities]]
@@ -460,7 +454,7 @@ For each error discovered:
    ```markdown
    ---
    title: Bug Report - [Short Description]
-   tags: [bug, testing, v0.13.0, [severity]]
+   tags: [bug, testing, [installed-version], [severity]]
    ---
    
    # Bug Report: [Description]
@@ -513,24 +507,24 @@ For each error discovered:
 
 ## Test Execution Flow
 
-1. **Setup Phase** (5 minutes)
+1. **Setup Phase**
    - Verify environment and create test project
    - Record baseline system state
    - Establish performance benchmarks
 
-2. **Core Testing** (15-20 minutes per phase)
+2. **Core Testing**
    - Execute test scenarios systematically
    - Record observations immediately
    - Note timestamps for performance tracking
    - Explore variations when interesting behaviors occur
 
-3. **Documentation** (5 minutes per phase)
+3. **Documentation**
    - Create phase summary note
    - Link related test observations
    - Update running issues list
    - Record enhancement ideas
 
-4. **Analysis Phase** (10 minutes)
+4. **Analysis Phase**
    - Review all observations across phases
    - Identify patterns and trends
    - Create comprehensive summary report
@@ -545,7 +539,7 @@ For each error discovered:
 - Error handling works as expected
 
 ### Feature Testing (Tier 1+2) - Should Pass
-- All 11 core + important tools function
+- All 10 core + important tools function
 - Workflow scenarios complete successfully
 - Performance meets baseline expectations
 - Integration points work correctly

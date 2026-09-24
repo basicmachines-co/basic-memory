@@ -112,12 +112,12 @@ settings:
 
 Look for clusters of notes that share structure but have no schema:
 
-1. **Search by type**: `search_notes(query="type:Meeting")` — if many notes share a `type` but no `schema/Meeting.md` exists, it's a candidate.
+1. **Search by type**: `search_notes(note_types=["meeting"])` — if many notes share a `type` but no `schema/Meeting.md` exists, it's a candidate.
 
 2. **Infer a schema**: Use `schema_infer` to analyze existing notes and generate a suggested schema:
    ```python
-   schema_infer(noteType="Meeting")
-   schema_infer(noteType="Meeting", threshold=0.5)  # fields in 50%+ of notes
+   schema_infer(note_type="Meeting")
+   schema_infer(note_type="Meeting", threshold=0.5)  # fields in 50%+ of notes
    ```
    The threshold (0.0–1.0) controls how common a field must be to be included. Default is usually fine; lower it to catch rarer fields.
 
@@ -168,7 +168,7 @@ Check how well existing notes conform to their schema:
 
 ```python
 # Validate all notes of a type
-schema_validate(noteType="Meeting")
+schema_validate(note_type="Meeting")
 
 # Validate a single note
 schema_validate(identifier="meetings/2026-02-10-standup")
@@ -176,11 +176,10 @@ schema_validate(identifier="meetings/2026-02-10-standup")
 
 **Important:** `schema_validate` checks for schema fields as **observation categories** in the note body — e.g., a `status` field expects `- [status] active` as an observation. Fields stored only in frontmatter metadata won't satisfy validation. To pass cleanly, include schema fields as both frontmatter values (for metadata search) and observations (for schema validation).
 
-Validation reports:
-- **Missing required fields** — the note lacks a field the schema requires (as an observation category)
-- **Unknown fields** — the note has fields the schema doesn't define
-- **Type mismatches** — a field value doesn't match the expected type
-- **Invalid enum values** — a value isn't in the allowed set
+Validation reports **missing required fields** (as observation categories, or relations
+for entity-reference fields) and **invalid enum values**. Undeclared observation categories
+and relations are listed as informational "unmatched" items. Scalar values are not
+type-checked.
 
 ### Handling Validation Results
 
@@ -192,32 +191,41 @@ Validation reports:
 Over time, notes evolve and schemas lag behind. Use `schema_diff` to find divergence:
 
 ```python
-schema_diff(noteType="Meeting")
+schema_diff(note_type="Meeting")
 ```
 
 Diff reports:
 - **Fields in notes but not in schema** — candidates for adding to the schema (as optional)
 - **Schema fields rarely used** — consider making optional or removing
-- **Type inconsistencies** — fields used as different types across notes
+- **Cardinality changes** — a field that moved between single-value and array
 
 ## Schema Evolution
 
 When note structure changes:
 
-1. **Run diff** to see current state: `schema_diff(noteType="Meeting")`
-2. **Update the schema note** via `edit_note`:
+1. **Run diff** to see current state: `schema_diff(note_type="Meeting")`
+2. **Update the schema note** via `edit_note` with the `metadata` parameter. Top-level
+   keys are replaced whole, so pass the complete updated `schema` map along with the new
+   `version`:
    ```python
    edit_note(
      identifier="schema/Meeting",
-     operation="find_replace",
-     find_text="version: 1",
-     content="version: 2",
-     expected_replacements=1
+     operation="append",
+     content="",
+     metadata={
+       "version": 2,
+       "schema": {
+         "topic": "string, what was discussed",
+         "date": "string, when it happened",
+         "attendees?(array)": "Person, who attended",
+         "decisions?(array)": "string, decisions made",
+         "location?": "string, where it happened"
+       }
+     }
    )
    ```
-3. **Add/remove/modify fields** in the `schema:` block
-4. **Re-validate** to confirm existing notes still pass: `schema_validate(noteType="Meeting")`
-5. **Fix outliers** — update notes that don't conform to the new schema
+3. **Re-validate** to confirm existing notes still pass: `schema_validate(note_type="Meeting")`
+4. **Fix outliers** — update notes that don't conform to the new schema
 
 ### Evolution Guidelines
 

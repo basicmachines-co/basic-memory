@@ -21,9 +21,9 @@ wired into Claude Code yet. **Stop and walk the user through it first** (everyth
 below depends on it):
 
 1. Install it: `uv tool install basic-memory --prerelease=allow` (or
-   `pip install basic-memory`), version `>= 0.19.0`. The `--prerelease=allow`
-   flag is required with uv — Basic Memory depends on a FastMCP pre-release, and
-   without it uv silently installs an older release.
+   `pip install basic-memory`), version `>= 0.19.0`. Keep `--prerelease=allow`
+   with uv: published releases pin a FastMCP pre-release, and without the flag uv
+   silently installs an older Basic Memory release.
 2. Connect it: `claude mcp add basic-memory -- uvx --prerelease=allow basic-memory mcp`,
    then restart the session so the MCP server loads.
 
@@ -35,12 +35,10 @@ it succeeds.
 Ask only what you can't infer. Cover:
 
 1. **Focus / how you'll use it.** "What will this project mostly be — code/dev,
-   research, writing, knowledge capture, planning, or a mix?" This answer is
-   **load-bearing**, not small talk: it drives the folder structure you suggest
-   (step 4) and is stored so the SessionStart brief can surface it, keeping capture
-   matched to the use-case. Don't let it evaporate — if you infer it from context
-   instead of asking, still say the use-case you assumed and the structure it
-   implies, and let the user correct it in one word.
+   research, writing, knowledge capture, planning, or a mix?" This answer drives
+   the folder structure you suggest (step 4) and is stored so the SessionStart
+   brief can surface it. If you infer it instead of asking, state the use-case you
+   assumed and the structure it implies so the user can correct it in one word.
 
    A code/dev answer makes this a **coding setup** (`sessionProfile: "coding"`):
    verify the directory is inside a Git repository, resolve a stable `repository`
