@@ -53,13 +53,18 @@ import basic_memory.mcp.tools  # noqa: F401  (importing registers the tools)
 # must import them explicitly or every subcommand comes back empty.
 from basic_memory.cli.app import app
 import basic_memory.cli.commands.posix  # noqa: F401  (registers cat/grep/ls/find/tail/head/tree)
+import basic_memory.cli.commands.okf  # noqa: F401 (registers OKF commands)
 import basic_memory.cli.commands.man  # noqa: F401  (registers `bm man apropos`)
 
 # Section-1 page name -> `bm` command path. Seven pages resolve directly from the
 # page name (`grep` -> `bm grep`); apropos(1) documents `bm man apropos`, a verb on
 # the `man` subgroup, so it needs an explicit path. The map lives here rather than
 # in page frontmatter because man1/*.md is only ever rewritten by this generator.
-SECTION1_COMMAND_PATHS: Mapping[str, str] = {"apropos": "man apropos"}
+SECTION1_COMMAND_PATHS: Mapping[str, str] = {
+    "apropos": "man apropos",
+    "okf-export": "okf export",
+    "okf-check": "okf check",
+}
 
 
 def resolve_cli_command(command_path: str) -> Any:

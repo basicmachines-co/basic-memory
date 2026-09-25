@@ -468,7 +468,11 @@ def _render_cli_form(
             alternatives = [_synopsis_option_token(present_longs[opt])[1:-1] for opt in pair]
             tokens.append("[" + " | ".join(alternatives) + "]")
         else:
-            tokens.append(_synopsis_option_token(param, required=param.name in required_options))
+            tokens.append(
+                _synopsis_option_token(
+                    param, required=param.required or param.name in required_options
+                )
+            )
 
     prefix = f"bm {command_path}"
     indent = " " * (len(prefix) + 1)
