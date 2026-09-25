@@ -80,6 +80,12 @@ QUERY_TIMEOUT_SECONDS = 10.0
 # Cap how many shared projects we read per session — bounds latency and output.
 MAX_SHARED = 6
 CODING_SESSION_PROFILE = "coding"
+CURRENT_DECISION_STATUSES = ("active", "open")
+CURRENT_TASK_STATUSES = ("active", "open")
+# Decisions/tasks are one-line standing context; sessions are bulkier and
+# recency-ordered, so they keep the tighter bound.
+STANDING_CONTEXT_LIMIT = 12
+SESSION_BRIEF_LIMIT = 5
 DEFAULT_CAPTURE_EVENTS = True
 CODEX_DEFAULT_CHECKPOINT_ON_COMPACT = True
 CODEX_CHECKPOINT_PROMPT = (
@@ -631,22 +637,51 @@ async def _gather_context(
             )
         )
     # General checkpoints are a lower-priority path because coding_session
-    # results carry repository identity and are therefore merged first.
-    session_queries.append(
-        _query(project, note_types=list(profile.recall_session_types), after_date=timeframe)
-    )
+    # results carry repository identity and are therefore merged first. A
+    # generic checkpoint has no repository boundary, so only recall it for a
+    # general session rather than leaking another checkout into coding context.
+    recall_session_types = list(profile.recall_session_types)
+    if repository is None:
+        recall_session_types.append("checkpoint")
+    session_queries.append(_query(project, note_types=recall_session_types, after_date=timeframe))
+    decision_queries = [
+        _query(project, note_types=["decision"], status=status, page_size=20)
+        for status in CURRENT_DECISION_STATUSES
+    ]
+    shared_decision_queries = [
+        _query(ref, note_types=["decision"], status=status)
+        for ref in shared_refs
+        for status in CURRENT_DECISION_STATUSES
+    ]
+    task_queries = [
+        _query(project, note_types=["task"], status=status, page_size=20)
+        for status in CURRENT_TASK_STATUSES
+    ]
     results = await asyncio.gather(
-        _query(project, note_types=["task"], status="active"),
-        _query(project, note_types=["decision"], status="open"),
+        *task_queries,
+        *decision_queries,
         *session_queries,
-        *[_query(ref, note_types=["decision"], status="open") for ref in shared_refs],
+        *shared_decision_queries,
     )
-    session_end = 2 + len(session_queries)
+    task_end = len(task_queries)
+    decision_end = task_end + len(decision_queries)
+    session_end = decision_end + len(session_queries)
+    shared = {
+        ref: _merge_search_results(
+            results[
+                session_end + index * len(CURRENT_DECISION_STATUSES) : session_end
+                + (index + 1) * len(CURRENT_DECISION_STATUSES)
+            ]
+        )
+        for index, ref in enumerate(shared_refs)
+    }
     return _BriefContext(
-        tasks=results[0],
-        decisions=results[1],
-        sessions=_merge_search_results(results[2:session_end]),
-        shared=dict(zip(shared_refs, results[session_end:])),
+        tasks=_merge_search_results(results[:task_end], limit=STANDING_CONTEXT_LIMIT),
+        decisions=_merge_search_results(
+            results[task_end:decision_end], limit=STANDING_CONTEXT_LIMIT
+        ),
+        sessions=_merge_search_results(results[decision_end:session_end]),
+        shared=shared,
     )
 
 
@@ -654,7 +689,9 @@ def _rows(result: dict[str, Any] | None) -> list[dict[str, Any]]:
     return (result or {}).get("results") or []
 
 
-def _merge_search_results(results: list[dict[str, Any] | None]) -> dict[str, Any] | None:
+def _merge_search_results(
+    results: list[dict[str, Any] | None], limit: int = SESSION_BRIEF_LIMIT
+) -> dict[str, Any] | None:
     """Merge bounded recall queries while preserving their priority order."""
     if all(result is None for result in results):
         return None
@@ -668,7 +705,7 @@ def _merge_search_results(results: list[dict[str, Any] | None]) -> dict[str, Any
                 continue
             seen.add(identity)
             merged.append(row)
-            if len(merged) == 5:
+            if len(merged) == limit:
                 return {"results": merged}
     return {"results": merged}
 
@@ -778,9 +815,13 @@ def _build_brief(
     decision_rows = _rows(context.decisions)
     session_rows = _rows(context.sessions)
     if task_rows:
-        data_lines += ["", f"## Active tasks ({len(task_rows)})", *map(_label, task_rows)]
+        data_lines += ["", f"## Unfinished tasks ({len(task_rows)})", *map(_label, task_rows)]
     if decision_rows:
-        data_lines += ["", f"## Open decisions ({len(decision_rows)})", *map(_label, decision_rows)]
+        data_lines += [
+            "",
+            f"## Current decisions ({len(decision_rows)})",
+            *map(_label, decision_rows),
+        ]
     if session_rows:
         session_lines = [
             line
@@ -795,14 +836,17 @@ def _build_brief(
             *session_lines,
         ]
     if not (task_rows or decision_rows or session_rows):
-        data_lines += ["", "_No active tasks, open decisions, or recent sessions in this project._"]
+        data_lines += [
+            "",
+            "_No unfinished tasks, open decisions, or recent sessions in this project._",
+        ]
 
     shared_sections = [(ref, _rows(context.shared.get(ref))) for ref in shared_refs]
     shared_sections = [(ref, items) for ref, items in shared_sections if items]
     if shared_sections:
         data_lines += ["", "## From shared projects (read-only)"]
         for ref, items in shared_sections:
-            data_lines += [f"### {_readable(ref)} — open decisions", *map(_label, items)]
+            data_lines += [f"### {_readable(ref)} — current decisions", *map(_label, items)]
         data_lines += [
             "",
             "_Shared-project context is read-only. Your captures stay in this project; "
