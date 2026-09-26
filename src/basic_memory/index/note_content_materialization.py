@@ -30,6 +30,7 @@ from basic_memory.indexing.project_index_maintenance import (
     ProjectIndexMovedEntitySearchRefresher,
 )
 from basic_memory.runtime.cleanup import (
+    RuntimeGuardedFileDeleteOutcome,
     RuntimeNoteFileDeleteJobRequest,
     plan_note_file_delete_job_request,
 )
@@ -544,26 +545,27 @@ class LocalNoteContentStorage:
     async def delete_file(self, path: RuntimeFilePath) -> None:
         await self.file_service.delete_file(path)
 
-    async def delete_file_if_unchanged(
+    async def delete_file_if_matches(
         self,
         path: RuntimeFilePath,
         *,
         expected_checksum: RuntimeFileChecksum,
-    ) -> bool:
-        # Re-verify the checksum immediately before deleting so a replacement written into the
-        # freshness-read → delete gap is never removed (basic-memory-cloud#1618). Local has no
-        # atomic precondition; the race is negligible on a filesystem.
+    ) -> RuntimeGuardedFileDeleteOutcome:
+        # Verify the checksum immediately before deleting so a replacement written before the
+        # delete is never removed (basic-memory-cloud#1618). Local has no atomic precondition;
+        # the race is negligible on a filesystem.
         if not await self.file_service.exists(path):
-            return False
+            return RuntimeGuardedFileDeleteOutcome.missing
         try:
             actual_checksum = await self.compute_checksum(path)
         except FileNotFoundError:
-            # Disappearance after the final existence probe is another safe no-delete outcome.
-            return False
+            # Disappearance after the existence probe means the object is already gone.
+            return RuntimeGuardedFileDeleteOutcome.missing
+        # Local files carry a single content checksum, so exact equality identifies the version.
         if actual_checksum != expected_checksum:
-            return False
+            return RuntimeGuardedFileDeleteOutcome.changed
         await self.file_service.delete_file(path)
-        return True
+        return RuntimeGuardedFileDeleteOutcome.deleted
 
 
 @dataclass(frozen=True, slots=True)
