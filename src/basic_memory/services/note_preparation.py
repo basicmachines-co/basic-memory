@@ -726,7 +726,20 @@ def _merge_metadata_into_markdown(markdown_content: str, metadata: dict[str, Any
         # `type` now changes the note's classification, so it must cross the
         # same normalization and length boundary as write_note's note_type.
         sanitized["type"] = _NOTE_TYPE_ADAPTER.validate_python(raw_note_type)
+    return rewrite_frontmatter_fields(markdown_content, updates=sanitized)
 
+
+def rewrite_frontmatter_fields(
+    markdown_content: str,
+    *,
+    updates: dict[str, Any],
+    removals: frozenset[str] = frozenset(),
+) -> str:
+    """Set and remove frontmatter keys while leaving the note body byte-for-byte intact.
+
+    Section offsets are computed against the body, so callers that patch an
+    already-parsed note rely on the body round-tripping unchanged.
+    """
     had_separator = True
     if has_frontmatter(markdown_content):
         current_metadata = parse_frontmatter(markdown_content)
@@ -746,7 +759,9 @@ def _merge_metadata_into_markdown(markdown_content: str, metadata: dict[str, Any
         body = markdown_content
 
     merged_metadata = deepcopy(current_metadata)
-    merged_metadata.update(sanitized)
+    merged_metadata.update(updates)
+    for key in removals:
+        merged_metadata.pop(key, None)
 
     post = frontmatter.Post(body)
     post.metadata.update(merged_metadata)

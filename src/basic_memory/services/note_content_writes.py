@@ -86,6 +86,9 @@ class NoteContentMutationActorContext:
     source: str
     actor_kind: str | None = None
     actor_name: str | None = None
+    # Display name stamped into created_by/updated_by frontmatter. Routes never
+    # set it; only a resolver that authenticated the caller can supply it.
+    author: str | None = None
 
 
 class NoteContentMutationActorResolver(Protocol):
@@ -137,12 +140,14 @@ def accepted_note_mutation_actor(
     user_profile_id: UUID | None,
     actor_kind: str | None,
     actor_name: str | None,
+    author: str | None = None,
 ) -> AcceptedNoteMutationActor:
     """Build the typed accepted-note actor passed to core mutation runners."""
     return AcceptedNoteMutationActor(
         user_profile_id=user_profile_id,
         kind=actor_kind,
         name=actor_name,
+        author=author,
     )
 
 
@@ -535,8 +540,11 @@ class NoteContentMutationService:
         )
         request = replace(
             request,
-            actor=AcceptedNoteMutationActor(
-                actor.user_profile_id, actor.actor_kind, actor.actor_name
+            actor=accepted_note_mutation_actor(
+                user_profile_id=actor.user_profile_id,
+                actor_kind=actor.actor_kind,
+                actor_name=actor.actor_name,
+                author=actor.author,
             ),
             source=actor.source,
         )
@@ -639,6 +647,7 @@ class NoteContentMutationService:
                                 user_profile_id=actor_context.user_profile_id,
                                 actor_kind=actor_context.actor_kind,
                                 actor_name=actor_context.actor_name,
+                                author=actor_context.author,
                             ),
                             source=actor_context.source,
                         ),
@@ -696,6 +705,7 @@ class NoteContentMutationService:
                                 user_profile_id=actor_context.user_profile_id,
                                 actor_kind=actor_context.actor_kind,
                                 actor_name=actor_context.actor_name,
+                                author=actor_context.author,
                             ),
                             source=actor_context.source,
                         ),

@@ -22,6 +22,9 @@ from basic_memory.runtime.storage import (
 type RuntimeNoteObjectMetadataMap = Mapping[str, str]
 
 NOTE_OBJECT_ACTOR_KIND_METADATA = "bm-actor-kind"
+# agent = a credentialed agent (for example a cloud API key) writing on a member's
+# behalf; system stays for writers the platform itself runs.
+NOTE_OBJECT_ACTOR_KIND_AGENT = "agent"
 NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT = "mcp_client"
 NOTE_OBJECT_ACTOR_KIND_SYSTEM = "system"
 NOTE_OBJECT_ACTOR_NAME_METADATA = "bm-actor-name"
@@ -33,7 +36,11 @@ NOTE_OBJECT_FILE_CHECKSUM_METADATA = "bm-file-checksum"
 NOTE_OBJECT_FILE_VERSION_METADATA = "bm-file-version"
 NOTE_OBJECT_SOURCE_METADATA = "bm-note-source"
 VALID_NOTE_OBJECT_ACTOR_KINDS: frozenset[RuntimeNoteActorKind] = frozenset(
-    {NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT, NOTE_OBJECT_ACTOR_KIND_SYSTEM}
+    {
+        NOTE_OBJECT_ACTOR_KIND_AGENT,
+        NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+        NOTE_OBJECT_ACTOR_KIND_SYSTEM,
+    }
 )
 # web_v2 = a note write originating from the web-v2 UI. Distinguishing it from
 # `api` lets clients tell a genuine web-UI edit apart from api/materialization
