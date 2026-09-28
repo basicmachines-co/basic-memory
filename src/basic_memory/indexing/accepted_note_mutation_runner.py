@@ -36,6 +36,7 @@ from basic_memory.markdown.note_lock import LOCKED_NOTE_MESSAGE, note_is_locked
 from basic_memory.repository import NoteContentVersionConflict
 from basic_memory.repository.note_file_vacate_repository import NoteFileVacateRepository
 from basic_memory.services.exceptions import EntityAlreadyExistsError
+from basic_memory.services.note_authorship import NoteAuthor, NoteAuthorship
 from basic_memory.runtime.note_content import (
     RuntimeAcceptedNoteChange,
     RuntimeAcceptedNoteWriteConflictKind,
@@ -141,6 +142,9 @@ class AcceptedNoteMutationActor:
     user_profile_id: AcceptedNoteMutationUserProfileId | None
     kind: RuntimeNoteActorKind | None = None
     name: RuntimeNoteActorName | None = None
+    # Display name stamped into created_by/updated_by frontmatter. Only the runtime
+    # boundary that authenticated the caller may set it; None stamps nothing.
+    author: NoteAuthor | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -732,6 +736,7 @@ async def _run_accepted_note_create(
         data,
         check_storage_exists=dependencies.verify_storage_absent_on_create,
         session=session,
+        authorship=NoteAuthorship.for_write(request.actor.author, current_markdown=None),
     )
     prepared_write = apply_accepted_note_graph_policy(
         prepared_write,
@@ -878,6 +883,7 @@ async def _run_accepted_note_update(
             data,
             check_storage_exists=dependencies.verify_storage_absent_on_create,
             session=session,
+            authorship=NoteAuthorship.for_write(request.actor.author, current_markdown=None),
         )
         entity = await create_accepted_pending_entity(
             session,
@@ -957,6 +963,10 @@ async def _run_accepted_note_update(
                 data=data,
                 current_note_content=current_note_content,
                 user_profile_value=user_profile_value,
+                authorship=NoteAuthorship.for_write(
+                    request.actor.author,
+                    current_markdown=str(current_note_content.markdown_content),
+                ),
             )
         except (ParseError, ValueError) as error:
             reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.bad_request, str(error))
@@ -1065,6 +1075,10 @@ async def _run_accepted_note_edit(
             replace_subsections=request.data.replace_subsections,
             user_profile_value=user_profile_value,
             metadata=request.data.metadata,
+            authorship=NoteAuthorship.for_write(
+                request.actor.author,
+                current_markdown=str(current_note_content.markdown_content),
+            ),
         )
     except (ParseError, ValueError) as error:
         reject_accepted_note_mutation(AcceptedNoteMutationRejectKind.bad_request, str(error))
@@ -1392,6 +1406,7 @@ async def prepare_create_or_reject(
     *,
     check_storage_exists: bool,
     session: AsyncSession,
+    authorship: NoteAuthorship | None,
 ) -> AcceptedPreparedNoteWrite:
     """Prepare a new accepted note or raise a typed mutation rejection."""
     try:
@@ -1420,6 +1435,7 @@ async def prepare_create_or_reject(
             # binary resources, which are valid alongside Markdown notes.
             skip_conflict_check=True,
             session=session,
+            authorship=authorship,
         )
     except EntityAlreadyExistsError as error:
         # PUT-as-create over an unindexed on-disk file (local source-of-truth

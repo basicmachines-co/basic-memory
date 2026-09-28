@@ -51,6 +51,7 @@ from basic_memory.runtime.storage import (
     RuntimeNoteContentVersion,
 )
 from basic_memory.schemas.base import Entity as EntitySchema
+from basic_memory.services.note_authorship import NoteAuthorship, stamp_note_authorship
 from basic_memory.services.note_preparation import (
     PreparedEntityFields,
     PreparedEntityMove,
@@ -275,6 +276,7 @@ async def prepare_accepted_note_create(
     check_storage_exists: bool,
     skip_conflict_check: bool = False,
     session: AsyncSession | None = None,
+    authorship: NoteAuthorship | None = None,
 ) -> AcceptedPreparedNoteWrite:
     """Prepare one DB-first note create and checksum the accepted markdown."""
     prepared = await preparer.prepare_create_entity_content(
@@ -283,6 +285,8 @@ async def prepare_accepted_note_create(
         skip_conflict_check=skip_conflict_check,
         session=session,
     )
+    if authorship is not None:
+        prepared = stamp_note_authorship(prepared, authorship)
     return AcceptedPreparedNoteWrite(
         prepared=prepared,
         db_checksum=await file_utils.compute_checksum(prepared.markdown_content),
@@ -297,6 +301,7 @@ async def prepare_accepted_note_replace(
     data: EntitySchema,
     current_note_content: NoteContent,
     user_profile_value: str | None,
+    authorship: NoteAuthorship | None = None,
 ) -> AcceptedPreparedNoteWrite:
     """Prepare a full accepted replacement and apply its entity fields."""
     prepared = await preparer.prepare_update_entity_content(
@@ -305,6 +310,8 @@ async def prepare_accepted_note_replace(
         str(current_note_content.markdown_content),
         session=session,
     )
+    if authorship is not None:
+        prepared = stamp_note_authorship(prepared, authorship)
     result = AcceptedPreparedNoteWrite(
         prepared=prepared,
         db_checksum=await file_utils.compute_checksum(prepared.markdown_content),
@@ -332,6 +339,7 @@ async def prepare_accepted_note_edit(
     replace_subsections: bool,
     user_profile_value: str | None,
     metadata: dict[str, Any] | None = None,
+    authorship: NoteAuthorship | None = None,
 ) -> AcceptedPreparedNoteWrite:
     """Prepare a partial accepted edit and apply its entity fields."""
     prepared = await preparer.prepare_edit_entity_content(
@@ -346,6 +354,8 @@ async def prepare_accepted_note_edit(
         metadata=metadata,
         session=session,
     )
+    if authorship is not None:
+        prepared = stamp_note_authorship(prepared, authorship)
     result = AcceptedPreparedNoteWrite(
         prepared=prepared,
         db_checksum=await file_utils.compute_checksum(prepared.markdown_content),
