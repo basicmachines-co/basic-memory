@@ -34,6 +34,7 @@ from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.runtime.cleanup import (
     RuntimeDirectoryFileSnapshot,
     RuntimeFileDeleteResult,
+    RuntimeGuardedFileDeleteOutcome,
     RuntimeNoteFileDeleteJobRequest,
 )
 from basic_memory.runtime.storage import (
@@ -222,26 +223,27 @@ class LocalNoteFileDeleteStorage:
                 raise FileNotFoundError(path) from exc
             raise
 
-    async def delete_file_if_unchanged(
+    async def delete_file_if_matches(
         self,
         path: RuntimeFilePath,
         *,
         expected_checksum: RuntimeFileChecksum,
-    ) -> bool:
-        # The local filesystem has no atomic compare-and-delete, so re-verify the checksum
+    ) -> RuntimeGuardedFileDeleteOutcome:
+        # The local filesystem has no atomic compare-and-delete, so verify the checksum
         # immediately before deleting. A local race is negligible, but this keeps the runner's
         # guarantee portable: never delete an object that no longer matches (basic-memory-cloud#1618).
         if not await self.file_service.exists(path):
-            return False
+            return RuntimeGuardedFileDeleteOutcome.missing
         try:
             actual_checksum = await self.compute_checksum(path)
         except FileNotFoundError:
-            # Disappearance after the final existence probe is another safe no-delete outcome.
-            return False
+            # Disappearance after the existence probe means the object is already gone.
+            return RuntimeGuardedFileDeleteOutcome.missing
+        # Local files carry a single content checksum, so exact equality identifies the version.
         if actual_checksum != expected_checksum:
-            return False
+            return RuntimeGuardedFileDeleteOutcome.changed
         await self.file_service.delete_file(path)
-        return True
+        return RuntimeGuardedFileDeleteOutcome.deleted
 
 
 @dataclass(frozen=True, slots=True)
