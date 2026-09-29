@@ -421,14 +421,18 @@ class SQLiteSearchRepository(SearchRepositoryBase):
     # ------------------------------------------------------------------
 
     @override
-    async def index_item(self, search_index_row: SearchIndexRow) -> None:
+    async def index_item(
+        self, search_index_row: SearchIndexRow, session: AsyncSession | None = None
+    ) -> None:
         """Index a single row in FTS only.
 
         Vector chunks are derived asynchronously via sync_entity_vectors().
         """
-        await super().index_item(search_index_row)
+        await super().index_item(search_index_row, session)
 
     @override
-    async def bulk_index_items(self, search_index_rows: List[SearchIndexRow]) -> None:
+    async def bulk_index_items(
+        self, search_index_rows: List[SearchIndexRow], session: AsyncSession | None = None
+    ) -> None:
         """Index multiple rows in FTS only."""
-        await super().bulk_index_items(search_index_rows)
+        await super().bulk_index_items(search_index_rows, session)

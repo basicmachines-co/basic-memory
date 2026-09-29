@@ -277,6 +277,13 @@
   routed project prefix only from the slug form of the URL (`ses-ab-cd-ef-gh-ij`), so
   `build_context` returned an empty result and `read_note` found nothing. The resolver
   now tries the caller's own spelling of the path before its slug.
+- **#1621**: A failed search refresh no longer removes a note from search. Refreshing an
+  entity deleted its old search rows in one committed transaction and wrote the
+  replacement rows (and, on Postgres, their full-text chunks) in another, so a timeout
+  while writing the replacement left an existing note with no search rows, and nothing
+  rebuilt them until the note was edited or the project re-indexed. The delete and the
+  replacement now commit together: a failure keeps the previous rows, and a failed first
+  index leaves nothing partial behind to retry against.
 
 - **#1598**: Under `BASIC_MEMORY_PROJECT_ROOT`, a project name whose permalink contains
   `/` (such as `Research/2026`) is refused, so every project under a shared root stays a

@@ -641,12 +641,19 @@ class SearchService:
                 # Outcome: storage errors remain visible before any search rows are deleted.
                 replacement_content = await self.file_service.read_entity_content(entity)
 
-            await self.repository.delete_by_entity_id(entity_id=entity.id)
-
-            if entity.is_markdown:
-                await self.index_entity_markdown(entity, replacement_content)
-            else:
-                await self.index_entity_file(entity)
+            # Trigger: every refresh replaces the entity's whole search projection.
+            # Why: the delete used to commit on its own, so a timeout while writing the
+            #   replacement (Postgres FTS chunks under load, #1621) left an existing note
+            #   with no search rows, and nothing rebuilds a projection that is missing
+            #   rather than stale.
+            # Outcome: delete and replacement commit together; a failure rolls back to
+            #   the previous projection, or to none on a first index, and stays retryable.
+            async with db.scoped_session(self.repository.session_maker) as session:
+                await self.repository.delete_by_entity_id(entity_id=entity.id, session=session)
+                if entity.is_markdown:
+                    await self.index_entity_markdown(entity, replacement_content, session=session)
+                else:
+                    await self.index_entity_file(entity, session=session)
 
             logger.debug(
                 f"[BackgroundTask] Completed search index for entity_id={entity.id} "
@@ -849,6 +856,7 @@ class SearchService:
     async def index_entity_file(
         self,
         entity: Entity,
+        session: AsyncSession | None = None,
     ) -> None:
         # Index entity file with no content
         await self.repository.index_item(
@@ -865,19 +873,22 @@ class SearchService:
                 created_at=entity.created_at,
                 updated_at=entity.updated_at,
                 project_id=entity.project_id,
-            )
+            ),
+            session,
         )
 
     async def index_entity_markdown(
         self,
         entity: Entity,
         content: str | None = None,
+        session: AsyncSession | None = None,
     ) -> None:
         """Index an entity and all its observations and relations.
 
         Args:
             entity: The entity to index
             content: Optional pre-loaded content (avoids file read). If None, will read from file.
+            session: Optional caller-owned session; the caller then owns the commit.
 
         Indexing structure:
         1. Entities
@@ -1006,7 +1017,7 @@ class SearchService:
                 )
             )
 
-        await self.repository.bulk_index_items(rows_to_index)
+        await self.repository.bulk_index_items(rows_to_index, session)
 
     async def delete_by_permalink(self, permalink: str, search_item_type: SearchItemType):
         """Delete the search row one permalink owns for the given row kind."""

@@ -867,13 +867,16 @@ class SearchRepositoryBase(ABC):
     async def purge_stale_search_rows(self) -> int:
         return await purge_stale_search_index_rows(self.session_maker, self.project_id)
 
-    async def index_item(self, search_index_row: SearchIndexRow) -> None:
+    async def index_item(
+        self, search_index_row: SearchIndexRow, session: AsyncSession | None = None
+    ) -> None:
         """Index or update a single item.
 
         This implementation is shared across backends as it uses standard SQL INSERT.
+        A caller-owned ``session`` keeps the write inside the caller's transaction.
         """
 
-        async with db.scoped_session(self.session_maker) as session:
+        async with db.scoped_session(self.session_maker, session) as session:
             # Replace only the row this address owns *for this kind*. Keying the
             # replacement on the permalink alone let a relation whose authored type
             # spells an observation's address evict that observation -- silently on
@@ -918,9 +921,10 @@ class SearchRepositoryBase(ABC):
                 insert_data,
             )
             logger.debug(f"indexed row {search_index_row}")
-            await session.commit()
 
-    async def bulk_index_items(self, search_index_rows: List[SearchIndexRow]) -> None:
+    async def bulk_index_items(
+        self, search_index_rows: List[SearchIndexRow], session: AsyncSession | None = None
+    ) -> None:
         """Index multiple items in a single batch operation.
 
         This implementation is shared across backends as it uses standard SQL INSERT.
@@ -930,12 +934,13 @@ class SearchRepositoryBase(ABC):
 
         Args:
             search_index_rows: List of SearchIndexRow objects to index
+            session: Optional caller-owned session; the caller then owns the commit
         """
 
         if not search_index_rows:  # pragma: no cover
             return  # pragma: no cover
 
-        async with db.scoped_session(self.session_maker) as session:
+        async with db.scoped_session(self.session_maker, session) as session:
             # When using text() raw SQL, always serialize JSON to string
             # Both SQLite (TEXT) and Postgres (JSONB) accept JSON strings in raw SQL
             # The database driver/column type will handle conversion
@@ -970,7 +975,6 @@ class SearchRepositoryBase(ABC):
                 insert_data_list,
             )
             logger.debug(f"Bulk indexed {len(search_index_rows)} rows")
-            await session.commit()
 
     async def get_entity_search_rows(self, entity_id: int) -> list[SearchIndexRow]:
         """Return every search projection owned by one entity."""
@@ -1024,19 +1028,21 @@ class SearchRepositoryBase(ABC):
         """
         ...
 
-    async def delete_by_entity_id(self, entity_id: int) -> None:
+    async def delete_by_entity_id(
+        self, entity_id: int, session: AsyncSession | None = None
+    ) -> None:
         """Delete all search index entries for an entity.
 
         This implementation is shared across backends as it uses standard SQL DELETE.
+        A caller-owned ``session`` keeps the delete inside the caller's transaction.
         """
-        async with db.scoped_session(self.session_maker) as session:
+        async with db.scoped_session(self.session_maker, session) as session:
             await session.execute(
                 text(
                     "DELETE FROM search_index WHERE entity_id = :entity_id AND project_id = :project_id"
                 ),
                 {"entity_id": entity_id, "project_id": self.project_id},
             )
-            await session.commit()
 
     async def delete_by_permalink(self, permalink: str, search_item_type: SearchItemType) -> None:
         """Delete the one search row an address owns for the given row kind.

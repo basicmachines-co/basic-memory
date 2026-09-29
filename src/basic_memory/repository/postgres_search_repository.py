@@ -134,7 +134,9 @@ class PostgresSearchRepository(SearchRepositoryBase):
             await self._ensure_vector_tables()
 
     @override
-    async def index_item(self, search_index_row: SearchIndexRow) -> None:
+    async def index_item(
+        self, search_index_row: SearchIndexRow, session: AsyncSession | None = None
+    ) -> None:
         """Index or update a single item using UPSERT.
 
         Uses INSERT ... ON CONFLICT to handle race conditions during parallel
@@ -144,9 +146,10 @@ class PostgresSearchRepository(SearchRepositoryBase):
 
         For rows with non-null permalinks, a conflict against the same kind is resolved
         by updating the existing row. For rows with null permalinks, no conflict occurs
-        on this partial index.
+        on this partial index. A caller-owned ``session`` keeps the write inside the
+        caller's transaction.
         """
-        async with db.scoped_session(self.session_maker) as session:
+        async with db.scoped_session(self.session_maker, session) as session:
             # Serialize JSON for raw SQL
             insert_data = search_index_row.to_insert(serialize_json=True)
             insert_data["project_id"] = self.project_id
@@ -195,7 +198,6 @@ class PostgresSearchRepository(SearchRepositoryBase):
             )
             await self._replace_fts_chunks(session, [search_index_row])
             logger.debug(f"indexed row {search_index_row}")
-            await session.commit()
 
     async def _replace_fts_chunks(
         self,
@@ -491,7 +493,9 @@ class PostgresSearchRepository(SearchRepositoryBase):
     # ------------------------------------------------------------------
 
     @override
-    async def bulk_index_items(self, search_index_rows: List[SearchIndexRow]) -> None:
+    async def bulk_index_items(
+        self, search_index_rows: List[SearchIndexRow], session: AsyncSession | None = None
+    ) -> None:
         """Index multiple items in a single batch operation using UPSERT.
 
         Uses INSERT ... ON CONFLICT to handle race conditions during parallel
@@ -505,12 +509,13 @@ class PostgresSearchRepository(SearchRepositoryBase):
 
         Args:
             search_index_rows: List of SearchIndexRow objects to index
+            session: Optional caller-owned session; the caller then owns the commit
         """
 
         if not search_index_rows:
             return
 
-        async with db.scoped_session(self.session_maker) as session:
+        async with db.scoped_session(self.session_maker, session) as session:
             # When using text() raw SQL, always serialize JSON to string
             # Both SQLite (TEXT) and Postgres (JSONB) accept JSON strings in raw SQL
             # The database driver/column type will handle conversion
@@ -563,4 +568,3 @@ class PostgresSearchRepository(SearchRepositoryBase):
             )
             await self._replace_fts_chunks(session, search_index_rows)
             logger.debug(f"Bulk indexed {len(search_index_rows)} rows")
-            await session.commit()
