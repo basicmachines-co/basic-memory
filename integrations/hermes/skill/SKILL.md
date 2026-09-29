@@ -113,7 +113,7 @@ A permalink is the canonical, URL-friendly identifier for a note. Three shapes e
 | **Project-qualified** | `main/decisions/auth-strategy` | `project-name/folder/note-slug`. Carries enough context to route without a separate `project` arg. |
 | **Workspace-qualified** | `personal/main/decisions/auth-strategy` | `workspace-slug/project-name/folder/note-slug`. Fully routes, including across cloud workspaces with same-named projects. |
 
-The permalink returned by `bm_write` already encodes the routing it needs for follow-up reads. If you wrote with `project="personal/main"`, you get back `personal/main/folder/note-slug` and can call `bm_read({ identifier: <that permalink> })` with no `project` arg. The permalink self-routes.
+Only a workspace-qualified permalink routes by itself. A cloud write with `project="personal/main"` returns `personal/main/folder/note-slug`, which `bm_read({ identifier: <that permalink> })` can follow with no `project` arg. A local write returns a short permalink such as `folder/note-slug`; to read it back, pass the same `project` or `project_id` you used for `bm_write`, or the call falls back to the active project.
 
 `memory://` URLs follow the same shapes: `memory://personal/main/decisions/auth-strategy` is valid. The `memory://` prefix is optional for `bm_read` (any of the three permalink shapes works directly); `bm_context` expects the prefix.
 
@@ -139,7 +139,7 @@ bm_write({ title: "...", folder: "...", content: "...", project_id: "bf2a4c1e-d7
 
 `bm_projects` and `bm_workspaces` themselves do **not** take routing — they list across everything.
 
-To save into a named project: find it with `bm_projects`, write with explicit `project` or `project_id`, and return the permalink `bm_write` gives back — it routes follow-up reads by itself.
+To save into a named project: find it with `bm_projects`, write with explicit `project` or `project_id`, and return the permalink `bm_write` gives back. Follow-up reads need the same `project` or `project_id` unless that permalink is workspace-qualified.
 
 ## When to use each tool
 
@@ -152,7 +152,7 @@ To save into a named project: find it with `bm_projects`, write with explicit `p
 | "What was I working on yesterday?" / no specific query yet | `bm_recent` |
 | User names a project that isn't the active one | `bm_projects` → call read/write tool with `project: "workspace/name"` or `project_id: "<uuid>"` |
 | Same project name might exist in multiple workspaces | `bm_projects` (+ `bm_workspaces` if needed) → route with workspace-qualified `project` or `project_id` |
-| Following up on a freshly-written note | Use the returned permalink directly — it already encodes the routing |
+| Following up on a freshly-written note | Use the returned permalink with the same `project` / `project_id` as the write (workspace-qualified permalinks need neither) |
 
 ## Note structure
 
