@@ -69,8 +69,9 @@ def _exact_external_id(identifier: str) -> str | None:
     title="Read Note",
     description=(
         "Read a markdown note by title or permalink, optionally a numbered line range. "
-        "If the identifier doesn't resolve exactly, it falls back to title and text "
-        "search and returns suggested matches instead of content."
+        "If the identifier doesn't resolve directly, a note whose title matches it "
+        "exactly (case-insensitive) is returned with full content; otherwise it returns "
+        "related-note suggestions from text search instead of content."
     ),
     tags={"notes"},
     # TODO: re-enable once MCP client rendering is working
