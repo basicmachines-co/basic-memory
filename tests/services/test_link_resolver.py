@@ -1490,3 +1490,34 @@ async def test_own_project_prefixed_miss_is_a_miss_without_search(link_resolver,
     missing = f"{project_prefix}/zzq-nothing"
     assert await link_resolver.resolve_link(missing, use_search=False) is None
     assert await link_resolver.resolve_link(missing, strict=True) is None
+
+
+@pytest.mark.asyncio
+async def test_non_markdown_path_beats_same_stem_markdown_permalink(
+    entity_repository, session_maker, link_resolver, project_prefix
+):
+    """`components/core-service.txt` must not resolve to the Core Service note (#1629)."""
+    now = datetime.now(timezone.utc)
+    async with db.scoped_session(session_maker) as session:
+        await entity_repository.add(
+            session,
+            EntityModel(
+                title="core-service.txt",
+                note_type="file",
+                content_type="text/plain",
+                file_path="components/core-service.txt",
+                permalink="components/core-service-txt",
+                created_at=now,
+                updated_at=now,
+                project_id=entity_repository.project_id,
+            ),
+        )
+
+    for kwargs in ({}, {"strict": True}):
+        result = await link_resolver.resolve_link("components/core-service.txt", **kwargs)
+        assert result is not None, kwargs
+        assert result.file_path == "components/core-service.txt"
+
+    markdown = await link_resolver.resolve_link("components/core-service")
+    assert markdown is not None
+    assert markdown.permalink == f"{project_prefix}/components/core-service"
