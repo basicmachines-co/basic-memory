@@ -1,8 +1,38 @@
 # CHANGELOG
 
-## Unreleased
+## v0.24.0 (2026-09-29)
+
+### Breaking Changes
+
+- **#1600**: `bm project remove` on a cloud-routed project always deletes the project's
+  cloud files; there is no longer a way to keep them. It warns that the files can be
+  recovered only from a cloud snapshot (`bm cloud snapshot list`) and asks for
+  confirmation (`--yes` skips it). It no longer deletes the local sync directory as a
+  side effect of `--delete-notes`; the new `--delete-local-files` flag does that. MCP
+  `delete_project` on a cloud route also always deletes files, and `delete_notes` is now
+  documented as local-only. Local projects behave as before. A cloud-only project
+  removed without `--cloud` is now correctly treated as cloud-routed.
 
 ### Features
+
+- **#1550**: `bm okf export DESTINATION --project NAME` writes a static OKF v0.2 bundle
+  from a local project, and `bm okf check BUNDLE_PATH` validates one. Export keeps
+  concept frontmatter, categorized observations and relative asset paths, rewrites
+  wikilinks to standard Markdown links resolved the way the graph resolves them, and
+  records the original relation types in a `bm.okf_export` extension. It generates
+  per-folder `index.md` files and a dated root `log.md` from the accepted-write journal.
+  Export stages beside the destination, validates before publishing, refuses to
+  overwrite without `--replace`, and restores the previous bundle if publication fails.
+  `okf check` reports per-file, per-rule diagnostics and exits nonzero on any
+  violation, including unreadable or non-regular files. Both commands take `--json`.
+
+- **#1608**: Accepted note writes stamp `created_by` and `updated_by` into frontmatter
+  when the runtime supplies an author, so the file itself says who wrote it. Cloud
+  composes `<member> via <key name>` for API-key writes. The keys are server-stamped:
+  whatever a writer submits for them is overwritten. `created_by` is set once and carried
+  forward, and a note written before this change never gains one. Unchanged authorship
+  does not rewrite the file, moves and deletes do not restamp, and local runtimes, which
+  supply no author, leave both keys untouched.
 
 - **#1558**: `QUERY /v2/search/` (and `POST /v2/search/` for clients that cannot send
   QUERY) searches an explicit set of projects in one database with one query. The body
@@ -96,6 +126,29 @@
   band, so the decision stays with the agent, which has the context the score does not.
 
 ### Bug Fixes
+
+- **#1598**: Under `BASIC_MEMORY_PROJECT_ROOT`, a project name whose permalink contains
+  `/` (such as `Research/2026`) is refused, so every project under a shared root stays a
+  single top-level directory. Cloud stores and purges projects by that top-level prefix,
+  and a nested name could overlap another project's files. The rule lives in
+  `project_permalink`, which cloud calls when it creates projects.
+
+- **#1606**: Deleting a non-Markdown file (an image, a PDF) now removes it from storage.
+  The delete runner compared the accepted checksum with a SHA-256 of the stored bytes,
+  but an accepted checksum is not always a content hash (cloud records ETags), so the
+  delete was skipped and the next reindex brought the file back. Storage now owns the
+  compare-and-delete through `delete_file_if_matches`. This changes the
+  `NoteFileDeleteStorage` protocol.
+
+- **#1601**: Wiki-projected `index.md` files no longer carry `bm_parse_semantics: false`,
+  so the wikilinks they list become graph relations. `log.md` stays graph-silent.
+
+- **#1603**: Model-facing text (tool descriptions, server instructions, prompts, skills)
+  was audited against the real tool contracts. Suggested calls use keyword arguments
+  (a positional `delete_note` example would have deleted a note named after the
+  project), skills use real parameter names and operations, and under-described tools
+  such as `search_notes`, `grep`, `edit_note` and `move_note` now send their full
+  contract to clients. Prompts no longer push agents to create notes unprompted.
 
 - **#1581**: The sqlite-vec stale-vector cleanup no longer stalls on large vaults. Its
   DELETE compared each chunk's `source_hash` against the outer vector row, which made
@@ -195,8 +248,6 @@
   relations it declares. Rows already lost to the old behavior stay lost; re-index
   the affected notes to bring them back as unresolved.
 
-### Fixes
-
 - **#1451**: A markdown file whose leading `---` block is not a YAML mapping (a letterhead between
   horizontal rules) is now indexed as plain markdown instead of being dropped. The parser
   already treated such a block as body; the indexer separately saw fences, tried to write
@@ -207,6 +258,10 @@
   malformed, and only the first two are ever written to.
 
 ### Internal
+
+- **#1602**: Hot paths emit far fewer Logfire spans and INFO logs: per-sub-step read-cache
+  and indexing spans collapse to one span per operation, and per-item INFO logs move to
+  DEBUG. Counters and error logs are unchanged.
 
 - **#1558**: Search filter compilation now runs over an explicit `ProjectScope` instead of
   a repository-bound `project_id`. FTS term preparation and filter compilation moved out
