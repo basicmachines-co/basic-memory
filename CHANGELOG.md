@@ -271,6 +271,48 @@
 
 ### Bug Fixes
 
+- **#1624**: A local project whose name is not already its permalink (`My Research`,
+  `Gamma-Mixed`) is indexed at startup and watched again. Startup rewrites config keys to
+  permalinks, but the database keeps the display name, and config was then looked up by
+  that name with an exact match. The project was skipped as "not locally indexable" and
+  treated as cloud-routed. Config entries are now matched by permalink.
+
+- **#1632**: On an install with no cloud credentials, an unknown or deleted project name
+  reports "project not found" instead of "Cloud routing requested but no credentials
+  found". Unknown names still route to cloud when cloud is available.
+
+- **#1628**: The MCP `man` tool no longer asks a local install for cloud credentials.
+  Without a `manual` project, an unbundled page returns "No manual entry for ...", and
+  query mode says it needs that project.
+
+- **#1626**: `build_context` resolves a `memory://` title URL to that note, and returns
+  nothing for a URL that names no note. The routed URL carries the project prefix
+  (`main/Cache Layer Design`), which the title and file-path lookups never matched. Titles
+  therefore resolved only through a fuzzy search that often picked a note linking to the
+  target, and a miss returned whatever ranked first. The resolver now tries the exact
+  lookups on the remainder before any fuzzy match, and `build_context` no longer fuzzy
+  matches at all.
+
+- **#1625**: `bm wiki` projects local projects that have had API or MCP writes. The
+  projector waits until every accepted change is materialized, and the local runtime
+  never recorded that, so a single write left the wiki `partial` for good. Local writes
+  and deletes now mark their journal rows once the file work settles, as cloud does.
+
+- **#1629**: `read_content`, `cat` and `read_note` on `notes/foo.txt` return that file,
+  not the same-stem `notes/foo.md`. An identifier with a non-Markdown extension now
+  matches its exact file path before the extension-less permalink candidates.
+
+- **#1630**: When `BASIC_MEMORY_MCP_PROJECT` differs from the project name only in case
+  (`ALPHA` for `alpha`), `search_notes(search_all_projects=True)` and `projects=[...]`
+  find the project again, and `projects=["BETA"]` matches `beta`. Search scoping now
+  compares project names by permalink, as routing does.
+
+- **#1633**: Tool descriptions, docstrings and error guidance now pass every argument
+  after the first by keyword in their example calls. Several showed the old project-first
+  positional order (`read_note("qa", "notes/x")` reads a note named `qa` from project
+  `notes/x`), a retired `list_projects()` tool, or a `kind=` parameter that `search_notes`
+  does not have. A test now checks every example against the registered tool signatures.
+
 - **#1549**: A note whose frontmatter sets a permalink that is not already a slug
   (`s/2026/09/ses_AbCdEfGhIj`) is reachable by `memory://` URL again, in `build_context`
   and `read_note`. The stored permalink is kept verbatim, but the resolver stripped the
