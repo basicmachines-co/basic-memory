@@ -549,12 +549,22 @@ async def write_note(
                     for note in similar_notes
                 ]
 
+            # file_checksum is only set once file materialization has run. In
+            # production that materialization is deferred to a background worker
+            # for write-load parity with cloud (see
+            # LocalNoteContentMaterializationProvider.materialize_write_change), so
+            # file_checksum is still None for essentially every response here. The
+            # db_checksum recorded during accept already identifies this exact
+            # write, so it stands in for the not-yet-materialized file checksum
+            # instead of a permanent "unknown" (#1586).
+            checksum = result.file_checksum or result.db_checksum
+
             summary = [
                 f"# {action} note",
                 f"project: {active_project.name}",
                 f"file_path: {result.file_path}",
                 f"permalink: {response_permalink}",
-                f"checksum: {result.file_checksum[:8] if result.file_checksum else 'unknown'}",
+                f"checksum: {checksum[:8] if checksum else 'unknown'}",
             ]
 
             # Count observations by category
@@ -602,7 +612,7 @@ async def write_note(
                     "title": result.title,
                     "permalink": response_permalink,
                     "file_path": result.file_path,
-                    "checksum": result.file_checksum,
+                    "checksum": checksum,
                     "action": action.lower(),
                     "similar_notes": [dataclasses.asdict(note) for note in similar_notes],
                 }
