@@ -18,7 +18,6 @@ from basic_memory.markdown.entity_parser import (
 )
 from basic_memory.markdown.path_links import (
     is_path_target,
-    markdown_link_path,
     resolve_project_path,
 )
 from basic_memory.markdown.plugins import _is_escaped
@@ -159,30 +158,28 @@ def convert_wikilinks(
             return False
         rooted = target.startswith("/")
         resolved = None
-        # Only ./ and ../ targets are source-relative; see the path branch below.
-        # Wikilink paths are literal identifiers, so URL decoding must round-trip them.
-        authored_path = markdown_link_path(quote(target, safe="/"))
-        relative = resolve_project_path(authored_path, source) if authored_path else None
-        # A root-relative URI with escaping dot segments could normalize to a real note.
-        # Keep that unresolved reference literal rather than inventing a portable edge.
-        if relative is None and ".." in PurePosixPath(target).parts:
-            return False
         # Trigger: an unqualified ./ or ../ path wikilink.
-        # Why: the graph resolves path targets as exact files, with no extension,
-        #   title, permalink or alias guesses (BulkLinkResolutionSnapshot.resolve).
-        #   A project-qualified target routes through the qualifier first and
-        #   resolves from the project root, so it takes the identity path below.
+        # Why: the graph resolves path targets as exact files relative to the source
+        #   note, with no extension, title, permalink or alias guesses
+        #   (BulkLinkResolutionSnapshot.resolve). A project-qualified target routes
+        #   through the qualifier first and resolves from the project root instead.
+        #   Wikilink paths are literal, so they skip Markdown href filtering.
         # Outcome: the export links that exact path, a broken link when it is absent.
-        if (
-            relative is not None
-            and not rooted
-            and not reference.explicitly_qualified
-            and is_path_target(target)
-        ):
+        relative = (
+            resolve_project_path(target, source)
+            if not rooted and not reference.explicitly_qualified and is_path_target(target)
+            else None
+        )
+        if relative is not None:
             replacements.append((start, end + 2, markdown_link(label, relative, fragment)))
             state.push("text", "", 0).content = raw
             state.pos = end + 2
             return True
+        # Dot segments that climb past the project root, or sit in a qualified or bare
+        # identity, name no file; keep the reference literal rather than letting URI
+        # normalization invent an edge.
+        if ".." in PurePosixPath(target).parts:
+            return False
         # Bare slash-bearing targets such as nested/a are identities, not paths: the
         # graph resolves them by permalink, title, then project-root path, never
         # against the source folder.

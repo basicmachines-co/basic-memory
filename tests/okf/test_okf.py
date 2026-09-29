@@ -822,6 +822,23 @@ def test_explicit_project_qualifiers_cannot_bind_to_foreign_local_aliases():
     assert b"[[q::foo]] [p::foo](/target.md) [p::target.md](/target.md)" in source
 
 
+def test_qualified_parent_target_stays_literal():
+    # The qualifier resolves from the project root, where ../foo.md names nothing.
+    targets = {"foo.md": "foo.md"}
+    assert (
+        convert_wikilinks("[[p::../foo.md]]", "folder/source.md", targets, "p")
+        == "[[p::../foo.md]]"
+    )
+
+
+def test_path_wikilink_keeps_backslash_filenames_exact():
+    targets = {"a\\b": "a\\b", "a-b": "other.md"}
+    assert (
+        convert_wikilinks("[[./a\\b]]", "source.md", targets, "p", permalinks={"a-b": "other.md"})
+        == "[./a\\\\b](/a%5Cb)"
+    )
+
+
 def test_bom_is_dropped_before_generated_frontmatter():
     snapshot = ExportSnapshot("p", (ExportFile("note.md", "\ufeff# Heading".encode()),))
     note = next(file.content for file in render_bundle(snapshot) if file.path == "note.md")
