@@ -1699,3 +1699,43 @@ async def test_edit_note_append_traversal_identifier_json_error(client, test_pro
     assert isinstance(result, dict)
     assert result["error"] == "SECURITY_VALIDATION_ERROR"
     assert result["fileCreated"] is False
+
+
+@pytest.mark.asyncio
+async def test_edit_note_falls_back_to_db_checksum_when_file_not_yet_materialized(
+    monkeypatch, app, test_project
+):
+    """edit_note must not report "unknown" while a real checksum already exists (#1586).
+
+    The PATCH entities route defers the file write to
+    note_content_materialization_provider.materialize_write_change exactly like the POST
+    route does, so in production file_checksum is still None when the response is built.
+    db_checksum is recorded synchronously at accept time over the same markdown bytes,
+    so the response must fall back to it. The test environment materializes inline,
+    which is why the integration test alone cannot cover this path.
+    """
+    await write_note(
+        project=test_project.name,
+        title="Deferred Edit Note",
+        directory="test",
+        content="# Deferred Edit Note\n\nOriginal body.",
+    )
+
+    db_checksum = "b" * 64  # a real, already-persisted SHA-256 hex digest
+    real_patch_entity = KnowledgeClient.patch_entity
+
+    async def fake_patch_entity(self, entity_id, patch_data):
+        result = await real_patch_entity(self, entity_id, patch_data)
+        return result.model_copy(update={"file_checksum": None, "db_checksum": db_checksum})
+
+    monkeypatch.setattr(KnowledgeClient, "patch_entity", fake_patch_entity)
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier="Deferred Edit Note",
+        operation="append",
+        content="\n\nAppended body.",
+    )
+
+    assert "checksum: unknown" not in result
+    assert f"checksum: {db_checksum[:8]}" in result
