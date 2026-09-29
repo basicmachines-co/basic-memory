@@ -24,7 +24,7 @@ Research an external subject, synthesize what you find, and create a structured 
 
 ### Step 1: Web Research
 
-Basic Memory does not include a web search tool. If this host already has one, use it. If it does not, the user can add any web search tool or MCP server, for example [Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp). Search queries go to that provider; notes do not. Still ask before saving a note.
+Basic Memory does not include a web search tool. If this host already has one, use it. If it does not, the user can add any web search tool or MCP server, for example [Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp). Search queries go to that provider, so keep private note content out of them. Still ask before saving a note.
 
 Search for current information across multiple sources. Aim for 3-5 searches to build a well-rounded picture:
 
