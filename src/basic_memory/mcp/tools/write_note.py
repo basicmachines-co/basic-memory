@@ -633,7 +633,7 @@ def _format_overwrite_error(title: str, permalink: str | None, project_name: str
         | Append content | `edit_note("{permalink}", operation="append", content="...")` |
         | Prepend content | `edit_note("{permalink}", operation="prepend", content="...")` |
         | Replace a section | `edit_note("{permalink}", operation="replace_section", section="...", content="...")` |
-        | Full replace | `write_note("{title}", ..., overwrite=True)` |
+        | Full replace | `write_note(title="{title}", content="...", directory="...", overwrite=True)` |
         | Inspect first | `read_note("{permalink}")` |
 
         Project: {project_name}""")

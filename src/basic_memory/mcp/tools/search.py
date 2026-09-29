@@ -243,7 +243,7 @@ def _format_search_error_response(
 
             ## Alternative now
             - Run FTS search instead:
-              `search_notes("{project}", "{query}", search_type="text")`
+              `search_notes(query="{query}", project="{project}", search_type="text")`
             """).strip()
 
     if "pip install" in error_message.lower() and "semantic" in error_message.lower():
@@ -256,7 +256,7 @@ def _format_search_error_response(
             1. Install/update Basic Memory: `pip install -U basic-memory`
             2. Restart Basic Memory
             3. Retry your query:
-               `search_notes("{project}", "{query}", search_type="{search_type}")`
+               `search_notes(query="{query}", project="{project}", search_type="{search_type}")`
             """).strip()
 
     # Corrupt/missing FastEmbed model cache (interrupted download leaves a partial
@@ -293,11 +293,11 @@ def _format_search_error_response(
             1. Delete the FastEmbed model cache so it re-downloads on the next search:
                `{cache_dir}`
             2. Run your search again (the model downloads automatically on first use):
-               `search_notes("{project}", "{query}", search_type="{search_type}")`
+               `search_notes(query="{query}", project="{project}", search_type="{search_type}")`
 
             ## Workaround right now
             - Use full-text search, which needs no embedding model:
-              `search_notes("{project}", "{query}", search_type="text")`
+              `search_notes(query="{query}", project="{project}", search_type="text")`
             """).strip()
 
     # FTS5 syntax errors
@@ -335,13 +335,13 @@ def _format_search_error_response(
 
             ## Try again with:
             ```
-            search_notes("{project}","{clean_query}")
+            search_notes(query="{clean_query}", project="{project}")
             ```
 
             ## Alternative search strategies:
-            - Break into simpler terms: `search_notes("{project}", "{" ".join(clean_query.split()[:2])}")`
-            - Try different search types: `search_notes("{project}","{clean_query}", search_type="title")`
-            - Use filtering: `search_notes("{project}","{clean_query}", note_types=["note"])`
+            - Break into simpler terms: `search_notes(query="{" ".join(clean_query.split()[:2])}", project="{project}")`
+            - Try different search types: `search_notes(query="{clean_query}", project="{project}", search_type="title")`
+            - Use filtering: `search_notes(query="{clean_query}", project="{project}", note_types=["note"])`
             """).strip()
 
     # Project not found errors (check before general "not found")
@@ -352,11 +352,11 @@ def _format_search_error_response(
             The current project is not accessible or doesn't exist: {error_message}
 
             ## How to resolve:
-            1. **Check available projects**: `list_projects()`
+            1. **Check available projects**: `list_memory_projects()`
             3. **Verify project setup**: Ensure your project is properly configured
 
             ## Current session info:
-            - See available projects: `list_projects()`
+            - See available projects: `list_memory_projects()`
             """).strip()
 
     # No results found
@@ -383,28 +383,28 @@ def _format_search_error_response(
                - Try synonyms or related terms
 
             3. **Use different search approaches**:
-               - **Text search**: `search_notes("{project}","{query}", search_type="text")` (searches full content)
-               - **Title search**: `search_notes("{project}","{query}", search_type="title")` (searches only titles)
-               - **Permalink search**: `search_notes("{project}","{query}", search_type="permalink")` (searches file paths)
+               - **Text search**: `search_notes(query="{query}", project="{project}", search_type="text")` (searches full content)
+               - **Title search**: `search_notes(query="{query}", project="{project}", search_type="title")` (searches only titles)
+               - **Permalink search**: `search_notes(query="{query}", project="{project}", search_type="permalink")` (searches file paths)
 
             4. **Try boolean operators for broader results**:
-               - OR search: `search_notes("{project}","{" OR ".join(query.split()[:3])}")`
+               - OR search: `search_notes(query="{" OR ".join(query.split()[:3])}", project="{project}")`
                - Remove restrictive terms: Focus on the most important keywords
 
             5. **Use filtering to narrow scope**:
-               - By note type in frontmatter: `search_notes("{project}","{query}", note_types=["note"])`
-               - By recent content: `search_notes("{project}","{query}", after_date="1 week")`
-               - By entity type: `search_notes("{project}","{query}", entity_types=["observation"])`
+               - By note type in frontmatter: `search_notes(query="{query}", project="{project}", note_types=["note"])`
+               - By recent content: `search_notes(query="{query}", project="{project}", after_date="1 week")`
+               - By entity type: `search_notes(query="{query}", project="{project}", entity_types=["observation"])`
 
             6. **Try advanced search patterns**:
-               - Tag search: `search_notes("{project}","tag:your-tag")`
-               - Observation category: `search_notes("{project}","{query}", entity_types=["observation"], categories=["requirement"])`
-               - Pattern matching: `search_notes("{project}","*{query}*", search_type="permalink")`
+               - Tag search: `search_notes(query="tag:your-tag", project="{project}")`
+               - Observation category: `search_notes(query="{query}", project="{project}", entity_types=["observation"], categories=["requirement"])`
+               - Pattern matching: `search_notes(query="*{query}*", project="{project}", search_type="permalink")`
 
             ## Explore what content exists:
             - **Recent activity**: `recent_activity(timeframe="7d")` - See what's been updated recently
-            - **List directories**: `list_directory("{project}","/")` - Browse all content
-            - **Browse by folder**: `list_directory("{project}","/notes")` or `list_directory("/docs")`
+            - **List directories**: `list_directory(dir_name="/", project="{project}")` - Browse all content
+            - **Browse by folder**: `list_directory(dir_name="/notes", project="{project}")` or `list_directory("/docs")`
             """).strip()
 
     # Server/API errors
@@ -420,9 +420,9 @@ def _format_search_error_response(
             3. **Check project status**: Ensure your project is properly synced
 
             ## Alternative approaches:
-            - Browse files directly: `list_directory("{project}","/")`
+            - Browse files directly: `list_directory(dir_name="/", project="{project}")`
             - Check recent activity: `recent_activity(timeframe="7d")`
-            - Try a different search type: `search_notes("{project}","{query}", search_type="title")`
+            - Try a different search type: `search_notes(query="{query}", project="{project}", search_type="title")`
 
             ## If the problem persists:
             The search index might need to be rebuilt. Send a message to support@basicmachines.co or check the project sync status.
@@ -444,7 +444,7 @@ You don't have permission to search in the current project: {error_message}
 3. **Check authentication**: You might need to re-authenticate
 
 ## Alternative actions:
-- List available projects: `list_projects()`"""
+- List available projects: `list_memory_projects()`"""
 
     # Generic fallback
     return f"""# Search Failed
@@ -459,16 +459,16 @@ Error searching for '{query}': {error_message}
 
 ## Alternative search approaches:
 - **Different search types**: 
-  - Title only: `search_notes("{project}","{query}", search_type="title")`
-  - Permalink patterns: `search_notes("{project}","{query}*", search_type="permalink")`
-- **With filters**: `search_notes("{project}","{query}", note_types=["note"])`
-- **Recent content**: `search_notes("{project}","{query}", after_date="1 week")`
-- **Boolean variations**: `search_notes("{project}","{" OR ".join(query.split()[:2])}")`
+  - Title only: `search_notes(query="{query}", project="{project}", search_type="title")`
+  - Permalink patterns: `search_notes(query="{query}*", project="{project}", search_type="permalink")`
+- **With filters**: `search_notes(query="{query}", project="{project}", note_types=["note"])`
+- **Recent content**: `search_notes(query="{query}", project="{project}", after_date="1 week")`
+- **Boolean variations**: `search_notes(query="{" OR ".join(query.split()[:2])}", project="{project}")`
 
 ## Explore your content:
-- **Browse files**: `list_directory("{project}","/")` - See all available content
+- **Browse files**: `list_directory(dir_name="/", project="{project}")` - See all available content
 - **Recent activity**: `recent_activity(timeframe="7d")` - Check what's been updated
-- **All projects**: `list_projects()` 
+- **All projects**: `list_memory_projects()` 
 
 ## Search syntax reference:
 - **Basic**: `keyword` or `multiple words`
@@ -1257,11 +1257,11 @@ async def search_notes(
 
     These filters query that authored time, which is a different axis from `after_date`
     (last-indexed time) — `after_date` is never reinterpreted as valid time.
-    - `search_notes("cache layer", kind="effective", valid_at="2026-07-28")`
+    - `search_notes("cache layer", time_kind="effective", valid_at="2026-07-28")`
       - Returns the Memcached decision; the Redis decision expired at the cutover.
-    - `search_notes("cache layer", kind="effective", valid_at="2026-07-01")`
+    - `search_notes("cache layer", time_kind="effective", valid_at="2026-07-01")`
       - Returns the Redis decision; Memcached is not yet effective.
-    - `search_notes("cache layer", kind="effective", valid_overlaps="[2026-06-01,2026-08-01)")`
+    - `search_notes("cache layer", time_kind="effective", valid_overlaps="[2026-06-01,2026-08-01)")`
       - Returns both, since each overlaps that window.
     - `search_notes("cache layer")` with no valid-time filter
       - Both compete under ordinary relevance, exactly as before.

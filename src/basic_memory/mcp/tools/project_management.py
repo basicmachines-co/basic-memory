@@ -581,9 +581,9 @@ async def create_memory_project(
         Confirmation message with project details
 
     Example:
-        create_memory_project("my-research", "~/Documents/research")
-        create_memory_project("work-notes", "/home/user/work", set_default=True)
-        create_memory_project("team-notes", "/team/notes", workspace="team-paul")
+        create_memory_project(project_name="my-research", project_path="~/Documents/research")
+        create_memory_project(project_name="work-notes", project_path="/home/user/work", set_default=True)
+        create_memory_project(project_name="team-notes", project_path="/team/notes", workspace="team-paul")
     """
     # Trigger: MCP server is constrained to a single project.
     # Why: constrained sessions cannot create projects, and workspace selectors

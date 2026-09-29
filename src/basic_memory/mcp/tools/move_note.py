@@ -184,7 +184,7 @@ def _format_cross_project_error_response(
         read_note("{identifier}")
         
         # 2. Create the note in the target project
-        write_note("Note Title", "content from step 1", "target-folder", project="{target_project}")
+        write_note(title="Note Title", content="content from step 1", directory="target-folder", project="{target_project}")
 
         # 3. Delete the original note if desired
         delete_note("{identifier}", project="{current_project}")
@@ -194,7 +194,7 @@ def _format_cross_project_error_response(
         ### Alternative: Stay in current project
         If you want to move the note within the **{current_project}** project only:
         ```
-        move_note("{identifier}", "new-folder/new-name.md")
+        move_note(identifier="{identifier}", destination_path="new-folder/new-name.md")
         ```
 
         ## Available projects:
@@ -234,7 +234,7 @@ def _format_move_error_response(error_message: str, identifier: str, destination
             search_notes("{identifier}")
 
             # Then use the exact identifier from search results:
-            move_note("correct-identifier-here", "{destination_path}")
+            move_note(identifier="correct-identifier-here", destination_path="{destination_path}")
             ```
             """).strip()
 
@@ -255,10 +255,10 @@ Cannot move '{identifier}' to '{destination_path}' because a file already exists
 ## Try these alternatives:
 ```
 # Option 1: Add timestamp to make unique
-move_note("{identifier}", "{destination_path.rsplit(".", 1)[0] if "." in destination_path else destination_path}-backup.md")
+move_note(identifier="{identifier}", destination_path="{destination_path.rsplit(".", 1)[0] if "." in destination_path else destination_path}-backup.md")
 
 # Option 2: Use archive folder  
-move_note("{identifier}", "archive/{destination_path}")
+move_note(identifier="{identifier}", destination_path="archive/{destination_path}")
 
 # Option 3: Check what's at destination first
 read_note("{destination_path}")
@@ -283,7 +283,7 @@ The destination path '{destination_path}' is not valid: {error_message}
 
 ## Try again with:
 ```
-move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in destination_path else destination_path}")
+move_note(identifier="{identifier}", destination_path="notes/{destination_path.split("/")[-1] if "/" in destination_path else destination_path}")
 ```"""
 
     # Permission/access errors
@@ -356,7 +356,7 @@ A system error occurred while moving '{identifier}': {error_message}
 content = read_note("{identifier}")
 
 # Create new note at desired location  
-write_note("New Note Title", content, "{destination_path.split("/")[0] if "/" in destination_path else "notes"}")
+write_note(title="New Note Title", content=content, directory="{destination_path.split("/")[0] if "/" in destination_path else "notes"}")
 
 # Then delete original if successful
 delete_note("{identifier}")
@@ -380,7 +380,7 @@ Error moving '{identifier}' to '{destination_path}': {error_message}  # pragma: 
 read_note("{identifier}")
 
 # 2. Try a simple destination first
-move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in destination_path else destination_path}")
+move_note(identifier="{identifier}", destination_path="notes/{destination_path.split("/")[-1] if "/" in destination_path else destination_path}")
 
 # 3. If that works, then try your original destination
 ```
@@ -392,7 +392,7 @@ If moving continues to fail, you can copy the content manually:
 content = read_note("{identifier}")
 
 # Create new note
-write_note("Title", content, "target-folder") 
+write_note(title="Title", content=content, directory="target-folder") 
 
 # Delete original once confirmed
 delete_note("{identifier}")
@@ -481,29 +481,29 @@ async def move_note(
 
     Examples:
         # Move a single note to new folder (exact title match)
-        move_note("My Note", "work/notes/my-note.md")
+        move_note(identifier="My Note", destination_path="work/notes/my-note.md")
 
         # Move by exact permalink
-        move_note("my-note-permalink", "archive/old-notes/my-note.md")
+        move_note(identifier="my-note-permalink", destination_path="archive/old-notes/my-note.md")
 
         # Move note to archive folder (filename preserved automatically)
         move_note("my-note", destination_folder="archive")
 
         # Move with complex path structure
-        move_note("experiments/ml-results", "archive/2025/ml-experiments.md")
+        move_note(identifier="experiments/ml-results", destination_path="archive/2025/ml-experiments.md")
 
         # Explicit project specification
-        move_note("My Note", "work/notes/my-note.md", project="work-project")
+        move_note(identifier="My Note", destination_path="work/notes/my-note.md", project="work-project")
 
         # Move entire directory
-        move_note("docs", "archive/docs", is_directory=True)
+        move_note(identifier="docs", destination_path="archive/docs", is_directory=True)
 
         # Move nested directory
-        move_note("projects/2024", "archive/projects/2024", is_directory=True)
+        move_note(identifier="projects/2024", destination_path="archive/projects/2024", is_directory=True)
 
         # If uncertain about identifier, search first:
         # search_notes("my note")  # Find available notes
-        # move_note("docs/my-note-2025", "archive/my-note.md")  # Use exact result
+        # move_note(identifier="docs/my-note-2025", destination_path="archive/my-note.md")  # Use exact result
 
     Raises:
         ToolError: If project doesn't exist, identifier is not found, or destination_path is invalid
@@ -612,7 +612,7 @@ The destination path '{destination_path}' is not allowed - paths must stay withi
 
 ## Try again with a safe path:
 ```
-move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in destination_path else destination_path}")
+move_note(identifier="{identifier}", destination_path="notes/{destination_path.split("/")[-1] if "/" in destination_path else destination_path}")
 ```"""
 
         # Resolve every source before branching so file and directory mutations share
@@ -784,7 +784,7 @@ Error moving directory '{identifier}' to '{destination_path}': {str(e)}
 list_directory("{identifier}")
 
 # Then move individual files
-move_note("path/to/file.md", "{destination_path}/file.md")
+move_note(identifier="path/to/file.md", destination_path="{destination_path}/file.md")
 ```"""
 
         # Resolve once and reuse the entity ID across extension validation and move.
@@ -945,7 +945,7 @@ move_note("{identifier}", destination_folder="notes")
 
                 ## Try again with extension:
                 ```
-                move_note("{identifier}", "{destination_path}.{source_ext}")
+                move_note(identifier="{identifier}", destination_path="{destination_path}.{source_ext}")
                 ```
 
                 All examples in Basic Memory expect file extensions to be explicitly provided.
@@ -993,7 +993,7 @@ move_note("{identifier}", destination_folder="notes")
 
                     ## Try again with matching extension:
                     ```
-                    move_note("{identifier}", "{destination_path.rsplit(".", 1)[0]}.{source_ext}")
+                    move_note(identifier="{identifier}", destination_path="{destination_path.rsplit(".", 1)[0]}.{source_ext}")
                     ```
                     """).strip()
 
@@ -1056,7 +1056,7 @@ move_note("{identifier}", destination_folder="notes")
 
                     ```
                     read_note("{result.file_path}")
-                    write_note("Title", "content", "folder", project="target-project")
+                    write_note(title="Title", content="content", directory="folder", project="target-project")
                     delete_note("{result.file_path}", project="{active_project.name}")
                     ```
                     """).strip()

@@ -32,7 +32,8 @@ search_notes(query=None, project=None, project_id=None,
 CLI:
 
 ```
-bm tool search-notes [QUERY] [--project NAME] [--search-type TYPE]
+bm tool search-notes [QUERY] [--project NAME]
+                     [--title | --permalink | --vector | --hybrid]
                      [--page N] [--page-size N] [--local | --cloud] ...
 ```
 
