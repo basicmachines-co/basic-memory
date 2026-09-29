@@ -613,3 +613,22 @@ def test_project_refs_need_an_id_an_external_id_and_a_name():
     ]
     assert search_mod._search_project_refs({"projects": "nope"}) == []
     assert search_mod._search_project_refs(None) == []
+
+
+def test_project_names_match_by_permalink_like_routing():
+    """`ALPHA` names project `alpha` in search scoping, as it does in routing (#1630)."""
+    search_mod = importlib.import_module("basic_memory.mcp.tools.search")
+    payload = {
+        "projects": [
+            {"name": "alpha", "external_id": ALPHA.external_id, "id": 3, "path": "/alpha"},
+            {"name": "beta", "external_id": BETA.external_id, "id": 4, "path": "/beta"},
+        ],
+        "constrained_project": "ALPHA",
+    }
+
+    refs = search_mod._search_project_refs(payload)
+
+    assert [ref.name for ref in refs] == ["alpha"]
+    assert search_mod._select_project_refs([ALPHA, BETA], ["BETA"]) == [BETA]
+    with pytest.raises(ValueError, match="Unknown project\\(s\\): gamma"):
+        search_mod._select_project_refs([ALPHA, BETA], ["gamma"])
