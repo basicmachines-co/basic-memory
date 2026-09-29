@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import stat
 from collections.abc import Mapping, Sequence
 from contextlib import nullcontext
 from dataclasses import dataclass
@@ -223,6 +224,7 @@ def scan_local_project_index_files(
     project_root: Path,
     *,
     ignore_patterns: LocalProjectIndexIgnorePatterns | None = None,
+    strict: bool = False,
 ) -> LocalProjectIndexScan:
     """Walk one local project and report eligible files plus unreadable subtrees."""
     project_root = project_root.expanduser().resolve()
@@ -254,7 +256,7 @@ def scan_local_project_index_files(
             # The root scan failed (onerror re-raised). Never return an empty,
             # delete-everything snapshot; files discovered before a deeper traversal
             # error are kept.
-            if not file_paths:
+            if strict or not file_paths:
                 raise
             break
 
@@ -269,15 +271,22 @@ def scan_local_project_index_files(
 
         for name in filenames:
             path = root_path / name
-            try:
-                if path.is_symlink() or not path.is_file():
-                    continue
-            except OSError:
-                continue
             relative_path = path.relative_to(project_root).as_posix()
             if local_relative_path_is_filtered(relative_path):
                 continue
             if should_ignore_path(path, project_root, active_ignore_patterns):
+                continue
+            try:
+                # Export requires every eligible file: lstat propagates errors that
+                # pathlib predicates may suppress, without following symlinks.
+                if strict:
+                    if not stat.S_ISREG(path.lstat().st_mode):
+                        continue
+                elif path.is_symlink() or not path.is_file():
+                    continue
+            except OSError:
+                if strict:
+                    raise
                 continue
             file_paths.append(relative_path)
 

@@ -452,6 +452,15 @@ def test_render_cli_synopsis_renders_the_shell_form() -> None:
     assert render_cli_synopsis(apropos_path, apropos).startswith("bm man apropos QUERY")
 
 
+def test_export_synopsis_requires_project_but_keeps_flags_optional() -> None:
+    command_path, command = _cli_command(find_page(PageRef("okf-export", 1)))
+    synopsis = render_cli_synopsis(command_path, command)
+    assert "--project PROJECT" in synopsis
+    assert "[--project PROJECT]" not in synopsis
+    assert "[--replace]" in synopsis
+    assert "[--json]" in synopsis
+
+
 def test_render_options_includes_shared_and_global_flags() -> None:
     # D2: OPTIONS is the COMPLETE public option list, including the shared output
     # and routing flags the hand-written blocks left out — grep(1) grows from four

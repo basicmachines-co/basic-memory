@@ -159,8 +159,21 @@ def test_man_install_treats_manpath_failure_as_unknown(tmp_path, monkeypatch):
 # Section 1 is the CLI's own documentation, so a page and its command must not
 # drift: an option a user can type that the page never names is undocumented.
 # find(1) went stale exactly this way when `bm find` grew --meta/--fields.
-PAGES_WITHOUT_TOP_LEVEL_COMMANDS = {"apropos"}  # `bm man apropos`, not `bm apropos`
-DOCUMENTED_VERBS = {"cat", "find", "grep", "head", "ls", "tail", "tree"}
+# Match the nested paths used by scripts/update_man_pages.py.
+NESTED_COMMAND_PATHS = {
+    "apropos": ("man", "apropos"),
+    "okf-check": ("okf", "check"),
+    "okf-export": ("okf", "export"),
+}
+DOCUMENTED_VERBS = {
+    "cat",
+    "find",
+    "grep",
+    "head",
+    "ls",
+    "tail",
+    "tree",
+} | NESTED_COMMAND_PATHS.keys()
 
 
 def test_section_1_pages_document_every_option_of_their_command():
@@ -171,10 +184,14 @@ def test_section_1_pages_document_every_option_of_their_command():
     checked: set[str] = set()
 
     for page in bundled_pages():
-        if page.section != 1 or page.name in PAGES_WITHOUT_TOP_LEVEL_COMMANDS:
+        if page.section != 1:
             continue
         body = page.body()
-        for param in cli.commands[page.name].params:
+        command = cli
+        for segment in NESTED_COMMAND_PATHS.get(page.name, (page.name,)):
+            assert isinstance(command, TyperGroup)
+            command = command.commands[segment]
+        for param in command.params:
             for option in param.opts:
                 if not option.startswith("--"):
                     continue
