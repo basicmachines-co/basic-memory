@@ -87,11 +87,17 @@ async def _detect_cross_project_move_attempt(
         #      intent to move into another project, which move_note cannot do — it
         #      would silently create a same-project nested folder instead.
         # Outcome: candidate for rejection, unless the folder is already local (below).
+        # Projects are addressed by name or by permalink ("Other Project" is
+        # "other-project"), so compare the generated permalinks too.
+        leading_permalink = generate_permalink(leading_folder)
         matching_project = next(
             (
                 p.name
                 for p in project_list.projects
-                if p.name.lower() == leading_folder.lower()
+                if (
+                    p.name.lower() == leading_folder.lower()
+                    or generate_permalink(p.name) == leading_permalink
+                )
                 and p.name.lower() != active_project.name.lower()
             ),
             None,

@@ -146,6 +146,53 @@ async def test_detect_cross_project_stops_paging_after_root_folders(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_detect_cross_project_matches_project_permalink(monkeypatch):
+    """A destination addressed by project permalink ("Other Project" -> other-project)."""
+    import importlib
+
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+
+    class _Project:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    class _ProjectList:
+        projects = [_Project("test-project"), _Project("Other Project")]
+
+    class MockProjectClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def list_projects(self, *args, **kwargs):
+            return _ProjectList()
+
+    class _EmptyListing:
+        nodes = ()
+        has_more = False
+
+    class MockDirectoryClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def list(self, *args, **kwargs):
+            return _EmptyListing()
+
+    monkeypatch.setattr(clients_mod, "ProjectClient", MockProjectClient)
+    monkeypatch.setattr(clients_mod, "DirectoryClient", MockDirectoryClient)
+
+    move_note_module = importlib.import_module("basic_memory.mcp.tools.move_note")
+
+    result = await move_note_module._detect_cross_project_move_attempt(
+        client=None,
+        identifier="source",
+        destination_path="other-project/moved",
+        active_project=ACTIVE_PROJECT,
+    )
+    assert result is not None
+    assert "Other Project" in result
+
+
+@pytest.mark.asyncio
 async def test_detect_cross_project_only_flags_known_project_name(monkeypatch):
     """Detection flags only a leading segment that matches a KNOWN project name.
 
