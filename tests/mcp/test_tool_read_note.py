@@ -1416,3 +1416,41 @@ async def test_missing_title_in_unindexed_project_keeps_index_guidance(app, test
     """A title miss cannot prove absence before an index pass, so guidance still surfaces."""
     with pytest.raises(RuntimeError, match="Project Index Required"):
         await read_note("Some Missing Title", project=test_project.name, output_format="json")
+
+
+@pytest.mark.asyncio
+async def test_unavailable_resolver_does_not_prove_markdown_path_missing(
+    monkeypatch, app, test_project
+):
+    """Only a resolver 404 confirms absence; other failures keep the prior recovery."""
+    import importlib
+
+    read_note_module = importlib.import_module("basic_memory.mcp.tools.read_note")
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+    searched: list[str] = []
+
+    def resolver_unavailable() -> ToolError:
+        request = Request("POST", "http://test/knowledge/resolve")
+        error = ToolError("resolver unavailable")
+        error.__cause__ = HTTPStatusError(
+            "resolver unavailable", request=request, response=Response(503, request=request)
+        )
+        return error
+
+    class UnavailableKnowledgeClient(clients_mod.KnowledgeClient):
+        @override
+        async def resolve_entity(self, identifier: str, *, strict: bool = False) -> str:
+            raise resolver_unavailable()
+
+    async def fake_search_notes(*, search_type, **kwargs):
+        searched.append(search_type)
+        return {"results": [], "current_page": 1, "page_size": 10}
+
+    monkeypatch.setattr(clients_mod, "KnowledgeClient", UnavailableKnowledgeClient)
+    monkeypatch.setattr(read_note_module, "search_notes", fake_search_notes)
+
+    await read_note("notes/present.md", project=test_project.name)
+    assert searched == ["title", "text"]
+
+    with pytest.raises(ToolError, match="resolver unavailable"):
+        await read_note("notes/present.md", project=test_project.name, output_format="json")
