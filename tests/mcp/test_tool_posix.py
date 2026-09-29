@@ -1781,13 +1781,12 @@ async def test_man_query_finds_manpage_notes(client, test_project):
 
 
 @pytest.mark.asyncio
-async def test_man_query_missing_manual_project_raises(client, test_project):
-    # No "manual" project exists in the test config. Unknown project names route
-    # cloud by default (get_project_mode defaults CLOUD for unknown identifiers),
-    # so without credentials the query fails fast with the setup hint instead of
-    # silently searching the wrong project.
-    with pytest.raises(RuntimeError, match="no credentials found"):
+async def test_man_without_a_manual_project_stays_local(client, test_project):
+    """A local install with no manual project never asks for cloud credentials (#1628)."""
+    with pytest.raises(ToolError, match="query mode searches the 'manual' project"):
         await man(query="anything")
+    with pytest.raises(ToolError, match=r"No manual entry for grep\(3\)"):
+        await man(page="grep(3)")
 
 
 # --- project-qualified routing (#1415) ---
