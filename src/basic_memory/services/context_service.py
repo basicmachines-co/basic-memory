@@ -189,7 +189,7 @@ class ContextService:
                             async with db.scoped_session(self._require_session_maker()) as session:
                                 entity = await self.link_resolver.resolve_link(
                                     path,
-                                    use_search=True,
+                                    use_search=False,
                                     strict=False,
                                     session=session,
                                 )

@@ -336,3 +336,25 @@ async def test_build_context_finds_explicit_non_slug_permalink(client, test_proj
     note = await read_note(url, project=test_project.name, output_format="json")
     assert isinstance(note, dict)
     assert note["permalink"] == permalink
+
+
+@pytest.mark.asyncio
+async def test_build_context_miss_returns_nothing(client, test_project):
+    """A memory:// URL is an address; a miss must not become a fuzzy guess (#1626)."""
+    for title in ("Search Spec", "Cache Layer Design"):
+        await write_note(
+            project=test_project.name,
+            title=title,
+            directory="specs",
+            content=f"# {title}\n\nNotes about {title.lower()}.\n\n- relates_to [[Search Spec]]\n",
+        )
+
+    for url in ("memory://zzq-nonexistent", f"memory://{test_project.name}/zzq-nonexistent"):
+        result = await build_context(project=test_project.name, url=url)
+        assert isinstance(result, dict)
+        assert result["metadata"]["primary_count"] == 0, url
+        assert result["results"] == []
+
+    titled = await build_context(project=test_project.name, url="memory://Cache Layer Design")
+    assert isinstance(titled, dict)
+    assert [r["primary_result"]["title"] for r in titled["results"]] == ["Cache Layer Design"]

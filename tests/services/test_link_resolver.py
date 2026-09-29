@@ -1469,3 +1469,24 @@ async def test_fuzzy_search_selects_first_result(link_resolver, project_prefix):
     assert result is not None
     # The best match for "Auth Serv" should be Auth Service
     assert result.permalink == f"{project_prefix}/components/auth-service"
+
+
+# ============================================================================
+# Own-project prefixed titles (#1626)
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_own_project_prefixed_title_resolves_exactly(link_resolver, project_prefix):
+    """A routed memory:// URL arrives as `<project>/<Title>`; the title must match exactly."""
+    for kwargs in ({"use_search": False}, {"strict": True}, {}):
+        result = await link_resolver.resolve_link(f"{project_prefix}/Service Config", **kwargs)
+        assert result is not None, kwargs
+        assert result.permalink == f"{project_prefix}/config/service-config"
+
+
+@pytest.mark.asyncio
+async def test_own_project_prefixed_miss_is_a_miss_without_search(link_resolver, project_prefix):
+    missing = f"{project_prefix}/zzq-nothing"
+    assert await link_resolver.resolve_link(missing, use_search=False) is None
+    assert await link_resolver.resolve_link(missing, strict=True) is None

@@ -248,7 +248,7 @@ class LinkResolver:
                 entity_repository=self.entity_repository,
                 search_service=self.search_service,
                 link_text=clean_text,
-                use_search=use_search,
+                use_search=False,
                 strict=strict,
                 source_path=source_path,
                 project_permalink=current_project_permalink,
@@ -256,6 +256,46 @@ class LinkResolver:
             )
             if resolved:
                 return resolved
+
+            # Trigger: the identifier starts with this project's own prefix, as a
+            #   routed memory:// URL does (`main/Cache Layer Design`).
+            # Why: permalink candidates strip that prefix, but the title and file-path
+            #   lookups saw the prefixed text and could never match, so a title URL
+            #   resolved only through fuzzy search and often landed on a neighbour
+            #   that links to it (#1626).
+            # Outcome: the exact lookups run on the remainder before any fuzzy match.
+            own_prefix, own_remainder = self._split_project_prefix(clean_text)
+            if (
+                own_prefix
+                and current_project_permalink
+                and generate_permalink(own_prefix) == current_project_permalink
+            ):
+                resolved = await self._resolve_in_project(
+                    session=active_session,
+                    entity_repository=self.entity_repository,
+                    search_service=self.search_service,
+                    link_text=own_remainder,
+                    use_search=False,
+                    strict=strict,
+                    source_path=source_path,
+                    project_permalink=current_project_permalink,
+                    load_relations=load_relations,
+                )
+                if resolved:
+                    return resolved
+
+            # Fuzzy matching is the last resort for the current project, after every
+            # exact spelling has missed. Strict resolution never guesses.
+            if use_search and not strict:
+                resolved = await self._search_best_match(
+                    session=active_session,
+                    entity_repository=self.entity_repository,
+                    search_service=self.search_service,
+                    link_text=clean_text,
+                    load_relations=load_relations,
+                )
+                if resolved:
+                    return resolved
 
             # Trigger: local resolution failed and identifier looks like project/path
             # Why: allow explicit project path references without namespace syntax
@@ -563,29 +603,48 @@ class LinkResolver:
             return None
 
         # 6. Fall back to search for fuzzy matching (only if not in strict mode)
-        if use_search and "*" not in clean_text:
-            results = await search_service.search(
-                query=SearchQuery(text=clean_text, entity_types=[SearchItemType.ENTITY]),
+        if use_search:
+            return await self._search_best_match(
                 session=session,
+                entity_repository=entity_repository,
+                search_service=search_service,
+                link_text=clean_text,
+                load_relations=load_relations,
             )
-
-            if results:
-                # Both SQLite and Postgres return results sorted best-first in SQL
-                # (SQLite: ORDER BY score ASC for negative BM25, Postgres: ORDER BY score DESC
-                # for positive ts_rank). Using results[0] is backend-agnostic and correct.
-                best_match = results[0]
-                logger.trace(
-                    f"Selected best match from {len(results)} results: {best_match.permalink}"
-                )
-                if best_match.permalink:
-                    return await entity_repository.get_by_permalink(
-                        session,
-                        best_match.permalink,
-                        load_relations=load_relations,
-                    )
 
         # if we couldn't find anything then return None
         return None
+
+    async def _search_best_match(
+        self,
+        *,
+        session: AsyncSession,
+        entity_repository: EntityRepository,
+        search_service: SearchService,
+        link_text: str,
+        load_relations: bool,
+    ) -> Optional[Entity]:
+        """Return the top full-text hit for link text, the resolver's fuzzy last resort."""
+        if "*" in link_text:
+            return None
+        results = await search_service.search(
+            query=SearchQuery(text=link_text, entity_types=[SearchItemType.ENTITY]),
+            session=session,
+        )
+        if not results:
+            return None
+        # Both SQLite and Postgres return results sorted best-first in SQL
+        # (SQLite: ORDER BY score ASC for negative BM25, Postgres: ORDER BY score DESC
+        # for positive ts_rank). Using results[0] is backend-agnostic and correct.
+        best_match = results[0]
+        logger.trace(f"Selected best match from {len(results)} results: {best_match.permalink}")
+        if not best_match.permalink:
+            return None
+        return await entity_repository.get_by_permalink(
+            session,
+            best_match.permalink,
+            load_relations=load_relations,
+        )
 
     def _include_project_permalinks(self) -> bool:
         """Return True when permalinks should include the project slug."""
