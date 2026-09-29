@@ -169,16 +169,16 @@ async def read_note(
 
     Examples:
         # Read by permalink
-        read_note("my-research", "specs/search-spec")
+        read_note(identifier="specs/search-spec", project="my-research")
 
         # Read by title
-        read_note("work-project", "Search Specification")
+        read_note(identifier="Search Specification", project="work-project")
 
         # Read with memory URL
-        read_note("my-research", "memory://specs/search-spec")
+        read_note(identifier="memory://specs/search-spec", project="my-research")
 
         # Read recent meeting notes
-        read_note("team-docs", "Weekly Standup")
+        read_note(identifier="Weekly Standup", project="team-docs")
 
         # Page through fallback-search suggestions when nothing matches directly
         read_note("unknown topic", page=2, page_size=5)

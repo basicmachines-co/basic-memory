@@ -262,13 +262,13 @@ async def build_context(
 
     Examples:
         # Continue a specific discussion
-        build_context("my-project", "memory://specs/search")
+        build_context(url="memory://specs/search", project="my-project")
 
         # Get deeper context about a component
-        build_context("work-docs", "memory://components/memory-service", depth=2)
+        build_context(url="memory://components/memory-service", project="work-docs", depth=2)
 
         # Get text output for compact context
-        build_context("research", "memory://specs/search", output_format="text")
+        build_context(url="memory://specs/search", project="research", output_format="text")
 
     Raises:
         ToolError: If project doesn't exist or depth parameter is invalid
