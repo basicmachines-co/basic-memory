@@ -50,6 +50,9 @@ FrontmatterLoader.yaml_implicit_resolvers = {
 def parse_document(content: str, *, source: bool = False) -> Document:
     """Require a mapping when a YAML fence is present; preserve YAML value types."""
     if source:
+        # BM strips a BOM before parsing; drop it here too so generated frontmatter
+        # prepended to a fence-less body cannot strand U+FEFF mid-document.
+        content = strip_bom(content)
         # BM treats unmatched fences and malformed YAML as authored body text.
         # Reuse that classification, then load valid metadata without coercing dates.
         if not has_frontmatter(content):
@@ -58,7 +61,7 @@ def parse_document(content: str, *, source: bool = False) -> Document:
             parse_frontmatter(content)
         except ParseError:
             return Document({}, content, False)
-    lines = (strip_bom(content) if source else content).splitlines(keepends=True)
+    lines = content.splitlines(keepends=True)
     # BM accepts a BOM and leading blank lines; OKF check keeps its on-disk boundary.
     if source:
         while lines and not lines[0].strip():

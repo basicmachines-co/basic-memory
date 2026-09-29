@@ -816,6 +816,13 @@ def test_explicit_project_qualifiers_cannot_bind_to_foreign_local_aliases():
     assert b"[[q::foo]] [p::foo](/target.md) [p::target.md](/target.md)" in source
 
 
+def test_bom_is_dropped_before_generated_frontmatter():
+    snapshot = ExportSnapshot("p", (ExportFile("note.md", "\ufeff# Heading".encode()),))
+    note = next(file.content for file in render_bundle(snapshot) if file.path == "note.md")
+    assert "\ufeff" not in note.decode()
+    assert note.decode().endswith("---\n# Heading")
+
+
 def test_qualified_relative_target_resolves_from_project_root():
     # The qualifier routes first, so ./foo is root-relative, unlike the bare path form.
     snapshot = ExportSnapshot(
