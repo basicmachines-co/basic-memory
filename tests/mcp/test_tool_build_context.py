@@ -304,3 +304,35 @@ def test_format_entity_block_renders_unresolved_relations_by_name():
     assert "- see_also [[edit-note(3)]]" in block
     assert "- see_also [[bm-note(5)]]" in block
     assert "[[None]]" not in block
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "url_template",
+    [
+        "memory://s/2026/09/ses_AbCdEfGhIj",
+        "memory://{project}/s/2026/09/ses_AbCdEfGhIj",
+        "s/2026/09/ses_AbCdEfGhIj",
+    ],
+)
+async def test_build_context_finds_explicit_non_slug_permalink(client, test_project, url_template):
+    """A verbatim frontmatter permalink resolves through every URL spelling (#1549)."""
+    from basic_memory.mcp.tools import read_note
+
+    permalink = "s/2026/09/ses_AbCdEfGhIj"
+    await write_note(
+        project=test_project.name,
+        title="index",
+        directory="s/2026/09/sessions",
+        content=f"---\npermalink: {permalink}\n---\n\n# T\n\nBody.\n",
+    )
+    url = url_template.format(project=test_project.name)
+
+    result = await build_context(project=test_project.name, url=url)
+    assert isinstance(result, dict)
+    assert result["metadata"]["primary_count"] == 1
+    assert result["results"][0]["primary_result"]["permalink"] == permalink
+
+    note = await read_note(url, project=test_project.name, output_format="json")
+    assert isinstance(note, dict)
+    assert note["permalink"] == permalink

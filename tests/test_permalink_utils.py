@@ -88,3 +88,29 @@ def test_qualified_permalink_reference_preserves_lookup_syntax():
         )
         == "personal/main/patterns/*"
     )
+
+
+def test_prefixed_candidates_keep_the_callers_spelling_of_the_remainder():
+    """An explicit frontmatter permalink is stored verbatim, not as its slug (#1549)."""
+    expected_remainders = ["s/ses_AbCdEf", "s/ses-ab-cd-ef"]
+
+    project_prefixed = build_permalink_resolution_candidates(
+        "main/s/ses_AbCdEf", "main", include_project=True
+    )
+    assert project_prefixed == ["main/s/ses_AbCdEf", "main/s/ses-ab-cd-ef", *expected_remainders]
+
+    unprefixed_route = build_permalink_resolution_candidates(
+        "main/s/ses_AbCdEf", "main", include_project=False
+    )
+    assert unprefixed_route == ["main/s/ses_AbCdEf", "main/s/ses-ab-cd-ef", *expected_remainders]
+
+    workspace_qualified = build_permalink_resolution_candidates(
+        "personal/main/s/ses_AbCdEf", "main", workspace_permalink="personal"
+    )
+    assert workspace_qualified == [
+        "personal/main/s/ses_AbCdEf",
+        "personal/main/s/ses-ab-cd-ef",
+        "main/s/ses_AbCdEf",
+        "main/s/ses-ab-cd-ef",
+        *expected_remainders,
+    ]

@@ -271,6 +271,12 @@
 
 ### Bug Fixes
 
+- **#1549**: A note whose frontmatter sets a permalink that is not already a slug
+  (`s/2026/09/ses_AbCdEfGhIj`) is reachable by `memory://` URL again, in `build_context`
+  and `read_note`. The stored permalink is kept verbatim, but the resolver stripped the
+  routed project prefix only from the slug form of the URL (`ses-ab-cd-ef-gh-ij`), so
+  `build_context` returned an empty result and `read_note` found nothing. The resolver
+  now tries the caller's own spelling of the path before its slug.
 - **#1621**: A failed search refresh no longer removes a note from search. Refreshing an
   entity deleted its old search rows in one committed transaction and wrote the
   replacement rows (and, on Postgres, their full-text chunks) in another, so a timeout
