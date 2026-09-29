@@ -1871,6 +1871,43 @@ async def test_move_directory_into_project_named_folder_rejected(
 
 
 @pytest.mark.asyncio
+async def test_move_into_local_folder_with_other_casing_succeeds(
+    mcp_server, app, test_project, tmp_path_factory
+):
+    """A local folder that differs only in case still counts as local (#1607, #1326).
+
+    The server lands "schemas/" in an existing "Schemas/", so the guard resolves the
+    leading folder's casing the same way before treating the move as cross-project.
+    """
+
+    async with Client(mcp_server) as client:
+        await _create_sibling_project(client, "schemas", tmp_path_factory.mktemp("schemas"))
+        for title, directory in (("Existing Schema", "Schemas"), ("Incoming Note", "inbox")):
+            await client.call_tool(
+                "write_note",
+                {
+                    "project": test_project.name,
+                    "title": title,
+                    "directory": directory,
+                    "content": f"# {title}\n\nBody of {title}.",
+                },
+            )
+
+        result = await client.call_tool(
+            "move_note",
+            {
+                "project": test_project.name,
+                "identifier": "Incoming Note",
+                "destination_path": "schemas/Incoming Note.md",
+                "output_format": "json",
+            },
+        )
+        data = json.loads(result.content[0].text)
+        assert data["moved"] is True
+        assert data["file_path"] == "Schemas/Incoming Note.md"
+
+
+@pytest.mark.asyncio
 async def test_move_into_existing_local_folder_named_after_project_succeeds(
     mcp_server, app, test_project, tmp_path_factory
 ):

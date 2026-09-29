@@ -12,10 +12,12 @@ from pydantic import AliasChoices, Field
 from basic_memory.config import ConfigManager
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.project_context import get_project_client, resolve_project_and_path
+from basic_memory.schemas.directory import MAX_DIRECTORY_PAGE_SIZE
 from basic_memory.schemas.project_info import ProjectItem
 from basic_memory.utils import (
     generate_permalink,
     normalize_project_reference,
+    resolve_directory_casing,
     validate_project_path,
 )
 from basic_memory.workspace_context import current_workspace_permalink_context
@@ -106,14 +108,24 @@ async def _detect_cross_project_move_attempt(
         # Why: the name match already signals routing intent; allowing the move
         #      unverified is the silent misroute this guard exists to prevent.
         # Outcome: keep the cross-project rejection.
+        # The server resolves a destination folder to an existing folder's casing
+        # (#1326), so "schemas/" lands in "Schemas/"; resolve the same way here.
         try:
-            local_folder = await DirectoryClient(client, active_project.external_id).list(
-                leading_folder, depth=1, page_size=1
-            )
+            directory_client = DirectoryClient(client, active_project.external_id)
+            root_folders: list[str] = []
+            page = 1
+            while True:
+                listing = await directory_client.list(
+                    "/", depth=1, page=page, page_size=MAX_DIRECTORY_PAGE_SIZE
+                )
+                root_folders.extend(node.name for node in listing.nodes if node.type == "directory")
+                if not listing.has_more:
+                    break
+                page += 1
         except Exception as e:
             logger.debug(f"Could not verify local folder {leading_folder!r}: {e}")
         else:
-            if local_folder.total > 0:
+            if resolve_directory_casing(leading_folder, root_folders) in root_folders:
                 return None
 
         return _format_cross_project_error_response(
