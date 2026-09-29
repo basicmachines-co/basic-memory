@@ -1,9 +1,12 @@
 """Server-stamped authorship fields in accepted note frontmatter.
 
 `created_by` and `updated_by` name the person or agent behind a note so the
-Markdown file itself says who wrote it. Only the runtime boundary that knows the
-caller's identity can supply the name; whatever the writer submitted for these
-keys is replaced, so the fields cannot be set or spoofed through note content.
+Markdown file itself says who wrote it. When the runtime boundary knows the
+caller's identity (cloud API and MCP writes), it stamps the name and replaces
+whatever the writer submitted for these keys. When it knows no identity (local
+runtimes, background writers), the keys are ordinary frontmatter: a user who
+sets them by hand keeps what they wrote, and a value set that way is carried
+forward as `created_by` like any other.
 """
 
 from __future__ import annotations
