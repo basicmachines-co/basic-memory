@@ -132,12 +132,16 @@ class SearchRepository(Protocol):
         """Count indexed content matching the same filters as search."""
         ...
 
-    async def index_item(self, search_index_row: SearchIndexRow) -> None:
-        """Index a single item."""
+    async def index_item(
+        self, search_index_row: SearchIndexRow, session: AsyncSession | None = None
+    ) -> None:
+        """Index a single item, inside ``session``'s transaction when one is given."""
         ...
 
-    async def bulk_index_items(self, search_index_rows: List[SearchIndexRow]) -> None:
-        """Index multiple items in a batch."""
+    async def bulk_index_items(
+        self, search_index_rows: List[SearchIndexRow], session: AsyncSession | None = None
+    ) -> None:
+        """Index multiple items in a batch, inside ``session``'s transaction when given."""
         ...
 
     async def get_entity_search_rows(self, entity_id: int) -> list[SearchIndexRow]:
@@ -156,8 +160,10 @@ class SearchRepository(Protocol):
         """Delete every full-text search row owned by this project."""
         ...
 
-    async def delete_by_entity_id(self, entity_id: int) -> None:
-        """Delete items by entity ID."""
+    async def delete_by_entity_id(
+        self, entity_id: int, session: AsyncSession | None = None
+    ) -> None:
+        """Delete items by entity ID, inside ``session``'s transaction when one is given."""
         ...
 
     async def purge_stale_search_rows(self) -> int:
