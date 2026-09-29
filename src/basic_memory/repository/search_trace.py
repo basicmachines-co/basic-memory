@@ -146,7 +146,6 @@ class RerankStageTrace:
     reranker_candidates: int
     entries: tuple[RerankEntry, ...]
     tail_floor: float
-    stable_pool_refetched: bool
     rerank_ms: float
 
 
@@ -236,7 +235,6 @@ class SearchTraceCollector:
     fusion: FusionStageTrace | None = None
     rerank: RerankStageTrace | None = None
     readiness: ManifestReadiness | None = None
-    stable_pool_refetched: bool = False
     # Rendered from the exact prepared query the repository executed (including
     # legacy note-type expansion), so the trace never re-derives its criteria.
     executed_query_description: str | None = None
@@ -410,7 +408,6 @@ def build_rerank_stage(
     post_rerank_rows: Sequence[tuple[TraceKey, float]],
     demoted_scores: Mapping[TraceKey, float],
     tail_floor: float,
-    stable_pool_refetched: bool,
     rerank_ms: float,
 ) -> RerankStageTrace:
     """Freeze pre-rewrite scores and the final pool-plus-demoted-tail ordering."""
@@ -431,7 +428,6 @@ def build_rerank_stage(
             for rank, (key, _score) in enumerate(post_rerank_rows, start=1)
         ),
         tail_floor=tail_floor,
-        stable_pool_refetched=stable_pool_refetched,
         rerank_ms=rerank_ms,
     )
 

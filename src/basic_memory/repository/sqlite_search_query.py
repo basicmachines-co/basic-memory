@@ -481,12 +481,15 @@ class SQLiteFts:
         if search_text and "script_text" in params:
             relaxed_search_text = analyze_script_query(search_text.strip()).word_text
 
+        # The id tie-break makes equal-score rows keep one order at every LIMIT, as
+        # Postgres does: a page, or a fixed rerank prefix read from a larger window,
+        # is then the same rows a smaller query returns.
         sql = f"""
             SELECT{_RESULT_COLUMNS},
                 {compiled.score_expression} as score
             FROM {compiled.from_clause}
             WHERE {compiled.where_clause}
-            ORDER BY score ASC {compiled.order_by_clause}
+            ORDER BY score ASC {compiled.order_by_clause}, search_index.id ASC
             LIMIT :limit
             OFFSET :offset
         """

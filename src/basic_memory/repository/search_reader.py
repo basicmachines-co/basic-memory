@@ -183,24 +183,162 @@ class HydratedChunk:
 
 
 @dataclass(frozen=True, slots=True)
+class WindowChunk:
+    """One chunk of a candidate window and its position in the adapter's ranking."""
+
+    position: int
+    similarity: float
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
 class CandidateWindow:
     """The search rows one vector candidate window resolved to, in adapter order.
 
     ``similarity_by_key`` holds the best chunk similarity of every row above the
     threshold; ``rows`` holds those of them that exist and that the query's filters
     admit, so a key present in the first and absent from the second was rejected.
+    ``chunks_by_key`` keeps every row's chunks in adapter order, each with its
+    position in that ranking.
     """
 
     similarity_by_key: dict[SearchIndexKey, float]
-    chunks_by_key: dict[SearchIndexKey, list[tuple[float, str]]]
+    chunks_by_key: dict[SearchIndexKey, list[WindowChunk]]
     rows: dict[SearchIndexKey, SearchIndexRow]
     chunk_count: int
+    embed_ms: float = 0.0
     vector_query_ms: float = 0.0
     hydrate_ms: float = 0.0
 
     @property
     def admitted(self) -> int:
         return sum(1 for key in self.similarity_by_key if key in self.rows)
+
+    def position(self, key: SearchIndexKey) -> int:
+        """Where a row enters the ranking: the position of its first, best chunk.
+
+        Adapters return matches nearest first, so a row's first chunk is its best.
+        """
+        return self.chunks_by_key[key][0].position
+
+    def ranked_rows(self, position_bound: int | None = None) -> list[SearchIndexRow]:
+        """Admitted rows, best similarity first, as a window of ``position_bound`` sees them.
+
+        A window reaching further down the adapter ranking only appends chunks, so the
+        rows that enter before ``position_bound``, their scores, and the passages drawn
+        from chunks before it are the same in every window that reaches the bound.
+        ``None`` reads the whole window.
+        """
+        ranked: list[SearchIndexRow] = []
+        for key, similarity in self.similarity_by_key.items():
+            row = self.rows.get(key)
+            if row is None:
+                continue
+            chunks = [
+                chunk
+                for chunk in self.chunks_by_key[key]
+                if position_bound is None or chunk.position < position_bound
+            ]
+            if not chunks:
+                continue
+
+            # Small notes: return full content so the answer is always present.
+            # Large notes: return top-N most relevant chunks for richer context.
+            content_snippet = row.content_snippet or ""
+            if content_snippet and len(content_snippet) <= SMALL_NOTE_CONTENT_LIMIT:
+                matched_chunk_text = content_snippet
+            else:
+                best_chunks = sorted(chunks, key=lambda chunk: chunk.similarity, reverse=True)
+                matched_chunk_text = "\n---\n".join(
+                    chunk.text for chunk in best_chunks[:TOP_CHUNKS_PER_RESULT]
+                )
+            ranked.append(replace(row, score=similarity, matched_chunk_text=matched_chunk_text))
+
+        ranked.sort(key=lambda item: item.score or 0.0, reverse=True)
+        return ranked
+
+
+def row_key(row: SearchIndexRow) -> SearchIndexKey:
+    """The ``(type, id)`` pair that identifies a search row across row types (#982)."""
+    assert row.id is not None
+    return row.type, row.id
+
+
+@dataclass(frozen=True, slots=True)
+class Fusion:
+    """Score-based fusion of one FTS ranking and one vector ranking, keyed on (type, id)."""
+
+    rows_by_key: dict[SearchIndexKey, SearchIndexRow]
+    fts_scores: dict[SearchIndexKey, float]
+    fts_ranks: dict[SearchIndexKey, int]
+    vector_scores: dict[SearchIndexKey, float]
+    vector_ranks: dict[SearchIndexKey, int]
+    fts_max: float
+    # Fused scores, best first; equal scores order by key so the ranking is repeatable.
+    ranked: list[tuple[SearchIndexKey, float]]
+
+    def rows(self, entries: Sequence[tuple[SearchIndexKey, float]]) -> list[SearchIndexRow]:
+        # FTS-only hits keep the bounded content preview and its truncation metadata.
+        # Copying the full note into matched_chunk would bypass that response bound.
+        return [replace(self.rows_by_key[key], score=score) for key, score in entries]
+
+
+def fuse(fts_rows: Sequence[SearchIndexRow], vector_rows: Sequence[SearchIndexRow]) -> Fusion:
+    """Fuse with ``max(vec, fts) + FUSION_BONUS * min(vec, fts)``.
+
+    The formula preserves the dominant signal and rewards dual-source agreement. A bare
+    row id collides across row types (independent id sequences), so fusion keys on
+    (type, id) or distinct rows would merge (#982).
+    """
+    rows_by_key: dict[SearchIndexKey, SearchIndexRow] = {}
+
+    # FTS scores are normalized to [0, 1] (BM25 is unbounded). Absolute values handle
+    # both SQLite (negative bm25) and Postgres (positive ts_rank).
+    fts_abs = [abs(row.score or 0.0) for row in fts_rows]
+    fts_max = max(fts_abs) if fts_abs else 1.0
+    fts_scores: dict[SearchIndexKey, float] = {}
+    fts_ranks: dict[SearchIndexKey, int] = {}
+    for rank, row in enumerate(fts_rows):
+        if row.id is None:
+            continue
+        key = row_key(row)
+        norm = abs(row.score or 0.0) / fts_max if fts_max > 0 else 0.0
+        # Gate: FTS scores below threshold contribute zero
+        if norm < FTS_GATE_THRESHOLD:
+            norm = 0.0
+        fts_scores[key] = norm
+        fts_ranks.setdefault(key, rank)
+        rows_by_key[key] = row
+
+    vector_scores: dict[SearchIndexKey, float] = {}
+    vector_ranks: dict[SearchIndexKey, int] = {}
+    # Vector rows are fetched by the id their chunk key names, so every one has an id.
+    for rank, row in enumerate(vector_rows):
+        key = row_key(row)
+        # Trigger: no re-normalization by vec_max
+        # Why: vector similarity is already calibrated [0, 1]; re-normalizing
+        # inflates weak matches when the entire result set is mediocre
+        vector_scores[key] = row.score or 0.0
+        vector_ranks.setdefault(key, rank)
+        rows_by_key[key] = row
+
+    # Output range: [0, 1.3] for dual-source, [0, 1.0] for single-source.
+    fused_scores: dict[SearchIndexKey, float] = {}
+    for key in fts_scores.keys() | vector_scores.keys():
+        v = vector_scores.get(key, 0.0)
+        f = fts_scores.get(key, 0.0)
+        fused_scores[key] = max(v, f) + FUSION_BONUS * min(v, f)
+
+    ranked = sorted(fused_scores.items(), key=lambda item: (-item[1], item[0]))
+    return Fusion(
+        rows_by_key=rows_by_key,
+        fts_scores=fts_scores,
+        fts_ranks=fts_ranks,
+        vector_scores=vector_scores,
+        vector_ranks=vector_ranks,
+        fts_max=fts_max,
+        ranked=ranked,
+    )
 
 
 # --- Vector and hybrid retrieval ---
@@ -523,43 +661,63 @@ class SemanticSearch:
 
     # --- Reranking ---
 
+    def _prefix_rows(
+        self,
+        window: CandidateWindow,
+        count: int,
+        query: PreparedSearchQuery,
+        rerank: Reranking,
+    ) -> list[SearchIndexRow]:
+        """The first ``count`` vector rows exactly as the fixed rerank window sees them.
+
+        A request whose page reaches past the reranked prefix retrieves a larger
+        window, but its prefix must match the one every shallower page reranked, or
+        pages duplicate and skip rows. The fixed window reads the adapter ranking up
+        to ``_rerank_candidate_limit`` chunks, so the prefix is read from this window
+        through that same position bound instead of from a second retrieval (#1557).
+        """
+        position_bound = self._rerank_candidate_limit(rerank)
+        # Trigger: the query carries structured filters.
+        # Why: the fixed window then keeps widening past the bound until it admits
+        #     enough rows, so its leading admitted rows can enter the ranking beyond
+        #     it. Every window of this request admits at least as many rows, so those
+        #     leading rows are the same in all of them.
+        # Outcome: the bound extends to cover the leading rows; passages past it
+        #     stay out of the prefix, since a smaller window may not have read them.
+        if query.has_filters:
+            leading = window.ranked_rows()[:count]
+            if leading:
+                last_position = max(window.position(row_key(row)) for row in leading)
+                position_bound = max(position_bound, last_position + 1)
+        return window.ranked_rows(position_bound)[:count]
+
     async def _rerank_and_paginate(
         self,
+        rerank: Reranking,
         query_text: str,
-        rows: list[SearchIndexRow],
+        pool: list[SearchIndexRow],
+        tail: list[SearchIndexRow],
         *,
         offset: int,
         limit: int,
-        stable_rows: list[SearchIndexRow] | None = None,
         trace: SearchTraceCollector | None = None,
     ) -> list[SearchIndexRow]:
-        """Rerank the top candidates, then return the requested ``[offset:offset+limit]`` page.
+        """Rerank the fixed prefix, then return the requested ``[offset:offset+limit]`` page.
 
         Trigger: a reranker is configured and there is a real query.
         Why: bi-encoder/FTS ranking lands the gold document in the top-N but often
         just below the top-k cutoff (#950); a cross-encoder that reads query and
         document together recovers those near-misses.
-        Outcome: the first ``reranker_candidates`` rows are reordered by reranker
-        relevance (which replaces ``score``); the requested page is sliced from the
-        reordered list.
+        Outcome: the prefix (at most ``reranker_candidates`` rows) is reordered by
+        reranker relevance (which replaces ``score``); the tail follows it, and the
+        requested page is sliced from the combined list.
 
-        Every non-empty page rescores the same fixed prefix before slicing so the
-        untouched tail can be demoted onto the reranker's public ``[0, 1]`` scale.
+        The caller owns prefix membership: it is the same on every page of a query,
+        and ``tail`` holds only rows outside it. Every non-empty page rescores that
+        prefix before slicing so the untouched tail can be demoted onto the
+        reranker's public ``[0, 1]`` scale.
         """
         page_end = offset + limit
-        rerank = self._active_rerank(query_text)
-        if rerank is None:
-            return rows[offset:page_end]
-
-        # Trigger: pagination needs more rows than the fixed rerank retrieval window.
-        # Why: an expanded retrieval may introduce or strengthen raw candidates, but
-        # letting them replace the original prefix causes duplicates and skips.
-        # Outcome: the fixed window owns prefix membership; the expanded result only
-        # supplies new, de-duplicated tail rows.
-        pool_source = stable_rows if stable_rows is not None else rows
-        pool = pool_source[: rerank.candidates]
-        pool_keys = {(row.type, row.id) for row in pool}
-        tail = [row for row in rows if (row.type, row.id) not in pool_keys]
         ordered_rows = pool + tail
 
         # Skip only when there is no prefix to calibrate or the requested page is
@@ -609,7 +767,6 @@ class SemanticSearch:
                 post_rerank_rows=[((row.type, row.id), row.score or 0.0) for row in reranked_rows],
                 demoted_scores={(row.type, row.id): row.score or 0.0 for row in demoted_tail},
                 tail_floor=tail_floor,
-                stable_pool_refetched=trace.stable_pool_refetched,
                 rerank_ms=(time.perf_counter() - rerank_start) * 1000,
             )
         return reranked_rows[offset:page_end]
@@ -622,9 +779,6 @@ class SemanticSearch:
         *,
         limit: int,
         offset: int,
-        candidate_limit: int | None = None,
-        apply_rerank: bool = True,
-        emit_observability_log: bool = True,
         trace: SearchTraceCollector | None = None,
     ) -> list[SearchIndexRow]:
         """Run vector-only search returning chunk-level results.
@@ -632,17 +786,61 @@ class SemanticSearch:
         Returns individual search_index rows (entities, observations, relations)
         ranked by vector similarity. Each observation or relation is a first-class
         result, not collapsed into its parent entity.
-
-        ``candidate_limit`` is supplied only by a composed retrieval stage that
-        already sized the shared candidate pool.
         """
         # An empty scope admits no rows; embedding the query would buy nothing.
         if self.scope.is_empty:
             return []
         query_text = (query.search_text or "").strip()
-        if candidate_limit is None:
-            candidate_limit = self._candidate_limit(limit, offset, query_text)
+        rerank = self._active_rerank(query_text)
+        candidate_limit = self._candidate_limit(limit, offset, query_text)
         query_start = time.perf_counter()
+        window = await self._vector_window(query, candidate_limit, trace=trace)
+        ranked_rows = window.ranked_rows()
+
+        if rerank is None:
+            output = ranked_rows[offset : offset + limit]
+        else:
+            # One window feeds both halves: the fixed prefix is read from it at the
+            # fixed window's bound, and the tail is every other row in similarity order.
+            prefix = self._prefix_rows(window, rerank.candidates, query, rerank)
+            prefix_keys = {row_key(row) for row in prefix}
+            tail = [row for row in ranked_rows if row_key(row) not in prefix_keys]
+            output = await self._rerank_and_paginate(
+                rerank, query_text, prefix, tail, offset=offset, limit=limit, trace=trace
+            )
+
+        # Vector latency owns the optional rerank stage too. Logging before the
+        # awaited provider call hides the feature's dominant cost and can suppress
+        # the slow-query warning entirely.
+        total_ms = (time.perf_counter() - query_start) * 1000
+        if total_ms > 2000:
+            logger.warning(
+                "[SEMANTIC_SLOW_QUERY] Semantic query timing: scope={scope} "
+                "retrieval_mode={retrieval_mode} query_length={query_length} "
+                "candidate_limit={candidate_limit} vector_row_count={vector_row_count} "
+                "embed_ms={embed_ms:.2f} vector_query_ms={vector_query_ms:.2f} "
+                "hydrate_ms={hydrate_ms:.2f} total_ms={total_ms:.2f}",
+                scope=self.scope.project_ids,
+                retrieval_mode="vector",
+                query_length=len(query_text),
+                candidate_limit=candidate_limit,
+                vector_row_count=window.chunk_count,
+                embed_ms=window.embed_ms,
+                vector_query_ms=window.vector_query_ms,
+                hydrate_ms=window.hydrate_ms,
+                total_ms=total_ms,
+            )
+        return output
+
+    async def _vector_window(
+        self,
+        query: PreparedSearchQuery,
+        candidate_limit: int,
+        *,
+        trace: SearchTraceCollector | None = None,
+    ) -> CandidateWindow:
+        """Embed the query once and resolve its candidate window of ``candidate_limit`` chunks."""
+        query_text = (query.search_text or "").strip()
         embed_start = time.perf_counter()
         with logfire.span("search.embed_query", query_chars=len(query_text)):
             query_embedding = await self.vector.embedding_provider.embed_query(query_text)
@@ -668,95 +866,7 @@ class SemanticSearch:
                 embed_ms=embed_ms,
                 vector_query_ms=window.vector_query_ms,
             )
-
-        def _log_vector_summary() -> None:
-            if not emit_observability_log:
-                return
-
-            total_ms = (time.perf_counter() - query_start) * 1000
-            if total_ms > 2000:
-                logger.warning(
-                    "[SEMANTIC_SLOW_QUERY] Semantic query timing: scope={scope} "
-                    "retrieval_mode={retrieval_mode} query_length={query_length} "
-                    "candidate_limit={candidate_limit} vector_row_count={vector_row_count} "
-                    "embed_ms={embed_ms:.2f} vector_query_ms={vector_query_ms:.2f} "
-                    "hydrate_ms={hydrate_ms:.2f} total_ms={total_ms:.2f}",
-                    scope=self.scope.project_ids,
-                    retrieval_mode="vector",
-                    query_length=len(query_text),
-                    candidate_limit=candidate_limit,
-                    vector_row_count=window.chunk_count,
-                    embed_ms=embed_ms,
-                    vector_query_ms=window.vector_query_ms,
-                    hydrate_ms=window.hydrate_ms,
-                    total_ms=total_ms,
-                )
-
-        if not window.similarity_by_key:
-            _log_vector_summary()
-            return []
-
-        ranked_rows: list[SearchIndexRow] = []
-        for si_key, similarity in window.similarity_by_key.items():
-            row = window.rows.get(si_key)
-            if row is None:
-                continue
-
-            # Small notes: return full content so the answer is always present.
-            # Large notes: return top-N most relevant chunks for richer context.
-            content_snippet = row.content_snippet or ""
-            if content_snippet and len(content_snippet) <= SMALL_NOTE_CONTENT_LIMIT:
-                matched_chunk_text = content_snippet
-            else:
-                si_chunks = window.chunks_by_key.get(si_key, [])
-                si_chunks.sort(key=lambda c: c[0], reverse=True)
-                top_texts = [chunk_text for _, chunk_text in si_chunks[:TOP_CHUNKS_PER_RESULT]]
-                matched_chunk_text = "\n---\n".join(top_texts) if top_texts else None
-
-            ranked_rows.append(
-                replace(
-                    row,
-                    score=similarity,
-                    matched_chunk_text=matched_chunk_text,
-                )
-            )
-
-        ranked_rows.sort(key=lambda item: item.score or 0.0, reverse=True)
-        # Rerank over the wide candidate pool, then slice to the page. Suppressed when
-        # hybrid calls this internally (apply_rerank=False): hybrid reranks its own
-        # fused result, and _rerank_and_paginate is a plain slice without a reranker.
-        if apply_rerank:
-            stable_rows = ranked_rows
-            rerank = self._active_rerank(query_text)
-            if rerank is not None:
-                stable_candidate_limit = self._rerank_candidate_limit(rerank)
-                if candidate_limit > stable_candidate_limit:
-                    if trace is not None:
-                        trace.stable_pool_refetched = True
-                    stable_rows = await self.vector_only(
-                        query,
-                        limit=stable_candidate_limit,
-                        offset=0,
-                        candidate_limit=stable_candidate_limit,
-                        apply_rerank=False,
-                        emit_observability_log=False,
-                        trace=None,
-                    )
-            output = await self._rerank_and_paginate(
-                query_text,
-                ranked_rows,
-                offset=offset,
-                limit=limit,
-                stable_rows=stable_rows,
-                trace=trace,
-            )
-        else:
-            output = ranked_rows[offset : offset + limit]
-        # Vector latency owns the optional rerank stage too. Logging before the
-        # awaited provider call hides the feature's dominant cost and can suppress
-        # the slow-query warning entirely.
-        _log_vector_summary()
-        return output
+        return replace(window, embed_ms=embed_ms)
 
     async def _candidate_window(
         self,
@@ -826,17 +936,20 @@ class SemanticSearch:
         # key because different row types can share the same numeric id (#982).
         # Track the best similarity per row (for ranking) and all chunks (for context).
         similarity_by_key: dict[SearchIndexKey, float] = {}
-        chunks_by_key: dict[SearchIndexKey, list[tuple[float, str]]] = {}
-        for chunk in chunks:
+        chunks_by_key: dict[SearchIndexKey, list[WindowChunk]] = {}
+        for position, chunk in enumerate(chunks):
             try:
                 si_key = parse_chunk_key(chunk.chunk_key)
             except (ValueError, IndexError):
-                # A chunk without a parseable key names no search row to rank.
+                # A chunk without a parseable key names no search row to rank. It
+                # still holds its position, as it does in every larger window.
                 continue
             current = similarity_by_key.get(si_key)
             if current is None or chunk.similarity > current:
                 similarity_by_key[si_key] = chunk.similarity
-            chunks_by_key.setdefault(si_key, []).append((chunk.similarity, chunk.chunk_text))
+            chunks_by_key.setdefault(si_key, []).append(
+                WindowChunk(position=position, similarity=chunk.similarity, text=chunk.chunk_text)
+            )
 
         # Filter out results below the minimum similarity threshold.
         if min_similarity > 0.0:
@@ -888,24 +1001,15 @@ class SemanticSearch:
         *,
         limit: int,
         offset: int,
-        candidate_limit: int | None = None,
-        apply_rerank: bool = True,
-        emit_observability_log: bool = True,
         trace: SearchTraceCollector | None = None,
     ) -> list[SearchIndexRow]:
-        """Fuse FTS and vector results using score-based fusion.
-
-        Uses the search_index (type, id) pair as the fusion key. The formula
-        ``max(vec, fts) + FUSION_BONUS * min(vec, fts)`` preserves
-        the dominant signal and rewards dual-source agreement.
-        """
+        """Fuse FTS and vector results using score-based fusion (see ``fuse``)."""
         if self.scope.is_empty:
             return []
         query_text = (query.search_text or "").strip()
         rerank = self._active_rerank(query_text)
         query_start = time.perf_counter()
-        if candidate_limit is None:
-            candidate_limit = self._candidate_limit(limit, offset, query_text)
+        candidate_limit = self._candidate_limit(limit, offset, query_text)
         fts_start = time.perf_counter()
         # allow_relaxed: question-form queries rarely AND-match, and a dead FTS
         # branch silently degrades hybrid to vector-only ranking. Fusion plus
@@ -922,19 +1026,17 @@ class SemanticSearch:
             fts_span.set_attribute("result_count", len(fts_results))
         fts_ms = (time.perf_counter() - fts_start) * 1000
         vector_start = time.perf_counter()
-        vector_results = await self.vector_only(
-            query,
-            limit=candidate_limit,
-            offset=0,
-            # Trigger: reranking owns a bounded candidate window shared by both legs.
-            # Why: the disabled path historically expands the vector leg again to
-            # preserve recall when many vector chunks collapse into a few search rows.
-            # Outcome: avoid double expansion only when reranking is actually active.
-            candidate_limit=candidate_limit if rerank is not None else None,
-            apply_rerank=False,
-            emit_observability_log=False,
-            trace=trace,
+        # Trigger: reranking owns a bounded candidate window shared by both legs.
+        # Why: the disabled path historically expands the vector leg again to
+        # preserve recall when many vector chunks collapse into a few search rows.
+        # Outcome: avoid double expansion only when reranking is actually active.
+        vector_candidate_limit = (
+            candidate_limit
+            if rerank is not None
+            else self._candidate_limit(candidate_limit, 0, query_text)
         )
+        window = await self._vector_window(query, vector_candidate_limit, trace=trace)
+        vector_results = window.ranked_rows()[:candidate_limit]
         vector_ms = (time.perf_counter() - vector_start) * 1000
         # Trigger: with reranking disabled the vector leg expands internally and can
         # hydrate more rows than the fusion window it returns.
@@ -970,140 +1072,73 @@ class SemanticSearch:
         with logfire.span(
             "search.fusion", fts_count=len(fts_results), vector_count=len(vector_results)
         ) as fusion_span:
-            # --- Score-based fusion keyed on (type, id) ---
-            # A bare row id collides across row types (independent id sequences), so
-            # fusion must key on (type, id) or distinct rows would merge (#982).
-            # FTS scores are normalized to [0, 1] (BM25 is unbounded).
-            # Vector scores are used raw: the adapters already calibrate them to [0, 1].
-            rows_by_key: dict[SearchIndexKey, SearchIndexRow] = {}
-
-            # Normalize FTS scores to [0, 1] — handles both SQLite (negative bm25)
-            # and Postgres (positive ts_rank) by using absolute values
-            fts_abs = [abs(row.score or 0.0) for row in fts_results]
-            fts_max = max(fts_abs) if fts_abs else 1.0
-
-            fts_scores: dict[SearchIndexKey, float] = {}
-            fts_ranks: dict[SearchIndexKey, int] = {}
-            for rank, row in enumerate(fts_results):
-                if row.id is None:
-                    continue
-                row_key = (row.type, row.id)
-                norm = abs(row.score or 0.0) / fts_max if fts_max > 0 else 0.0
-                # Gate: FTS scores below threshold contribute zero
-                if norm < FTS_GATE_THRESHOLD:
-                    norm = 0.0
-                fts_scores[row_key] = norm
-                fts_ranks.setdefault(row_key, rank)
-                rows_by_key[row_key] = row
-
-            if trace is not None:
-                relaxed_fallback_used = (
-                    trace.fts.relaxed_fallback_used if trace.fts is not None else False
-                )
-                trace.fts = build_fts_page_stage(
-                    [((row.type, row.id), row.score or 0.0) for row in fts_results],
-                    normalized_scores=fts_scores,
-                    entity_ids={(row.type, row.id): row.entity_id for row in fts_results},
-                    fts_max_abs=fts_max,
-                    relaxed_fallback_used=relaxed_fallback_used,
-                    fts_ms=fts_ms,
-                )
-
-            vec_scores: dict[SearchIndexKey, float] = {}
-            vec_ranks: dict[SearchIndexKey, int] = {}
-            for rank, row in enumerate(vector_results):
-                if row.id is None:
-                    continue
-                row_key = (row.type, row.id)
-                # Trigger: no re-normalization by vec_max
-                # Why: vector similarity is already calibrated [0, 1]; re-normalizing
-                # inflates weak matches when the entire result set is mediocre
-                vec_scores[row_key] = row.score or 0.0
-                vec_ranks.setdefault(row_key, rank)
-                rows_by_key[row_key] = row
-
-            # Fuse: max(v, f) + FUSION_BONUS * min(v, f)
-            # Preserves the dominant signal; bonus rewards dual-source agreement.
-            # Output range: [0, 1.3] for dual-source, [0, 1.0] for single-source.
-            fused_scores: dict[SearchIndexKey, float] = {}
-            for row_key in fts_scores.keys() | vec_scores.keys():
-                v = vec_scores.get(row_key, 0.0)
-                f = fts_scores.get(row_key, 0.0)
-                fused_scores[row_key] = max(v, f) + FUSION_BONUS * min(v, f)
-
-            ranked = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)
-            fusion_span.set_attribute("result_count", len(ranked))
+            fusion = fuse(fts_results, vector_results)
+            fusion_span.set_attribute("result_count", len(fusion.ranked))
         fusion_ms = (time.perf_counter() - fusion_start) * 1000
         if trace is not None:
+            relaxed_fallback_used = (
+                trace.fts.relaxed_fallback_used if trace.fts is not None else False
+            )
+            trace.fts = build_fts_page_stage(
+                [((row.type, row.id), row.score or 0.0) for row in fts_results],
+                normalized_scores=fusion.fts_scores,
+                entity_ids={(row.type, row.id): row.entity_id for row in fts_results},
+                fts_max_abs=fusion.fts_max,
+                relaxed_fallback_used=relaxed_fallback_used,
+                fts_ms=fts_ms,
+            )
             trace.fusion = build_fusion_stage(
                 formula_version=FUSION_FORMULA_VERSION,
                 bonus=FUSION_BONUS,
-                fts_scores=fts_scores,
-                fts_ranks=fts_ranks,
-                vector_scores=vec_scores,
-                vector_ranks=vec_ranks,
-                ranked_scores=ranked,
+                fts_scores=fusion.fts_scores,
+                fts_ranks=fusion.fts_ranks,
+                vector_scores=fusion.vector_scores,
+                vector_ranks=fusion.vector_ranks,
+                ranked_scores=fusion.ranked,
                 fusion_ms=fusion_ms,
             )
 
-        def _materialize(entry: tuple[SearchIndexKey, float]) -> SearchIndexRow:
-            row_key, fused_score = entry
-            row = rows_by_key[row_key]
-            # FTS-only hits use the bounded content preview and its truncation metadata.
-            # Copying the full note into matched_chunk bypasses that response bound.
-            return replace(row, score=fused_score)
+        if rerank is None:
+            # The disabled path stays cheap by materializing only the requested page.
+            output = fusion.rows(fusion.ranked[offset : offset + limit])
+        else:
+            # --- Fixed reranked prefix, read from this one retrieval (#1557) ---
+            # The prefix is the fusion the fixed window would compute: its leading
+            # FTS rows and its leading vector rows. Both legs of a larger window only
+            # extend those rankings, so every page of a query reranks the same rows
+            # with the same documents, whatever window its depth asked for.
+            fixed_limit = self._rerank_candidate_limit(rerank)
+            prefix_fusion = fuse(
+                fts_results[:fixed_limit],
+                self._prefix_rows(window, fixed_limit, query, rerank),
+            )
+            prefix = prefix_fusion.rows(prefix_fusion.ranked[: rerank.candidates])
+            prefix_keys = {row_key(row) for row in prefix}
 
-        # Rerank the top fused candidates before paginating. When reranking is active
-        # we materialize the whole candidate list (cheap next to a cross-encoder call)
-        # and hand it to the shared paginate helper; the disabled path stays cheap by
-        # materializing only the requested page.
-        if apply_rerank and rerank is not None:
-            candidates = [_materialize(entry) for entry in ranked]
-            stable_candidates = candidates
-            stable_candidate_limit = self._rerank_candidate_limit(rerank)
-            if candidate_limit > stable_candidate_limit:
-                if trace is not None:
-                    trace.stable_pool_refetched = True
-                stable_candidates = await self.hybrid(
-                    query,
-                    limit=stable_candidate_limit,
-                    offset=0,
-                    candidate_limit=stable_candidate_limit,
-                    apply_rerank=False,
-                    emit_observability_log=False,
-                    trace=None,
-                )
-                stable_keys = {(row.type, row.id) for row in stable_candidates}
-                expanded_tail = [entry for entry in ranked if entry[0] not in stable_keys]
-
-                # Trigger: deeper pages expand the FTS/vector retrieval windows.
-                # Why: score fusion can strengthen an existing row when its second
-                # signal appears later, moving it across a page already returned.
-                # Outcome: freeze the fixed fused universe, then order newly admitted
-                # rows by their earliest source rank. That rank cannot improve after a
-                # row first appears, so each larger window only appends to the tail.
-                expanded_tail.sort(
-                    key=lambda entry: (
-                        min(
-                            fts_ranks.get(entry[0], candidate_limit),
-                            vec_ranks.get(entry[0], candidate_limit),
-                        ),
-                        entry[0],
-                    )
-                )
-                candidates = stable_candidates + [_materialize(entry) for entry in expanded_tail]
+            # Trigger: rows outside the prefix, including rows only a deeper window found.
+            # Why: score fusion can strengthen a row when its second signal appears in a
+            #     larger window, moving it across a page already returned.
+            # Outcome: order the tail by where each row first entered either ranking —
+            #     its FTS rank or its best chunk's vector position. That cannot improve
+            #     as the window grows, so each larger window only appends to the tail.
+            admission = dict(fusion.fts_ranks)
+            for key in fusion.vector_scores:
+                admission[key] = min(admission.get(key, window.position(key)), window.position(key))
+            tail_entries = sorted(
+                (entry for entry in fusion.ranked if entry[0] not in prefix_keys),
+                key=lambda entry: (admission[entry[0]], entry[0]),
+            )
             output = await self._rerank_and_paginate(
+                rerank,
                 query_text,
-                candidates,
+                prefix,
+                fusion.rows(tail_entries),
                 offset=offset,
                 limit=limit,
-                stable_rows=stable_candidates,
                 trace=trace,
             )
-        else:
-            output = [_materialize(entry) for entry in ranked[offset : offset + limit]]
         total_ms = (time.perf_counter() - query_start) * 1000
-        if emit_observability_log and total_ms > 2500:
+        if total_ms > 2500:
             logger.warning(
                 "[SEMANTIC_SLOW_QUERY] Semantic query timing: scope={scope} "
                 "retrieval_mode={retrieval_mode} query_length={query_length} "

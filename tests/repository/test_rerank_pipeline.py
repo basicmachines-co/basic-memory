@@ -23,11 +23,13 @@ from basic_memory.repository.search_filters import FtsBackend
 from basic_memory.repository.search_query import PreparedSearchQuery
 from basic_memory.repository.search_reader import (
     RERANK_POOL_CHUNK_FANOUT,
+    CandidateWindow,
     HydratedChunk,
     Reranking,
     SemanticSearch,
     VectorRetrieval,
     rerank_document_text,
+    row_key,
 )
 from basic_memory.repository.search_repository import create_search_repository
 from basic_memory.repository.search_scope import ProjectScope
@@ -40,7 +42,7 @@ from basic_memory.repository.semantic_vector_index import SemanticVectorIndex
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 from basic_memory.services.entity_service import EntityService
-from tests.repository.test_hybrid_fusion import FakeFts
+from tests.repository.test_hybrid_fusion import FakeFts, window_of
 
 type BackendSearchRepository = SQLiteSearchRepository | PostgresSearchRepository
 
@@ -301,16 +303,35 @@ def test_candidate_limit_expands_only_for_results_beyond_rerank_pool():
     assert semantic._candidate_limit(limit=101, offset=0, query_text="auth") == 890
 
 
+async def _paginate(
+    semantic: SemanticSearch,
+    rows: list[SearchIndexRow],
+    *,
+    offset: int,
+    limit: int,
+    pool: list[SearchIndexRow] | None = None,
+) -> list[SearchIndexRow]:
+    """Split ``rows`` into the fixed prefix and its tail the way the retrieval stages do.
+
+    ``pool`` stands in for a prefix read at the fixed window's bound; without it the
+    prefix is the leading ``reranker_candidates`` rows.
+    """
+    assert semantic.rerank is not None
+    prefix = (rows if pool is None else pool)[: semantic.rerank.candidates]
+    prefix_keys = {(row.type, row.id) for row in prefix}
+    tail = [row for row in rows if (row.type, row.id) not in prefix_keys]
+    return await semantic._rerank_and_paginate(
+        semantic.rerank, "auth", prefix, tail, offset=offset, limit=limit
+    )
+
+
 @pytest.mark.asyncio
 async def test_rerank_paginate_noop_paths():
     rows = [_row(id=1), _row(id=2)]
-    assert await _semantic()._rerank_and_paginate("auth", rows, offset=0, limit=10) == rows
-
     reranker = _FakeReranker({})
     semantic = _semantic(rerank=_reranking(reranker))
-    assert await semantic._rerank_and_paginate("", rows, offset=0, limit=10) == rows
-    assert await semantic._rerank_and_paginate("auth", [], offset=0, limit=10) == []
-    assert await semantic._rerank_and_paginate("auth", rows, offset=2, limit=10) == []
+    assert await _paginate(semantic, [], offset=0, limit=10) == []
+    assert await _paginate(semantic, rows, offset=2, limit=10) == []
     assert reranker.calls == 0
 
 
@@ -325,7 +346,7 @@ async def test_rerank_paginate_reorders_rescore_and_demotes_tail():
         _row(id=3, title="Charlie"),  # past the pool
     ]
 
-    result = await semantic._rerank_and_paginate("auth", rows, offset=0, limit=3)
+    result = await _paginate(semantic, rows, offset=0, limit=3)
 
     assert [r.title for r in result] == ["Bravo", "Alpha", "Charlie"]
     assert result[0].score == 0.9  # reranker relevance replaces the prior score
@@ -350,7 +371,7 @@ async def test_rerank_paginate_preserves_pool_before_tail_at_zero_floor():
         _row(id=3, title="Charlie"),
     ]
 
-    result = await semantic._rerank_and_paginate("auth", rows, offset=0, limit=3)
+    result = await _paginate(semantic, rows, offset=0, limit=3)
 
     assert [row.title for row in result] == ["Bravo", "Alpha", "Charlie"]
     assert [row.score for row in result] == [0.9, 0.0, 0.0]
@@ -367,12 +388,12 @@ async def test_rerank_paginate_scores_singleton_prefix_and_demotes_tail():
         _row(id=2, title="Tail", score=1.3),
     ]
 
-    result = await semantic._rerank_and_paginate(
-        "auth",
+    result = await _paginate(
+        semantic,
         expanded_rows,
         offset=0,
         limit=2,
-        stable_rows=stable_rows,
+        pool=stable_rows,
     )
 
     assert reranker.calls == 1
@@ -395,12 +416,12 @@ async def test_rerank_paginate_calibrates_tail_scores_on_deep_page():
         _row(id=5, title="n5"),
     ]
 
-    result = await semantic._rerank_and_paginate(
-        "auth",
+    result = await _paginate(
+        semantic,
         expanded_rows,
         offset=2,
         limit=2,
-        stable_rows=stable_rows,
+        pool=stable_rows,
     )
 
     assert reranker.calls == 1
@@ -421,19 +442,19 @@ async def test_rerank_paginate_keeps_expanded_candidates_out_of_stable_prefix():
         _row(id=4, title="Delta"),
     ]
 
-    result = await semantic._rerank_and_paginate(
-        "auth",
+    result = await _paginate(
+        semantic,
         expanded_rows,
         offset=0,
         limit=3,
-        stable_rows=stable_rows,
+        pool=stable_rows,
     )
-    expanded_result = await semantic._rerank_and_paginate(
-        "auth",
+    expanded_result = await _paginate(
+        semantic,
         expanded_rows + [_row(id=5, title="Echo"), _row(id=6, title="Foxtrot")],
         offset=0,
         limit=3,
-        stable_rows=stable_rows,
+        pool=stable_rows,
     )
 
     assert [row.title for row in result] == ["Bravo", "Alpha", "Charlie"]
@@ -449,7 +470,7 @@ async def test_rerank_paginate_surfaces_transient_provider_error():
     rows = [_row(id=1, title="A"), _row(id=2, title="B")]
 
     with pytest.raises(RerankTransientError, match="backend unreachable"):
-        await semantic._rerank_and_paginate("auth", rows, offset=0, limit=10)
+        await _paginate(semantic, rows, offset=0, limit=10)
 
 
 @pytest.mark.asyncio
@@ -458,11 +479,11 @@ async def test_rerank_paginate_does_not_duplicate_results_when_later_page_is_tra
     semantic = _semantic(rerank=_reranking(_SucceedsThenTransientReranker(), candidates=2))
     rows = [_row(id=1, title="A"), _row(id=2, title="B")]
 
-    first_page = await semantic._rerank_and_paginate("auth", rows, offset=0, limit=1)
+    first_page = await _paginate(semantic, rows, offset=0, limit=1)
 
     assert [row.id for row in first_page] == [2]
     with pytest.raises(RerankTransientError, match="backend unreachable"):
-        await semantic._rerank_and_paginate("auth", rows, offset=1, limit=1)
+        await _paginate(semantic, rows, offset=1, limit=1)
 
 
 @pytest.mark.asyncio
@@ -470,7 +491,7 @@ async def test_rerank_paginate_misaligned_scores_raise():
     """A length mismatch is a provider bug — fail fast, don't degrade."""
     semantic = _semantic(rerank=_reranking(_BadReranker(), candidates=20))
     with pytest.raises(RerankProviderContractError, match="Reranker returned 0 scores"):
-        await semantic._rerank_and_paginate("auth", [_row(id=1), _row(id=2)], offset=0, limit=10)
+        await _paginate(semantic, [_row(id=1), _row(id=2)], offset=0, limit=10)
 
 
 @pytest.mark.asyncio
@@ -486,7 +507,7 @@ async def test_rerank_paginate_surfaces_permanent_faults(exc):
     """Permanent faults (contract break, missing deps) propagate — not silently degraded."""
     semantic = _semantic(rerank=_reranking(_PermanentFaultReranker(exc), candidates=20))
     with pytest.raises(type(exc)):
-        await semantic._rerank_and_paginate("auth", [_row(id=1), _row(id=2)], offset=0, limit=10)
+        await _paginate(semantic, [_row(id=1), _row(id=2)], offset=0, limit=10)
 
 
 # --- End-to-end through both repository backends ---
@@ -496,6 +517,7 @@ def _semantic_search_repository(
     session_maker: Any,
     project_id: int,
     app_config: BasicMemoryConfig,
+    embedding_provider: Any | None = None,
     **config_updates: object,
 ) -> BackendSearchRepository:
     config = app_config.model_copy(
@@ -514,7 +536,7 @@ def _semantic_search_repository(
         session_maker,
         project_id=project_id,
         app_config=config,
-        embedding_provider=_StubEmbeddingProvider(),
+        embedding_provider=embedding_provider or _StubEmbeddingProvider(),
     )
 
 
@@ -574,11 +596,11 @@ async def test_vector_search_applies_reranker(rerank_search_repository):
 
 
 @pytest.mark.asyncio
-async def test_vector_search_expands_tail_from_stable_rerank_pool(
+async def test_vector_search_reads_prefix_and_tail_from_one_retrieval(
     rerank_search_repository,
     monkeypatch,
 ):
-    """Vector retrieval keeps its fixed prefix when a request also needs tail rows."""
+    """A request past the fixed prefix reads it from its own, single retrieval (#1557)."""
     await _index_two_auth_notes(rerank_search_repository)
     rerank_search_repository._semantic_vector_k = 5
     rerank_search_repository._reranker_candidates = 2
@@ -607,7 +629,7 @@ async def test_vector_search_expands_tail_from_stable_rerank_pool(
     )
 
     assert [row.permalink for row in results] == ["specs/bravo", "specs/alpha"]
-    assert candidate_limits == [18, 8]
+    assert candidate_limits == [18]  # one retrieval feeds the prefix and the tail (#1557)
 
 
 @pytest.mark.asyncio
@@ -785,69 +807,51 @@ async def test_hybrid_search_preserves_candidate_windows(
 
     assert growing_prefix_results
     assert reranker.calls == 2
-    assert candidate_limits == [90, 80]
+    assert candidate_limits == [90]
 
 
 @pytest.mark.asyncio
 async def test_hybrid_search_keeps_deep_tail_stable_as_candidate_window_grows(monkeypatch):
-    """Late dual-source evidence cannot move a row across an earlier tail page."""
-    reranker = _FakeReranker({"Alpha": 0.9, "Bravo": 0.8})
+    """Late dual-source evidence cannot move a row across an earlier tail page.
 
-    charlie = _row(id=3, title="Charlie")
-    delta = _row(id=4, title="Delta")
-
-    def fts_window(limit: int) -> list[SearchIndexRow]:
-        if limit <= 8:
-            return [
-                _row(id=1, title="Alpha", score=10.0),
-                _row(id=2, title="Bravo", score=9.0),
-            ]
-        return [
-            _row(id=1, title="Alpha", score=10.0),
-            _row(id=2, title="Bravo", score=9.0),
-            _row(id=3, title="Charlie", score=8.0),
-            _row(id=4, title="Delta", score=7.0),
-        ]
-
-    fts = FakeFts(fts_window)
+    Row 9 ranks ninth lexically, and its vector chunk appears only once a deeper page
+    widens the vector window past ten chunks. Fused on raw score it would then jump
+    ahead of rows an earlier, shallower page already returned.
+    """
+    reranker = _FakeReranker({"lexical 0": 0.9, "lexical 1": 0.8})
+    lexical = [_row(id=index, title=f"lexical {index}", score=12.0 - index) for index in range(12)]
+    vector_stream = [
+        _row(id=0, title="lexical 0", score=0.9),
+        _row(id=1, title="lexical 1", score=0.85),
+        *[
+            _row(id=100 + index, title=f"vector {index}", score=0.8 - index / 100)
+            for index in range(8)
+        ],
+        _row(id=9, title="lexical 9", score=0.7),
+    ]
+    fts = FakeFts(lambda limit: lexical[:limit])
     semantic = _semantic(vector_k=2, rerank=_reranking(reranker, candidates=2), fts=fts)
 
-    async def fake_vector_search(query: PreparedSearchQuery, **kwargs: Any) -> list[SearchIndexRow]:
-        candidate_limit = kwargs["candidate_limit"]
-        assert candidate_limit is not None
-        if candidate_limit <= 8:
-            return [
-                _row(id=1, title="Alpha", score=1.0),
-                _row(id=2, title="Bravo", score=0.9),
-            ]
-        if candidate_limit <= 18:
-            return [
-                _row(id=1, title="Alpha", score=1.0),
-                _row(id=2, title="Bravo", score=0.9),
-                _row(id=4, title="Delta", score=0.95),
-            ]
-        return [
-            _row(id=1, title="Alpha", score=1.0),
-            _row(id=2, title="Bravo", score=0.9),
-            _row(id=3, title="Charlie", score=1.0),
-            _row(id=4, title="Delta", score=0.7),
-        ]
+    async def vector_window(
+        query: PreparedSearchQuery, candidate_limit: int, *, trace: Any = None
+    ) -> CandidateWindow:
+        return window_of(vector_stream[:candidate_limit])
 
-    monkeypatch.setattr(semantic, "vector_only", fake_vector_search)
+    monkeypatch.setattr(semantic, "_vector_window", vector_window)
+    query = PreparedSearchQuery(search_text="auth", retrieval_mode=SearchRetrievalMode.HYBRID)
 
-    async def deep_page(offset: int) -> list[SearchIndexRow]:
-        return await semantic.hybrid(
-            PreparedSearchQuery(search_text="auth", retrieval_mode=SearchRetrievalMode.HYBRID),
-            limit=1,
-            offset=offset,
-        )
+    complete = await semantic.hybrid(query, limit=30, offset=0)
+    paged = [
+        row
+        for offset in range(len(complete))
+        for row in await semantic.hybrid(query, limit=1, offset=offset)
+    ]
 
-    first_tail_page = await deep_page(offset=2)
-    second_tail_page = await deep_page(offset=3)
-
-    assert [row.id for row in first_tail_page] == [charlie.id]
-    assert [row.id for row in second_tail_page] == [delta.id]
-    assert reranker.calls == 2
+    assert len(complete) == 20
+    assert [row_key(row) for row in paged] == [row_key(row) for row in complete]
+    assert [row.score for row in paged] == [row.score for row in complete]
+    # Every page reranked the same fixed prefix with the same documents.
+    assert all(batch == reranker.document_batches[0] for batch in reranker.document_batches)
     assert all(query.retrieval_mode == SearchRetrievalMode.FTS for query in fts.queries)
 
 

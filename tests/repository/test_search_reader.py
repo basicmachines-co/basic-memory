@@ -25,6 +25,7 @@ from tests.repository.test_hybrid_fusion import (
     FakeFts,
     FakeRow,
     fake_vector_retrieval,
+    vector_leg,
 )
 from tests.repository.test_vector_threshold import run_vector_only, vector_semantic
 
@@ -177,12 +178,12 @@ async def test_vector_only_with_no_parseable_chunk_keys_returns_nothing():
 
 
 @pytest.mark.asyncio
-async def test_hybrid_skips_rows_without_an_id_on_both_legs():
+async def test_hybrid_skips_rows_without_an_id_on_the_lexical_leg():
     fts = FakeFts([FakeRow(id=None, score=2.0), FakeRow(id=1, score=5.0)])
     semantic = _semantic(fts)
-    vector_results = [FakeRow(id=None, score=0.9), FakeRow(id=2, score=0.8)]
+    vector_results = [FakeRow(id=2, score=0.8)]
 
-    with patch.object(semantic, "vector_only", new_callable=AsyncMock, return_value=vector_results):
+    with patch.object(semantic, "_vector_window", vector_leg(vector_results)):
         rows = await semantic.hybrid(HYBRID_QUERY, limit=10, offset=0)
 
     assert [(row.type, row.id) for row in rows] == [("entity", 1), ("entity", 2)]
@@ -198,7 +199,7 @@ async def test_hybrid_slow_query_warning_names_the_scope(monkeypatch):
     warning = MagicMock()
     monkeypatch.setattr("basic_memory.repository.search_reader.logger.warning", warning)
 
-    with patch.object(semantic, "vector_only", new_callable=AsyncMock, return_value=[]):
+    with patch.object(semantic, "_vector_window", vector_leg([])):
         await semantic.hybrid(HYBRID_QUERY, limit=10, offset=0)
 
     warning.assert_called_once()
@@ -242,7 +243,7 @@ async def test_fts_gate_zeroes_weak_lexical_scores(monkeypatch):
     monkeypatch.setattr("basic_memory.repository.search_reader.FTS_GATE_THRESHOLD", 0.5)
     semantic = _semantic(FakeFts([FakeRow(id=1, score=10.0), FakeRow(id=2, score=1.0)]))
 
-    with patch.object(semantic, "vector_only", new_callable=AsyncMock, return_value=[]):
+    with patch.object(semantic, "_vector_window", vector_leg([])):
         rows = await semantic.hybrid(HYBRID_QUERY, limit=10, offset=0)
 
     assert [(row.id, row.score) for row in rows] == [(1, 1.0), (2, 0.0)]
@@ -261,26 +262,28 @@ class _PrefixReranker:
 
 
 @pytest.mark.asyncio
-async def test_hybrid_trace_records_the_stable_pool_refetch():
-    """A page past the fixed rerank prefix refetches the stable pool, and the trace says so."""
+async def test_hybrid_page_past_the_prefix_retrieves_once():
+    """A page past the fixed rerank prefix reads that prefix from its own retrieval (#1557)."""
     rows = [
         FakeRow(id=index, score=10.0 - index, title=f"n{index}", entity_id=index)
         for index in range(1, 6)
     ]
+    fts = FakeFts(rows)
     semantic = SemanticSearch(
         cast(Any, None),
         SCOPE,
-        FakeFts(rows),
+        fts,
         replace(fake_vector_retrieval(), vector_k=2),
         Reranking(provider=_PrefixReranker(), candidates=2, max_document_chars=0),
     )
-    trace = SearchTraceCollector()
+    vector_window = vector_leg([])
 
-    with patch.object(semantic, "vector_only", new_callable=AsyncMock, return_value=[]):
-        page = await semantic.hybrid(HYBRID_QUERY, limit=1, offset=3, trace=trace)
+    with patch.object(semantic, "_vector_window", vector_window):
+        page = await semantic.hybrid(HYBRID_QUERY, limit=1, offset=3)
 
-    assert trace.stable_pool_refetched is True
     assert [row.id for row in page] == [4]
+    assert len(fts.calls) == 1
+    vector_window.assert_awaited_once()
 
 
 @pytest.mark.asyncio

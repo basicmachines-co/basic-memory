@@ -19,8 +19,10 @@ from basic_memory.repository.search_index_row import SearchIndexKey, SearchIndex
 from basic_memory.repository.search_query import PreparedSearchQuery
 from basic_memory.repository.search_reader import (
     FUSION_BONUS,
+    CandidateWindow,
     SemanticSearch,
     VectorRetrieval,
+    WindowChunk,
 )
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.search_trace import SearchTraceCollector
@@ -131,6 +133,28 @@ def fake_vector_retrieval(
 HYBRID_QUERY = PreparedSearchQuery(search_text="test", retrieval_mode=SearchRetrievalMode.HYBRID)
 
 
+def window_of(rows: Sequence[Any]) -> CandidateWindow:
+    """A vector candidate window holding ``rows`` in order, one chunk per row.
+
+    Each row's chunk carries its ``matched_chunk_text``, which is what the window
+    quotes for a row whose content is too long to return whole.
+    """
+    return CandidateWindow(
+        similarity_by_key={(row.type, row.id): row.score for row in rows},
+        chunks_by_key={
+            (row.type, row.id): [WindowChunk(position, row.score, row.matched_chunk_text or "")]
+            for position, row in enumerate(rows)
+        },
+        rows={(row.type, row.id): row for row in rows},
+        chunk_count=len(rows),
+    )
+
+
+def vector_leg(rows: Sequence[Any]) -> AsyncMock:
+    """Stub the embedded vector window so a hybrid test controls only the fused rows."""
+    return AsyncMock(return_value=window_of(rows))
+
+
 async def fuse(
     fts_results: list[Any],
     vector_results: list[Any],
@@ -141,7 +165,7 @@ async def fuse(
     semantic = SemanticSearch(
         cast(Any, None), ProjectScope.single(1), FakeFts(fts_results), fake_vector_retrieval()
     )
-    with patch.object(semantic, "vector_only", new_callable=AsyncMock, return_value=vector_results):
+    with patch.object(semantic, "_vector_window", vector_leg(vector_results)):
         return await semantic.hybrid(query, limit=10, offset=0)
 
 
@@ -243,7 +267,8 @@ async def test_fts_only_result_with_null_content_keeps_null_matched_chunk():
 @pytest.mark.asyncio
 async def test_dual_source_result_keeps_vector_matched_chunk():
     """Dual-source results should keep matched_chunk_text from vector search, not overwrite."""
-    content = "Full note content from FTS."
+    # Long enough that the vector leg quotes its matched chunk, not the whole note.
+    content = "Full note content from FTS. " * 100
     vector_chunk = "Specific chunk matched by vector search."
     fts_results = [
         FakeRow(id=1, score=5.0, title="both", content_snippet=content),
@@ -271,7 +296,7 @@ async def test_hybrid_fts_leg_runs_in_fts_mode_with_relaxation():
     fts = FakeFts([FakeRow(id=1, score=5.0)])
     semantic = SemanticSearch(cast(Any, None), ProjectScope.single(1), fts, fake_vector_retrieval())
 
-    with patch.object(semantic, "vector_only", new_callable=AsyncMock, return_value=[]):
+    with patch.object(semantic, "_vector_window", vector_leg([])):
         await semantic.hybrid(HYBRID_QUERY, limit=10, offset=0)
 
     assert [query.retrieval_mode for query in fts.queries] == [SearchRetrievalMode.FTS]
