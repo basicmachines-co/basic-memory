@@ -97,6 +97,13 @@
 
 ### Bug Fixes
 
+- **#1581**: The sqlite-vec stale-vector cleanup no longer stalls on large vaults. Its
+  DELETE compared each chunk's `source_hash` against the outer vector row, which made
+  the subquery correlated, so SQLite re-ran it once per vector: quadratic work that
+  held the write lock long enough for concurrent writers to fail with `database is
+  locked`. The subquery now joins the vector row by rowid, and the cleanup deletes the
+  same rows in one pass. Thanks to @mikemikimike for the report and fix (#1584).
+
 - **#1607**: `move_note` applies its cross-project guard to directory moves as well as
   file moves. The guard ran only after the directory branch had returned, so
   `work/moved` was refused for a note and accepted for a directory. The guard also
