@@ -54,17 +54,16 @@ Test project selection:
 
 1. **Initial Discovery**
    - Call `list_memory_projects()` without knowing which project to use
-   - Verify clear session guidance appears: "Next: Ask which project to use"
-   - Confirm removal of CLI-specific references
+   - Verify the footer explains routing: pass a project name (or `[external_id]` as `project_id`); calls without one use the session's active project, then the configured default
+   - Confirm no scripted "ask the user" lines and no CLI-specific references
 
 2. **Activity-Based Discovery**
    - Call `recent_activity()` without project parameter (discovery mode)
-   - Verify intelligent project suggestions based on activity
-   - Test guidance: "Should I use [most-active-project] for this task?"
+   - Verify the summary names the most active project: `Suggested project: '<name>' (most active with N items)`
+   - With no activity anywhere, verify it reports "No recent activity found in any project." and adds no scripted question
 
 3. **Session Tracking Validation**
-   - Verify all tool responses include `[Session: Using project 'name']`
-   - Confirm guidance reminds about session-wide project tracking
+   - Verify tool responses include `[Session: Using project 'name']`
 
 4. **Single Project Constraint Mode**
    - Test MCP server with `--project` parameter
