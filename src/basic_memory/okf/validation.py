@@ -186,7 +186,17 @@ def check_bundle(root: Path) -> CheckReport:
                     )
                 )
                 continue
-            if name not in files or path.suffix != ".md":
+            if name not in files:
+                continue
+            if path.suffix != ".md":
+                # Assets are not validated, but an unreadable one still fails the bundle.
+                if is_file:
+                    try:
+                        path.open("rb").close()
+                    except OSError as error:
+                        report.diagnostics.append(
+                            Diagnostic(path=relative, rule="filesystem.read", message=str(error))
+                        )
                 continue
             if not is_file:
                 report.diagnostics.append(

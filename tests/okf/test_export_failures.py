@@ -121,6 +121,21 @@ def test_unreadable_subtree_is_a_failure(tmp_path, monkeypatch):
         snapshot_files(tmp_path)
 
 
+def test_unreadable_asset_is_a_diagnostic(tmp_path, monkeypatch):
+    (tmp_path / "paper.pdf").write_bytes(b"%PDF")
+    real_open = Path.open
+
+    def denied_open(path, *args, **kwargs):
+        if path.name == "paper.pdf":
+            raise PermissionError(13, "denied", str(path))
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", denied_open)
+    report = check_bundle(tmp_path)
+    assert not report.success
+    assert [(d.path, d.rule) for d in report.diagnostics] == [("paper.pdf", "filesystem.read")]
+
+
 def test_unreadable_entry_metadata_is_a_diagnostic(tmp_path, monkeypatch):
     (tmp_path / "note.md").write_text("# Note")
     real_is_symlink = Path.is_symlink
