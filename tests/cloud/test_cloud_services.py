@@ -13,6 +13,7 @@ from basic_memory.indexing.accepted_note_mutation_runner import (
     AcceptedNoteDeleteMutation,
     AcceptedNoteEditMutation,
     AcceptedNoteMoveMutation,
+    AcceptedNoteMutationActor,
     AcceptedNoteMutationChange,
     AcceptedNoteMutationDependencies,
     AcceptedNoteMutationRejectKind,
@@ -780,6 +781,78 @@ async def test_note_content_mutation_service_uses_injected_actor_resolver(monkey
 
 
 @pytest.mark.asyncio
+async def test_note_content_mutation_service_resolves_delete_actor(monkeypatch) -> None:
+    """Deletes consult the actor resolver like every other mutation, so a runtime
+    adapter can attribute who removed a note."""
+    tenant_session_maker = cast(async_sessionmaker[AsyncSession], FakeSessionMaker())
+    dependencies = cast(AcceptedNoteMutationDependencies, object())
+    requested_profile_id = uuid4()
+    resolved_profile_id = uuid4()
+    calls: list[AcceptedNoteDeleteMutation] = []
+    resolver_calls: list[tuple[str, NoteContentMutationActorContext]] = []
+
+    async def fake_runner(
+        repository_session: AsyncSession,
+        *,
+        request: AcceptedNoteDeleteMutation,
+        dependencies: AcceptedNoteMutationDependencies,
+    ):
+        calls.append(request)
+        return AcceptedNoteMutationResult(
+            change=cast(Any, SimpleNamespace(status_code=200, payload={"deleted": True}))
+        )
+
+    monkeypatch.setattr(note_content_writes, "run_accepted_note_delete", fake_runner)
+
+    class RequestDerivedResolver:
+        def resolve_mutation_actor(
+            self,
+            *,
+            mutation_kind: NoteContentMutationKind,
+            requested: NoteContentMutationActorContext,
+        ) -> NoteContentMutationActorContext:
+            resolver_calls.append((mutation_kind, requested))
+            return NoteContentMutationActorContext(
+                user_profile_id=resolved_profile_id,
+                source="web",
+                actor_kind="mcp_client",
+                actor_name="Resolved Actor",
+            )
+
+    service = NoteContentMutationService(
+        session_maker=tenant_session_maker,
+        mutation_dependencies=dependencies,
+        actor_resolver=RequestDerivedResolver(),
+    )
+
+    await service.delete_note(
+        project_external_id="project-123",
+        entity_external_id="entity-123",
+        user_profile_id=requested_profile_id,
+        source="api",
+        actor_kind="user",
+        actor_name="Requested Actor",
+    )
+
+    assert resolver_calls == [
+        (
+            "delete",
+            NoteContentMutationActorContext(
+                user_profile_id=requested_profile_id,
+                source="api",
+                actor_kind="user",
+                actor_name="Requested Actor",
+            ),
+        )
+    ]
+    assert calls[0].actor == AcceptedNoteMutationActor(
+        user_profile_id=resolved_profile_id,
+        kind="mcp_client",
+        name="Resolved Actor",
+    )
+
+
+@pytest.mark.asyncio
 async def test_note_content_mutation_service_delegates_remaining_methods_to_core_runners(
     monkeypatch,
 ) -> None:
@@ -886,6 +959,8 @@ async def test_note_content_mutation_service_delegates_remaining_methods_to_core
     assert isinstance(delete_request, AcceptedNoteDeleteMutation)
     assert delete_request.project_external_id == "project-123"
     assert delete_request.entity_external_id == "entity-123"
+    # No actor supplied and no resolver: the journal row stays unattributed.
+    assert delete_request.actor == AcceptedNoteMutationActor(user_profile_id=None)
 
 
 @pytest.mark.asyncio
