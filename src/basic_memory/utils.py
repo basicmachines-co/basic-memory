@@ -347,15 +347,18 @@ def build_permalink_resolution_candidates(
         if value and value not in candidates:
             candidates.append(value)
 
-    def add_remainder(prefix: str) -> None:
-        # Trigger: a routing prefix is stripped to reach a short stored permalink.
+    def add_remainder(prefix: str, *, requalify_with: str | None = None) -> None:
+        # Trigger: a routing prefix is stripped to reach a shorter stored permalink.
         # Why: a permalink set explicitly in frontmatter is stored verbatim, so
         #   `ses_AbCd` never equals its slug `ses-ab-cd`; stripping only the
         #   normalized path left such notes unreachable by memory:// URL (#1549).
-        # Outcome: the caller's own spelling is tried first, then the slug form.
+        # Outcome: each remainder is tried in the caller's own spelling first, then
+        #   as its slug, optionally under a legacy `project/` qualifier.
+        remainders = [normalized_path.removeprefix(f"{prefix}/")]
         if exact_path.startswith(f"{prefix}/"):
-            add_candidate(exact_path.removeprefix(f"{prefix}/"))
-        add_candidate(normalized_path.removeprefix(f"{prefix}/"))
+            remainders.insert(0, exact_path.removeprefix(f"{prefix}/"))
+        for remainder in remainders:
+            add_candidate(f"{requalify_with}/{remainder}" if requalify_with else remainder)
 
     add_candidate(exact_path)
     add_candidate(normalized_path)
@@ -380,8 +383,7 @@ def build_permalink_resolution_candidates(
             add_candidate(normalized_project)
         elif normalized_path.startswith(f"{workspace_project_prefix}/"):
             workspace_qualified = True
-            remainder = normalized_path.removeprefix(f"{workspace_project_prefix}/")
-            add_candidate(f"{normalized_project}/{remainder}")
+            add_remainder(workspace_project_prefix, requalify_with=normalized_project)
             add_remainder(workspace_project_prefix)
 
     if workspace_project_prefix and not include_project and not workspace_qualified:

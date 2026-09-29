@@ -110,6 +110,7 @@ def test_prefixed_candidates_keep_the_callers_spelling_of_the_remainder():
     assert workspace_qualified == [
         "personal/main/s/ses_AbCdEf",
         "personal/main/s/ses-ab-cd-ef",
+        "main/s/ses_AbCdEf",
         "main/s/ses-ab-cd-ef",
         *expected_remainders,
     ]
