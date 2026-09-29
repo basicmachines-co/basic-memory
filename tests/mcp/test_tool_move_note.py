@@ -88,6 +88,64 @@ async def test_detect_cross_project_rejects_when_local_folder_check_fails(monkey
 
 
 @pytest.mark.asyncio
+async def test_detect_cross_project_stops_paging_after_root_folders(monkeypatch):
+    """Root folders come first, so paging stops at the first page that holds a file."""
+    import importlib
+
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+
+    class _Project:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    class _ProjectList:
+        projects = [_Project("test-project"), _Project("other-project")]
+
+    class MockProjectClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def list_projects(self, *args, **kwargs):
+            return _ProjectList()
+
+    class _Node:
+        def __init__(self, name: str, node_type: str) -> None:
+            self.name = name
+            self.type = node_type
+
+    class _Page:
+        def __init__(self, nodes: list[_Node]) -> None:
+            self.nodes = nodes
+            self.has_more = True
+
+    requested_pages: list[int] = []
+
+    class PagingDirectoryClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def list(self, *args, page: int = 1, **kwargs):
+            requested_pages.append(page)
+            if page == 1:
+                return _Page([_Node("alpha", "directory")])
+            return _Page([_Node("Other-Project", "directory"), _Node("note.md", "file")])
+
+    monkeypatch.setattr(clients_mod, "ProjectClient", MockProjectClient)
+    monkeypatch.setattr(clients_mod, "DirectoryClient", PagingDirectoryClient)
+
+    move_note_module = importlib.import_module("basic_memory.mcp.tools.move_note")
+
+    result = await move_note_module._detect_cross_project_move_attempt(
+        client=None,
+        identifier="source/note",
+        destination_path="other-project/note.md",
+        active_project=ACTIVE_PROJECT,
+    )
+    assert result is None
+    assert requested_pages == [1, 2]
+
+
+@pytest.mark.asyncio
 async def test_detect_cross_project_only_flags_known_project_name(monkeypatch):
     """Detection flags only a leading segment that matches a KNOWN project name.
 

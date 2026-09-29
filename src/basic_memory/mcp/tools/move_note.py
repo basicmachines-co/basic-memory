@@ -119,7 +119,9 @@ async def _detect_cross_project_move_attempt(
                     "/", depth=1, page=page, page_size=MAX_DIRECTORY_PAGE_SIZE
                 )
                 root_folders.extend(node.name for node in listing.nodes if node.type == "directory")
-                if not listing.has_more:
+                # The default listing orders folders before files, so the first page
+                # holding a file has already yielded every root folder.
+                if not listing.has_more or any(node.type != "directory" for node in listing.nodes):
                     break
                 page += 1
         except Exception as e:
