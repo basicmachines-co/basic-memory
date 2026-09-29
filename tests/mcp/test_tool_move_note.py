@@ -191,6 +191,15 @@ async def test_detect_cross_project_matches_project_permalink(monkeypatch):
     assert result is not None
     assert "Other Project" in result
 
+    # A root-level filename is a rename, not a project prefix.
+    root_rename = await move_note_module._detect_cross_project_move_attempt(
+        client=None,
+        identifier="source",
+        destination_path="other-project.md",
+        active_project=ACTIVE_PROJECT,
+    )
+    assert root_rename is None
+
 
 @pytest.mark.asyncio
 async def test_detect_cross_project_only_flags_known_project_name(monkeypatch):

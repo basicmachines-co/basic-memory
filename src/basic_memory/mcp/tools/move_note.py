@@ -1,6 +1,6 @@
 """Move note tool for Basic Memory MCP server."""
 
-from pathlib import Path, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from textwrap import dedent
 from typing import Any, Annotated, Optional, Literal
 
@@ -88,8 +88,11 @@ async def _detect_cross_project_move_attempt(
         #      would silently create a same-project nested folder instead.
         # Outcome: candidate for rejection, unless the folder is already local (below).
         # Projects are addressed by name or by permalink ("Other Project" is
-        # "other-project"), so compare the generated permalinks too.
-        leading_permalink = generate_permalink(leading_folder)
+        # "other-project"), so compare the generated permalinks too. A lone segment
+        # with an extension is a root filename, not a folder: generate_permalink
+        # would strip ".md" and turn "other-project.md" into a project prefix.
+        is_root_filename = len(path_parts) == 1 and bool(PurePosixPath(leading_folder).suffix)
+        leading_permalink = None if is_root_filename else generate_permalink(leading_folder)
         matching_project = next(
             (
                 p.name
