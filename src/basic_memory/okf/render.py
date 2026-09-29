@@ -16,7 +16,7 @@ from basic_memory.markdown.entity_parser import (
     normalize_frontmatter_value,
     parse,
 )
-from basic_memory.markdown.path_links import markdown_link_target
+from basic_memory.markdown.path_links import markdown_link_path, resolve_project_path
 from basic_memory.markdown.plugins import _is_escaped
 from basic_memory.repository.entity_repository import file_path_alias
 from basic_memory.services.bulk_link_resolver import RelationTargetReference
@@ -154,7 +154,8 @@ def convert_wikilinks(
         resolved = None
         # Explicit relative links bind to their source directory before semantic aliases.
         # Wikilink paths are literal identifiers, so URL decoding must round-trip them.
-        relative = markdown_link_target(quote(target, safe="/"), source)
+        authored_path = markdown_link_path(quote(target, safe="/"))
+        relative = resolve_project_path(authored_path, source) if authored_path else None
         # A root-relative URI with escaping dot segments could normalize to a real note.
         # Keep that unresolved reference literal rather than inventing a portable edge.
         if relative is None and ".." in PurePosixPath(target).parts:
