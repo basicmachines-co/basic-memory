@@ -25,6 +25,19 @@
   scans, which writes a `permalink` into their frontmatter. Non-Markdown files are
   unchanged.
 
+- **#1495**: Reading a note that does not exist exits with status 1 from the CLI in
+  every output mode, and JSON reads carry `error: "NOTE_NOT_FOUND"`. Scripts that relied
+  on exit status 0 with null fields need to check the status instead.
+
+- **#1531**: `edit_note(operation="replace_section")` fails when the exact heading is
+  not in the note, instead of appending a duplicate section and reporting success. A
+  heading such as `## Open items #urgent` must be given in full; use `append` to create
+  a new section on purpose.
+
+- **#1343**: `bm project add --cloud --visibility private` is refused. The cloud has
+  only `workspace` and `shared` visibility, so `private` had created a team-visible
+  project while reporting success.
+
 ### Features
 
 - **#1550**: `bm okf export DESTINATION --project NAME` writes a static OKF v0.2 bundle
@@ -387,19 +400,6 @@
   rewritten, and `remove_frontmatter` no longer strips such a block from search content.
   Frontmatter is now classified once, by the parser, as present, absent, or
   malformed, and only the first two are ever written to.
-
-- **#1531**: `edit_note(operation="replace_section")` fails when the exact heading is
-  not in the note, instead of appending a duplicate section and reporting success. A
-  heading such as `## Open items #urgent` must be given in full; use `append` to create
-  a new section on purpose.
-
-- **#1495**: Reading a note that does not exist exits with status 1 from the CLI in
-  every output mode, and JSON reads carry `error: "NOTE_NOT_FOUND"`. Scripts that relied
-  on exit status 0 with null fields need to check the status instead.
-
-- **#1343**: `bm project add --cloud --visibility private` is refused. The cloud has
-  only `workspace` and `shared` visibility, so `private` had created a team-visible
-  project while reporting success.
 
 - **#1334**: A fresh install that runs a CLI command first (`bm status`, `bm project
   add`) no longer fails with "Project not found" for the seeded `main` project; config
