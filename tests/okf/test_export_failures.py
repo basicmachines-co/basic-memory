@@ -138,14 +138,14 @@ def test_unreadable_asset_is_a_diagnostic(tmp_path, monkeypatch):
 
 def test_unreadable_entry_metadata_is_a_diagnostic(tmp_path, monkeypatch):
     (tmp_path / "note.md").write_text("# Note")
-    real_is_symlink = Path.is_symlink
+    real_lstat = Path.lstat
 
-    def denied_is_symlink(path):
+    def denied_lstat(path):
         if path.name == "note.md":
             raise PermissionError(13, "denied", str(path))
-        return real_is_symlink(path)
+        return real_lstat(path)
 
-    monkeypatch.setattr(Path, "is_symlink", denied_is_symlink)
+    monkeypatch.setattr(Path, "lstat", denied_lstat)
     diagnostics = check_bundle(tmp_path).diagnostics
     assert [(d.path, d.rule) for d in diagnostics] == [("note.md", "filesystem.read")]
 

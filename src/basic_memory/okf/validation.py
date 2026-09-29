@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from datetime import date
 import os
+import stat
 from pathlib import Path
 import re
 
@@ -171,14 +172,17 @@ def check_bundle(root: Path) -> CheckReport:
             path = Path(directory) / name
             relative = path.relative_to(root).as_posix()
             try:
-                is_symlink = path.is_symlink()
-                is_file = path.is_file()
+                # lstat() raises on unreadable metadata; is_symlink()/is_file()
+                # return False instead on Python 3.13+, hiding the failure.
+                mode = path.lstat().st_mode
             except OSError as error:
                 # Metadata can become unreadable mid-walk; report it like a read failure.
                 report.diagnostics.append(
                     Diagnostic(path=relative, rule="filesystem.read", message=str(error))
                 )
                 continue
+            is_symlink = stat.S_ISLNK(mode)
+            is_file = stat.S_ISREG(mode)
             if is_symlink:
                 report.diagnostics.append(
                     Diagnostic(
