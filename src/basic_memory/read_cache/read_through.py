@@ -72,6 +72,8 @@ class ModelReadCache[ModelT: BaseModel]:
         key: ReadCacheKey,
     ) -> AsyncIterator[ReadCacheScope[ModelT]]:
         """Yield a cached model or store the authoritative value supplied by the route."""
+        # One span per cached read. Lookup, deserialize, serialize, and store outcomes live
+        # on its attributes; child spans per step multiplied volume on the hottest read path.
         with logfire.span(
             "read_cache.read_through",
             operation=key.operation.value,

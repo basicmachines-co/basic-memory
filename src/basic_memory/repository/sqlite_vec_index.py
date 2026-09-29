@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.models.search import create_sqlite_search_vector_embeddings
+from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.semantic_vector_index import (
     VectorDeletion,
@@ -78,7 +79,18 @@ class SQLiteVecIndex:
                     "basic-memory under uv-managed or Homebrew Python, or disable "
                     "semantic search."
                 )
-            await driver_connection.enable_load_extension(True)
+            try:
+                await driver_connection.enable_load_extension(True)
+            except AttributeError as exc:
+                # aiosqlite exposes the wrapper method even when the wrapped
+                # sqlite3.Connection was built without extension support, so
+                # calling it is the authoritative probe (#711).
+                raise SemanticDependenciesMissingError(
+                    "This Python build does not support SQLite extension loading "
+                    "(no enable_load_extension on sqlite3.Connection). Reinstall "
+                    "basic-memory under uv-managed or Homebrew Python, or disable "
+                    "semantic search."
+                ) from exc
             await driver_connection.load_extension(sqlite_vec.loadable_path())
             await driver_connection.enable_load_extension(False)
             await session.execute(text("SELECT vec_version()"))
@@ -103,6 +115,7 @@ class SQLiteVecIndex:
                 expected_dimensions = f"float[{self.scope.dimensions}]"
                 dimensions_changed = bool(vector_sql and expected_dimensions not in vector_sql)
                 source_hash_missing = bool(vector_sql and "+source_hash text" not in vector_sql)
+                partitions_missing = bool(vector_sql and "partition key" not in vector_sql)
                 if dimensions_changed or source_hash_missing:
                     logger.warning(
                         "SQLite vector storage schema mismatch "
@@ -112,6 +125,19 @@ class SQLiteVecIndex:
                         source_hash_missing=source_hash_missing,
                     )
                     await session.execute(text("DROP TABLE IF EXISTS search_vector_embeddings"))
+                elif partitions_missing:
+                    # Trigger: storage predates the project_id partition key, and its
+                    #   vectors are otherwise current.
+                    # Why: vec0 cannot add a column in place, and re-embedding a whole
+                    #   vault only to change how rows are partitioned would cost every
+                    #   local user a full embedding pass for nothing new.
+                    # Outcome: the vectors are carried into partitioned storage, each
+                    #   keyed by the project its manifest row names; manifests stay ready.
+                    logger.info(
+                        "SQLite vector storage predates project partitions; "
+                        "carrying vectors into partitioned storage"
+                    )
+                    await self._partition_existing_storage(session)
 
                 await session.execute(create_sqlite_search_vector_embeddings(self.scope.dimensions))
                 # Missing or dimension-rebuilt vec storage has no vectors, so ready
@@ -126,43 +152,43 @@ class SQLiteVecIndex:
                 await session.commit()
             self._initialized = True
 
-    async def _rowids_by_key(
-        self,
-        session: AsyncSession,
-        keys: Sequence[VectorKey],
-    ) -> dict[VectorKey, int]:
-        if not keys:
-            return {}
-        params: dict[str, object] = {"project_id": self.scope.project_id}
-        predicates: list[str] = []
-        for index, key in enumerate(keys):
-            params[f"entity_id_{index}"] = key.entity_id
-            params[f"chunk_key_{index}"] = key.chunk_key
-            predicates.append(
-                f"(entity_id = :entity_id_{index} AND chunk_key = :chunk_key_{index})"
-            )
-        result = await session.execute(
-            text(
-                "SELECT id, entity_id, chunk_key FROM search_vector_chunks "
-                "WHERE project_id = :project_id AND (" + " OR ".join(predicates) + ")"
-            ),
-            params,
-        )
-        return {
-            VectorKey(entity_id=int(row["entity_id"]), chunk_key=str(row["chunk_key"])): int(
-                row["id"]
-            )
-            for row in result.mappings().all()
-        }
+    async def _partition_existing_storage(self, session: AsyncSession) -> None:
+        """Rebuild vec storage with the partition key, keeping every current vector.
 
-    async def upsert(self, records: Sequence[VectorRecord]) -> None:
+        SQLite DDL is transactional, so the copy out, drop, recreate, and copy back
+        either all land or none do. A vector whose manifest row is gone has no
+        project to file under and is left behind, which is what the orphan sweep
+        would have done to it anyway.
+        """
+        await session.execute(
+            text(
+                "CREATE TEMP TABLE search_vector_embeddings_carry AS "
+                "SELECT e.rowid AS id, c.project_id AS project_id, "
+                "e.embedding AS embedding, e.source_hash AS source_hash "
+                "FROM search_vector_embeddings e "
+                "JOIN search_vector_chunks c ON c.id = e.rowid"
+            )
+        )
+        await session.execute(text("DROP TABLE search_vector_embeddings"))
+        await session.execute(create_sqlite_search_vector_embeddings(self.scope.dimensions))
+        await session.execute(
+            text(
+                "INSERT INTO search_vector_embeddings "
+                "(rowid, project_id, embedding, source_hash) "
+                "SELECT id, project_id, embedding, source_hash "
+                "FROM search_vector_embeddings_carry"
+            )
+        )
+        await session.execute(text("DROP TABLE search_vector_embeddings_carry"))
+
+    async def upsert(self, project_id: int, records: Sequence[VectorRecord]) -> None:
         if not records:
             return
         validate_vector_dimensions(self.scope, records)
         await self.initialize()
         async with db.scoped_session(self._session_maker) as session:
             await self._ensure_loaded(session)
-            params: dict[str, object] = {"project_id": self.scope.project_id}
+            params: dict[str, object] = {"project_id": project_id}
             predicates: list[str] = []
             records_by_key = {record.key: record for record in records}
             for index, record in enumerate(records):
@@ -209,12 +235,14 @@ class SQLiteVecIndex:
             )
             await session.execute(
                 text(
-                    "INSERT INTO search_vector_embeddings (rowid, embedding, source_hash) "
-                    "VALUES (:rowid, :embedding, :source_hash)"
+                    "INSERT INTO search_vector_embeddings "
+                    "(rowid, project_id, embedding, source_hash) "
+                    "VALUES (:rowid, :project_id, :embedding, :source_hash)"
                 ),
                 [
                     {
                         "rowid": rowids_by_key[record.key],
+                        "project_id": project_id,
                         "embedding": json.dumps(record.values),
                         "source_hash": record.source_hash,
                     }
@@ -223,13 +251,13 @@ class SQLiteVecIndex:
             )
             await session.commit()
 
-    async def delete(self, records: Sequence[VectorDeletion]) -> None:
+    async def delete(self, project_id: int, records: Sequence[VectorDeletion]) -> None:
         if not records:
             return
         await self.initialize()
         async with db.scoped_session(self._session_maker) as session:
             await self._ensure_loaded(session)
-            params: dict[str, object] = {"project_id": self.scope.project_id}
+            params: dict[str, object] = {"project_id": project_id}
             predicates: list[str] = []
             for index, record in enumerate(records):
                 params[f"entity_id_{index}"] = record.key.entity_id
@@ -264,7 +292,7 @@ class SQLiteVecIndex:
                 )
                 await session.commit()
 
-    async def delete_entity(self, entity_id: int) -> None:
+    async def delete_entity(self, project_id: int, entity_id: int) -> None:
         await self.initialize()
         async with db.scoped_session(self._session_maker) as session:
             await self._ensure_loaded(session)
@@ -274,12 +302,12 @@ class SQLiteVecIndex:
                     "SELECT id FROM search_vector_chunks "
                     "WHERE project_id = :project_id AND entity_id = :entity_id)"
                 ),
-                {"project_id": self.scope.project_id, "entity_id": entity_id},
+                {"project_id": project_id, "entity_id": entity_id},
             )
             await session.commit()
 
-    async def delete_orphans(self, _live_keys: Sequence[VectorKey]) -> None:
-        """Remove sqlite-vec rows absent from the current ready manifest scope."""
+    async def delete_orphans(self, project_id: int, _live_keys: Sequence[VectorKey]) -> None:
+        """Remove sqlite-vec rows absent from one project's current ready manifest."""
         await self.initialize()
         async with db.scoped_session(self._session_maker) as session:
             await self._ensure_loaded(session)
@@ -316,7 +344,7 @@ class SQLiteVecIndex:
                     "AND embedding_status = 'ready'))"
                 ),
                 {
-                    "project_id": self.scope.project_id,
+                    "project_id": project_id,
                     "embedding_identity": self.scope.embedding_identity,
                 },
             )
@@ -327,38 +355,43 @@ class SQLiteVecIndex:
         query: Sequence[float],
         *,
         limit: int,
+        projects: ProjectScope,
     ) -> list[VectorMatch]:
-        if not query or limit <= 0:
+        if not query or limit <= 0 or projects.is_empty:
             return []
         validate_query_dimensions(self.scope, query)
         await self.initialize()
         vector_k = min(limit, SQLITE_VEC_MAX_K)
+        params: dict[str, object] = {
+            "query": json.dumps(list(query)),
+            "vector_k": vector_k,
+            "embedding_identity": self.scope.embedding_identity,
+            "limit": limit,
+        }
+        # vec0 ranks the k nearest within each partition in scope, so a small
+        # project is never crowded out of its own window by a larger neighbour that
+        # shares the database; the outer ORDER BY merges the partitions.
+        partitions_in_scope = projects.predicate("project_id", params)
         async with db.scoped_session(self._session_maker) as session:
             await self._ensure_loaded(session)
             result = await session.execute(
                 text(
                     "WITH vector_matches AS MATERIALIZED ("
                     " SELECT rowid, distance, source_hash FROM search_vector_embeddings "
-                    " WHERE embedding MATCH :query AND k = :vector_k"
+                    f" WHERE {partitions_in_scope} "
+                    " AND embedding MATCH :query AND k = :vector_k"
                     ") "
                     "SELECT c.entity_id, c.chunk_key, vector_matches.distance "
                     "FROM vector_matches "
                     "JOIN search_vector_chunks c ON c.id = vector_matches.rowid "
                     "AND c.source_hash = vector_matches.source_hash "
-                    "WHERE c.project_id = :project_id "
-                    "AND c.vector_index = 'sqlite-vec' "
+                    "WHERE c.vector_index = 'sqlite-vec' "
                     "AND c.embedding_status = 'ready' "
                     "AND c.embedding_model = :embedding_identity "
                     "ORDER BY vector_matches.distance ASC, "
                     "c.entity_id ASC, c.chunk_key ASC LIMIT :limit"
                 ),
-                {
-                    "query": json.dumps(list(query)),
-                    "vector_k": vector_k,
-                    "project_id": self.scope.project_id,
-                    "embedding_identity": self.scope.embedding_identity,
-                    "limit": limit,
-                },
+                params,
             )
         return [
             VectorMatch(

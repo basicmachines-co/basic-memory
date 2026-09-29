@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 
 
 _TRANSIENT_DOWNLOAD_STATUS_CODES = frozenset({408, 425, 429})
+_RERANK_BATCH_SIZE = 8
 _TRUE_ENV_VALUES = frozenset({"1", "ON", "YES", "TRUE"})
 
 
@@ -95,7 +96,12 @@ class FastEmbedRerankProvider:
                 "Install/update basic-memory to include semantic dependencies: "
                 "pip install -U basic-memory"
             ) from exc
-        model_kwargs: dict[str, Any] = {"model_name": self.model_name}
+        # ONNX's CPU arena retains its largest inference allocations for the session's
+        # lifetime. Let the allocator release those buffers between searches instead.
+        model_kwargs: dict[str, Any] = {
+            "model_name": self.model_name,
+            "enable_cpu_mem_arena": False,
+        }
         if self.cache_dir is not None:
             model_kwargs["cache_dir"] = self.cache_dir
         if self.threads is not None:
@@ -147,7 +153,11 @@ class FastEmbedRerankProvider:
         # in input order; run it off the event loop and squash to [0, 1] so callers
         # get a bounded relevance on the same scale as API-based rerankers.
         scores = await asyncio.to_thread(
-            lambda: [_sigmoid(float(score)) for score in model.rerank(query, documents)]
+            # Bound each tensor batch without dropping candidates or changing input order.
+            lambda: [
+                _sigmoid(float(score))
+                for score in model.rerank(query, documents, batch_size=_RERANK_BATCH_SIZE)
+            ]
         )
         return validate_rerank_scores(scores, len(documents))
 

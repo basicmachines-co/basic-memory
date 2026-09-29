@@ -32,7 +32,9 @@ async def test_search_router_wraps_request_in_manual_operation(monkeypatch) -> N
         operations.append((name, attrs))
         yield
 
-    async def fake_to_search_results(entity_service, results, *, temporal_by_source=None):
+    async def fake_to_search_results(
+        entity_service, results, *, temporal_by_source=None, project_external_ids=None
+    ):
         return []
 
     monkeypatch.setattr(logfire, "span", fake_span)
@@ -48,6 +50,7 @@ async def test_search_router_wraps_request_in_manual_operation(monkeypatch) -> N
         session_maker=object(),
         read_cache=None,
         response=http_response,
+        internal_project_id=1,
         project_id="11111111-1111-1111-1111-111111111111",
         page=2,
         page_size=5,

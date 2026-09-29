@@ -18,6 +18,7 @@ from basic_memory.repository.litellm_provider import LiteLLMEmbeddingProvider
 from basic_memory.repository.prefixing_provider import PrefixingEmbeddingProvider
 from basic_memory.repository import search_repository_base as search_repository_base_module
 from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_errors import SemanticVectorIndexExtensionError
 from basic_memory.repository.semantic_vector_index import (
     VectorDeletion,
@@ -76,7 +77,6 @@ class RecordingVectorIndex:
     def __init__(self) -> None:
         self.scope = VectorIndexScope(
             namespace="test",
-            project_id=1,
             embedding_identity="test",
             dimensions=4,
         )
@@ -91,20 +91,20 @@ class RecordingVectorIndex:
     async def initialize(self) -> None:
         return None
 
-    async def upsert(self, records: Sequence[VectorRecord]) -> None:
+    async def upsert(self, project_id: int, records: Sequence[VectorRecord]) -> None:
         self.upsert_calls.append(list(records))
         if self.fail_upsert:
             raise RuntimeError("adapter write failed")
         self.records.update({record.key: record.values for record in records})
 
-    async def delete(self, records: Sequence[VectorDeletion]) -> None:
+    async def delete(self, project_id: int, records: Sequence[VectorDeletion]) -> None:
         self.deleted_entities.extend(sorted({record.key.entity_id for record in records}))
         if self.fail_delete_entity:
             raise RuntimeError("adapter delete failed")
         for record in records:
             self.records.pop(record.key, None)
 
-    async def delete_entity(self, entity_id: int) -> None:
+    async def delete_entity(self, project_id: int, entity_id: int) -> None:
         self.deleted_entities.append(entity_id)
         if self.fail_delete_entity:
             raise RuntimeError("adapter delete failed")
@@ -112,7 +112,7 @@ class RecordingVectorIndex:
             key: values for key, values in self.records.items() if key.entity_id != entity_id
         }
 
-    async def delete_orphans(self, live_keys: Sequence[VectorKey]) -> None:
+    async def delete_orphans(self, project_id: int, live_keys: Sequence[VectorKey]) -> None:
         self.reconcile_calls.append(list(live_keys))
         live_key_set = set(live_keys)
         self.records = {key: values for key, values in self.records.items() if key in live_key_set}
@@ -122,6 +122,7 @@ class RecordingVectorIndex:
         query: Sequence[float],
         *,
         limit: int,
+        projects: ProjectScope,
     ) -> list[VectorMatch]:
         if self.fail_search:
             raise RuntimeError("adapter query failed")
@@ -436,7 +437,7 @@ async def test_sqlite_vec_reconciliation_is_project_scoped(search_repository):
         )
         await session.commit()
 
-    await index.delete_orphans([])
+    await index.delete_orphans(search_repository.project_id, [])
 
     async with db.scoped_session(search_repository.session_maker) as session:
         remaining = await session.execute(
@@ -446,6 +447,268 @@ async def test_sqlite_vec_reconciliation_is_project_scoped(search_repository):
             )
         )
         assert remaining.scalars().all() == [902, 903]
+
+
+@pytest.mark.asyncio
+async def test_sqlite_vec_search_reads_every_project_in_scope(search_repository):
+    """One statement answers a multi-project scope; a single-project scope stays isolated."""
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec search behavior is local SQLite-only.")
+
+    _enable_semantic(search_repository)
+    await search_repository.init_search_index()
+    index = cast(SQLiteVecIndex, search_repository._semantic_vector_index)
+    embedding_identity = search_repository._embedding_model_key()
+    own_project = search_repository.project_id
+    other_project = own_project + 1
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        await index._ensure_loaded(session)
+        await session.execute(
+            text(
+                "INSERT INTO search_vector_chunks ("
+                "id, entity_id, project_id, chunk_key, chunk_text, source_hash, "
+                "entity_fingerprint, embedding_model, vector_index, embedding_status"
+                ") VALUES ("
+                ":id, :entity_id, :project_id, :chunk_key, 'text', 'hash', "
+                "'fingerprint', :embedding_model, 'sqlite-vec', 'ready')"
+            ),
+            [
+                {
+                    "id": 911,
+                    "entity_id": 911,
+                    "project_id": own_project,
+                    "chunk_key": "entity:911:0",
+                    "embedding_model": embedding_identity,
+                },
+                {
+                    "id": 912,
+                    "entity_id": 912,
+                    "project_id": other_project,
+                    "chunk_key": "entity:912:0",
+                    "embedding_model": embedding_identity,
+                },
+            ],
+        )
+        await session.execute(
+            text(
+                "INSERT INTO search_vector_embeddings (rowid, project_id, embedding, source_hash) "
+                "VALUES (:rowid, :project_id, :embedding, 'hash')"
+            ),
+            [
+                {"rowid": 911, "project_id": own_project, "embedding": "[1,0,0,0]"},
+                {"rowid": 912, "project_id": other_project, "embedding": "[0,1,0,0]"},
+            ],
+        )
+        await session.commit()
+
+    query = [1.0, 0.0, 0.0, 0.0]
+    both = await index.search(
+        query, limit=10, projects=ProjectScope.of([other_project, own_project])
+    )
+    own_only = await index.search(query, limit=10, projects=ProjectScope.single(own_project))
+    nothing = await index.search(query, limit=10, projects=ProjectScope.of([]))
+
+    assert [match.key.entity_id for match in both] == [911, 912]
+    assert [match.key.entity_id for match in own_only] == [911]
+    assert nothing == []
+
+
+async def _seed_ready_vectors(
+    search_repository: SQLiteSearchRepository,
+    index: SQLiteVecIndex,
+    rows: list[tuple[int, int, str]],
+    *,
+    partitioned: bool = True,
+) -> None:
+    """Insert ready manifest rows and their vectors: ``(rowid, project_id, embedding)``."""
+    embedding_identity = search_repository._embedding_model_key()
+    async with db.scoped_session(search_repository.session_maker) as session:
+        await index._ensure_loaded(session)
+        await session.execute(
+            text(
+                "INSERT INTO search_vector_chunks ("
+                "id, entity_id, project_id, chunk_key, chunk_text, source_hash, "
+                "entity_fingerprint, embedding_model, vector_index, embedding_status"
+                ") VALUES ("
+                ":id, :id, :project_id, :chunk_key, 'text', 'hash', "
+                "'fingerprint', :embedding_model, 'sqlite-vec', 'ready')"
+            ),
+            [
+                {
+                    "id": rowid,
+                    "project_id": project_id,
+                    "chunk_key": f"entity:{rowid}:0",
+                    "embedding_model": embedding_identity,
+                }
+                for rowid, project_id, _embedding in rows
+            ],
+        )
+        if partitioned:
+            await session.execute(
+                text(
+                    "INSERT INTO search_vector_embeddings "
+                    "(rowid, project_id, embedding, source_hash) "
+                    "VALUES (:rowid, :project_id, :embedding, 'hash')"
+                ),
+                [
+                    {"rowid": rowid, "project_id": project_id, "embedding": embedding}
+                    for rowid, project_id, embedding in rows
+                ],
+            )
+        else:
+            await session.execute(
+                text(
+                    "INSERT INTO search_vector_embeddings (rowid, embedding, source_hash) "
+                    "VALUES (:rowid, :embedding, 'hash')"
+                ),
+                [{"rowid": rowid, "embedding": embedding} for rowid, _project, embedding in rows],
+            )
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_sqlite_vec_scope_is_a_partition_not_a_filter_on_the_nearest(search_repository):
+    """A small project fills its window even when a neighbour's vectors sit closer.
+
+    The k nearest across the whole database used to be taken first and the scope
+    applied afterwards, so a project holding a few vectors among a large
+    neighbour's could get an empty page for a query its own notes answered.
+    """
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec search behavior is local SQLite-only.")
+
+    _enable_semantic(search_repository)
+    await search_repository.init_search_index()
+    index = cast(SQLiteVecIndex, search_repository._semantic_vector_index)
+    small = search_repository.project_id
+    large = small + 1
+
+    # The large project's vectors are all nearer the query than the small one's.
+    await _seed_ready_vectors(
+        search_repository,
+        index,
+        [(921, large, "[1,0,0,0]"), (922, large, "[0.9,0.1,0,0]"), (923, large, "[0.8,0.2,0,0]")]
+        + [(931, small, "[0,1,0,0]"), (932, small, "[0,0,1,0]")],
+    )
+
+    nearest_two = await index.search(
+        [1.0, 0.0, 0.0, 0.0], limit=2, projects=ProjectScope.single(small)
+    )
+
+    assert [match.key.entity_id for match in nearest_two] == [931, 932]
+
+
+@pytest.mark.asyncio
+async def test_filtered_vector_search_fills_its_window_past_nearer_rejected_rows(
+    search_repository,
+):
+    """Rows the filter rejects can sit in front of the ones it admits without hiding them.
+
+    Twelve archive rows are nearer the query than three notes rows. With a candidate
+    window of ten chunks, a filter on the notes prefix used to see ten rejected
+    candidates and answer with nothing, although three notes matched.
+    """
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec search behavior is local SQLite-only.")
+
+    _enable_semantic(search_repository)
+    await search_repository.init_search_index()
+    index = cast(SQLiteVecIndex, search_repository._semantic_vector_index)
+    project = search_repository.project_id
+    # limit 1 with vector_k 4 sizes the first window at ten chunks.
+    search_repository._semantic_vector_k = 4
+    search_repository._semantic_min_similarity = 0.0
+
+    nearer = list(range(1101, 1113))
+    farther = [1121, 1122, 1123]
+    for row_id in nearer:
+        await search_repository.index_item(
+            _entity_row(
+                project_id=project,
+                row_id=row_id,
+                entity_id=row_id,
+                title=f"Archive {row_id}",
+                permalink=f"archive/entry-{row_id}",
+                content_stems="auth token archive",
+            )
+        )
+    for row_id in farther:
+        await search_repository.index_item(
+            _entity_row(
+                project_id=project,
+                row_id=row_id,
+                entity_id=row_id,
+                title=f"Note {row_id}",
+                permalink=f"notes/entry-{row_id}",
+                content_stems="schema note",
+            )
+        )
+    # The query embeds to [1,0,0,0]; archive rows sit nearer it than notes rows.
+    await _seed_ready_vectors(
+        search_repository,
+        index,
+        [(row_id, project, f"[1,{(row_id - 1100) / 100:.2f},0,0]") for row_id in nearer]
+        + [(row_id, project, f"[0.5,1,{(row_id - 1120) / 100:.2f},0]") for row_id in farther],
+    )
+
+    results = await search_repository.search(
+        search_text="auth",
+        file_path_prefix="notes",
+        retrieval_mode=SearchRetrievalMode.VECTOR,
+        limit=1,
+    )
+
+    assert [row.id for row in results] == [1121]
+
+
+@pytest.mark.asyncio
+async def test_sqlite_vec_partitions_legacy_storage_without_re_embedding(search_repository):
+    """Storage from before the partition key is carried over, vectors and readiness intact."""
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec storage upgrade is local SQLite-only.")
+
+    _enable_semantic(search_repository)
+    await search_repository.init_search_index()
+    index = cast(SQLiteVecIndex, search_repository._semantic_vector_index)
+    project = search_repository.project_id
+    dimensions = search_repository._vector_dimensions
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        await index._ensure_loaded(session)
+        await session.execute(text("DROP TABLE search_vector_embeddings"))
+        await session.execute(
+            text(
+                "CREATE VIRTUAL TABLE search_vector_embeddings USING vec0("
+                f"embedding float[{dimensions}], +source_hash text)"
+            )
+        )
+        await session.commit()
+    await _seed_ready_vectors(
+        search_repository,
+        index,
+        [(941, project, "[1,0,0,0]"), (942, project, "[0,1,0,0]")],
+        partitioned=False,
+    )
+
+    index.invalidate_initialization()
+    await index.initialize()
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        table_sql = await session.scalar(
+            text("SELECT sql FROM sqlite_master WHERE name = 'search_vector_embeddings'")
+        )
+        statuses = await session.execute(
+            text("SELECT embedding_status FROM search_vector_chunks WHERE id IN (941, 942)")
+        )
+        carried = await session.execute(
+            text("SELECT rowid, project_id FROM search_vector_embeddings ORDER BY rowid")
+        )
+    assert table_sql is not None and "project_id integer partition key" in table_sql
+    assert statuses.scalars().all() == ["ready", "ready"]
+    assert carried.all() == [(941, project), (942, project)]
+    found = await index.search([1.0, 0.0, 0.0, 0.0], limit=5, projects=ProjectScope.single(project))
+    assert [match.key.entity_id for match in found] == [941, 942]
 
 
 @pytest.mark.asyncio
@@ -486,7 +749,7 @@ async def test_sqlite_vec_delete_requires_pending_source_generation(search_repos
         await session.commit()
 
     deletion = VectorDeletion(key=key, source_hash="hash")
-    await index.delete([deletion])
+    await index.delete(search_repository.project_id, [deletion])
     async with db.scoped_session(search_repository.session_maker) as session:
         assert (
             await session.scalar(
@@ -499,7 +762,7 @@ async def test_sqlite_vec_delete_requires_pending_source_generation(search_repos
         )
         await session.commit()
 
-    await index.delete([deletion])
+    await index.delete(search_repository.project_id, [deletion])
     async with db.scoped_session(search_repository.session_maker) as session:
         vector_count = await session.scalar(
             text("SELECT COUNT(*) FROM search_vector_embeddings WHERE rowid = 907")
@@ -1459,19 +1722,19 @@ async def test_run_vector_query_caps_k_at_sqlite_vec_limit(search_repository, mo
     monkeypatch.setattr(index, "_ensure_loaded", AsyncMock())
     query_embedding = [0.1] * search_repository._vector_dimensions
 
-    await index.search(query_embedding, limit=10000)
+    await index.search(query_embedding, limit=10000, projects=search_repository.scope)
 
     assert captured_params == [
         {
             "query": "[0.1, 0.1, 0.1, 0.1]",
             "vector_k": SQLITE_VEC_MAX_K,
-            "project_id": search_repository.project_id,
+            "scope_0": search_repository.project_id,
             "embedding_identity": search_repository._embedding_model_key(),
             "limit": 10000,
         }
     ]
 
     captured_params.clear()
-    await index.search(query_embedding, limit=500)
+    await index.search(query_embedding, limit=500, projects=search_repository.scope)
     assert captured_params[0]["vector_k"] == 500
     assert captured_params[0]["limit"] == 500

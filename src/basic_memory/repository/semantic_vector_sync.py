@@ -314,7 +314,7 @@ async def sync_entity_vectors_internal(
     repository._log_vector_sync_runtime_settings(
         backend_name=backend_name, entities_total=total_entities
     )
-    logger.info(
+    logger.debug(
         "Vector batch sync start: project_id={project_id} entities_total={entities_total} "
         "sync_batch_size={sync_batch_size} prepare_window_size={prepare_window_size}",
         project_id=repository.project_id,
@@ -551,7 +551,9 @@ async def sync_entity_vectors_internal(
             embedding_model=embedding_model,
         )
 
-        logger.info(
+        # The batch span below carries these totals as attributes; the log line is
+        # DEBUG so production does not pay for the same summary twice per batch.
+        logger.debug(
             "Vector batch sync complete: project_id={project_id} entities_total={entities_total} "
             "entities_synced={entities_synced} entities_failed={entities_failed} "
             "entities_deferred={entities_deferred} "
@@ -624,6 +626,11 @@ async def sync_entity_vectors_internal(
                     "embedding_jobs_total": result.embedding_jobs_total,
                     "chunks_total": result.chunks_total,
                     "chunks_skipped": result.chunks_skipped,
+                    "sync_batch_size": repository._semantic_embedding_sync_batch_size,
+                    "prepare_seconds_total": result.prepare_seconds_total,
+                    "queue_wait_seconds_total": result.queue_wait_seconds_total,
+                    "embed_seconds_total": result.embed_seconds_total,
+                    "write_seconds_total": result.write_seconds_total,
                     "batch_total_seconds": batch_total_seconds,
                 }
             )
@@ -1360,7 +1367,7 @@ def log_vector_sync_runtime_settings(
     provider = repository._embedding_provider
     runtime_attrs = provider.runtime_log_attrs() if hasattr(provider, "runtime_log_attrs") else {}
     if runtime_attrs:
-        logger.info(
+        logger.debug(
             "Vector batch runtime settings: project_id={project_id} backend={backend} "
             "entities_total={entities_total} provider={provider} model_name={model_name} "
             "dimensions={dimensions} sync_batch_size={sync_batch_size} "
@@ -1377,7 +1384,7 @@ def log_vector_sync_runtime_settings(
         )
         return
 
-    logger.info(
+    logger.debug(
         "Vector batch runtime settings: project_id={project_id} backend={backend} "
         "entities_total={entities_total} provider={provider} sync_batch_size={sync_batch_size}",
         project_id=repository.project_id,

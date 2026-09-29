@@ -392,7 +392,7 @@ async def write_note(
             client,
             active_project,
         ):
-            logger.info(
+            logger.debug(
                 f"MCP tool call tool=write_note project={active_project.name} directory={directory}, title={title}, tags={tags}"
             )
 
@@ -589,7 +589,7 @@ async def write_note(
                 )
 
             # Log the response with structured data
-            logger.info(
+            logger.debug(
                 f"MCP tool response: tool=write_note project={active_project.name} action={action} permalink={response_permalink} observations_count={len(result.observations)} relations_count={len(result.relations)} resolved_relations={resolved} unresolved_relations={unresolved} similar_notes_count={len(similar_notes)}"
             )
             if output_format == "json":

@@ -29,6 +29,7 @@ from basic_memory.markdown.entity_parser import (
     _coerce_to_string,
     normalize_frontmatter_metadata,
 )
+from basic_memory.markdown.path_links import is_path_target, resolve_project_path
 from basic_memory.markdown.utils import schema_to_markdown
 from basic_memory.models import Entity
 from basic_memory.repository import (
@@ -725,7 +726,20 @@ def _merge_metadata_into_markdown(markdown_content: str, metadata: dict[str, Any
         # `type` now changes the note's classification, so it must cross the
         # same normalization and length boundary as write_note's note_type.
         sanitized["type"] = _NOTE_TYPE_ADAPTER.validate_python(raw_note_type)
+    return rewrite_frontmatter_fields(markdown_content, updates=sanitized)
 
+
+def rewrite_frontmatter_fields(
+    markdown_content: str,
+    *,
+    updates: dict[str, Any],
+    removals: frozenset[str] = frozenset(),
+) -> str:
+    """Set and remove frontmatter keys while leaving the note body byte-for-byte intact.
+
+    Section offsets are computed against the body, so callers that patch an
+    already-parsed note rely on the body round-tripping unchanged.
+    """
     had_separator = True
     if has_frontmatter(markdown_content):
         current_metadata = parse_frontmatter(markdown_content)
@@ -745,7 +759,9 @@ def _merge_metadata_into_markdown(markdown_content: str, metadata: dict[str, Any
         body = markdown_content
 
     merged_metadata = deepcopy(current_metadata)
-    merged_metadata.update(sanitized)
+    merged_metadata.update(updates)
+    for key in removals:
+        merged_metadata.pop(key, None)
 
     post = frontmatter.Post(body)
     post.metadata.update(merged_metadata)
@@ -953,10 +969,15 @@ async def resolve_deferred_self_relation(
     entity: Entity,
     session: AsyncSession | None = None,
 ) -> Entity | None:
-    # Background resolution excludes self-edges, so exact Markdown paths must
-    # resolve here before wikilink alias parsing can reinterpret filename bytes.
-    if target.startswith("/"):
-        return entity if target[1:] == entity.file_path else None
+    # Background resolution excludes self-edges, so path targets must resolve
+    # here, against this note's own path, before wikilink alias parsing can
+    # reinterpret filename bytes.
+    if is_path_target(target):
+        return (
+            entity
+            if resolve_project_path(target, entity.file_path) == f"/{entity.file_path}"
+            else None
+        )
     clean_target = target.strip()
     if clean_target.startswith("[[") and clean_target.endswith("]]"):
         clean_target = clean_target[2:-2].strip()

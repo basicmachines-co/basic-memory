@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Sequence
 
 from loguru import logger
@@ -10,6 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
+from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.repository.semantic_vector_index import (
     VectorDeletion,
@@ -20,6 +22,32 @@ from basic_memory.repository.semantic_vector_index import (
     validate_query_dimensions,
     validate_vector_dimensions,
 )
+
+
+# pgvector's HNSW scan hands back at most ``hnsw.ef_search`` rows, 40 by default,
+# whatever the LIMIT asks for; the server caps the setting at 1000.
+HNSW_EF_SEARCH_DEFAULT = 40
+HNSW_EF_SEARCH_MAX = 1000
+
+_PGVECTOR_VERSION = re.compile(r"^(\d+)\.(\d+)")
+
+
+def pgvector_supports_iterative_scan(extversion: str) -> bool:
+    """Whether this pgvector keeps scanning an HNSW index until the LIMIT is filled.
+
+    Iterative index scans arrived in pgvector 0.8.0. Before that, a scan stops at
+    ``hnsw.ef_search`` candidates, and a filter applied afterwards (the manifest
+    join, a scope narrower than the table) leaves the window under-filled, so the
+    adapter cannot promise the nearest ``limit`` rows in scope. A version string
+    the pattern cannot read counts as older.
+    """
+    match = _PGVECTOR_VERSION.match(extversion)
+    return match is not None and (int(match.group(1)), int(match.group(2))) >= (0, 8)
+
+
+def hnsw_ef_search_for(limit: int) -> int:
+    """The candidate-list size that lets one HNSW scan return ``limit`` rows."""
+    return min(max(limit, HNSW_EF_SEARCH_DEFAULT), HNSW_EF_SEARCH_MAX)
 
 
 class PgVectorIndex:
@@ -55,6 +83,19 @@ class PgVectorIndex:
                     raise SemanticDependenciesMissingError(
                         "pgvector extension is unavailable for this Postgres database."
                     ) from exc
+                version = await session.execute(
+                    text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
+                )
+                extversion = str(version.scalar_one())
+                # Trigger: the installed pgvector predates iterative index scans.
+                # Why: without them a scoped query silently returns fewer rows than
+                #   the window asked for; a deployment gap should read as one.
+                # Outcome: a typed dependency error the API reports as a bad request.
+                if not pgvector_supports_iterative_scan(extversion):
+                    raise SemanticDependenciesMissingError(
+                        f"pgvector {extversion} predates iterative index scans; semantic "
+                        "search needs pgvector 0.8 or later (ALTER EXTENSION vector UPDATE)."
+                    )
 
                 existing_dimensions = await self._existing_dimensions(session)
                 storage_missing = existing_dimensions is None
@@ -151,37 +192,7 @@ class PgVectorIndex:
         )
         return result.scalar_one_or_none() is not None
 
-    async def _chunk_ids_by_key(
-        self,
-        session: AsyncSession,
-        keys: Sequence[VectorKey],
-    ) -> dict[VectorKey, int]:
-        if not keys:
-            return {}
-
-        params: dict[str, object] = {"project_id": self.scope.project_id}
-        predicates: list[str] = []
-        for index, key in enumerate(keys):
-            params[f"entity_id_{index}"] = key.entity_id
-            params[f"chunk_key_{index}"] = key.chunk_key
-            predicates.append(
-                f"(entity_id = :entity_id_{index} AND chunk_key = :chunk_key_{index})"
-            )
-        result = await session.execute(
-            text(
-                "SELECT id, entity_id, chunk_key FROM search_vector_chunks "
-                "WHERE project_id = :project_id AND (" + " OR ".join(predicates) + ")"
-            ),
-            params,
-        )
-        return {
-            VectorKey(entity_id=int(row["entity_id"]), chunk_key=str(row["chunk_key"])): int(
-                row["id"]
-            )
-            for row in result.mappings().all()
-        }
-
-    async def upsert(self, records: Sequence[VectorRecord]) -> None:
+    async def upsert(self, project_id: int, records: Sequence[VectorRecord]) -> None:
         if not records:
             return
         validate_vector_dimensions(self.scope, records)
@@ -189,7 +200,7 @@ class PgVectorIndex:
 
         async with db.scoped_session(self._session_maker) as session:
             keys = [record.key for record in records]
-            params: dict[str, object] = {"project_id": self.scope.project_id}
+            params: dict[str, object] = {"project_id": project_id}
             predicates: list[str] = []
             for index, key in enumerate(keys):
                 params[f"entity_id_{index}"] = key.entity_id
@@ -224,7 +235,7 @@ class PgVectorIndex:
             if not current_records:
                 return
 
-            params = {"project_id": self.scope.project_id}
+            params = {"project_id": project_id}
             values: list[str] = []
             for index, record in enumerate(current_records):
                 params[f"chunk_id_{index}"] = manifest_by_key[record.key][0]
@@ -252,12 +263,12 @@ class PgVectorIndex:
             )
             await session.commit()
 
-    async def delete(self, records: Sequence[VectorDeletion]) -> None:
+    async def delete(self, project_id: int, records: Sequence[VectorDeletion]) -> None:
         if not records:
             return
         await self.initialize()
         async with db.scoped_session(self._session_maker) as session:
-            params: dict[str, object] = {"project_id": self.scope.project_id}
+            params: dict[str, object] = {"project_id": project_id}
             predicates: list[str] = []
             for index, record in enumerate(records):
                 params[f"entity_id_{index}"] = record.key.entity_id
@@ -294,7 +305,7 @@ class PgVectorIndex:
                 )
                 await session.commit()
 
-    async def delete_entity(self, entity_id: int) -> None:
+    async def delete_entity(self, project_id: int, entity_id: int) -> None:
         await self.initialize()
         async with db.scoped_session(self._session_maker) as session:
             await session.execute(
@@ -303,12 +314,12 @@ class PgVectorIndex:
                     "SELECT id FROM search_vector_chunks "
                     "WHERE project_id = :project_id AND entity_id = :entity_id)"
                 ),
-                {"project_id": self.scope.project_id, "entity_id": entity_id},
+                {"project_id": project_id, "entity_id": entity_id},
             )
             await session.commit()
 
-    async def delete_orphans(self, _live_keys: Sequence[VectorKey]) -> None:
-        """Remove pgvector rows absent from the current ready manifest scope."""
+    async def delete_orphans(self, project_id: int, _live_keys: Sequence[VectorKey]) -> None:
+        """Remove pgvector rows absent from one project's current ready manifest."""
         await self.initialize()
         async with db.scoped_session(self._session_maker) as session:
             await session.execute(
@@ -324,7 +335,7 @@ class PgVectorIndex:
                     "AND chunks.embedding_status = 'ready')"
                 ),
                 {
-                    "project_id": self.scope.project_id,
+                    "project_id": project_id,
                     "embedding_identity": self.scope.embedding_identity,
                 },
             )
@@ -335,36 +346,58 @@ class PgVectorIndex:
         query: Sequence[float],
         *,
         limit: int,
+        projects: ProjectScope,
     ) -> list[VectorMatch]:
-        if not query or limit <= 0:
+        if not query or limit <= 0 or projects.is_empty:
             return []
         validate_query_dimensions(self.scope, query)
         await self.initialize()
+        params: dict[str, object] = {
+            "query": self._format_vector(query),
+            "dimensions": self.scope.dimensions,
+            "embedding_identity": self.scope.embedding_identity,
+            "limit": limit,
+        }
+        # The scope binds its ids once; both predicates reference the same names.
+        embeddings_in_scope = projects.predicate("e.project_id", params)
+        chunks_in_scope = projects.predicate("c.project_id", params)
         async with db.scoped_session(self._session_maker) as session:
+            # Both settings are transaction-local, so they last exactly as long as
+            # this scoped session. The scan is sized to the window it must fill
+            # and continues past that until the scope and manifest filters have
+            # admitted enough rows, instead of stopping at the first ef_search
+            # candidates and returning whatever of them survived.
+            await session.execute(
+                text("SELECT set_config('hnsw.ef_search', :ef_search, true)"),
+                {"ef_search": str(hnsw_ef_search_for(limit))},
+            )
+            await session.execute(
+                text("SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true)")
+            )
+            # A relaxed iterative scan may hand rows back slightly out of distance
+            # order, so the window is taken by distance alone and sorted once more.
             result = await session.execute(
                 text(
+                    "WITH nearest AS MATERIALIZED ("
                     "SELECT c.entity_id, c.chunk_key, "
-                    "1 - (e.embedding <=> CAST(:query AS vector)) AS similarity "
+                    "e.embedding <=> CAST(:query AS vector) AS distance "
                     "FROM search_vector_embeddings e "
                     "JOIN search_vector_chunks c ON c.id = e.chunk_id "
-                    "WHERE e.project_id = :project_id "
+                    f"WHERE {embeddings_in_scope} "
                     "AND e.embedding_dims = :dimensions "
-                    "AND c.project_id = :project_id "
+                    f"AND {chunks_in_scope} "
                     "AND c.vector_index = 'pgvector' "
                     "AND c.embedding_status = 'ready' "
                     "AND c.embedding_model = :embedding_identity "
                     "AND e.source_hash = c.source_hash "
-                    "ORDER BY e.embedding <=> CAST(:query AS vector), "
-                    "c.entity_id ASC, c.chunk_key ASC "
+                    "ORDER BY e.embedding <=> CAST(:query AS vector) "
                     "LIMIT :limit"
+                    ") "
+                    "SELECT entity_id, chunk_key, 1 - distance AS similarity "
+                    "FROM nearest "
+                    "ORDER BY distance ASC, entity_id ASC, chunk_key ASC"
                 ),
-                {
-                    "query": self._format_vector(query),
-                    "project_id": self.scope.project_id,
-                    "dimensions": self.scope.dimensions,
-                    "embedding_identity": self.scope.embedding_identity,
-                    "limit": limit,
-                },
+                params,
             )
         return [
             VectorMatch(

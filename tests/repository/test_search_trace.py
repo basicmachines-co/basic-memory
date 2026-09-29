@@ -1,5 +1,6 @@
 """Execution-native search trace builders and repository integration."""
 
+from basic_memory.repository.search_scope import ProjectScope
 from collections.abc import Sequence
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -13,7 +14,7 @@ from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.search_index_row import SearchIndexRow
-from basic_memory.repository.search_repository_base import FUSION_BONUS
+from basic_memory.repository.search_reader import FUSION_BONUS
 from basic_memory.repository.search_trace import (
     BelowThreshold,
     FilteredOut,
@@ -67,11 +68,10 @@ class _TraceEmbeddingProvider:
 
 
 class _TraceVectorIndex:
-    def __init__(self, project_id: int) -> None:
+    def __init__(self) -> None:
         self.matches: list[VectorMatch] = []
         self.scope = VectorIndexScope(
             namespace="trace-test",
-            project_id=project_id,
             embedding_identity="trace-embedding",
             dimensions=4,
         )
@@ -79,16 +79,18 @@ class _TraceVectorIndex:
     async def initialize(self) -> None:
         return None
 
-    async def upsert(self, records: Sequence[VectorRecord]) -> None:
+    async def upsert(self, project_id: int, records: Sequence[VectorRecord]) -> None:
         return None
 
-    async def delete(self, records: Sequence[VectorDeletion]) -> None:
+    async def delete(self, project_id: int, records: Sequence[VectorDeletion]) -> None:
         return None
 
-    async def delete_entity(self, entity_id: int) -> None:
+    async def delete_entity(self, project_id: int, entity_id: int) -> None:
         return None
 
-    async def search(self, query: Sequence[float], *, limit: int) -> list[VectorMatch]:
+    async def search(
+        self, query: Sequence[float], *, limit: int, projects: ProjectScope
+    ) -> list[VectorMatch]:
         return self.matches[:limit]
 
 
@@ -524,7 +526,7 @@ def _repository(
             "semantic_vector_k": 10,
         }
     )
-    vector_index = _TraceVectorIndex(test_project.id)
+    vector_index = _TraceVectorIndex()
     repository_type = (
         PostgresSearchRepository
         if config.database_backend == DatabaseBackend.POSTGRES
@@ -685,10 +687,10 @@ async def test_vector_trace_captures_drops_threshold_filter_and_missing_on_same_
     assert all("auth retrieval" not in match.chunk_key for match in collector.vector.chunk_matches)
 
     async with db.scoped_session(repository.session_maker) as session:
-        assert await classify_hydration_drops(session, repository.project_id, ()) == ()
+        assert await classify_hydration_drops(session, repository.scope, ()) == ()
         readiness_race = await classify_hydration_drops(
             session,
-            repository.project_id,
+            repository.scope,
             (
                 HydrationDropKey(
                     entity_id=1,
@@ -722,7 +724,7 @@ async def test_classify_hydration_drops_batches_large_unhealthy_candidate_set(
     async with db.scoped_session(session_maker) as session:
         classified = await classify_hydration_drops(
             session,
-            test_project.id,
+            ProjectScope.single(test_project.id),
             dropped_keys,
         )
 
@@ -750,7 +752,7 @@ async def test_classify_hydration_drop_observes_pending_to_ready_transition(
         )
         await session.commit()
     async with db.scoped_session(session_maker) as session:
-        assert await repository._hydrate_vector_matches(session, [match]) == []
+        assert await repository._semantic_search()._hydrate_vector_matches(session, [match]) == []
 
     async with db.scoped_session(session_maker) as session:
         await session.execute(
@@ -764,7 +766,7 @@ async def test_classify_hydration_drop_observes_pending_to_ready_transition(
     async with db.scoped_session(session_maker) as session:
         classified = await classify_hydration_drops(
             session,
-            test_project.id,
+            ProjectScope.single(test_project.id),
             (
                 HydrationDropKey(
                     entity_id=1,

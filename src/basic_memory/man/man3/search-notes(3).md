@@ -21,7 +21,7 @@ MCP:
 
 ```
 search_notes(query=None, project=None, project_id=None,
-             search_all_projects=False, page=1, page_size=10,
+             search_all_projects=False, projects=None, page=1, page_size=10,
              search_type=None, output_format="text", note_types=None,
              entity_types=None, categories=None, after_date=None,
              metadata_filters=None, tags=None, status=None,
@@ -88,6 +88,7 @@ It is not a hard token budget: titles and metadata can still be large.
 - **project** (string | null, optional, default: None) — Project name to search in. Optional - server will resolve using hierarchy. If unknown, use list_memory_projects() to discover available projects.
 - **project_id** (string | null, optional, default: None) — Project external_id (UUID). Prefer this over `project` when known — it routes to the exact project regardless of name collisions across cloud workspaces. Takes precedence over `project`. Get from list_memory_projects().
 - **search_all_projects** (boolean, optional, default: False) — Optional opt-in to search every accessible project. Ignored when `project` or `project_id` is supplied.
+- **projects** (array | null, optional, default: None) — Optional list of project names or external ids to search together. Names are matched exactly as list_memory_projects() reports them (cloud projects by their workspace-qualified name). Ignored when `project` or `project_id` is supplied; an unknown name is an error rather than a silent skip.
 - **page** (integer, optional, default: 1) — The page number of results to return (default 1). Aliases: page_number.
 - **page_size** (integer, optional, default: 10) — The number of results to return per page (default 10). Aliases: limit, per_page.
 - **search_type** (string | null, optional, default: None) — Type of search to perform, one of: "text", "title", "permalink", "vector", "semantic", "hybrid". Default is dynamic: "hybrid" when semantic search is enabled, otherwise "text".

@@ -136,6 +136,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "project",
         "project_id",
         "search_all_projects",
+        "projects",
         "page",
         "page_size",
         "search_type",

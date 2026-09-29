@@ -33,6 +33,7 @@ from __future__ import annotations
 
 from typing import Any, Sequence
 
+from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.schemas.search import SearchItemType
 
 SEARCH_TABLE = "search_index"
@@ -49,6 +50,7 @@ def build_note_type_predicate(
     note_types: Sequence[str],
     params: dict[str, Any],
     *,
+    scope: ProjectScope,
     note_type_value: str,
 ) -> str:
     """Build the WHERE-clause fragment restricting rows to notes of the given types.
@@ -57,19 +59,22 @@ def build_note_type_predicate(
     documented case-insensitive, so both sides are folded to lowercase.
 
     Binds are added to `params` in place, following the convention the surrounding FTS
-    query builders already use. `project_id` is bound by the caller for the whole query.
+    query builders already use. The owning note is matched on `(project_id, id)`: the
+    search row's identity is composite, and the subquery is restricted to `scope` so an
+    owner outside the caller's projects can never admit a row.
     """
     placeholders = []
     for index, note_type in enumerate(note_types):
         name = f"note_type_{index}"
         params[name] = note_type.lower()
         placeholders.append(f":{name}")
+    owner_scope = scope.predicate(f"{_OWNER}.project_id", params)
 
     return (
-        f"{SEARCH_TABLE}.entity_id IN (\n"
-        f"  SELECT {_OWNER}.id\n"
+        f"({SEARCH_TABLE}.project_id, {SEARCH_TABLE}.entity_id) IN (\n"
+        f"  SELECT {_OWNER}.project_id, {_OWNER}.id\n"
         f"    FROM {SEARCH_TABLE} AS {_OWNER}\n"
         f"   WHERE {_OWNER}.type = '{SearchItemType.ENTITY.value}'\n"
-        f"     AND {_OWNER}.project_id = :project_id\n"
+        f"     AND {owner_scope}\n"
         f"     AND LOWER({note_type_value}) IN ({', '.join(placeholders)}))"
     )

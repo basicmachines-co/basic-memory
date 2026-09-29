@@ -4,7 +4,7 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any, NoReturn
+from typing import Any, Literal, NoReturn
 
 import typer
 from loguru import logger
@@ -1147,7 +1147,20 @@ def index_project_command(
 def remove_project(
     name: str = typer.Argument(..., help="Name of the project to remove"),
     delete_notes: bool = typer.Option(
-        False, "--delete-notes", help="Delete project files from disk"
+        False,
+        "--delete-notes",
+        help=(
+            "Delete a local project's files from disk. Cloud projects always delete "
+            "their cloud files."
+        ),
+    ),
+    delete_local_files: bool = typer.Option(
+        False,
+        "--delete-local-files",
+        help="Cloud projects only: also delete the local sync directory on this machine",
+    ),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Delete a cloud project without a confirmation prompt"
     ),
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
@@ -1155,6 +1168,14 @@ def remove_project(
     cloud: bool = typer.Option(False, "--cloud", help="Force cloud API routing"),
 ) -> None:
     """Remove a project.
+
+    Removing a local project stops tracking it; its files stay on disk unless
+    you pass --delete-notes.
+
+    Removing a cloud project always deletes its files from cloud storage. They
+    can be recovered only from a cloud snapshot (`bm cloud snapshot list`). You
+    are asked to confirm first; pass --yes to skip the prompt in scripts. A
+    local sync directory is kept unless you pass --delete-local-files.
 
     Use --local to force local routing when cloud mode is enabled.
     Use --cloud to force cloud routing when cloud mode is disabled.
@@ -1165,54 +1186,95 @@ def remove_project(
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
 
+    # A display name and its permalink address the same entry, and the API
+    # accepts either, so resolve the config key the same permalink-aware way.
+    config_manager = ConfigManager()
+    config = config_manager.config
+    entry_name, _ = config_manager.get_project(name)
+    entry = config.projects.get(entry_name) if entry_name else None
+    route_name = entry_name or name
+
+    # The delete is cloud-routed on an explicit --cloud, or when per-project
+    # routing sends it there: a cloud-mode entry, or a name with no local entry
+    # at all (get_client treats unknown projects as cloud-only). Local-artifact
+    # cleanup and the file-deletion policy must follow the route the delete
+    # actually takes, not just the flag.
+    cloud_routed = not local and (cloud or config.get_project_mode(route_name) == ProjectMode.CLOUD)
+
+    # Trigger: --delete-local-files on a delete that goes to the local API.
+    # Why: the flag names the local copy of a cloud project; on a local project
+    #   it would silently overlap --delete-notes, so the intent is unclear.
+    # Outcome: fail before anything is deleted.
+    if delete_local_files and not cloud_routed:
+        console.print(
+            "[red]Error: --delete-local-files applies only to cloud projects. "
+            "Use --delete-notes to delete a local project's files.[/red]"
+        )
+        raise typer.Exit(1)
+
+    local_path_config = None
+    bisync_state_path: Path | None = None
+    if cloud_routed and entry is not None and entry_name is not None and entry.local_sync_path:
+        local_path_config = entry.local_sync_path
+
+        # Bisync state is keyed by the canonical config name, not the form
+        # the user typed.
+        from basic_memory.cli.commands.cloud.rclone_commands import get_project_bisync_state
+
+        bisync_state_path = get_project_bisync_state(entry_name)
+
+    # Trigger: the delete goes to the cloud.
+    # Why: the cloud service always deletes a project's files on delete
+    #   (basic-memory-cloud#2117); files kept under a deleted project were
+    #   unreachable, so there is no "keep cloud files" option. The only way back
+    #   is a snapshot restore, and the user should hear that before, not after.
+    # Outcome: explain what will be deleted and what is kept, then require a
+    #   yes unless --yes was passed. Declining exits without deleting anything.
+    if cloud_routed:
+        console.print(
+            f"[yellow]Removing cloud project '{name}' permanently deletes all of its files "
+            "in cloud storage. They can be recovered only from a cloud snapshot "
+            "(`bm cloud snapshot list`).[/yellow]"
+        )
+        if local_path_config and delete_local_files:
+            console.print(
+                f"[yellow]The local sync directory {local_path_config} will also be "
+                "deleted.[/yellow]"
+            )
+        elif local_path_config:
+            console.print(f"The local sync directory {local_path_config} will be kept.")
+        if not yes and not typer.confirm(f"Delete cloud project '{name}' and its cloud files?"):
+            console.print("[yellow]Remove cancelled - nothing deleted[/yellow]")
+            raise typer.Exit(0)
+
+    # Local deletes keep the caller's choice; cloud deletes always ask the
+    # service to delete files so the request matches what the server does.
+    request_delete_notes = True if cloud_routed else delete_notes
+
     async def _remove_project():
         # Resolve workspace so cloud-only projects auto-route without --cloud
-        config_manager = ConfigManager()
-        config = config_manager.config
-        entry_name, _ = config_manager.get_project(name)
-        entry = config.projects.get(entry_name) if entry_name else None
         ws = None
         if entry and entry.workspace_id:
             ws = entry.workspace_id
         elif config.default_workspace:
             ws = config.default_workspace
 
-        async with get_client(project_name=name, workspace=ws) as client:
+        async with get_client(project_name=route_name, workspace=ws) as client:
             project_client = ProjectClient(client)
             # Convert name to permalink for efficient resolution
             project_permalink = generate_permalink(name)
             target_project = await project_client.resolve_project(project_permalink)
             return await project_client.delete_project(
-                target_project.external_id, delete_notes=delete_notes
+                target_project.external_id, delete_notes=request_delete_notes
             )
 
     try:
-        # A display name and its permalink address the same entry, and the API
-        # accepts either, so resolve the config key the same permalink-aware way.
-        config_manager = ConfigManager()
-        config = config_manager.config
-        entry_name, _ = config_manager.get_project(name)
-        entry = config.projects.get(entry_name) if entry_name else None
-        # The delete is cloud-routed on an explicit --cloud or a cloud-mode entry
-        # (per-project routing); local-artifact cleanup must follow the route the
-        # delete actually takes, not just the flag.
-        cloud_routed = cloud or (entry is not None and entry.mode == ProjectMode.CLOUD)
-        local_path_config = None
-        bisync_state_path: Path | None = None
-
-        if cloud_routed and entry is not None and entry_name is not None and entry.local_sync_path:
-            local_path_config = entry.local_sync_path
-
-            # Bisync state is keyed by the canonical config name, not the form
-            # the user typed.
-            from basic_memory.cli.commands.cloud.rclone_commands import get_project_bisync_state
-
-            bisync_state_path = get_project_bisync_state(entry_name)
-
         # Remove project from cloud/API
         with force_routing(local=local, cloud=cloud):
             result = run_with_cleanup(_remove_project())
         console.print(f"[green]{result.message}[/green]")
+        if cloud_routed:
+            console.print(_cloud_file_delete_message(result.file_delete_status))
 
         # Trigger: the entry is a cloud-mode routing entry (written by
         # `project add --cloud` or `set-cloud`). An explicit --cloud alone is only
@@ -1247,14 +1309,20 @@ def remove_project(
                 del config.projects[entry_name]
             config_manager.save_config(config)
 
-        # Clean up local sync directory if it exists and delete_notes is True
-        if delete_notes and local_path_config:
+        # Trigger: a cloud project with a local sync directory.
+        # Why: that directory is the user's own copy; deleting it is a separate
+        #   decision from deleting the cloud files, so only --delete-local-files
+        #   removes it.
+        # Outcome: the directory is deleted or kept, and the output says which.
+        if local_path_config:
             local_dir = Path(local_path_config)
-            if local_dir.exists():
+            if delete_local_files and local_dir.exists():
                 import shutil
 
                 shutil.rmtree(local_dir)
                 console.print(f"[green]Removed local sync directory: {local_path_config}[/green]")
+            elif local_dir.exists():
+                console.print(f"[yellow]Local files kept at {local_path_config}[/yellow]")
 
         # Clean up bisync state if it exists
         if bisync_state_path is not None and bisync_state_path.exists():
@@ -1263,15 +1331,28 @@ def remove_project(
             shutil.rmtree(bisync_state_path)
             console.print("[green]Removed bisync state[/green]")
 
-        # Show informative message if files were not deleted
-        if not delete_notes:
-            if local_path_config:
-                console.print(f"[yellow]Note: Local files remain at {local_path_config}[/yellow]")
-
     except Exception as e:
         # str() of httpx transport errors is often empty (#1034) — never print a blank error.
         console.print(f"[red]Error removing project: {str(e) or repr(e)}[/red]")
         raise typer.Exit(1)
+
+
+def _cloud_file_delete_message(
+    status: Literal["pending", "skipped", "complete", "failed"] | None,
+) -> str:
+    """Describe the cloud file deletion without overstating backend completion."""
+    if status == "complete":
+        return "[green]Cloud files deleted.[/green]"
+    if status == "pending":
+        return "[green]Cloud file deletion queued.[/green]"
+    if status == "failed":
+        return "[red]Cloud file deletion failed; some cloud files may remain.[/red]"
+    if status == "skipped":
+        return (
+            "[yellow]The cloud service reported file deletion as skipped; "
+            "cloud files may remain.[/yellow]"
+        )
+    return "[yellow]The cloud service did not report a file deletion status.[/yellow]"
 
 
 @project_app.command("default")

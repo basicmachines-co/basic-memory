@@ -513,7 +513,7 @@ async def move_note(
         active_project,
     ):
         destination_target = destination_folder or destination_path
-        logger.info(
+        logger.debug(
             f"MCP tool call tool=move_note project={active_project.name} "
             f"identifier={identifier} destination={destination_target} "
             f"is_directory={str(is_directory).lower()}"
@@ -1016,7 +1016,7 @@ move_note("{identifier}", destination_folder="notes")
             ]
 
             # Log the operation
-            logger.info(
+            logger.debug(
                 f"MCP tool response: tool=move_note project={active_project.name} "
                 f"source={identifier} destination={result.file_path} permalink={result.permalink}"
             )

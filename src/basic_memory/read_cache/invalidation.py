@@ -29,24 +29,24 @@ async def invalidate_project_read_cache(
     project_id: str,
 ) -> ReadCacheInvalidationStatus:
     """Invalidate one project without failing an already-committed mutation."""
-    with logfire.span("read_cache.invalidate_project") as span:
-        try:
-            status = await cache.invalidate_project(project_id)
-        except ReadCacheUnavailable as error:
-            # Trigger: an authoritative mutation committed while Redis was unavailable.
-            # Why: failing the request cannot roll the mutation back and would invite
-            # duplicate retries; the configured response TTL bounds stale exposure.
-            # Outcome: surface prominent telemetry and let the committed write succeed.
-            status = ReadCacheInvalidationStatus.unavailable
-            logger.error(
-                "Read cache project invalidation unavailable; cached values may remain "
-                "reachable until TTL expiry",
-                error=str(error),
-            )
+    try:
+        status = await cache.invalidate_project(project_id)
+    except ReadCacheUnavailable as error:
+        # Trigger: an authoritative mutation committed while Redis was unavailable.
+        # Why: failing the request cannot roll the mutation back and would invite
+        # duplicate retries; the configured response TTL bounds stale exposure.
+        # Outcome: surface prominent telemetry and let the committed write succeed.
+        status = ReadCacheInvalidationStatus.unavailable
+        logger.error(
+            "Read cache project invalidation unavailable; cached values may remain "
+            "reachable until TTL expiry",
+            error=str(error),
+        )
 
-        _record_invalidation_event(status)
-        span.set_attribute("cache.outcome", status.value)
-        return status
+    # Every write invalidates, so a span here fired per mutation; the events counter
+    # carries the outcome and unavailability still logs an error above.
+    _record_invalidation_event(status)
+    return status
 
 
 async def finish_project_read_cache_invalidation(

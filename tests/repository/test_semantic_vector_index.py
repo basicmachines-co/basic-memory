@@ -14,6 +14,7 @@ from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.search_repository import create_search_repository
+from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_errors import (
     SemanticDependenciesMissingError,
 )
@@ -59,13 +60,13 @@ class StubVectorIndex:
     async def initialize(self) -> None:
         return None
 
-    async def upsert(self, records: Sequence[VectorRecord]) -> None:
+    async def upsert(self, project_id: int, records: Sequence[VectorRecord]) -> None:
         return None
 
-    async def delete(self, records: Sequence[VectorDeletion]) -> None:
+    async def delete(self, project_id: int, records: Sequence[VectorDeletion]) -> None:
         return None
 
-    async def delete_entity(self, entity_id: int) -> None:
+    async def delete_entity(self, project_id: int, entity_id: int) -> None:
         return None
 
     async def search(
@@ -73,6 +74,7 @@ class StubVectorIndex:
         query: Sequence[float],
         *,
         limit: int,
+        projects: ProjectScope,
     ) -> list[VectorMatch]:
         return []
 
@@ -92,7 +94,6 @@ def _postgres_config(**overrides: object) -> BasicMemoryConfig:
 def test_vector_contract_values_and_dimension_validation() -> None:
     scope = VectorIndexScope(
         namespace="basic-memory-test",
-        project_id=7,
         embedding_identity="stub:3",
         dimensions=3,
     )
@@ -127,9 +128,9 @@ def test_selector_defaults_to_pgvector_and_sqlite_remains_automatic() -> None:
         _postgres_config(semantic_vector_index="test-extension")
 
 
-def test_scope_is_stable_credential_free_and_project_isolated() -> None:
+def test_scope_is_stable_and_credential_free() -> None:
     provider: EmbeddingProvider = StubEmbeddingProvider()
-    first = build_vector_index_scope(_postgres_config(), provider, project_id=7)
+    first = build_vector_index_scope(_postgres_config(), provider)
     rotated_password = build_vector_index_scope(
         _postgres_config(
             database_url=(
@@ -137,15 +138,12 @@ def test_scope_is_stable_credential_free_and_project_isolated() -> None:
             )
         ),
         provider,
-        project_id=7,
     )
-    other_project = build_vector_index_scope(_postgres_config(), provider, project_id=8)
     other_user = build_vector_index_scope(
         _postgres_config(
             database_url="postgresql+asyncpg://tenant-user:secret@db.example.test:5432/memory"
         ),
         provider,
-        project_id=7,
     )
     other_schema = build_vector_index_scope(
         _postgres_config(
@@ -155,7 +153,6 @@ def test_scope_is_stable_credential_free_and_project_isolated() -> None:
             )
         ),
         provider,
-        project_id=7,
     )
     first_socket = build_vector_index_scope(
         _postgres_config(
@@ -164,7 +161,6 @@ def test_scope_is_stable_credential_free_and_project_isolated() -> None:
             )
         ),
         provider,
-        project_id=7,
     )
     other_socket = build_vector_index_scope(
         _postgres_config(
@@ -173,18 +169,16 @@ def test_scope_is_stable_credential_free_and_project_isolated() -> None:
             )
         ),
         provider,
-        project_id=7,
     )
 
     assert first.namespace == rotated_password.namespace
     assert "secret" not in first.namespace
-    assert first.project_id != other_project.project_id
     assert first.namespace != other_user.namespace
     assert first.namespace != other_schema.namespace
     assert first_socket.namespace != other_socket.namespace
     assert first.embedding_identity == "StubEmbeddingProvider:stub-model:3"
     assert first.dimensions == 3
-    assert first.storage_key == rotated_password.storage_key
+    assert first == rotated_password
 
 
 def test_milvus_without_optional_dependencies_reports_install_extra(monkeypatch) -> None:
@@ -213,7 +207,6 @@ def test_milvus_without_optional_dependencies_reports_install_extra(monkeypatch)
     ):
         create_semantic_vector_index(
             session_maker=MagicMock(),
-            project_id=7,
             app_config=config,
             database_backend=DatabaseBackend.POSTGRES,
             embedding_provider=StubEmbeddingProvider(),
@@ -222,7 +215,7 @@ def test_milvus_without_optional_dependencies_reports_install_extra(monkeypatch)
 
 def test_search_repository_composition_root_injects_selected_adapter(monkeypatch) -> None:
     provider = StubEmbeddingProvider()
-    scope = build_vector_index_scope(_postgres_config(), provider, project_id=7)
+    scope = build_vector_index_scope(_postgres_config(), provider)
     index = StubVectorIndex(scope)
     monkeypatch.setattr(
         "basic_memory.repository.search_repository.create_embedding_provider",

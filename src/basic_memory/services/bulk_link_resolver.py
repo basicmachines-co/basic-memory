@@ -8,6 +8,8 @@ import uuid as uuid_mod
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory.config import BasicMemoryConfig
+from basic_memory.indexing.models import RelationTargetRequest
+from basic_memory.markdown.path_links import is_path_target, resolve_project_path
 from basic_memory.models import Entity, Project
 from basic_memory.repository.entity_repository import EntityRepository, file_path_alias
 from basic_memory.repository.project_repository import ProjectRepository
@@ -30,22 +32,37 @@ class RelationTargetReference:
     original: str
     identifier: str
     explicitly_qualified: bool
+    # The note a path target is relative to; identity targets carry none.
+    source_path: str | None = None
 
     @classmethod
-    def parse(cls, link_text: str) -> "RelationTargetReference":
+    def parse(cls, link_text: str, source_path: str | None = None) -> "RelationTargetReference":
         """Normalize wikilink syntax once for the whole bulk-resolution pass."""
-        if link_text.startswith("/"):
-            return cls(original=link_text, identifier=link_text, explicitly_qualified=False)
         clean_text, _ = normalize_link_text(link_text)
+        if is_path_target(clean_text):
+            return cls(
+                original=link_text,
+                identifier=clean_text,
+                explicitly_qualified=False,
+                source_path=source_path,
+            )
         return cls(
             original=link_text,
             identifier=normalize_project_reference(clean_text),
             explicitly_qualified="::" in clean_text,
         )
 
+    @classmethod
+    def from_request(cls, request: RelationTargetRequest) -> "RelationTargetReference":
+        return cls.parse(request.link_text, request.source_path)
+
+    @property
+    def is_path(self) -> bool:
+        return is_path_target(self.identifier)
+
     def project_path(self) -> tuple[str | None, str]:
         """Return a possible project prefix and its remaining target path."""
-        if "/" not in self.identifier:
+        if self.is_path or "/" not in self.identifier:
             return None, self.identifier
 
         project_prefix, remainder = self.identifier.split("/", 1)
@@ -208,10 +225,11 @@ class BulkLinkResolutionSnapshot:
         """Resolve one parsed target without additional I/O."""
         current_index = self.entity_indexes[self.current_project_id]
 
-        # Rooted Markdown targets are file identities, never title/permalink or
-        # cross-project guesses, including while their target is still absent.
-        if target.identifier.startswith("/"):
-            return current_index.by_file_path.get(target.identifier[1:])
+        # Path targets are file identities relative to their source note, never
+        # title, permalink or cross-project guesses, including while absent.
+        if target.is_path:
+            project_path = resolve_project_path(target.identifier, target.source_path)
+            return current_index.by_file_path.get(project_path[1:]) if project_path else None
 
         try:
             external_id = str(uuid_mod.UUID(target.identifier))
@@ -332,13 +350,14 @@ class BulkLinkResolver:
 
     async def resolve_relation_targets(
         self,
-        link_texts: Sequence[str],
+        requests: Sequence[RelationTargetRequest],
         *,
         session: AsyncSession,
-    ) -> dict[str, Entity | None]:
+    ) -> dict[RelationTargetRequest, Entity | None]:
         """Resolve unique relation targets with I/O bounded by referenced projects."""
+        unique_requests = tuple(dict.fromkeys(requests))
         targets = tuple(
-            RelationTargetReference.parse(link_text) for link_text in dict.fromkeys(link_texts)
+            RelationTargetReference.from_request(request) for request in unique_requests
         )
         if not targets:
             return {}
@@ -350,4 +369,7 @@ class BulkLinkResolver:
             app_config=self.app_config,
             session=session,
         )
-        return {target.original: snapshot.resolve(target) for target in targets}
+        return {
+            request: snapshot.resolve(target)
+            for request, target in zip(unique_requests, targets, strict=True)
+        }

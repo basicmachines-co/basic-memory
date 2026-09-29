@@ -13,6 +13,7 @@ from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.repository.search_index_row import SearchIndexRow
+from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.semantic_vector_index import (
     VectorDeletion,
     VectorIndexScope,
@@ -74,17 +75,17 @@ class InMemoryExternalVectorIndex:
     async def initialize(self) -> None:
         return None
 
-    async def upsert(self, records: Sequence[VectorRecord]) -> None:
+    async def upsert(self, project_id: int, records: Sequence[VectorRecord]) -> None:
         for record in records:
             self.records[record.key] = record
 
-    async def delete(self, records: Sequence[VectorDeletion]) -> None:
+    async def delete(self, project_id: int, records: Sequence[VectorDeletion]) -> None:
         for deletion in records:
             current = self.records.get(deletion.key)
             if current is not None and current.source_hash == deletion.source_hash:
                 self.records.pop(deletion.key)
 
-    async def delete_entity(self, entity_id: int) -> None:
+    async def delete_entity(self, project_id: int, entity_id: int) -> None:
         self.records = {
             key: record for key, record in self.records.items() if key.entity_id != entity_id
         }
@@ -94,6 +95,7 @@ class InMemoryExternalVectorIndex:
         query: Sequence[float],
         *,
         limit: int,
+        projects: ProjectScope,
     ) -> list[VectorMatch]:
         return []
 
@@ -144,7 +146,6 @@ async def _repositories(
         vector_index = InMemoryExternalVectorIndex(
             VectorIndexScope(
                 namespace="generation-ownership",
-                project_id=project_id,
                 embedding_identity="test:4",
                 dimensions=4,
             )

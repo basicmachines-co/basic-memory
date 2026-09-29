@@ -33,6 +33,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.temporal import TemporalFilter, TemporalRange
 
 TEMPORAL_INDEX_TABLE = "memory_time_index"
@@ -84,7 +85,9 @@ def _not_window_ends_before_source(window: TemporalRange) -> str | None:
     return f"({' OR '.join(clauses)})"
 
 
-def build_temporal_predicate(temporal: TemporalFilter, params: dict[str, Any]) -> str:
+def build_temporal_predicate(
+    temporal: TemporalFilter, params: dict[str, Any], *, scope: ProjectScope
+) -> str:
     """Build the WHERE-clause fragment restricting search rows by authored valid time.
 
     Two intervals overlap exactly when neither lies entirely before the other, which
@@ -97,7 +100,8 @@ def build_temporal_predicate(temporal: TemporalFilter, params: dict[str, Any]) -
     documented default for a valid-time query.
 
     Binds are added to `params` in place, following the convention already used by the
-    surrounding FTS query builders.
+    surrounding FTS query builders. Assertions are read from `scope` only, and the
+    search row is matched on its full `(project_id, type, id)` identity.
     """
     window = temporal.window
     if window is not None and window.is_empty:
@@ -105,7 +109,7 @@ def build_temporal_predicate(temporal: TemporalFilter, params: dict[str, Any]) -
         # false constant is both correct and cheaper than running the subquery.
         return _MATCHES_NOTHING
 
-    conditions = [f"{TEMPORAL_INDEX_TABLE}.project_id = :project_id"]
+    conditions = [scope.predicate(f"{TEMPORAL_INDEX_TABLE}.project_id", params)]
 
     if temporal.kind is not None:
         params["tq_kind"] = temporal.kind.value
@@ -135,11 +139,12 @@ def build_temporal_predicate(temporal: TemporalFilter, params: dict[str, Any]) -
         )
 
     where_clause = "\n     AND ".join(conditions)
-    # (type, id) is the search row's own identity and the address this projection
-    # stores, so the pair joins the two without a correlated reference.
+    # (project_id, type, id) is the search row's own identity and the address this
+    # projection stores, so the triple joins the two without a correlated reference.
     return (
-        "(search_index.type, search_index.id) IN (\n"
-        f"  SELECT {TEMPORAL_INDEX_TABLE}.source_type, {TEMPORAL_INDEX_TABLE}.source_id\n"
+        "(search_index.project_id, search_index.type, search_index.id) IN (\n"
+        f"  SELECT {TEMPORAL_INDEX_TABLE}.project_id, "
+        f"{TEMPORAL_INDEX_TABLE}.source_type, {TEMPORAL_INDEX_TABLE}.source_id\n"
         f"    FROM {TEMPORAL_INDEX_TABLE}\n"
         f"   WHERE {where_clause})"
     )

@@ -240,7 +240,7 @@ async def read_content(
             # different accessible workspace holding the same permalink (#1432).
             project, project_id = detected.project, detected.project_id
 
-    logger.info(f"MCP tool call tool=read_content project={project} path={path}")
+    logger.debug(f"MCP tool call tool=read_content project={project} path={path}")
 
     async with get_project_client(project, context=context, project_id=project_id) as (
         client,
@@ -289,7 +289,7 @@ async def read_content(
         # Handle text or json
         if content_type.startswith("text/") or content_type == "application/json":
             logger.debug("Processing text resource")
-            logger.info(
+            logger.debug(
                 f"MCP tool response: tool=read_content project={active_project.name} "
                 f"path={url} type=text content_type={content_type}"
             )
@@ -305,7 +305,7 @@ async def read_content(
             logger.debug("Processing image")
             img = PILImage.open(io.BytesIO(response.content))
             img_bytes = optimize_image(img, content_length)
-            logger.info(
+            logger.debug(
                 f"MCP tool response: tool=read_content project={active_project.name} "
                 f"path={url} type=image content_type=image/jpeg"
             )
@@ -328,7 +328,7 @@ async def read_content(
                     "type": "error",
                     "error": f"Document size {content_length} bytes exceeds maximum allowed size",
                 }
-            logger.info(
+            logger.debug(
                 f"MCP tool response: tool=read_content project={active_project.name} "
                 f"path={url} type=document content_type={content_type}"
             )

@@ -22,15 +22,23 @@ class _StubCrossEncoder:
     init_count = 0
     last_init_kwargs: dict[str, Any] = {}
 
-    def __init__(self, model_name: str, cache_dir: str | None = None, threads: int | None = None):
+    def __init__(
+        self,
+        model_name: str,
+        cache_dir: str | None = None,
+        threads: int | None = None,
+        enable_cpu_mem_arena: bool = True,
+    ):
         _StubCrossEncoder.last_init_kwargs = {
             "model_name": model_name,
             "cache_dir": cache_dir,
             "threads": threads,
+            "enable_cpu_mem_arena": enable_cpu_mem_arena,
         }
         _StubCrossEncoder.init_count += 1
 
-    def rerank(self, query: str, documents: list[str]):
+    def rerank(self, query: str, documents: list[str], batch_size: int = 64):
+        assert batch_size == 8
         # Score = count of query-token overlaps, so tests can assert ordering.
         tokens = set(query.lower().split())
         for doc in documents:
@@ -143,7 +151,7 @@ async def test_rerank_sigmoid_handles_extreme_logits(monkeypatch):
         def __init__(self, **kwargs):
             pass
 
-        def rerank(self, query, documents):
+        def rerank(self, query, documents, batch_size=64):
             yield -1000.0
             yield 1000.0
 
@@ -165,7 +173,7 @@ async def test_rerank_rejects_non_finite_logits(monkeypatch, logit):
         def __init__(self, **kwargs):
             pass
 
-        def rerank(self, query, documents):
+        def rerank(self, query, documents, batch_size=64):
             yield logit
 
     setattr(module, "TextCrossEncoder", _NonFinite)
@@ -184,7 +192,7 @@ async def test_rerank_rejects_missing_model_scores(monkeypatch):
         def __init__(self, **kwargs):
             pass
 
-        def rerank(self, query, documents):
+        def rerank(self, query, documents, batch_size=64):
             yield 0.5
 
     setattr(module, "TextCrossEncoder", _Incomplete)
@@ -215,6 +223,7 @@ async def test_passes_cache_dir_and_threads_to_model(monkeypatch):
         "model_name": "stub-reranker",
         "cache_dir": "/tmp/rr-cache",
         "threads": 3,
+        "enable_cpu_mem_arena": False,
     }
 
 
@@ -320,3 +329,15 @@ async def test_download_auth_error_remains_permanent(monkeypatch):
 def test_runtime_log_attrs():
     provider = FastEmbedRerankProvider(model_name="stub-reranker", threads=2)
     assert provider.runtime_log_attrs() == {"model_name": "stub-reranker", "threads": 2}
+
+
+@pytest.mark.asyncio
+async def test_rerank_scores_every_candidate_beyond_one_batch(monkeypatch):
+    _install_stub(monkeypatch)
+    provider = FastEmbedRerankProvider(model_name="stub-reranker")
+    documents = ["auth token" if i % 2 else "unrelated" for i in range(21)]
+
+    scores = await provider.rerank("auth token", documents)
+
+    assert len(scores) == len(documents)
+    assert scores == pytest.approx([0.8807970779778823 if i % 2 else 0.5 for i in range(21)])

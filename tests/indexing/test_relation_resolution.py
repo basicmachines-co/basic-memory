@@ -23,7 +23,7 @@ from basic_memory.indexing.relation_resolution import (
     resolve_project_index_completion_relations,
     resolve_project_relations,
 )
-from basic_memory.indexing.models import IndexFileJobStatus
+from basic_memory.indexing.models import IndexFileJobStatus, RelationTargetRequest
 from basic_memory.models import Entity
 from basic_memory.repository.relation_repository import (
     PendingRelationSearchRefresh,
@@ -84,6 +84,7 @@ class FakeRelation:
 class FakeResolvedEntity:
     id: int
     title: str
+    file_path: str = ""
 
     @property
     def external_id(self) -> str:
@@ -222,16 +223,18 @@ class StubLinkResolver:
     def __init__(self, targets: dict[str, FakeResolvedEntity]) -> None:
         self.targets = targets
         self.calls: list[tuple[str, bool]] = []
+        self.requests: list[RelationTargetRequest] = []
 
     async def resolve_relation_targets(
         self,
-        link_texts: Sequence[str],
+        requests: Sequence[RelationTargetRequest],
         *,
         session: AsyncSession,
-    ) -> Mapping[str, FakeResolvedEntity | None]:
+    ) -> Mapping[RelationTargetRequest, FakeResolvedEntity | None]:
         assert isinstance(session, FakeSession)
-        self.calls.extend((link_text, True) for link_text in link_texts)
-        return {link_text: self.targets.get(link_text) for link_text in link_texts}
+        self.requests.extend(requests)
+        self.calls.extend((request.link_text, True) for request in requests)
+        return {request: self.targets.get(request.link_text) for request in requests}
 
 
 class StubEntityIndexer:
@@ -283,11 +286,12 @@ def build_repository_runtime(
     target_resolver: StubLinkResolver,
     entity_indexer: StubEntityIndexer,
     note_contents: Sequence[FakeNoteContent] = (),
+    entity_repository: StubEntityRepository | None = None,
 ) -> RepositoryRelationResolutionRuntime:
     return RepositoryRelationResolutionRuntime(
         session_maker=cast(async_sessionmaker[AsyncSession], FakeSession),
         relation_repository=relation_repository,
-        entity_repository=StubEntityRepository(),
+        entity_repository=entity_repository or StubEntityRepository(),
         note_content_repository=StubNoteContentRepository(note_contents),
         target_resolver=target_resolver,
         entity_indexer=entity_indexer,
@@ -496,6 +500,54 @@ async def test_resolution_loop_is_bounded_by_max_passes() -> None:
     assert result.passes == 3
     assert result.remaining == 0
     assert runtime.resolve_calls == 3
+
+
+@pytest.mark.asyncio
+async def test_path_targets_are_resolved_per_source_note() -> None:
+    """The same authored path from two notes names two files; a title resolves once for both."""
+    repo = StubRelationRepository(
+        [
+            [
+                FakeRelation(id=1, from_id=10, to_name="./Guide.md"),
+                FakeRelation(id=2, from_id=11, to_name="./Guide.md"),
+                FakeRelation(id=3, from_id=10, to_name="Shared Title"),
+                FakeRelation(id=4, from_id=11, to_name="Shared Title"),
+            ],
+            [],
+        ]
+    )
+    guides = {
+        RelationTargetRequest("./Guide.md", "a/Source A.md"): FakeResolvedEntity(20, "Guide A"),
+        RelationTargetRequest("./Guide.md", "b/Source B.md"): FakeResolvedEntity(21, "Guide B"),
+        RelationTargetRequest("Shared Title"): FakeResolvedEntity(22, "Shared Title"),
+    }
+
+    class SourceAwareLinkResolver(StubLinkResolver):
+        @override
+        async def resolve_relation_targets(
+            self,
+            requests: Sequence[RelationTargetRequest],
+            *,
+            session: AsyncSession,
+        ) -> Mapping[RelationTargetRequest, FakeResolvedEntity | None]:
+            self.requests.extend(requests)
+            return {request: guides.get(request) for request in requests}
+
+    link_resolver = SourceAwareLinkResolver({})
+    sources = StubEntityRepository()
+    sources.entities = {
+        10: cast(Entity, FakeResolvedEntity(10, "Source A", file_path="a/Source A.md")),
+        11: cast(Entity, FakeResolvedEntity(11, "Source B", file_path="b/Source B.md")),
+    }
+    runtime = build_repository_runtime(
+        repo, link_resolver, StubEntityIndexer(), entity_repository=sources
+    )
+
+    assert await runtime.resolve_relations() == {10, 11}
+
+    assert link_resolver.requests == list(guides)
+    written = sorted((write.relation_id, write.target_id) for write in repo.write_batches[0])
+    assert written == [(1, 20), (2, 21), (3, 22), (4, 22)]
 
 
 @pytest.mark.asyncio
@@ -793,15 +845,19 @@ async def test_resolve_relations_skips_ambiguous_target_without_aborting_pass() 
         @override
         async def resolve_relation_targets(
             self,
-            link_texts: Sequence[str],
+            requests: Sequence[RelationTargetRequest],
             *,
             session: AsyncSession,
-        ) -> Mapping[str, FakeResolvedEntity | None]:
+        ) -> Mapping[RelationTargetRequest, FakeResolvedEntity | None]:
             assert isinstance(session, FakeSession)
-            self.calls.extend((link_text, True) for link_text in link_texts)
+            self.calls.extend((request.link_text, True) for request in requests)
             return {
-                link_text: None if link_text in self.ambiguous else self.targets.get(link_text)
-                for link_text in link_texts
+                request: (
+                    None
+                    if request.link_text in self.ambiguous
+                    else self.targets.get(request.link_text)
+                )
+                for request in requests
             }
 
     repo = StubRelationRepository(

@@ -137,13 +137,14 @@ async def test_embedding_status_reads_real_vec0_table(engine_factory, test_proje
     # An obsolete embedding result must not claim the stable vec0 row after the
     # manifest has advanced to a newer source generation.
     await search_repo._semantic_vector_index.upsert(
+        project_id,
         [
             VectorRecord(
                 key=VectorKey(entity_id=entity_id, chunk_key="chunk-1"),
                 source_hash="stale-hash",
                 values=tuple(_unit_vector(dimensions)),
             )
-        ]
+        ],
     )
     async with db.scoped_session(session_maker) as session:
         # sqlite-vec is loaded per connection. Windows may hand this assertion a
@@ -153,13 +154,14 @@ async def test_embedding_status_reads_real_vec0_table(engine_factory, test_proje
         assert stale_count.scalar_one() == 0
 
     await search_repo._semantic_vector_index.upsert(
+        project_id,
         [
             VectorRecord(
                 key=VectorKey(entity_id=entity_id, chunk_key="chunk-1"),
                 source_hash="hash",
                 values=tuple(_unit_vector(dimensions)),
             )
-        ]
+        ],
     )
 
     async with db.scoped_session(session_maker) as session:

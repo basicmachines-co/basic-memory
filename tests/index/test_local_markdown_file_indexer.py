@@ -98,7 +98,7 @@ async def test_local_file_indexer_logs_brace_path_through_retry(
     sink_id = logger.add(
         lambda message: rendered_messages.append(str(message).strip()),
         format="{message}",
-        level="INFO",
+        level="DEBUG",
     )
     try:
         result = await indexer.index_markdown_file(file_path, source="index")

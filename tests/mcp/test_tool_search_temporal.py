@@ -11,12 +11,14 @@ insufficient and forces the projection to address individual observations.
 """
 
 import inspect
+import sys
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
 from basic_memory.mcp.tools import write_note
-from basic_memory.mcp.tools.search import search_notes
+from basic_memory.mcp.tools.search import SearchProjectRef, search_notes
 
 # The spec's worked example, verbatim: one note, two decisions, adjacent half-open
 # effective windows meeting at the July 27 cutover.
@@ -474,17 +476,37 @@ async def test_all_projects_search_propagates_a_filter_no_project_could_apply(
     """
     await _write_cache_layer_note(test_project.name)
 
-    import sys
-
     # `basic_memory.mcp.tools.search` is shadowed by a `search` function exported
     # from the package, so reach the module itself rather than that name.
     search_module = sys.modules["basic_memory.mcp.tools.search"]
 
-    async def refuse_every_leg(*args: Any, **kwargs: Any) -> str:
-        # What a per-project leg looks like once SearchClient rejects the response.
-        return "# Search Failed\n\nThe search API did not apply the requested valid-time filter"
+    monkeypatch.setattr(
+        search_module,
+        "_load_search_project_refs",
+        AsyncMock(
+            return_value=[
+                SearchProjectRef(
+                    name=test_project.name,
+                    external_id=test_project.external_id,
+                    id=test_project.id,
+                    workspace_tenant_id=None,
+                    path=test_project.path,
+                )
+            ]
+        ),
+    )
 
-    monkeypatch.setattr(search_module, "search_notes", refuse_every_leg)
+    class RefusingScopedSearchClient:
+        # What a database looks like once the client rejects its response.
+        def __init__(self, client: Any) -> None:
+            pass
+
+        async def search(self, *args: Any, **kwargs: Any) -> Any:
+            raise ValueError("The search API did not apply the requested valid-time filter")
+
+    monkeypatch.setattr(
+        sys.modules["basic_memory.mcp.clients"], "ScopedSearchClient", RefusingScopedSearchClient
+    )
 
     with pytest.raises(ValueError, match="No project applied the requested valid-time filter"):
         await search_module._search_all_projects(

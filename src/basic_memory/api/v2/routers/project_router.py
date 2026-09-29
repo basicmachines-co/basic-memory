@@ -289,7 +289,7 @@ async def get_project_status(
     force_full: bool = Query(False, description="Accepted for compatibility; ignored"),
 ) -> ProjectIndexStatusResponse:
     """Observe current project-index files and readiness for a project."""
-    logger.info(
+    logger.debug(
         f"API v2 request: get_project_status for project_id={project_id} "
         f"(force_full ignored={force_full})"
     )
@@ -342,7 +342,7 @@ async def resolve_project_identifier(
             "resolution_method": "name"
         }
     """
-    logger.info(f"API v2 request: resolve_project_identifier for '{data.identifier}'")
+    logger.debug("API v2 request: resolve_project_identifier for {!r}", data.identifier)
 
     project, resolution_method = await _resolve_project_identifier(
         session,
@@ -401,7 +401,7 @@ async def get_project_by_id(
     Example:
         GET /v2/projects/550e8400-e29b-41d4-a716-446655440000
     """
-    logger.info(f"API v2 request: get_project_by_id for project_id={project_id}")
+    logger.debug(f"API v2 request: get_project_by_id for project_id={project_id}")
 
     project = await project_repository.get_by_external_id(session, project_id)
     if not project:
@@ -426,7 +426,7 @@ async def get_project_info_by_id(
     project_id: str = Path(..., description="Project external ID (UUID)"),
 ) -> ProjectInfoResponse:
     """Get detailed project information by external ID."""
-    logger.info(f"API v2 request: get_project_info_by_id for project_id={project_id}")
+    logger.debug(f"API v2 request: get_project_info_by_id for project_id={project_id}")
     async with db.scoped_session(session_maker) as session:
         project = await project_repository.get_by_external_id(session, project_id)
     if not project:
@@ -463,7 +463,7 @@ async def update_project_by_id(
         PATCH /v2/projects/550e8400-e29b-41d4-a716-446655440000
         {"path": "/new/path"}
     """
-    logger.info(f"API v2 request: update_project_by_id for project_id={project_id}")
+    logger.debug(f"API v2 request: update_project_by_id for project_id={project_id}")
 
     try:
         # Validate that path is absolute if provided
@@ -553,7 +553,7 @@ async def delete_project_by_id(
     Example:
         DELETE /v2/projects/550e8400-e29b-41d4-a716-446655440000?delete_notes=false
     """
-    logger.info(
+    logger.debug(
         f"API v2 request: delete_project_by_id for project_id={project_id}, delete_notes={delete_notes}"
     )
 
@@ -620,7 +620,7 @@ async def set_default_project_by_id(
     Example:
         PUT /v2/projects/550e8400-e29b-41d4-a716-446655440000/default
     """
-    logger.info(f"API v2 request: set_default_project_by_id for project_id={project_id}")
+    logger.debug(f"API v2 request: set_default_project_by_id for project_id={project_id}")
 
     try:
         # Get the old default project from database. It may be absent during

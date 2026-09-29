@@ -73,7 +73,7 @@ def test_project_remove_blank_transport_error_renders_repr(runner, mock_config, 
     """str(ReadTimeout('')) is empty — the CLI must fall back to repr (#1034)."""
     failing_resolve["error"] = httpx.ReadTimeout("")
 
-    result = runner.invoke(app, ["project", "remove", "big-project"])
+    result = runner.invoke(app, ["project", "remove", "big-project", "--yes"])
 
     assert result.exit_code == 1
     assert "Error removing project:" in result.stdout
@@ -85,7 +85,7 @@ def test_project_remove_error_with_message_renders_str(runner, mock_config, fail
     """Exceptions with a message keep rendering str(e)."""
     failing_resolve["error"] = ValueError("project is busy")
 
-    result = runner.invoke(app, ["project", "remove", "big-project"])
+    result = runner.invoke(app, ["project", "remove", "big-project", "--yes"])
 
     assert result.exit_code == 1
     assert "Error removing project: project is busy" in result.stdout

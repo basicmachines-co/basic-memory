@@ -10,6 +10,7 @@ from basic_memory import db
 from basic_memory.models import Entity
 from basic_memory.models.project import Project
 from basic_memory.repository.search_repository import SearchIndexRow
+from basic_memory.repository import postgres_search_query, sqlite_search_query
 from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
 from basic_memory.schemas.search import SearchItemType
 
@@ -17,6 +18,13 @@ from basic_memory.schemas.search import SearchItemType
 def is_postgres_backend(search_repository):
     """Helper to check if search repository is Postgres-based."""
     return isinstance(search_repository, PostgresSearchRepository)
+
+
+def fts_query(search_repository):
+    """The term-preparation module for the repository's backend."""
+    if is_postgres_backend(search_repository):
+        return postgres_search_query
+    return sqlite_search_query
 
 
 @pytest_asyncio.fixture
@@ -616,53 +624,57 @@ class TestSearchTermPreparation:
 
     def test_simple_terms_get_prefix_wildcard(self, search_repository):
         """Simple alphanumeric terms should get prefix matching."""
-        from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
-
-        if isinstance(search_repository, PostgresSearchRepository):
+        if is_postgres_backend(search_repository):
             # Postgres tsquery uses :* for prefix matching
-            assert search_repository._prepare_search_term("hello") == "hello:*"
-            assert search_repository._prepare_search_term("project") == "project:*"
-            assert search_repository._prepare_search_term("test123") == "test123:*"
+            assert fts_query(search_repository).prepare_search_term("hello") == "hello:*"
+            assert fts_query(search_repository).prepare_search_term("project") == "project:*"
+            assert fts_query(search_repository).prepare_search_term("test123") == "test123:*"
         else:
             # SQLite FTS5 uses * for prefix matching
-            assert search_repository._prepare_search_term("hello") == "hello*"
-            assert search_repository._prepare_search_term("project") == "project*"
-            assert search_repository._prepare_search_term("test123") == "test123*"
+            assert fts_query(search_repository).prepare_search_term("hello") == "hello*"
+            assert fts_query(search_repository).prepare_search_term("project") == "project*"
+            assert fts_query(search_repository).prepare_search_term("test123") == "test123*"
 
     def test_terms_with_existing_wildcard_unchanged(self, search_repository):
         """Terms that already contain * should remain unchanged."""
         if is_postgres_backend(search_repository):
             # Postgres uses different syntax (:* instead of *)
-            assert search_repository._prepare_search_term("hello*") == "hello:*"
-            assert search_repository._prepare_search_term("test*world") == "test:*world"
+            assert fts_query(search_repository).prepare_search_term("hello*") == "hello:*"
+            assert fts_query(search_repository).prepare_search_term("test*world") == "test:*world"
         else:
-            assert search_repository._prepare_search_term("hello*") == "hello*"
-            assert search_repository._prepare_search_term("test*world") == "test*world"
+            assert fts_query(search_repository).prepare_search_term("hello*") == "hello*"
+            assert fts_query(search_repository).prepare_search_term("test*world") == "test*world"
 
     def test_boolean_operators_preserved(self, search_repository):
         """Boolean operators should be preserved without modification."""
         if is_postgres_backend(search_repository):
             # Postgres converts AND/OR/NOT to &/|/!
-            assert search_repository._prepare_search_term("hello AND world") == "hello & world"
-            assert search_repository._prepare_search_term("cat OR dog") == "cat | dog"
+            assert (
+                fts_query(search_repository).prepare_search_term("hello AND world")
+                == "hello & world"
+            )
+            assert fts_query(search_repository).prepare_search_term("cat OR dog") == "cat | dog"
             # NOT must be converted to "& !" for proper tsquery syntax
             assert (
-                search_repository._prepare_search_term("project NOT meeting")
+                fts_query(search_repository).prepare_search_term("project NOT meeting")
                 == "project & !meeting"
             )
             assert (
-                search_repository._prepare_search_term("(hello AND world) OR test")
+                fts_query(search_repository).prepare_search_term("(hello AND world) OR test")
                 == "(hello & world) | test"
             )
         else:
-            assert search_repository._prepare_search_term("hello AND world") == "hello AND world"
-            assert search_repository._prepare_search_term("cat OR dog") == "cat OR dog"
             assert (
-                search_repository._prepare_search_term("project NOT meeting")
+                fts_query(search_repository).prepare_search_term("hello AND world")
+                == "hello AND world"
+            )
+            assert fts_query(search_repository).prepare_search_term("cat OR dog") == "cat OR dog"
+            assert (
+                fts_query(search_repository).prepare_search_term("project NOT meeting")
                 == "project NOT meeting"
             )
             assert (
-                search_repository._prepare_search_term("(hello AND world) OR test")
+                fts_query(search_repository).prepare_search_term("(hello AND world) OR test")
                 == "(hello AND world) OR test"
             )
 
@@ -672,30 +684,30 @@ class TestSearchTermPreparation:
             pytest.skip("This test is for SQLite FTS5-specific quoting behavior")
 
         # Test the specific case from the GitHub issue
-        result = search_repository._prepare_search_term("tier1-test AND unicode")
+        result = fts_query(search_repository).prepare_search_term("tier1-test AND unicode")
         assert result == '"tier1-test" AND unicode'
 
         # Test other hyphenated Boolean combinations
         assert (
-            search_repository._prepare_search_term("multi-word OR single")
+            fts_query(search_repository).prepare_search_term("multi-word OR single")
             == '"multi-word" OR single'
         )
         assert (
-            search_repository._prepare_search_term("well-formed NOT badly-formed")
+            fts_query(search_repository).prepare_search_term("well-formed NOT badly-formed")
             == '"well-formed" NOT "badly-formed"'
         )
         assert (
-            search_repository._prepare_search_term("test-case AND (hello OR world)")
+            fts_query(search_repository).prepare_search_term("test-case AND (hello OR world)")
             == '"test-case" AND (hello OR world)'
         )
 
         # Test mixed special characters with Boolean operators
         assert (
-            search_repository._prepare_search_term("config.json AND test-file")
+            fts_query(search_repository).prepare_search_term("config.json AND test-file")
             == '"config.json" AND "test-file"'
         )
         assert (
-            search_repository._prepare_search_term("C++ OR python-script")
+            fts_query(search_repository).prepare_search_term("C++ OR python-script")
             == '"C++" OR "python-script"'
         )
 
@@ -705,11 +717,14 @@ class TestSearchTermPreparation:
             pytest.skip("This test is for SQLite FTS5-specific behavior")
 
         # These should be quoted to handle special characters safely
-        assert search_repository._prepare_search_term("C++") == '"C++"*'
-        assert search_repository._prepare_search_term("function()") == '"function()"*'
-        assert search_repository._prepare_search_term("email@domain.com") == '"email@domain.com"*'
-        assert search_repository._prepare_search_term("array[index]") == '"array[index]"*'
-        assert search_repository._prepare_search_term("config.json") == '"config.json"*'
+        assert fts_query(search_repository).prepare_search_term("C++") == '"C++"*'
+        assert fts_query(search_repository).prepare_search_term("function()") == '"function()"*'
+        assert (
+            fts_query(search_repository).prepare_search_term("email@domain.com")
+            == '"email@domain.com"*'
+        )
+        assert fts_query(search_repository).prepare_search_term("array[index]") == '"array[index]"*'
+        assert fts_query(search_repository).prepare_search_term("config.json") == '"config.json"*'
 
     def test_malformed_fts5_syntax_quoted(self, search_repository):
         """Malformed FTS5 syntax should be quoted to prevent errors."""
@@ -717,17 +732,21 @@ class TestSearchTermPreparation:
             pytest.skip("This test is for SQLite FTS5-specific behavior")
 
         # Multiple operators without proper syntax
-        assert search_repository._prepare_search_term("+++invalid+++") == '"+++invalid+++"*'
-        assert search_repository._prepare_search_term("!!!error!!!") == '"!!!error!!!"*'
-        assert search_repository._prepare_search_term("@#$%^&*()") == '"@#$%^&*()"*'
+        assert (
+            fts_query(search_repository).prepare_search_term("+++invalid+++") == '"+++invalid+++"*'
+        )
+        assert fts_query(search_repository).prepare_search_term("!!!error!!!") == '"!!!error!!!"*'
+        assert fts_query(search_repository).prepare_search_term("@#$%^&*()") == '"@#$%^&*()"*'
 
     def test_quoted_strings_handled_properly(self, search_repository):
         """Strings with quotes should have quotes escaped."""
         if is_postgres_backend(search_repository):
             pytest.skip("This test is for SQLite FTS5-specific behavior")
 
-        assert search_repository._prepare_search_term('say "hello"') == '"say ""hello"""*'
-        assert search_repository._prepare_search_term("it's working") == '"it\'s working"*'
+        assert fts_query(search_repository).prepare_search_term('say "hello"') == '"say ""hello"""*'
+        assert (
+            fts_query(search_repository).prepare_search_term("it's working") == '"it\'s working"*'
+        )
 
     def test_file_paths_no_prefix_wildcard(self, search_repository):
         """File paths should not get prefix wildcards."""
@@ -735,11 +754,11 @@ class TestSearchTermPreparation:
             pytest.skip("This test is for SQLite FTS5-specific behavior")
 
         assert (
-            search_repository._prepare_search_term("config.json", is_prefix=False)
+            fts_query(search_repository).prepare_search_term("config.json", is_prefix=False)
             == '"config.json"'
         )
         assert (
-            search_repository._prepare_search_term("docs/readme.md", is_prefix=False)
+            fts_query(search_repository).prepare_search_term("docs/readme.md", is_prefix=False)
             == '"docs/readme.md"'
         )
 
@@ -748,9 +767,12 @@ class TestSearchTermPreparation:
         if is_postgres_backend(search_repository):
             pytest.skip("This test is for SQLite FTS5-specific behavior")
 
-        assert search_repository._prepare_search_term("hello world") == "hello* AND world*"
         assert (
-            search_repository._prepare_search_term("project planning") == "project* AND planning*"
+            fts_query(search_repository).prepare_search_term("hello world") == "hello* AND world*"
+        )
+        assert (
+            fts_query(search_repository).prepare_search_term("project planning")
+            == "project* AND planning*"
         )
 
     def test_version_strings_with_dots_handled_correctly(self, search_repository):
@@ -760,7 +782,7 @@ class TestSearchTermPreparation:
 
         # This reproduces the bug where "Basic Memory v0.13.0b2" becomes "Basic* AND Memory* AND v0.13.0b2*"
         # which causes FTS5 syntax errors because v0.13.0b2* is not valid FTS5 syntax
-        result = search_repository._prepare_search_term("Basic Memory v0.13.0b2")
+        result = fts_query(search_repository).prepare_search_term("Basic Memory v0.13.0b2")
         # Should be quoted because of dots in v0.13.0b2
         assert result == '"Basic Memory v0.13.0b2"*'
 
@@ -770,12 +792,18 @@ class TestSearchTermPreparation:
             pytest.skip("This test is for SQLite FTS5-specific behavior")
 
         # Any word containing special characters should cause the entire phrase to be quoted
-        assert search_repository._prepare_search_term("config.json file") == '"config.json file"*'
         assert (
-            search_repository._prepare_search_term("user@email.com account")
+            fts_query(search_repository).prepare_search_term("config.json file")
+            == '"config.json file"*'
+        )
+        assert (
+            fts_query(search_repository).prepare_search_term("user@email.com account")
             == '"user@email.com account"*'
         )
-        assert search_repository._prepare_search_term("node.js and react") == '"node.js and react"*'
+        assert (
+            fts_query(search_repository).prepare_search_term("node.js and react")
+            == '"node.js and react"*'
+        )
 
     @pytest.mark.asyncio
     async def test_search_with_special_characters_returns_results(self, search_repository):
@@ -913,15 +941,19 @@ class TestSearchTermPreparation:
     def test_boolean_query_empty_parts_coverage(self, search_repository):
         """Test Boolean query parsing with empty parts (line 143 coverage)."""
         # Create queries that will result in empty parts after splitting
-        result1 = search_repository._prepare_boolean_query(
+        result1 = fts_query(search_repository).prepare_boolean_query(
             "hello AND  AND world"
         )  # Double operator
         assert "hello" in result1 and "world" in result1
 
-        result2 = search_repository._prepare_boolean_query("  OR test")  # Leading operator
+        result2 = fts_query(search_repository).prepare_boolean_query(
+            "  OR test"
+        )  # Leading operator
         assert "test" in result2
 
-        result3 = search_repository._prepare_boolean_query("test OR  ")  # Trailing operator
+        result3 = fts_query(search_repository).prepare_boolean_query(
+            "test OR  "
+        )  # Trailing operator
         assert "test" in result3
 
     def test_parenthetical_term_quote_escaping(self, search_repository):
@@ -930,12 +962,12 @@ class TestSearchTermPreparation:
             pytest.skip("This test is for SQLite FTS5-specific behavior")
 
         # Test term with quotes that needs escaping
-        result = search_repository._prepare_parenthetical_term('(say "hello" world)')
+        result = fts_query(search_repository).prepare_parenthetical_term('(say "hello" world)')
         # Should escape quotes by doubling them
         assert '""hello""' in result
 
         # Test term with single quotes
-        result2 = search_repository._prepare_parenthetical_term("(it's working)")
+        result2 = fts_query(search_repository).prepare_parenthetical_term("(it's working)")
         assert "it's working" in result2
 
     def test_needs_quoting_empty_input(self, search_repository):
@@ -944,26 +976,26 @@ class TestSearchTermPreparation:
             pytest.skip("This test is for SQLite FTS5-specific behavior")
 
         # Test empty string
-        assert not search_repository._needs_quoting("")
+        assert not fts_query(search_repository).needs_quoting("")
 
         # Test whitespace-only string
-        assert not search_repository._needs_quoting("   ")
+        assert not fts_query(search_repository).needs_quoting("   ")
 
         # Test None-like cases
-        assert not search_repository._needs_quoting("\t")
+        assert not fts_query(search_repository).needs_quoting("\t")
 
     def test_prepare_single_term_empty_input(self, search_repository):
         """Test _prepare_single_term with empty inputs (line 227 coverage)."""
         # Test empty string
-        result1 = search_repository._prepare_single_term("")
+        result1 = fts_query(search_repository).prepare_single_term("")
         assert result1 == ""
 
         # Test whitespace-only string
-        result2 = search_repository._prepare_single_term("   ")
+        result2 = fts_query(search_repository).prepare_single_term("   ")
         assert result2 == "   "  # Should return as-is
 
         # Test string that becomes empty after strip
-        result3 = search_repository._prepare_single_term("\t\n")
+        result3 = fts_query(search_repository).prepare_single_term("\t\n")
         assert result3 == "\t\n"  # Should return original
 
 
@@ -1192,7 +1224,7 @@ async def test_question_punctuation_does_not_phrase_quote(search_repository):
     '"When did Melanie paint a sunrise?"*' — zero rows for any corpus — which
     silently disabled the FTS half of hybrid search for question queries.
     """
-    prepared = search_repository._prepare_single_term("When did Melanie paint a sunrise?")
+    prepared = fts_query(search_repository).prepare_single_term("When did Melanie paint a sunrise?")
     assert '"' not in prepared
     # Prefix syntax differs by backend: FTS5 uses '*', tsquery uses ':*'.
     if is_postgres_backend(search_repository):
@@ -1205,10 +1237,10 @@ async def test_question_punctuation_does_not_phrase_quote(search_repository):
 async def test_relaxed_query_drops_stopwords(search_repository):
     """Relaxation keys on content-bearing terms in each backend's syntax."""
     if is_postgres_backend(search_repository):
-        relaxed = search_repository._relaxed_tsquery_text("When did Melanie paint a sunrise?")
+        relaxed = postgres_search_query.relaxed_tsquery_text("When did Melanie paint a sunrise?")
         assert relaxed == "melanie:* | paint:* | sunrise:*"
     else:
-        relaxed = search_repository._relaxed_fts_text("When did Melanie paint a sunrise?")
+        relaxed = sqlite_search_query.relaxed_fts_text("When did Melanie paint a sunrise?")
         assert relaxed == "melanie* OR paint* OR sunrise*"
 
 
@@ -1216,14 +1248,14 @@ async def test_relaxed_query_drops_stopwords(search_repository):
 async def test_relaxed_query_preserves_punctuated_ascii_token_pieces(search_repository):
     """Hyphenated and slashed ASCII terms should relax using their regex token pieces."""
     if is_postgres_backend(search_repository):
-        relaxed = search_repository._relaxed_tsquery_text("client-side state management")
+        relaxed = postgres_search_query.relaxed_tsquery_text("client-side state management")
         assert relaxed == "client:* | side:* | state:* | management:*"
-        slashed = search_repository._relaxed_tsquery_text("foo/bar baz qux")
+        slashed = postgres_search_query.relaxed_tsquery_text("foo/bar baz qux")
         assert slashed == "foo:* | bar:* | baz:* | qux:*"
     else:
-        relaxed = search_repository._relaxed_fts_text("client-side state management")
+        relaxed = sqlite_search_query.relaxed_fts_text("client-side state management")
         assert relaxed == "client* OR side* OR state* OR management*"
-        slashed = search_repository._relaxed_fts_text("foo/bar baz qux")
+        slashed = sqlite_search_query.relaxed_fts_text("foo/bar baz qux")
         assert slashed == "foo* OR bar* OR baz* OR qux*"
 
 
@@ -1231,10 +1263,10 @@ async def test_relaxed_query_preserves_punctuated_ascii_token_pieces(search_repo
 async def test_relaxed_query_supports_whitespace_separated_cjk_terms(search_repository):
     """CJK terms separated by spaces should relax even when ASCII tokenization finds none."""
     if is_postgres_backend(search_repository):
-        relaxed = search_repository._relaxed_tsquery_text("季度 报告")
+        relaxed = postgres_search_query.relaxed_tsquery_text("季度 报告")
         assert relaxed == "季度:* | 报告:*"
     else:
-        relaxed = search_repository._relaxed_fts_text("季度 报告")
+        relaxed = sqlite_search_query.relaxed_fts_text("季度 报告")
         assert relaxed == "季度* OR 报告*"
 
 
@@ -1243,9 +1275,9 @@ async def test_relaxed_query_respects_user_intent(search_repository):
     # Eligibility matches the service-level relaxation (both backends): quoted,
     # boolean, short (<3 tokens), and numeric-identifier queries are not relaxed.
     relaxer = (
-        search_repository._relaxed_tsquery_text
+        postgres_search_query.relaxed_tsquery_text
         if is_postgres_backend(search_repository)
-        else search_repository._relaxed_fts_text
+        else sqlite_search_query.relaxed_fts_text
     )
     assert relaxer("alpha AND beta") is None
     assert relaxer('"exact phrase"') is None

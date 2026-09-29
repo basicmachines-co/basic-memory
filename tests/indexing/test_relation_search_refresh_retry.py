@@ -19,6 +19,7 @@ from basic_memory.repository.note_content_repository import (
     NoteContentRepository,
 )
 from basic_memory.repository.relation_repository import RelationRepository
+from basic_memory.indexing.models import RelationTargetRequest
 from basic_memory.schemas.search import SearchItemType
 
 
@@ -31,13 +32,13 @@ class StaticLinkResolver:
 
     async def resolve_relation_targets(
         self,
-        link_texts: Sequence[str],
+        requests: Sequence[RelationTargetRequest],
         *,
         session: AsyncSession,
-    ) -> Mapping[str, Entity | None]:
+    ) -> Mapping[RelationTargetRequest, Entity | None]:
         del session
-        self.calls += len(link_texts)
-        return {link_text: self.targets.get(link_text) for link_text in link_texts}
+        self.calls += len(requests)
+        return {request: self.targets.get(request.link_text) for request in requests}
 
 
 @pytest.mark.asyncio

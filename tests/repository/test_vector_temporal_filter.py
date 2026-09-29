@@ -10,130 +10,88 @@ with unfiltered results, including the undated sources the filter excludes. Thes
 pin both halves at the seam rather than trusting the call sites to stay in step.
 """
 
-from typing import Any
+from dataclasses import replace
+from typing import Any, cast
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from basic_memory.repository.search_reader import SemanticSearch
+from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.temporal import TemporalFilter, TimeKind, parse_point
 from tests.repository.test_hybrid_fusion import (
-    HYBRID_KWARGS,
-    ConcreteSearchRepo as HybridSearchRepo,
+    HYBRID_QUERY,
+    FakeFts,
     FakeRow as HybridFakeRow,
+    fake_vector_retrieval,
 )
 from tests.repository.test_vector_threshold import (
-    COMMON_SEARCH_KWARGS,
-    ConcreteSearchRepo as VectorSearchRepo,
+    VECTOR_QUERY,
     FakeRow,
-    _fake_embedding_provider,
     _make_vector_rows,
-    fake_scoped_session,
+    run_vector_only,
+    vector_semantic,
 )
 
 TEMPORAL = TemporalFilter(kind=TimeKind.EFFECTIVE, at=parse_point("2026-07-28"))
 
 
-def _vector_kwargs(**overrides: Any) -> dict[str, Any]:
-    return {**COMMON_SEARCH_KWARGS, **overrides}
-
-
-def _hybrid_kwargs(**overrides: Any) -> dict[str, Any]:
-    return {**HYBRID_KWARGS, **overrides}
-
-
-def _forwarded_temporal(leg: AsyncMock) -> Any:
-    """The `temporal` argument one retrieval leg was actually called with."""
-    assert leg.await_args is not None, "leg was never awaited"
-    return leg.await_args.kwargs["temporal"]
-
-
 @pytest.mark.asyncio
 async def test_temporal_filter_applies_in_vector_mode():
     """A valid-time filter narrows the vector candidate set, and is forwarded verbatim."""
-    repo = VectorSearchRepo()
-    repo._semantic_min_similarity = 0.0
-    repo._embedding_provider = _fake_embedding_provider(AsyncMock(return_value=[0.0] * 384))
-
     # The embedding neighbourhood offers three entities; only entity 1 asserts a range
     # covering the queried date, so the FTS intersection pass returns just that one.
-    filter_pass = AsyncMock(return_value=[FakeRow(id=1)])
+    filter_pass = FakeFts([FakeRow(id=1)])
+    semantic = vector_semantic(fts=filter_pass)
 
-    with (
-        patch(
-            "basic_memory.repository.search_repository_base.db.scoped_session", fake_scoped_session
-        ),
-        patch.object(repo, "_ensure_vector_tables", new_callable=AsyncMock),
-        patch.object(repo, "_prepare_vector_session", new_callable=AsyncMock),
-        patch.object(
-            repo,
-            "_run_vector_query",
-            new_callable=AsyncMock,
-            return_value=_make_vector_rows([0.9, 0.8, 0.7]),
-        ),
-        patch.object(
-            repo,
-            "_fetch_search_index_rows_by_ids",
-            new_callable=AsyncMock,
-            return_value={("entity", i): FakeRow(id=i) for i in range(3)},
-        ),
-        patch.object(repo, "search", filter_pass),
-    ):
-        results = await repo._search_vector_only(**_vector_kwargs(temporal=TEMPORAL))
+    results = await run_vector_only(
+        semantic,
+        _make_vector_rows([0.9, 0.8, 0.7]),
+        AsyncMock(return_value={("entity", i): FakeRow(id=i) for i in range(3)}),
+        query=replace(VECTOR_QUERY, temporal=TEMPORAL),
+    )
 
     assert [row.id for row in results] == [1]
     # Counted as a requested filter...
-    filter_pass.assert_awaited_once()
-    # ...and forwarded unchanged, so the intersection asks the same question.
-    assert _forwarded_temporal(filter_pass) is TEMPORAL
+    assert len(filter_pass.queries) == 1
+    # ...and forwarded unchanged, so the intersection asks the same question,
+    # about the candidates themselves rather than a page of the whole match set.
+    assert filter_pass.queries[0].temporal is TEMPORAL
+    assert filter_pass.queries[0].search_text is None
+    assert filter_pass.calls[0]["candidate_keys"] == [("entity", 0), ("entity", 1), ("entity", 2)]
 
 
 @pytest.mark.asyncio
 async def test_vector_mode_without_a_temporal_filter_runs_no_intersection_pass():
     """An unfiltered semantic search must not pay for a filter pass it does not need."""
-    repo = VectorSearchRepo()
-    repo._semantic_min_similarity = 0.0
-    repo._embedding_provider = _fake_embedding_provider(AsyncMock(return_value=[0.0] * 384))
-    filter_pass = AsyncMock(return_value=[])
+    filter_pass = FakeFts([])
+    semantic = vector_semantic(fts=filter_pass)
 
-    with (
-        patch(
-            "basic_memory.repository.search_repository_base.db.scoped_session", fake_scoped_session
-        ),
-        patch.object(repo, "_ensure_vector_tables", new_callable=AsyncMock),
-        patch.object(repo, "_prepare_vector_session", new_callable=AsyncMock),
-        patch.object(
-            repo,
-            "_run_vector_query",
-            new_callable=AsyncMock,
-            return_value=_make_vector_rows([0.9]),
-        ),
-        patch.object(
-            repo,
-            "_fetch_search_index_rows_by_ids",
-            new_callable=AsyncMock,
-            return_value={("entity", 0): FakeRow(id=0)},
-        ),
-        patch.object(repo, "search", filter_pass),
-    ):
-        results = await repo._search_vector_only(**_vector_kwargs())
+    results = await run_vector_only(
+        semantic,
+        _make_vector_rows([0.9]),
+        AsyncMock(return_value={("entity", 0): FakeRow(id=0)}),
+    )
 
     assert [row.id for row in results] == [0]
-    filter_pass.assert_not_awaited()
+    assert filter_pass.queries == []
 
 
 @pytest.mark.asyncio
 async def test_temporal_filter_applies_in_hybrid_mode():
     """Hybrid fuses two legs; both must ask the same valid-time question."""
-    repo = HybridSearchRepo()
-    fts_leg = AsyncMock(return_value=[HybridFakeRow(id=1, score=5.0, title="dated")])
+    fts_leg = FakeFts([HybridFakeRow(id=1, score=5.0, title="dated")])
+    semantic = SemanticSearch(
+        cast(Any, None), ProjectScope.single(1), fts_leg, fake_vector_retrieval()
+    )
     vector_leg = AsyncMock(return_value=[HybridFakeRow(id=1, score=0.9, title="dated")])
 
-    with (
-        patch.object(repo, "search", fts_leg),
-        patch.object(repo, "_search_vector_only", vector_leg),
-    ):
-        results = await repo._search_hybrid(**_hybrid_kwargs(temporal=TEMPORAL))
+    with patch.object(semantic, "vector_only", vector_leg):
+        results = await semantic.hybrid(
+            replace(HYBRID_QUERY, temporal=TEMPORAL), limit=10, offset=0
+        )
 
     assert [row.id for row in results] == [1]
-    assert _forwarded_temporal(fts_leg) is TEMPORAL
-    assert _forwarded_temporal(vector_leg) is TEMPORAL
+    assert fts_leg.queries[0].temporal is TEMPORAL
+    assert vector_leg.await_args is not None, "vector leg was never awaited"
+    assert vector_leg.await_args.args[0].temporal is TEMPORAL

@@ -340,20 +340,15 @@ async def test_similarity_formula_analysis(sqlite_engine_factory, tmp_path):
         from basic_memory import db as bm_db
 
         repo = cast(Any, service.repository)
+        semantic = repo._semantic_search()
         async with bm_db.scoped_session(repo.session_maker) as session:
-            await repo._prepare_vector_session(session)
-            vector_rows = await repo._run_vector_query(
-                session,
-                query_embedding,
-                candidate_limit=20,
-            )
+            vector_rows = await semantic._run_vector_query(session, query_embedding, 20)
 
         print(f"\nQuery: '{query_text}'")
         print(f"  {'chunk_key':<40} {'similarity':>12}")
-        for row in vector_rows[:10]:
-            similarity = float(row["best_similarity"])
-            assert 0.0 <= similarity <= 1.0
-            print(f"  {row['chunk_key']:<40} {similarity:>12.4f}")
+        for chunk in vector_rows[:10]:
+            assert 0.0 <= chunk.similarity <= 1.0
+            print(f"  {chunk.chunk_key:<40} {chunk.similarity:>12.4f}")
 
 
 # --- Test: min_similarity threshold effectiveness ---

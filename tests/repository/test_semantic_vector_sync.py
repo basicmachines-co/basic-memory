@@ -1,5 +1,7 @@
 """Focused edge-case coverage for shared semantic vector synchronization."""
 
+from sqlalchemy.ext.asyncio import AsyncSession
+from basic_memory.repository.search_scope import ProjectScope
 import hashlib
 from collections.abc import Sequence
 from contextlib import asynccontextmanager
@@ -36,6 +38,7 @@ class _TestRepository(SearchRepositoryBase):
     def __init__(self):
         self.session_maker = None
         self.project_id = 1
+        self.scope = ProjectScope.single(1)
 
     @override
     async def init_search_index(self):
@@ -44,10 +47,6 @@ class _TestRepository(SearchRepositoryBase):
     @override
     async def get_entity_physical_chunk_keys(self, entity_id: int) -> set[str] | None:
         return None  # physical storage is not inspectable in this double
-
-    @override
-    def _prepare_search_term(self, term, is_prefix=True):
-        return term
 
     @override
     async def search(
@@ -68,6 +67,7 @@ class _TestRepository(SearchRepositoryBase):
         limit: int = 10,
         offset: int = 0,
         allow_relaxed: bool = False,
+        session: AsyncSession | None = None,
         *,
         candidate_keys: Sequence[SearchIndexKey] | None = None,
         trace: SearchTraceCollector | None = None,
@@ -77,17 +77,6 @@ class _TestRepository(SearchRepositoryBase):
     @override
     async def _ensure_vector_tables(self):
         pass
-
-    @override
-    async def _run_vector_query(
-        self,
-        session,
-        query_embedding,
-        candidate_limit,
-        *,
-        trace: SearchTraceCollector | None = None,
-    ):
-        return []
 
     @override
     async def _write_embeddings(self, session, jobs, embeddings):
@@ -107,10 +96,6 @@ class _TestRepository(SearchRepositoryBase):
         expected_deletions=None,
     ):
         return []
-
-    @override
-    def _distance_to_similarity(self, distance: float) -> float:
-        return 1.0 / (1.0 + max(distance, 0.0))
 
 
 def _pending_job(

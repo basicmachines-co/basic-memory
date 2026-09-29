@@ -9,7 +9,11 @@ from basic_memory.file_utils import FileError
 from basic_memory.index.local_notes import LocalNoteFileDeleteStorage
 from basic_memory.index.note_content_materialization import LocalNoteContentStorage
 from basic_memory.indexing.note_file_delete_runner import run_note_file_delete
-from basic_memory.runtime.cleanup import RuntimeDeleteStatus, RuntimeNoteFileDeleteJobRequest
+from basic_memory.runtime.cleanup import (
+    RuntimeDeleteStatus,
+    RuntimeGuardedFileDeleteOutcome,
+    RuntimeNoteFileDeleteJobRequest,
+)
 from basic_memory.runtime.note_file_guards import read_runtime_file_checksum
 from basic_memory.services.file_service import FileService
 
@@ -29,7 +33,7 @@ async def test_checksum_read_treats_post_probe_deletion_as_absent(tmp_path: Path
 async def test_directory_delete_converges_when_file_disappears_before_delete(
     tmp_path: Path,
 ) -> None:
-    """The final guarded checksum should treat a vanished target as a safe no-delete."""
+    """The guarded checksum read should treat a vanished target as already absent."""
     file_service = FileService(tmp_path)
     file_path = "notes/disappeared.md"
     await file_service.write_file(file_path, "# Disappearing note\n")
@@ -40,7 +44,8 @@ async def test_directory_delete_converges_when_file_disappears_before_delete(
     async def delete_before_final_checksum(path: str) -> str:
         nonlocal checksum_calls
         checksum_calls += 1
-        if checksum_calls == 2:
+        # The guarded delete's only checksum read runs after its existence probe.
+        if checksum_calls == 1:
             (tmp_path / path).unlink()
         return await original_compute_checksum(path)
 
@@ -55,15 +60,15 @@ async def test_directory_delete_converges_when_file_disappears_before_delete(
             storage=LocalNoteFileDeleteStorage(file_service),
         )
 
-    assert result.status == RuntimeDeleteStatus.skipped
-    assert result.reason == f"file changed before delete: {file_path}"
+    assert result.status == RuntimeDeleteStatus.missing
+    assert result.reason == f"file already absent: {file_path}"
     assert not (tmp_path / file_path).exists()
 
 
 async def test_note_delete_converges_when_file_disappears_before_delete(
     tmp_path: Path,
 ) -> None:
-    """Ordinary note cleanup should share the safe final-checksum outcome."""
+    """Ordinary note cleanup should report a vanished target as already absent."""
     file_service = FileService(tmp_path)
     file_path = "notes/disappeared.md"
     await file_service.write_file(file_path, "# Disappearing note\n")
@@ -74,7 +79,8 @@ async def test_note_delete_converges_when_file_disappears_before_delete(
     async def delete_before_final_checksum(path: str) -> str:
         nonlocal checksum_calls
         checksum_calls += 1
-        if checksum_calls == 2:
+        # The guarded delete's only checksum read runs after its existence probe.
+        if checksum_calls == 1:
             (tmp_path / path).unlink()
         return await original_compute_checksum(path)
 
@@ -89,8 +95,8 @@ async def test_note_delete_converges_when_file_disappears_before_delete(
             storage=LocalNoteContentStorage(file_service),
         )
 
-    assert result.status == RuntimeDeleteStatus.skipped
-    assert result.reason == f"file changed before delete: {file_path}"
+    assert result.status == RuntimeDeleteStatus.missing
+    assert result.reason == f"file already absent: {file_path}"
     assert not (tmp_path / file_path).exists()
 
 
@@ -113,3 +119,29 @@ async def test_directory_delete_checksum_treats_post_probe_deletion_as_absent(
         checksum = await read_runtime_file_checksum(storage, "notes/disappeared.md")
 
     assert checksum is None
+
+
+@pytest.mark.parametrize("storage_type", [LocalNoteFileDeleteStorage, LocalNoteContentStorage])
+async def test_local_guarded_delete_removes_only_the_accepted_version(
+    tmp_path: Path,
+    storage_type: type[LocalNoteFileDeleteStorage] | type[LocalNoteContentStorage],
+) -> None:
+    """Local adapters delete a matching file and keep a replacement written after acceptance."""
+    file_service = FileService(tmp_path)
+    storage = storage_type(file_service)
+    await file_service.write_file("notes/kept.md", "# Accepted\n")
+    await file_service.write_file("notes/gone.md", "# Accepted\n")
+    accepted_checksum = await file_service.compute_checksum("notes/gone.md")
+    await file_service.write_file("notes/kept.md", "# Replacement\n")
+
+    deleted = await storage.delete_file_if_matches(
+        "notes/gone.md", expected_checksum=accepted_checksum
+    )
+    changed = await storage.delete_file_if_matches(
+        "notes/kept.md", expected_checksum=accepted_checksum
+    )
+
+    assert deleted is RuntimeGuardedFileDeleteOutcome.deleted
+    assert not (tmp_path / "notes/gone.md").exists()
+    assert changed is RuntimeGuardedFileDeleteOutcome.changed
+    assert (tmp_path / "notes/kept.md").read_text() == "# Replacement\n"

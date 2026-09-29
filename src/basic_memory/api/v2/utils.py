@@ -1,11 +1,19 @@
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from typing import Any, Protocol, Optional, List, Sequence
 
 import logfire
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from basic_memory.models import MemoryTimeIndex
 from basic_memory.repository.search_repository import SearchIndexRow
+from basic_memory.repository.semantic_errors import (
+    RerankProviderContractError,
+    RerankTransientError,
+    SemanticDependenciesMissingError,
+    SemanticSearchDisabledError,
+)
 from basic_memory.schemas.memory import (
     EntitySummary,
     ObservationSummary,
@@ -52,6 +60,28 @@ class TemporalAssertionLookup(Protocol):
 # One page of hits, keyed by the (search row type, search row id) pair the projection
 # addresses. Empty means "no valid-time metadata was loaded", never "none exists".
 type TemporalMetadataBySource = Mapping[tuple[str, int], list[TemporalResultMetadata]]
+
+
+@contextmanager
+def search_error_boundary() -> Iterator[None]:
+    """Map search failures onto HTTP statuses the same way on every search route."""
+    try:
+        yield
+    except SemanticSearchDisabledError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except SemanticDependenciesMissingError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RerankTransientError as exc:
+        # Returning raw retrieval order would make pagination inconsistent with
+        # earlier reranked pages. Preserve ordering semantics and make the outage
+        # explicitly retryable instead.
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except RerankProviderContractError as exc:
+        # Upstream reranker returned a malformed response: an upstream fault, not a
+        # client error and not a transient outage (those map to a retryable 503).
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 async def get_entities_by_id_lookup(
@@ -304,7 +334,13 @@ async def to_search_results(
     results: List[SearchIndexRow],
     *,
     temporal_by_source: TemporalMetadataBySource | None = None,
+    project_external_ids: Mapping[int, str] | None = None,
 ) -> list[SearchResult]:
+    """Shape one page of search rows into the public result.
+
+    ``project_external_ids`` maps each row's project to its external id; a caller
+    that knows the projects passes it and results carry both identities.
+    """
     with logfire.span(
         "search.hydrate_results",
         domain="search",
@@ -389,6 +425,12 @@ async def to_search_results(
                         temporal=(
                             temporal_by_source.get((result.type, result.id))
                             if temporal_by_source
+                            else None
+                        ),
+                        project_id=result.project_id,
+                        project_external_id=(
+                            project_external_ids.get(result.project_id)
+                            if project_external_ids
                             else None
                         ),
                     )

@@ -6,25 +6,28 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from basic_memory.repository.search_scope import ProjectScope
+
 
 @dataclass(frozen=True, slots=True)
 class VectorIndexScope:
-    """Stable project storage identity plus the current embedding schema."""
+    """The database namespace and embedding schema an adapter stores vectors under.
+
+    Projects are partitions inside it: every write names the project it touches and a
+    search names the projects it reads, so one adapter serves a whole database.
+    """
 
     namespace: str
-    project_id: int
     embedding_identity: str
     dimensions: int
-
-    @property
-    def storage_key(self) -> tuple[str, int]:
-        """Return the stable isolation key external adapters must use for storage."""
-        return (self.namespace, self.project_id)
 
 
 @dataclass(frozen=True, slots=True)
 class VectorKey:
-    """Backend-independent identity for one semantic chunk vector."""
+    """Backend-independent identity for one semantic chunk vector.
+
+    Entity ids are database-wide primary keys, so the pair is unique across projects.
+    """
 
     entity_id: int
     chunk_key: str
@@ -68,19 +71,19 @@ class SemanticVectorIndex(Protocol):
     def scope(self) -> VectorIndexScope: ...
 
     async def initialize(self) -> None:
-        """Create or validate backend storage for the configured scope."""
+        """Create or validate backend storage shared by every project in the scope."""
         ...
 
-    async def upsert(self, records: Sequence[VectorRecord]) -> None:
-        """Insert or replace vectors only for each record's source generation."""
+    async def upsert(self, project_id: int, records: Sequence[VectorRecord]) -> None:
+        """Insert or replace one project's vectors, only for each record's source generation."""
         ...
 
-    async def delete(self, records: Sequence[VectorDeletion]) -> None:
-        """Delete vectors only for each record's source generation."""
+    async def delete(self, project_id: int, records: Sequence[VectorDeletion]) -> None:
+        """Delete one project's vectors, only for each record's source generation."""
         ...
 
-    async def delete_entity(self, entity_id: int) -> None:
-        """Delete every vector owned by an entity in this scope."""
+    async def delete_entity(self, project_id: int, entity_id: int) -> None:
+        """Delete every vector owned by an entity in one project."""
         ...
 
     async def search(
@@ -88,8 +91,9 @@ class SemanticVectorIndex(Protocol):
         query: Sequence[float],
         *,
         limit: int,
+        projects: ProjectScope,
     ) -> list[VectorMatch]:
-        """Return nearest matches ordered by normalized cosine similarity."""
+        """Return nearest matches within ``projects``, ordered by normalized similarity."""
         ...
 
 
@@ -100,8 +104,8 @@ class SemanticVectorIndexReconciler(Protocol):
     @property
     def scope(self) -> VectorIndexScope: ...
 
-    async def delete_orphans(self, live_keys: Sequence[VectorKey]) -> None:
-        """Delete scoped vectors whose stable keys are not in ``live_keys``."""
+    async def delete_orphans(self, project_id: int, live_keys: Sequence[VectorKey]) -> None:
+        """Delete one project's vectors whose stable keys are not in ``live_keys``."""
         ...
 
 

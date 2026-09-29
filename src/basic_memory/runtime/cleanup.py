@@ -34,6 +34,19 @@ class RuntimeDeleteStatus(StrEnum):
     skipped = "skipped"
 
 
+class RuntimeGuardedFileDeleteOutcome(StrEnum):
+    """What storage did with one checksum-guarded compare-and-delete.
+
+    Storage owns the match because only storage knows which checksum representations identify
+    an object version: local files have one content checksum, while object stores can carry
+    both a content checksum and a native version tag (basic-memory-cloud#2167).
+    """
+
+    deleted = "deleted"
+    missing = "missing"
+    changed = "changed"
+
+
 class RuntimeExternalFileDeleteAction(StrEnum):
     """Adapter work selected for an externally observed file delete."""
 
@@ -301,63 +314,6 @@ class RuntimeFileDeleteResult:
             status=RuntimeDeleteStatus.deleted,
             reason=f"file deleted: {file_path}",
         )
-
-
-@dataclass(frozen=True, slots=True)
-class RuntimeNoteFileDeletePlan:
-    """Pure cleanup decision before a runtime adapter deletes a materialized file."""
-
-    result: RuntimeFileDeleteResult
-    actual_checksum: RuntimeFileChecksum | None
-
-    @property
-    def should_delete_file(self) -> bool:
-        """Return whether the adapter may perform the storage delete."""
-        return self.result.status == RuntimeDeleteStatus.deleted
-
-
-def plan_note_file_delete_cleanup(
-    *,
-    entity_id: RuntimeEntityId,
-    file_path: RuntimeFilePath,
-    accepted_checksum: RuntimeFileChecksum | None,
-    actual_checksum: RuntimeFileChecksum | None,
-) -> RuntimeNoteFileDeletePlan:
-    """Select the safe cleanup outcome for one materialized note file."""
-    if accepted_checksum is None:
-        return RuntimeNoteFileDeletePlan(
-            result=RuntimeFileDeleteResult.no_accepted_checksum(
-                entity_id=entity_id,
-                file_path=file_path,
-            ),
-            actual_checksum=actual_checksum,
-        )
-
-    if actual_checksum is None:
-        return RuntimeNoteFileDeletePlan(
-            result=RuntimeFileDeleteResult.already_absent(
-                entity_id=entity_id,
-                file_path=file_path,
-            ),
-            actual_checksum=actual_checksum,
-        )
-
-    if actual_checksum != accepted_checksum:
-        return RuntimeNoteFileDeletePlan(
-            result=RuntimeFileDeleteResult.changed_before_delete(
-                entity_id=entity_id,
-                file_path=file_path,
-            ),
-            actual_checksum=actual_checksum,
-        )
-
-    return RuntimeNoteFileDeletePlan(
-        result=RuntimeFileDeleteResult.deleted(
-            entity_id=entity_id,
-            file_path=file_path,
-        ),
-        actual_checksum=actual_checksum,
-    )
 
 
 @dataclass(frozen=True, slots=True)

@@ -171,3 +171,30 @@ def test_remove_main_project(app, app_config, config_manager):
         config_after_list = config_manager.load_config()
         assert "main" not in config_after_list.projects
         assert "new_default" in config_after_list.projects
+
+
+def test_local_project_remove_keeps_files_without_delete_notes(app, app_config, config_manager):
+    """Local projects keep today's behavior: no prompt, files stay unless --delete-notes (#1597)."""
+    runner = CliRunner()
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        kept_path = Path(temp_dir) / "kept-project"
+        deleted_path = Path(temp_dir) / "deleted-project"
+
+        for name, path in (("kept-project", kept_path), ("deleted-project", deleted_path)):
+            path.mkdir()
+            result = runner.invoke(cli_app, ["project", "add", name, str(path)])
+            assert result.exit_code == 0, result.stdout
+            # Written after add so the file survives or goes with the directory,
+            # without depending on the add-time index pass.
+            (path / "note.md").write_text(f"# {name}\n")
+
+        result = runner.invoke(cli_app, ["project", "remove", "kept-project"])
+        assert result.exit_code == 0, result.stdout
+        assert "cloud snapshot" not in result.stdout
+        assert (kept_path / "note.md").exists()
+
+        result = runner.invoke(cli_app, ["project", "remove", "deleted-project", "--delete-notes"])
+        assert result.exit_code == 0, result.stdout
+        assert "cloud snapshot" not in result.stdout
+        assert not deleted_path.exists()

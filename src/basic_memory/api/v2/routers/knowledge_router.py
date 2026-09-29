@@ -214,7 +214,7 @@ async def get_graph(
         domain="knowledge",
         action="get_graph",
     ):
-        logger.info("API v2 request: get_graph")
+        logger.debug("API v2 request: get_graph")
 
         # Fetch all entities for this project
         entities = await entity_repository.find_all(session, use_load_options=False)
@@ -240,7 +240,7 @@ async def get_graph(
             if relation.to_entity is not None
         ]
 
-        logger.info(f"API v2 response: graph with {len(nodes)} nodes and {len(edges)} edges")
+        logger.debug(f"API v2 response: graph with {len(nodes)} nodes and {len(edges)} edges")
         return GraphResponse(nodes=nodes, edges=edges)
 
 
@@ -260,7 +260,7 @@ async def get_orphan_entities(
         domain="knowledge",
         action="get_orphans",
     ):
-        logger.info("API v2 request: get_orphan_entities")
+        logger.debug("API v2 request: get_orphan_entities")
 
         entities = await entity_repository.find_without_relations(session)
         nodes = [
@@ -273,7 +273,7 @@ async def get_orphan_entities(
             for entity in entities
         ]
 
-        logger.info(f"API v2 response: {len(nodes)} orphan entities")
+        logger.debug(f"API v2 response: {len(nodes)} orphan entities")
         return OrphanEntitiesResponse(entities=nodes, total=len(nodes))
 
 
@@ -329,7 +329,7 @@ async def resolve_identifier(
         domain="knowledge",
         action="resolve_entity",
     ):
-        logger.info(f"API v2 request: resolve_identifier for '{data.identifier}'")
+        logger.debug("API v2 request: resolve_identifier for {!r}", data.identifier)
 
         workspace_context = current_workspace_permalink_context()
         cache_key = ReadCacheKey(
@@ -480,7 +480,7 @@ async def resolve_link(
         source_project_id=project_id,
         source_project_external_id=source_project_external_id,
     ):
-        logger.info(f"API v2 request: resolve_link for '{data.identifier}'")
+        logger.debug(f"API v2 request: resolve_link for '{data.identifier}'")
 
         try:
             entity = await link_resolver.resolve_link(
@@ -611,7 +611,7 @@ async def index_file(
         domain="knowledge",
         action="index_file",
     ):
-        logger.info(f"API v2 request: index_file file_path='{data.file_path}'")
+        logger.debug(f"API v2 request: index_file file_path='{data.file_path}'")
 
         if not validate_project_path(data.file_path, project_config.home):
             raise HTTPException(
@@ -714,7 +714,7 @@ async def index_file(
             await search_service.sync_entity_vectors_batch([entity.id])
 
         result = EntityResponseV2.model_validate(entity)
-        logger.info(
+        logger.debug(
             f"API v2 response: index_file file_path='{file_path}' external_id={result.external_id}"
         )
         return result
@@ -851,7 +851,7 @@ async def get_entity_by_id(
         domain="knowledge",
         action="get_entity",
     ):
-        logger.info(f"API v2 request: get_entity_by_id entity_id={entity_id}")
+        logger.debug("API v2 request: get_entity_by_id entity_id={}", entity_id)
 
         selector, line_range = _parse_note_slice_params(section=section, lines=lines)
 
@@ -884,7 +884,7 @@ async def get_entity_by_id(
             )
             if note_payload is not None:
                 result = entity_response_from_note_content_payload(note_payload)
-                logger.info(f"API v2 response: external_id={entity_id}, title='{result.title}'")
+                logger.debug(f"API v2 response: external_id={entity_id}, title='{result.title}'")
                 cached.value = result
                 return _apply_note_slice(
                     result,
@@ -901,7 +901,7 @@ async def get_entity_by_id(
                 )
 
             result = EntityResponseV2.model_validate(entity)
-            logger.info(f"API v2 response: external_id={entity_id}, title='{result.title}'")
+            logger.debug(f"API v2 response: external_id={entity_id}, title='{result.title}'")
             cached.value = result
             return _apply_note_slice(
                 result,
@@ -941,7 +941,7 @@ async def create_entity(
         domain="knowledge",
         action="create_entity",
     ):
-        logger.info(
+        logger.debug(
             "API v2 request", endpoint="create_entity", note_type=data.note_type, title=data.title
         )
 
@@ -965,7 +965,7 @@ async def create_entity(
             project_id=project_id,
         )
 
-        logger.info(
+        logger.debug(
             f"API v2 response: endpoint='create_entity' external_id={result.external_id}, title={result.title}, permalink={result.permalink}, status_code=202"
         )
         return result
@@ -1021,7 +1021,7 @@ async def update_entity_by_id(
         domain="knowledge",
         action="update_entity",
     ):
-        logger.info(f"API v2 request: update_entity_by_id entity_id={entity_id}")
+        logger.debug(f"API v2 request: update_entity_by_id entity_id={entity_id}")
 
         try:
             accepted = await note_content_mutation_service.update_note(
@@ -1046,7 +1046,9 @@ async def update_entity_by_id(
             project_id=project_id,
         )
 
-        logger.info(f"API v2 response: external_id={entity_id}, status_code={response.status_code}")
+        logger.debug(
+            f"API v2 response: external_id={entity_id}, status_code={response.status_code}"
+        )
         return result
 
 
@@ -1086,8 +1088,10 @@ async def edit_entity_by_id(
         domain="knowledge",
         action="edit_entity",
     ):
-        logger.info(
-            f"API v2 request: edit_entity_by_id entity_id={entity_id}, operation='{data.operation}'"
+        logger.debug(
+            "API v2 request: edit_entity_by_id entity_id={} operation={}",
+            entity_id,
+            data.operation,
         )
 
         try:
@@ -1111,7 +1115,7 @@ async def edit_entity_by_id(
             project_id=project_id,
         )
 
-        logger.info(
+        logger.debug(
             f"API v2 response: external_id={entity_id}, operation='{data.operation}', status_code=202"
         )
 
@@ -1151,7 +1155,7 @@ async def delete_entity_by_id(
         domain="knowledge",
         action="delete_entity",
     ):
-        logger.info(f"API v2 request: delete_entity_by_id entity_id={entity_id}")
+        logger.debug(f"API v2 request: delete_entity_by_id entity_id={entity_id}")
 
         try:
             accepted = await note_content_mutation_service.delete_note(
@@ -1164,7 +1168,7 @@ async def delete_entity_by_id(
         accepted = await note_content_materialization_provider.materialize_delete_change(accepted)
         result = delete_response_from_note_content_payload(accepted.payload)
 
-        logger.info(f"API v2 response: external_id={entity_id}, deleted={result.deleted}")
+        logger.debug(f"API v2 response: external_id={entity_id}, deleted={result.deleted}")
 
         return result
 
@@ -1209,7 +1213,7 @@ async def move_entity(
         domain="knowledge",
         action="move_entity",
     ):
-        logger.info(
+        logger.debug(
             f"API v2 request: move_entity entity_id={entity_id}, destination='{data.destination_path}'"
         )
 
@@ -1234,7 +1238,7 @@ async def move_entity(
             project_id=project_id,
         )
 
-        logger.info(f"API v2 response: moved external_id={entity_id} to '{data.destination_path}'")
+        logger.debug(f"API v2 response: moved external_id={entity_id} to '{data.destination_path}'")
 
         return result
 
@@ -1277,7 +1281,7 @@ async def move_directory(
         domain="knowledge",
         action="move_directory",
     ):
-        logger.info(
+        logger.debug(
             f"API v2 request: move_directory source='{data.source_directory}', destination='{data.destination_directory}'"
         )
 
@@ -1359,7 +1363,7 @@ async def delete_directory(
         domain="knowledge",
         action="delete_directory",
     ):
-        logger.info(f"API v2 request: delete_directory directory='{data.directory}'")
+        logger.debug(f"API v2 request: delete_directory directory='{data.directory}'")
 
         try:
             result = await directory_delete_service.delete_directory(

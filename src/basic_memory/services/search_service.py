@@ -4,13 +4,14 @@ import asyncio
 import ast
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import datetime
 from typing import Any, List, Optional, Set, Dict
 
 from dateparser import parse
 from fastapi import BackgroundTasks
 from loguru import logger
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import logfire
@@ -23,7 +24,8 @@ from basic_memory.repository.search_repository import (
     SearchIndexRow,
     SearchRepository,
 )
-from basic_memory.repository.search_query import relaxed_query_words
+from basic_memory.repository.search_query import PreparedSearchQuery, relaxed_query_words
+from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.search_trace import SearchTraceCollector
 from basic_memory.schemas.base import normalize_note_type
 from basic_memory.schemas.search import SearchQuery, SearchItemType, SearchRetrievalMode
@@ -40,25 +42,6 @@ from basic_memory.temporal import (
 # Maximum size for content_stems field to stay under Postgres's 8KB index row limit.
 # We use 6000 characters to leave headroom for other indexed columns and overhead.
 MAX_CONTENT_STEMS_SIZE = 6000
-
-
-@dataclass(frozen=True)
-class PreparedSearchQuery:
-    """Normalized query inputs shared by search and count."""
-
-    search_text: str | None
-    permalink: str | None
-    permalink_match: str | None
-    title: str | None
-    note_types: list[str] | None
-    search_item_types: list[SearchItemType] | None
-    categories: list[str] | None
-    after_date: datetime | None
-    metadata_filters: dict[str, Any] | None
-    file_path_prefix: str | None
-    temporal: TemporalFilter | None
-    retrieval_mode: SearchRetrievalMode
-    min_similarity: float | None
 
 
 def entity_embeddings_enabled(entity: Entity) -> bool:
@@ -159,6 +142,132 @@ def _strip_nul(value: str) -> str:
     return value.replace("\x00", "")
 
 
+def prepare_search_query(query: SearchQuery) -> PreparedSearchQuery | None:
+    """Normalize a ``SearchQuery`` into the prepared form every reader consumes.
+
+    Returns ``None`` when the query names no criteria at all, so callers can answer
+    an empty page without touching storage.
+    """
+    search_text = query.text
+    tags = query.tags
+
+    # Support tag:<tag> shorthand by mapping to tags filter.
+    if search_text is not None:
+        search_text = search_text.strip() or None
+        if search_text and search_text.lower().startswith("tag:"):
+            tag_values = re.split(r"[,\s]+", search_text[4:].strip())
+            parsed_tags = [t for t in tag_values if t]
+            if parsed_tags:
+                tags = parsed_tags
+                search_text = None
+
+    after_date = (
+        (query.after_date if isinstance(query.after_date, datetime) else parse(query.after_date))
+        if query.after_date
+        else None
+    )
+
+    # Merge structured metadata filters (explicit + convenience fields).
+    metadata_filters: Optional[Dict[str, Any]] = None
+    if query.metadata_filters or tags or query.status:
+        metadata_filters = dict(query.metadata_filters or {})
+        if tags:
+            metadata_filters.setdefault("tags", tags)
+        if query.status:
+            metadata_filters.setdefault("status", query.status)
+
+    prepared = PreparedSearchQuery(
+        search_text=search_text,
+        permalink=query.permalink,
+        permalink_match=query.permalink_match,
+        title=query.title,
+        note_types=(
+            [normalize_note_type(note_type) for note_type in query.note_types]
+            if query.note_types
+            else None
+        ),
+        search_item_types=query.entity_types,
+        categories=query.categories,
+        after_date=after_date,
+        metadata_filters=metadata_filters,
+        file_path_prefix=query.file_path_prefix,
+        temporal=build_temporal_filter(query),
+        retrieval_mode=query.retrieval_mode or SearchRetrievalMode.FTS,
+        min_similarity=query.min_similarity,
+    )
+
+    has_criteria = bool(
+        prepared.search_text
+        or prepared.permalink
+        or prepared.permalink_match
+        or prepared.title
+        or prepared.note_types
+        or prepared.search_item_types
+        or prepared.categories
+        or prepared.after_date
+        or prepared.metadata_filters
+        # Normalized by SearchQuery, so only a real subtree reaches here.
+        or prepared.file_path_prefix
+        or prepared.temporal
+    )
+    if not has_criteria:
+        logger.debug("no criteria passed to query")
+        return None
+    return prepared
+
+
+async def include_legacy_note_type_spellings(
+    session_maker: async_sessionmaker[AsyncSession],
+    scope: ProjectScope,
+    prepared: PreparedSearchQuery,
+    *,
+    session: AsyncSession | None = None,
+) -> PreparedSearchQuery:
+    """Expand canonical note-type filters to the exact legacy spellings stored in ``scope``.
+
+    Search rows written before canonicalization preserve the owning entity's exact
+    type spelling. Including those spellings alongside the canonical values keeps an
+    upgrade searchable without requiring an eager full reindex. Only spellings from
+    projects in scope are read, so a scope cannot learn what another project stores.
+    """
+    if not prepared.note_types:
+        return prepared
+
+    canonical_note_types = set(prepared.note_types)
+    async with db.scoped_session(session_maker, session) as active_session:
+        stored_types = await active_session.scalars(
+            select(Entity.note_type).where(Entity.project_id.in_(scope.project_ids)).distinct()
+        )
+        compatible_note_types = canonical_note_types | {
+            stored_type
+            for stored_type in stored_types.all()
+            if stored_type and normalize_note_type(stored_type) in canonical_note_types
+        }
+    return replace(prepared, note_types=sorted(compatible_note_types))
+
+
+def relaxed_fts_fallback_eligible(
+    query: SearchQuery,
+    search_text: str | None,
+    retrieval_mode: SearchRetrievalMode,
+) -> bool:
+    """Whether a zero-result strict full-text query may retry with OR-joined terms."""
+    if retrieval_mode != SearchRetrievalMode.FTS:
+        return False
+    if not search_text or not search_text.strip():
+        return False
+    if '"' in search_text:
+        return False
+    if query.has_boolean_operators():
+        return False
+    # Trigger: query has too few safe relaxed terms, explicit numeric identifiers,
+    # or only terms that would over-broaden under OR.
+    # Why: the shared helper preserves the old English guard while allowing
+    # whitespace-separated CJK terms that ASCII tokenization cannot see.
+    # Outcome: retry only when there is a backend-safe relaxed OR query.
+    return relaxed_query_words(search_text) is not None
+
+
 class SearchService:
     """Service for search operations.
 
@@ -215,76 +324,7 @@ class SearchService:
 
     def prepare_query(self, query: SearchQuery) -> PreparedSearchQuery | None:
         """Normalize a SearchQuery into repository arguments."""
-        search_text = query.text
-        tags = query.tags
-
-        # Support tag:<tag> shorthand by mapping to tags filter.
-        if search_text is not None:
-            search_text = search_text.strip() or None
-            if search_text and search_text.lower().startswith("tag:"):
-                tag_values = re.split(r"[,\s]+", search_text[4:].strip())
-                parsed_tags = [t for t in tag_values if t]
-                if parsed_tags:
-                    tags = parsed_tags
-                    search_text = None
-
-        after_date = (
-            (
-                query.after_date
-                if isinstance(query.after_date, datetime)
-                else parse(query.after_date)
-            )
-            if query.after_date
-            else None
-        )
-
-        # Merge structured metadata filters (explicit + convenience fields).
-        metadata_filters: Optional[Dict[str, Any]] = None
-        if query.metadata_filters or tags or query.status:
-            metadata_filters = dict(query.metadata_filters or {})
-            if tags:
-                metadata_filters.setdefault("tags", tags)
-            if query.status:
-                metadata_filters.setdefault("status", query.status)
-
-        prepared = PreparedSearchQuery(
-            search_text=search_text,
-            permalink=query.permalink,
-            permalink_match=query.permalink_match,
-            title=query.title,
-            note_types=(
-                [normalize_note_type(note_type) for note_type in query.note_types]
-                if query.note_types
-                else None
-            ),
-            search_item_types=query.entity_types,
-            categories=query.categories,
-            after_date=after_date,
-            metadata_filters=metadata_filters,
-            file_path_prefix=query.file_path_prefix,
-            temporal=build_temporal_filter(query),
-            retrieval_mode=query.retrieval_mode or SearchRetrievalMode.FTS,
-            min_similarity=query.min_similarity,
-        )
-
-        has_criteria = bool(
-            prepared.search_text
-            or prepared.permalink
-            or prepared.permalink_match
-            or prepared.title
-            or prepared.note_types
-            or prepared.search_item_types
-            or prepared.categories
-            or prepared.after_date
-            or prepared.metadata_filters
-            # Normalized by SearchQuery, so only a real subtree reaches here.
-            or prepared.file_path_prefix
-            or prepared.temporal
-        )
-        if not has_criteria:
-            logger.debug("no criteria passed to query")
-            return None
-        return prepared
+        return prepare_search_query(query)
 
     @staticmethod
     def _prepared_has_filters(prepared: PreparedSearchQuery) -> bool:
@@ -305,27 +345,12 @@ class SearchService:
         session: AsyncSession | None = None,
     ) -> PreparedSearchQuery:
         """Expand canonical note-type filters to exact legacy entity spellings."""
-        if not prepared.note_types:
-            return prepared
-
-        canonical_note_types = set(prepared.note_types)
-        async with db.scoped_session(self.session_maker, session) as active_session:
-            stored_types_query = self.entity_repository.select(Entity.note_type).distinct()
-            stored_types_result = await self.entity_repository.execute_query(
-                active_session,
-                stored_types_query,
-                use_query_options=False,
-            )
-
-        # Search rows written before canonicalization preserve the owning entity's
-        # exact type spelling. Include those spellings alongside canonical values
-        # so an upgrade remains searchable without requiring an eager full reindex.
-        compatible_note_types = canonical_note_types | {
-            stored_type
-            for stored_type in stored_types_result.scalars().all()
-            if stored_type and normalize_note_type(stored_type) in canonical_note_types
-        }
-        return replace(prepared, note_types=sorted(compatible_note_types))
+        return await include_legacy_note_type_spellings(
+            self.session_maker,
+            ProjectScope.single(self.repository.project_id),
+            prepared,
+            session=session,
+        )
 
     async def _search_repository(
         self,
@@ -501,20 +526,7 @@ class SearchService:
         retrieval_mode: SearchRetrievalMode,
     ) -> bool:
         """Check whether we should run relaxed OR fallback after strict FTS returns empty."""
-        if retrieval_mode != SearchRetrievalMode.FTS:
-            return False
-        if not search_text or not search_text.strip():
-            return False
-        if '"' in search_text:
-            return False
-        if query.has_boolean_operators():
-            return False
-        # Trigger: query has too few safe relaxed terms, explicit numeric identifiers,
-        # or only terms that would over-broaden under OR.
-        # Why: the shared helper preserves the old English guard while allowing
-        # whitespace-separated CJK terms that ASCII tokenization cannot see.
-        # Outcome: retry only when there is a backend-safe relaxed OR query.
-        return relaxed_query_words(search_text) is not None
+        return relaxed_fts_fallback_eligible(query, search_text, retrieval_mode)
 
     @staticmethod
     def _generate_variants(text: str) -> Set[str]:
@@ -622,20 +634,19 @@ class SearchService:
             f"permalink={entity.permalink} project_id={entity.project_id}"
         )
         try:
-            with logfire.span("search.index_entity_data", entity_id=entity.id):
-                replacement_content = content
-                if entity.is_markdown and replacement_content is None:
-                    # Trigger: synchronized and legacy notes source search text from storage.
-                    # Why: a transient read failure must preserve the last valid projection.
-                    # Outcome: storage errors remain visible before any search rows are deleted.
-                    replacement_content = await self.file_service.read_entity_content(entity)
+            replacement_content = content
+            if entity.is_markdown and replacement_content is None:
+                # Trigger: synchronized and legacy notes source search text from storage.
+                # Why: a transient read failure must preserve the last valid projection.
+                # Outcome: storage errors remain visible before any search rows are deleted.
+                replacement_content = await self.file_service.read_entity_content(entity)
 
-                await self.repository.delete_by_entity_id(entity_id=entity.id)
+            await self.repository.delete_by_entity_id(entity_id=entity.id)
 
-                if entity.is_markdown:
-                    await self.index_entity_markdown(entity, replacement_content)
-                else:
-                    await self.index_entity_file(entity)
+            if entity.is_markdown:
+                await self.index_entity_markdown(entity, replacement_content)
+            else:
+                await self.index_entity_file(entity)
 
             logger.debug(
                 f"[BackgroundTask] Completed search index for entity_id={entity.id} "
@@ -888,50 +899,78 @@ class SearchService:
         The project_id is automatically added by the repository when indexing.
         """
 
-        with logfire.span("search.index_markdown", entity_id=entity.id):
-            rows_to_index = []
+        rows_to_index = []
 
-            content_stems = []
-            content_snippet = ""
-            title_variants = self._generate_variants(entity.title)
-            content_stems.extend(title_variants)
+        content_stems = []
+        content_snippet = ""
+        title_variants = self._generate_variants(entity.title)
+        content_stems.extend(title_variants)
 
-            if content is None:
-                content = await self.file_service.read_entity_content(entity)
-            if content:
-                content_stems.append(content)
-                content_snippet = _strip_nul(content)
+        if content is None:
+            content = await self.file_service.read_entity_content(entity)
+        if content:
+            content_stems.append(content)
+            content_snippet = _strip_nul(content)
 
-            if entity.permalink:
-                content_stems.extend(self._generate_variants(entity.permalink))
+        if entity.permalink:
+            content_stems.extend(self._generate_variants(entity.permalink))
 
-            content_stems.extend(self._generate_variants(entity.file_path))
+        content_stems.extend(self._generate_variants(entity.file_path))
 
-            entity_tags = self._extract_entity_tags(entity)
-            if entity_tags:
-                content_stems.extend(entity_tags)
+        entity_tags = self._extract_entity_tags(entity)
+        if entity_tags:
+            content_stems.extend(entity_tags)
 
-            entity_content_stems = _strip_nul(
-                "\n".join(p for p in content_stems if p and p.strip())
+        entity_content_stems = _strip_nul("\n".join(p for p in content_stems if p and p.strip()))
+
+        if len(entity_content_stems) > MAX_CONTENT_STEMS_SIZE:  # pragma: no cover
+            entity_content_stems = entity_content_stems[:MAX_CONTENT_STEMS_SIZE]  # pragma: no cover
+
+        rows_to_index.append(
+            SearchIndexRow(
+                id=entity.id,
+                type=SearchItemType.ENTITY.value,
+                title=_strip_nul(entity.title),
+                content_stems=entity_content_stems,
+                content_snippet=content_snippet,
+                permalink=entity.permalink,
+                file_path=entity.file_path,
+                entity_id=entity.id,
+                metadata={
+                    "note_type": normalize_note_type(entity.note_type),
+                },
+                created_at=entity.created_at,
+                updated_at=entity.updated_at,
+                project_id=entity.project_id,
             )
+        )
 
-            if len(entity_content_stems) > MAX_CONTENT_STEMS_SIZE:  # pragma: no cover
-                entity_content_stems = entity_content_stems[
-                    :MAX_CONTENT_STEMS_SIZE
-                ]  # pragma: no cover
+        seen_permalinks: set[str] = {entity.permalink} if entity.permalink else set()
+        for obs in entity.observations:
+            obs_permalink = obs.permalink
+            if obs_permalink in seen_permalinks:
+                logger.debug(f"Skipping duplicate observation permalink: {obs_permalink}")
+                continue
+            seen_permalinks.add(obs_permalink)
 
+            obs_content_stems = _strip_nul(
+                "\n".join(p for p in self._generate_variants(obs.content) if p and p.strip())
+            )
+            if len(obs_content_stems) > MAX_CONTENT_STEMS_SIZE:  # pragma: no cover
+                obs_content_stems = obs_content_stems[:MAX_CONTENT_STEMS_SIZE]  # pragma: no cover
             rows_to_index.append(
                 SearchIndexRow(
-                    id=entity.id,
-                    type=SearchItemType.ENTITY.value,
-                    title=_strip_nul(entity.title),
-                    content_stems=entity_content_stems,
-                    content_snippet=content_snippet,
-                    permalink=entity.permalink,
+                    id=obs.id,
+                    type=SearchItemType.OBSERVATION.value,
+                    title=_strip_nul(f"{obs.category}: {obs.content[:100]}..."),
+                    content_stems=obs_content_stems,
+                    content_snippet=_strip_nul(obs.content),
+                    permalink=obs_permalink,
                     file_path=entity.file_path,
+                    category=obs.category,
                     entity_id=entity.id,
                     metadata={
-                        "note_type": normalize_note_type(entity.note_type),
+                        "tags": obs.tags,
                     },
                     created_at=entity.created_at,
                     updated_at=entity.updated_at,
@@ -939,70 +978,35 @@ class SearchService:
                 )
             )
 
-            seen_permalinks: set[str] = {entity.permalink} if entity.permalink else set()
-            for obs in entity.observations:
-                obs_permalink = obs.permalink
-                if obs_permalink in seen_permalinks:
-                    logger.debug(f"Skipping duplicate observation permalink: {obs_permalink}")
-                    continue
-                seen_permalinks.add(obs_permalink)
+        for rel in entity.outgoing_relations:
+            relation_title = _strip_nul(
+                f"{rel.from_entity.title} -> {rel.to_entity.title}"
+                if rel.to_entity
+                else f"{rel.from_entity.title}"
+            )
 
-                obs_content_stems = _strip_nul(
-                    "\n".join(p for p in self._generate_variants(obs.content) if p and p.strip())
+            rel_content_stems = _strip_nul(
+                "\n".join(p for p in self._generate_variants(relation_title) if p and p.strip())
+            )
+            rows_to_index.append(
+                SearchIndexRow(
+                    id=rel.id,
+                    title=relation_title,
+                    permalink=rel.permalink,
+                    content_stems=rel_content_stems,
+                    file_path=entity.file_path,
+                    type=SearchItemType.RELATION.value,
+                    entity_id=entity.id,
+                    from_id=rel.from_id,
+                    to_id=rel.to_id,
+                    relation_type=rel.relation_type,
+                    created_at=entity.created_at,
+                    updated_at=entity.updated_at,
+                    project_id=entity.project_id,
                 )
-                if len(obs_content_stems) > MAX_CONTENT_STEMS_SIZE:  # pragma: no cover
-                    obs_content_stems = obs_content_stems[
-                        :MAX_CONTENT_STEMS_SIZE
-                    ]  # pragma: no cover
-                rows_to_index.append(
-                    SearchIndexRow(
-                        id=obs.id,
-                        type=SearchItemType.OBSERVATION.value,
-                        title=_strip_nul(f"{obs.category}: {obs.content[:100]}..."),
-                        content_stems=obs_content_stems,
-                        content_snippet=_strip_nul(obs.content),
-                        permalink=obs_permalink,
-                        file_path=entity.file_path,
-                        category=obs.category,
-                        entity_id=entity.id,
-                        metadata={
-                            "tags": obs.tags,
-                        },
-                        created_at=entity.created_at,
-                        updated_at=entity.updated_at,
-                        project_id=entity.project_id,
-                    )
-                )
+            )
 
-            for rel in entity.outgoing_relations:
-                relation_title = _strip_nul(
-                    f"{rel.from_entity.title} -> {rel.to_entity.title}"
-                    if rel.to_entity
-                    else f"{rel.from_entity.title}"
-                )
-
-                rel_content_stems = _strip_nul(
-                    "\n".join(p for p in self._generate_variants(relation_title) if p and p.strip())
-                )
-                rows_to_index.append(
-                    SearchIndexRow(
-                        id=rel.id,
-                        title=relation_title,
-                        permalink=rel.permalink,
-                        content_stems=rel_content_stems,
-                        file_path=entity.file_path,
-                        type=SearchItemType.RELATION.value,
-                        entity_id=entity.id,
-                        from_id=rel.from_id,
-                        to_id=rel.to_id,
-                        relation_type=rel.relation_type,
-                        created_at=entity.created_at,
-                        updated_at=entity.updated_at,
-                        project_id=entity.project_id,
-                    )
-                )
-
-            await self.repository.bulk_index_items(rows_to_index)
+        await self.repository.bulk_index_items(rows_to_index)
 
     async def delete_by_permalink(self, permalink: str, search_item_type: SearchItemType):
         """Delete the search row one permalink owns for the given row kind."""

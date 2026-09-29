@@ -4,8 +4,8 @@ import sqlite3
 
 import pytest
 
-from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
-from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
+from basic_memory.repository.postgres_search_query import relaxed_tsquery_text
+from basic_memory.repository.sqlite_search_query import relaxed_fts_text
 
 CREATE_FTS = (
     "CREATE VIRTUAL TABLE t USING fts5("
@@ -27,7 +27,7 @@ DOCUMENT = (
 )
 def test_sqlite_relaxed_text_quotes_only_terms_that_need_it(query: str, expected: str) -> None:
     """Apostrophe terms are quoted; every other term renders exactly as before."""
-    assert SQLiteSearchRepository._relaxed_fts_text(query) == expected
+    assert relaxed_fts_text(query) == expected
 
 
 @pytest.mark.parametrize(
@@ -47,7 +47,7 @@ def test_sqlite_relaxed_text_is_accepted_by_fts5(query: str) -> None:
     catches and turns into an empty result — the relaxed retry then silently
     contributes nothing, which is the failure this fallback exists to prevent.
     """
-    relaxed = SQLiteSearchRepository._relaxed_fts_text(query)
+    relaxed = relaxed_fts_text(query)
     assert relaxed is not None
 
     connection = sqlite3.connect(":memory:")
@@ -82,7 +82,7 @@ def test_sqlite_relaxed_text_bare_apostrophe_would_be_rejected() -> None:
 )
 def test_postgres_relaxed_tsquery_quotes_apostrophe_lexemes(query: str, expected: str) -> None:
     """Postgres carries the same token shapes, so it needs the same escaping."""
-    assert PostgresSearchRepository._relaxed_tsquery_text(query) == expected
+    assert relaxed_tsquery_text(query) == expected
 
 
 @pytest.mark.parametrize(
@@ -105,7 +105,7 @@ def test_relaxed_terms_match_the_stored_note(document: str, query: str) -> None:
     try:
         connection.execute(CREATE_FTS)
         connection.execute("INSERT INTO t VALUES (?)", (document,))
-        relaxed = SQLiteSearchRepository._relaxed_fts_text(query)
+        relaxed = relaxed_fts_text(query)
         assert relaxed is not None
         rows = connection.execute("SELECT rowid FROM t WHERE t MATCH ?", (relaxed,)).fetchall()
     finally:
@@ -125,7 +125,7 @@ def test_relaxed_terms_match_either_stored_form(document: str) -> None:
     try:
         connection.execute(CREATE_FTS)
         connection.execute("INSERT INTO t VALUES (?)", (document,))
-        relaxed = SQLiteSearchRepository._relaxed_fts_text("foo­bar права доступа")
+        relaxed = relaxed_fts_text("foo­bar права доступа")
         assert relaxed is not None
         rows = connection.execute("SELECT rowid FROM t WHERE t MATCH ?", (relaxed,)).fetchall()
     finally:
@@ -138,5 +138,5 @@ def test_orthographic_joiners_are_not_duplicated_into_a_second_variant() -> None
 
     A stripped variant would only widen the OR with a term no note can hold.
     """
-    relaxed = SQLiteSearchRepository._relaxed_fts_text("نمی‌خواهم دسترسی را لغو")
+    relaxed = relaxed_fts_text("نمی‌خواهم دسترسی را لغو")
     assert relaxed == "نمی‌خواهم* OR دسترسی* OR را* OR لغو*"

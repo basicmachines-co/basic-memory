@@ -76,12 +76,13 @@ def _database_namespace(app_config: BasicMemoryConfig) -> str:
 def build_vector_index_scope(
     app_config: BasicMemoryConfig,
     provider: EmbeddingProvider,
-    project_id: int,
 ) -> VectorIndexScope:
-    """Build the explicit isolation contract handed to every vector adapter."""
+    """Build the storage identity handed to every vector adapter.
+
+    The database namespace and embedding schema; projects are named per operation.
+    """
     return VectorIndexScope(
         namespace=_database_namespace(app_config),
-        project_id=project_id,
         embedding_identity=semantic_embedding_identity(provider),
         dimensions=provider.dimensions,
     )
@@ -109,14 +110,13 @@ def _create_milvus_index(
 def create_semantic_vector_index(
     *,
     session_maker: async_sessionmaker[AsyncSession],
-    project_id: int,
     app_config: BasicMemoryConfig,
     database_backend: DatabaseBackend,
     embedding_provider: EmbeddingProvider,
 ) -> tuple[str, SemanticVectorIndex]:
     """Create the vector adapter selected by the validated application config."""
     name = resolve_semantic_vector_index_name(app_config, database_backend)
-    scope = build_vector_index_scope(app_config, embedding_provider, project_id)
+    scope = build_vector_index_scope(app_config, embedding_provider)
 
     if name == "sqlite-vec":
         from basic_memory.repository.sqlite_vec_index import SQLiteVecIndex

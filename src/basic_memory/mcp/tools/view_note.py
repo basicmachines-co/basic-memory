@@ -59,7 +59,7 @@ async def view_note(
         HTTPError: If project doesn't exist or is inaccessible
         SecurityError: If identifier attempts path traversal
     """
-    logger.info(f"Viewing note: {identifier} in project: {project}")
+    logger.debug(f"Viewing note: {identifier} in project: {project}")
 
     # Call the existing read_note logic (default output_format="text" returns str)
     content = str(

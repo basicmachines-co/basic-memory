@@ -1,5 +1,6 @@
 """Typed, execution-native trace values for the search retrieval pipeline."""
 
+from basic_memory.repository.search_scope import ProjectScope
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -508,25 +509,23 @@ class HydrationDropKey:
 
 async def read_manifest_readiness(
     session: Any,
-    project_id: int,
+    scope: ProjectScope,
     vector_index: str,
     embedding_model: str,
 ) -> ManifestReadiness:
     """Count configured readiness and rows stored under another vector identity."""
     from sqlalchemy import text
 
+    params: dict[str, Any] = {"vector_index": vector_index, "embedding_model": embedding_model}
+    scope_predicate = scope.predicate("project_id", params)
     readiness_result = await session.execute(
         text(
             "SELECT embedding_status, COUNT(*) AS row_count "
-            "FROM search_vector_chunks WHERE project_id = :project_id "
+            f"FROM search_vector_chunks WHERE {scope_predicate} "
             "AND vector_index = :vector_index AND embedding_model = :embedding_model "
             "GROUP BY embedding_status"
         ),
-        {
-            "project_id": project_id,
-            "vector_index": vector_index,
-            "embedding_model": embedding_model,
-        },
+        params,
     )
     counts = {
         str(row["embedding_status"]): int(row["row_count"])
@@ -534,14 +533,10 @@ async def read_manifest_readiness(
     }
     other_result = await session.execute(
         text(
-            "SELECT COUNT(*) FROM search_vector_chunks WHERE project_id = :project_id "
+            f"SELECT COUNT(*) FROM search_vector_chunks WHERE {scope_predicate} "
             "AND (vector_index <> :vector_index OR embedding_model <> :embedding_model)"
         ),
-        {
-            "project_id": project_id,
-            "vector_index": vector_index,
-            "embedding_model": embedding_model,
-        },
+        params,
     )
     return ManifestReadiness(
         configured_index=vector_index,
@@ -554,7 +549,7 @@ async def read_manifest_readiness(
 
 async def classify_hydration_drops(
     session: Any,
-    project_id: int,
+    scope: ProjectScope,
     dropped_keys: Sequence[HydrationDropKey],
 ) -> tuple[HydrationDropped, ...]:
     """Classify adapter hits rejected by authoritative manifest hydration."""
@@ -570,7 +565,8 @@ async def classify_hydration_drops(
         HYDRATION_DROP_CLASSIFICATION_BATCH_SIZE,
     ):
         batch = dropped_keys[batch_start : batch_start + HYDRATION_DROP_CLASSIFICATION_BATCH_SIZE]
-        params: dict[str, object] = {"project_id": project_id}
+        params: dict[str, Any] = {}
+        scope_predicate = scope.predicate("project_id", params)
         predicates: list[str] = []
         for index, dropped in enumerate(batch):
             params[f"entity_id_{index}"] = dropped.entity_id
@@ -585,7 +581,7 @@ async def classify_hydration_drops(
         result = await session.execute(
             text(
                 "SELECT entity_id, chunk_key, embedding_model, vector_index, embedding_status "
-                "FROM search_vector_chunks WHERE project_id = :project_id AND ("
+                f"FROM search_vector_chunks WHERE {scope_predicate} AND ("
                 + " OR ".join(predicates)
                 + ")"
             ),

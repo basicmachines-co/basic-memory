@@ -7,6 +7,7 @@ import pytest_asyncio
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig
+from basic_memory.indexing.models import RelationTargetRequest
 from basic_memory.models import Entity, Project
 from basic_memory.repository import EntityRepository, ProjectRepository
 from basic_memory.services.bulk_link_resolver import (
@@ -119,7 +120,7 @@ async def test_bulk_resolution_matches_regular_strict_resolution(
 
     async with db.scoped_session(session_maker) as session:
         bulk_results = await bulk_resolver.resolve_relation_targets(
-            link_texts,
+            [RelationTargetRequest(link_text) for link_text in link_texts],
             session=session,
         )
         for link_text in link_texts[:-1]:
@@ -129,7 +130,7 @@ async def test_bulk_resolution_matches_regular_strict_resolution(
                 load_relations=False,
                 session=session,
             )
-            bulk_result = bulk_results[link_text]
+            bulk_result = bulk_results[RelationTargetRequest(link_text)]
             assert (bulk_result.id if bulk_result else None) == (
                 regular_result.id if regular_result else None
             )
@@ -142,7 +143,7 @@ async def test_bulk_resolution_matches_regular_strict_resolution(
                 session=session,
             )
 
-    assert bulk_results["Core Service"] is None
+    assert bulk_results[RelationTargetRequest("Core Service")] is None
 
 
 @pytest.mark.asyncio
@@ -195,17 +196,25 @@ async def test_bulk_resolution_normalizes_file_paths(
     resolver = BulkLinkResolver(entity_repository, app_config)
 
     async with db.scoped_session(session_maker) as session:
-        results = await resolver.resolve_relation_targets(
-            [
-                "./assets//image.png",
-                "docs/Guide",
-                "alpha_note",
-                "alpha-note",
-                "ALPHA-NOTE.MD",
-                "école-note",
-            ],
-            session=session,
-        )
+        results = {
+            request.link_text: entity
+            for request, entity in (
+                await resolver.resolve_relation_targets(
+                    [
+                        RelationTargetRequest(link_text)
+                        for link_text in (
+                            "./assets//image.png",
+                            "docs/Guide",
+                            "alpha_note",
+                            "alpha-note",
+                            "ALPHA-NOTE.MD",
+                            "école-note",
+                        )
+                    ],
+                    session=session,
+                )
+            ).items()
+        }
 
     resolved_image = results["./assets//image.png"]
     assert resolved_image is not None
@@ -326,14 +335,22 @@ async def test_bulk_resolution_routes_cross_project_targets(
         project_repository=project_repository,
     )
     async with db.scoped_session(session_maker) as session:
-        results = await resolver.resolve_relation_targets(
-            [
-                "other project::Cross Project Note",
-                "Other Project/docs/cross-project-note",
-                "missing::Cross Project Note",
-            ],
-            session=session,
-        )
+        results = {
+            request.link_text: entity
+            for request, entity in (
+                await resolver.resolve_relation_targets(
+                    [
+                        RelationTargetRequest(link_text)
+                        for link_text in (
+                            "other project::Cross Project Note",
+                            "Other Project/docs/cross-project-note",
+                            "missing::Cross Project Note",
+                        )
+                    ],
+                    session=session,
+                )
+            ).items()
+        }
 
     explicit_result = results["other project::Cross Project Note"]
     path_result = results["Other Project/docs/cross-project-note"]
@@ -365,4 +382,73 @@ async def test_bulk_resolution_requires_the_current_project_to_exist(
 
     async with db.scoped_session(session_maker) as session:
         with pytest.raises(RuntimeError, match="Current project 999999 does not exist"):
-            await resolver.resolve_relation_targets(["Target"], session=session)
+            await resolver.resolve_relation_targets(
+                [RelationTargetRequest("Target")], session=session
+            )
+
+
+@pytest.mark.asyncio
+async def test_path_targets_resolve_from_the_note_that_carries_them(
+    entity_repository: EntityRepository,
+    test_project: Project,
+    session_maker,
+    app_config: BasicMemoryConfig,
+) -> None:
+    """The same authored path names a different file from each source note."""
+    now = datetime.now(timezone.utc)
+    entities = [
+        Entity(
+            title=title,
+            note_type="note",
+            content_type="text/markdown",
+            file_path=file_path,
+            permalink=permalink,
+            created_at=now,
+            updated_at=now,
+            project_id=test_project.id,
+        )
+        for title, file_path, permalink in (
+            ("Alpha Guide", "alpha/Guide.md", "alpha/guide"),
+            ("Beta Guide", "beta/Guide.md", "beta/guide"),
+            ("Shared", "Shared.md", "shared"),
+        )
+    ]
+    async with db.scoped_session(session_maker) as session:
+        for entity in entities:
+            await entity_repository.add(session, entity)
+    alpha_guide, beta_guide, shared = entities
+    from_alpha = RelationTargetRequest("./Guide.md", source_path="alpha/notes.md")
+    from_beta = RelationTargetRequest("./Guide.md", source_path="beta/notes.md")
+    up_from_alpha = RelationTargetRequest("../Shared.md", source_path="alpha/notes.md")
+    wikilink_from_beta = RelationTargetRequest("[[../Shared.md|the shared note]]", "beta/notes.md")
+    rooted = RelationTargetRequest("/beta/Guide.md", source_path="alpha/notes.md")
+    escaping = RelationTargetRequest("../../Shared.md", source_path="alpha/notes.md")
+    no_source = RelationTargetRequest("../Shared.md")
+    by_title = RelationTargetRequest("./guide", source_path="alpha/notes.md")
+
+    async with db.scoped_session(session_maker) as session:
+        results = await BulkLinkResolver(entity_repository, app_config).resolve_relation_targets(
+            [
+                from_alpha,
+                from_beta,
+                up_from_alpha,
+                wikilink_from_beta,
+                rooted,
+                escaping,
+                no_source,
+                by_title,
+            ],
+            session=session,
+        )
+
+    assert {request: entity.id if entity else None for request, entity in results.items()} == {
+        from_alpha: alpha_guide.id,
+        from_beta: beta_guide.id,
+        up_from_alpha: shared.id,
+        wikilink_from_beta: shared.id,
+        rooted: beta_guide.id,
+        escaping: None,
+        no_source: None,
+        # A path names a file exactly; it never falls back to a permalink or title.
+        by_title: None,
+    }

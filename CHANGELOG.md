@@ -4,6 +4,47 @@
 
 ### Features
 
+- **#1558**: `QUERY /v2/search/` (and `POST /v2/search/` for clients that cannot send
+  QUERY) searches an explicit set of projects in one database with one query. The body
+  is the project search body plus `project_ids`, a required list of internal ids the
+  caller has already authorized; an empty list answers no rows and there is no way to
+  ask for every project. Full-text, vector, and hybrid retrieval run the same reader
+  the project route runs, so one project here ranks exactly as its own route does, and
+  results are one ranking over the union rather than merged per-project pages. Hits are
+  hydrated only from projects in scope. Every search result, on both routes, now
+  carries `project_id` and `project_external_id`.
+
+- **#1558**: `search_notes(search_all_projects=True)` runs one scoped query per database
+  instead of one search per project, so a local vault with many projects is one
+  query, and each cloud workspace is one query, with results attributed to their
+  project by the server rather than by which request they came back on. A new
+  `projects` parameter searches a chosen subset by name or external id; an unknown
+  name is an error. Cross-database results are still merged by score, one failing
+  database is skipped with a warning and an inexact total, and a retryable outage
+  or a server too old to attribute its results fails the whole page.
+
+- **#1558**: Vector retrieval reads only the projects in scope and fills the window it
+  asks for. The sqlite-vec table gains a `project_id` partition key, so a scoped
+  nearest-neighbour query ranks each project's own vectors instead of taking the k
+  nearest across the whole database and discarding the out-of-scope ones, which
+  could leave a small project with an empty page for a query its notes answered.
+  Existing local storage is carried into the partitioned table without re-embedding.
+  On Postgres the nearest-neighbour statement now runs on the HNSW index (its
+  tie-break sort keys had kept the planner on an exact scan of every vector), with
+  `hnsw.ef_search` sized to the candidate window and an iterative scan that keeps
+  going until the scope and manifest filters have admitted enough rows. That scan
+  needs pgvector 0.8 or later; an older extension is reported as a dependency error
+  instead of quietly returning short windows.
+
+- **#1558**: A vector or hybrid search with structured filters (note types, dates,
+  categories, metadata, path prefixes, valid time) now fills its candidate window.
+  The vector index ranks by similarity alone, so a window taken straight from it and
+  filtered afterwards could hold few admitted rows while more sat just past it, and
+  the page came back short although matches existed. The reader re-reads the window
+  with a bounded geometric overfetch until it holds enough admitted rows, the ranking
+  is exhausted, or its tail falls below the similarity threshold. Unfiltered searches
+  read their window once, as before.
+
 - **#1512**: Word, PowerPoint, and CSV files get the same sidecar Markdown note a
   PDF gets. `bm import document <path>` indexes the project, extracts the file,
   and writes `<file>.<ext>.md` next to it plus a run note under
@@ -55,6 +96,24 @@
   band, so the decision stays with the agent, which has the context the score does not.
 
 ### Bug Fixes
+
+- **#1514**: Markdown path links resolve against the note's own path at resolution
+  time, the way wikilinks do, instead of at parse time from the file's location
+  on disk. The parser had derived the note's project path with `relative_to` on the
+  filesystem path, which raised for content parsed from anywhere outside the project
+  root (a hosted note read from object storage, for one) and gave a wrong base for
+  any other temporary location. The graph now stores the path as authored
+  (`../guides/Guide.md`, `./same.md`, `/root.md`); both resolvers turn it into a
+  project path from the source note, and background resolution keys path targets
+  by their source note. Wikilinks spelled `[[../x.md]]` or `[[./x.md]]` resolve
+  by the same rule.
+
+- **#1558**: `search_notes(search_all_projects=True)` and `projects=[...]` rank merged
+  full-text hits by score strength instead of raw value. SQLite bm25 scores are
+  negative with lower meaning better, so sorting raw values put the weakest hit first
+  and cut every page from the wrong end of the ranking; page two repeated page one.
+  Every hit on a page that spans projects now carries `project` (JSON) or a
+  `- project:` line (text), so the next call can be routed to the right project.
 
 - **#1458**: A note whose file stem equals its project's name is now readable by its bare
   identifier. `split_project_permalink_prefix` matches a leading path segment against a
@@ -108,6 +167,49 @@
   rewritten, and `remove_frontmatter` no longer strips such a block from search content.
   Frontmatter is now classified once, by the parser, as present, absent, or
   malformed, and only the first two are ever written to.
+
+### Internal
+
+- **#1558**: Search filter compilation now runs over an explicit `ProjectScope` instead of
+  a repository-bound `project_id`. FTS term preparation and filter compilation moved out
+  of the SQLite and Postgres repositories into `sqlite_search_query` and
+  `postgres_search_query` as pure functions returning a `CompiledFilter`, and the filters
+  both backends share (scope, permalink, directory, item type, category, note type,
+  `after_date`, valid time, candidate keys) are compiled once in `search_filters`. The
+  note-type and valid-time predicates match search rows on their full
+  `(project_id, ...)` identity. Project repositories call the compilers with a scope of
+  one; no query behavior changes. First step of the shared single/multi-project reader.
+
+- **#1558**: Full-text execution leaves the project repositories. `SQLiteFts` and
+  `PostgresFts` run a compiled statement for any `ProjectScope` and own their engine's
+  failure semantics (FTS5 syntax errors answer empty, Postgres retries a malformed strict
+  tsquery relaxed inside a savepoint). `SearchRepositoryBase.search` and `count` are
+  concrete: shared vector/hybrid dispatch, then the engine's `FtsBackend`. The base read
+  path binds every statement to the repository's scope (manifest hydration, candidate row
+  fetch, readiness and drop classification). `PreparedSearchQuery` moves to the repository
+  layer with defaults, and the filter helpers both backends share move from the base into
+  `search_filters`. No query behavior changes.
+
+- **#1558**: Retrieval leaves `SearchRepositoryBase`. `SearchReader` runs one prepared
+  query over one `ProjectScope` in whichever mode it asks for, and `SemanticSearch` owns
+  vector and hybrid retrieval (adapter lookup, manifest hydration, the structured filter
+  pass, score fusion, reranking, pagination) over a `VectorRetrieval` that is present or
+  absent rather than probed with `hasattr`. The repository keeps what only it knows
+  (whether semantic search is enabled and its vector tables exist) and builds a reader
+  per call from its current state. Hydrated chunks are a typed `HydratedChunk`, which
+  retires the `best_distance` compatibility branch and the per-backend
+  `_distance_to_similarity` hooks the adapters had already replaced. Test doubles
+  construct the pipeline directly instead of subclassing the repository. No query
+  behavior changes.
+
+- **#1558**: Vector adapters are bound to the database, not to a project. `VectorIndexScope`
+  is the database namespace plus embedding schema; every write names the project it
+  touches (`upsert(project_id, ...)`, `delete(project_id, ...)`,
+  `delete_entity(project_id, ...)`, `delete_orphans(project_id, ...)`) and `search` takes
+  a `ProjectScope`, so one sqlite-vec or pgvector adapter answers a query across any set
+  of projects with one statement. Milvus keeps a collection per project and searches the
+  collections in scope. `SemanticSearch` passes its scope through, so a project
+  repository's vector search is unchanged. No query behavior changes.
 
 
 ## v0.23.2 (2026-08-25)
