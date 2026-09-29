@@ -6,6 +6,8 @@ Tests the complete move note workflow: MCP client -> MCP server -> FastAPI -> da
 
 import json
 from hashlib import sha256
+from pathlib import Path
+from typing import Any
 
 import pytest
 from fastmcp import Client
@@ -1788,3 +1790,143 @@ async def test_move_note_interior_projects_segment_still_succeeds(mcp_server, ap
             },
         )
         assert "Interior projects segment is fine" in read_result.content[0].text
+
+
+async def _create_sibling_project(client: Client[Any], name: str, project_path: Path) -> None:
+    """Create a second project whose name the tests reuse as a local folder name."""
+    await client.call_tool(
+        "create_memory_project",
+        {
+            "project_name": name,
+            "project_path": str(project_path),
+            "set_default": False,
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_move_directory_into_project_named_folder_rejected(
+    mcp_server, app, test_project, tmp_path_factory
+):
+    """A directory move gets the same cross-project verdict a file move gets (#1607).
+
+    The guard used to run only on the file path, so `work/moved` was refused for a note
+    and accepted for a directory.
+    """
+
+    async with Client(mcp_server) as client:
+        await _create_sibling_project(client, "work", tmp_path_factory.mktemp("work"))
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Scratch Dir Note",
+                "directory": "worknot/scratch",
+                "content": "# Scratch Dir Note\n\nStays put.",
+            },
+        )
+
+        file_result = await client.call_tool(
+            "move_note",
+            {
+                "project": test_project.name,
+                "identifier": "Scratch Dir Note",
+                "destination_folder": "work/scratch",
+                "output_format": "json",
+            },
+        )
+        dir_result = await client.call_tool(
+            "move_note",
+            {
+                "project": test_project.name,
+                "identifier": "worknot/scratch",
+                "destination_path": "work/moved",
+                "is_directory": True,
+                "output_format": "json",
+            },
+        )
+
+        file_data = json.loads(file_result.content[0].text)
+        dir_data = json.loads(dir_result.content[0].text)
+        assert file_data["error"] == "CROSS_PROJECT_MOVE_NOT_SUPPORTED"
+        assert dir_data["error"] == "CROSS_PROJECT_MOVE_NOT_SUPPORTED"
+        assert dir_data["destination"] == "work/moved"
+
+        text_result = await client.call_tool(
+            "move_note",
+            {
+                "project": test_project.name,
+                "identifier": "worknot/scratch",
+                "destination_path": "work/moved",
+                "is_directory": True,
+            },
+        )
+        assert "Cross-Project Move Not Supported" in text_result.content[0].text
+
+        read_original = await client.call_tool(
+            "read_note",
+            {"project": test_project.name, "identifier": "worknot/scratch/Scratch Dir Note.md"},
+        )
+        assert "Stays put." in read_original.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_move_into_existing_local_folder_named_after_project_succeeds(
+    mcp_server, app, test_project, tmp_path_factory
+):
+    """A folder that already exists locally is a same-project destination (#1607).
+
+    Knowledge bases organised by domain have folders named after sibling projects. When
+    `work/` already holds notes in the active project, moving into it is local intent,
+    for file and directory moves alike.
+    """
+
+    async with Client(mcp_server) as client:
+        await _create_sibling_project(client, "work", tmp_path_factory.mktemp("work"))
+        for title, directory in (
+            ("Existing Work Note", "work/scratch"),
+            ("Incoming File Note", "inbox"),
+            ("Incoming Dir Note", "worknot/scratch"),
+        ):
+            await client.call_tool(
+                "write_note",
+                {
+                    "project": test_project.name,
+                    "title": title,
+                    "directory": directory,
+                    "content": f"# {title}\n\nBody of {title}.",
+                },
+            )
+
+        file_result = await client.call_tool(
+            "move_note",
+            {
+                "project": test_project.name,
+                "identifier": "Incoming File Note",
+                "destination_folder": "work/scratch",
+                "output_format": "json",
+            },
+        )
+        file_data = json.loads(file_result.content[0].text)
+        assert file_data["moved"] is True
+        assert file_data["file_path"] == "work/scratch/Incoming File Note.md"
+
+        dir_result = await client.call_tool(
+            "move_note",
+            {
+                "project": test_project.name,
+                "identifier": "worknot/scratch",
+                "destination_path": "work/moved",
+                "is_directory": True,
+                "output_format": "json",
+            },
+        )
+        dir_data = json.loads(dir_result.content[0].text)
+        assert dir_data["moved"] is True
+        assert dir_data["successful_moves"] == 1
+
+        read_moved = await client.call_tool(
+            "read_note",
+            {"project": test_project.name, "identifier": "work/moved/Incoming Dir Note.md"},
+        )
+        assert "Body of Incoming Dir Note." in read_moved.content[0].text

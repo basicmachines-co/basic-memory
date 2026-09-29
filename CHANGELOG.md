@@ -97,6 +97,15 @@
 
 ### Bug Fixes
 
+- **#1607**: `move_note` applies its cross-project guard to directory moves as well as
+  file moves. The guard ran only after the directory branch had returned, so
+  `work/moved` was refused for a note and accepted for a directory. The guard also
+  no longer rejects a destination whose first folder is named after another project
+  when that folder already holds notes in the current project: a knowledge base
+  organised by domain has such folders, and an existing local folder is evidence of a
+  same-project move. A first folder named after another project that does not exist
+  locally is still rejected.
+
 - **#1514**: Markdown path links resolve against the note's own path at resolution
   time, the way wikilinks do, instead of at parse time from the file's location
   on disk. The parser had derived the note's project path with `relative_to` on the

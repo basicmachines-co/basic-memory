@@ -48,46 +48,69 @@ def _directory_path_for_move(
 
 
 async def _detect_cross_project_move_attempt(
-    client, identifier: str, destination_path: str, current_project: str
+    client, identifier: str, destination_path: str, active_project: ProjectItem
 ) -> Optional[str]:
     """Detect potential cross-project move attempts and return guidance.
 
+    Applies to file and directory moves alike, so both reach the same verdict for the
+    same destination (#1607).
+
     Args:
         client: The AsyncClient instance
-        identifier: The note identifier being moved
-        destination_path: The destination path
-        current_project: The current active project
+        identifier: The note or directory identifier being moved
+        destination_path: The destination path or folder
+        active_project: The project the move runs in
 
     Returns:
         Error message with guidance if cross-project move is detected, None otherwise
     """
     try:
         # Import here to avoid circular import
-        from basic_memory.mcp.clients import ProjectClient
+        from basic_memory.mcp.clients import DirectoryClient, ProjectClient
 
         # Use typed ProjectClient for API calls
         project_client = ProjectClient(client)
         project_list = await project_client.list_projects()
-        project_names = [p.name.lower() for p in project_list.projects]
 
-        dest_lower = destination_path.lower()
-        path_parts = [part for part in dest_lower.split("/") if part]
+        path_parts = [
+            part for part in PureWindowsPath(destination_path).as_posix().split("/") if part
+        ]
+        if not path_parts:
+            return None
+        leading_folder = path_parts[0]
 
         # --- Detection 1: leading segment is a known project name ---
         # Trigger: the first path segment matches a different project's name.
         # Why: a routing-style destination like "other-project/file.md" expresses an
         #      intent to move into another project, which move_note cannot do — it
         #      would silently create a same-project nested folder instead.
-        # Outcome: reject with cross-project guidance rather than fake success.
-        if path_parts:
-            leading = path_parts[0]
-            if leading in project_names and leading != current_project.lower():
-                matching_project = next(
-                    p.name for p in project_list.projects if p.name.lower() == leading
-                )
-                return _format_cross_project_error_response(
-                    identifier, destination_path, current_project, matching_project
-                )
+        # Outcome: candidate for rejection, unless the folder is already local (below).
+        matching_project = next(
+            (
+                p.name
+                for p in project_list.projects
+                if p.name.lower() == leading_folder.lower()
+                and p.name.lower() != active_project.name.lower()
+            ),
+            None,
+        )
+        if matching_project is None:
+            return None
+
+        # Trigger: the leading folder already holds content in the active project.
+        # Why: a knowledge base organised by domain routinely has folders named after
+        #      sibling projects; an existing local folder is evidence of local intent,
+        #      and rejecting it left `git mv` as the only way in (#1607).
+        # Outcome: the move proceeds as an ordinary same-project move.
+        local_folder = await DirectoryClient(client, active_project.external_id).list(
+            leading_folder, depth=1, page_size=1
+        )
+        if local_folder.total > 0:
+            return None
+
+        return _format_cross_project_error_response(
+            identifier, destination_path, active_project.name, matching_project
+        )
 
         # NOTE: a "<seg>/projects/<seg>/..." structural heuristic was removed here.
         # Why: matching any destination whose 2nd segment is literally "projects" is
@@ -448,7 +471,9 @@ async def move_note(
 
     Note:
         This operation moves notes within the specified project only. Moving notes
-        between different projects is not currently supported.
+        between different projects is not currently supported. For file and
+        directory moves alike, a destination whose first folder is named after
+        another project is rejected, unless that folder already exists in this project.
 
     The move operation:
     - Updates the entity's file_path in the database
@@ -585,6 +610,34 @@ move_note("{identifier}", "notes/{destination_path.split("/")[-1] if "/" in dest
             return _format_cross_project_error_response(
                 identifier, destination_path, active_project.name, source_project.name
             )
+
+        # --- Cross-boundary intent guard (file and directory moves) ---
+        # Trigger: every move, before branching on is_directory.
+        # Why: the guard used to run only on the file path, so a directory move accepted
+        #      the same destination a file move refused (#1607). It checks the leading
+        #      segment only, which destination_folder already carries — so it no longer
+        #      needs to wait for folder resolution (#881 Gap 3).
+        # Outcome: a cross-project routing destination is rejected with guidance instead
+        #          of silently degrading to a same-project nested folder.
+        guarded_destination = destination_folder or destination_path
+        cross_project_error = await _detect_cross_project_move_attempt(
+            client, identifier, guarded_destination, active_project
+        )
+        if cross_project_error:
+            logger.info(
+                f"Detected cross-project move attempt: {identifier} -> {guarded_destination}"
+            )
+            if output_format == "json":
+                return {
+                    "moved": False,
+                    "title": None,
+                    "permalink": None,
+                    "file_path": None,
+                    "source": identifier,
+                    "destination": guarded_destination,
+                    "error": "CROSS_PROJECT_MOVE_NOT_SUPPORTED",
+                }
+            return cross_project_error
 
         # Handle directory moves
         if is_directory:
@@ -795,31 +848,6 @@ The destination folder '{destination_folder}' is not allowed - paths must stay w
 ```
 move_note("{identifier}", destination_folder="notes")
 ```"""
-
-        # --- Cross-boundary intent guard (file moves only) ---
-        # Trigger: destination_path now holds the real combined target, whether it came
-        #          from destination_path or was resolved from destination_folder above.
-        # Why: detection must run AFTER folder resolution — running it earlier (when a
-        #      caller used destination_folder) saw an empty destination_path and skipped
-        #      entirely (#881 Gap 3).
-        # Outcome: a cross-workspace/cross-project routing destination is rejected with
-        #          guidance instead of silently degrading to a same-project nested folder.
-        cross_project_error = await _detect_cross_project_move_attempt(
-            client, identifier, destination_path, active_project.name
-        )
-        if cross_project_error:
-            logger.info(f"Detected cross-project move attempt: {identifier} -> {destination_path}")
-            if output_format == "json":
-                return {
-                    "moved": False,
-                    "title": None,
-                    "permalink": None,
-                    "file_path": None,
-                    "source": identifier,
-                    "destination": destination_path,
-                    "error": "CROSS_PROJECT_MOVE_NOT_SUPPORTED",
-                }
-            return cross_project_error
 
         # Trigger: caller asks to move a note to its current normalized file path.
         # Why: the API treats this as a successful update, but no file actually moved.

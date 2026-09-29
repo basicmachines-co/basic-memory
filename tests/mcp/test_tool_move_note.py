@@ -5,6 +5,15 @@ import pytest
 from basic_memory.mcp.tools.move_note import move_note, _format_move_error_response
 from basic_memory.mcp.tools.write_note import write_note
 from basic_memory.mcp.tools.read_note import read_note
+from basic_memory.schemas.project_info import ProjectItem
+
+ACTIVE_PROJECT = ProjectItem(
+    id=1,
+    external_id="11111111-1111-1111-1111-111111111111",
+    name="test-project",
+    path="/tmp/test-project",
+    is_default=False,
+)
 
 
 @pytest.mark.asyncio
@@ -30,7 +39,7 @@ async def test_detect_cross_project_move_attempt_is_defensive_on_api_error(monke
         client=None,
         identifier="source/note",
         destination_path="somewhere/note",
-        current_project="test-project",
+        active_project=ACTIVE_PROJECT,
     )
     assert result is None
 
@@ -63,7 +72,18 @@ async def test_detect_cross_project_only_flags_known_project_name(monkeypatch):
         async def list_projects(self, *args, **kwargs):
             return _ProjectList()
 
+    class _EmptyListing:
+        total = 0
+
+    class MockDirectoryClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def list(self, *args, **kwargs):
+            return _EmptyListing()
+
     monkeypatch.setattr(clients_mod, "ProjectClient", MockProjectClient)
+    monkeypatch.setattr(clients_mod, "DirectoryClient", MockDirectoryClient)
 
     move_note_module = importlib.import_module("basic_memory.mcp.tools.move_note")
 
@@ -72,7 +92,7 @@ async def test_detect_cross_project_only_flags_known_project_name(monkeypatch):
         client=None,
         identifier="source/note",
         destination_path="other-project/note.md",
-        current_project="test-project",
+        active_project=ACTIVE_PROJECT,
     )
     assert rejected is not None
     assert "Cross-Project Move Not Supported" in rejected
@@ -83,7 +103,7 @@ async def test_detect_cross_project_only_flags_known_project_name(monkeypatch):
         client=None,
         identifier="source/note",
         destination_path="other-workspace/projects/x/note.md",
-        current_project="test-project",
+        active_project=ACTIVE_PROJECT,
     )
     assert workspace_shaped is None
 
@@ -92,7 +112,7 @@ async def test_detect_cross_project_only_flags_known_project_name(monkeypatch):
         client=None,
         identifier="source/note",
         destination_path="team/2026/projects/alpha/note.md",
-        current_project="test-project",
+        active_project=ACTIVE_PROJECT,
     )
     assert allowed is None
 
@@ -101,9 +121,18 @@ async def test_detect_cross_project_only_flags_known_project_name(monkeypatch):
         client=None,
         identifier="source/note",
         destination_path="projects/2025/note.md",
-        current_project="test-project",
+        active_project=ACTIVE_PROJECT,
     )
     assert top_level is None
+
+    # Root-only folder (destination_folder="/") has no leading segment -> allowed.
+    root_only = await move_note_module._detect_cross_project_move_attempt(
+        client=None,
+        identifier="source/note",
+        destination_path="/",
+        active_project=ACTIVE_PROJECT,
+    )
+    assert root_only is None
 
 
 @pytest.mark.asyncio
