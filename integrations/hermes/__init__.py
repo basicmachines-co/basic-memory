@@ -110,8 +110,9 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "name": "bm_read",
         "description": (
             "Read a specific note by title, permalink, or memory:// URL. Returns the "
-            "full markdown body with observations and relations. Permalinks returned "
-            "by bm_write carry their own project routing."
+            "full markdown body with observations and relations. To read back a note "
+            "written to another project, pass the same `project` or `project_id` "
+            "used for bm_write; otherwise the active project is used."
         ),
         "parameters": {
             "type": "object",
