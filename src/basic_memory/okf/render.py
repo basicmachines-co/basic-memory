@@ -342,10 +342,11 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
         metadata["type"] = note_types[file.path]
         metadata.setdefault("tags", [])
         semantic_setting = metadata.get("bm_parse_semantics")
-        if not (
+        parse_semantics = not (
             semantic_setting is False
             or (isinstance(semantic_setting, str) and semantic_setting.lower() == "false")
-        ):
+        )
+        if parse_semantics:
             semantics = parse(document.body)
             # Observation syntax remains intact and is documented by the profile.
             # Typed relation metadata is needed because a standard link is untyped.
@@ -359,16 +360,20 @@ def render_bundle(snapshot: ExportSnapshot) -> tuple[ExportFile, ...]:
             **existing,
             "okf_export": {"version": 1, "relations": relations},
         }
-        body = convert_wikilinks(
-            document.body,
-            file.path,
-            targets,
-            snapshot.project,
-            include_project=snapshot.permalinks_include_project,
-            ambiguous_aliases=frozenset(ambiguous),
-            permalinks=permalinks,
-            title_targets=title_targets,
-        )
+        # A graph-silent note (bm_parse_semantics: false) keeps its [[...]] text as
+        # authored; rewriting it would invent edges the graph never recorded.
+        body = document.body.replace("\r\n", "\n").replace("\r", "\n")
+        if parse_semantics:
+            body = convert_wikilinks(
+                body,
+                file.path,
+                targets,
+                snapshot.project,
+                include_project=snapshot.permalinks_include_project,
+                ambiguous_aliases=frozenset(ambiguous),
+                permalinks=permalinks,
+                title_targets=title_targets,
+            )
         content = "---\n" + yaml.dump(
             metadata, Dumper=ExportDumper, allow_unicode=True, sort_keys=False
         )

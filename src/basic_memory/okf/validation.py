@@ -192,24 +192,24 @@ def check_bundle(root: Path) -> CheckReport:
                 continue
             if name not in files:
                 continue
-            if path.suffix != ".md":
-                # Assets are not validated, but an unreadable one still fails the bundle.
-                if is_file:
-                    try:
-                        path.open("rb").close()
-                    except OSError as error:
-                        report.diagnostics.append(
-                            Diagnostic(path=relative, rule="filesystem.read", message=str(error))
-                        )
-                continue
             if not is_file:
+                # FIFOs, sockets and devices are not portable, whatever their name.
                 report.diagnostics.append(
                     Diagnostic(
                         path=relative,
                         rule="filesystem.regular_file",
-                        message="Markdown must be a regular file",
+                        message="Bundle entries must be regular files",
                     )
                 )
+                continue
+            if path.suffix != ".md":
+                # Assets are not validated, but an unreadable one still fails the bundle.
+                try:
+                    path.open("rb").close()
+                except OSError as error:
+                    report.diagnostics.append(
+                        Diagnostic(path=relative, rule="filesystem.read", message=str(error))
+                    )
                 continue
             if name not in {"index.md", "log.md"}:
                 report.concepts += 1

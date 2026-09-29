@@ -1,6 +1,7 @@
 """Publication fault injection and read-only journal boundaries."""
 
 from datetime import UTC, datetime
+import os
 from pathlib import Path
 
 import pytest
@@ -121,6 +122,16 @@ def test_unreadable_subtree_is_a_failure(tmp_path, monkeypatch):
         snapshot_files(tmp_path)
 
 
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFOs only")
+def test_non_regular_asset_is_a_diagnostic(tmp_path):
+    os.mkfifo(tmp_path / "pipe.pdf")
+    report = check_bundle(tmp_path)
+    assert not report.success
+    assert [(d.path, d.rule) for d in report.diagnostics] == [
+        ("pipe.pdf", "filesystem.regular_file")
+    ]
+
+
 def test_unreadable_asset_is_a_diagnostic(tmp_path, monkeypatch):
     (tmp_path / "paper.pdf").write_bytes(b"%PDF")
     real_open = Path.open
@@ -163,12 +174,15 @@ def test_ambiguous_alias_and_semantic_opt_out():
         (
             ExportFile("one/a.md", b"---\ntitle: Same\n---\n"),
             ExportFile("two/a.md", b"---\ntitle: Same\n---\n"),
-            ExportFile("source.md", b"---\nbm_parse_semantics: false\n---\n[[Same]]"),
+            ExportFile("source.md", b"[[Same]]"),
+            ExportFile("raw.md", b"---\nbm_parse_semantics: false\n---\n[[Same]]"),
         ),
     )
     output = {file.path: file.content for file in render_bundle(snapshot)}
     assert b"[Same](/Same)" in output["source.md"]
-    assert b"relations: []" in output["source.md"]
+    # A graph-silent note keeps its wikilink text and records no relations.
+    assert output["raw.md"].endswith(b"---\n[[Same]]")
+    assert b"relations: []" in output["raw.md"]
     assert b"[one](one/index.md)" in output["index.md"]
 
 

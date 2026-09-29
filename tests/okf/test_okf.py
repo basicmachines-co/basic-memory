@@ -844,6 +844,15 @@ def test_link_labels_keep_unicode_line_separators():
     assert convert_wikilinks(body, "source.md", {"A": "a.md"}, "p") == "[left\u2028right](/a.md)"
 
 
+@pytest.mark.parametrize("setting", ["false", '"False"'])
+def test_graph_silent_note_keeps_wikilinks_literal(setting):
+    body = f"---\nbm_parse_semantics: {setting}\n---\nSee [[A]].".encode()
+    snapshot = ExportSnapshot("p", (ExportFile("a.md", b"# A"), ExportFile("raw.md", body)))
+    raw = next(file.content for file in render_bundle(snapshot) if file.path == "raw.md")
+    assert raw.decode().endswith("---\nSee [[A]].")
+    assert b"relations: []" in raw
+
+
 def test_bom_is_dropped_before_generated_frontmatter():
     snapshot = ExportSnapshot("p", (ExportFile("note.md", "\ufeff# Heading".encode()),))
     note = next(file.content for file in render_bundle(snapshot) if file.path == "note.md")
