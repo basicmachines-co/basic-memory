@@ -9,7 +9,7 @@ from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import event, text
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
@@ -503,6 +503,48 @@ async def test_sqlite_vec_reconciliation_is_project_scoped(search_repository):
             )
         )
         assert remaining.scalars().all() == [902, 906]
+
+
+@pytest.mark.asyncio
+async def test_sqlite_vec_stale_cleanup_is_not_a_correlated_subquery(search_repository):
+    """The stale-vector DELETE must not re-run its subquery for every vec0 row.
+
+    A subquery that reads ``search_vector_embeddings.source_hash`` from the outer
+    DELETE is correlated, so SQLite re-evaluates it once per vector row: quadratic
+    in vault size, and it held the write lock for minutes on real vaults (#1581).
+    The query plan is the stable signal; timing it would be flaky.
+    """
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec reconciliation behavior is local SQLite-only.")
+
+    _enable_semantic(search_repository)
+    await search_repository.init_search_index()
+    index = cast(SQLiteVecIndex, search_repository._semantic_vector_index)
+
+    stale_deletes: list[tuple[str, Any]] = []
+
+    def record_stale_delete(_conn, _cursor, statement, parameters, _context, _executemany):
+        if statement.startswith("DELETE FROM search_vector_embeddings") and "NOT (" in statement:
+            stale_deletes.append((statement, parameters))
+
+    async with db.scoped_session(search_repository.session_maker) as session:
+        engine = session.get_bind()
+    event.listen(engine, "before_cursor_execute", record_stale_delete)
+    try:
+        await index.delete_orphans(search_repository.project_id, [])
+    finally:
+        event.remove(engine, "before_cursor_execute", record_stale_delete)
+
+    assert len(stale_deletes) == 1
+    statement, parameters = stale_deletes[0]
+    async with db.scoped_session(search_repository.session_maker) as session:
+        await index._ensure_loaded(session)
+        connection = await session.connection()
+        plan = await connection.exec_driver_sql(f"EXPLAIN QUERY PLAN {statement}", parameters)
+        details = [str(row[3]) for row in plan.fetchall()]
+
+    assert details, "expected a query plan for the stale-vector DELETE"
+    assert not any("CORRELATED" in detail for detail in details), details
 
 
 @pytest.mark.asyncio

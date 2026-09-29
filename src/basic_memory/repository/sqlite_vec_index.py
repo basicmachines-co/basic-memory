@@ -332,6 +332,9 @@ class SQLiteVecIndex:
                     text(f"DELETE FROM search_vector_embeddings WHERE rowid IN ({placeholders})"),
                     params,
                 )
+            # Join the vector row by rowid inside the subquery instead of reading
+            # the outer DELETE's source_hash: a correlated subquery re-runs once per
+            # vec0 row, which is quadratic and held the write lock on large vaults.
             await session.execute(
                 text(
                     "DELETE FROM search_vector_embeddings WHERE rowid IN ("
