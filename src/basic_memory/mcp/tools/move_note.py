@@ -102,11 +102,19 @@ async def _detect_cross_project_move_attempt(
         #      sibling projects; an existing local folder is evidence of local intent,
         #      and rejecting it left `git mv` as the only way in (#1607).
         # Outcome: the move proceeds as an ordinary same-project move.
-        local_folder = await DirectoryClient(client, active_project.external_id).list(
-            leading_folder, depth=1, page_size=1
-        )
-        if local_folder.total > 0:
-            return None
+        # Trigger: the folder lookup itself fails after a project name matched.
+        # Why: the name match already signals routing intent; allowing the move
+        #      unverified is the silent misroute this guard exists to prevent.
+        # Outcome: keep the cross-project rejection.
+        try:
+            local_folder = await DirectoryClient(client, active_project.external_id).list(
+                leading_folder, depth=1, page_size=1
+            )
+        except Exception as e:
+            logger.debug(f"Could not verify local folder {leading_folder!r}: {e}")
+        else:
+            if local_folder.total > 0:
+                return None
 
         return _format_cross_project_error_response(
             identifier, destination_path, active_project.name, matching_project

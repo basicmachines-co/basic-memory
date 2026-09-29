@@ -45,6 +45,49 @@ async def test_detect_cross_project_move_attempt_is_defensive_on_api_error(monke
 
 
 @pytest.mark.asyncio
+async def test_detect_cross_project_rejects_when_local_folder_check_fails(monkeypatch):
+    """After a project name matches, a failed local-folder lookup keeps the rejection."""
+    import importlib
+
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+
+    class _Project:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    class _ProjectList:
+        projects = [_Project("test-project"), _Project("other-project")]
+
+    class MockProjectClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def list_projects(self, *args, **kwargs):
+            return _ProjectList()
+
+    class FailingDirectoryClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def list(self, *args, **kwargs):
+            raise RuntimeError("directory backend unavailable")
+
+    monkeypatch.setattr(clients_mod, "ProjectClient", MockProjectClient)
+    monkeypatch.setattr(clients_mod, "DirectoryClient", FailingDirectoryClient)
+
+    move_note_module = importlib.import_module("basic_memory.mcp.tools.move_note")
+
+    result = await move_note_module._detect_cross_project_move_attempt(
+        client=None,
+        identifier="source/note",
+        destination_path="other-project/note.md",
+        active_project=ACTIVE_PROJECT,
+    )
+    assert result is not None
+    assert "Cross-Project Move Not Supported" in result
+
+
+@pytest.mark.asyncio
 async def test_detect_cross_project_only_flags_known_project_name(monkeypatch):
     """Detection flags only a leading segment that matches a KNOWN project name.
 
