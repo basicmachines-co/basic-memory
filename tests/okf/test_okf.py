@@ -278,11 +278,16 @@ def test_log_entries_require_date_group():
     assert check_document("log.md", "# Log\n- Undated entry")[0].rule == "log.group"
 
 
-def test_source_relative_path_precedes_root_path():
+def test_bare_slash_target_resolves_from_project_root():
+    # Only ./ and ../ are source-relative; nested/a is an identity, as in the graph.
     targets = {"nested/a.md": "nested/a.md", "folder/nested/a.md": "folder/nested/a.md"}
     assert (
         convert_wikilinks("[[nested/a]]", "folder/source.md", targets, "p")
-        == "[nested/a](/folder/nested/a.md)"
+        == "[nested/a](/nested/a.md)"
+    )
+    assert (
+        convert_wikilinks("[[./nested/a.md]]", "folder/source.md", targets, "p")
+        == "[./nested/a.md](/folder/nested/a.md)"
     )
 
 
@@ -513,7 +518,8 @@ async def test_disabled_project_prefix_policy_reaches_export(export_config, tmp_
     export_config.permalinks_include_project = False
     destination = tmp_path / "bundle"
     assert (await export_project(export_config, "export", destination)).success
-    assert "[export/foo](/folder/export/foo.md)" in (destination / "folder/source.md").read_text()
+    # A bare target is an identity: the unprefixed permalink wins over the source folder.
+    assert "[export/foo](/a.md)" in (destination / "folder/source.md").read_text()
 
 
 def test_ambiguous_bare_title_does_not_fall_through_to_filename():
@@ -611,8 +617,8 @@ def test_image_and_reference_labels_keep_literal_wikilinks(label):
 def test_relative_wikilink_percent_sequences_are_literal():
     targets = {path: path for path in ("folder/sub/A%20B.md", "folder/sub/A B.md")}
     assert (
-        convert_wikilinks("[[sub/A%20B.md]]", "folder/source.md", targets, "p")
-        == "[sub/A%20B.md](/folder/sub/A%2520B.md)"
+        convert_wikilinks("[[./sub/A%20B.md]]", "folder/source.md", targets, "p")
+        == "[./sub/A%20B.md](/folder/sub/A%2520B.md)"
     )
 
 

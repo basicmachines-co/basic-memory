@@ -159,7 +159,7 @@ def convert_wikilinks(
             return False
         rooted = target.startswith("/")
         resolved = None
-        # Explicit relative links bind to their source directory before semantic aliases.
+        # Only ./ and ../ targets are source-relative; see the path branch below.
         # Wikilink paths are literal identifiers, so URL decoding must round-trip them.
         authored_path = markdown_link_path(quote(target, safe="/"))
         relative = resolve_project_path(authored_path, source) if authored_path else None
@@ -183,18 +183,9 @@ def convert_wikilinks(
             state.push("text", "", 0).content = raw
             state.pos = end + 2
             return True
-        if reference.explicitly_qualified:
-            relative = None
-        if (
-            include_project
-            and "/" in target
-            and generate_permalink(target.partition("/")[0]) == project
-        ):
-            relative = None
-        if not rooted and "/" in target and relative:
-            resolved = targets.get(relative.lstrip("/"))
-            if resolved is None:
-                resolved = targets.get(relative.lstrip("/") + ".md")
+        # Bare slash-bearing targets such as nested/a are identities, not paths: the
+        # graph resolves them by permalink, title, then project-root path, never
+        # against the source folder.
         if not rooted and resolved is None and permalinks:
             # Semantic addresses precede title/path aliases, even when they look like filenames.
             for candidate in build_permalink_resolution_candidates(
@@ -219,15 +210,10 @@ def convert_wikilinks(
             )
         ):
             # Forgiving filename spelling is a last resort after exact identities.
-            candidates = ([relative] if relative and "/" in target else []) + [target]
-            for candidate in candidates:
-                path = candidate.lstrip("/")
-                if not path.casefold().endswith(".md"):
-                    path += ".md"
-                matches = path_aliases.get(file_path_alias(path), [])
-                if len(matches) == 1:
-                    resolved = matches[0]
-                    break
+            path = target if target.casefold().endswith(".md") else target + ".md"
+            matches = path_aliases.get(file_path_alias(path), [])
+            if len(matches) == 1:
+                resolved = matches[0]
         # A missing target stays a broken link, not a guessed edge to another concept.
         # Rooted links already name exact portable file paths; never infer an extension.
         href = target if rooted else "/" + (resolved or target or source)
