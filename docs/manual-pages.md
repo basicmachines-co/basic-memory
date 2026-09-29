@@ -10,9 +10,12 @@ documents the tools; the tools verify the manual.
 ## Where it lives
 
 Sections 1 and 3 are canonical **in the package**: `src/basic_memory/man/man1/`
-holds the shell commands (`ls(1)`, `grep(1)`, `find(1)`, `cat(1)`, `head(1)`,
-`tail(1)`, `tree(1)`, `apropos(1)`) and `src/basic_memory/man/man3/` one page
-per MCP tool, so every install ships the same pages: local, cloud, or offline.
+holds the shell commands run against a project (`ls(1)`, `grep(1)`, ...) and
+`bm` subcommands (`okf-export(1)`, `okf-check(1)`), and
+`src/basic_memory/man/man3/` holds one page per MCP tool, so every install ships
+the same pages: local, cloud, or offline. `bm.1` at the package root is the
+system man page that `bm man install` copies for `man bm`; it is not a
+`bm man` page.
 The MCP server serves them as resources (`memory://man` is the index,
 `memory://man/search-notes(3)` a page) and `bm man <topic>` prints one in a
 shell. The `manual` project in the Basic Memory team workspace (cloud, shared)
@@ -26,7 +29,7 @@ Layout:
 ```
 manual/
 ├── schemas/Manpage.md      # the manpage schema (type: schema)
-├── man1/                   # shell commands      ls(1), grep(1), ...
+├── man1/                   # commands            ls(1), okf-export(1), ...
 ├── man3/                   # MCP tools           write-note(3), search-notes(3), ...
 ├── man5/                   # file formats        bm-note(5), bm-observation(5), ...
 ├── man7/                   # concepts            basic-memory(7), semantic-memory(7), ...
@@ -57,7 +60,7 @@ two sections. `man 5 crontab` picks the section explicitly.
 This manual copies that layout with the sections that have a Basic Memory
 analog:
 
-- **man1/** — shell commands run against a project → `ls(1)`, `grep(1)`
+- **man1/** — shell commands run against a project and `bm` subcommands → `ls(1)`, `okf-export(1)`
 - **man3/** — MCP tools, our equivalent of the "library API" section → `write-note(3)`
 - **man5/** — file formats: note syntax, observations, relations, schemas → `bm-note(5)`
 - **man7/** — concepts → `basic-memory(7)`, `semantic-memory(7)`
