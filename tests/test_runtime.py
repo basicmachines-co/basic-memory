@@ -15,8 +15,10 @@ from basic_memory.runtime.note_materialization import (
     plan_prepared_note_write,
 )
 from basic_memory.runtime.note_object_metadata import (
+    NOTE_OBJECT_ACTOR_KIND_AGENT,
     NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
     NOTE_OBJECT_ACTOR_KIND_METADATA,
+    NOTE_OBJECT_ACTOR_KIND_SYSTEM,
     NOTE_OBJECT_ACTOR_NAME_METADATA,
     NOTE_OBJECT_ACTOR_USER_PROFILE_ID_METADATA,
     NOTE_OBJECT_DB_CHECKSUM_METADATA,
@@ -1095,7 +1097,7 @@ class TestRuntimeContracts:
         with pytest.raises(FrozenInstanceError):
             setattr(provenance, "actor_name", "changed")
 
-    def test_note_actor_origin_uses_mcp_client_labels_only(self):
+    def test_note_actor_origin_uses_mcp_client_and_agent_labels(self):
         assert RuntimeNoteActorOrigin.from_actor_metadata(
             actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
             actor_name="Claude Code",
@@ -1114,6 +1116,40 @@ class TestRuntimeContracts:
             RuntimeNoteActorOrigin.from_actor_metadata(
                 actor_kind="user",
                 actor_name="Pat",
+            )
+            is None
+        )
+
+    def test_note_actor_origin_keeps_agent_origin_from_object_metadata(self):
+        # Regression: cloud rebuilds API-write origins from stored object metadata, and
+        # API-key writes are recorded as kind "agent" with the key name as the label.
+        provenance = RuntimeNoteObjectProvenance.from_object_metadata(
+            {
+                NOTE_OBJECT_ACTOR_KIND_METADATA: NOTE_OBJECT_ACTOR_KIND_AGENT,
+                NOTE_OBJECT_ACTOR_NAME_METADATA: "verify-full",
+            }
+        )
+
+        assert RuntimeNoteActorOrigin.from_actor_metadata(
+            actor_kind=provenance.actor_kind,
+            actor_name=provenance.actor_name,
+        ) == RuntimeNoteActorOrigin(
+            actor_kind=NOTE_OBJECT_ACTOR_KIND_AGENT,
+            actor_name="verify-full",
+        )
+        assert (
+            RuntimeNoteActorOrigin.from_actor_metadata(
+                actor_kind=NOTE_OBJECT_ACTOR_KIND_AGENT,
+                actor_name=None,
+            )
+            is None
+        )
+
+    def test_note_actor_origin_excludes_system_writers(self):
+        assert (
+            RuntimeNoteActorOrigin.from_actor_metadata(
+                actor_kind=NOTE_OBJECT_ACTOR_KIND_SYSTEM,
+                actor_name="wiki projector",
             )
             is None
         )
