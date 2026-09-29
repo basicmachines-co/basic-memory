@@ -383,6 +383,20 @@ async def test_filesystem_identical_source_containment_is_rejected(
 
 
 @pytest.mark.asyncio
+async def test_ambiguous_normalized_project_name_is_rejected(source_config, tmp_path):
+    other = tmp_path / "other-project"
+    other.mkdir()
+    source_config.projects = {
+        "My Project": source_config.projects["export"],
+        "my_project": ProjectEntry(path=str(other)),
+    }
+    destination = tmp_path / "bundle"
+    with pytest.raises(ValueError, match="matches several projects"):
+        await export_project(source_config, "my-project", destination)
+    assert not destination.exists()
+
+
+@pytest.mark.asyncio
 async def test_exact_project_name_precedes_normalized_alias(source_config, tmp_path):
     other = tmp_path / "other-project"
     other.mkdir()

@@ -167,11 +167,18 @@ def convert_wikilinks(
         # Keep that unresolved reference literal rather than inventing a portable edge.
         if relative is None and ".." in PurePosixPath(target).parts:
             return False
-        # Trigger: an explicit ./ or ../ path wikilink.
+        # Trigger: an unqualified ./ or ../ path wikilink.
         # Why: the graph resolves path targets as exact files, with no extension,
         #   title, permalink or alias guesses (BulkLinkResolutionSnapshot.resolve).
+        #   A project-qualified target routes through the qualifier first and
+        #   resolves from the project root, so it takes the identity path below.
         # Outcome: the export links that exact path, a broken link when it is absent.
-        if relative is not None and not rooted and is_path_target(target):
+        if (
+            relative is not None
+            and not rooted
+            and not reference.explicitly_qualified
+            and is_path_target(target)
+        ):
             replacements.append((start, end + 2, markdown_link(label, relative, fragment)))
             state.push("text", "", 0).content = raw
             state.pos = end + 2

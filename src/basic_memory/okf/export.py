@@ -121,10 +121,18 @@ async def export_project(
 ) -> CheckReport:
     if project not in config.projects:
         requested_permalink = generate_permalink(project)
-        project = next(
-            (name for name in config.projects if generate_permalink(name) == requested_permalink),
-            project,
-        )
+        matches = [
+            name for name in config.projects if generate_permalink(name) == requested_permalink
+        ]
+        # Two configured names can share a slug; guessing one could publish the
+        # wrong project's files over the destination.
+        if len(matches) > 1:
+            raise ValueError(
+                f"Project {project!r} matches several projects ({', '.join(sorted(matches))}); "
+                "use the exact name"
+            )
+        if matches:
+            project = matches[0]
     entry = config.projects.get(project)
     if entry is None or entry.mode != ProjectMode.LOCAL:
         raise ValueError(

@@ -816,6 +816,22 @@ def test_explicit_project_qualifiers_cannot_bind_to_foreign_local_aliases():
     assert b"[[q::foo]] [p::foo](/target.md) [p::target.md](/target.md)" in source
 
 
+def test_qualified_relative_target_resolves_from_project_root():
+    # The qualifier routes first, so ./foo is root-relative, unlike the bare path form.
+    snapshot = ExportSnapshot(
+        "p",
+        (
+            ExportFile("foo.md", b"# Root"),
+            ExportFile("folder/foo.md", b"# Nested"),
+            ExportFile("folder/source.md", b"[[p::./foo]] [[./foo.md]]"),
+        ),
+    )
+    source = next(
+        file.content for file in render_bundle(snapshot) if file.path == "folder/source.md"
+    )
+    assert b"[p::./foo](/foo.md) [./foo.md](/folder/foo.md)" in source
+
+
 @pytest.mark.parametrize("field", ["title", "type"])
 @pytest.mark.parametrize(
     "value",
