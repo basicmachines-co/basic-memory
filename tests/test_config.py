@@ -1484,6 +1484,17 @@ class TestProjectMode:
         config = BasicMemoryConfig(projects={"research": ProjectEntry(path=abs_path)})
         assert config.is_locally_syncable("research", abs_path) is True
 
+    def test_display_name_finds_the_permalink_keyed_entry(self, tmp_path):
+        """Startup rewrites config keys to permalinks; the DB keeps the name (#1624)."""
+        abs_path = str(tmp_path / "gamma")
+        config = BasicMemoryConfig(
+            projects={"gamma-mixed": ProjectEntry(path=abs_path, mode=ProjectMode.LOCAL)}
+        )
+        assert config.project_entry("Gamma-Mixed") is config.projects["gamma-mixed"]
+        assert config.is_locally_syncable("Gamma-Mixed", abs_path) is True
+        assert config.get_project_mode("Gamma-Mixed") == ProjectMode.LOCAL
+        assert config.project_entry("Gamma") is None
+
     def test_is_locally_syncable_false_for_empty_path(self):
         """An empty path resolves to cwd, so it is never locally syncable (#949)."""
         config = BasicMemoryConfig(projects={"empty": ProjectEntry(path="")})

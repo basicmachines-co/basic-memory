@@ -825,6 +825,23 @@ class BasicMemoryConfig(BaseSettings):
         """
         return self.skip_initialization_sync or self.cloud_mode
 
+    def project_entry(self, project_name: str) -> Optional["ProjectEntry"]:
+        """Return the config entry for a project, matched by name or by permalink.
+
+        Startup reconciliation rewrites config keys to permalinks while the
+        database keeps the display name, so `My Research` is stored under
+        `my-research`. Every lookup by a project's name goes through here so
+        the two spellings cannot disagree (#1624).
+        """
+        entry = self.projects.get(project_name)
+        if entry is not None:
+            return entry
+        project_permalink = generate_permalink(project_name)
+        for configured_name, configured_entry in self.projects.items():
+            if generate_permalink(configured_name) == project_permalink:
+                return configured_entry
+        return None
+
     def get_project_mode(self, project_name: str) -> ProjectMode:
         """Get the routing mode for a project.
 
@@ -832,7 +849,7 @@ class BasicMemoryConfig(BaseSettings):
         Unknown projects (not in local config) default to CLOUD —
         local projects are always registered in config.
         """
-        entry = self.projects.get(project_name)
+        entry = self.project_entry(project_name)
         return entry.mode if entry else ProjectMode.CLOUD
 
     def is_locally_syncable(self, project_name: str, project_path: str) -> bool:
@@ -852,7 +869,7 @@ class BasicMemoryConfig(BaseSettings):
         local bisync copy (absolute path) are handled correctly by these two
         conditions, so no separate mode check is needed.
         """
-        entry = self.projects.get(project_name)
+        entry = self.project_entry(project_name)
         return entry is not None and Path(project_path).is_absolute()
 
     def set_project_mode(self, project_name: str, mode: ProjectMode) -> None:
