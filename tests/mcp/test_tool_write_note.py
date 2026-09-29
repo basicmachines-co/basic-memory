@@ -1,5 +1,6 @@
 """Tests for note tools that exercise the full stack with SQLite."""
 
+from datetime import datetime, timezone
 from textwrap import dedent
 from typing import Any
 
@@ -9,6 +10,7 @@ from fastmcp.exceptions import ToolError
 from basic_memory import db
 from basic_memory import config as config_module
 from basic_memory.mcp import clients as clients_module
+from basic_memory.mcp.clients import KnowledgeClient
 from basic_memory.mcp.tools import write_note, read_note, delete_note
 from basic_memory.mcp.tools.write_note import (
     SIMILAR_NOTES_LIMIT,
@@ -19,6 +21,8 @@ from basic_memory.mcp.tools.write_note import (
 )
 from basic_memory.repository.relation_repository import RelationRepository
 from basic_memory.schemas.search import SearchItemType, SearchResponse, SearchResult
+from basic_memory.schemas.v2.entity import EntityResponseV2
+from basic_memory.schemas.v2.note_write import NoteCreated
 from basic_memory.workspace_context import workspace_permalink_context
 
 
@@ -227,6 +231,51 @@ async def test_write_note_no_tags(app, test_project):
         .strip()
     )
     assert expected in content
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("file_checksum", [None, "c" * 64])
+async def test_write_note_reports_the_accepted_db_checksum(
+    monkeypatch, app, test_project, file_checksum
+):
+    """write_note reports db_checksum, the value edit preconditions compare (#1586).
+
+    file_checksum is None until deferred materialization runs, and can differ
+    from db_checksum after an outside edit; either way the response must carry
+    the accepted revision's checksum. The client call is replaced to inject
+    those two file states, which the inline test environment never produces.
+    """
+    now = datetime.now(timezone.utc)
+    db_checksum = "a" * 64  # a real, already-persisted SHA-256 hex digest
+
+    async def fake_write_note(self, note, *, overwrite):
+        entity = EntityResponseV2(
+            external_id="11111111-1111-1111-1111-111111111111",
+            id=1,
+            title=note.title,
+            note_type=note.note_type,
+            permalink=f"{test_project.name}/{note.directory}/{note.title.lower()}",
+            file_path=f"{note.directory}/{note.title}.md",
+            created_at=now,
+            updated_at=now,
+            db_version=1,
+            db_checksum=db_checksum,
+            file_version=None,
+            file_checksum=file_checksum,
+        )
+        return NoteCreated(entity=entity)
+
+    monkeypatch.setattr(KnowledgeClient, "write_note", fake_write_note)
+
+    result = await write_note(
+        project=test_project.name,
+        title="Deferred Materialization Note",
+        directory="test",
+        content="# Deferred Materialization Note\n\nBody.",
+    )
+
+    assert "checksum: unknown" not in result
+    assert f"checksum: {db_checksum[:8]}" in result
 
 
 @pytest.mark.asyncio

@@ -549,12 +549,20 @@ async def write_note(
                     for note in similar_notes
                 ]
 
+            # Report the accepted revision's checksum. It is recorded
+            # synchronously at accept time, and it is the value checksum-guarded
+            # edits compare base_checksum against. file_checksum is filled in
+            # later by deferred materialization and can drift if the file is
+            # edited outside Basic Memory, so it is not what a caller should
+            # echo back (#1586).
+            checksum = result.db_checksum
+
             summary = [
                 f"# {action} note",
                 f"project: {active_project.name}",
                 f"file_path: {result.file_path}",
                 f"permalink: {response_permalink}",
-                f"checksum: {result.file_checksum[:8] if result.file_checksum else 'unknown'}",
+                f"checksum: {checksum[:8] if checksum else 'unknown'}",
             ]
 
             # Count observations by category
@@ -602,7 +610,7 @@ async def write_note(
                     "title": result.title,
                     "permalink": response_permalink,
                     "file_path": result.file_path,
-                    "checksum": result.file_checksum,
+                    "checksum": checksum,
                     "action": action.lower(),
                     "similar_notes": [dataclasses.asdict(note) for note in similar_notes],
                 }

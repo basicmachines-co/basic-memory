@@ -32,7 +32,7 @@ from basic_memory.mcp.project_context import (
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.utils import _extract_response_data, _response_detail_text
 from basic_memory.schemas.base import Entity
-from basic_memory.schemas.response import EntityResponse
+from basic_memory.schemas.v2.entity import EntityResponseV2
 from basic_memory.services.link_resolver import (
     detect_project_from_workspace_identifier_prefix,
     is_workspace_qualified_plain_identifier,
@@ -664,7 +664,7 @@ async def edit_note(
 
                 file_created = False
                 entity_id = ""
-                result: EntityResponse | None = None
+                result: EntityResponseV2 | None = None
 
                 # Try to resolve the entity; for append/prepend, create it if not found
                 try:
@@ -799,13 +799,18 @@ async def edit_note(
                 # --- Format response ---
                 # result is always set: either by create_entity (auto-create) or patch_entity (edit)
                 assert result is not None
+                # Report the accepted revision's checksum: it is recorded at accept
+                # time and is what checksum-guarded edits compare base_checksum
+                # against. file_checksum arrives later from deferred materialization
+                # and can drift from it (#1586).
+                checksum = result.db_checksum
                 if file_created:
                     summary = [
                         f"# Created note ({operation})",
                         f"project: {active_project.name}",
                         f"file_path: {result.file_path}",
                         f"permalink: {result.permalink}",
-                        f"checksum: {result.checksum[:8] if result.checksum else 'unknown'}",
+                        f"checksum: {checksum[:8] if checksum else 'unknown'}",
                         "fileCreated: true",
                     ]
                     lines_added = len(content.split("\n"))
@@ -816,7 +821,7 @@ async def edit_note(
                         f"project: {active_project.name}",
                         f"file_path: {result.file_path}",
                         f"permalink: {result.permalink}",
-                        f"checksum: {result.checksum[:8] if result.checksum else 'unknown'}",
+                        f"checksum: {checksum[:8] if checksum else 'unknown'}",
                     ]
 
                     # Add operation-specific details
@@ -872,7 +877,7 @@ async def edit_note(
                         "title": result.title,
                         "permalink": result.permalink,
                         "file_path": result.file_path,
-                        "checksum": result.checksum,
+                        "checksum": checksum,
                         "operation": operation,
                         "fileCreated": file_created,
                     }

@@ -1699,3 +1699,42 @@ async def test_edit_note_append_traversal_identifier_json_error(client, test_pro
     assert isinstance(result, dict)
     assert result["error"] == "SECURITY_VALIDATION_ERROR"
     assert result["fileCreated"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("file_checksum", [None, "c" * 64])
+async def test_edit_note_reports_the_accepted_db_checksum(
+    monkeypatch, app, test_project, file_checksum
+):
+    """edit_note reports db_checksum, the value edit preconditions compare (#1586).
+
+    The PATCH response is replaced to inject a not-yet-materialized file and a
+    drifted file checksum, which the inline test environment never produces.
+    """
+    await write_note(
+        project=test_project.name,
+        title="Deferred Edit Note",
+        directory="test",
+        content="# Deferred Edit Note\n\nOriginal body.",
+    )
+
+    db_checksum = "b" * 64  # a real, already-persisted SHA-256 hex digest
+    real_patch_entity = KnowledgeClient.patch_entity
+
+    async def fake_patch_entity(self, entity_id, patch_data):
+        result = await real_patch_entity(self, entity_id, patch_data)
+        return result.model_copy(
+            update={"file_checksum": file_checksum, "db_checksum": db_checksum}
+        )
+
+    monkeypatch.setattr(KnowledgeClient, "patch_entity", fake_patch_entity)
+
+    result = await edit_note(
+        project=test_project.name,
+        identifier="Deferred Edit Note",
+        operation="append",
+        content="\n\nAppended body.",
+    )
+
+    assert "checksum: unknown" not in result
+    assert f"checksum: {db_checksum[:8]}" in result
