@@ -839,6 +839,11 @@ def test_path_wikilink_keeps_backslash_filenames_exact():
     )
 
 
+def test_link_labels_keep_unicode_line_separators():
+    body = "[[A|left\u2028right]]"
+    assert convert_wikilinks(body, "source.md", {"A": "a.md"}, "p") == "[left\u2028right](/a.md)"
+
+
 def test_bom_is_dropped_before_generated_frontmatter():
     snapshot = ExportSnapshot("p", (ExportFile("note.md", "\ufeff# Heading".encode()),))
     note = next(file.content for file in render_bundle(snapshot) if file.path == "note.md")

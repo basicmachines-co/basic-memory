@@ -80,7 +80,9 @@ class ExportSnapshot:
 
 def markdown_link(label: str, path: str, fragment: str = "") -> str:
     escaped = label.replace("\\", "\\\\").replace("[", "\\[").replace("]", "\\]")
-    escaped = " ".join(escaped.splitlines())
+    # Fold only Markdown line breaks; splitlines() would also eat U+2028/U+2029,
+    # which MarkdownIt keeps as inline text.
+    escaped = " ".join(escaped.replace("\r\n", "\n").replace("\r", "\n").split("\n"))
     href = quote(path, safe="/")
     if fragment:
         href += "#" + quote(fragment, safe="")
