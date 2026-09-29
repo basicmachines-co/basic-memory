@@ -25,6 +25,7 @@ from basic_memory.mcp.note_reads import (
 )
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search_notes
+from basic_memory.runtime.storage import runtime_file_path_is_markdown_note
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.utils import validate_project_path
 
@@ -48,6 +49,12 @@ def _is_exact_title_match(identifier: str, title: str) -> bool:
 def _parse_opening_frontmatter(content: str) -> tuple[str, dict[str, Any] | None]:
     """Retain the existing test/import surface for the shared parser."""
     return parse_opening_frontmatter(content)
+
+
+def _is_http_not_found(error: Exception) -> bool:
+    """Return True when a typed-client failure wraps an HTTP 404 response."""
+    cause = error.__cause__
+    return isinstance(cause, HTTPStatusError) and cause.response.status_code == 404
 
 
 def _exact_external_id(identifier: str) -> str | None:
@@ -110,6 +117,9 @@ async def read_note(
     1. Direct permalink lookup
     2. Title search fallback
     3. Text search as last resort
+
+    An explicit Markdown file path (ending in .md or .markdown) that does not
+    resolve directly is reported as not found without the search fallbacks.
 
     Args:
         project: Project name to read from. Optional - server will resolve using the
@@ -376,6 +386,7 @@ async def read_note(
                 value = item.get("external_id")
                 return value if isinstance(value, str) and value else None
 
+            resolver_miss = False
             if output_format == "json" or line_scan:
                 exact_external_id = _exact_external_id(entity_path)
                 if exact_external_id is not None:
@@ -415,11 +426,11 @@ async def read_note(
                 try:
                     entity_id = await knowledge_client.resolve_entity(entity_path, strict=True)
                 except ToolError as error:
-                    cause = error.__cause__
                     # Search is a recovery for a confirmed lookup miss, not for
                     # unavailable or unauthorized resolution services.
-                    if not isinstance(cause, HTTPStatusError) or cause.response.status_code != 404:
+                    if not _is_http_not_found(error):
                         raise
+                    resolver_miss = True
                     logger.info(f"Direct lookup failed for '{entity_path}': {error}")
                 else:
                     logger.debug(
@@ -428,18 +439,38 @@ async def read_note(
                     )
                     return await _read_resolved_note(entity_id)
             else:
-                # Text mode intentionally retains the resolve -> resource behavior.
+                # Text mode intentionally retains the resolve -> resource behavior,
+                # including its search recovery from operational lookup failures.
                 try:
                     entity_id = await knowledge_client.resolve_entity(entity_path, strict=True)
-                    response = await resource_client.read(entity_id)
-                    if response.status_code == 200:
-                        logger.debug(
-                            "Returning read_note result from resource: {path}",
-                            path=entity_path,
-                        )
-                        return response.text
-                except Exception as error:  # pragma: no cover
+                except Exception as error:
+                    resolver_miss = _is_http_not_found(error)
                     logger.info(f"Direct lookup failed for '{entity_path}': {error}")
+                else:
+                    try:
+                        response = await resource_client.read(entity_id)
+                        if response.status_code == 200:
+                            logger.debug(
+                                "Returning read_note result from resource: {path}",
+                                path=entity_path,
+                            )
+                            return response.text
+                    except Exception as error:  # pragma: no cover
+                        logger.info(f"Resource read failed for '{entity_path}': {error}")
+
+            # Trigger: the identifier names a Markdown file and strict resolution
+            #          answered 404 for it.
+            # Why: strict resolution already matches file path, permalink, and exact title,
+            #      so that 404 confirms the note is absent. Search could only add fuzzy
+            #      suggestions, and in a project with no recorded full index pass it answers
+            #      with index-required guidance, which JSON reads raised as an error (#1609).
+            #      Only the resolver's 404 proves absence; an unavailable resolver or a
+            #      failed resource read keeps the ordinary recovery path below.
+            # Outcome: an explicit path miss returns the ordinary not-found response.
+            if resolver_miss and runtime_file_path_is_markdown_note(entity_path):
+                if output_format == "json":
+                    return _not_found_json_payload()
+                return format_not_found_message(active_project.name, identifier)
 
             # Fallback 1: Try title search via API, walking fixed-size pages of
             # title results until an exact match is found or results run out.
