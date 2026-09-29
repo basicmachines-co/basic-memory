@@ -40,11 +40,12 @@ from fastmcp import Context
 from fastmcp.exceptions import ToolError
 from pydantic import BeforeValidator, TypeAdapter
 
-from basic_memory.config import ConfigManager
+from basic_memory.config import ConfigManager, has_cloud_credentials
 from basic_memory.file_utils import ParseError, has_frontmatter, parse_frontmatter
 from basic_memory.man import bundled_pages, find_page, parse_page_ref, render_index
 from basic_memory.markdown.line_scanning import scan_literal_lines
 from basic_memory.markdown.sections import document_lines
+from basic_memory.mcp.async_client import is_factory_mode
 from basic_memory.mcp.container import get_container
 from basic_memory.mcp.note_reads import read_note_json_by_external_id
 from basic_memory.mcp.project_context import (
@@ -1389,6 +1390,21 @@ async def man(
 
     manual_project = project or _MANUAL_PROJECT
 
+    # Trigger: no project was named, and this install has neither a local
+    #   "manual" project nor any cloud route to one.
+    # Why: the manual project holds the non-bundled pages in cloud workspaces.
+    #   Without it, the fallback could only fail, and it failed by asking a
+    #   local user for cloud credentials (#1628).
+    # Outcome: page reads stop at the bundled pages, and query mode says what
+    #   it would need instead of routing anywhere.
+    manual_reachable = (
+        project is not None
+        or project_id is not None
+        or is_factory_mode()
+        or ConfigManager().config.project_entry(_MANUAL_PROJECT) is not None
+        or has_cloud_credentials(ConfigManager().config)
+    )
+
     if page is not None:
         try:
             page_ref = parse_page_ref(page)
@@ -1398,6 +1414,8 @@ async def man(
             bundled = find_page(page_ref)
         if bundled is not None:
             return bundled.read()
+        if not manual_reachable:
+            raise ToolError(f"No manual entry for {page}")
 
         # Not a bundled page — the reference may name a manual note (the
         # non-bundled sections live as notes in the manual project), mirroring
@@ -1421,6 +1439,13 @@ async def man(
                 raise ToolError(f"No manual entry for {page}") from error
             response = await resource_client.read(entity_id)
             return response.text
+
+    if not manual_reachable:
+        raise ToolError(
+            f"man: query mode searches the '{_MANUAL_PROJECT}' project, which this "
+            "install does not have. Call man() for the index of bundled pages, or "
+            "man(page=...) to read one."
+        )
 
     search_query = SearchQuery(
         text=query,
