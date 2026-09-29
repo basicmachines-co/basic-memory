@@ -97,6 +97,13 @@
 
 ### Bug Fixes
 
+- **#1581**: The sqlite-vec stale-vector cleanup no longer stalls on large vaults. Its
+  DELETE compared each chunk's `source_hash` against the outer vector row, which made
+  the subquery correlated, so SQLite re-ran it once per vector: quadratic work that
+  held the write lock long enough for concurrent writers to fail with `database is
+  locked`. The subquery now joins the vector row by rowid, and the cleanup deletes the
+  same rows in one pass. Thanks to @mikemikimike for the report and fix (#1584).
+
 - **#1514**: Markdown path links resolve against the note's own path at resolution
   time, the way wikilinks do, instead of at parse time from the file's location
   on disk. The parser had derived the note's project path with `relative_to` on the
