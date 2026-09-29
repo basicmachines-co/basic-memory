@@ -42,6 +42,15 @@ VALID_NOTE_OBJECT_ACTOR_KINDS: frozenset[RuntimeNoteActorKind] = frozenset(
         NOTE_OBJECT_ACTOR_KIND_SYSTEM,
     }
 )
+# Kinds that name who made a write and can be shown as its origin. system is
+# excluded: platform-run writers are identified by their change source, not by
+# a named origin.
+NOTE_OBJECT_ORIGIN_ACTOR_KINDS: frozenset[RuntimeNoteActorKind] = frozenset(
+    {
+        NOTE_OBJECT_ACTOR_KIND_AGENT,
+        NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+    }
+)
 # web_v2 = a note write originating from the web-v2 UI. Distinguishing it from
 # `api` lets clients tell a genuine web-UI edit apart from api/materialization
 # round-trips (e.g. the onboarding "close the loop" signal).
@@ -273,7 +282,11 @@ class RuntimeNoteObjectProvenance:
 
 @dataclass(frozen=True, slots=True)
 class RuntimeNoteActorOrigin:
-    """User-facing client origin that can be safely attached to live updates."""
+    """User-facing origin (an MCP client or a credentialed agent) for live updates.
+
+    Built from server-written object metadata, which is trusted only after checksum
+    validation accepts it (#1589).
+    """
 
     actor_kind: RuntimeNoteActorKind
     actor_name: RuntimeNoteActorName
@@ -285,6 +298,6 @@ class RuntimeNoteActorOrigin:
         actor_kind: RuntimeNoteActorKind | None,
         actor_name: RuntimeNoteActorName | None,
     ) -> Self | None:
-        if actor_kind != NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT or not actor_name:
+        if actor_kind not in NOTE_OBJECT_ORIGIN_ACTOR_KINDS or not actor_name:
             return None
         return cls(actor_kind=actor_kind, actor_name=actor_name)
