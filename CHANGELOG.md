@@ -13,6 +13,18 @@
   documented as local-only. Local projects behave as before. A cloud-only project
   removed without `--cloud` is now correctly treated as cloud-routed.
 
+- **#1476**: The POSIX read tools (`cat`, `grep`, `ls`, `find`, `tail`, `man`) are on by
+  default, so an MCP client now sees six more tools alongside the existing rich tools,
+  and the server instructions describe projects as mount points. Set
+  `enable_posix_tools=false` (or `BASIC_MEMORY_ENABLE_POSIX_TOOLS=false`) to hide them.
+
+- **#1395**: Markdown notes always get a permalink. The `disable_permalinks` setting and
+  `BASIC_MEMORY_DISABLE_PERMALINKS` are retired: an existing value is ignored rather
+  than rejected, and the key is dropped from `config.json` when it is next normalized.
+  Notes indexed without a permalink under the old setting are backfilled during ordinary
+  scans, which writes a `permalink` into their frontmatter. Non-Markdown files are
+  unchanged.
+
 ### Features
 
 - **#1550**: `bm okf export DESTINATION --project NAME` writes a static OKF v0.2 bundle
@@ -124,6 +136,125 @@
   similarity scores are shown and nothing is overwritten on the caller's behalf: on the
   default embedding model a near-duplicate and a merely related note score in the same
   band, so the decision stays with the agent, which has the context the score does not.
+
+- **#1398**: POSIX-style read tools. MCP gains `cat`, `grep`, `ls`, `find`, `tail`, and
+  `man` next to the rich tools, and the CLI gains the same verbs (`bm cat`, `bm head`,
+  `bm grep`, `bm ls`, `bm find`, `bm tail`, `bm tree`) over one shared translation
+  layer. Notes are indexed by heading, so `cat` can read one section, a line range, or a
+  token budget instead of the whole note. Projects act as mount points: `ls /` lists
+  them, and a path whose first segment names a project routes there, so the paths the
+  tools return can be passed straight back. `find` takes metadata predicates
+  (`status=active`, `confidence>0.6`) and a `--fields` projection of frontmatter values.
+  **This ships an Alembic migration** adding the `note_section` table.
+
+- **#1501**: `read_note` accepts `start_line` / `end_line` and returns numbered lines
+  with the next range to read, and `grep(literal=True, context_lines=N)` returns merged
+  match windows instead of whole notes, with `max_matches` bounding the lines per note.
+  The CLI equivalents are `bm grep -F "retry" -C 3` and `bm tool read-note NAME
+  --start-line 120 --end-line 180`.
+
+- **#686**: `search_notes(compact=True)` and `build_context(compact=True)` return
+  identifiers, metadata, relation targets, and pagination without note content, so an
+  agent can pick what to read before paying for the bodies. `bm tool search-notes` and
+  `bm tool build-context` take `--compact`. Default responses are unchanged.
+
+- **#1426**: Observations can say when a claim holds (SPEC-82). An authored qualifier
+  such as `- [decision] @effective:2026-06-10 The cache layer will use Redis.`, a range
+  (`@effective[2026-06-10,2026-07-27)`), or a quoted multi-word date (`@occurred:"June
+  10, 2026"`) is indexed as valid time; the kinds are `effective`, `valid` (the
+  default), `occurred`, `due`, and `mentioned`. `search_notes` gains `valid_at`,
+  `valid_overlaps`, and `time_kind` filters, and a malformed filter is refused instead
+  of ignored. Searches without them rank as before. A qualifier that does not parse
+  stays in the observation text. **This ships an Alembic migration** adding the time
+  index table.
+
+- **#1246**: Ordinary Markdown links to files in the project
+  (`[Guide](../guides/Guide.md)`, reference-style links, `/`-rooted paths) become
+  `links_to` relations, the way wikilinks do. External URLs, images, code, fragment-only
+  links, and paths outside the project are ignored, and the authored Markdown is not
+  rewritten. (PR #1514; see the #1514 fix below for how the paths resolve.)
+
+- **#1422**: Wiki projection. `bm wiki status`, `bm wiki validate`, and `bm wiki
+  rebuild` (with `init` and `update` as aliases) generate root and per-folder `index.md`
+  and `log.md` navigation pages for a local project, with `--project`, `--all`,
+  `--json`, and `--dry-run`. The projector is deterministic, so local and cloud produce
+  the same bytes; each `log.md` keeps the 25 most recent changes. It never overwrites a
+  hand-written `index.md` or `log.md` (those are reported as conflicts), links empty
+  folders from their parents, and does not recreate pages for a deleted folder. The
+  change order comes from a new per-project accepted-change journal. **This ships an
+  Alembic migration** (#1381, #1382, #1396, #1433, #1434, #1436, #1484).
+
+- **#1006**: PDF ingestion. `basic-memory[pdf]` adds a pdf-inspector extraction adapter
+  that runs in a bounded worker process and turns a PDF into a `type: document` sidecar
+  note plus a `type: document_ingestion_run` provenance note, under the same
+  parser-neutral contract local and cloud share (#1178, #1377). Generated document
+  bodies are searchable but cannot mint observations or relations from extracted text.
+
+- **#1366**: Document observations can cite the PDF page they came from. Enrichment
+  writes OKF-compatible `sources` entries and Markdown footnotes pointing at
+  `file.pdf#page=N`, with an optional printed page label, and the page is checked
+  against the extraction's page count. Provenance also keeps the extraction's page map,
+  so a span of the raw text can be traced to its pages without re-parsing the PDF
+  (#1490, #1519).
+
+- **#993**: `locked: true` in a note's frontmatter makes it read-only to the note API.
+  Edits, overwrites, deletes, and directory deletes that include it are refused with
+  HTTP 423, and no API call can unlock it. Direct filesystem edits and deletes still
+  win, and imports are not bound by the lock. See `docs/LOCKED_NOTES.md`.
+
+- **#1254**: `bm prune` removes index entries for files that the current `.bmignore` or
+  `.gitignore` now excludes. It lists the entries first, takes `--dry-run` and `--yes`,
+  and points cloud projects at `bm cloud prune`. Indexing does not do this on its own
+  because an upgrade that changed the ignore defaults would otherwise drop notes.
+
+- **#1414**: `bm project add` indexes a local project before returning (`--no-wait` opts
+  out), and `bm project index NAME` reindexes one. `bm status --json` reports readiness
+  per stage (files, relations, embeddings) with a phase that tells a never-indexed
+  project from an idle one, and `bm status --wait` now waits until every stage settles
+  or `--timeout` passes. **This ships an Alembic migration** backfilling
+  `last_indexed_at`.
+
+- **#1294**: Full-text search finds words inside unsegmented scripts (Chinese, Japanese,
+  Korean, Thai, Lao, Tibetan, Myanmar, Khmer) on SQLite and Postgres, by indexing
+  character unigrams and bigrams alongside the existing word index. **This ships an
+  Alembic migration**; existing notes gain this recall after a reindex.
+
+- **#1336**: The `openai` embedding provider honors `semantic_embedding_api_base` and
+  `semantic_embedding_api_key`, so it can point at any OpenAI-compatible endpoint
+  (llama.cpp, vLLM, TEI, LM Studio, Ollama) without the experimental litellm path.
+  Thanks to @mikemikimike (#1365).
+
+- **#610**: The manual's `## PARAMETERS` sections on section-3 pages are generated from
+  the tool schemas (#1478), and the section-1 SYNOPSIS and OPTIONS blocks are generated
+  from the Typer command tree (#1524, thanks to @FBISiri), with drift tests for both.
+
+- **#1455**: Search results carry `content_length` and `content_truncated`, metadata
+  fields keep their JSON types (numbers, booleans, lists), and `bm ls --plain` and `bm
+  find --plain` report further pages on stderr so stdout stays pipe-clean (#1456,
+  #1457).
+
+- `bm install codex`, `bm install claude-code`, `bm install tau`, and `bm install pi`
+  install the Basic Memory plugin or package for that host, with `--dry-run` and
+  `--yes`. Codex and Claude Code installs delegate to the host's own plugin CLI, and
+  `claude-code` takes `--scope user|project|local`; Tau and Pi copy the packaged
+  resources and keep existing config. None of them touch the Basic Memory database
+  (#1497, #1498, #1493, #1492).
+
+- **#1487**: Tau integration. Tau sessions recall the active branch's latest checkpoint,
+  tasks, and decisions at startup, capture knowledge as work settles, and write an
+  awaited checkpoint before compaction. Coding sessions are keyed by repository identity
+  and write shared Coding Session, Session, Task, and Decision schemas that the Claude
+  Code and Codex packages also use (#1489, #1493).
+
+- **#1488**: Pi integration. The `@basicmemory/pi-basic-memory` package adds
+  `/bm-status`, `/bm-recall`, `/bm-capture`, and `bm_recall` / `bm_capture` tools, over
+  either the `bm` CLI or `pi-mcp-adapter`, configured per project in
+  `.pi/basic-memory.json`. Automatic recall and capture run only in a trusted workspace
+  (`BASIC_MEMORY_PI_TRUST_WORKSPACE=1`), and `/bm-status` reports whether they are on,
+  off, or blocked and why (#1492, #1509).
+
+- OpenClaw's `write_note` accepts `metadata`, `tags`, and `note_type`, and `edit_note`
+  accepts `metadata`, matching the core MCP tools. Thanks to @lastguru-net (#1474).
 
 ### Bug Fixes
 
@@ -257,6 +388,129 @@
   Frontmatter is now classified once, by the parser, as present, absent, or
   malformed, and only the first two are ever written to.
 
+- **#1531**: `edit_note(operation="replace_section")` fails when the exact heading is
+  not in the note, instead of appending a duplicate section and reporting success. A
+  heading such as `## Open items #urgent` must be given in full; use `append` to create
+  a new section on purpose.
+
+- **#1495**: Reading a note that does not exist exits with status 1 from the CLI in
+  every output mode, and JSON reads carry `error: "NOTE_NOT_FOUND"`. Scripts that relied
+  on exit status 0 with null fields need to check the status instead.
+
+- **#1343**: `bm project add --cloud --visibility private` is refused. The cloud has
+  only `workspace` and `shared` visibility, so `private` had created a team-visible
+  project while reporting success.
+
+- **#1334**: A fresh install that runs a CLI command first (`bm status`, `bm project
+  add`) no longer fails with "Project not found" for the seeded `main` project; config
+  projects are reconciled into the database on first use.
+
+- **#1340**: `bm project remove` on a cloud project also removes its local routing
+  entry, so the name can be added again and no stub appears in `project list`.
+
+- **#1441**: `bm project add --cloud` creates the local sync directory before saving
+  config, so a bad path leaves config unchanged; rerunning adopts the remote project
+  already created.
+
+- **#1333**: `bm schema validate` and other commands exit on Python 3.12 and 3.13
+  instead of hanging after printing their result. Thanks to @WebKingdom for the
+  diagnosis (#1346).
+
+- **#1338**: Every uv install path the project controls (`bm hook install`, `bm update`,
+  the Hermes and OpenClaw bootstraps, `server.json`, README snippets) passes
+  `--prerelease=allow`, which the v0.23.x FastMCP beta pin required. Development builds
+  are no longer published to PyPI, because that flag made them outrank the stable
+  release.
+
+- **#1506**: Core, the Codex hooks, and the Claude Code hooks move from the FastMCP
+  4.0.0b1 pre-release to stable FastMCP 4.0.3. Installed Codex hooks had exited before
+  running because uv could not resolve the beta.
+
+- **#1339**: The Hermes plugin manifest declares `manifest_version: 1`, which the
+  current Hermes installer accepts.
+
+- **#1341**: The Hermes and OpenClaw tool descriptions and prompts tell agents to call
+  the write tool in the same turn when asked to remember something, never to claim a
+  save without a tool result, and to quote the returned permalink.
+
+- **#1332**: A `[[wikilink]]` inside inline code no longer creates a relation. Thanks to
+  @yaodong-shen (#1337).
+
+- **#1359**: Quoted Postgres searches such as `"incident response" OR "database
+  recovery"` no longer raise a `to_tsquery` syntax error that aborted the transaction;
+  quoted groups are searched as grouped terms and unmatched quotes are recovered.
+
+- **#1281**: Case-only renames (`config.md` to `Config.md`) stick on case-insensitive
+  filesystems instead of being reverted by the next scan.
+
+- **#1351**: Deleting a note through the API or MCP refreshes the search rows of notes
+  that linked to it, so relation search no longer returns the deleted note.
+
+- **#1335**: The entity-body vector is no longer split into one chunk per bullet. It
+  splits on headings and the size budget, and oversized sections break at line
+  boundaries. Per-fact vectors still come from the observation and relation rows.
+
+- **#1432**: MCP identifiers and `memory://` URLs resolve against the session's own
+  projects, so a bare prefix no longer routes to another workspace and multi-segment
+  project names are reachable. `find --meta` results round-trip as inputs (#1435,
+  #1428).
+
+- **#1431**: A filtered vector or hybrid search no longer drops matches that fell
+  outside the first 50,000 rows of the filter's match set, which had hidden the newest
+  notes.
+
+- **#1388**: `BASIC_MEMORY_MCP_PROJECT` matches projects case-insensitively by
+  permalink, so startup indexing and watching pick up a mixed-case name.
+
+- `edit_note(metadata={"type": ...})` changes an existing note's type, and append or
+  prepend that creates a note honors the requested type (#1472).
+
+- `bm hook` installs and reads Claude Code hooks in the profile named by
+  `CLAUDE_CONFIG_DIR` instead of always `~/.claude` (#1473).
+
+- **#1430**: On Windows, file-backed SQLite uses a bounded five-connection pool instead
+  of `NullPool`, which failed concurrent writes with `database is locked`.
+
+- Moving a PDF or other non-Markdown file preserves its bytes; the move had tried to add
+  frontmatter to it (#1485).
+
+- **#1378**: MCP API calls retry an HTTP 429 that carries a valid `Retry-After`, up to
+  three attempts within a 30-second budget. Non-replayable request bodies are not
+  retried.
+
+- `bm cloud pull` and `bm cloud push` over WebDAV (Team workspaces) wait out rate limits
+  using `Retry-After` instead of aborting the transfer on the first 429 (#1532).
+
+- **#1479**: `write_note` decides between create, update, and conflict in one typed
+  operation instead of matching exception text. A write to a vacant path whose permalink
+  belongs to a moved note returns `NOTE_PATH_CONFLICT` with the note's current path, and
+  locked-note refusals are reported as such.
+
+- **#1538**: A Markdown note indexed as a plain resource is repaired by the next scan.
+  Thanks to @wangzhengzhuo05 (#1542).
+
+- **#1539**: `.bmignore` and `.gitignore` patterns honor escaped hashes (`\#*#`) and
+  escaped or leading whitespace. Thanks to @wangzhengzhuo05 (#1540).
+
+- **#1537**: Emacs `#note.md#` autosave files are not indexed.
+
+- **#1534**: `search_notes` and `recent_activity` on a project that has never been
+  indexed return "Project Index Required" guidance instead of an empty result. Thanks to
+  @wangzhengzhuo05 (#1535).
+
+- **#1533**: An empty search for an unspaced CJK compound returns a `query_hint`
+  suggesting a shorter word or spaces between words.
+
+- **#1390**: Relation search refresh cleanup deletes markers in batches of 500, so a
+  backlog larger than asyncpg's 32,767-parameter limit no longer fails relation
+  resolution.
+
+- Indexing converges under production load: a note rewritten faster than it indexes
+  settles on the newer accepted write, a MIME-marked `.md` path with no note basename
+  stays a resource, and a relation refresh for an entity whose content is gone no longer
+  crash-loops (#1374). A file deleted between the existence probe and the checksum read
+  is treated as absent instead of failing materialization (#1383).
+
 ### Internal
 
 - **#1602**: Hot paths emit far fewer Logfire spans and INFO logs: per-sub-step read-cache
@@ -303,6 +557,37 @@
   of projects with one statement. Milvus keeps a collection per project and searches the
   collections in scope. `SemanticSearch` passes its scope through, so a project
   repository's vector search is unchanged. No query behavior changes.
+
+- **#1556**: A hybrid hit found only by full-text search returns `matched_chunk: null`
+  and relies on the bounded `content` preview, instead of copying the whole note into
+  `matched_chunk`; vector-matched passages are unchanged. Search stages (hybrid FTS,
+  query embedding, vector lookup, hydration, fusion, reranking, cache) get their own
+  trace spans.
+
+- **#1555**: The local FastEmbed reranker scores candidates in batches of eight with the
+  ONNX CPU memory arena disabled, so hybrid searches stop leaving inference buffers
+  resident after the request.
+
+- **#1446**: The first `bm status` on a never-indexed project no longer reads every file
+  to hash it.
+
+- **#1454**: `QUERY /v2/projects/{project_id}/knowledge/entities/batch` returns accepted
+  Markdown for up to 25 notes in one query, for hosted search hydration, and the search
+  read cache now keeps entries for 30 minutes instead of 30 seconds.
+
+- **#1347**: The portable batch indexer applies the caller's metadata concurrency limit
+  to the search-index refresh phase too, so cloud batch jobs stay within their database
+  connection budget.
+
+- Extension seams for cloud: a subclass can write inside the accept transaction (#1483),
+  completed schema validation has an overridable observer that reports the resolved
+  schema identity (#1491, #1494), and `agent_runtime` is an accepted note source so
+  managed-agent writes materialize (#1505).
+
+- **#1400**: The benchmarks package gains BEAM and xAFS dataset adapters and an
+  agent-task harness that compares the rich and POSIX tool surfaces, with resumable
+  scoring, configurable model endpoints, and secret redaction in saved errors. A
+  multilingual embedding benchmark covers chunk boundaries and model-cache measurement.
 
 
 ## v0.23.2 (2026-08-25)
