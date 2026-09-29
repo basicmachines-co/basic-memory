@@ -63,6 +63,45 @@ async def test_edit_note_append_operation(mcp_server, app, test_project):
 
 
 @pytest.mark.asyncio
+async def test_edit_note_reports_real_checksum(mcp_server, app, test_project):
+    """edit_note must report the persisted checksum, not a permanent "unknown" (#1586).
+
+    A real SHA-256 checksum is computed and stored for every edit; the MCP
+    response must surface it instead of always falling back to "unknown".
+    """
+
+    async with Client(mcp_server) as client:
+        await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Checksum Probe",
+                "directory": "probe",
+                "content": "# Checksum Probe\n\nOriginal content.",
+            },
+        )
+
+        edit_result = await client.call_tool(
+            "edit_note",
+            {
+                "project": test_project.name,
+                "identifier": "Checksum Probe",
+                "operation": "append",
+                "content": "\n\nAppended content.",
+            },
+        )
+
+        edit_text = edit_result.content[0].text
+        assert "checksum: unknown" not in edit_text
+        checksum_line = next(
+            line for line in edit_text.splitlines() if line.startswith("checksum: ")
+        )
+        reported_checksum = checksum_line.removeprefix("checksum: ")
+        assert len(reported_checksum) == 8
+        assert all(c in "0123456789abcdef" for c in reported_checksum)
+
+
+@pytest.mark.asyncio
 async def test_edit_note_prepend_operation(mcp_server, app, test_project):
     """Test prepending content to an existing note."""
 
