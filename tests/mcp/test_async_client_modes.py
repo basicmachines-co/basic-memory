@@ -398,6 +398,17 @@ async def test_get_client_per_project_cloud_raises_without_credentials(config_ma
 
 
 @pytest.mark.asyncio
+async def test_get_client_unknown_project_without_credentials_stays_local(config_manager):
+    """An unknown name with no cloud credentials is a local miss, not a cloud route (#1632)."""
+    cfg = config_manager.load_config()
+    cfg.cloud_api_key = None
+    config_manager.save_config(cfg)
+
+    async with get_client(project_name="nope-nope") as client:
+        assert isinstance(client._transport, httpx.ASGITransport)  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.asyncio
 async def test_get_client_local_project_uses_asgi_transport(config_manager):
     """Local-mode project uses ASGI transport even if API key exists."""
     cfg = config_manager.load_config()

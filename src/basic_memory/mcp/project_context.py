@@ -1906,7 +1906,7 @@ async def get_project_client(
         return
 
     # Step 3: Determine if cloud routing is needed
-    project_entry = config.projects.get(resolved_project)
+    project_entry = config.project_entry(resolved_project)
     project_mode = config.get_project_mode(resolved_project)
 
     # Trigger: identifier is a UUID (project_id) but local config keys by name only
@@ -1916,6 +1916,16 @@ async def get_project_client(
     #   discovery still happens when factory/explicit/credentials are present
     cloud_available = factory_mode or explicit_cloud_routing or has_cloud_credentials(config)
     if project_id and not cloud_available:
+        project_mode = ProjectMode.LOCAL
+
+    # Trigger: the name is not in local config and no cloud route is available.
+    # Why: get_project_mode treats unknown names as cloud, so a typo or a deleted
+    #   project on a local-only install failed with "no credentials found"
+    #   instead of naming the missing project (#1632, and man's manual project
+    #   in #1628).
+    # Outcome: the local API answers, and its "project not found" error lists the
+    #   projects that do exist.
+    if project_entry is None and not cloud_available:
         project_mode = ProjectMode.LOCAL
 
     # Trigger: project_id is a local external_id in a mixed local+cloud setup.
