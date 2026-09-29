@@ -271,6 +271,13 @@
 
 ### Bug Fixes
 
+- **#1549**: A note whose frontmatter sets a permalink that is not already a slug
+  (`s/2026/09/ses_AbCdEfGhIj`) is reachable by `memory://` URL again, in `build_context`
+  and `read_note`. The stored permalink is kept verbatim, but the resolver stripped the
+  routed project prefix only from the slug form of the URL (`ses-ab-cd-ef-gh-ij`), so
+  `build_context` returned an empty result and `read_note` found nothing. The resolver
+  now tries the caller's own spelling of the path before its slug.
+
 - **#1598**: Under `BASIC_MEMORY_PROJECT_ROOT`, a project name whose permalink contains
   `/` (such as `Research/2026`) is refused, so every project under a shared root stays a
   single top-level directory. Cloud stores and purges projects by that top-level prefix,

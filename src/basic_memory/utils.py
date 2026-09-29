@@ -347,6 +347,16 @@ def build_permalink_resolution_candidates(
         if value and value not in candidates:
             candidates.append(value)
 
+    def add_remainder(prefix: str) -> None:
+        # Trigger: a routing prefix is stripped to reach a short stored permalink.
+        # Why: a permalink set explicitly in frontmatter is stored verbatim, so
+        #   `ses_AbCd` never equals its slug `ses-ab-cd`; stripping only the
+        #   normalized path left such notes unreachable by memory:// URL (#1549).
+        # Outcome: the caller's own spelling is tried first, then the slug form.
+        if exact_path.startswith(f"{prefix}/"):
+            add_candidate(exact_path.removeprefix(f"{prefix}/"))
+        add_candidate(normalized_path.removeprefix(f"{prefix}/"))
+
     add_candidate(exact_path)
     add_candidate(normalized_path)
     if not normalized_project:
@@ -372,7 +382,7 @@ def build_permalink_resolution_candidates(
             workspace_qualified = True
             remainder = normalized_path.removeprefix(f"{workspace_project_prefix}/")
             add_candidate(f"{normalized_project}/{remainder}")
-            add_candidate(remainder)
+            add_remainder(workspace_project_prefix)
 
     if workspace_project_prefix and not include_project and not workspace_qualified:
         # Trigger: short lookup in a workspace where new canonical links omit project prefixes.
@@ -397,14 +407,13 @@ def build_permalink_resolution_candidates(
         if normalized_path == normalized_project:
             return candidates
         if normalized_path.startswith(f"{normalized_project}/"):
-            remainder = normalized_path.removeprefix(f"{normalized_project}/")
-            add_candidate(remainder)
+            add_remainder(normalized_project)
 
     if not include_project and normalized_path.startswith(f"{normalized_project}/"):
         # Trigger: caller supplied `project/path` while legacy short permalinks are stored.
         # Why: routing uses the project prefix, but strict lookup still needs the short row.
         # Outcome: try `path` after the exact project-qualified candidate.
-        add_candidate(normalized_path.removeprefix(f"{normalized_project}/"))
+        add_remainder(normalized_project)
 
     return candidates
 
