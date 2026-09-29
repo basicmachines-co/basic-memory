@@ -1702,17 +1702,14 @@ async def test_edit_note_append_traversal_identifier_json_error(client, test_pro
 
 
 @pytest.mark.asyncio
-async def test_edit_note_falls_back_to_db_checksum_when_file_not_yet_materialized(
-    monkeypatch, app, test_project
+@pytest.mark.parametrize("file_checksum", [None, "c" * 64])
+async def test_edit_note_reports_the_accepted_db_checksum(
+    monkeypatch, app, test_project, file_checksum
 ):
-    """edit_note must not report "unknown" while a real checksum already exists (#1586).
+    """edit_note reports db_checksum, the value edit preconditions compare (#1586).
 
-    The PATCH entities route defers the file write to
-    note_content_materialization_provider.materialize_write_change exactly like the POST
-    route does, so in production file_checksum is still None when the response is built.
-    db_checksum is recorded synchronously at accept time over the same markdown bytes,
-    so the response must fall back to it. The test environment materializes inline,
-    which is why the integration test alone cannot cover this path.
+    The PATCH response is replaced to inject a not-yet-materialized file and a
+    drifted file checksum, which the inline test environment never produces.
     """
     await write_note(
         project=test_project.name,
@@ -1726,7 +1723,9 @@ async def test_edit_note_falls_back_to_db_checksum_when_file_not_yet_materialize
 
     async def fake_patch_entity(self, entity_id, patch_data):
         result = await real_patch_entity(self, entity_id, patch_data)
-        return result.model_copy(update={"file_checksum": None, "db_checksum": db_checksum})
+        return result.model_copy(
+            update={"file_checksum": file_checksum, "db_checksum": db_checksum}
+        )
 
     monkeypatch.setattr(KnowledgeClient, "patch_entity", fake_patch_entity)
 

@@ -549,15 +549,13 @@ async def write_note(
                     for note in similar_notes
                 ]
 
-            # file_checksum is only set once file materialization has run. In
-            # production that materialization is deferred to a background worker
-            # for write-load parity with cloud (see
-            # LocalNoteContentMaterializationProvider.materialize_write_change), so
-            # file_checksum is still None for essentially every response here. The
-            # db_checksum recorded during accept already identifies this exact
-            # write, so it stands in for the not-yet-materialized file checksum
-            # instead of a permanent "unknown" (#1586).
-            checksum = result.file_checksum or result.db_checksum
+            # Report the accepted revision's checksum. It is recorded
+            # synchronously at accept time, and it is the value checksum-guarded
+            # edits compare base_checksum against. file_checksum is filled in
+            # later by deferred materialization and can drift if the file is
+            # edited outside Basic Memory, so it is not what a caller should
+            # echo back (#1586).
+            checksum = result.db_checksum
 
             summary = [
                 f"# {action} note",

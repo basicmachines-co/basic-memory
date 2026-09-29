@@ -799,13 +799,11 @@ async def edit_note(
                 # --- Format response ---
                 # result is always set: either by create_entity (auto-create) or patch_entity (edit)
                 assert result is not None
-                # Both routes this tool uses (POST and PATCH entities) hand the file write to
-                # note_content_materialization_provider.materialize_write_change, which is
-                # deferred to a background worker in production, so file_checksum is not yet
-                # set when the response is built. db_checksum is recorded synchronously at
-                # accept time over the same markdown bytes, so it stands in for the
-                # not-yet-materialized file checksum instead of a permanent "unknown" (#1586).
-                checksum = result.file_checksum or result.db_checksum
+                # Report the accepted revision's checksum: it is recorded at accept
+                # time and is what checksum-guarded edits compare base_checksum
+                # against. file_checksum arrives later from deferred materialization
+                # and can drift from it (#1586).
+                checksum = result.db_checksum
                 if file_created:
                     summary = [
                         f"# Created note ({operation})",

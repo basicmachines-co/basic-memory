@@ -234,17 +234,16 @@ async def test_write_note_no_tags(app, test_project):
 
 
 @pytest.mark.asyncio
-async def test_write_note_falls_back_to_db_checksum_when_file_not_yet_materialized(
-    monkeypatch, app, test_project
+@pytest.mark.parametrize("file_checksum", [None, "c" * 64])
+async def test_write_note_reports_the_accepted_db_checksum(
+    monkeypatch, app, test_project, file_checksum
 ):
-    """write_note must not report "unknown" while a real checksum already exists (#1586).
+    """write_note reports db_checksum, the value edit preconditions compare (#1586).
 
-    In production, file materialization (which fills in file_checksum) is deferred to
-    a background worker for write-load parity with cloud, so file_checksum is still
-    None for essentially every response (see
-    LocalNoteContentMaterializationProvider.materialize_write_change). db_checksum is
-    persisted synchronously during accept and already identifies the exact content
-    that was written, so the response must fall back to it instead of "unknown".
+    file_checksum is None until deferred materialization runs, and can differ
+    from db_checksum after an outside edit; either way the response must carry
+    the accepted revision's checksum. The client call is replaced to inject
+    those two file states, which the inline test environment never produces.
     """
     now = datetime.now(timezone.utc)
     db_checksum = "a" * 64  # a real, already-persisted SHA-256 hex digest
@@ -262,7 +261,7 @@ async def test_write_note_falls_back_to_db_checksum_when_file_not_yet_materializ
             db_version=1,
             db_checksum=db_checksum,
             file_version=None,
-            file_checksum=None,  # not yet materialized
+            file_checksum=file_checksum,
         )
         return NoteCreated(entity=entity)
 
