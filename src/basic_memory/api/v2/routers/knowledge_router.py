@@ -1161,6 +1161,8 @@ async def delete_entity_by_id(
             accepted = await note_content_mutation_service.delete_note(
                 project_external_id=project_external_id,
                 entity_external_id=entity_id,
+                user_profile_id=None,
+                source="api",
             )
         except NoteContentMutationServiceError as error:
             raise HTTPException(status_code=error.status_code, detail=error.detail) from error

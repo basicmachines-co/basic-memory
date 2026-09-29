@@ -1,9 +1,23 @@
 """Tests for delete_note MCP tool."""
 
+import functools
+from dataclasses import replace
+from typing import Any
 from unittest.mock import patch
+from uuid import UUID
 
 import pytest
+from sqlalchemy import select
 
+from basic_memory import db
+from basic_memory.deps.services import get_note_content_mutation_service
+from basic_memory.models import AcceptedProjectNoteChange
+from basic_memory.runtime.project_partition import RuntimeProjectNoteOperation
+from basic_memory.services.note_content_writes import (
+    NoteContentMutationActorContext,
+    NoteContentMutationKind,
+    NoteContentMutationService,
+)
 from basic_memory.mcp.tools.delete_note import delete_note, _format_delete_error_response
 from basic_memory.mcp.tools.read_note import read_note
 from basic_memory.mcp.tools.write_note import write_note
@@ -273,3 +287,61 @@ async def test_delete_directory_workspace_memory_url_strips_route_prefix(client,
     assert result["total_files"] == 1
     assert result["successful_deletes"] == 1
     assert result["failed_deletes"] == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_note_journal_row_carries_resolved_actor(
+    app, client, engine_factory, test_project
+):
+    """The MCP delete path reaches the actor resolver, so its journal row is attributed."""
+    profile_id = UUID("33333333-3333-4333-8333-333333333333")
+    resolved_kinds: list[str] = []
+
+    class IdentifiedCaller:
+        def resolve_mutation_actor(
+            self,
+            *,
+            mutation_kind: NoteContentMutationKind,
+            requested: NoteContentMutationActorContext,
+        ) -> NoteContentMutationActorContext:
+            resolved_kinds.append(mutation_kind)
+            return replace(
+                requested,
+                user_profile_id=profile_id,
+                actor_kind="mcp_client",
+                actor_name="Test Agent",
+            )
+
+    # FastAPI reads the override's parameters through __wrapped__, so the real
+    # dependency's wiring still builds the service this override decorates.
+    @functools.wraps(get_note_content_mutation_service)
+    async def resolved_service(**dependencies: Any) -> NoteContentMutationService:
+        service = await get_note_content_mutation_service(**dependencies)
+        service.actor_resolver = IdentifiedCaller()
+        return service
+
+    app.dependency_overrides[get_note_content_mutation_service] = resolved_service
+
+    await write_note(
+        project=test_project.name,
+        title="Attributed Delete",
+        directory="test",
+        content="# Attributed Delete\nGone soon.",
+    )
+    assert await delete_note("test/attributed-delete", project=test_project.name) is True
+
+    assert resolved_kinds == ["create", "delete"]
+    _, session_maker = engine_factory
+    async with db.scoped_session(session_maker) as session:
+        [row] = (
+            await session.scalars(
+                select(AcceptedProjectNoteChange).where(
+                    AcceptedProjectNoteChange.project_id == test_project.id,
+                    AcceptedProjectNoteChange.operation
+                    == RuntimeProjectNoteOperation.deleted.value,
+                )
+            )
+        ).all()
+    assert row.actor_user_profile_id == str(profile_id)
+    assert row.actor_kind == "mcp_client"
+    assert row.actor_name == "Test Agent"

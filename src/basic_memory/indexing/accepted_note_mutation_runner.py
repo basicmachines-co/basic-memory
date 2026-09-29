@@ -200,6 +200,9 @@ class AcceptedNoteDeleteMutation:
 
     project_external_id: ProjectExternalId
     entity_external_id: NoteExternalId
+    # None records the delete unattributed, as every delete was before actors
+    # reached this path; the journal source stays ACCEPTED_NOTE_DELETE_SOURCE.
+    actor: AcceptedNoteMutationActor | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -687,7 +690,7 @@ async def run_accepted_note_delete(
         source=ACCEPTED_NOTE_DELETE_SOURCE,
         previous_file_path=None,
         note_content=note_content,
-        actor=None,
+        actor=request.actor,
         dependencies=dependencies,
     )
     return AcceptedNoteMutationResult(

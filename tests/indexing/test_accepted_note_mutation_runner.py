@@ -2224,9 +2224,51 @@ async def test_run_accepted_note_delete_removes_entity_and_returns_cleanup() -> 
     assert change.project_change.db_version == note_content.db_version
     assert change.project_change.db_checksum == note_content.db_checksum
     assert change.project_change.actor_user_profile_id is None
+    assert change.project_change.actor_kind is None
+    assert change.project_change.actor_name is None
     assert change.file_delete.project_change is change.project_change
     assert change.relation_cleanup_entity_ids == frozenset()
     assert result.relation_publication is None
+
+
+@pytest.mark.asyncio
+async def test_run_accepted_note_delete_records_actor_on_project_change() -> None:
+    # A delete is the change people most want to trace back, so its journal row
+    # carries the same actor columns creates, updates and moves already fill.
+    session = _MutationSession()
+    project = _project()
+    entity = _entity(file_path="notes/accepted.md")
+    note_content = _note_content(entity)
+
+    result = await run_accepted_note_delete(
+        cast(AsyncSession, session),
+        request=AcceptedNoteDeleteMutation(
+            project_external_id="project-123",
+            entity_external_id="note-123",
+            actor=AcceptedNoteMutationActor(
+                user_profile_id=_ACTOR_ID,
+                kind="user",
+                name="Ada",
+            ),
+        ),
+        dependencies=_dependencies(
+            project_repository=_ProjectRepository(project),
+            entity_lookup_repository=_EntityLookupRepository(by_external_id=entity),
+            note_content_lookup_repository=_NoteContentLookupRepository(note_content),
+            preparer_factory=_PreparerFactory(_CreatePreparer(_prepared())),
+            pending_entity_repository=_PendingEntityRepository(entity),
+            note_content_accept_repository=_NoteContentAcceptRepository(note_content),
+            search_repository=_SearchRepository(),
+        ),
+    )
+
+    project_change = result.change.project_change
+    assert project_change is not None
+    assert project_change.operation is RuntimeProjectNoteOperation.deleted
+    assert project_change.source == "delete_note"
+    assert project_change.actor_user_profile_id == _ACTOR_ID
+    assert project_change.actor_kind == "user"
+    assert project_change.actor_name == "Ada"
 
 
 @pytest.mark.asyncio
