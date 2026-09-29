@@ -98,21 +98,35 @@ async def test_build_context_underscore_normalization(mcp_server, app, test_proj
         assert '"results"' in response_text_related
         assert "related-to" in response_text_related.lower()
 
-        # Test 4: Test exact path (non-wildcard) with underscore
-        # Previously this returned empty (no exact permalink match). Now LinkResolver
-        # resolves to the child entity, so we get its relations back.
+        # Test 4: Exact (non-wildcard) relation address with an underscore.
+        # A relation's permalink is source/relation_type/target with the target's
+        # own project-qualified permalink, and `part_of` normalizes to `part-of`.
         result_exact = await client.call_tool(
+            "build_context",
+            {
+                "project": test_project.name,
+                "url": (
+                    f"memory://testing/child-with-underscore/part_of/"
+                    f"{test_project.name}/testing/parent-entity"
+                ),
+            },
+        )
+
+        response_text_exact = result_exact.content[0].text  # pyright: ignore
+        assert '"results"' in response_text_exact
+        assert '"primary_count":1' in response_text_exact.replace(" ", "")
+        assert "part_of" in response_text_exact.lower()
+
+        # A relation-shaped URL that names no stored address used to fall through to
+        # a fuzzy search and return a neighbouring note (#1626). It is now a miss.
+        result_miss = await client.call_tool(
             "build_context",
             {
                 "project": test_project.name,
                 "url": "memory://testing/child-with-underscore/part_of/testing/parent-entity",
             },
         )
-
-        response_text_exact = result_exact.content[0].text  # pyright: ignore
-        assert '"results"' in response_text_exact
-        # LinkResolver resolves to child-with-underscore entity; its relation_type is "part_of"
-        assert "part_of" in response_text_exact.lower()
+        assert '"primary_count":0' in result_miss.content[0].text.replace(" ", "")  # pyright: ignore
 
 
 @pytest.mark.asyncio
