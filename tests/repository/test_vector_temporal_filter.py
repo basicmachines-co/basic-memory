@@ -24,6 +24,7 @@ from tests.repository.test_hybrid_fusion import (
     FakeFts,
     FakeRow as HybridFakeRow,
     fake_vector_retrieval,
+    window_of,
 )
 from tests.repository.test_vector_threshold import (
     VECTOR_QUERY,
@@ -84,9 +85,9 @@ async def test_temporal_filter_applies_in_hybrid_mode():
     semantic = SemanticSearch(
         cast(Any, None), ProjectScope.single(1), fts_leg, fake_vector_retrieval()
     )
-    vector_leg = AsyncMock(return_value=[HybridFakeRow(id=1, score=0.9, title="dated")])
+    vector_leg = AsyncMock(return_value=window_of([HybridFakeRow(id=1, score=0.9, title="dated")]))
 
-    with patch.object(semantic, "vector_only", vector_leg):
+    with patch.object(semantic, "_vector_window", vector_leg):
         results = await semantic.hybrid(
             replace(HYBRID_QUERY, temporal=TEMPORAL), limit=10, offset=0
         )

@@ -115,6 +115,18 @@
   Every hit on a page that spans projects now carries `project` (JSON) or a
   `- project:` line (text), so the next call can be routed to the right project.
 
+- **#1557**: A vector or hybrid search with reranking enabled retrieves once per request.
+  A page reaching past the fixed reranked prefix used to run a second full retrieval
+  (query embedding, vector query, and for hybrid a second FTS pass) only to rebuild
+  that prefix. The prefix is now read from the request's own window at the fixed
+  window's chunk bound, on the project route and the scoped `QUERY /v2/search/` route
+  alike, so every page still reranks the same rows with the same passages. Hybrid
+  tail rows are ordered by where each row first entered either ranking, counting
+  vector chunks before they collapse into rows, so a deep page cannot move a row
+  across one already returned. SQLite full-text results break score ties by row id,
+  as Postgres already did, so a smaller window is always a prefix of a larger one.
+  The `stable_pool_refetched` field is gone from the internal search trace.
+
 - **#1458**: A note whose file stem equals its project's name is now readable by its bare
   identifier. `split_project_permalink_prefix` matches a leading path segment against a
   project's permalink via `generate_permalink`, which drops file extensions -- so a single

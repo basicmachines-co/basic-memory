@@ -194,7 +194,6 @@ def test_stage_builders_freeze_plain_values_and_exact_fusion_math():
         post_rerank_rows=[(("entity", 1), 0.2), (("entity", 2), 0.1)],
         demoted_scores={("entity", 2): 0.1},
         tail_floor=0.2,
-        stable_pool_refetched=True,
         rerank_ms=4.0,
     )
     assert rerank.entries[0].pre_rerank_score == pytest.approx(1.24)
@@ -849,7 +848,6 @@ async def test_fts_vector_hybrid_and_rerank_trace_variants(
     )
     assert isinstance(reranked_trace, VectorQueryTrace)
     assert reranked_trace.rerank is not None
-    assert reranked_trace.rerank.stable_pool_refetched is True
     assert reranked_trace.rerank.entries[0].key == ("entity", 3)
     alpha_rerank = next(
         entry for entry in reranked_trace.rerank.entries if entry.key == ("entity", 1)
