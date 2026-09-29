@@ -116,7 +116,7 @@ async def test_detect_cross_project_only_flags_known_project_name(monkeypatch):
             return _ProjectList()
 
     class _EmptyListing:
-        nodes: list = []
+        nodes = ()
         has_more = False
 
     class MockDirectoryClient:
