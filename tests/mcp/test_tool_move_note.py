@@ -5,6 +5,15 @@ import pytest
 from basic_memory.mcp.tools.move_note import move_note, _format_move_error_response
 from basic_memory.mcp.tools.write_note import write_note
 from basic_memory.mcp.tools.read_note import read_note
+from basic_memory.schemas.project_info import ProjectItem
+
+ACTIVE_PROJECT = ProjectItem(
+    id=1,
+    external_id="11111111-1111-1111-1111-111111111111",
+    name="test-project",
+    path="/tmp/test-project",
+    is_default=False,
+)
 
 
 @pytest.mark.asyncio
@@ -30,9 +39,166 @@ async def test_detect_cross_project_move_attempt_is_defensive_on_api_error(monke
         client=None,
         identifier="source/note",
         destination_path="somewhere/note",
-        current_project="test-project",
+        active_project=ACTIVE_PROJECT,
     )
     assert result is None
+
+
+@pytest.mark.asyncio
+async def test_detect_cross_project_rejects_when_local_folder_check_fails(monkeypatch):
+    """After a project name matches, a failed local-folder lookup keeps the rejection."""
+    import importlib
+
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+
+    class _Project:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    class _ProjectList:
+        projects = [_Project("test-project"), _Project("other-project")]
+
+    class MockProjectClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def list_projects(self, *args, **kwargs):
+            return _ProjectList()
+
+    class FailingDirectoryClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def list(self, *args, **kwargs):
+            raise RuntimeError("directory backend unavailable")
+
+    monkeypatch.setattr(clients_mod, "ProjectClient", MockProjectClient)
+    monkeypatch.setattr(clients_mod, "DirectoryClient", FailingDirectoryClient)
+
+    move_note_module = importlib.import_module("basic_memory.mcp.tools.move_note")
+
+    result = await move_note_module._detect_cross_project_move_attempt(
+        client=None,
+        identifier="source/note",
+        destination_path="other-project/note.md",
+        active_project=ACTIVE_PROJECT,
+    )
+    assert result is not None
+    assert "Cross-Project Move Not Supported" in result
+
+
+@pytest.mark.asyncio
+async def test_detect_cross_project_stops_paging_after_root_folders(monkeypatch):
+    """Root folders come first, so paging stops at the first page that holds a file."""
+    import importlib
+
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+
+    class _Project:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    class _ProjectList:
+        projects = [_Project("test-project"), _Project("other-project")]
+
+    class MockProjectClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def list_projects(self, *args, **kwargs):
+            return _ProjectList()
+
+    class _Node:
+        def __init__(self, name: str, node_type: str) -> None:
+            self.name = name
+            self.type = node_type
+
+    class _Page:
+        def __init__(self, nodes: list[_Node]) -> None:
+            self.nodes = nodes
+            self.has_more = True
+
+    requested_pages: list[int] = []
+
+    class PagingDirectoryClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def list(self, *args, page: int = 1, **kwargs):
+            requested_pages.append(page)
+            if page == 1:
+                return _Page([_Node("alpha", "directory")])
+            return _Page([_Node("Other-Project", "directory"), _Node("note.md", "file")])
+
+    monkeypatch.setattr(clients_mod, "ProjectClient", MockProjectClient)
+    monkeypatch.setattr(clients_mod, "DirectoryClient", PagingDirectoryClient)
+
+    move_note_module = importlib.import_module("basic_memory.mcp.tools.move_note")
+
+    result = await move_note_module._detect_cross_project_move_attempt(
+        client=None,
+        identifier="source/note",
+        destination_path="other-project/note.md",
+        active_project=ACTIVE_PROJECT,
+    )
+    assert result is None
+    assert requested_pages == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_detect_cross_project_matches_project_permalink(monkeypatch):
+    """A destination addressed by project permalink ("Other Project" -> other-project)."""
+    import importlib
+
+    clients_mod = importlib.import_module("basic_memory.mcp.clients")
+
+    class _Project:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    class _ProjectList:
+        projects = [_Project("test-project"), _Project("Other Project")]
+
+    class MockProjectClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def list_projects(self, *args, **kwargs):
+            return _ProjectList()
+
+    class _EmptyListing:
+        nodes = ()
+        has_more = False
+
+    class MockDirectoryClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def list(self, *args, **kwargs):
+            return _EmptyListing()
+
+    monkeypatch.setattr(clients_mod, "ProjectClient", MockProjectClient)
+    monkeypatch.setattr(clients_mod, "DirectoryClient", MockDirectoryClient)
+
+    move_note_module = importlib.import_module("basic_memory.mcp.tools.move_note")
+
+    result = await move_note_module._detect_cross_project_move_attempt(
+        client=None,
+        identifier="source",
+        destination_path="other-project/moved",
+        active_project=ACTIVE_PROJECT,
+    )
+    assert result is not None
+    assert "Other Project" in result
+
+    # A root-level filename is a rename, not a project prefix.
+    root_rename = await move_note_module._detect_cross_project_move_attempt(
+        client=None,
+        identifier="source",
+        destination_path="other-project.md",
+        active_project=ACTIVE_PROJECT,
+    )
+    assert root_rename is None
 
 
 @pytest.mark.asyncio
@@ -63,7 +229,19 @@ async def test_detect_cross_project_only_flags_known_project_name(monkeypatch):
         async def list_projects(self, *args, **kwargs):
             return _ProjectList()
 
+    class _EmptyListing:
+        nodes = ()
+        has_more = False
+
+    class MockDirectoryClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def list(self, *args, **kwargs):
+            return _EmptyListing()
+
     monkeypatch.setattr(clients_mod, "ProjectClient", MockProjectClient)
+    monkeypatch.setattr(clients_mod, "DirectoryClient", MockDirectoryClient)
 
     move_note_module = importlib.import_module("basic_memory.mcp.tools.move_note")
 
@@ -72,7 +250,7 @@ async def test_detect_cross_project_only_flags_known_project_name(monkeypatch):
         client=None,
         identifier="source/note",
         destination_path="other-project/note.md",
-        current_project="test-project",
+        active_project=ACTIVE_PROJECT,
     )
     assert rejected is not None
     assert "Cross-Project Move Not Supported" in rejected
@@ -83,7 +261,7 @@ async def test_detect_cross_project_only_flags_known_project_name(monkeypatch):
         client=None,
         identifier="source/note",
         destination_path="other-workspace/projects/x/note.md",
-        current_project="test-project",
+        active_project=ACTIVE_PROJECT,
     )
     assert workspace_shaped is None
 
@@ -92,7 +270,7 @@ async def test_detect_cross_project_only_flags_known_project_name(monkeypatch):
         client=None,
         identifier="source/note",
         destination_path="team/2026/projects/alpha/note.md",
-        current_project="test-project",
+        active_project=ACTIVE_PROJECT,
     )
     assert allowed is None
 
@@ -101,9 +279,18 @@ async def test_detect_cross_project_only_flags_known_project_name(monkeypatch):
         client=None,
         identifier="source/note",
         destination_path="projects/2025/note.md",
-        current_project="test-project",
+        active_project=ACTIVE_PROJECT,
     )
     assert top_level is None
+
+    # Root-only folder (destination_folder="/") has no leading segment -> allowed.
+    root_only = await move_note_module._detect_cross_project_move_attempt(
+        client=None,
+        identifier="source/note",
+        destination_path="/",
+        active_project=ACTIVE_PROJECT,
+    )
+    assert root_only is None
 
 
 @pytest.mark.asyncio
