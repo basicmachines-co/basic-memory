@@ -104,6 +104,16 @@
   locked`. The subquery now joins the vector row by rowid, and the cleanup deletes the
   same rows in one pass. Thanks to @mikemikimike for the report and fix (#1584).
 
+- **#1609**: `read_note` on a Markdown file path that does not exist (`notes/x.md`)
+  returns the ordinary not-found response again. Strict resolution already checks
+  file path, permalink, and exact title, so a miss there confirms absence, and the
+  tool no longer falls back to title and text search for an explicit path. That
+  fallback was what surfaced the problem: in a project with no recorded full index
+  pass, which is common for hosted projects whose notes read fine, an empty search
+  answers with the "Project Index Required" guidance, and JSON reads raised it as
+  `Fallback search failed: # Project Index Required` instead of `NOTE_NOT_FOUND`.
+  Title and free-text identifiers keep the search fallback and the guidance.
+
 - **#1607**: `move_note` applies its cross-project guard to directory moves as well as
   file moves. The guard ran only after the directory branch had returned, so
   `work/moved` was refused for a note and accepted for a directory. The guard also
