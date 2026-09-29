@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from basic_memory.file_utils import ParseError, has_frontmatter, parse_frontmatter
 
 from basic_memory.indexing.accepted_note_mutation_runner import (
+    ACCEPTED_NOTE_DELETE_SOURCE,
     AcceptedNoteCreateMutation,
     AcceptedNoteDeleteMutation,
     AcceptedNoteEditMutation,
@@ -75,7 +76,7 @@ class NoteContentMutationFreshener(Protocol):
     ) -> None: ...
 
 
-type NoteContentMutationKind = Literal["create", "update", "edit", "move"]
+type NoteContentMutationKind = Literal["create", "update", "edit", "move", "delete"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -721,8 +722,25 @@ class NoteContentMutationService:
         *,
         project_external_id: str,
         entity_external_id: str,
+        user_profile_id: UUID | None = None,
+        source: str = ACCEPTED_NOTE_DELETE_SOURCE,
+        actor_kind: str | None = None,
+        actor_name: str | None = None,
     ) -> AcceptedNoteChange:
-        """DELETE the DB note and return the runtime follow-up change."""
+        """DELETE the DB note and return the runtime follow-up change.
+
+        The actor inputs default to an unidentified caller, so a delete with no
+        actor writes the same journal row it always has. The resolver sees
+        ``source`` like every other mutation, but the journal keeps recording
+        deletes under ``ACCEPTED_NOTE_DELETE_SOURCE``: only the actor is new here.
+        """
+        actor_context = self._resolve_actor(
+            "delete",
+            user_profile_id=user_profile_id,
+            source=source,
+            actor_kind=actor_kind,
+            actor_name=actor_name,
+        )
         freshening_may_have_published = False
         try:
             freshening_may_have_published = await self.freshen_existing_note_content(
@@ -739,6 +757,12 @@ class NoteContentMutationService:
                         request=AcceptedNoteDeleteMutation(
                             project_external_id=project_external_id,
                             entity_external_id=entity_external_id,
+                            actor=accepted_note_mutation_actor(
+                                user_profile_id=actor_context.user_profile_id,
+                                actor_kind=actor_context.actor_kind,
+                                actor_name=actor_context.actor_name,
+                                author=actor_context.author,
+                            ),
                         ),
                         dependencies=self.mutation_dependencies,
                     )
