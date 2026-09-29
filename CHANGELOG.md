@@ -97,6 +97,16 @@
 
 ### Bug Fixes
 
+- **#1609**: `read_note` on a Markdown file path that does not exist (`notes/x.md`)
+  returns the ordinary not-found response again. Strict resolution already checks
+  file path, permalink, and exact title, so a miss there confirms absence, and the
+  tool no longer falls back to title and text search for an explicit path. That
+  fallback was what surfaced the problem: in a project with no recorded full index
+  pass, which is common for hosted projects whose notes read fine, an empty search
+  answers with the "Project Index Required" guidance, and JSON reads raised it as
+  `Fallback search failed: # Project Index Required` instead of `NOTE_NOT_FOUND`.
+  Title and free-text identifiers keep the search fallback and the guidance.
+
 - **#1514**: Markdown path links resolve against the note's own path at resolution
   time, the way wikilinks do, instead of at parse time from the file's location
   on disk. The parser had derived the note's project path with `relative_to` on the

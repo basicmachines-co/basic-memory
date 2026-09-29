@@ -1,10 +1,12 @@
 """Tests for note tools that exercise the full stack with SQLite."""
 
+import json
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from textwrap import dedent
 
 import pytest
+from fastmcp import Client
 from fastmcp.exceptions import ToolError
 from httpx import HTTPStatusError, Request, Response
 
@@ -1340,3 +1342,77 @@ async def test_missing_uuid_line_scan_returns_not_found_guidance(app, test_proje
     )
     assert isinstance(result, str)
     assert "Note Not Found" in result
+
+
+# --- Explicit Markdown path misses (#1609) ---
+# The default test project has never completed a full index pass (last_indexed_at
+# is NULL), the same readiness a hosted project reports while its notes still read.
+
+
+@pytest.mark.asyncio
+async def test_missing_markdown_path_in_unindexed_project_is_not_found(mcp, app, test_project):
+    await write_note(
+        project=test_project.name, title="Readable", directory="notes", content="Visible body"
+    )
+    async with Client(mcp) as mcp_client:
+        existing = await mcp_client.call_tool(
+            "read_note",
+            {
+                "identifier": "notes/Readable.md",
+                "project": test_project.name,
+                "output_format": "json",
+            },
+        )
+        missing = await mcp_client.call_tool(
+            "read_note",
+            {
+                "identifier": "notes/runs/2026-09-25.md",
+                "project": test_project.name,
+                "output_format": "json",
+            },
+        )
+    assert "Visible body" in json.loads(existing.content[0].text)["content"]
+    assert json.loads(missing.content[0].text) == {
+        "title": None,
+        "permalink": None,
+        "file_path": None,
+        "content": None,
+        "frontmatter": None,
+        "error": "NOTE_NOT_FOUND",
+        "message": "Note not found: notes/runs/2026-09-25.md",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("identifier", ["notes/missing.md", "memory://notes/missing.markdown"])
+async def test_missing_markdown_path_skips_search_fallback(
+    monkeypatch, app, test_project, identifier
+):
+    import importlib
+
+    read_note_module = importlib.import_module("basic_memory.mcp.tools.read_note")
+
+    async def search_must_not_run(**kwargs):
+        raise AssertionError("an explicit path miss must not fall back to search")
+
+    monkeypatch.setattr(read_note_module, "search_notes", search_must_not_run)
+
+    text = await read_note(identifier, project=test_project.name)
+    assert isinstance(text, str)
+    assert "# Note Not Found" in text
+    assert "Project Index Required" not in text
+
+    scan = await read_note(identifier, project=test_project.name, start_line=1, end_line=5)
+    assert isinstance(scan, str)
+    assert "# Note Not Found" in scan
+
+    payload = await read_note(identifier, project=test_project.name, output_format="json")
+    assert isinstance(payload, dict)
+    assert payload["error"] == "NOTE_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_missing_title_in_unindexed_project_keeps_index_guidance(app, test_project):
+    """A title miss cannot prove absence before an index pass, so guidance still surfaces."""
+    with pytest.raises(RuntimeError, match="Project Index Required"):
+        await read_note("Some Missing Title", project=test_project.name, output_format="json")

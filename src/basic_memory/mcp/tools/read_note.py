@@ -25,6 +25,7 @@ from basic_memory.mcp.note_reads import (
 )
 from basic_memory.mcp.server import mcp
 from basic_memory.mcp.tools.search import search_notes
+from basic_memory.runtime.storage import runtime_file_path_is_markdown_note
 from basic_memory.schemas.memory import memory_url_path
 from basic_memory.utils import validate_project_path
 
@@ -110,6 +111,9 @@ async def read_note(
     1. Direct permalink lookup
     2. Title search fallback
     3. Text search as last resort
+
+    An explicit Markdown file path (ending in .md or .markdown) that does not
+    resolve directly is reported as not found without the search fallbacks.
 
     Args:
         project: Project name to read from. Optional - server will resolve using the
@@ -440,6 +444,17 @@ async def read_note(
                         return response.text
                 except Exception as error:  # pragma: no cover
                     logger.info(f"Direct lookup failed for '{entity_path}': {error}")
+
+            # Trigger: the identifier names a Markdown file and strict resolution missed it.
+            # Why: strict resolution already matches file path, permalink, and exact title,
+            #      so this miss confirms the note is absent. Search could only add fuzzy
+            #      suggestions, and in a project with no recorded full index pass it answers
+            #      with index-required guidance, which JSON reads raised as an error (#1609).
+            # Outcome: an explicit path miss returns the ordinary not-found response.
+            if runtime_file_path_is_markdown_note(entity_path):
+                if output_format == "json":
+                    return _not_found_json_payload()
+                return format_not_found_message(active_project.name, identifier)
 
             # Fallback 1: Try title search via API, walking fixed-size pages of
             # title results until an exact match is found or results run out.
