@@ -30,7 +30,11 @@ class TestKnowledgeClient:
         """Test create_entity calls correct endpoint."""
 
         mock_response = MagicMock()
+        # The entity routes return EntityResponseV2, which always carries these ids.
         mock_response.json.return_value = {
+            "id": 1,
+            "external_id": "entity-uuid-123",
+            "db_checksum": "d" * 64,
             "permalink": "test",
             "title": "Test",
             "file_path": "test.md",
@@ -53,13 +57,18 @@ class TestKnowledgeClient:
         client = KnowledgeClient(mock_http, "proj-123")
         result = await client.create_entity({"title": "Test"})
         assert result.title == "Test"
+        assert result.db_checksum == "d" * 64
 
     @pytest.mark.asyncio
     async def test_update_entity(self, monkeypatch):
         """Test update_entity calls correct endpoint without fast query params."""
 
         mock_response = MagicMock()
+        # The entity routes return EntityResponseV2, which always carries these ids.
         mock_response.json.return_value = {
+            "id": 1,
+            "external_id": "entity-uuid-123",
+            "db_checksum": "d" * 64,
             "permalink": "test",
             "title": "Test",
             "file_path": "test.md",
@@ -82,13 +91,18 @@ class TestKnowledgeClient:
         client = KnowledgeClient(mock_http, "proj-123")
         result = await client.update_entity("entity-123", {"title": "Test"})
         assert result.title == "Test"
+        assert result.db_checksum == "d" * 64
 
     @pytest.mark.asyncio
     async def test_patch_entity(self, monkeypatch):
         """Test patch_entity calls correct endpoint without fast query params."""
 
         mock_response = MagicMock()
+        # The entity routes return EntityResponseV2, which always carries these ids.
         mock_response.json.return_value = {
+            "id": 1,
+            "external_id": "entity-uuid-123",
+            "db_checksum": "d" * 64,
             "permalink": "test",
             "title": "Test",
             "file_path": "test.md",
@@ -111,6 +125,7 @@ class TestKnowledgeClient:
         client = KnowledgeClient(mock_http, "proj-123")
         result = await client.patch_entity("entity-123", {"operation": "append"})
         assert result.title == "Test"
+        assert result.db_checksum == "d" * 64
 
     @pytest.mark.asyncio
     async def test_resolve_entity(self, monkeypatch):
