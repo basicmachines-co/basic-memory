@@ -17,6 +17,7 @@ from basic_memory.config import ConfigManager
 from basic_memory.utils import (
     build_canonical_permalink,
     coerce_dict,
+    generate_permalink,
     parse_str_list,
     parse_tags,
     strict_search_tags,
@@ -579,21 +580,32 @@ def _valid_project_id(value: object) -> str | None:
         return None
 
 
+def _names_project(token: str, *spellings: object) -> bool:
+    """Return True when a caller's project token names one of a project's spellings.
+
+    Project routing matches names by permalink (#1388), so `ALPHA` and `alpha`
+    are the same project there. Search scoping compared exact strings, which made
+    a case-mismatched BASIC_MEMORY_MCP_PROJECT or `projects=["BETA"]` see no
+    projects at all (#1630).
+    """
+    token_permalink = generate_permalink(token.strip())
+    return any(
+        isinstance(spelling, str) and generate_permalink(spelling) == token_permalink
+        for spelling in spellings
+    )
+
+
 def _matches_constrained_project(project: dict[str, Any], constrained_project: object) -> bool:
     """Return True when a project list row satisfies BASIC_MEMORY_MCP_PROJECT."""
     if not isinstance(constrained_project, str) or not constrained_project.strip():
         return True
 
-    candidates = {
-        value
-        for value in (
-            project.get("name"),
-            project.get("qualified_name"),
-            project.get("external_id"),
-        )
-        if isinstance(value, str)
-    }
-    return constrained_project in candidates
+    return _names_project(
+        constrained_project,
+        project.get("name"),
+        project.get("qualified_name"),
+        project.get("external_id"),
+    )
 
 
 @dataclass(frozen=True)
@@ -672,7 +684,9 @@ def _select_project_refs(
     unknown: list[str] = []
     for requested in projects:
         token = requested.strip()
-        matches = [ref for ref in refs if token in (ref.name, ref.bare_name, ref.external_id)]
+        matches = [
+            ref for ref in refs if _names_project(token, ref.name, ref.bare_name, ref.external_id)
+        ]
         if not matches:
             unknown.append(token)
             continue
