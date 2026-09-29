@@ -121,6 +121,20 @@ def test_unreadable_subtree_is_a_failure(tmp_path, monkeypatch):
         snapshot_files(tmp_path)
 
 
+def test_unreadable_entry_metadata_is_a_diagnostic(tmp_path, monkeypatch):
+    (tmp_path / "note.md").write_text("# Note")
+    real_is_symlink = Path.is_symlink
+
+    def denied_is_symlink(path):
+        if path.name == "note.md":
+            raise PermissionError(13, "denied", str(path))
+        return real_is_symlink(path)
+
+    monkeypatch.setattr(Path, "is_symlink", denied_is_symlink)
+    diagnostics = check_bundle(tmp_path).diagnostics
+    assert [(d.path, d.rule) for d in diagnostics] == [("note.md", "filesystem.read")]
+
+
 @pytest.mark.parametrize("bm", ["broken", "{okf_export: {version: 1}}"])
 def test_extension_collision_is_not_overwritten(bm):
     snapshot = ExportSnapshot("p", (ExportFile("a.md", f"---\nbm: {bm}\n---\n".encode()),))

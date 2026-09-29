@@ -16,7 +16,11 @@ from basic_memory.markdown.entity_parser import (
     normalize_frontmatter_value,
     parse,
 )
-from basic_memory.markdown.path_links import markdown_link_path, resolve_project_path
+from basic_memory.markdown.path_links import (
+    is_path_target,
+    markdown_link_path,
+    resolve_project_path,
+)
 from basic_memory.markdown.plugins import _is_escaped
 from basic_memory.repository.entity_repository import file_path_alias
 from basic_memory.services.bulk_link_resolver import RelationTargetReference
@@ -131,6 +135,9 @@ def convert_wikilinks(
         raw = state.src[start + 2 : end]
         target, alias = normalize_link_text(raw)
         target, _, fragment = target.partition("#")
+        # The canonical parser records no relation for [[]]; keep it as prose.
+        if not target and not fragment:
+            return False
         label = alias or target or fragment
         reference = RelationTargetReference.parse(target)
         if reference.explicitly_qualified:
@@ -160,6 +167,15 @@ def convert_wikilinks(
         # Keep that unresolved reference literal rather than inventing a portable edge.
         if relative is None and ".." in PurePosixPath(target).parts:
             return False
+        # Trigger: an explicit ./ or ../ path wikilink.
+        # Why: the graph resolves path targets as exact files, with no extension,
+        #   title, permalink or alias guesses (BulkLinkResolutionSnapshot.resolve).
+        # Outcome: the export links that exact path, a broken link when it is absent.
+        if relative is not None and not rooted and is_path_target(target):
+            replacements.append((start, end + 2, markdown_link(label, relative, fragment)))
+            state.push("text", "", 0).content = raw
+            state.pos = end + 2
+            return True
         if reference.explicitly_qualified:
             relative = None
         if (

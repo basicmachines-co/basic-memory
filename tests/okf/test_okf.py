@@ -79,7 +79,10 @@ def test_filesystem_check_includes_hidden_files_and_assets(tmp_path):
     "source,expected",
     [
         ("See [[A|alias]] and [[missing]].", "See [alias](/a.md) and [missing](/missing)."),
-        ("[[../a#heading]]", "[../a](/a.md#heading)"),
+        ("[[../a.md#heading]]", "[../a.md](/a.md#heading)"),
+        # Path wikilinks name exact files, as the graph resolves them: no .md guess.
+        ("[[../a#heading]]", "[../a](/a#heading)"),
+        ("[[]]", "[[]]"),
         ("[[/a]]", "[/a](/a)"),
         ("[[#here]]", "[here](/folder/source.md#here)"),
         ("[[broken", "[[broken"),
@@ -436,7 +439,7 @@ def test_unique_filename_alias_follows_exact_identity():
     targets["folder/My_Note.md"] = "folder/My_Note.md"
     assert (
         convert_wikilinks("[[./my-note.md]]", "folder/source.md", targets, "p")
-        == "[./my-note.md](/folder/My_Note.md)"
+        == "[./my-note.md](/folder/my-note.md)"
     )
 
 
@@ -591,7 +594,7 @@ def test_bare_filename_alias_does_not_prefer_source_directory():
     )
     assert (
         convert_wikilinks("[[./my-note]]", "folder/source.md", targets, "p")
-        == "[./my-note](/folder/My_Note.md)"
+        == "[./my-note](/folder/my-note)"
     )
 
 

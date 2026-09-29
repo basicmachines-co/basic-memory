@@ -167,7 +167,16 @@ def check_bundle(root: Path) -> CheckReport:
         for name in sorted([*directories, *files]):
             path = Path(directory) / name
             relative = path.relative_to(root).as_posix()
-            if path.is_symlink():
+            try:
+                is_symlink = path.is_symlink()
+                is_file = path.is_file()
+            except OSError as error:
+                # Metadata can become unreadable mid-walk; report it like a read failure.
+                report.diagnostics.append(
+                    Diagnostic(path=relative, rule="filesystem.read", message=str(error))
+                )
+                continue
+            if is_symlink:
                 report.diagnostics.append(
                     Diagnostic(
                         path=relative, rule="filesystem.symlink", message="Symlink not portable"
@@ -176,7 +185,7 @@ def check_bundle(root: Path) -> CheckReport:
                 continue
             if name not in files or path.suffix != ".md":
                 continue
-            if not path.is_file():
+            if not is_file:
                 report.diagnostics.append(
                     Diagnostic(
                         path=relative,
