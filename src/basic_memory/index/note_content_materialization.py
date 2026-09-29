@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Coroutine, Mapping
 from contextlib import nullcontext, suppress
 from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from typing import Any
 
 from loguru import logger
@@ -48,9 +49,11 @@ from basic_memory.runtime.note_content import (
     read_runtime_file_checksum,
 )
 from basic_memory.runtime.note_materialization import RuntimeFileMetadataSource
+from basic_memory.runtime.project_partition import RuntimeAcceptedProjectNoteChange
 from basic_memory.runtime.storage import RuntimeFileChecksum, RuntimeFilePath
 from basic_memory.models import Entity
 from basic_memory.repository import EntityRepository, NoteContentRepository
+from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.repository.note_file_vacate_repository import (
     NoteFileVacateRepository,
     RecoverableVacate,
@@ -621,6 +624,28 @@ class InlineNoteFileDeleteEnqueuer:
         )
 
 
+async def settle_local_project_change(
+    session_maker: async_sessionmaker[AsyncSession],
+    change: RuntimeAcceptedProjectNoteChange | None,
+) -> None:
+    """Record that an accepted journal row's file work has settled in local storage.
+
+    The wiki projector defers until every accepted change it replays is
+    materialized. Cloud stamps its journal rows from the materialization job; the
+    local runtime never did, so any project with an API write reported `partial`
+    forever (#1625).
+    """
+    if change is None:
+        return
+    async with db.scoped_session(session_maker) as session:
+        await ProjectRepository().mark_accepted_note_change_materialized(
+            session,
+            change.project_id,
+            change.partition_position,
+            materialized_at=datetime.now(tz=UTC),
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class LocalNoteContentMaterializationProvider:
     """Run accepted-note materialization inline for the local runtime."""
@@ -724,6 +749,16 @@ class LocalNoteContentMaterializationProvider:
                     ),
                     cleanup_enqueuer=cleanup_enqueuer,
                 )
+            # Trigger: materialization reached a terminal status.
+            # Why: written, stale and missing all mean the accepted bytes are no
+            #   longer waiting on this job (a stale one was superseded by a newer
+            #   accepted version). Only a conflict leaves the user's disk edit
+            #   unresolved, so it keeps the wiki projector behind (mirrors cloud).
+            # Outcome: the journal row stops blocking the wiki projection.
+            if result.status is not RuntimeNoteMaterializationStatus.conflict:
+                await settle_local_project_change(
+                    self.session_maker, accepted.materialization.project_change
+                )
             if result.status is not RuntimeNoteMaterializationStatus.written:
                 return replace(
                     accepted,
@@ -773,6 +808,8 @@ class LocalNoteContentMaterializationProvider:
             storage,
             vacate_clearer=RepositoryMoveVacateClearer(session_maker=self.session_maker),
         ).enqueue_note_file_delete(plan_note_file_delete_job_request(accepted.file_delete))
+        # The inline delete has run, so the accepted delete no longer waits on storage.
+        await settle_local_project_change(self.session_maker, accepted.file_delete.project_change)
 
         # Trigger: surviving notes still linked to the deleted target at commit time.
         # Why: their relation search rows carry the deleted entity's id and title, and
