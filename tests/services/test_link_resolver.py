@@ -1506,7 +1506,8 @@ async def test_non_markdown_path_beats_same_stem_markdown_permalink(
                 note_type="file",
                 content_type="text/plain",
                 file_path="components/core-service.txt",
-                permalink="components/core-service-txt",
+                # Resource entities are indexed without a permalink.
+                permalink=None,
                 created_at=now,
                 updated_at=now,
                 project_id=entity_repository.project_id,
@@ -1516,6 +1517,8 @@ async def test_non_markdown_path_beats_same_stem_markdown_permalink(
     for identifier in (
         "components/core-service.txt",
         f"{project_prefix}/components/core-service.txt",
+        # Routing accepts any spelling of the project prefix that normalizes to it.
+        f"{project_prefix.upper()}/components/core-service.txt",
     ):
         for kwargs in ({}, {"strict": True}):
             result = await link_resolver.resolve_link(identifier, **kwargs)

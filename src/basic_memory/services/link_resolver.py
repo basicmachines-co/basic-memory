@@ -1,7 +1,6 @@
 """Service and helpers for resolving markdown links and permalink-like identifiers."""
 
 import uuid as uuid_mod
-from pathlib import PurePosixPath
 from typing import Any, Optional, Tuple, Dict
 
 from loguru import logger
@@ -15,7 +14,6 @@ from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.services.exceptions import AmbiguousIdentifierError
 from basic_memory.repository.search_repository import create_search_repository
-from basic_memory.runtime.storage import RUNTIME_MARKDOWN_FILE_SUFFIXES
 from basic_memory.schemas.search import SearchQuery, SearchItemType
 from basic_memory.services.search_service import SearchService
 from basic_memory.utils import (
@@ -440,38 +438,6 @@ class LinkResolver:
                         if relative_path.casefold().endswith(".md")
                         else f"{relative_path}.md"
                     )
-
-        # Trigger: the identifier names a file with a non-Markdown extension
-        #   (`notes/foo.txt`, `assets/doc.pdf`).
-        # Why: permalink candidates drop the extension, so `notes/foo.txt` became
-        #   `notes/foo` and matched the same-stem Markdown note before any file-path
-        #   lookup ran, returning the wrong file's bytes (#1629).
-        # Outcome: an exact file path wins first; a miss falls through unchanged.
-        #   file_path is project-relative, so a routed `<project>/…` or
-        #   `<workspace>/<project>/…` spelling is tried without its prefix too.
-        suffix = PurePosixPath(clean_text).suffix.casefold()
-        if suffix and suffix not in RUNTIME_MARKDOWN_FILE_SUFFIXES:
-            routing_prefixes = [
-                f"{prefix}/"
-                for prefix in (
-                    f"{workspace_permalink}/{project_permalink}"
-                    if workspace_permalink and project_permalink
-                    else None,
-                    project_permalink,
-                )
-                if prefix
-            ]
-            file_path_candidates = [clean_text] + [
-                clean_text.removeprefix(prefix)
-                for prefix in routing_prefixes
-                if clean_text.startswith(prefix)
-            ]
-            for file_path_candidate in file_path_candidates:
-                exact_file = await entity_repository.get_by_file_path(
-                    session, file_path_candidate, load_relations=load_relations
-                )
-                if exact_file:
-                    return exact_file
 
         # When source_path is provided, use context-aware resolution:
         # Check both permalink and title matches, prefer closest to source.

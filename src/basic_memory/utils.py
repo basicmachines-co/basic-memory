@@ -4,17 +4,19 @@ import json
 import os
 
 import logging
+import mimetypes
 import re
 import shlex
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import override, Any, Protocol, Union, runtime_checkable, List, Optional
 
 from loguru import logger
 from unidecode import unidecode
 
 from basic_memory import telemetry
+from basic_memory.runtime.storage import RUNTIME_MARKDOWN_FILE_SUFFIXES
 
 
 def normalize_project_path(path: str) -> str:
@@ -324,6 +326,18 @@ def build_qualified_permalink_reference(
     return f"{normalized_project}/{normalized_path}"
 
 
+def has_non_markdown_file_extension(path: str) -> bool:
+    """Return whether a path ends in a real file extension that is not Markdown.
+
+    Uses the same mimetypes test as generate_permalink, so version-like titles
+    (`Release 2.0`) are not mistaken for files.
+    """
+    suffix = PurePosixPath(path).suffix.casefold()
+    if not suffix or suffix in RUNTIME_MARKDOWN_FILE_SUFFIXES:
+        return False
+    return mimetypes.guess_type(path)[0] is not None
+
+
 def build_permalink_resolution_candidates(
     identifier: Union[Path, str, PathLike],
     project_permalink: Optional[str],
@@ -338,6 +352,18 @@ def build_permalink_resolution_candidates(
     all resolver callers share the same compatibility behavior.
     """
     exact_path = normalize_project_reference(str(identifier)).strip("/")
+
+    # Trigger: the identifier names a file with a real, non-Markdown extension
+    #   (`notes/foo.txt`, `assets/doc.pdf`).
+    # Why: resource entities carry no permalink, so dropping the extension could
+    #   only ever match the same-stem Markdown note, which is the wrong file (#1629).
+    # Outcome: the extension stays; callers reach the file through their exact
+    #   file-path lookups instead.
+    if has_non_markdown_file_extension(exact_path):
+        return list(
+            dict.fromkeys([exact_path, generate_permalink(exact_path, split_extension=False)])
+        )
+
     normalized_path = generate_permalink(exact_path).strip("/")
     normalized_project = generate_permalink(project_permalink) if project_permalink else None
     normalized_workspace = generate_permalink(workspace_permalink) if workspace_permalink else None
