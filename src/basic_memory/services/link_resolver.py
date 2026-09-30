@@ -266,12 +266,8 @@ class LinkResolver:
             #   resolved only through fuzzy search and often landed on a neighbour
             #   that links to it (#1626).
             # Outcome: the exact lookups run on the remainder before any fuzzy match.
-            own_prefix, own_remainder = self._split_project_prefix(clean_text)
-            if (
-                own_prefix
-                and current_project_permalink
-                and generate_permalink(own_prefix) == current_project_permalink
-            ):
+            own_remainder = self._own_project_remainder(clean_text, current_project_permalink)
+            if own_remainder:
                 resolved = await self._resolve_in_project(
                     session=active_session,
                     entity_repository=self.entity_repository,
@@ -749,6 +745,28 @@ class LinkResolver:
             self._search_service_cache[project.id] = search_service
 
         return project, entity_repository, search_service
+
+    def _own_project_remainder(
+        self, identifier: str, project_permalink: Optional[str]
+    ) -> Optional[str]:
+        """Return the identifier without this project's routing prefix, if it has one.
+
+        Workspace-scoped routes qualify identifiers as `<workspace>/<project>/…`,
+        other routes as `<project>/…`; either prefix names this project.
+        """
+        if not project_permalink:
+            return None
+        workspace_context = current_workspace_permalink_context()
+        prefixes = [f"{project_permalink}/"]
+        if workspace_context and workspace_context.should_prefix_permalinks:
+            workspace_permalink = generate_permalink(workspace_context.workspace_slug)
+            prefixes.insert(0, f"{workspace_permalink}/{project_permalink}/")
+        for prefix in prefixes:
+            if generate_permalink(identifier).startswith(prefix):
+                segments = prefix.count("/")
+                remainder = identifier.split("/", segments)[-1]
+                return remainder or None
+        return None
 
     def _split_project_prefix(self, identifier: str) -> Tuple[Optional[str], str]:
         """Split project prefix from a path-like identifier."""
