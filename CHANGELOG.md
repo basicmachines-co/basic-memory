@@ -40,6 +40,13 @@
 
 ### Features
 
+- **#1636**: Note deletes record their actor in the accepted-change journal, as
+  creates, updates, edits and moves already did. The delete route now asks the actor
+  resolver like the other mutations (with a new `delete` mutation kind), so a runtime
+  that identifies its callers can say who removed a note. With no resolver, which is
+  every local install, the row is written exactly as before and deletes keep the
+  `delete_note` source. Thanks to @sammywachtel (#1638).
+
 - **#1550**: `bm okf export DESTINATION --project NAME` writes a static OKF v0.2 bundle
   from a local project, and `bm okf check BUNDLE_PATH` validates one. Export keeps
   concept frontmatter, categorized observations and relative asset paths, rewrites
