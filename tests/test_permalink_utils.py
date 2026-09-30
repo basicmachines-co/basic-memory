@@ -114,3 +114,13 @@ def test_prefixed_candidates_keep_the_callers_spelling_of_the_remainder():
         "main/s/ses-ab-cd-ef",
         *expected_remainders,
     ]
+
+
+def test_non_markdown_identifiers_keep_their_extension():
+    """Resource entities have no permalink, so `.txt` must not collapse to the .md stem (#1629)."""
+    assert build_permalink_resolution_candidates("main/notes/foo.txt", "main") == [
+        "main/notes/foo.txt"
+    ]
+    assert "main/notes/foo" in build_permalink_resolution_candidates("main/notes/foo.md", "main")
+    # A version-like title is not a file extension.
+    assert "main/release-2.0" in build_permalink_resolution_candidates("Release 2.0", "main")
