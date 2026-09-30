@@ -271,6 +271,13 @@
 
 ### Bug Fixes
 
+- **#1586**: `write_note` and `edit_note` report the note's real checksum instead of
+  `checksum: unknown`. The typed client parsed a response model without checksum
+  fields, and file materialization runs after the response is built, so neither value
+  reached the tool. The tools now report the checksum recorded when the write was
+  accepted, which is the value checksum-guarded edits compare against. Thanks to
+  @tonydzi for the report and fix (#1617, landed as #1619).
+
 - **#1624**: A local project whose name is not already its permalink (`My Research`,
   `Gamma-Mixed`) is indexed at startup and watched again. Startup rewrites config keys to
   permalinks, but the database keeps the display name, and config was then looked up by
@@ -568,6 +575,10 @@
   is treated as absent instead of failing materialization (#1383).
 
 ### Internal
+
+- **#1613**: Note object metadata keeps an origin for `agent` and `mcp_client` actors,
+  not only MCP clients, so cloud can attribute API-key writes to the key's name.
+  `system` writers still carry no named origin.
 
 - **#1602**: Hot paths emit far fewer Logfire spans and INFO logs: per-sub-step read-cache
   and indexing spans collapse to one span per operation, and per-item INFO logs move to
