@@ -411,11 +411,18 @@ async def get_client(
     # Outcome: route via project.mode (CLOUD/LOCAL).
     if project_name is not None and not _explicit_routing():
         project_mode = config.get_project_mode(project_name)
-        # Trigger: a name local config does not know, with no cloud credentials.
+        # Trigger: a name local config does not know, with no cloud credentials and
+        #   no workspace selector.
         # Why: an unknown name defaults to cloud mode, which can only fail here
-        #   with a credentials error that hides the real problem (#1632).
+        #   with a credentials error that hides the real problem (#1632). A caller
+        #   that names a workspace asked for cloud explicitly, so it must still fail
+        #   as a cloud request rather than read a same-named local project.
         # Outcome: the local API answers with its "project not found" error.
-        if config.project_entry(project_name) is None and not has_cloud_credentials(config):
+        if (
+            workspace is None
+            and config.project_entry(project_name) is None
+            and not has_cloud_credentials(config)
+        ):
             project_mode = ProjectMode.LOCAL
         if project_mode == ProjectMode.CLOUD:
             logger.debug(f"Project '{project_name}' is cloud mode - using cloud proxy client")

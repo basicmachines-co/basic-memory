@@ -407,6 +407,11 @@ async def test_get_client_unknown_project_without_credentials_stays_local(config
     async with get_client(project_name="nope-nope") as client:
         assert isinstance(client._transport, httpx.ASGITransport)  # pyright: ignore[reportPrivateUsage]
 
+    # Naming a workspace asks for cloud explicitly; it must not fall back to local.
+    with pytest.raises(RuntimeError, match="no credentials found"):
+        async with get_client(project_name="nope-nope", workspace="team-paul"):
+            pass
+
 
 @pytest.mark.asyncio
 async def test_get_client_local_project_uses_asgi_transport(config_manager):
