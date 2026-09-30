@@ -451,13 +451,31 @@ class LinkResolver:
         #   `notes/foo` and matched the same-stem Markdown note before any file-path
         #   lookup ran, returning the wrong file's bytes (#1629).
         # Outcome: an exact file path wins first; a miss falls through unchanged.
+        #   file_path is project-relative, so a routed `<project>/…` or
+        #   `<workspace>/<project>/…` spelling is tried without its prefix too.
         suffix = PurePosixPath(clean_text).suffix.casefold()
         if suffix and suffix not in RUNTIME_MARKDOWN_FILE_SUFFIXES:
-            exact_file = await entity_repository.get_by_file_path(
-                session, clean_text, load_relations=load_relations
-            )
-            if exact_file:
-                return exact_file
+            routing_prefixes = [
+                f"{prefix}/"
+                for prefix in (
+                    f"{workspace_permalink}/{project_permalink}"
+                    if workspace_permalink and project_permalink
+                    else None,
+                    project_permalink,
+                )
+                if prefix
+            ]
+            file_path_candidates = [clean_text] + [
+                clean_text.removeprefix(prefix)
+                for prefix in routing_prefixes
+                if clean_text.startswith(prefix)
+            ]
+            for file_path_candidate in file_path_candidates:
+                exact_file = await entity_repository.get_by_file_path(
+                    session, file_path_candidate, load_relations=load_relations
+                )
+                if exact_file:
+                    return exact_file
 
         # When source_path is provided, use context-aware resolution:
         # Check both permalink and title matches, prefer closest to source.
