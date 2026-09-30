@@ -1513,10 +1513,14 @@ async def test_non_markdown_path_beats_same_stem_markdown_permalink(
             ),
         )
 
-    for kwargs in ({}, {"strict": True}):
-        result = await link_resolver.resolve_link("components/core-service.txt", **kwargs)
-        assert result is not None, kwargs
-        assert result.file_path == "components/core-service.txt"
+    for identifier in (
+        "components/core-service.txt",
+        f"{project_prefix}/components/core-service.txt",
+    ):
+        for kwargs in ({}, {"strict": True}):
+            result = await link_resolver.resolve_link(identifier, **kwargs)
+            assert result is not None, (identifier, kwargs)
+            assert result.file_path == "components/core-service.txt"
 
     markdown = await link_resolver.resolve_link("components/core-service")
     assert markdown is not None
