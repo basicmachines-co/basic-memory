@@ -1524,6 +1524,10 @@ async def test_non_markdown_path_beats_same_stem_markdown_permalink(
             result = await link_resolver.resolve_link(identifier, **kwargs)
             assert result is not None, (identifier, kwargs)
             assert result.file_path == "components/core-service.txt"
+        # Entity reads (the API resolve path) accept the same routed identifiers.
+        entity = await link_resolver.resolve_entity(identifier, strict=True)
+        assert entity is not None, identifier
+        assert entity.file_path == "components/core-service.txt"
 
     markdown = await link_resolver.resolve_link("components/core-service")
     assert markdown is not None
