@@ -154,18 +154,79 @@ class LinkResolver:
             except ValueError:
                 pass
 
-            project_permalink = await self._get_current_project_permalink(active_session)
-            return await self._resolve_in_project(
+            return await self._resolve_in_current_project(
                 session=active_session,
-                entity_repository=self.entity_repository,
-                search_service=self.search_service,
                 link_text=clean_text,
                 use_search=True,
+                strict=strict,
+                source_path=source_path,
+                load_relations=load_relations,
+            )
+
+    async def _resolve_in_current_project(
+        self,
+        *,
+        session: AsyncSession,
+        link_text: str,
+        use_search: bool,
+        strict: bool,
+        source_path: Optional[str],
+        load_relations: bool,
+    ) -> Optional[Entity]:
+        """Resolve in this resolver's project: exact spellings first, fuzzy search last.
+
+        Shared by resolve_link and resolve_entity so entity reads and link
+        resolution accept the same routed identifiers.
+        """
+        project_permalink = await self._get_current_project_permalink(session)
+        resolved = await self._resolve_in_project(
+            session=session,
+            entity_repository=self.entity_repository,
+            search_service=self.search_service,
+            link_text=link_text,
+            use_search=False,
+            strict=strict,
+            source_path=source_path,
+            project_permalink=project_permalink,
+            load_relations=load_relations,
+        )
+        if resolved:
+            return resolved
+
+        # Trigger: the identifier starts with this project's own routing prefix, as a
+        #   routed memory:// URL does (`main/Cache Layer Design`, `main/assets/a.pdf`).
+        # Why: permalink candidates strip that prefix, but the title and file-path
+        #   lookups saw the prefixed text and could never match, so a title URL
+        #   resolved only through fuzzy search and often landed on a neighbour that
+        #   links to it (#1626), and a routed resource path (permalink NULL) missed.
+        # Outcome: the exact lookups run on the remainder before any fuzzy match.
+        own_remainder = self._own_project_remainder(link_text, project_permalink)
+        if own_remainder:
+            resolved = await self._resolve_in_project(
+                session=session,
+                entity_repository=self.entity_repository,
+                search_service=self.search_service,
+                link_text=own_remainder,
+                use_search=False,
                 strict=strict,
                 source_path=source_path,
                 project_permalink=project_permalink,
                 load_relations=load_relations,
             )
+            if resolved:
+                return resolved
+
+        # Fuzzy matching is the last resort, after every exact spelling has missed.
+        # Strict resolution never guesses.
+        if use_search and not strict:
+            return await self._search_best_match(
+                session=session,
+                entity_repository=self.entity_repository,
+                search_service=self.search_service,
+                link_text=link_text,
+                load_relations=load_relations,
+            )
+        return None
 
     async def resolve_link(
         self,
@@ -242,56 +303,16 @@ class LinkResolver:
                     load_relations=load_relations,
                 )
 
-            current_project_permalink = await self._get_current_project_permalink(active_session)
-            resolved = await self._resolve_in_project(
+            resolved = await self._resolve_in_current_project(
                 session=active_session,
-                entity_repository=self.entity_repository,
-                search_service=self.search_service,
                 link_text=clean_text,
-                use_search=False,
+                use_search=use_search,
                 strict=strict,
                 source_path=source_path,
-                project_permalink=current_project_permalink,
                 load_relations=load_relations,
             )
             if resolved:
                 return resolved
-
-            # Trigger: the identifier starts with this project's own prefix, as a
-            #   routed memory:// URL does (`main/Cache Layer Design`).
-            # Why: permalink candidates strip that prefix, but the title and file-path
-            #   lookups saw the prefixed text and could never match, so a title URL
-            #   resolved only through fuzzy search and often landed on a neighbour
-            #   that links to it (#1626).
-            # Outcome: the exact lookups run on the remainder before any fuzzy match.
-            own_remainder = self._own_project_remainder(clean_text, current_project_permalink)
-            if own_remainder:
-                resolved = await self._resolve_in_project(
-                    session=active_session,
-                    entity_repository=self.entity_repository,
-                    search_service=self.search_service,
-                    link_text=own_remainder,
-                    use_search=False,
-                    strict=strict,
-                    source_path=source_path,
-                    project_permalink=current_project_permalink,
-                    load_relations=load_relations,
-                )
-                if resolved:
-                    return resolved
-
-            # Fuzzy matching is the last resort for the current project, after every
-            # exact spelling has missed. Strict resolution never guesses.
-            if use_search and not strict:
-                resolved = await self._search_best_match(
-                    session=active_session,
-                    entity_repository=self.entity_repository,
-                    search_service=self.search_service,
-                    link_text=clean_text,
-                    load_relations=load_relations,
-                )
-                if resolved:
-                    return resolved
 
             # Trigger: local resolution failed and identifier looks like project/path
             # Why: allow explicit project path references without namespace syntax
