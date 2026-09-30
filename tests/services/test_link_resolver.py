@@ -1525,3 +1525,18 @@ async def test_non_markdown_path_beats_same_stem_markdown_permalink(
     markdown = await link_resolver.resolve_link("components/core-service")
     assert markdown is not None
     assert markdown.permalink == f"{project_prefix}/components/core-service"
+
+
+@pytest.mark.asyncio
+async def test_workspace_qualified_title_resolves_exactly(link_resolver, project_prefix):
+    """Workspace routes qualify as `<workspace>/<project>/<Title>` (#1626 review)."""
+    from basic_memory.workspace_context import workspace_permalink_context
+
+    with workspace_permalink_context("team-paul", "organization"):
+        result = await link_resolver.resolve_link(
+            f"team-paul/{project_prefix}/Service Config", use_search=False
+        )
+    assert result is not None
+    assert result.title == "Service Config"
+    assert link_resolver._own_project_remainder("anything/at-all", None) is None
+    assert link_resolver._own_project_remainder(f"{project_prefix}/", project_prefix) is None
