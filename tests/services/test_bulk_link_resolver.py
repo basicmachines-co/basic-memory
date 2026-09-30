@@ -452,3 +452,35 @@ async def test_path_targets_resolve_from_the_note_that_carries_them(
         # A path names a file exactly; it never falls back to a permalink or title.
         by_title: None,
     }
+
+
+@pytest.mark.asyncio
+async def test_bulk_resolution_retries_own_project_qualified_targets(
+    entity_repository: EntityRepository,
+    search_service,
+    session_maker,
+    app_config: BasicMemoryConfig,
+    test_project: Project,
+    bulk_entities: list[Entity],
+) -> None:
+    """`[[<project>/assets/image.png]]` and `[[<project>/Title]]` resolve like LinkResolver."""
+    auth_service, _, _, image = bulk_entities
+    regular_resolver = LinkResolver(entity_repository, search_service, session_maker, app_config)
+    bulk_resolver = BulkLinkResolver(entity_repository, app_config)
+    link_texts = [
+        f"{test_project.permalink}/{image.file_path}",
+        f"{test_project.permalink}/{auth_service.title}",
+    ]
+
+    async with db.scoped_session(session_maker) as session:
+        bulk_results = await bulk_resolver.resolve_relation_targets(
+            [RelationTargetRequest(link_text) for link_text in link_texts],
+            session=session,
+        )
+        for link_text, expected in zip(link_texts, (image, auth_service)):
+            regular = await regular_resolver.resolve_link(
+                link_text, strict=True, load_relations=False, session=session
+            )
+            bulk = bulk_results[RelationTargetRequest(link_text)]
+            assert regular is not None and regular.id == expected.id, link_text
+            assert bulk is not None and bulk.id == expected.id, link_text

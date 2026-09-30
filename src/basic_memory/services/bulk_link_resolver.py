@@ -268,8 +268,21 @@ class BulkLinkResolutionSnapshot:
         if current_match.ambiguous:
             return None
 
-        if referenced_project is None or referenced_project.id == self.current_project_id:
+        if referenced_project is None:
             return None
+        if referenced_project.id == self.current_project_id:
+            # Trigger: the target is qualified with this project's own prefix
+            #   (`[[main/assets/a.txt]]`, `[[main/Some Title]]`).
+            # Why: permalink candidates strip that prefix, but title and file-path
+            #   lookups saw the qualified text; a resource (permalink NULL) or a
+            #   title could never match, and every reindex repeated the miss.
+            # Outcome: the same strict lookups run on the project-relative remainder,
+            #   matching LinkResolver's own-project retry.
+            return current_index.resolve_strict(
+                remainder,
+                include_project_permalinks=self.include_project_permalinks,
+                workspace_permalink=self.workspace_permalink,
+            ).entity
         return (
             self.entity_indexes[referenced_project.id]
             .resolve_strict(
