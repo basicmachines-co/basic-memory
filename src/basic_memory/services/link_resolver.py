@@ -19,6 +19,7 @@ from basic_memory.services.search_service import SearchService
 from basic_memory.utils import (
     build_permalink_resolution_candidates,
     generate_permalink,
+    own_project_remainder,
     normalize_project_reference,
 )
 from basic_memory.workspace_context import current_workspace_permalink_context
@@ -736,24 +737,17 @@ class LinkResolver:
     def _own_project_remainder(
         self, identifier: str, project_permalink: Optional[str]
     ) -> Optional[str]:
-        """Return the identifier without this project's routing prefix, if it has one.
-
-        Workspace-scoped routes qualify identifiers as `<workspace>/<project>/…`,
-        other routes as `<project>/…`; either prefix names this project.
-        """
-        if not project_permalink:
-            return None
+        """Return the identifier without this project's routing prefix, if it has one."""
         workspace_context = current_workspace_permalink_context()
-        prefixes = [f"{project_permalink}/"]
-        if workspace_context and workspace_context.should_prefix_permalinks:
-            workspace_permalink = generate_permalink(workspace_context.workspace_slug)
-            prefixes.insert(0, f"{workspace_permalink}/{project_permalink}/")
-        for prefix in prefixes:
-            if generate_permalink(identifier).startswith(prefix):
-                segments = prefix.count("/")
-                remainder = identifier.split("/", segments)[-1]
-                return remainder or None
-        return None
+        return own_project_remainder(
+            identifier,
+            project_permalink,
+            workspace_permalink=(
+                workspace_context.workspace_slug
+                if workspace_context and workspace_context.should_prefix_permalinks
+                else None
+            ),
+        )
 
     def _split_project_prefix(self, identifier: str) -> Tuple[Optional[str], str]:
         """Split project prefix from a path-like identifier."""

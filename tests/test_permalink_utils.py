@@ -2,6 +2,7 @@
 
 from basic_memory.utils import (
     build_permalink_resolution_candidates,
+    own_project_remainder,
     build_qualified_permalink_reference,
 )
 
@@ -124,3 +125,20 @@ def test_non_markdown_identifiers_keep_their_extension():
     assert "main/notes/foo" in build_permalink_resolution_candidates("main/notes/foo.md", "main")
     # A version-like title is not a file extension.
     assert "main/release-2.0" in build_permalink_resolution_candidates("Release 2.0", "main")
+
+
+def test_own_project_remainder_strips_every_routing_spelling():
+    """One helper serves LinkResolver and the bulk resolver (#1626, #1629)."""
+    assert own_project_remainder("main/assets/a.txt", "main") == "assets/a.txt"
+    assert own_project_remainder("MAIN/Some Title", "main") == "Some Title"
+    assert (
+        own_project_remainder(
+            "team-paul/main/assets/a.txt", "main", workspace_permalink="team-paul"
+        )
+        == "assets/a.txt"
+    )
+    # A workspace prefix only counts when the route is workspace-scoped.
+    assert own_project_remainder("team-paul/main/x", "main") is None
+    assert own_project_remainder("other/x", "main") is None
+    assert own_project_remainder("main/", "main") is None
+    assert own_project_remainder("main/x", None) is None

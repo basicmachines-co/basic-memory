@@ -484,3 +484,28 @@ async def test_bulk_resolution_retries_own_project_qualified_targets(
             bulk = bulk_results[RelationTargetRequest(link_text)]
             assert regular is not None and regular.id == expected.id, link_text
             assert bulk is not None and bulk.id == expected.id, link_text
+
+
+@pytest.mark.asyncio
+async def test_bulk_resolution_strips_workspace_and_project_prefixes(
+    entity_repository: EntityRepository,
+    session_maker,
+    app_config: BasicMemoryConfig,
+    test_project: Project,
+    bulk_entities: list[Entity],
+) -> None:
+    """`[[<workspace>/<project>/assets/image.png]]` resolves on a workspace route."""
+    from basic_memory.workspace_context import workspace_permalink_context
+
+    image = bulk_entities[-1]
+    link_text = f"team-paul/{test_project.permalink}/{image.file_path}"
+    bulk_resolver = BulkLinkResolver(entity_repository, app_config)
+
+    with workspace_permalink_context("team-paul", "organization"):
+        async with db.scoped_session(session_maker) as session:
+            results = await bulk_resolver.resolve_relation_targets(
+                [RelationTargetRequest(link_text)], session=session
+            )
+
+    resolved = results[RelationTargetRequest(link_text)]
+    assert resolved is not None and resolved.id == image.id

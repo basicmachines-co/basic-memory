@@ -326,6 +326,35 @@ def build_qualified_permalink_reference(
     return f"{normalized_project}/{normalized_path}"
 
 
+def own_project_remainder(
+    identifier: str,
+    project_permalink: Optional[str],
+    *,
+    workspace_permalink: Optional[str] = None,
+) -> Optional[str]:
+    """Return an identifier without this project's routing prefix, or None.
+
+    Routed identifiers arrive qualified as `<workspace>/<project>/…` on
+    workspace-scoped routes and `<project>/…` otherwise. Permalink candidates
+    strip those prefixes, but title and file-path lookups need the
+    project-relative remainder too: a title, or a resource whose permalink is
+    NULL, can only match there (#1626, #1629). Prefixes match by permalink, as
+    routing does, so `TEST-PROJECT/…` names `test-project`.
+    """
+    if not project_permalink:
+        return None
+    normalized_project = generate_permalink(project_permalink)
+    prefixes = [f"{normalized_project}/"]
+    if workspace_permalink:
+        prefixes.insert(0, f"{generate_permalink(workspace_permalink)}/{normalized_project}/")
+    normalized_identifier = generate_permalink(identifier)
+    for prefix in prefixes:
+        if normalized_identifier.startswith(prefix):
+            remainder = identifier.split("/", prefix.count("/"))[-1]
+            return remainder or None
+    return None
+
+
 def has_non_markdown_file_extension(path: str) -> bool:
     """Return whether a path ends in a real file extension that is not Markdown.
 
