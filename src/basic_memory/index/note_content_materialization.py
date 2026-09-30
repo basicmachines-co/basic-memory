@@ -281,6 +281,20 @@ async def recover_stuck_materializations(
                 entity_id=row.entity_id,
             )
             continue
+        # Trigger: the recovered write reached a terminal status other than conflict.
+        # Why: recovery rebuilds its request from note_content, so it carries no
+        #   journal position; without settling here, the accepted row stays
+        #   unmaterialized and the wiki projector reports partial forever (#1625).
+        # Outcome: every journal row of this note up to the recovered version settles.
+        if result.status is not RuntimeNoteMaterializationStatus.conflict:
+            async with db.scoped_session(session_maker) as session:
+                await ProjectRepository().mark_note_changes_materialized_through_version(
+                    session,
+                    project_id,
+                    row.entity_id,
+                    int(row.db_version),
+                    materialized_at=datetime.now(tz=UTC),
+                )
         if result.status is RuntimeNoteMaterializationStatus.written:
             written += 1
     return MaterializationRecoverySummary(

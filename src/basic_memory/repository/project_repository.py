@@ -264,6 +264,35 @@ class ProjectRepository(Repository[Project]):
         )
         return bool((await session.execute(statement)).scalars().all())
 
+    async def mark_note_changes_materialized_through_version(
+        self,
+        session: AsyncSession,
+        project_id: int,
+        entity_id: int,
+        db_version: int,
+        *,
+        materialized_at: datetime,
+    ) -> bool:
+        """Settle one note's unsettled journal rows up to an accepted db_version.
+
+        For callers that hold a note's accepted version but not the journal
+        position it was accepted at, such as startup recovery, which rebuilds its
+        materialization request from the note_content row.
+        """
+        statement = (
+            update(AcceptedProjectNoteChange)
+            .where(
+                AcceptedProjectNoteChange.project_id == project_id,
+                AcceptedProjectNoteChange.entity_id == entity_id,
+                AcceptedProjectNoteChange.db_version <= db_version,
+                AcceptedProjectNoteChange.materialized_at.is_(None),
+            )
+            .values(materialized_at=materialized_at)
+            .returning(AcceptedProjectNoteChange.id)
+            .execution_options(synchronize_session=False)
+        )
+        return bool((await session.execute(statement)).scalars().all())
+
     async def get_active_projects(self, session: AsyncSession) -> Sequence[Project]:
         """Get all active projects."""
         query = self.select().where(Project.is_active == True)  # noqa: E712
