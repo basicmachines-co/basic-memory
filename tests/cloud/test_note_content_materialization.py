@@ -710,6 +710,65 @@ async def test_recover_stuck_materializations_writes_file_and_marks_synced(
 
 
 @pytest.mark.asyncio
+async def test_recover_stuck_materializations_settles_the_accepted_journal_row(
+    session_maker,
+    test_project: Project,
+    sample_entity,
+    file_service: FileService,
+) -> None:
+    """Recovery carries no journal position, but must still settle the note's row (#1625)."""
+    from sqlalchemy import select
+
+    from basic_memory.models import AcceptedProjectNoteChange
+
+    await _seed_stuck_note_content(
+        session_maker,
+        project_id=test_project.id,
+        entity_id=sample_entity.id,
+        markdown_content="# Recovered\n",
+        db_version=2,
+        db_checksum="db-checksum-2",
+        file_write_status="writing",
+    )
+    async with db.scoped_session(session_maker) as session:
+        for position, version in ((1, 1), (2, 2), (3, 3)):
+            session.add(
+                AcceptedProjectNoteChange(
+                    project_id=test_project.id,
+                    project_external_id=test_project.external_id,
+                    partition_position=position,
+                    entity_id=sample_entity.id,
+                    note_external_id=sample_entity.external_id,
+                    permalink=sample_entity.permalink,
+                    title=sample_entity.title,
+                    operation="updated",
+                    file_path=sample_entity.file_path,
+                    accepted_at=datetime.now(UTC),
+                    source="api",
+                    db_version=version,
+                )
+            )
+
+    await recover_stuck_materializations(
+        session_maker=session_maker,
+        file_service=file_service,
+        project_id=test_project.id,
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        rows = (
+            await session.execute(
+                select(AcceptedProjectNoteChange).order_by(
+                    AcceptedProjectNoteChange.partition_position
+                )
+            )
+        ).scalars()
+        settled = {row.db_version: row.materialized_at is not None for row in rows}
+    # Versions up to the recovered one settle; a newer accepted version still waits.
+    assert settled == {1: True, 2: True, 3: False}
+
+
+@pytest.mark.asyncio
 async def test_move_vacate_recovery_waits_for_destination_then_cleans_source(
     session_maker,
     test_project: Project,
