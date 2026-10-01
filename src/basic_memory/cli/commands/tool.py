@@ -577,6 +577,15 @@ def _delete_note_failure_message(result: dict[str, Any]) -> str | None:
     return None
 
 
+def _tool_error_payload(error: Exception) -> dict[str, Any]:
+    """The structured result a JSON-mode tool error carries, or {} for plain text."""
+    try:
+        payload = json.loads(str(error))
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 # --- Commands ---
 
 
@@ -857,6 +866,8 @@ def delete_note(
     bm tool delete-note docs/archive --is-directory
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+    from fastmcp.exceptions import ToolError
+
     from basic_memory.mcp.tools import delete_note as mcp_delete_note
 
     try:
@@ -880,6 +891,11 @@ def delete_note(
                 raise typer.Exit(1)
 
         _print_json(result)
+    except ToolError as e:
+        # A failed delete is a tool error whose message, in JSON mode, is the
+        # structured result; report it the same way as an error field.
+        typer.echo(f"Error: {_delete_note_failure_message(_tool_error_payload(e)) or e}", err=True)
+        raise typer.Exit(1)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)

@@ -1,6 +1,7 @@
 """Tests for the move_note MCP tool."""
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.tools.move_note import move_note, _format_move_error_response
 from basic_memory.mcp.tools.write_note import write_note
@@ -483,14 +484,15 @@ async def test_move_note_by_file_path(client, test_project):
 @pytest.mark.asyncio
 async def test_move_note_nonexistent_note(client, test_project):
     """Test moving a note that doesn't exist."""
-    result = await move_note(
-        project=test_project.name,
-        identifier="nonexistent/note",
-        destination_path="target/SomeFile.md",
-    )
+    # A failed move is a tool error (isError), and its message keeps the guidance.
+    with pytest.raises(ToolError) as exc_info:
+        await move_note(
+            project=test_project.name,
+            identifier="nonexistent/note",
+            destination_path="target/SomeFile.md",
+        )
 
-    # Should return user-friendly error message string
-    assert isinstance(result, str)
+    result = str(exc_info.value)
     assert "# Move Failed - Note Not Found" in result
     assert "could not be found for moving" in result
     assert "Search for the note first" in result
@@ -649,14 +651,14 @@ async def test_move_note_destination_exists(client, test_project):
     )
 
     # Try to move source to existing destination
-    result = await move_note(
-        project=test_project.name,
-        identifier="source/source-note",
-        destination_path="target/DestinationNote.md",
-    )
+    with pytest.raises(ToolError) as exc_info:
+        await move_note(
+            project=test_project.name,
+            identifier="source/source-note",
+            destination_path="target/DestinationNote.md",
+        )
 
-    # Should return user-friendly error message string
-    assert isinstance(result, str)
+    result = str(exc_info.value)
     assert "# Move Failed" in result
     assert "already exists" in result or "Destination" in result
 
@@ -889,14 +891,14 @@ async def test_move_note_rejects_fuzzy_match(client, test_project):
     )
 
     # Attempt to move a nonexistent note — should error, not silently move the existing note
-    result = await move_note(
-        project=test_project.name,
-        identifier="Move Target NONEXISTENT",
-        destination_path="target/Moved.md",
-    )
+    with pytest.raises(ToolError) as exc_info:
+        await move_note(
+            project=test_project.name,
+            identifier="Move Target NONEXISTENT",
+            destination_path="target/Moved.md",
+        )
 
-    assert isinstance(result, str)
-    assert "# Move Failed" in result
+    assert "# Move Failed" in str(exc_info.value)
 
     # Verify the existing note was NOT moved
     content = await read_note("Move Target Note", project=test_project.name)
@@ -1133,11 +1135,16 @@ class TestMoveNoteSecurityValidation:
         ]
 
         for safe_path in safe_paths:
-            result = await move_note(
-                project=test_project.name,
-                identifier="source/test-note",
-                destination_path=safe_path,
-            )
+            # A move may fail for legitimate reasons (the note already moved); only a
+            # security rejection would be wrong, and that is returned, not raised.
+            try:
+                result = await move_note(
+                    project=test_project.name,
+                    identifier="source/test-note",
+                    destination_path=safe_path,
+                )
+            except ToolError as error:
+                result = str(error)
 
             # Should succeed or fail for legitimate reasons (not security)
             assert isinstance(result, str)
@@ -1213,11 +1220,16 @@ class TestMoveNoteSecurityValidation:
         ]
 
         for safe_path in safe_paths:
-            result = await move_note(
-                project=test_project.name,
-                identifier="source/test-note",
-                destination_path=safe_path,
-            )
+            # A move may fail for legitimate reasons (the note already moved); only a
+            # security rejection would be wrong, and that is returned, not raised.
+            try:
+                result = await move_note(
+                    project=test_project.name,
+                    identifier="source/test-note",
+                    destination_path=safe_path,
+                )
+            except ToolError as error:
+                result = str(error)
 
             assert isinstance(result, str)
             # Should NOT contain security error message
@@ -1383,14 +1395,14 @@ class TestMoveNoteDestinationFolder:
     @pytest.mark.asyncio
     async def test_move_note_destination_folder_nonexistent_note(self, client, test_project):
         """Test destination_folder with a note that doesn't exist."""
-        result = await move_note(
-            project=test_project.name,
-            identifier="nonexistent/note",
-            destination_folder="archive",
-        )
+        with pytest.raises(ToolError) as exc_info:
+            await move_note(
+                project=test_project.name,
+                identifier="nonexistent/note",
+                destination_folder="archive",
+            )
 
-        assert isinstance(result, str)
-        assert "# Move Failed" in result
+        assert "# Move Failed" in str(exc_info.value)
 
     @pytest.mark.asyncio
     async def test_move_note_destination_folder_json_output(self, client, test_project):

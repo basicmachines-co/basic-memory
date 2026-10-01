@@ -1,8 +1,9 @@
 """Move note tool for Basic Memory MCP server."""
 
+import json
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from textwrap import dedent
-from typing import Any, Annotated, Optional, Literal
+from typing import Any, Annotated, NoReturn, Optional, Literal
 
 from loguru import logger
 from fastmcp import Context
@@ -202,6 +203,15 @@ def _format_cross_project_error_response(
         """).strip()
 
 
+def _raise_move_failure(output_format: str, payload: dict[str, Any], text: str) -> NoReturn:
+    """Report a failed move as a tool error, keeping the guidance for the caller.
+
+    A returned "Move Failed" string reads as success to MCP clients; raising makes
+    the result an error (isError) while the message still carries the same help.
+    """
+    raise ToolError(json.dumps(payload) if output_format == "json" else text)
+
+
 def _format_move_error_response(error_message: str, identifier: str, destination_path: str) -> str:
     """Format helpful error responses for move failures that guide users to successful moves."""
 
@@ -366,7 +376,7 @@ delete_note("{identifier}")
     return (  # pragma: no cover
         f"""# Move Failed
 
-Error moving '{identifier}' to '{destination_path}': {error_message}  # pragma: no cover
+Error moving '{identifier}' to '{destination_path}': {error_message}
 
 ## General troubleshooting:
 1. **Verify the note exists**: `read_note("{identifier}")` or `search_notes("{identifier}")`
@@ -691,75 +701,13 @@ move_note(identifier="{identifier}", destination_path="notes/{destination_path.s
                     else resolved_identifier
                 )
                 result = await knowledge_client.move_directory(source_directory, destination_path)
-                if output_format == "json":
-                    return {
-                        "moved": result.total_files > 0 and result.failed_moves == 0,
-                        "title": None,
-                        "permalink": None,
-                        "file_path": None,
-                        "source": identifier,
-                        "destination": destination_path,
-                        "is_directory": True,
-                        "total_files": result.total_files,
-                        "successful_moves": result.successful_moves,
-                        "failed_moves": result.failed_moves,
-                        **(
-                            {"error": "Directory not found or empty: no files matched"}
-                            if result.total_files == 0
-                            else {}
-                        ),
-                    }
-
-                if result.total_files == 0:
-                    return f"""# Directory Move Failed - No Files Found
-
-No files found for source directory `{identifier}`.
-Total files: 0.
-
-<!-- Project: {active_project.name} -->"""
-
-                # Build success message for directory move
-                result_lines = [
-                    "# Directory Moved Successfully",
-                    "",
-                    f"**Source:** `{identifier}`",
-                    f"**Destination:** `{destination_path}`",
-                    "",
-                    "## Summary",
-                    f"- Total files: {result.total_files}",
-                    f"- Successfully moved: {result.successful_moves}",
-                    f"- Failed: {result.failed_moves}",
-                ]
-
-                if result.moved_files:
-                    result_lines.extend(["", "## Moved Files"])
-                    for file_path in result.moved_files[:10]:  # Show first 10
-                        result_lines.append(f"- `{file_path}`")
-                    if len(result.moved_files) > 10:
-                        result_lines.append(f"- ... and {len(result.moved_files) - 10} more")
-
-                if result.errors:  # pragma: no cover
-                    result_lines.extend(["", "## Errors"])
-                    for error in result.errors[:5]:  # Show first 5 errors
-                        result_lines.append(f"- `{error.path}`: {error.error}")
-                    if len(result.errors) > 5:
-                        result_lines.append(f"- ... and {len(result.errors) - 5} more errors")
-
-                result_lines.extend(["", f"<!-- Project: {active_project.name} -->"])
-
-                logger.info(
-                    f"Directory move completed: {identifier} -> {destination_path}, "
-                    f"moved={result.successful_moves}, failed={result.failed_moves}"
-                )
-
-                return "\n".join(result_lines)
-
             except Exception as e:  # pragma: no cover
                 logger.error(
                     f"Directory move failed for '{identifier}' to '{destination_path}': {e}"
                 )
-                if output_format == "json":
-                    return {
+                _raise_move_failure(
+                    output_format,
+                    {
                         "moved": False,
                         "title": None,
                         "permalink": None,
@@ -768,8 +716,8 @@ Total files: 0.
                         "destination": destination_path,
                         "is_directory": True,
                         "error": str(e),
-                    }
-                return f"""# Directory Move Failed
+                    },
+                    f"""# Directory Move Failed
 
 Error moving directory '{identifier}' to '{destination_path}': {str(e)}
 
@@ -785,7 +733,82 @@ list_directory("{identifier}")
 
 # Then move individual files
 move_note(identifier="path/to/file.md", destination_path="{destination_path}/file.md")
-```"""
+```""",
+                )
+
+            # --- Directory move outcome ---
+            # move_directory reports an empty match or per-file failures in its result
+            # rather than raising. Both are failures of the requested move, so they are
+            # tool errors too; a partial move keeps its full summary so the caller sees
+            # which files already moved before retrying.
+            response: dict[str, Any] = {
+                "moved": result.total_files > 0 and result.failed_moves == 0,
+                "title": None,
+                "permalink": None,
+                "file_path": None,
+                "source": identifier,
+                "destination": destination_path,
+                "is_directory": True,
+                "total_files": result.total_files,
+                "successful_moves": result.successful_moves,
+                "failed_moves": result.failed_moves,
+            }
+
+            if result.total_files == 0:
+                response["error"] = "Directory not found or empty: no files matched"
+                _raise_move_failure(
+                    output_format,
+                    response,
+                    f"""# Directory Move Failed - No Files Found
+
+No files found for source directory `{identifier}`.
+Total files: 0.
+
+<!-- Project: {active_project.name} -->""",
+                )
+
+            incomplete = result.failed_moves > 0
+            result_lines = [
+                "# Directory Move Incomplete" if incomplete else "# Directory Moved Successfully",
+                "",
+                f"**Source:** `{identifier}`",
+                f"**Destination:** `{destination_path}`",
+                "",
+                "## Summary",
+                f"- Total files: {result.total_files}",
+                f"- Successfully moved: {result.successful_moves}",
+                f"- Failed: {result.failed_moves}",
+            ]
+
+            if result.moved_files:
+                result_lines.extend(["", "## Moved Files"])
+                for file_path in result.moved_files[:10]:  # Show first 10
+                    result_lines.append(f"- `{file_path}`")
+                if len(result.moved_files) > 10:
+                    result_lines.append(f"- ... and {len(result.moved_files) - 10} more")
+
+            if result.errors:
+                result_lines.extend(["", "## Errors"])
+                for error in result.errors[:5]:  # Show first 5 errors
+                    result_lines.append(f"- `{error.path}`: {error.error}")
+                if len(result.errors) > 5:
+                    result_lines.append(f"- ... and {len(result.errors) - 5} more errors")
+
+            result_lines.extend(["", f"<!-- Project: {active_project.name} -->"])
+
+            logger.info(
+                f"Directory move completed: {identifier} -> {destination_path}, "
+                f"moved={result.successful_moves}, failed={result.failed_moves}"
+            )
+
+            if incomplete:
+                response["error"] = (
+                    "Directory move incomplete: "
+                    f"{result.failed_moves} of {result.total_files} file(s) failed"
+                )
+                _raise_move_failure(output_format, response, "\n".join(result_lines))
+
+            return response if output_format == "json" else "\n".join(result_lines)
 
         # Resolve once and reuse the entity ID across extension validation and move.
         source_ext = "md"  # Default to .md if we can't determine source extension
@@ -812,8 +835,9 @@ move_note(identifier="path/to/file.md", destination_path="{destination_path}/fil
             #      to extension defaults and failing later with a confusing message.
             # Outcome: move_note returns a user-facing not-found error immediately.
             logger.error(f"Move failed for '{identifier}' to '{destination_path}': {e}")
-            if output_format == "json":
-                return {
+            _raise_move_failure(
+                output_format,
+                {
                     "moved": False,
                     "title": None,
                     "permalink": None,
@@ -821,8 +845,9 @@ move_note(identifier="path/to/file.md", destination_path="{destination_path}/fil
                     "source": identifier,
                     "destination": destination_path,
                     "error": str(e),
-                }
-            return _format_move_error_response(str(e), identifier, destination_path)
+                },
+                _format_move_error_response(str(e), identifier, destination_path),
+            )
         except Exception as e:
             # If we can't fetch source metadata (e.g. get_entity or file_path parsing fails),
             # continue with extension defaults — the entity was at least resolved.
@@ -1092,8 +1117,9 @@ move_note("{identifier}", destination_folder="notes")
 
         except Exception as e:
             logger.error(f"Move failed for '{identifier}' to '{destination_path}': {e}")
-            if output_format == "json":
-                return {
+            _raise_move_failure(
+                output_format,
+                {
                     "moved": False,
                     "title": None,
                     "permalink": None,
@@ -1101,6 +1127,6 @@ move_note("{identifier}", destination_folder="notes")
                     "source": identifier,
                     "destination": destination_path,
                     "error": str(e),
-                }
-            # Return formatted error message for better user experience
-            return _format_move_error_response(str(e), identifier, destination_path)
+                },
+                _format_move_error_response(str(e), identifier, destination_path),
+            )

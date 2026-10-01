@@ -7,6 +7,7 @@ Tests mock the MCP tool functions directly.
 import json
 from unittest.mock import AsyncMock, patch
 
+from fastmcp.exceptions import ToolError
 from typer.testing import CliRunner
 
 from basic_memory.cli.main import app as cli_app
@@ -453,6 +454,37 @@ def test_delete_note_directory_partial_failure_exits_nonzero(
     assert result.exit_code == 1
     assert "Error: Directory delete incomplete: 1 file(s) failed" in result.output
     assert mock_mcp_delete.call_args.kwargs["output_format"] == "json"
+
+
+@patch(
+    "basic_memory.mcp.tools.delete_note",
+    new_callable=AsyncMock,
+    side_effect=ToolError(
+        json.dumps(
+            {
+                "deleted": False,
+                "is_directory": True,
+                "identifier": "notes/archive",
+                "total_files": 3,
+                "successful_deletes": 2,
+                "failed_deletes": 1,
+                "error": "Directory delete incomplete: 1 of 3 file(s) failed",
+            }
+        )
+    ),
+)
+def test_delete_note_reports_a_tool_error_payload_and_exits_nonzero(
+    mock_mcp_delete: AsyncMock,
+) -> None:
+    """A failed delete raised as a tool error prints its error field, not raw JSON."""
+    result = runner.invoke(
+        cli_app,
+        ["tool", "delete-note", "notes/archive", "--is-directory"],
+    )
+
+    assert result.exit_code == 1
+    assert "Error: Directory delete incomplete: 1 of 3 file(s) failed" in result.output
+    assert '"deleted"' not in result.output
 
 
 @patch(

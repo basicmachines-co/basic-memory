@@ -301,8 +301,11 @@ async def test_delete_note_directory_json_output_failure_is_structured(
                 "is_directory": True,
                 "output_format": "json",
             },
+            raise_on_error=False,
         )
 
+        # A failed delete is an MCP error result whose text is the structured payload.
+        assert result.is_error is True
         payload = _json_content(result)
         assert payload["deleted"] is False
         assert payload["is_directory"] is True
