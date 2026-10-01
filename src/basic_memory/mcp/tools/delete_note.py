@@ -284,69 +284,6 @@ async def delete_note(
                     else target_identifier
                 )
                 result = await knowledge_client.delete_directory(directory_identifier)
-                if output_format == "json":
-                    response = {
-                        "deleted": result.total_files > 0 and result.failed_deletes == 0,
-                        "is_directory": True,
-                        "identifier": identifier,
-                        "total_files": result.total_files,
-                        "successful_deletes": result.successful_deletes,
-                        "failed_deletes": result.failed_deletes,
-                        "deleted_files": result.deleted_files,
-                        "errors": [error.model_dump() for error in result.errors],
-                    }
-                    if result.total_files == 0:
-                        response["error"] = "Directory not found or empty: no files matched"
-                    elif result.failed_deletes > 0:
-                        response["error"] = (
-                            "Directory delete incomplete: "
-                            f"{result.failed_deletes} of {result.total_files} file(s) failed"
-                        )
-                    return response
-
-                if result.total_files == 0:
-                    return f"""# Directory Delete Failed - No Files Found
-
-No files found for directory `{identifier}`.
-Total files: 0.
-
-<!-- Project: {active_project.name} -->"""
-
-                # Build success message for directory delete
-                result_lines = [
-                    "# Directory Deleted Successfully",
-                    "",
-                    f"**Directory:** `{identifier}`",
-                    "",
-                    "## Summary",
-                    f"- Total files: {result.total_files}",
-                    f"- Successfully deleted: {result.successful_deletes}",
-                    f"- Failed: {result.failed_deletes}",
-                ]
-
-                if result.deleted_files:
-                    result_lines.extend(["", "## Deleted Files"])
-                    for file_path in result.deleted_files[:10]:  # Show first 10
-                        result_lines.append(f"- `{file_path}`")
-                    if len(result.deleted_files) > 10:
-                        result_lines.append(f"- ... and {len(result.deleted_files) - 10} more")
-
-                if result.errors:  # pragma: no cover
-                    result_lines.extend(["", "## Errors"])
-                    for error in result.errors[:5]:  # Show first 5 errors
-                        result_lines.append(f"- `{error.path}`: {error.error}")
-                    if len(result.errors) > 5:
-                        result_lines.append(f"- ... and {len(result.errors) - 5} more errors")
-
-                result_lines.extend(["", f"<!-- Project: {active_project.name} -->"])
-
-                logger.info(
-                    f"Directory delete completed: {identifier}, "
-                    f"deleted={result.successful_deletes}, failed={result.failed_deletes}"
-                )
-
-                return "\n".join(result_lines)
-
             except Exception as e:  # pragma: no cover
                 logger.error(f"Directory delete failed for '{identifier}': {e}")
                 _raise_delete_failure(
@@ -378,6 +315,79 @@ list_directory("{identifier}")
 delete_note("path/to/file.md")
 ```""",
                 )
+
+            # --- Directory delete outcome ---
+            # delete_directory reports an empty match or per-file failures in its
+            # result rather than raising. Both are failures of the requested delete,
+            # so they are tool errors too; a partial delete keeps its full summary so
+            # the caller sees what was already removed before retrying.
+            response: dict[str, Any] = {
+                "deleted": result.total_files > 0 and result.failed_deletes == 0,
+                "is_directory": True,
+                "identifier": identifier,
+                "total_files": result.total_files,
+                "successful_deletes": result.successful_deletes,
+                "failed_deletes": result.failed_deletes,
+                "deleted_files": result.deleted_files,
+                "errors": [error.model_dump() for error in result.errors],
+            }
+
+            if result.total_files == 0:
+                response["error"] = "Directory not found or empty: no files matched"
+                _raise_delete_failure(
+                    output_format,
+                    response,
+                    f"""# Directory Delete Failed - No Files Found
+
+No files found for directory `{identifier}`.
+Total files: 0.
+
+<!-- Project: {active_project.name} -->""",
+                )
+
+            incomplete = result.failed_deletes > 0
+            result_lines = [
+                "# Directory Delete Incomplete"
+                if incomplete
+                else "# Directory Deleted Successfully",
+                "",
+                f"**Directory:** `{identifier}`",
+                "",
+                "## Summary",
+                f"- Total files: {result.total_files}",
+                f"- Successfully deleted: {result.successful_deletes}",
+                f"- Failed: {result.failed_deletes}",
+            ]
+
+            if result.deleted_files:
+                result_lines.extend(["", "## Deleted Files"])
+                for file_path in result.deleted_files[:10]:  # Show first 10
+                    result_lines.append(f"- `{file_path}`")
+                if len(result.deleted_files) > 10:
+                    result_lines.append(f"- ... and {len(result.deleted_files) - 10} more")
+
+            if result.errors:
+                result_lines.extend(["", "## Errors"])
+                for error in result.errors[:5]:  # Show first 5 errors
+                    result_lines.append(f"- `{error.path}`: {error.error}")
+                if len(result.errors) > 5:
+                    result_lines.append(f"- ... and {len(result.errors) - 5} more errors")
+
+            result_lines.extend(["", f"<!-- Project: {active_project.name} -->"])
+
+            logger.info(
+                f"Directory delete completed: {identifier}, "
+                f"deleted={result.successful_deletes}, failed={result.failed_deletes}"
+            )
+
+            if incomplete:
+                response["error"] = (
+                    "Directory delete incomplete: "
+                    f"{result.failed_deletes} of {result.total_files} file(s) failed"
+                )
+                _raise_delete_failure(output_format, response, "\n".join(result_lines))
+
+            return response if output_format == "json" else "\n".join(result_lines)
 
         # Handle single note deletes
         note_title = None

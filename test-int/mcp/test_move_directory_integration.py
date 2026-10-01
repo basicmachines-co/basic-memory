@@ -144,12 +144,14 @@ async def test_move_directory_empty(mcp_server, app, test_project):
                 "destination_path": "dest-dir",
                 "is_directory": True,
             },
+            raise_on_error=False,
         )
 
-        # Should return message about no files found
+        # Nothing matched, so the move failed: an MCP error result that says so
+        assert move_result.is_error is True
         assert len(move_result.content) == 1
         move_text = move_result.content[0].text
-        assert "No files found" in move_text or "0" in move_text
+        assert "No files found" in move_text
 
 
 @pytest.mark.asyncio

@@ -130,13 +130,15 @@ async def test_delete_directory_empty(mcp_server, app, test_project):
                 "identifier": "nonexistent-dir",
                 "is_directory": True,
             },
+            raise_on_error=False,
         )
 
-        # Should return message about no files found
+        # Nothing matched, so the delete failed: an MCP error result that says so
+        assert delete_result.is_error is True
         assert len(delete_result.content) == 1
         delete_text = delete_result.content[0].text
-        # Either shows "Directory Deleted Successfully" with 0 files or similar
-        assert "Total files: 0" in delete_text or "0" in delete_text
+        assert "Directory Delete Failed - No Files Found" in delete_text
+        assert "Total files: 0" in delete_text
 
 
 @pytest.mark.asyncio
