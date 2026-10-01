@@ -432,7 +432,7 @@ async def test_project_status_uses_event_index_report_not_sync_service(
     note_content = "# Project Status\n\nVisible in status report.\n"
     note_path.write_text(note_content, encoding="utf-8")
 
-    response = await client.post(f"{v2_projects_url}/{test_project.external_id}/status")
+    response = await client.get(f"{v2_projects_url}/{test_project.external_id}/status")
 
     assert response.status_code == 200
     data = response.json()
@@ -469,6 +469,22 @@ async def test_project_id_stability_after_rename(
     assert response.status_code == 200
     project_after = ProjectItem.model_validate(response.json())
     assert project_after.external_id == original_external_id
+
+
+@pytest.mark.asyncio
+async def test_project_status_still_answers_older_clients_that_post(
+    client: AsyncClient,
+    test_project: Project,
+    v2_projects_url,
+):
+    """Clients from before the GET route POST here; the alias answers the same."""
+    url = f"{v2_projects_url}/{test_project.external_id}/status"
+
+    posted = await client.post(url)
+    fetched = await client.get(url)
+
+    assert posted.status_code == 200
+    assert posted.json() == fetched.json()
 
 
 @pytest.mark.asyncio

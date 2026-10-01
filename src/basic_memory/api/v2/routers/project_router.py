@@ -280,19 +280,18 @@ async def index_project(
     )
 
 
-@router.post("/{project_id}/status", response_model=ProjectIndexStatusResponse)
+# Status only reads: it walks the project files and reports index readiness. It was a
+# POST when it ran a sync scan; read-only gates (viewers, read-only API keys) treat
+# POSTs as writes, so empty-result guidance that calls it failed for them.
+@router.get("/{project_id}/status", response_model=ProjectIndexStatusResponse)
 async def get_project_status(
     project_index_observer: ProjectIndexObserverDep,
     project_readiness: ProjectReadinessServiceDep,
     project_internal_id: ProjectExternalIdPathDep,
     project_id: str = Path(..., description="Project external ID (UUID)"),
-    force_full: bool = Query(False, description="Accepted for compatibility; ignored"),
 ) -> ProjectIndexStatusResponse:
     """Observe current project-index files and readiness for a project."""
-    logger.debug(
-        f"API v2 request: get_project_status for project_id={project_id} "
-        f"(force_full ignored={force_full})"
-    )
+    logger.debug(f"API v2 request: get_project_status for project_id={project_id}")
     observation = await project_index_observer.observe_project(project_internal_id)
     # The observation is handed to the readiness reader rather than re-derived:
     # it already cost a full project walk, and a waiter polls this route.
@@ -301,6 +300,18 @@ async def get_project_status(
         observation.observed_files,
     )
     return ProjectIndexStatusResponse.from_observation(observation, readiness)
+
+
+# Older clients still POST here (their own core version, e.g. a local `bm` in cloud
+# mode). Kept out of the schema; remove once those clients have upgraded.
+router.add_api_route(
+    "/{project_id}/status",
+    get_project_status,
+    methods=["POST"],
+    response_model=ProjectIndexStatusResponse,
+    include_in_schema=False,
+    deprecated=True,
+)
 
 
 @router.post("/resolve", response_model=ProjectResolveResponse)
