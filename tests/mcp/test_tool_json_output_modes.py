@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
+from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.clients.knowledge import KnowledgeClient
 from basic_memory.mcp.tools import (
@@ -314,13 +316,15 @@ async def test_delete_directory_json_mode_returns_structured_error_on_failure(
 
     monkeypatch.setattr(KnowledgeClient, "delete_directory", mock_delete_directory)
 
-    json_delete = await delete_note(
-        identifier="mode-tests",
-        is_directory=True,
-        project=test_project.name,
-        output_format="json",
-    )
-    assert isinstance(json_delete, dict)
+    # A failed delete is a tool error; in JSON mode its message is the structured payload.
+    with pytest.raises(ToolError) as exc_info:
+        await delete_note(
+            identifier="mode-tests",
+            is_directory=True,
+            project=test_project.name,
+            output_format="json",
+        )
+    json_delete = json.loads(str(exc_info.value))
     assert json_delete["deleted"] is False
     assert json_delete["is_directory"] is True
     assert json_delete["identifier"] == "mode-tests"

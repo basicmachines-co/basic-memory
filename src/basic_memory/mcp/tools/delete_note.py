@@ -1,5 +1,6 @@
+import json
 from textwrap import dedent
-from typing import Any, Annotated, Optional, Literal
+from typing import Any, Annotated, NoReturn, Optional, Literal
 
 from loguru import logger
 from fastmcp import Context
@@ -99,6 +100,15 @@ def _format_delete_error_response(project: str, error_message: str, identifier: 
         """).strip()
 
 
+def _raise_delete_failure(output_format: str, payload: dict[str, Any], text: str) -> NoReturn:
+    """Report a failed delete as a tool error, keeping the guidance for the caller.
+
+    A returned "Delete Failed" string reads as success to MCP clients; raising makes
+    the result an error (isError) while the message still carries the same help.
+    """
+    raise ToolError(json.dumps(payload) if output_format == "json" else text)
+
+
 def _directory_path_for_delete(
     target_identifier: str,
     active_project: ProjectItem,
@@ -182,7 +192,7 @@ async def delete_note(
     Returns:
         True if note was successfully deleted, False if note was not found.
         For directories, returns a formatted summary of deleted files.
-        On errors, returns a formatted string with helpful troubleshooting guidance.
+        On errors, raises a tool error whose message carries troubleshooting guidance.
 
     Examples:
         # Delete by title
@@ -339,8 +349,9 @@ Total files: 0.
 
             except Exception as e:  # pragma: no cover
                 logger.error(f"Directory delete failed for '{identifier}': {e}")
-                if output_format == "json":
-                    return {
+                _raise_delete_failure(
+                    output_format,
+                    {
                         "deleted": False,
                         "is_directory": True,
                         "identifier": identifier,
@@ -348,8 +359,8 @@ Total files: 0.
                         "successful_deletes": 0,
                         "failed_deletes": 0,
                         "error": str(e),
-                    }
-                return f"""# Directory Delete Failed
+                    },
+                    f"""# Directory Delete Failed
 
 Error deleting directory '{identifier}': {str(e)}
 
@@ -365,7 +376,8 @@ list_directory("{identifier}")
 
 # Then delete individual files
 delete_note("path/to/file.md")
-```"""
+```""",
+                )
 
         # Handle single note deletes
         note_title = None
@@ -395,16 +407,16 @@ delete_note("path/to/file.md")
             logger.error(  # pragma: no cover
                 f"Delete failed for '{identifier}': {e}, project: {active_project.name}"
             )
-            if output_format == "json":
-                return {
+            _raise_delete_failure(
+                output_format,
+                {
                     "deleted": False,
                     "title": None,
                     "permalink": None,
                     "file_path": None,
                     "error": str(e),
-                }
-            return _format_delete_error_response(  # pragma: no cover
-                active_project.name, str(e), identifier
+                },
+                _format_delete_error_response(active_project.name, str(e), identifier),
             )
 
         try:
@@ -438,13 +450,14 @@ delete_note("path/to/file.md")
 
         except Exception as e:  # pragma: no cover
             logger.error(f"Delete failed for '{identifier}': {e}, project: {active_project.name}")
-            if output_format == "json":
-                return {
+            _raise_delete_failure(
+                output_format,
+                {
                     "deleted": False,
                     "title": note_title,
                     "permalink": note_permalink,
                     "file_path": note_file_path,
                     "error": str(e),
-                }
-            # Return formatted error message for better user experience
-            return _format_delete_error_response(active_project.name, str(e), identifier)
+                },
+                _format_delete_error_response(active_project.name, str(e), identifier),
+            )

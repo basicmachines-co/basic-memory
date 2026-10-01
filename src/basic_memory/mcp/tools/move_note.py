@@ -1,8 +1,9 @@
 """Move note tool for Basic Memory MCP server."""
 
+import json
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from textwrap import dedent
-from typing import Any, Annotated, Optional, Literal
+from typing import Any, Annotated, NoReturn, Optional, Literal
 
 from loguru import logger
 from fastmcp import Context
@@ -202,6 +203,15 @@ def _format_cross_project_error_response(
         """).strip()
 
 
+def _raise_move_failure(output_format: str, payload: dict[str, Any], text: str) -> NoReturn:
+    """Report a failed move as a tool error, keeping the guidance for the caller.
+
+    A returned "Move Failed" string reads as success to MCP clients; raising makes
+    the result an error (isError) while the message still carries the same help.
+    """
+    raise ToolError(json.dumps(payload) if output_format == "json" else text)
+
+
 def _format_move_error_response(error_message: str, identifier: str, destination_path: str) -> str:
     """Format helpful error responses for move failures that guide users to successful moves."""
 
@@ -366,7 +376,7 @@ delete_note("{identifier}")
     return (  # pragma: no cover
         f"""# Move Failed
 
-Error moving '{identifier}' to '{destination_path}': {error_message}  # pragma: no cover
+Error moving '{identifier}' to '{destination_path}': {error_message}
 
 ## General troubleshooting:
 1. **Verify the note exists**: `read_note("{identifier}")` or `search_notes("{identifier}")`
@@ -758,8 +768,9 @@ Total files: 0.
                 logger.error(
                     f"Directory move failed for '{identifier}' to '{destination_path}': {e}"
                 )
-                if output_format == "json":
-                    return {
+                _raise_move_failure(
+                    output_format,
+                    {
                         "moved": False,
                         "title": None,
                         "permalink": None,
@@ -768,8 +779,8 @@ Total files: 0.
                         "destination": destination_path,
                         "is_directory": True,
                         "error": str(e),
-                    }
-                return f"""# Directory Move Failed
+                    },
+                    f"""# Directory Move Failed
 
 Error moving directory '{identifier}' to '{destination_path}': {str(e)}
 
@@ -785,7 +796,8 @@ list_directory("{identifier}")
 
 # Then move individual files
 move_note(identifier="path/to/file.md", destination_path="{destination_path}/file.md")
-```"""
+```""",
+                )
 
         # Resolve once and reuse the entity ID across extension validation and move.
         source_ext = "md"  # Default to .md if we can't determine source extension
@@ -812,8 +824,9 @@ move_note(identifier="path/to/file.md", destination_path="{destination_path}/fil
             #      to extension defaults and failing later with a confusing message.
             # Outcome: move_note returns a user-facing not-found error immediately.
             logger.error(f"Move failed for '{identifier}' to '{destination_path}': {e}")
-            if output_format == "json":
-                return {
+            _raise_move_failure(
+                output_format,
+                {
                     "moved": False,
                     "title": None,
                     "permalink": None,
@@ -821,8 +834,9 @@ move_note(identifier="path/to/file.md", destination_path="{destination_path}/fil
                     "source": identifier,
                     "destination": destination_path,
                     "error": str(e),
-                }
-            return _format_move_error_response(str(e), identifier, destination_path)
+                },
+                _format_move_error_response(str(e), identifier, destination_path),
+            )
         except Exception as e:
             # If we can't fetch source metadata (e.g. get_entity or file_path parsing fails),
             # continue with extension defaults — the entity was at least resolved.
@@ -1092,8 +1106,9 @@ move_note("{identifier}", destination_folder="notes")
 
         except Exception as e:
             logger.error(f"Move failed for '{identifier}' to '{destination_path}': {e}")
-            if output_format == "json":
-                return {
+            _raise_move_failure(
+                output_format,
+                {
                     "moved": False,
                     "title": None,
                     "permalink": None,
@@ -1101,6 +1116,6 @@ move_note("{identifier}", destination_folder="notes")
                     "source": identifier,
                     "destination": destination_path,
                     "error": str(e),
-                }
-            # Return formatted error message for better user experience
-            return _format_move_error_response(str(e), identifier, destination_path)
+                },
+                _format_move_error_response(str(e), identifier, destination_path),
+            )

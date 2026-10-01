@@ -1086,9 +1086,11 @@ async def test_move_note_error_handling_note_not_found(mcp_server, app, test_pro
                 "identifier": "Non-existent Note",
                 "destination_path": "new/location.md",
             },
+            raise_on_error=False,
         )
 
-        # Should contain error message about the failed operation
+        # A failed move is an MCP error result, and its text keeps the guidance
+        assert move_result.is_error is True
         assert len(move_result.content) == 1
         error_message = move_result.content[0].text
         assert "# Move Failed" in error_message
@@ -1166,9 +1168,11 @@ async def test_move_note_error_handling_destination_exists(mcp_server, app, test
                 "identifier": "Source Note",
                 "destination_path": "destination/Existing Note.md",  # Use exact existing file name
             },
+            raise_on_error=False,
         )
 
-        # Should contain error message about the failed operation
+        # A failed move is an MCP error result, and its text keeps the guidance
+        assert move_result.is_error is True
         assert len(move_result.content) == 1
         error_message = move_result.content[0].text
         assert "# Move Failed" in error_message
@@ -1551,8 +1555,10 @@ async def test_move_note_strict_resolution_rejects_fuzzy_match(mcp_server, app, 
                 "identifier": "Move Strict Test NONEXISTENT",
                 "destination_path": "archive/Moved.md",
             },
+            raise_on_error=False,
         )
 
+        assert move_result.is_error is True
         assert len(move_result.content) == 1
         error_text = move_result.content[0].text
         assert "# Move Failed" in error_text
