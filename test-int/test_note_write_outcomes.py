@@ -152,3 +152,87 @@ async def test_write_hook_failure_rolls_back_canonical_acceptance(
         monkeypatch.undo()
         retried = await client.post(endpoint, json={"note": note})
         assert retried.json()["kind"] == "created"
+
+
+# --- Conditional overwrite (expected_checksum) ---
+
+
+async def test_expected_checksum_replaces_only_the_revision_the_caller_read(
+    client: AsyncClient,
+    test_project: Project,
+) -> None:
+    endpoint = f"/v2/projects/{test_project.external_id}/knowledge/write"
+    note = {"title": "Conditional", "directory": "notes", "content": "Revision A"}
+    created = await client.post(endpoint, json={"note": note})
+    revision_a = created.json()["entity"]["db_checksum"]
+    assert revision_a
+    path = Path(test_project.path) / "notes/Conditional.md"
+
+    updated = await client.post(
+        endpoint,
+        json={
+            "note": {**note, "content": "Revision B"},
+            "overwrite": True,
+            "expected_checksum": revision_a,
+        },
+    )
+    assert updated.status_code == 200
+    assert updated.json()["kind"] == "updated"
+    revision_b = updated.json()["entity"]["db_checksum"]
+    assert revision_b != revision_a
+    after_b = path.read_bytes()
+    assert b"Revision B" in after_b
+
+    # A writer still holding revision A must not replace revision B.
+    stale = await client.post(
+        endpoint,
+        json={
+            "note": {**note, "content": "Stale replacement"},
+            "overwrite": True,
+            "expected_checksum": revision_a,
+        },
+    )
+    assert stale.status_code == 200
+    assert stale.json() == {
+        "kind": "revision_conflict",
+        "file_path": "notes/Conditional.md",
+        "db_checksum": revision_b,
+    }
+    assert path.read_bytes() == after_b
+
+
+async def test_expected_checksum_never_creates_a_missing_note(
+    client: AsyncClient,
+    test_project: Project,
+) -> None:
+    response = await client.post(
+        f"/v2/projects/{test_project.external_id}/knowledge/write",
+        json={
+            "note": {"title": "Deleted Since", "directory": "notes", "content": "Resurrected"},
+            "overwrite": True,
+            "expected_checksum": "a" * 64,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json() == {
+        "kind": "revision_conflict",
+        "file_path": "notes/Deleted Since.md",
+        "db_checksum": None,
+    }
+    assert not (Path(test_project.path) / "notes/Deleted Since.md").exists()
+
+
+async def test_expected_checksum_requires_overwrite(
+    client: AsyncClient,
+    test_project: Project,
+) -> None:
+    response = await client.post(
+        f"/v2/projects/{test_project.external_id}/knowledge/write",
+        json={
+            "note": {"title": "Create Only", "directory": "notes", "content": "Body"},
+            "expected_checksum": "a" * 64,
+        },
+    )
+    assert response.status_code == 422
+    assert "expected_checksum requires overwrite=True" in response.text
+    assert not (Path(test_project.path) / "notes/Create Only.md").exists()

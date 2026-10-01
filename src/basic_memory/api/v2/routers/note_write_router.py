@@ -23,6 +23,7 @@ from basic_memory.schemas.v2.note_write import (
     NoteAlreadyExists,
     NoteCreated,
     NoteLocked,
+    NoteRevisionConflict,
     NoteTargetMoved,
     NoteUpdated,
     WriteNoteRequest,
@@ -37,6 +38,7 @@ from basic_memory.services.note_write_outcomes import (
     Created,
     Locked,
     Rejected,
+    RevisionConflict,
     TargetMoved,
     Updated,
 )
@@ -92,6 +94,7 @@ async def write_note(
                 permalink_candidates=candidates,
                 user_profile_id=None,
                 source="api",
+                expected_checksum=data.expected_checksum,
             )
         except NoteContentMutationServiceError as error:
             raise HTTPException(status_code=error.status_code, detail=error.detail) from error
@@ -122,6 +125,8 @@ async def write_note(
                 return NoteTargetMoved(**asdict(note))
             case Locked(message=message):
                 return NoteLocked(message=message)
+            case RevisionConflict(file_path=file_path, current_db_checksum=current):
+                return NoteRevisionConflict(file_path=file_path, db_checksum=current)
             case Rejected(rejection=rejection):
                 error = note_content_mutation_error_from_rejection(rejection)
                 raise HTTPException(status_code=error.status_code, detail=error.detail)

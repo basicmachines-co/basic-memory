@@ -56,7 +56,13 @@ class KnowledgeClient:
 
     # --- Entity CRUD Operations ---
 
-    async def write_note(self, note: Entity, *, overwrite: bool) -> WriteNoteResponse:
+    async def write_note(
+        self,
+        note: Entity,
+        *,
+        overwrite: bool,
+        expected_checksum: str | None = None,
+    ) -> WriteNoteResponse:
         """Write at an exact path and preserve the service's expected outcomes."""
         from basic_memory.mcp.tools.utils import call_post
 
@@ -68,7 +74,11 @@ class KnowledgeClient:
             response = await call_post(
                 self.http_client,
                 f"{self._base_path}/write",
-                json=WriteNoteRequest(note=note, overwrite=overwrite).model_dump(mode="json"),
+                json=WriteNoteRequest(
+                    note=note,
+                    overwrite=overwrite,
+                    expected_checksum=expected_checksum,
+                ).model_dump(mode="json"),
                 client_name="knowledge",
                 operation="write_note",
                 path_template="/v2/projects/{project_id}/knowledge/write",

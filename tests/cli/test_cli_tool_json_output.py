@@ -165,6 +165,64 @@ def test_write_note_project_id_passthrough(mock_mcp_write):
     new_callable=AsyncMock,
     return_value=WRITE_NOTE_RESULT,
 )
+def test_write_note_expected_checksum_passthrough(mock_mcp_write):
+    """--expected-checksum conditions the MCP overwrite on the revision the caller read."""
+    checksum = "a" * 64
+    result = runner.invoke(
+        cli_app,
+        [
+            "tool",
+            "write-note",
+            "--title",
+            "Test Note",
+            "--folder",
+            "notes",
+            "--content",
+            "hello",
+            "--overwrite",
+            "--expected-checksum",
+            checksum,
+        ],
+    )
+
+    assert result.exit_code == 0, f"CLI failed: {result.output}"
+    assert mock_mcp_write.call_args.kwargs["overwrite"] is True
+    assert mock_mcp_write.call_args.kwargs["expected_checksum"] == checksum
+
+
+@patch(
+    "basic_memory.mcp.tools.write_note",
+    new_callable=AsyncMock,
+    return_value={"action": "conflict", "error": "NOTE_REVISION_CONFLICT", "checksum": "b" * 64},
+)
+def test_write_note_revision_conflict_exits_nonzero(mock_mcp_write):
+    """A stale --expected-checksum is a failed write for exit-code-driven scripts."""
+    result = runner.invoke(
+        cli_app,
+        [
+            "tool",
+            "write-note",
+            "--title",
+            "Test Note",
+            "--folder",
+            "notes",
+            "--content",
+            "hello",
+            "--overwrite",
+            "--expected-checksum",
+            "a" * 64,
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "NOTE_REVISION_CONFLICT" in result.output
+
+
+@patch(
+    "basic_memory.mcp.tools.write_note",
+    new_callable=AsyncMock,
+    return_value=WRITE_NOTE_RESULT,
+)
 def test_write_note_with_tags(mock_mcp_write):
     """write-note passes tags through to MCP tool."""
     result = runner.invoke(

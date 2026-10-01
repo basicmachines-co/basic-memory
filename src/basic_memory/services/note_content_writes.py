@@ -15,6 +15,7 @@ from basic_memory.file_utils import ParseError, has_frontmatter, parse_frontmatt
 
 from basic_memory.indexing.accepted_note_mutation_runner import (
     ACCEPTED_NOTE_DELETE_SOURCE,
+    AcceptedNoteBaseChecksumConflict,
     AcceptedNoteCreateMutation,
     AcceptedNoteDeleteMutation,
     AcceptedNoteEditMutation,
@@ -58,11 +59,14 @@ from basic_memory.services.note_write_outcomes import (
     TargetMoved,
     Locked,
     Rejected,
+    RevisionConflict,
     NoteLocation,
     WriteOutcome,
 )
 
 AcceptedNoteChange = RuntimeAcceptedNoteChange[RuntimeNoteContentResponsePayload]
+# The dataclass uses slots, so its default lives on instances, not the class.
+STALE_BASE_CHECKSUM_MESSAGE = AcceptedNoteBaseChecksumConflict(db_checksum=None).message
 
 
 class NoteContentMutationFreshener(Protocol):
@@ -363,12 +367,18 @@ class NoteContentMutationService:
         permalink_candidates: Sequence[str],
         user_profile_id: UUID | None,
         source: str,
+        expected_checksum: str | None = None,
     ) -> WriteOutcome:
         """Create at a path or replace its current owner, without search resolution.
 
         Retained exact permalinks only identify a moved target when the requested
         path has no owner. Rejections leave the transaction before becoming values,
         so the existing rollback, cache invalidation, and publication rules still apply.
+
+        ``expected_checksum`` makes a replacement conditional on the accepted
+        revision the caller read. It is checked inside the update transaction, so
+        a write that lands after the caller's read wins and this one reports a
+        revision conflict instead of replacing it.
         """
         target: NoteLocation | None = None
         try:
@@ -423,6 +433,10 @@ class NoteContentMutationService:
                                     moved.permalink,
                                 )
                             )
+                    # The caller expected to replace a revision, but no note owns the
+                    # path. Creating one would resurrect a note deleted after the read.
+                    if expected_checksum is not None:
+                        return RevisionConflict(data.file_path, current_db_checksum=None)
 
             # Dispatch through the public operations so runtime overrides retain
             # their pre-acceptance work as well as the in-transaction hook.
@@ -442,6 +456,7 @@ class NoteContentMutationService:
                         data=data,
                         user_profile_id=user_profile_id,
                         source=source,
+                        base_checksum=expected_checksum,
                     )
                     return Updated(change)
                 case _:
@@ -453,11 +468,18 @@ class NoteContentMutationService:
         except NoteContentMutationServiceError as error:
             # Legacy create/update adapters expose structured service errors.
             # Translate their recoverable outcomes once; preserve other refusals.
-            match error.status_code:
-                case 423:
+            match error.status_code, error.detail:
+                case 423, _:
                     return Locked(str(error.detail))
-                case 409 if target is None:
+                case 409, _ if target is None:
                     return AlreadyExists(data.file_path)
+                # update_note reports a moved base revision in the stable
+                # base-checksum wire shape (issue #1445); it is an expected outcome.
+                case 409, {
+                    "message": str() as message,
+                    "db_checksum": (str() | None) as current,
+                } if expected_checksum is not None and message == STALE_BASE_CHECKSUM_MESSAGE:
+                    return RevisionConflict(data.file_path, current_db_checksum=current)
                 case _:
                     raise
 

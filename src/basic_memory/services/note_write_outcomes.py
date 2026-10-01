@@ -42,8 +42,21 @@ class Locked:
 
 
 @dataclass(frozen=True, slots=True)
+class RevisionConflict:
+    """The note at the path is no longer the revision the caller expected to replace.
+
+    ``current_db_checksum`` is None when no note owns the path any more.
+    """
+
+    file_path: str
+    current_db_checksum: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class Rejected:
     rejection: AcceptedNoteMutationRejection
 
 
-type WriteOutcome = Created | Updated | AlreadyExists | TargetMoved | Locked | Rejected
+type WriteOutcome = (
+    Created | Updated | AlreadyExists | TargetMoved | Locked | RevisionConflict | Rejected
+)
