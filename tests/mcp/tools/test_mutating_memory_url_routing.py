@@ -2,6 +2,8 @@
 
 import importlib
 
+import json
+
 import pytest
 from fastmcp.exceptions import ToolError
 
@@ -102,14 +104,15 @@ async def test_directory_move_normalizes_project_memory_url(client, test_project
 @pytest.mark.asyncio
 async def test_missing_directory_delete_is_not_reported_as_success(client, test_project) -> None:
     """A missing-route path fallback must still require files to delete."""
-    result = await delete_note(
-        project=test_project.name,
-        identifier="memory://missing-directory-route/missing-child",
-        is_directory=True,
-        output_format="json",
-    )
+    with pytest.raises(ToolError) as exc_info:
+        await delete_note(
+            project=test_project.name,
+            identifier="memory://missing-directory-route/missing-child",
+            is_directory=True,
+            output_format="json",
+        )
 
-    assert isinstance(result, dict)
+    result = json.loads(str(exc_info.value))
     assert result["deleted"] is False
     assert result["total_files"] == 0
     assert result["error"] == "Directory not found or empty: no files matched"
@@ -118,15 +121,16 @@ async def test_missing_directory_delete_is_not_reported_as_success(client, test_
 @pytest.mark.asyncio
 async def test_missing_directory_move_is_not_reported_as_success(client, test_project) -> None:
     """A missing-route path fallback must still require files to move."""
-    result = await move_note(
-        project=test_project.name,
-        identifier="memory://missing-directory-route/missing-child",
-        destination_path="archive/missing-child",
-        is_directory=True,
-        output_format="json",
-    )
+    with pytest.raises(ToolError) as exc_info:
+        await move_note(
+            project=test_project.name,
+            identifier="memory://missing-directory-route/missing-child",
+            destination_path="archive/missing-child",
+            is_directory=True,
+            output_format="json",
+        )
 
-    assert isinstance(result, dict)
+    result = json.loads(str(exc_info.value))
     assert result["moved"] is False
     assert result["total_files"] == 0
     assert result["error"] == "Directory not found or empty: no files matched"
