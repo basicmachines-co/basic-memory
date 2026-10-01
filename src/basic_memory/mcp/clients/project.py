@@ -221,9 +221,9 @@ class ProjectClient:
         Raises:
             ToolError: If the request fails
         """
-        from basic_memory.mcp.tools.utils import call_post
+        from basic_memory.mcp.tools.utils import call_get
 
-        response = await call_post(
+        response = await call_get(
             self.http_client,
             f"/v2/projects/{project_external_id}/status",
         )

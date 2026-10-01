@@ -580,7 +580,7 @@ async def test_workspace_project_index_keeps_successes_when_workspace_fetch_fail
     index = await _ensure_workspace_project_index(context=ctx(context))
 
     assert [entry.qualified_name for entry in index.entries] == ["personal/meeting-notes"]
-    assert [workspace.slug for workspace in index.failed_workspaces] == ["acme"]
+    assert [failed.summary for failed in index.failed_workspaces] == ["acme: acme unavailable"]
 
     resolved = await resolve_workspace_project_identifier(
         "personal/meeting-notes",
@@ -626,6 +626,130 @@ async def test_workspace_project_index_raises_when_all_workspace_fetches_fail(
 
     with pytest.raises(ValueError, match="Unable to discover projects"):
         await _ensure_workspace_project_index()
+
+
+@pytest.mark.asyncio
+async def test_workspace_discovery_failure_keeps_the_servers_reason(monkeypatch):
+    """A cloud workspace at its spending limit answers 402; the user must see why.
+
+    The cloud gateway is external, so an httpx transport stands in for it; the
+    project client, error mapping and index build are the real code.
+    """
+    import httpx
+
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.mcp.clients import ProjectClient
+    from basic_memory.mcp.project_context import _ensure_workspace_project_index
+
+    limit_message = (
+        "This workspace reached its spending limit for the current billing period. "
+        "Raise the spending limit, or wait for the next billing period, to keep using it."
+    )
+
+    def gateway(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            402,
+            json={"detail": {"error": "spending_limit_reached", "message": limit_message}},
+        )
+
+    team = _workspace(
+        tenant_id="team-tenant",
+        workspace_type="organization",
+        slug="team",
+        name="Team",
+        role="owner",
+        is_default=True,
+    )
+
+    async def fake_get_available_workspaces(context=None):
+        return [team]
+
+    async def fetch_through_gateway(workspace, context=None):
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(gateway), base_url="http://cloud"
+        ) as client:
+            await ProjectClient(client).list_projects()
+        return ()
+
+    monkeypatch.setattr(project_context, "get_available_workspaces", fake_get_available_workspaces)
+    monkeypatch.setattr(project_context, "_fetch_workspace_project_entries", fetch_through_gateway)
+
+    with pytest.raises(ValueError) as error:
+        await _ensure_workspace_project_index()
+
+    assert f"team: {limit_message}" in str(error.value)
+
+
+@pytest.mark.asyncio
+async def test_a_partly_failed_index_keeps_each_reason_through_the_session_cache(monkeypatch):
+    """One workspace loads, the other is at its spending limit: lookups say why."""
+    from fastmcp.exceptions import ToolError
+
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.mcp.project_context import (
+        _ensure_workspace_project_index,
+        resolve_workspace_project_identifier,
+    )
+    from basic_memory.mcp.workspace_project_index import WorkspaceProjectEntry
+
+    context = ContextState()
+    personal = _workspace(
+        tenant_id="personal-tenant",
+        workspace_type="personal",
+        slug="personal",
+        name="Personal",
+        role="owner",
+        is_default=True,
+    )
+    team = _workspace(
+        tenant_id="team-tenant",
+        workspace_type="organization",
+        slug="team",
+        name="Team",
+        role="editor",
+    )
+    project = _project("Meeting Notes", id=7, external_id="personal-meeting-notes")
+
+    async def fake_get_available_workspaces(context=None):
+        return [personal, team]
+
+    async def fake_fetch_workspace_project_entries(workspace, context=None):
+        if workspace.slug == "team":
+            raise ToolError("This workspace reached its spending limit.")
+        return (WorkspaceProjectEntry(workspace=workspace, project=project),)
+
+    monkeypatch.setattr(project_context, "get_available_workspaces", fake_get_available_workspaces)
+    monkeypatch.setattr(
+        project_context, "_fetch_workspace_project_entries", fake_fetch_workspace_project_entries
+    )
+    await _ensure_workspace_project_index(context=ctx(context))
+
+    # Both lookups read the index back from the session cache.
+    with pytest.raises(
+        ValueError, match="could not be loaded: This workspace reached its spending limit"
+    ):
+        await resolve_workspace_project_identifier("team/research", context=ctx(context))
+    with pytest.raises(ValueError, match="team: This workspace reached its spending limit"):
+        await resolve_workspace_project_identifier("research", context=ctx(context))
+
+
+def test_an_index_cached_before_failures_had_reasons_is_rebuilt():
+    from basic_memory.mcp.workspace_project_index import workspace_project_index_from_state
+
+    team = _workspace(
+        tenant_id="team-tenant",
+        workspace_type="organization",
+        slug="team",
+        name="Team",
+        role="editor",
+    )
+    cached = {
+        "workspaces": [team.model_dump()],
+        "entries": [],
+        "failed_workspaces": [team.model_dump()],
+    }
+
+    assert workspace_project_index_from_state(cached) is None
 
 
 @pytest.mark.asyncio
