@@ -629,6 +629,58 @@ async def test_workspace_project_index_raises_when_all_workspace_fetches_fail(
 
 
 @pytest.mark.asyncio
+async def test_workspace_discovery_failure_keeps_the_servers_reason(monkeypatch):
+    """A cloud workspace at its spending limit answers 402; the user must see why.
+
+    The cloud gateway is external, so an httpx transport stands in for it; the
+    project client, error mapping and index build are the real code.
+    """
+    import httpx
+
+    import basic_memory.mcp.project_context as project_context
+    from basic_memory.mcp.clients import ProjectClient
+    from basic_memory.mcp.project_context import _ensure_workspace_project_index
+
+    limit_message = (
+        "This workspace reached its spending limit for the current billing period. "
+        "Raise the spending limit, or wait for the next billing period, to keep using it."
+    )
+
+    def gateway(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            402,
+            json={"detail": {"error": "spending_limit_reached", "message": limit_message}},
+        )
+
+    team = _workspace(
+        tenant_id="team-tenant",
+        workspace_type="organization",
+        slug="team",
+        name="Team",
+        role="owner",
+        is_default=True,
+    )
+
+    async def fake_get_available_workspaces(context=None):
+        return [team]
+
+    async def fetch_through_gateway(workspace, context=None):
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(gateway), base_url="http://cloud"
+        ) as client:
+            await ProjectClient(client).list_projects()
+        return ()
+
+    monkeypatch.setattr(project_context, "get_available_workspaces", fake_get_available_workspaces)
+    monkeypatch.setattr(project_context, "_fetch_workspace_project_entries", fetch_through_gateway)
+
+    with pytest.raises(ValueError) as error:
+        await _ensure_workspace_project_index()
+
+    assert f"team: {limit_message}" in str(error.value)
+
+
+@pytest.mark.asyncio
 async def test_fetch_workspace_project_entries_copies_default_project(monkeypatch):
     import basic_memory.mcp.async_client as async_client
     from basic_memory.mcp.project_context import _fetch_workspace_project_entries

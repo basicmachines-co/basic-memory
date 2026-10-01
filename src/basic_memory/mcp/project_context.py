@@ -516,6 +516,9 @@ async def _ensure_workspace_project_index(
     )
     entries_list: list[WorkspaceProjectEntry] = []
     failed_workspaces: list[WorkspaceInfo] = []
+    # Why each workspace failed, in the server's words (e.g. a cloud workspace at its
+    # spending limit), so a total failure can tell the user what to do.
+    failure_reasons: list[str] = []
     successful_fetches = 0
     for workspace, result in zip(workspaces, fetched_results, strict=True):
         if isinstance(result, BaseException):
@@ -526,6 +529,7 @@ async def _ensure_workspace_project_index(
             #   healthy workspaces, but unqualified routing still needs to know the index is partial.
             # Outcome: keep successful workspace entries and record the failed workspace.
             failed_workspaces.append(workspace)
+            failure_reasons.append(f"{workspace.slug}: {str(result) or type(result).__name__}")
             logger.warning(
                 f"Cloud project discovery failed for workspace {workspace.slug} "
                 f"({workspace.tenant_id}): {result}"
@@ -542,10 +546,9 @@ async def _ensure_workspace_project_index(
         entries_list.extend(workspace_entries)
 
     if failed_workspaces and successful_fetches == 0:
-        failed_labels = ", ".join(workspace.slug for workspace in failed_workspaces)
         raise ValueError(
             "Unable to discover projects in any accessible workspace. "
-            f"Failed workspaces: {failed_labels}"
+            f"Failed workspaces: {'; '.join(failure_reasons)}"
         )
 
     entries = tuple(entries_list)
