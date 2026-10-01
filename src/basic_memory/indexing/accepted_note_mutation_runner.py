@@ -169,6 +169,9 @@ class AcceptedNoteUpdateMutation:
     source: RuntimeNoteChangeSource
     # db_checksum the caller last synced; None means no precondition (issue #1445).
     base_checksum: str | None = None
+    # file_path the caller expected the note to own. A move can keep the Markdown,
+    # and so the checksum, unchanged; only the path proves the caller's target.
+    base_file_path: str | None = None
     publish_graph_facts: bool = True
 
 
@@ -842,6 +845,14 @@ async def _run_accepted_note_update(
                 AcceptedNoteMutationRejectKind.unsupported_media_type,
                 "Only markdown note mutations are supported by the note-content path.",
             )
+        # Trigger: the caller pinned the path it read, and the note has moved since.
+        # Why: a move can preserve the Markdown and its checksum, so the checksum
+        #   precondition alone would accept this PUT and move the note back to the
+        #   stale path, overwriting a note the caller never saw at its current home.
+        #   Checked before any path-sensitive preparation, on the refreshed entity.
+        # Outcome: the same structured stale-revision 409 the checksum check uses.
+        if request.base_file_path is not None and entity.file_path != request.base_file_path:
+            reject_stale_base_checksum(current_db_checksum=current_note_content.db_checksum)
 
     existing_file_path = entity.file_path if entity is not None else None
     vacated_source: tuple[RuntimeFilePath, RuntimeFileChecksum | None] | None = None

@@ -69,6 +69,7 @@ async def test_write_note_emits_root_operation_and_project_context(
             "requested_project_id": None,
             "note_type": "note",
             "overwrite": False,
+            "conditional_overwrite": False,
             "output_format": "json",
         },
     )

@@ -248,7 +248,7 @@ async def test_write_note_reports_the_accepted_db_checksum(
     now = datetime.now(timezone.utc)
     db_checksum = "a" * 64  # a real, already-persisted SHA-256 hex digest
 
-    async def fake_write_note(self, note, *, overwrite):
+    async def fake_write_note(self, note, *, overwrite, expected_checksum=None):
         entity = EntityResponseV2(
             external_id="11111111-1111-1111-1111-111111111111",
             id=1,

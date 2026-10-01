@@ -1,12 +1,14 @@
 """Typed write outcomes preserve canonical content across the HTTP boundary."""
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from basic_memory.config import BasicMemoryConfig
 from basic_memory.models import Project
 from basic_memory.services.note_content_writes import (
     AcceptedNoteChange,
@@ -236,3 +238,57 @@ async def test_expected_checksum_requires_overwrite(
     assert response.status_code == 422
     assert "expected_checksum requires overwrite=True" in response.text
     assert not (Path(test_project.path) / "notes/Create Only.md").exists()
+
+
+async def test_expected_checksum_refuses_a_note_moved_after_the_path_lookup(
+    client: AsyncClient,
+    test_project: Project,
+    app_config: BasicMemoryConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The shipped default: a move keeps the permalink, and so the note's checksum.
+    monkeypatch.setattr(app_config, "update_permalinks_on_move", False)
+    endpoint = f"/v2/projects/{test_project.external_id}/knowledge/write"
+    note = {"title": "Moving Target", "directory": "notes", "content": "Keep me"}
+    created = await client.post(endpoint, json={"note": note})
+    entity = created.json()["entity"]
+    entity_url = (
+        f"/v2/projects/{test_project.external_id}/knowledge/entities/{entity['external_id']}"
+    )
+    original_update = NoteContentMutationService.update_note
+    moved_checksum: str | None = None
+
+    async def move_before_update(self: NoteContentMutationService, **kwargs: Any):
+        # Another writer moves the note after write_note resolved its path but
+        # before the guarded replacement takes the note lock.
+        nonlocal moved_checksum
+        if moved_checksum is None:
+            # The real move route, so the file moves on disk as well as in the DB.
+            moved = await client.put(
+                f"{entity_url}/move", json={"destination_path": "archive/Moving Target.md"}
+            )
+            assert moved.status_code == 202, moved.text
+            moved_checksum = (await client.get(entity_url)).json()["db_checksum"]
+        return await original_update(self, **kwargs)
+
+    monkeypatch.setattr(NoteContentMutationService, "update_note", move_before_update)
+    response = await client.post(
+        endpoint,
+        json={
+            "note": {**note, "content": "Stale replacement"},
+            "overwrite": True,
+            "expected_checksum": entity["db_checksum"],
+        },
+    )
+
+    # The move kept the Markdown, so only the path precondition can catch it.
+    assert moved_checksum == entity["db_checksum"]
+    assert response.json() == {
+        "kind": "revision_conflict",
+        "file_path": "notes/Moving Target.md",
+        "db_checksum": entity["db_checksum"],
+    }
+    current = (await client.get(entity_url)).json()
+    assert current["file_path"] == "archive/Moving Target.md"
+    assert "Keep me" in current["content"]
+    assert "Stale replacement" not in current["content"]

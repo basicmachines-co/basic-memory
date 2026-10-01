@@ -449,7 +449,9 @@ class NoteContentMutationService:
                         source=source,
                     )
                     return Created(change)
-                case NoteLocation(external_id=entity_id):
+                case NoteLocation(external_id=entity_id, file_path=target_path):
+                    # A conditional replacement must still find the note at the path it
+                    # was addressed by; an unconditional one keeps Core's PUT semantics.
                     change = await self.update_note(
                         project_external_id=project_external_id,
                         entity_external_id=entity_id,
@@ -457,6 +459,7 @@ class NoteContentMutationService:
                         user_profile_id=user_profile_id,
                         source=source,
                         base_checksum=expected_checksum,
+                        base_file_path=target_path if expected_checksum is not None else None,
                     )
                     return Updated(change)
                 case _:
@@ -517,6 +520,7 @@ class NoteContentMutationService:
         base_checksum: str | None = None,
         actor_kind: str | None = None,
         actor_name: str | None = None,
+        base_file_path: str | None = None,
     ) -> AcceptedNoteChange:
         """PUT a markdown note by creating or replacing accepted DB state.
 
@@ -526,6 +530,10 @@ class NoteContentMutationService:
         moved, so the caller rebases instead of clobbering the newer write
         (issue #1445). It stays optional so callers without a synced base still
         write.
+
+        ``base_file_path`` pins the path the caller expected the note to own. A
+        move can leave the checksum unchanged, so a path-addressed replacement
+        passes both, and a moved note is rejected with the same structured 409.
         """
         try:
             return await self._accept_write(
@@ -536,6 +544,7 @@ class NoteContentMutationService:
                     actor=AcceptedNoteMutationActor(user_profile_id, actor_kind, actor_name),
                     source=source,
                     base_checksum=base_checksum,
+                    base_file_path=base_file_path,
                 )
             )
         except AcceptedNoteMutationRejected as error:
