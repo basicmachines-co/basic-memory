@@ -8,6 +8,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import basic_memory.indexing.accepted_note_mutation_runner as mutation_runner
 from basic_memory.config import BasicMemoryConfig
 from basic_memory.models import Project
 from basic_memory.services.note_content_writes import (
@@ -292,3 +293,39 @@ async def test_expected_checksum_refuses_a_note_moved_after_the_path_lookup(
     assert current["file_path"] == "archive/Moving Target.md"
     assert "Keep me" in current["content"]
     assert "Stale replacement" not in current["content"]
+
+
+@pytest.mark.parametrize("conditional", [True, False], ids=["conditional", "unconditional"])
+async def test_a_note_deleted_under_the_update_lock_is_a_revision_conflict_when_pinned(
+    client: AsyncClient,
+    test_project: Project,
+    monkeypatch: pytest.MonkeyPatch,
+    conditional: bool,
+) -> None:
+    endpoint = f"/v2/projects/{test_project.external_id}/knowledge/write"
+    note = {"title": "Vanishing", "directory": "notes", "content": "Original"}
+    created = await client.post(endpoint, json={"note": note})
+    checksum = created.json()["entity"]["db_checksum"]
+
+    # A delete commits after the update runner loads the entity but before it holds
+    # the content lock, so the accepted content row is gone once the lock is taken.
+    async def content_deleted(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(mutation_runner, "load_accepted_note_content", content_deleted)
+    request: dict[str, object] = {"note": {**note, "content": "Replacement"}, "overwrite": True}
+    if conditional:
+        request["expected_checksum"] = checksum
+    response = await client.post(endpoint, json=request)
+
+    if conditional:
+        assert response.status_code == 200
+        assert response.json() == {
+            "kind": "revision_conflict",
+            "file_path": "notes/Vanishing.md",
+            "db_checksum": None,
+        }
+    else:
+        # Without a pinned revision the missing content stays Core's backfill refusal.
+        assert response.status_code == 409
+        assert "Note content is not available" in response.json()["detail"]
