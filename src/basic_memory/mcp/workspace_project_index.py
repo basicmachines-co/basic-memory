@@ -37,6 +37,22 @@ class WorkspaceProjectEntry:
 
 
 @dataclass(frozen=True)
+class FailedWorkspace:
+    """A workspace whose projects could not be listed, and the server's reason.
+
+    The reason is what tells the user what to do, for example that a cloud
+    workspace reached its spending limit, so every error about it carries it.
+    """
+
+    workspace: WorkspaceInfo
+    reason: str
+
+    @property
+    def summary(self) -> str:
+        return f"{self.workspace.slug}: {self.reason}"
+
+
+@dataclass(frozen=True)
 class WorkspaceProjectIndex:
     """Session-local project lookup keyed by permalink and external_id."""
 
@@ -44,7 +60,26 @@ class WorkspaceProjectIndex:
     entries: tuple[WorkspaceProjectEntry, ...]
     entries_by_permalink: dict[str, tuple[WorkspaceProjectEntry, ...]]
     entries_by_external_id: dict[str, WorkspaceProjectEntry] = field(default_factory=dict)
-    failed_workspaces: tuple[WorkspaceInfo, ...] = ()
+    failed_workspaces: tuple[FailedWorkspace, ...] = ()
+
+    def failure_for(self, workspace: WorkspaceInfo) -> FailedWorkspace | None:
+        return next(
+            (
+                failed
+                for failed in self.failed_workspaces
+                if failed.workspace.tenant_id == workspace.tenant_id
+            ),
+            None,
+        )
+
+    @property
+    def failure_summary(self) -> str:
+        return "; ".join(failed.summary for failed in self.failed_workspaces)
+
+
+def workspace_not_loaded_message(failed: FailedWorkspace) -> str:
+    workspace = failed.workspace
+    return f"Projects for workspace '{workspace.name}' ({workspace.slug}) could not be loaded: {failed.reason}"
 
 
 async def get_cached_active_project(context: Optional[Context]) -> Optional[ProjectItem]:
@@ -141,12 +176,24 @@ def workspace_project_index_from_state(raw: object) -> WorkspaceProjectIndex | N
         return None
 
     workspaces = tuple(WorkspaceInfo.model_validate(item) for item in workspaces_raw)
-    failed_workspaces_raw = raw_mapping.get("failed_workspaces")
-    failed_workspaces = (
-        tuple(WorkspaceInfo.model_validate(item) for item in failed_workspaces_raw)
-        if isinstance(failed_workspaces_raw, list)
-        else ()
-    )
+    failed_workspaces_raw = raw_mapping.get("failed_workspaces", [])
+    if not isinstance(failed_workspaces_raw, list):
+        return None
+    failed_workspaces: list[FailedWorkspace] = []
+    for item in failed_workspaces_raw:
+        if not isinstance(item, dict):
+            return None
+        failed_mapping = cast(dict[str, object], item)
+        reason = failed_mapping.get("reason")
+        # A cache written before failures carried reasons is rebuilt, not guessed at.
+        if not isinstance(reason, str):
+            return None
+        failed_workspaces.append(
+            FailedWorkspace(
+                workspace=WorkspaceInfo.model_validate(failed_mapping.get("workspace")),
+                reason=reason,
+            )
+        )
     entries_list: list[WorkspaceProjectEntry] = []
     for item in entries_raw:
         if not isinstance(item, dict):
@@ -165,7 +212,7 @@ def workspace_project_index_from_state(raw: object) -> WorkspaceProjectIndex | N
     return build_workspace_project_index(
         workspaces,
         tuple(entries_list),
-        failed_workspaces=failed_workspaces,
+        failed_workspaces=tuple(failed_workspaces),
     )
 
 
@@ -173,7 +220,10 @@ def workspace_project_index_to_state(index: WorkspaceProjectIndex) -> dict[str, 
     """Serialize a workspace project index for MCP context state."""
     return {
         "workspaces": [workspace.model_dump() for workspace in index.workspaces],
-        "failed_workspaces": [workspace.model_dump() for workspace in index.failed_workspaces],
+        "failed_workspaces": [
+            {"workspace": failed.workspace.model_dump(), "reason": failed.reason}
+            for failed in index.failed_workspaces
+        ],
         "entries": [
             {
                 "workspace": entry.workspace.model_dump(),
@@ -188,7 +238,7 @@ def build_workspace_project_index(
     workspaces: tuple[WorkspaceInfo, ...],
     entries: tuple[WorkspaceProjectEntry, ...],
     *,
-    failed_workspaces: tuple[WorkspaceInfo, ...] = (),
+    failed_workspaces: tuple[FailedWorkspace, ...] = (),
 ) -> WorkspaceProjectIndex:
     """Build permalink and external_id lookup tables for workspace-project entries."""
     grouped: dict[str, list[WorkspaceProjectEntry]] = {}
@@ -323,14 +373,8 @@ async def resolve_workspace_project_from_index(
             if entry.workspace.tenant_id == workspace.tenant_id
         ]
         if not matches:
-            if any(
-                failed_workspace.tenant_id == workspace.tenant_id
-                for failed_workspace in index.failed_workspaces
-            ):
-                raise WorkspaceProjectLookupMiss(
-                    f"Projects for workspace '{workspace.name}' ({workspace.slug}) "
-                    "could not be loaded. Retry after workspace discovery recovers."
-                )
+            if (failed := index.failure_for(workspace)) is not None:
+                raise WorkspaceProjectLookupMiss(workspace_not_loaded_message(failed))
             available = ", ".join(
                 entry.qualified_name
                 for entry in index.entries
@@ -355,10 +399,9 @@ async def resolve_workspace_project_from_index(
     if not matches:
         failed_note = ""
         if index.failed_workspaces:
-            failed = ", ".join(workspace.slug for workspace in index.failed_workspaces)
             failed_note = (
-                f" Project discovery failed for workspace(s): {failed}; "
-                "retry or use a qualified project from an indexed workspace."
+                f" Project discovery failed for {index.failure_summary}. "
+                "Use a qualified project from an indexed workspace."
             )
         available = ", ".join(entry.qualified_name for entry in index.entries)
         raise WorkspaceProjectLookupMiss(
@@ -390,11 +433,10 @@ async def resolve_workspace_project_from_index(
 
     if index.failed_workspaces:
         qualified_name = matches[0].qualified_name
-        failed = ", ".join(workspace.slug for workspace in index.failed_workspaces)
         raise ValueError(
             f"Project '{project}' was found as {qualified_name}, but project discovery "
-            f"failed for workspace(s): {failed}. Use '{qualified_name}' to route "
-            "explicitly, or retry after discovery recovers."
+            f"failed for {index.failure_summary}. Use '{qualified_name}' to route "
+            "explicitly."
         )
 
     return matches[0]
