@@ -167,6 +167,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
         "note_type",
         "metadata",
         "overwrite",
+        "expected_checksum",
         "output_format",
     ],
 }

@@ -630,6 +630,16 @@ def write_note(
         "--overwrite",
         help="Replace an existing note on conflict (matches MCP write_note overwrite=True)",
     ),
+    expected_checksum: Annotated[
+        Optional[str],
+        typer.Option(
+            "--expected-checksum",
+            help=(
+                "With --overwrite, replace the note only if it is still this revision "
+                "(the checksum from a previous JSON result)."
+            ),
+        ),
+    ] = None,
     local: bool = typer.Option(
         False, "--local", help="Force local API routing (ignore cloud mode)"
     ),
@@ -643,6 +653,7 @@ def write_note(
     bm tool write-note --title "My Guide" --folder "notes" --content "..." --type guide
     echo "content" | bm tool write-note --title "My Note" --folder "notes"
     bm tool write-note --title "My Note" --folder "notes" --overwrite
+    bm tool write-note --title "My Note" --folder "notes" --overwrite --expected-checksum <checksum>
     bm tool write-note --title "My Note" --folder "notes" --local
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
@@ -679,12 +690,14 @@ def write_note(
                     tags=tags,
                     note_type=note_type,
                     overwrite=overwrite,
+                    expected_checksum=expected_checksum,
                     output_format="json",
                 )
             )
 
         # MCP tool returns an error field on failure in JSON mode (e.g.
-        # NOTE_ALREADY_EXISTS on a blocked overwrite, SECURITY_VALIDATION_ERROR).
+        # NOTE_ALREADY_EXISTS on a blocked overwrite, NOTE_REVISION_CONFLICT on a
+        # stale --expected-checksum, SECURITY_VALIDATION_ERROR).
         # Trigger: result carries a non-empty `error`.
         # Why: parity with delete-note/edit-note/search-notes so exit-code-driven
         #      scripts detect a failed/blocked write instead of seeing exit 0.

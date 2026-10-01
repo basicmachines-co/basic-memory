@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 from fastmcp import Client
+from fastmcp.exceptions import ToolError
 
 from basic_memory.config import ConfigManager
 from basic_memory.schemas.project_info import ProjectItem
@@ -642,3 +643,86 @@ async def test_write_note_overwrite_guard_via_mcp_client(mcp_server, app, test_p
         )
         response_text3 = result3.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
         assert "# Updated note" in response_text3
+
+
+@pytest.mark.asyncio
+async def test_write_note_expected_checksum_replaces_only_the_revision_read(
+    mcp_server, app, test_project
+):
+    """A conditional overwrite lands on the read revision and refuses a stale one."""
+    note = {"project": test_project.name, "title": "Conditional", "directory": "test"}
+
+    async with Client(mcp_server) as client:
+        created = _json_content(
+            await client.call_tool(
+                "write_note", {**note, "content": "Revision A.", "output_format": "json"}
+            )
+        )
+        revision_a = created["checksum"]
+        updated = _json_content(
+            await client.call_tool(
+                "write_note",
+                {
+                    **note,
+                    "content": "Revision B.",
+                    "overwrite": True,
+                    "expected_checksum": revision_a,
+                    "output_format": "json",
+                },
+            )
+        )
+        assert updated["action"] == "updated"
+        revision_b = updated["checksum"]
+        assert revision_b != revision_a
+
+        stale_json = _json_content(
+            await client.call_tool(
+                "write_note",
+                {
+                    **note,
+                    "content": "Stale replacement.",
+                    "overwrite": True,
+                    "expected_checksum": revision_a,
+                    "output_format": "json",
+                },
+            )
+        )
+        assert stale_json["action"] == "conflict"
+        assert stale_json["error"] == "NOTE_REVISION_CONFLICT"
+        assert stale_json["checksum"] == revision_b
+
+        stale_text = await client.call_tool(
+            "write_note",
+            {
+                **note,
+                "content": "Stale replacement.",
+                "overwrite": True,
+                "expected_checksum": revision_a,
+            },
+        )
+        text = stale_text.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+        assert "# Error: Note revision conflict" in text
+        assert f'expected_checksum="{revision_b}"' in text
+
+        read = await client.call_tool(
+            "read_note", {"project": test_project.name, "identifier": "test/Conditional"}
+        )
+        content = read.content[0].text  # pyright: ignore [reportAttributeAccessIssue]
+        assert "Revision B." in content
+        assert "Stale replacement." not in content
+
+
+@pytest.mark.asyncio
+async def test_write_note_expected_checksum_requires_overwrite(mcp_server, app, test_project):
+    async with Client(mcp_server) as client:
+        with pytest.raises(ToolError, match="expected_checksum requires overwrite=True"):
+            await client.call_tool(
+                "write_note",
+                {
+                    "project": test_project.name,
+                    "title": "Create Only",
+                    "directory": "test",
+                    "content": "Body.",
+                    "expected_checksum": "a" * 64,
+                },
+            )

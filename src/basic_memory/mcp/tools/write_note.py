@@ -23,6 +23,7 @@ from basic_memory.schemas.v2.note_write import (
     NoteAlreadyExists,
     NoteTargetMoved,
     NoteLocked,
+    NoteRevisionConflict,
 )
 from basic_memory.schemas.search import (
     SearchItemType,
@@ -206,7 +207,8 @@ def _compose_workspace_project_route(
         "Create a markdown note. If the note already exists, returns an error by default "
         "— pass overwrite=True to replace. directory is required. For incremental changes "
         "to an existing note use edit_note. A new note's result may list similar existing "
-        "notes; that is advisory and does not block the write."
+        "notes; that is advisory and does not block the write. Pass expected_checksum with "
+        "overwrite=True to replace the note only if it is still the revision you read."
     ),
     tags={"notes"},
     annotations={
@@ -232,6 +234,7 @@ async def write_note(
     note_type: str = "note",
     metadata: Annotated[dict[str, Any] | None, BeforeValidator(coerce_dict)] = None,
     overwrite: bool | None = None,
+    expected_checksum: str | None = None,
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
 ) -> str | dict[str, Any]:
@@ -309,6 +312,11 @@ async def write_note(
                   beyond title/type/tags. Nested dicts are supported. Not available from the CLI.
         overwrite: If True, replace existing note on conflict. If False, error on conflict.
                    If None (default), consult write_note_overwrite_default config setting.
+        expected_checksum: Optional revision precondition for overwrite=True: the checksum
+                   of the note you read (from a JSON write_note or edit_note result). The
+                   note is replaced only while it is still that revision; otherwise the
+                   tool reports a revision conflict with the current checksum and changes
+                   nothing. Omit it to replace the note unconditionally.
         output_format: "text" returns a markdown summary. "json" returns
                        machine-readable metadata; on conflict it returns action: "conflict"
                        with an error code instead of raising.
@@ -353,6 +361,16 @@ async def write_note(
             overwrite=True
         )
 
+        # Overwrite only if nobody changed the note since you read it
+        write_note(
+            project="my-research",
+            title="Meeting Notes",
+            directory="meetings",
+            content="# Weekly Standup\\n\\n- [decision] Keep PostgreSQL #tech",
+            overwrite=True,
+            expected_checksum="<checksum from the previous JSON result>",
+        )
+
         # Create a schema note with custom frontmatter via metadata
         write_note(
             title="Person",
@@ -377,6 +395,9 @@ async def write_note(
     effective_overwrite = (
         overwrite if overwrite is not None else ConfigManager().config.write_note_overwrite_default
     )
+    # A create has no prior revision, so a checksum only conditions a replacement.
+    if expected_checksum is not None and not effective_overwrite:
+        raise ValueError("expected_checksum requires overwrite=True")
     project = _compose_workspace_project_route(
         workspace=workspace,
         project=project,
@@ -391,6 +412,7 @@ async def write_note(
         requested_project_id=project_id,
         note_type=note_type,
         overwrite=effective_overwrite,
+        conditional_overwrite=expected_checksum is not None,
         output_format=output_format,
     ):
         async with get_project_client(project, context=context, project_id=project_id) as (
@@ -452,7 +474,11 @@ async def write_note(
 
             # The API owns path identity and overwrite policy; expected outcomes stay
             # typed all the way here, so presentation never has to parse an HTTP error.
-            outcome = await knowledge_client.write_note(entity, overwrite=effective_overwrite)
+            outcome = await knowledge_client.write_note(
+                entity,
+                overwrite=effective_overwrite,
+                expected_checksum=expected_checksum,
+            )
             match outcome:
                 case NoteCreated(entity=result):
                     action = "Created"
@@ -487,6 +513,19 @@ async def write_note(
                     )
                 case NoteLocked(message=message):
                     raise ToolError(message)
+                case NoteRevisionConflict(db_checksum=current_checksum) as conflict:
+                    if output_format == "json":
+                        return {
+                            "title": title,
+                            "permalink": entity.permalink,
+                            "file_path": conflict.file_path if current_checksum else None,
+                            "checksum": current_checksum,
+                            "action": "conflict",
+                            "error": "NOTE_REVISION_CONFLICT",
+                        }
+                    return _format_revision_conflict(
+                        title, conflict.file_path, current_checksum, active_project.name
+                    )
                 case _:
                     assert_never(outcome)
             # --- Similar-note advisory ---
@@ -617,6 +656,31 @@ async def write_note(
 
             summary_result = "\n".join(summary)
             return add_project_metadata(summary_result, active_project.name)
+
+
+def _format_revision_conflict(
+    title: str, file_path: str, current_checksum: str | None, project_name: str
+) -> str:
+    """Explain a refused conditional overwrite and the ways forward."""
+    if current_checksum is None:
+        return textwrap.dedent(f"""\
+            # Error: Note revision conflict
+
+            **"{title}"** no longer exists at `{file_path}`, so nothing was replaced.
+            Read the project again before writing, or drop expected_checksum to create
+            a new note at this path.
+
+            Project: {project_name}""")
+    return textwrap.dedent(f"""\
+        # Error: Note revision conflict
+
+        **"{title}"** at `{file_path}` changed since you read it, so nothing was replaced.
+        Current checksum: `{current_checksum}`
+
+        Read the note again and retry with expected_checksum="{current_checksum}", or drop
+        expected_checksum to replace it unconditionally.
+
+        Project: {project_name}""")
 
 
 def _format_overwrite_error(title: str, permalink: str | None, project_name: str) -> str:
