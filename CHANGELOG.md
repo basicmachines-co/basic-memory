@@ -40,6 +40,14 @@
 
 ### Features
 
+- **#1642**: `write_note` can overwrite only the revision you read. Pass
+  `expected_checksum` with `overwrite=True` (CLI: `--overwrite --expected-checksum`)
+  and the note is replaced only while it is still that revision. Otherwise nothing
+  changes and the result is a revision conflict carrying the current checksum (JSON
+  `error: "NOTE_REVISION_CONFLICT"`). A checksum for a path no note owns is also a
+  conflict, so a note deleted since you read it is not recreated. Without
+  `expected_checksum`, `overwrite=True` still replaces unconditionally.
+
 - **#1636**: Note deletes record their actor in the accepted-change journal, as
   creates, updates, edits and moves already did. The delete route now asks the actor
   resolver like the other mutations (with a new `delete` mutation kind), so a runtime
