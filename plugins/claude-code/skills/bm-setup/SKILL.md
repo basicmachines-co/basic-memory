@@ -127,12 +127,13 @@ Ask only what you can't infer. Cover:
    low-noise setup. (This is the single knob for how proactive the assistant is —
    the hooks always run regardless.)
 
-8. **Shared skills** (optional, default yes). "Want the full Basic Memory toolkit —
-   the shared `memory-*` skills (`memory-notes`, `memory-tasks`, `memory-research`,
-   `memory-schema`, `memory-defrag`, …)? I can install them alongside this plugin."
-   These are the canonical, framework-agnostic skills (the same set OpenClaw bundles).
-   This plugin ships only the Claude-Code-specific glue and pulls the shared set on
-   demand — it doesn't vendor its own copies. (See "Install the shared skills" below.)
+8. **Standalone `memory-*` copies** (only if any exist — see "Retire duplicate
+   standalone skills" below). The plugin bundles the canonical `memory-*` skills
+   (`memory-notes`, `memory-tasks`, `memory-research`, `memory-schema`,
+   `memory-defrag`, …) as `/basic-memory:memory-*`, so there is nothing to install.
+   If an earlier `npx skills add basicmachines-co/basic-memory/skills` left copies
+   in the user's skills directory, Claude now sees each skill twice. Offer to remove
+   the standalone copies; default yes.
 
 ## Apply (after confirming the plan)
 
@@ -171,27 +172,22 @@ For each one:
   Required-and-proven fields are what make coding checkpoints queryable, so seed
   the schema unmodified instead of also seeding the general Session schema.
 
-### 2. Install the shared skills (if the user opted in)
-**First, guard against clobbering a source checkout.** If `./skills` already exists,
-is tracked in git, and holds `memory-*` directories, you're inside the skills' own
-source repo (e.g. `basic-memory` itself) — the install would overwrite the working
-copy with published versions. In that case **skip the install** and tell the user
-the skills are already present as source; don't run the command. Quick check:
+### 2. Retire duplicate standalone skills (if the user agreed)
+The plugin already ships the canonical `memory-*` skills — the same files as the
+top-level `skills/` source, kept identical by the repository's drift check — so
+setup never runs `npx skills add`. Look for standalone copies that would duplicate
+them:
 
 ```
-git ls-files skills/ | grep -q memory- && echo "source repo - skip install"
+ls -d "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/skills/memory-* .claude/skills/memory-* 2>/dev/null
 ```
 
-Otherwise, run from the project root:
-
-```
-npx skills add basicmachines-co/basic-memory/skills
-```
-
-This installs the canonical `memory-*` skills into the user's skills directory — the
-single source of truth, shared with OpenClaw. The plugin does **not** vendor copies;
-it relies on this shared set. If `npx` / the `skills` CLI isn't available, point the
-user at the manual install in the top-level [`skills/README.md`](../../../../skills/README.md).
+- **Skip anything tracked in git** (`git ls-files --error-unmatch <dir>` succeeds):
+  that is a source checkout such as `basic-memory` itself, or a project that commits
+  its skills on purpose. Never delete it.
+- Otherwise list what you found, confirm with the user, and only then remove those
+  directories. Leave any other skills in the directory alone.
+- If nothing is found, say nothing about it.
 
 ### 3. Write settings
 Build the `basicMemory` block from the interview:

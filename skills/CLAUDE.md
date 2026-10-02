@@ -51,7 +51,12 @@ description: "What the skill does and when to use it."
 
 1. Create `memory-<name>/SKILL.md` with frontmatter and markdown instructions
 2. Update `README.md` with the new skill's summary
-3. Commit and push
+3. Run `python3 scripts/sync_plugin_skills.py` from the monorepo root so the Claude Code plugin's bundled copy matches
+4. Commit and push
+
+Any edit to an existing skill needs step 3 as well: the Claude Code plugin ships
+copies under `plugins/claude-code/skills/memory-*`, and its package check fails when
+they drift.
 
 ## Key Concepts Referenced in Skills
 
