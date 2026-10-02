@@ -269,6 +269,42 @@ async def test_a_project_with_no_recorded_pass_reports_never_indexed(
 
 
 @pytest.mark.asyncio
+async def test_a_project_with_indexed_notes_but_no_recorded_pass_is_indexed(
+    readiness_service, test_project, entity_repository, engine_factory
+):
+    """Notes indexed one at a time (as Basic Memory Cloud does) make the project indexed.
+
+    Cloud never runs a full pass for a project created there, so its empty search
+    results were reported as "never indexed" although every note was searchable.
+    """
+    _, session_maker = engine_factory
+    now = datetime.now(UTC)
+    async with db.scoped_session(session_maker) as session:
+        await entity_repository.create(
+            session,
+            {
+                "project_id": test_project.id,
+                "title": "Written",
+                "note_type": "note",
+                "permalink": "notes/written",
+                "file_path": "notes/written.md",
+                "content_type": "text/markdown",
+                "checksum": "indexed-sum",
+                "created_at": now,
+                "updated_at": now,
+            },
+        )
+
+    readiness = await readiness_service.readiness_for(
+        test_project,
+        (RuntimeObservedIndexFile(path="notes/written.md", checksum="indexed-sum", size=1),),
+    )
+
+    assert readiness.last_indexed_at is None
+    assert readiness.phase is ProjectIndexPhase.IDLE
+
+
+@pytest.mark.asyncio
 async def test_a_recorded_pass_with_nothing_outstanding_reports_idle(
     readiness_service, test_project, engine_factory
 ):
