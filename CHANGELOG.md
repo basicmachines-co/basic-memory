@@ -40,7 +40,7 @@
 
 ### Features
 
-- The Claude Code plugin bundles the shared `memory-*` skills (all of `skills/` except
+- **#1646**: The Claude Code plugin bundles the shared `memory-*` skills (all of `skills/` except
   the CI-only `memory-ci-capture`) as `/basic-memory:memory-*`, so enabling the plugin
   is enough and `npx skills add` is no longer part of `/basic-memory:bm-setup`. Setup
   instead offers to remove standalone copies from an earlier `npx` install, which would
