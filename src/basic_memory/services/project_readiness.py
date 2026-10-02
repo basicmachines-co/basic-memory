@@ -43,8 +43,8 @@ from basic_memory.schemas.project_readiness import (
 def _phase_for(*, indexed: bool, pending: int) -> ProjectIndexPhase:
     """Map one stage's outstanding work to its phase.
 
-    ``indexed`` is the project-wide fact that a pass completed at least once;
-    it dominates, because before that a zero pending count means "never
+    ``indexed`` is the project-wide fact that the project has been indexed at
+    all; it dominates, because before that a zero pending count means "never
     counted" rather than "nothing outstanding".
     """
     if not indexed:
@@ -110,14 +110,17 @@ class ProjectReadinessService:
         has already walked the project directory, and a second walk would double
         the cost of the one call a waiter polls.
         """
-        indexed = project.last_indexed_at is not None
-
         async with db.scoped_session(self.session_maker) as session:
             indexed_checksums = await self._indexed_checksums(session, project.id)
             relations_pending = await self._resolvable_unresolved_relations(session, project.id)
             total_relations = await self._total_relations(session, project.id)
             embeddable, embedded = await self._embedding_counts(session, project.id)
 
+        # A project is indexed once a full pass completed or anything was indexed.
+        # Notes can be indexed one at a time as they are written (Basic Memory Cloud
+        # never runs a full pass for a project created there), and an empty result
+        # from such a project is honest rather than "never indexed".
+        indexed = project.last_indexed_at is not None or bool(indexed_checksums)
         files_total, files_pending = file_stage_counts(observed_files, indexed_checksums)
         # No clamp: `embedded` is counted within the owed set, so it can never
         # exceed it (see _embedding_counts).
