@@ -44,7 +44,14 @@ Cloud extends local-first — still plain markdown, still yours. Start with a [7
 
 ## Installation
 
-### Via npx skills (recommended)
+### Claude Code plugin (bundled)
+
+The [Basic Memory Claude Code plugin](../plugins/claude-code) ships these skills
+(except the CI-only `memory-ci-capture`) as `/basic-memory:memory-*`. If you use
+the plugin, there is nothing more to install. Don't also add them with `npx`, or
+Claude sees each skill twice.
+
+### Via npx skills (recommended for other agents)
 
 Install or update skills using the [Skills CLI](https://github.com/vercel-labs/skills):
 

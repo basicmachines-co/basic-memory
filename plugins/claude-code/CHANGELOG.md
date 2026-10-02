@@ -8,6 +8,14 @@ Memory's durable graph**, rather than a memory layer of its own. See
 
 ### Added
 
+- **Bundled `memory-*` skills** (`skills/memory-*/`) — the plugin now ships the
+  canonical framework-agnostic skills from the top-level [`skills/`](../../skills)
+  source as `/basic-memory:memory-*` (capture, continue, curate, defrag, ingest,
+  lifecycle, literary-analysis, metadata-search, notes, onboarding, reflect,
+  research, schema, tasks), so enabling the plugin is enough on every machine.
+  They are committed copies written by `scripts/sync_plugin_skills.py`, and
+  `package-check-claude-code` fails when they drift from `skills/`. The CI-only
+  `memory-ci-capture` prompt is not bundled.
 - **`/basic-memory:bm-orient`** (`skills/bm-orient/`) — deliberate mid-session
   orientation: reads active tasks, open decisions, and recent checkpoints
   (repository-scoped `coding_session` recall for coding setups — never an
@@ -53,10 +61,9 @@ Memory's durable graph**, rather than a memory layer of its own. See
 - **`/basic-memory:bm-setup`** (`skills/bm-setup/`) — a short guided interview that
   configures the project for the plugin: maps it to a Basic Memory project (picking
   an existing one or creating a new one), seeds the `session`/`decision`/`task`
-  schemas into the project, installs the shared `memory-*` skills via
-  `npx skills add basicmachines-co/basic-memory/skills` (the plugin doesn't
-  vendor its own copies — `skills/` is the single source of truth, shared with
-  OpenClaw), optionally learns the project's placement conventions, and enables the
+  schemas into the project, offers to remove standalone `memory-*` skills an earlier
+  `npx skills add` installed (the plugin bundles them, so those would duplicate),
+  optionally learns the project's placement conventions, and enables the
   capture reflexes. Writes the `basicMemory` block to
   `.claude/settings.json` (or `settings.local.json`). The SessionStart hook nudges
   toward this on first run; running it (writing the config) stops the nudge. (Phase 3)
@@ -115,8 +122,8 @@ Memory's durable graph**, rather than a memory layer of its own. See
 - The six bundled skills (`placement`, `knowledge-capture`, `knowledge-organize`,
   `continue-conversation`, `research`, `edit-note`). Equivalent, framework-agnostic
   workflows live in the top-level [`skills/`](../../skills) package
-  (`memory-notes`, `memory-research`, `memory-tasks`, `memory-schema`, …); install
-  those for the old capabilities.
+  (`memory-notes`, `memory-research`, `memory-tasks`, `memory-schema`, …), which
+  the plugin now bundles.
 - The `basic-memory-manager` agent. The plugin ships no agent in v0.4 — memory is
   handled in the main context via hooks and the output style, not delegated.
 - The `PreToolUse`/`PostToolUse` `write_note` hooks (placement advisory + save

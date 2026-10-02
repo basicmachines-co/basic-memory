@@ -55,7 +55,7 @@ The thinker's needs are the foundation. The builder adds git hooks. The operator
 
 ## 3. Architecture — the four core surfaces
 
-We keep the plugin to a small number of well-chosen artifacts. Everything else (workflow skills, agents, deep references) loads from the top-level `skills/` package on demand.
+We keep the plugin to a small number of well-chosen artifacts. The general workflow skills are authored once in the top-level `skills/` package; the plugin ships synced copies of them (§4.4) rather than its own variants.
 
 ```
 plugins/claude-code/
@@ -189,7 +189,7 @@ If/when path-scoped rules start working *and* support out-of-tree globs, we can 
 
 ### 4.4 Deliberate gestures — skills
 
-Three skills only, each Claude-Code-specific (everything else lives in top-level `skills/`).
+The `bm-*` skills are the Claude-Code-specific ones the plugin owns. The general workflow skills are authored in top-level `skills/` and bundled as copies (see "Bundled shared skills" below).
 
 > **Verified (Q3) — slash commands are always plugin-namespaced.** A skill folder `skills/bm-setup/` in a plugin named `basic-memory` is invoked as **`/basic-memory:bm-setup`** — namespacing is mandatory and can't be shortened. Skills are auto-discovered on install, no extra registration.
 >
@@ -202,6 +202,13 @@ Three skills only, each Claude-Code-specific (everything else lives in top-level
 **`/basic-memory:bm-remember <text>`** — quick capture. Writes to a `bm-remember/` folder, separated from auto-captures. First line becomes title (truncated to 80 chars), tagged `manual-capture`. Optional `--project` flag for cross-project.
 
 **`/basic-memory:bm-status`** — show plugin state: active BM project, capture folders, recent SessionNotes, sync status, last successful BM call. Trust-building UI.
+
+**Bundled shared skills (decided 2026-10-02).** The plugin ships the canonical `memory-*` skills from top-level `skills/` as `/basic-memory:memory-*`, so enabling the plugin is enough on every machine. This reverses the earlier rule that the plugin "doesn't vendor its own copies" and that `bm-setup` installs them with `npx skills add`.
+
+- **Copies, not symlinks.** A marketplace install copies only `plugins/claude-code/` into Claude Code's plugin cache. Claude Code dereferences a symlink into another part of the same git-hosted marketplace, but it skips the same link for a plugin-local marketplace (`.claude-plugin/marketplace.json` here, source `./`) and from a local path, and a Windows checkout without symlink support turns the link into a text file. A real copy works on every install path.
+- **One source, one drift guard.** `scripts/sync_plugin_skills.py` writes the copies (the same pattern as `sync_memory_schemas.py`), and `validate_claude_plugin.py` runs its drift check, so `package-check-claude-code` and the Consolidated Packages CI job fail on a hand edit to a copy or a `skills/` change that was never synced.
+- **Excluded:** `memory-ci-capture`, a CI-only prompt for `bm ci publish` that returns only JSON.
+- **No name collisions.** `memory-*` and `bm-*` never overlap, and plugin skills are namespaced, so a standalone `memory-notes` from an earlier `npx` install does not conflict. It does duplicate, so `bm-setup` offers to remove standalone copies.
 
 ### 4.5 The schema layer — why our note types are contracts, not conventions
 

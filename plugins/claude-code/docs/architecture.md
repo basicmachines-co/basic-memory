@@ -161,6 +161,7 @@ project names collide across workspaces. Reads route over the user's OAuth sessi
 | `hooks/hooks.json` | registers the hooks |
 | `output-styles/basic-memory.md` | the capture reflexes |
 | `skills/{bm-setup,bm-remember,bm-share,bm-status}/` | the deliberate slash commands |
+| `skills/memory-*/` | bundled copies of the shared top-level `skills/`, synced by `scripts/sync_plugin_skills.py` |
 | `schemas/{session,decision,task}.md` | picoschema seeds (copied into your project at setup) |
 | `.claude/settings.json` → `basicMemory` | per-project configuration |
 | your Basic Memory projects | all actual content |

@@ -2,10 +2,10 @@
 """Validate the Basic Memory Claude Code plugin layout (v0.4 bridge redesign).
 
 The plugin's surfaces are intentionally minimal: lifecycle hooks (SessionStart,
-PreCompact), an opt-in output style, and seed schemas. There is no bundled agent,
-and skills are optional in this layout (added by later phases). This validator
-mirrors that contract so `package-check-claude-code` passes for what the plugin
-actually ships.
+PreCompact), an opt-in output style, seed schemas, the plugin's own `bm-*` skills,
+and copies of the canonical `memory-*` skills from `skills/`. There is no bundled
+agent. This validator mirrors that contract so `package-check-claude-code` passes
+for what the plugin actually ships.
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ import os
 import re
 from pathlib import Path
 
+from sync_plugin_skills import plugin_skill_drift
 from validate_skills import parse_frontmatter
 
 
@@ -27,7 +28,9 @@ REQUIRED_HOOK_SCRIPTS = ("hooks/session_start.py", "hooks/pre_compact.py")
 # Seed schemas the plugin ships for its note types (copied into the user's
 # project at bootstrap). Each must be a parseable schema note.
 REQUIRED_SCHEMAS = ("session.md", "coding-session.md", "decision.md", "task.md")
-# Skills the plugin ships as namespaced slash commands (/basic-memory:<name>).
+# Claude-Code-specific skills the plugin owns, shipped as namespaced slash
+# commands (/basic-memory:<name>). The bundled memory-* skills are checked
+# separately, against the canonical skills/ source.
 REQUIRED_SKILLS = (
     "bm-setup",
     "bm-orient",
@@ -227,6 +230,16 @@ def validate_claude_plugin(plugin_dir: Path) -> None:
         # silently cross Basic Memory project boundaries for Claude profiles.
         if skill_dir.name in PROFILE_AWARE_SKILLS and "CLAUDE_CONFIG_DIR" not in skill_text:
             raise SystemExit(f"{skill_md}: must honor CLAUDE_CONFIG_DIR")
+
+    # The memory-* skills are copies of the canonical top-level skills/ source,
+    # bundled so enabling the plugin is enough to get them. A hand edit to a copy,
+    # or a skills/ change that was never synced, would ship a fork.
+    drift = plugin_skill_drift(plugin_skills_root=skills_root)
+    if drift:
+        raise SystemExit(
+            "Bundled memory-* skills differ from skills/ "
+            "(run `python3 scripts/sync_plugin_skills.py`):\n  " + "\n  ".join(drift)
+        )
 
     readme = (plugin_dir / "README.md").read_text(encoding="utf-8")
     for required_text in (
