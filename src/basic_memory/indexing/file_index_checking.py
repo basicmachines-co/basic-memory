@@ -16,6 +16,7 @@ from basic_memory.indexing.file_index_planning import (
     FileIndexPath,
     FileIndexPlan,
     FileIndexTarget,
+    IndexedChecksums,
     build_file_index_plan,
     move_orphan_file_index_decision,
     plan_file_index_target_from_current,
@@ -30,8 +31,8 @@ class IndexedFileChecksumSource(Protocol):
     async def load_indexed_file_checksums(
         self,
         file_paths: Sequence[FileIndexPath],
-    ) -> Mapping[FileIndexPath, FileIndexChecksum | None]:
-        """Return indexed checksums keyed by file path."""
+    ) -> Mapping[FileIndexPath, IndexedChecksums]:
+        """Return indexed checksums keyed by file path; a missing key means no row owns it."""
 
 
 class CurrentFileChecksumSource(Protocol):
@@ -45,7 +46,7 @@ class CurrentFileChecksumSource(Protocol):
 
 
 class IndexedFileChecksumRow(Protocol):
-    """Tuple-like row containing file path and indexed checksum."""
+    """Tuple-like row of file path, indexed checksum and sync checksum."""
 
     def __getitem__(self, index: int, /) -> object:
         """Return a row field by positional index."""
@@ -61,7 +62,20 @@ class IndexedFileChecksumRepository(Protocol):
         *,
         content_types: Mapping[str, str | None] | None = None,
     ) -> Sequence[IndexedFileChecksumRow]:
-        """Return rows whose first two fields are file path and checksum."""
+        """Return rows whose first three fields are file path, checksum and sync checksum."""
+
+
+def indexed_checksums_by_path(
+    rows: Sequence[IndexedFileChecksumRow],
+) -> dict[FileIndexPath, IndexedChecksums]:
+    """Key repository checksum rows by path."""
+    return {
+        str(row[0]): IndexedChecksums(
+            checksum=None if row[1] is None else str(row[1]),
+            sync_checksum=None if row[2] is None else str(row[2]),
+        )
+        for row in rows
+    }
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,7 +192,7 @@ class RepositoryIndexedFileChecksumSource:
     async def load_indexed_file_checksums(
         self,
         file_paths: Sequence[FileIndexPath],
-    ) -> Mapping[FileIndexPath, FileIndexChecksum | None]:
+    ) -> Mapping[FileIndexPath, IndexedChecksums]:
         """Load accepted entity checksums for target paths."""
         async with self.session_maker() as session:
             if self.content_type_provider is None:
@@ -191,7 +205,7 @@ class RepositoryIndexedFileChecksumSource:
                         path: self.content_type_provider.content_type(path) for path in file_paths
                     },
                 )
-        return {str(row[0]): None if row[1] is None else str(row[1]) for row in rows}
+        return indexed_checksums_by_path(rows)
 
 
 @dataclass(frozen=True, slots=True)
@@ -314,7 +328,7 @@ class FileIndexChecker:
             if not legacy_targets:
                 decision, current_checksum = await self.inspect_target(
                     target,
-                    indexed_checksum=indexed_checksum_by_path.get(target.path),
+                    indexed=indexed_checksum_by_path.get(target.path),
                 )
             else:
                 # Forced-full and legacy batches still read every non-orphan target. Load current
@@ -350,12 +364,12 @@ class FileIndexChecker:
         self,
         target: FileIndexTarget,
         *,
-        indexed_checksum: FileIndexChecksum | None,
+        indexed: IndexedChecksums | None,
     ) -> tuple[FileIndexDecision, FileIndexChecksum | None]:
         """Inspect one file target, returning its decision and the current checksum it read."""
         observed_decision = plan_file_index_target_from_observed(
             target,
-            db_checksum=indexed_checksum,
+            indexed=indexed,
         )
         if observed_decision is not None:
             return observed_decision, None
@@ -365,7 +379,7 @@ class FileIndexChecker:
         )
         decision = plan_file_index_target_from_current(
             target,
-            db_checksum=indexed_checksum,
+            indexed=indexed,
             current_checksum=current_checksum,
         )
         return decision, current_checksum

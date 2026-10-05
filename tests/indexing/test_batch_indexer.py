@@ -15,6 +15,13 @@ from sqlalchemy import text
 from basic_memory import db
 from basic_memory.file_utils import remove_frontmatter
 from basic_memory.indexing.batch_indexer import BatchIndexer
+from basic_memory.indexing.change_planning import plan_file_changes
+from basic_memory.indexing.file_index_checking import RepositoryIndexedFileChecksumSource
+from basic_memory.indexing.file_index_planning import (
+    FileIndexDecisionStatus,
+    FileIndexTarget,
+    plan_file_index_target_from_observed,
+)
 from basic_memory.indexing.models import (
     IndexingBatchResult,
     IndexInputFile,
@@ -1651,3 +1658,109 @@ async def test_batch_indexer_repairs_missing_permalink_when_optional_frontmatter
     assert "type:" not in persisted_content
     assert indexed.markdown_content == persisted_content
     assert (await file_service.read_file_bytes(path)).decode("utf-8") == persisted_content
+
+
+@pytest.mark.asyncio
+async def test_a_one_way_sync_restoring_the_original_is_recognized_as_indexed(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+):
+    """Indexing adds frontmatter; a sync client copying its original back must not loop.
+
+    A one-way sync (rclone sync, a backup script) restores the file it has locally over our
+    rewrite. Re-indexing that restored original would rewrite it again, forever
+    (basic-memory-cloud#2350). The original's checksum is remembered as the sync checksum,
+    so both the observed-file check and the full scan treat it as already indexed, while a
+    real edit is still read.
+    """
+    path = "notes/synced.md"
+    original_content = "# Synced\n\nWritten by an agent with no frontmatter.\n"
+    await _create_file(project_config.home / path, original_content)
+    original_checksum = await file_service.compute_checksum(path)
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+
+    await batch_indexer.index_markdown_file(
+        await _load_input(file_service, path),
+        index_search=False,
+    )
+
+    rewritten_checksum = await file_service.compute_checksum(path)
+    assert rewritten_checksum != original_checksum
+    assert "permalink:" in (project_config.home / path).read_text()
+    async with db.scoped_session(search_service.session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, path)
+    assert entity is not None
+    assert (entity.checksum, entity.sync_checksum) == (rewritten_checksum, original_checksum)
+
+    # The sync client copies its original back over our rewrite.
+    await _create_file(project_config.home / path, original_content)
+    indexed = await RepositoryIndexedFileChecksumSource(
+        session_maker=search_service.session_maker,
+        entity_repository=entity_repository,
+    ).load_indexed_file_checksums([path])
+
+    observed = plan_file_index_target_from_observed(
+        FileIndexTarget(path=path, observed_checksum=original_checksum),
+        indexed=indexed[path],
+    )
+    assert observed is not None and observed.status == FileIndexDecisionStatus.current
+    scan = plan_file_changes(
+        storage_checksum_by_path={path: original_checksum},
+        db_checksum_by_path=indexed,
+        all_db_paths=(path,),
+        move_candidates=(),
+    )
+    assert scan.unchanged_files == [path]
+
+    # A real edit is not the original and is read again.
+    await _create_file(project_config.home / path, original_content + "\nA new line.\n")
+    edited_checksum = await file_service.compute_checksum(path)
+    assert not indexed[path].recognizes(edited_checksum)
+
+
+@pytest.mark.asyncio
+async def test_a_file_indexing_does_not_rewrite_has_no_sync_checksum(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+):
+    path = "notes/complete.md"
+    await _create_file(
+        project_config.home / path,
+        "---\ntitle: Complete\ntype: note\npermalink: notes/complete\n---\n\n# Complete\n",
+    )
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+
+    await batch_indexer.index_markdown_file(
+        await _load_input(file_service, path),
+        index_search=False,
+    )
+
+    async with db.scoped_session(search_service.session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, path)
+    assert entity is not None
+    assert entity.checksum == await file_service.compute_checksum(path)
+    assert entity.sync_checksum is None

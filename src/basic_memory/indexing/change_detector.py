@@ -21,9 +21,16 @@ from basic_memory.indexing.change_planning import (
     plan_move_target_checksums,
     storage_checksums_from_sources,
 )
-from basic_memory.indexing.file_index_checking import IndexedFileChecksumRepository
+from basic_memory.indexing.file_index_checking import (
+    IndexedFileChecksumRepository,
+    indexed_checksums_by_path,
+)
 from basic_memory.indexing.input_file_adaptation import IndexContentTypeProvider
-from basic_memory.indexing.file_index_planning import FileIndexChecksum, FileIndexPath
+from basic_memory.indexing.file_index_planning import (
+    FileIndexChecksum,
+    FileIndexPath,
+    IndexedChecksums,
+)
 
 # SQLite caps a statement at ~999 bind variables and Postgres at ~32767. Each
 # path/checksum in an IN() clause is one variable (plus a couple for the project
@@ -38,7 +45,7 @@ class ChangeDetectionStore(Protocol):
     async def load_indexed_file_checksums(
         self,
         paths: tuple[FileIndexPath, ...],
-    ) -> Mapping[FileIndexPath, FileIndexChecksum | None]: ...
+    ) -> Mapping[FileIndexPath, IndexedChecksums]: ...
 
     async def load_all_indexed_paths(self) -> tuple[FileIndexPath, ...]: ...
 
@@ -89,12 +96,12 @@ class ChangeDetector:
     async def load_indexed_file_checksums(
         self,
         paths: tuple[FileIndexPath, ...],
-    ) -> dict[FileIndexPath, FileIndexChecksum | None]:
+    ) -> dict[FileIndexPath, IndexedChecksums]:
         """Load indexed checksums for project-relative file paths."""
         if not paths:
             return {}
 
-        checksum_by_path: dict[FileIndexPath, FileIndexChecksum | None] = {}
+        checksum_by_path: dict[FileIndexPath, IndexedChecksums] = {}
         async with db.scoped_session(self.session_maker) as session:
             # Batch the IN() lookup so large projects stay under the bind limit.
             for path_batch in batched(paths, MAX_QUERY_BIND_PARAMETERS):
@@ -109,8 +116,7 @@ class ChangeDetector:
                             for path in path_batch
                         },
                     )
-                for row in rows:
-                    checksum_by_path[str(row[0])] = str(row[1]) if row[1] is not None else None
+                checksum_by_path.update(indexed_checksums_by_path(rows))
 
         return checksum_by_path
 

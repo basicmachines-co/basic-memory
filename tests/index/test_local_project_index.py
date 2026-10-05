@@ -33,7 +33,11 @@ from basic_memory.indexing.change_planning import ChangeReport, plan_file_change
 from basic_memory.indexing.embedding_index_planning import EmbeddingIndexTarget
 from basic_memory.indexing.file_batch_runner import IndexFileBatchReadResult
 from basic_memory.indexing.file_index_checking import IndexedFileChecksumRow
-from basic_memory.indexing.file_index_planning import FileIndexPlan, FileIndexTarget
+from basic_memory.indexing.file_index_planning import (
+    FileIndexPlan,
+    FileIndexTarget,
+    IndexedChecksums,
+)
 from basic_memory.indexing.models import (
     FileIndexOperation,
     FileIndexResult,
@@ -2860,9 +2864,9 @@ async def test_local_project_index_observed_source_carries_indexed_files_under_u
     report = plan_file_changes(
         storage_checksum_by_path={target.path: target.checksum for target in observed},
         db_checksum_by_path={
-            "keep.md": keep_checksum,
-            "locked/a.md": "indexed-a",
-            "locked/deep/b.md": "indexed-b",
+            "keep.md": IndexedChecksums(keep_checksum),
+            "locked/a.md": IndexedChecksums("indexed-a"),
+            "locked/deep/b.md": IndexedChecksums("indexed-b"),
         },
         all_db_paths=("keep.md", "locked/a.md", "locked/deep/b.md", "other/gone.md"),
         move_candidates=(),

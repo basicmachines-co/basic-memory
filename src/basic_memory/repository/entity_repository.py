@@ -374,7 +374,8 @@ class EntityRepository(Repository[Entity]):
     ) -> List[Row[Any]]:
         """Get file paths and checksums for multiple entities (optimized for change detection).
 
-        Only queries file_path and checksum columns, skips loading full entities and relationships.
+        Only queries file_path and the checksum columns, skips loading full entities and
+        relationships.
         This is much faster than loading complete Entity objects when you only need checksums.
 
         A markdown path whose indexed content type is not markdown is an incomplete
@@ -388,7 +389,7 @@ class EntityRepository(Repository[Entity]):
                 no MIME information, matching the indexer's suffix-only classification.
 
         Returns:
-            List of (file_path, checksum) tuples for matching entities
+            List of (file_path, checksum, sync_checksum) tuples for matching entities
         """
         if not file_paths:  # pragma: no cover
             return []  # pragma: no cover
@@ -447,7 +448,9 @@ class EntityRepository(Repository[Entity]):
                 (or_(*incomplete_projection), None),
                 else_=Entity.checksum,
             ).label("checksum")
-            path_query = select(Entity.file_path, indexed_checksum).where(
+            # The sync checksum is returned as stored: an incomplete row's masked checksum
+            # already forces a read, whatever the sync checksum says.
+            path_query = select(Entity.file_path, indexed_checksum, Entity.sync_checksum).where(
                 Entity.file_path.in_(paths)
             )
             queries.append(self._add_project_filter(path_query))

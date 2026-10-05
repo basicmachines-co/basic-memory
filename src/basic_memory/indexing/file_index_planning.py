@@ -15,6 +15,31 @@ type FileIndexChecksum = str
 
 
 @dataclass(frozen=True, slots=True)
+class IndexedChecksums:
+    """What the index knows about one path's stored file.
+
+    `checksum` is the file as indexed. When indexing rewrote the file (adding frontmatter or
+    a permalink), `sync_checksum` is the file as it was synced in before that rewrite. A sync
+    client that copies its original over our rewrite is sending a file we have already
+    indexed, so it must not trigger another index and rewrite: that is an endless loop with
+    any one-way sync.
+    """
+
+    checksum: FileIndexChecksum | None
+    sync_checksum: FileIndexChecksum | None = None
+
+    def recognizes(self, storage_checksum: FileIndexChecksum | None) -> bool:
+        """Whether a stored file with `storage_checksum` is already indexed.
+
+        A row without a checksum is incomplete and must be read again whatever the sync
+        checksum says.
+        """
+        if self.checksum is None or storage_checksum is None:
+            return False
+        return storage_checksum in (self.checksum, self.sync_checksum)
+
+
+@dataclass(frozen=True, slots=True)
 class FileIndexTarget:
     """One file observed by an indexing coordinator."""
 
@@ -130,10 +155,10 @@ def move_orphan_file_index_decision(
 def plan_file_index_target_from_observed(
     target: FileIndexTarget,
     *,
-    db_checksum: FileIndexChecksum | None,
+    indexed: IndexedChecksums | None,
 ) -> FileIndexDecision | None:
     """Use trusted observed metadata to skip content reads when possible."""
-    if target.observed_checksum is not None and target.observed_checksum == db_checksum:
+    if indexed is not None and indexed.recognizes(target.observed_checksum):
         return current_file_index_decision(target.path)
     return None
 
@@ -141,7 +166,7 @@ def plan_file_index_target_from_observed(
 def plan_file_index_target_from_current(
     target: FileIndexTarget,
     *,
-    db_checksum: FileIndexChecksum | None,
+    indexed: IndexedChecksums | None,
     current_checksum: FileIndexChecksum | None,
 ) -> FileIndexDecision:
     """Decide from current storage metadata after the observed shortcut misses."""
@@ -151,7 +176,7 @@ def plan_file_index_target_from_current(
             status=FileIndexDecisionStatus.missing,
             reason=f"file not found: {target.path}",
         )
-    if current_checksum == db_checksum:
+    if indexed is not None and indexed.recognizes(current_checksum):
         return current_file_index_decision(target.path)
     return FileIndexDecision(
         path=target.path,

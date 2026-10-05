@@ -116,6 +116,10 @@ class _PreparedMarkdownFile:
     final_checksum: str
     markdown: EntityMarkdown
     frontmatter_state: FrontmatterState
+    # The checksum the file was synced in with, once indexing has rewritten it; None while
+    # the file is still exactly what arrived. Saved as entity.sync_checksum so a client
+    # that copies the original back over the rewrite is recognized (IndexedChecksums).
+    sync_checksum: str | None = None
 
 
 @dataclass(slots=True)
@@ -428,6 +432,7 @@ class BatchIndexer:
     ) -> _PreparedMarkdownFile:
         final_checksum = prepared.final_checksum
         final_content = prepared.content
+        sync_checksum = prepared.sync_checksum
         final_permalink = await self._resolve_batch_permalink(
             prepared,
             reserved_permalinks,
@@ -449,6 +454,7 @@ class BatchIndexer:
             write_result = await self.file_writer.write_frontmatter(
                 IndexFrontmatterUpdate(path=prepared.file.path, metadata=frontmatter_updates)
             )
+            sync_checksum = sync_checksum or final_checksum
             final_checksum = write_result.checksum
             final_content = write_result.content
             prepared.markdown.frontmatter.metadata.update(frontmatter_updates)
@@ -467,6 +473,7 @@ class BatchIndexer:
                     metadata={"permalink": final_permalink},
                 )
             )
+            sync_checksum = sync_checksum or final_checksum
             final_checksum = write_result.checksum
             final_content = write_result.content
         elif prepared.frontmatter_state == "malformed":
@@ -480,6 +487,7 @@ class BatchIndexer:
             final_checksum=final_checksum,
             markdown=prepared.markdown,
             frontmatter_state=prepared.frontmatter_state,
+            sync_checksum=sync_checksum,
         )
 
     async def _resolve_batch_permalink(
@@ -1038,6 +1046,7 @@ class BatchIndexer:
             metadata_updates = self._file_bookkeeping_updates(
                 prepared.file,
                 prepared.final_checksum,
+                sync_checksum=prepared.sync_checksum,
             )
             updated = await self.entity_repository.update_fields(
                 session,
@@ -1085,6 +1094,7 @@ class BatchIndexer:
             final_checksum=write_result.checksum,
             markdown=prepared.markdown,
             frontmatter_state=prepared.frontmatter_state,
+            sync_checksum=prepared.sync_checksum or prepared.final_checksum,
         )
 
     async def _build_prepared_entity(
@@ -1148,11 +1158,18 @@ class BatchIndexer:
         self,
         file: IndexInputFile,
         checksum: str,
+        *,
+        sync_checksum: str | None,
     ) -> dict[str, object]:
-        """Return physical file state without changing note semantics."""
+        """Return physical file state without changing note semantics.
+
+        `sync_checksum` is always written, so a file that is no longer rewritten clears the
+        original it once replaced.
+        """
         updates: dict[str, object] = {
             "file_path": file.path,
             "checksum": checksum,
+            "sync_checksum": sync_checksum,
             "size": file.size,
         }
         if file.last_modified is not None:
@@ -1168,7 +1185,8 @@ class BatchIndexer:
         *,
         include_created_at: bool = True,
     ) -> dict[str, object]:
-        updates = self._file_bookkeeping_updates(file, checksum)
+        # Indexing never rewrites a resource, so it has no sync checksum.
+        updates = self._file_bookkeeping_updates(file, checksum, sync_checksum=None)
         if include_created_at and file.created_at is not None:
             updates["created_at"] = file.created_at
         if file.last_modified is not None:
