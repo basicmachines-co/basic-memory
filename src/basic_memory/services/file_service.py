@@ -35,6 +35,20 @@ class FrontmatterUpdateResult:
     content: str
 
 
+@dataclass(frozen=True, slots=True)
+class StoredFile:
+    """File bytes and the checksum storage reports for exactly those bytes.
+
+    Change detection compares indexed checksums against what storage reports, so the
+    checksum is in storage's domain: SHA-256 of the bytes on a local filesystem, the
+    object ETag on S3. Indexing must record the same domain or a file it already knows
+    reads as changed (basic-memory-cloud#2350).
+    """
+
+    content: bytes
+    checksum: str
+
+
 class FileService:
     """Service for handling file operations with concurrency control.
 
@@ -317,6 +331,11 @@ class FileService:
         except Exception as e:
             logger.exception("File read error", path=str(full_path), error=str(e))
             raise FileOperationError(f"Failed to read file: {e}") from e
+
+    async def read_stored_file(self, path: FilePath) -> StoredFile:
+        """Read file bytes with their storage checksum, the SHA-256 of the bytes locally."""
+        content = await self.read_file_bytes(path)
+        return StoredFile(content=content, checksum=await file_utils.compute_checksum(content))
 
     async def read_file(self, path: FilePath) -> Tuple[str, str]:
         """Read file and compute checksum using true async I/O.
