@@ -20,6 +20,7 @@ from basic_memory.indexing.change_planning import (
     storage_checksums_from_sources,
 )
 from basic_memory.indexing.change_detector import (
+    MAX_MOVE_CANDIDATE_CHECKSUMS,
     MAX_QUERY_BIND_PARAMETERS,
     ChangeDetector,
     detect_project_file_changes,
@@ -235,7 +236,9 @@ class FakeEntityRepository:
     ) -> tuple[SimpleNamespace, ...]:
         self.loaded_move_checksums = tuple(checksums)
         return (
-            SimpleNamespace(file_path="old/moved.md", checksum="moved-checksum", sync_checksum=None),
+            SimpleNamespace(
+                file_path="old/moved.md", checksum="moved-checksum", sync_checksum=None
+            ),
             SimpleNamespace(file_path="ignored.md", checksum=None, sync_checksum=None),
         )
 
@@ -423,7 +426,12 @@ async def test_load_move_candidates_batches_beyond_bind_limit(
 
     candidates = await detector.load_move_candidates(move_target_checksums)
 
-    assert repository.checksum_batch_sizes == [MAX_QUERY_BIND_PARAMETERS, 5]
-    assert all(size <= MAX_QUERY_BIND_PARAMETERS for size in repository.checksum_batch_sizes)
+    # Each checksum binds twice (checksum and sync_checksum), so batches are half the cap.
+    assert repository.checksum_batch_sizes == [
+        MAX_MOVE_CANDIDATE_CHECKSUMS,
+        MAX_MOVE_CANDIDATE_CHECKSUMS,
+        5,
+    ]
+    assert all(2 * size <= MAX_QUERY_BIND_PARAMETERS for size in repository.checksum_batch_sizes)
     # Every distinct checksum yields a merged candidate.
     assert {candidate.checksum for candidate in candidates} == set(move_target_checksums.values())

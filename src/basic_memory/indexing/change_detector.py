@@ -37,6 +37,8 @@ from basic_memory.indexing.file_index_planning import (
 # filter), so a project larger than the cap would raise OperationalError if we
 # sent every value in one query. Chunk IN() lookups well under the SQLite limit.
 MAX_QUERY_BIND_PARAMETERS = 900
+# Move lookups bind each checksum twice (entity.checksum and entity.sync_checksum).
+MAX_MOVE_CANDIDATE_CHECKSUMS = MAX_QUERY_BIND_PARAMETERS // 2
 
 
 class ChangeDetectionStore(Protocol):
@@ -135,7 +137,7 @@ class ChangeDetector:
         move_candidates: list[FileMoveCandidate] = []
         async with db.scoped_session(self.session_maker) as session:
             # Batch the IN() lookup so large projects stay under the bind limit.
-            for checksum_batch in batched(checksums, MAX_QUERY_BIND_PARAMETERS):
+            for checksum_batch in batched(checksums, MAX_MOVE_CANDIDATE_CHECKSUMS):
                 candidates = await self.entity_repository.find_by_checksums(session, checksum_batch)
                 # A file the sync client restored still carries the original's
                 # checksum, so it proves a move as well as our rewrite does.

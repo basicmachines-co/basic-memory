@@ -1732,6 +1732,62 @@ async def test_a_one_way_sync_restoring_the_original_is_recognized_as_indexed(
     assert not indexed[path].recognizes(edited_checksum)
 
 
+@pytest.mark.asyncio
+async def test_reindexing_our_own_rewrite_keeps_the_sync_original(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+):
+    """A forced reindex of the rewritten file rewrites nothing, but the original is still out there.
+
+    Forgetting it would let the sync client's next restore read as new, and an accepted edit
+    after that would strand as an external change. A genuinely different file still clears it.
+    """
+    path = "notes/synced.md"
+    original_content = "# Synced\n\nWritten by an agent with no frontmatter.\n"
+    await _create_file(project_config.home / path, original_content)
+    original_checksum = await file_service.compute_checksum(path)
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+    await batch_indexer.index_markdown_file(
+        await _load_input(file_service, path),
+        index_search=False,
+    )
+
+    await batch_indexer.index_markdown_file(
+        await _load_input(file_service, path),
+        index_search=False,
+    )
+
+    async with db.scoped_session(search_service.session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, path)
+    assert entity is not None
+    assert entity.sync_checksum == original_checksum
+
+    # Someone else edits the file: it is neither our rewrite nor the original.
+    edited = (project_config.home / path).read_text() + "\nA new line.\n"
+    await _create_file(project_config.home / path, edited)
+    await batch_indexer.index_markdown_file(
+        await _load_input(file_service, path),
+        index_search=False,
+    )
+
+    async with db.scoped_session(search_service.session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, path)
+    assert entity is not None
+    assert entity.sync_checksum is None
+
+
 @dataclass(frozen=True, slots=True)
 class _StoredChecksum:
     checksum: str | None

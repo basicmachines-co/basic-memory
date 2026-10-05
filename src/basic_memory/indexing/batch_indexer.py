@@ -1029,6 +1029,16 @@ class BatchIndexer:
             )
             if is_new is None:
                 is_new = existing is None
+            # A reindex that rewrote nothing, of a file still holding the bytes we indexed,
+            # is our own earlier rewrite. The sync client's original is still out there,
+            # so keep recognizing it rather than letting the next restore read as new.
+            # Read before the entity update below, which masks existing.checksum to None.
+            if (
+                prepared.sync_checksum is None
+                and existing is not None
+                and existing.checksum == prepared.final_checksum
+            ):
+                prepared.sync_checksum = existing.sync_checksum
             if is_new:
                 entity = await self.entity_service.create_entity_from_markdown(
                     Path(prepared.file.path),
