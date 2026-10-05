@@ -297,6 +297,7 @@ def prepared_write(
         file_path="notes/a.md",
         markdown_content="# A note\n",
         previous_file_checksum="old-file-sum",
+        previous_sync_checksum=None,
         attempted_at=datetime(2026, 6, 18, 14, 17, tzinfo=UTC),
     )
 
@@ -368,6 +369,7 @@ async def test_content_store_note_materialization_file_writer_writes_prepared_no
         file_path="notes/a.md",
         markdown_content="# A note\n",
         previous_file_checksum=None,
+        previous_sync_checksum=None,
         attempted_at=datetime(2026, 6, 18, 14, 17, tzinfo=UTC),
     )
     modified_at = datetime(2026, 6, 18, 14, 18, tzinfo=UTC)
@@ -421,7 +423,7 @@ def test_plan_note_materialization_preflight_returns_stale_terminal_result() -> 
 
     result = plan_note_materialization_preflight(
         request,
-        entity=SimpleNamespace(file_path="notes/a.md"),
+        entity=SimpleNamespace(file_path="notes/a.md", sync_checksum=None),
         note_content=SimpleNamespace(
             db_version=5,
             db_checksum="newer-db-checksum",
@@ -445,9 +447,11 @@ def test_plan_note_materialization_preflight_returns_prepared_write() -> None:
     request = materialization_request()
     attempted_at = datetime(2026, 6, 18, 14, 17, tzinfo=UTC)
 
+    # The entity's sync checksum travels with the write, so a sync client's restored
+    # original does not strand the edit as an external change.
     result = plan_note_materialization_preflight(
         request,
-        entity=SimpleNamespace(file_path="notes/a.md"),
+        entity=SimpleNamespace(file_path="notes/a.md", sync_checksum="synced-original"),
         note_content=SimpleNamespace(
             db_version=4,
             db_checksum="db-checksum",
@@ -463,6 +467,7 @@ def test_plan_note_materialization_preflight_returns_prepared_write() -> None:
             file_path="notes/a.md",
             markdown_content="# A note\n",
             previous_file_checksum="old-file-sum",
+            previous_sync_checksum="synced-original",
             attempted_at=attempted_at,
         )
     )
@@ -473,7 +478,7 @@ def test_plan_missed_note_materialization_claim_returns_typed_stale_result() -> 
 
     result = plan_missed_note_materialization_claim(
         request,
-        entity=SimpleNamespace(file_path="notes/a.md"),
+        entity=SimpleNamespace(file_path="notes/a.md", sync_checksum=None),
         note_content=materialization_note_content(),
         attempted_at=datetime(2026, 6, 18, 15, 0, tzinfo=UTC),
     )
@@ -522,6 +527,7 @@ async def test_repository_note_materialization_preflight_marks_current_note_writ
             file_path="notes/a.md",
             markdown_content="# A note\n",
             previous_file_checksum="old-file-sum",
+            previous_sync_checksum=None,
             attempted_at=attempted_at,
         )
     )

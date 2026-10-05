@@ -29,6 +29,10 @@ class RuntimePreparedNoteWrite:
     cleanup_file_checksum: RuntimeFileChecksum | None
     attempted_at: datetime
     object_metadata: RuntimeNoteObjectMetadata
+    # Storage checksum of the original a sync client restored over indexing's frontmatter
+    # rewrite (entity.sync_checksum). That file is the previous file plus or minus our
+    # frontmatter, not an external edit, so a write may replace it.
+    previous_sync_checksum: RuntimeFileChecksum | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +71,7 @@ def plan_prepared_note_write(
     file_path: RuntimeFilePath,
     markdown_content: str,
     previous_file_checksum: RuntimeFileChecksum | None,
+    previous_sync_checksum: RuntimeFileChecksum | None,
     attempted_at: datetime,
 ) -> RuntimePreparedNoteWrite:
     """Build the immutable storage write snapshot for one accepted note version."""
@@ -74,6 +79,7 @@ def plan_prepared_note_write(
         file_path=file_path,
         markdown_content=markdown_content,
         previous_file_checksum=previous_file_checksum,
+        previous_sync_checksum=previous_sync_checksum,
         cleanup_file_path=request.cleanup_file_path,
         cleanup_file_checksum=request.cleanup_file_checksum,
         attempted_at=attempted_at,
@@ -114,10 +120,20 @@ async def write_prepared_note_to_content_store(
             file_updated_at=file_metadata.modified_at,
         )
 
+    # A sync client may have restored the original over indexing's frontmatter rewrite.
+    # Indexing treats that file as current, so the expected-previous guard must too, or
+    # every later edit would be stranded as an external change.
+    restored_sync_original = (
+        actual_checksum is not None and actual_checksum == prepared_write.previous_sync_checksum
+    )
     # A present file that matches neither the accepted content nor the expected
     # previous checksum is a genuine external edit: refuse to overwrite it.
-    conflict = runtime_file_conflict(
-        actual_checksum, prepared_write.previous_file_checksum, prepared_write.file_path
+    conflict = (
+        None
+        if restored_sync_original
+        else runtime_file_conflict(
+            actual_checksum, prepared_write.previous_file_checksum, prepared_write.file_path
+        )
     )
     if conflict is not None:
         raise RuntimeFileConflictError(conflict)
