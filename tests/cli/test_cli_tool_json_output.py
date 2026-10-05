@@ -591,6 +591,37 @@ def test_edit_note_error_response(mock_mcp_edit):
     assert result.exit_code == 1
 
 
+@patch(
+    "basic_memory.mcp.tools.edit_note",
+    new_callable=AsyncMock,
+    side_effect=ToolError(
+        json.dumps(
+            {
+                "title": None,
+                "permalink": None,
+                "file_path": None,
+                "checksum": None,
+                "operation": "append",
+                "fileCreated": False,
+                "error": "The note was modified concurrently. Reload the latest content and retry.",
+            }
+        )
+    ),
+)
+def test_edit_note_reports_a_tool_error_payload_and_exits_nonzero(
+    mock_mcp_edit: AsyncMock,
+) -> None:
+    """A failed edit raised as a tool error prints its error field, not raw JSON."""
+    result = runner.invoke(
+        cli_app,
+        ["tool", "edit-note", "test-note", "--operation", "append", "--content", "content"],
+    )
+
+    assert result.exit_code == 1
+    assert "Error: The note was modified concurrently." in result.output
+    assert '"fileCreated"' not in result.output
+
+
 # --- build-context ---
 
 

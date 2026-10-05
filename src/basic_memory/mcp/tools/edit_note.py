@@ -1,6 +1,7 @@
 """Edit note tool for Basic Memory MCP server."""
 
-from typing import Any, TYPE_CHECKING, Annotated, Literal, Optional
+import json
+from typing import Any, TYPE_CHECKING, Annotated, Literal, NoReturn, Optional
 
 import frontmatter
 import logfire
@@ -231,6 +232,15 @@ def _format_cross_project_entity_response(
 The identifier `{identifier}` resolved to a note outside the selected project `{active_project}`, so no changes were made.
 
 Retry with `project_id="{target_project_id}"`, or use `list_memory_projects()` to confirm the intended project before editing."""
+
+
+def _raise_edit_failure(output_format: str, payload: dict[str, Any], text: str) -> NoReturn:
+    """Report a failed edit as a tool error, keeping the guidance for the caller.
+
+    A returned "Edit Failed" string reads as success to MCP clients; raising makes
+    the result an error (isError) while the message still carries the same help.
+    """
+    raise ToolError(json.dumps(payload) if output_format == "json" else text)
 
 
 def _format_error_response(
@@ -517,6 +527,9 @@ async def edit_note(
                    metadata={"status": "resolved", "closed_at": "2026-06-18T10:42:00Z"})
 
     Raises:
+        ToolError: If the edit fails or is refused (for example, the note was modified
+            concurrently). The message carries the troubleshooting guidance, or the
+            structured result in JSON mode.
         HTTPError: If project doesn't exist or is inaccessible
         ValueError: If operation is invalid or required parameters are missing
         SecurityError: If identifier attempts path traversal
@@ -888,8 +901,9 @@ async def edit_note(
             except Exception as e:
                 logger.error(f"Error editing note: {e}")
                 if isinstance(e, UnresolvedProjectRouteError):
-                    if output_format == "json":
-                        return {
+                    _raise_edit_failure(
+                        output_format,
+                        {
                             "title": None,
                             "permalink": None,
                             "file_path": None,
@@ -899,13 +913,17 @@ async def edit_note(
                             "error": "UNRESOLVED_PROJECT_ROUTE",
                             "project": active_project.name,
                             "projectRoute": e.project_prefix,
-                        }
-                    return _format_unresolved_project_route_response(
-                        error=e,
-                        active_project=active_project.name,
+                        },
+                        _format_unresolved_project_route_response(
+                            error=e,
+                            active_project=active_project.name,
+                        ),
                     )
-                if output_format == "json":
-                    return {
+                # A refused edit (for example a 409 when the note was modified
+                # concurrently) must not read as success, or the caller never retries it.
+                _raise_edit_failure(
+                    output_format,
+                    {
                         "title": None,
                         "permalink": None,
                         "file_path": None,
@@ -913,12 +931,13 @@ async def edit_note(
                         "operation": operation,
                         "fileCreated": False,
                         "error": str(e),
-                    }
-                return _format_error_response(
-                    str(e),
-                    operation,
-                    identifier,
-                    find_text,
-                    effective_replacements,
-                    active_project.name,
+                    },
+                    _format_error_response(
+                        str(e),
+                        operation,
+                        identifier,
+                        find_text,
+                        effective_replacements,
+                        active_project.name,
+                    ),
                 )
