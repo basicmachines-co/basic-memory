@@ -6,7 +6,11 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from basic_memory.indexing.file_index_planning import FileIndexChecksum, FileIndexPath
+from basic_memory.indexing.file_index_planning import (
+    FileIndexChecksum,
+    FileIndexPath,
+    IndexedChecksums,
+)
 
 
 class StorageChecksumSource(Protocol):
@@ -60,7 +64,7 @@ class ChangeDetectionSnapshot:
     """Storage and indexed-DB state for one project change-detection pass."""
 
     storage_checksum_by_path: Mapping[FileIndexPath, FileIndexChecksum | None]
-    db_checksum_by_path: Mapping[FileIndexPath, FileIndexChecksum | None]
+    db_checksum_by_path: Mapping[FileIndexPath, IndexedChecksums]
     all_db_paths: tuple[FileIndexPath, ...]
     move_candidates: tuple[FileMoveCandidate, ...] = ()
 
@@ -80,7 +84,7 @@ def storage_checksums_from_sources(
 def plan_move_target_checksums(
     *,
     storage_checksum_by_path: Mapping[FileIndexPath, FileIndexChecksum | None],
-    db_checksum_by_path: Mapping[FileIndexPath, FileIndexChecksum | None],
+    db_checksum_by_path: Mapping[FileIndexPath, IndexedChecksums],
 ) -> dict[FileIndexPath, FileIndexChecksum]:
     """Return storage objects eligible to prove a move, keyed by destination path.
 
@@ -110,7 +114,7 @@ def plan_change_detection_snapshot(snapshot: ChangeDetectionSnapshot) -> ChangeR
 def plan_file_changes(
     *,
     storage_checksum_by_path: Mapping[FileIndexPath, FileIndexChecksum | None],
-    db_checksum_by_path: Mapping[FileIndexPath, FileIndexChecksum | None],
+    db_checksum_by_path: Mapping[FileIndexPath, IndexedChecksums],
     all_db_paths: Sequence[FileIndexPath],
     move_candidates: Sequence[FileMoveCandidate],
 ) -> ChangeReport:
@@ -121,14 +125,14 @@ def plan_file_changes(
     unchanged_files: list[FileIndexPath] = []
 
     for path, storage_checksum in storage_checksum_by_path.items():
-        db_checksum = db_checksum_by_path.get(path)
-        if db_checksum is None:
+        indexed = db_checksum_by_path.get(path)
+        if indexed is None or indexed.checksum is None:
             new_files.append(path)
             continue
-        # An unknown (None) storage checksum never equals the indexed one, so
+        # An unknown (None) storage checksum is never recognized, so
         # an unobservable-but-present file re-enters indexing as modified —
         # the batch planner re-reads it later — instead of counting as deleted.
-        if storage_checksum != db_checksum:
+        if not indexed.recognizes(storage_checksum):
             modified_files.append(path)
             continue
         unchanged_files.append(path)

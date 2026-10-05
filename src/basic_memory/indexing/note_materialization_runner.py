@@ -168,6 +168,9 @@ class NoteMaterializationEntitySource(Protocol):
     @property
     def file_path(self) -> RuntimeFilePath: ...
 
+    @property
+    def sync_checksum(self) -> RuntimeFileChecksum | None: ...
+
 
 class NoteMaterializationContentSource(RuntimeNoteContentVersionSource, Protocol):
     """note_content fields needed to plan one note materialization preflight."""
@@ -287,6 +290,7 @@ def plan_note_materialization_preflight(
             file_path=entity.file_path,
             markdown_content=note_content.markdown_content,
             previous_file_checksum=note_content.file_checksum,
+            previous_sync_checksum=entity.sync_checksum,
             attempted_at=attempted_at,
         )
     )
@@ -488,6 +492,7 @@ class RepositoryNoteMaterializationPreflight:
                     file_path=entity.file_path,
                     markdown_content=claimed_content.markdown_content,
                     previous_file_checksum=claimed_content.previous_file_checksum,
+                    previous_sync_checksum=entity.sync_checksum,
                     attempted_at=attempted_at,
                 )
             )
@@ -638,6 +643,10 @@ class RepositoryNoteMaterializationPublisher:
                 {
                     "mtime": written_file.file_updated_at.timestamp(),
                     "size": len(prepared_write.markdown_content.encode("utf-8")),
+                    # The file now holds accepted content, so a sync client's original
+                    # is stale. Recognizing it after this would let a restore silently
+                    # revert the edit on storage while the index keeps it.
+                    "sync_checksum": None,
                 },
             )
             if not updated:

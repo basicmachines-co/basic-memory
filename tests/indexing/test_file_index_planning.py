@@ -6,6 +6,7 @@ from basic_memory.indexing.file_index_planning import (
     FileIndexPlan,
     FileIndexPlanSummary,
     FileIndexTarget,
+    IndexedChecksums,
     build_file_index_plan,
     file_index_targets_from_runtime_batch_request,
     plan_file_index_target_from_current,
@@ -79,7 +80,7 @@ def test_file_index_targets_from_runtime_batch_request_uses_legacy_paths() -> No
 def test_observed_checksum_match_plans_current_without_current_metadata() -> None:
     decision = plan_file_index_target_from_observed(
         FileIndexTarget(path="notes/current.md", observed_checksum="etag-current"),
-        db_checksum="etag-current",
+        indexed=IndexedChecksums("etag-current"),
     )
 
     assert decision == FileIndexDecision(
@@ -92,7 +93,7 @@ def test_observed_checksum_match_plans_current_without_current_metadata() -> Non
 def test_observed_checksum_mismatch_defers_to_current_metadata() -> None:
     decision = plan_file_index_target_from_observed(
         FileIndexTarget(path="notes/dirty.md", observed_checksum="old-etag"),
-        db_checksum="db-etag",
+        indexed=IndexedChecksums("db-etag"),
     )
 
     assert decision is None
@@ -101,17 +102,17 @@ def test_observed_checksum_mismatch_defers_to_current_metadata() -> None:
 def test_current_metadata_plans_missing_current_or_read() -> None:
     missing = plan_file_index_target_from_current(
         FileIndexTarget(path="notes/missing.md", observed_checksum="old-etag"),
-        db_checksum="db-etag",
+        indexed=IndexedChecksums("db-etag"),
         current_checksum=None,
     )
     caught_up = plan_file_index_target_from_current(
         FileIndexTarget(path="notes/caught-up.md", observed_checksum="old-etag"),
-        db_checksum="db-etag",
+        indexed=IndexedChecksums("db-etag"),
         current_checksum="db-etag",
     )
     dirty = plan_file_index_target_from_current(
         FileIndexTarget(path="notes/dirty.md", observed_checksum="old-etag"),
-        db_checksum="db-etag",
+        indexed=IndexedChecksums("db-etag"),
         current_checksum="new-etag",
     )
 
@@ -200,3 +201,32 @@ def test_plan_legacy_file_index_targets_reads_all_paths_without_decisions() -> N
         paths_to_read=("notes/one.md", "notes/two.md"),
         decisions=(),
     )
+
+
+def test_indexed_checksums_recognize_the_indexed_file_and_the_synced_original() -> None:
+    indexed = IndexedChecksums(checksum="rewritten", sync_checksum="original")
+
+    assert indexed.recognizes("rewritten")
+    assert indexed.recognizes("original")
+    assert not indexed.recognizes("edited")
+    assert not indexed.recognizes(None)
+    # An incomplete row must be read again, even when the synced original comes back.
+    assert not IndexedChecksums(checksum=None, sync_checksum="original").recognizes("original")
+
+
+def test_a_resynced_original_plans_current_from_observed_and_current_metadata() -> None:
+    indexed = IndexedChecksums(checksum="rewritten", sync_checksum="original")
+
+    observed = plan_file_index_target_from_observed(
+        FileIndexTarget(path="notes/synced.md", observed_checksum="original"),
+        indexed=indexed,
+    )
+    current = plan_file_index_target_from_current(
+        FileIndexTarget(path="notes/synced.md"),
+        indexed=indexed,
+        current_checksum="original",
+    )
+
+    assert observed is not None
+    assert observed.status == FileIndexDecisionStatus.current
+    assert current.status == FileIndexDecisionStatus.current

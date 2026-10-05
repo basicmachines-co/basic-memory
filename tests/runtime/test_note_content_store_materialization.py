@@ -89,6 +89,7 @@ async def test_write_prepared_note_to_content_store_writes_metadata_and_returns_
         file_path="notes/a.md",
         markdown_content="# A note\n",
         previous_file_checksum="old-checksum",
+        previous_sync_checksum=None,
         attempted_at=attempted_at,
     )
     content_store = _ContentStore(
@@ -130,6 +131,7 @@ async def test_write_prepared_note_to_content_store_rejects_unexpected_existing_
         file_path="notes/a.md",
         markdown_content="# A note\n",
         previous_file_checksum=None,
+        previous_sync_checksum=None,
         attempted_at=datetime(2026, 6, 19, 15, 59, tzinfo=UTC),
     )
     content_store = _ContentStore(existing_checksum="external-checksum")
@@ -137,4 +139,44 @@ async def test_write_prepared_note_to_content_store_rejects_unexpected_existing_
     with pytest.raises(RuntimeFileConflictError):
         await write_prepared_note_to_content_store(content_store, prepared_write)
 
+    assert content_store.write_calls == []
+
+
+@pytest.mark.asyncio
+async def test_a_restored_sync_original_is_replaced_not_reported_as_external() -> None:
+    """A sync client restored the pre-frontmatter original; an accepted edit still lands.
+
+    Indexing treats that original as current (entity.sync_checksum), so the next accepted
+    edit must not be stranded as external_change_detected (basic-memory-cloud#2350).
+    """
+    prepared_write = plan_prepared_note_write(
+        request=_request(),
+        file_path="notes/a.md",
+        markdown_content="# A note\n\nEdited through MCP.\n",
+        previous_file_checksum="rewritten-with-frontmatter",
+        previous_sync_checksum="synced-original",
+        attempted_at=datetime(2026, 6, 19, 15, 59, tzinfo=UTC),
+    )
+    content_store = _ContentStore(existing_checksum="synced-original")
+
+    written_file = await write_prepared_note_to_content_store(content_store, prepared_write)
+
+    assert written_file.file_checksum == "written-checksum"
+    assert [call[1] for call in content_store.write_calls] == ["# A note\n\nEdited through MCP.\n"]
+
+
+@pytest.mark.asyncio
+async def test_a_file_matching_neither_previous_checksum_is_still_external() -> None:
+    prepared_write = plan_prepared_note_write(
+        request=_request(),
+        file_path="notes/a.md",
+        markdown_content="# A note\n",
+        previous_file_checksum="rewritten-with-frontmatter",
+        previous_sync_checksum="synced-original",
+        attempted_at=datetime(2026, 6, 19, 15, 59, tzinfo=UTC),
+    )
+    content_store = _ContentStore(existing_checksum="someone-else-edited")
+
+    with pytest.raises(RuntimeFileConflictError):
+        await write_prepared_note_to_content_store(content_store, prepared_write)
     assert content_store.write_calls == []

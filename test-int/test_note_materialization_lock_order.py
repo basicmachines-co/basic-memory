@@ -101,6 +101,7 @@ async def test_materialization_and_accepted_mutation_share_note_content_first_or
         file_path=file_path,
         markdown_content=markdown,
         previous_file_checksum="previous-file-checksum",
+        previous_sync_checksum=None,
         attempted_at=attempted_at,
     )
     written_file = RuntimeWrittenFileState(
@@ -246,6 +247,7 @@ async def test_publish_cas_loss_never_reverts_newer_accepted_write(
         file_path=file_path,
         markdown_content=original_markdown,
         previous_file_checksum="previous-file-checksum",
+        previous_sync_checksum=None,
         attempted_at=datetime(2026, 8, 5, 2, 0, tzinfo=UTC),
     )
     written_file = RuntimeWrittenFileState(

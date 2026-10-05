@@ -17,6 +17,7 @@ from basic_memory.indexing.batch_indexer import (
 )
 from basic_memory.indexing.change_detector import ChangeDetector
 from basic_memory.indexing.file_index_checking import RepositoryIndexedFileChecksumSource
+from basic_memory.indexing.file_index_planning import IndexedChecksums
 from basic_memory.indexing.input_file_adaptation import build_index_input_files
 from basic_memory.indexing.models import IndexInputFile, StorageIndexFileWriter
 from basic_memory.models import Entity, NoteSection, Observation, Relation, RelationSearchRefresh
@@ -781,4 +782,6 @@ async def test_mime_classified_markdown_suffix_resource_converges(
             session_maker=search_service.session_maker,
             content_type_provider=file_service,
         )
-        assert await source.load_indexed_file_checksums([path]) == {path: resource.checksum}
+        assert await source.load_indexed_file_checksums([path]) == {
+            path: IndexedChecksums(resource.checksum)
+        }

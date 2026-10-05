@@ -1420,6 +1420,7 @@ class TestRuntimeContracts:
             file_path="notes/a.md",
             markdown_content="# A note\n",
             previous_file_checksum="old-file-sum",
+            previous_sync_checksum=None,
             attempted_at=attempted_at,
         )
 

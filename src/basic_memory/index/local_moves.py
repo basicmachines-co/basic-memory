@@ -21,6 +21,7 @@ from basic_memory.file_utils import (
     parse_frontmatter,
     remove_frontmatter,
 )
+from basic_memory.indexing.file_index_planning import IndexedChecksums
 from basic_memory.markdown import EntityMarkdown
 from basic_memory.indexing.project_index_maintenance import (
     ProjectIndexMaintenanceRunner,
@@ -45,6 +46,9 @@ class LocalMoveEntitySource(Protocol):
 
     @property
     def checksum(self) -> object | None: ...
+
+    @property
+    def sync_checksum(self) -> object | None: ...
 
 
 class LocalMoveEntityRepository(Protocol):
@@ -277,7 +281,10 @@ class LocalWatchMoveProcessor:
                     old_path is None
                     or delete_index in used_delete_indexes
                     or old_path == new_path
-                    or deleted_checksums.get(old_path) != new_checksum
+                    or old_path not in deleted_checksums
+                    # The file may still be the original a sync client restored over
+                    # our frontmatter rewrite, which identifies the entity as well.
+                    or not deleted_checksums[old_path].recognizes(new_checksum)
                 ):
                     continue
 
@@ -366,11 +373,11 @@ class LocalWatchMoveProcessor:
     async def load_deleted_checksums(
         self,
         deleted_paths: Sequence[RuntimeFilePath],
-    ) -> dict[RuntimeFilePath, str]:
+    ) -> dict[RuntimeFilePath, IndexedChecksums]:
         if not deleted_paths:
             return {}
 
-        checksums: dict[RuntimeFilePath, str] = {}
+        checksums: dict[RuntimeFilePath, IndexedChecksums] = {}
         async with db.scoped_session(self.session_maker) as session:
             for deleted_path in deleted_paths:
                 entity = await self.entity_repository.get_by_file_path(
@@ -379,7 +386,12 @@ class LocalWatchMoveProcessor:
                     load_relations=False,
                 )
                 if entity is not None and entity.checksum is not None:
-                    checksums[deleted_path] = str(entity.checksum)
+                    checksums[deleted_path] = IndexedChecksums(
+                        checksum=str(entity.checksum),
+                        sync_checksum=(
+                            str(entity.sync_checksum) if entity.sync_checksum is not None else None
+                        ),
+                    )
         return checksums
 
     async def current_checksum(self, file_path: RuntimeFilePath) -> str | None:

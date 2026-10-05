@@ -23,6 +23,7 @@ from basic_memory.index.note_content_materialization import (
 )
 from basic_memory import db
 from basic_memory.models import Project
+from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.note_content_repository import (
     AcceptedNoteContentWrite,
     NoteContentRepository,
@@ -707,6 +708,46 @@ async def test_recover_stuck_materializations_writes_file_and_marks_synced(
     assert row.file_write_status == "synced"
     assert row.file_checksum is not None
     assert row.file_version == 1
+
+
+@pytest.mark.asyncio
+async def test_materializing_an_accepted_edit_forgets_the_sync_original(
+    session_maker,
+    test_project: Project,
+    sample_entity,
+    file_service: FileService,
+) -> None:
+    """Once accepted content is on disk, a sync client's original is stale.
+
+    Recognizing it afterwards would let a one-way sync silently revert the edit on
+    storage while the index kept it (basic-memory-cloud#2350).
+    """
+    entity_repository = EntityRepository(project_id=test_project.id)
+    async with db.scoped_session(session_maker) as session:
+        assert await entity_repository.update_fields(
+            session, sample_entity.id, {"sync_checksum": "synced-original"}
+        )
+    await _seed_stuck_note_content(
+        session_maker,
+        project_id=test_project.id,
+        entity_id=sample_entity.id,
+        markdown_content="# Edited\n\nAccepted through MCP.\n",
+        db_version=1,
+        db_checksum="db-checksum-1",
+        file_write_status="writing",
+    )
+
+    recovered = await recover_stuck_materializations(
+        session_maker=session_maker,
+        file_service=file_service,
+        project_id=test_project.id,
+    )
+
+    assert recovered.written == 1
+    async with db.scoped_session(session_maker) as session:
+        entity = await entity_repository.select_by_id(session, sample_entity.id)
+    assert entity is not None
+    assert entity.sync_checksum is None
 
 
 @pytest.mark.asyncio

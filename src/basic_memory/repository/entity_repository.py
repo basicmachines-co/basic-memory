@@ -374,7 +374,8 @@ class EntityRepository(Repository[Entity]):
     ) -> List[Row[Any]]:
         """Get file paths and checksums for multiple entities (optimized for change detection).
 
-        Only queries file_path and checksum columns, skips loading full entities and relationships.
+        Only queries file_path and the checksum columns, skips loading full entities and
+        relationships.
         This is much faster than loading complete Entity objects when you only need checksums.
 
         A markdown path whose indexed content type is not markdown is an incomplete
@@ -388,7 +389,7 @@ class EntityRepository(Repository[Entity]):
                 no MIME information, matching the indexer's suffix-only classification.
 
         Returns:
-            List of (file_path, checksum) tuples for matching entities
+            List of (file_path, checksum, sync_checksum) tuples for matching entities
         """
         if not file_paths:  # pragma: no cover
             return []  # pragma: no cover
@@ -447,7 +448,9 @@ class EntityRepository(Repository[Entity]):
                 (or_(*incomplete_projection), None),
                 else_=Entity.checksum,
             ).label("checksum")
-            path_query = select(Entity.file_path, indexed_checksum).where(
+            # The sync checksum is returned as stored: an incomplete row's masked checksum
+            # already forces a read, whatever the sync checksum says.
+            path_query = select(Entity.file_path, indexed_checksum, Entity.sync_checksum).where(
                 Entity.file_path.in_(paths)
             )
             queries.append(self._add_project_filter(path_query))
@@ -497,13 +500,14 @@ class EntityRepository(Repository[Entity]):
         if not checksums:  # pragma: no cover
             return []  # pragma: no cover
 
-        # Query: SELECT * FROM entities WHERE checksum IN (checksum1, checksum2, ...)
-        query = self.select().where(Entity.checksum.in_(checksums))  # pragma: no cover
-        # Don't load relationships for move detection - we only need file_path and checksum
-        result = await self.execute_query(
-            session, query, use_query_options=False
-        )  # pragma: no cover
-        return list(result.scalars().all())  # pragma: no cover
+        # A moved file may still hold the original a sync client restored over our
+        # frontmatter rewrite, so its sync checksum identifies the entity too.
+        query = self.select().where(
+            or_(Entity.checksum.in_(checksums), Entity.sync_checksum.in_(checksums))
+        )
+        # Don't load relationships for move detection - we only need file_path and checksums
+        result = await self.execute_query(session, query, use_query_options=False)
+        return list(result.scalars().all())
 
     async def delete_by_file_path(self, session: AsyncSession, file_path: Union[Path, str]) -> bool:
         """Delete entity with the provided file_path.

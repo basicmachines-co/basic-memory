@@ -83,6 +83,10 @@ class Entity(Base):
     file_path: Mapped[str] = mapped_column(String, index=True)
     # checksum of file
     checksum: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    # When indexing rewrote the file (frontmatter or permalink), the checksum of the file
+    # as it was synced in before that rewrite. A sync client that copies that original
+    # back over our rewrite is sending a file we already indexed (see IndexedChecksums).
+    sync_checksum: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
     # File metadata for sync
     # mtime: file modification timestamp (Unix epoch float) for change detection

@@ -9,6 +9,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import basic_memory.indexing.change_detector as change_detector_module
+from basic_memory.indexing.file_index_planning import IndexedChecksums
 from basic_memory.indexing.change_planning import (
     ChangeDetectionSnapshot,
     ChangeReport,
@@ -19,6 +20,7 @@ from basic_memory.indexing.change_planning import (
     storage_checksums_from_sources,
 )
 from basic_memory.indexing.change_detector import (
+    MAX_MOVE_CANDIDATE_CHECKSUMS,
     MAX_QUERY_BIND_PARAMETERS,
     ChangeDetector,
     detect_project_file_changes,
@@ -43,8 +45,8 @@ def test_plan_change_detection_snapshot_maps_typed_runtime_state() -> None:
     snapshot = ChangeDetectionSnapshot(
         storage_checksum_by_path=storage_checksum_by_path,
         db_checksum_by_path={
-            "unchanged.md": "same-checksum",
-            "modified.md": "old-checksum",
+            "unchanged.md": IndexedChecksums("same-checksum"),
+            "modified.md": IndexedChecksums("old-checksum"),
         },
         all_db_paths=("unchanged.md", "modified.md", "old/moved.md", "deleted.md"),
         move_candidates=(FileMoveCandidate(path="old/moved.md", checksum="moved-checksum"),),
@@ -73,7 +75,7 @@ def test_plan_file_changes_keeps_unobservable_files_out_of_deletes() -> None:
             "unreadable.md": None,
             "unreadable-new.md": None,
         },
-        db_checksum_by_path={"unreadable.md": "indexed-checksum"},
+        db_checksum_by_path={"unreadable.md": IndexedChecksums("indexed-checksum")},
         all_db_paths=("unreadable.md", "moved-away.md"),
         move_candidates=(FileMoveCandidate(path="moved-away.md", checksum="indexed-checksum"),),
     )
@@ -105,8 +107,8 @@ def test_plan_file_changes_detects_new_modified_unchanged_and_deleted_files() ->
             "new.md": "new-file-checksum",
         },
         db_checksum_by_path={
-            "unchanged.md": "same-checksum",
-            "modified.md": "old-checksum",
+            "unchanged.md": IndexedChecksums("same-checksum"),
+            "modified.md": IndexedChecksums("old-checksum"),
         },
         all_db_paths=("unchanged.md", "modified.md", "deleted.md"),
         move_candidates=(),
@@ -142,7 +144,7 @@ def test_plan_file_changes_never_moves_onto_existing_indexed_path() -> None:
     # edit. The edit and the delete must both survive.
     report = plan_file_changes(
         storage_checksum_by_path={"target.md": "source-checksum"},
-        db_checksum_by_path={"target.md": "target-checksum"},
+        db_checksum_by_path={"target.md": IndexedChecksums("target-checksum")},
         all_db_paths=("target.md", "source.md"),
         move_candidates=(FileMoveCandidate(path="source.md", checksum="source-checksum"),),
     )
@@ -160,7 +162,7 @@ def test_plan_file_changes_treats_copy_as_new_when_original_path_still_exists() 
             "original.md": "shared-checksum",
             "copy.md": "shared-checksum",
         },
-        db_checksum_by_path={"original.md": "shared-checksum"},
+        db_checksum_by_path={"original.md": IndexedChecksums("shared-checksum")},
         all_db_paths=("original.md",),
         move_candidates=(FileMoveCandidate(path="original.md", checksum="shared-checksum"),),
     )
@@ -189,11 +191,13 @@ class FakeChangeDetectionStore:
         self.loaded_checksum_paths: tuple[str, ...] | None = None
         self.loaded_move_checksums: dict[str, str] | None = None
 
-    async def load_indexed_file_checksums(self, paths: tuple[str, ...]) -> dict[str, str]:
+    async def load_indexed_file_checksums(
+        self, paths: tuple[str, ...]
+    ) -> dict[str, IndexedChecksums]:
         self.loaded_checksum_paths = paths
         return {
-            "unchanged.md": "same-checksum",
-            "modified.md": "old-checksum",
+            "unchanged.md": IndexedChecksums("same-checksum"),
+            "modified.md": IndexedChecksums("old-checksum"),
         }
 
     async def load_all_indexed_paths(self) -> tuple[str, ...]:
@@ -217,12 +221,12 @@ class FakeEntityRepository:
         self,
         session: object,
         paths: tuple[str, ...],
-    ) -> list[tuple[str, str | None]]:
+    ) -> list[tuple[str, str | None, str | None]]:
         self.loaded_checksum_paths = paths
         return [
-            ("unchanged.md", "same-checksum"),
-            ("modified.md", "old-checksum"),
-            ("null-checksum.md", None),
+            ("unchanged.md", "same-checksum", None),
+            ("modified.md", "old-checksum", None),
+            ("null-checksum.md", None, None),
         ]
 
     async def find_by_checksums(
@@ -232,8 +236,10 @@ class FakeEntityRepository:
     ) -> tuple[SimpleNamespace, ...]:
         self.loaded_move_checksums = tuple(checksums)
         return (
-            SimpleNamespace(file_path="old/moved.md", checksum="moved-checksum"),
-            SimpleNamespace(file_path="ignored.md", checksum=None),
+            SimpleNamespace(
+                file_path="old/moved.md", checksum="moved-checksum", sync_checksum=None
+            ),
+            SimpleNamespace(file_path="ignored.md", checksum=None, sync_checksum=None),
         )
 
     async def get_all_file_paths(self, session: object) -> list[str]:
@@ -347,11 +353,11 @@ class BatchRecordingEntityRepository:
         self,
         session: object,
         paths: tuple[str, ...],
-    ) -> list[tuple[str, str | None]]:
+    ) -> list[tuple[str, str | None, str | None]]:
         self.path_batch_sizes.append(len(paths))
         # Echo each requested path back as an indexed row so the merged result
         # can be checked for completeness across batches.
-        return [(path, f"checksum-{path}") for path in paths]
+        return [(path, f"checksum-{path}", None) for path in paths]
 
     async def find_by_checksums(
         self,
@@ -360,7 +366,7 @@ class BatchRecordingEntityRepository:
     ) -> tuple[SimpleNamespace, ...]:
         self.checksum_batch_sizes.append(len(checksums))
         return tuple(
-            SimpleNamespace(file_path=f"path-{checksum}", checksum=checksum)
+            SimpleNamespace(file_path=f"path-{checksum}", checksum=checksum, sync_checksum=None)
             for checksum in checksums
         )
 
@@ -393,7 +399,7 @@ async def test_load_indexed_file_checksums_batches_beyond_bind_limit(
     assert repository.path_batch_sizes == [MAX_QUERY_BIND_PARAMETERS, 5]
     assert all(size <= MAX_QUERY_BIND_PARAMETERS for size in repository.path_batch_sizes)
     # Every path survives the merge across batches.
-    assert result == {path: f"checksum-{path}" for path in paths}
+    assert result == {path: IndexedChecksums(f"checksum-{path}") for path in paths}
 
 
 @pytest.mark.asyncio
@@ -420,7 +426,12 @@ async def test_load_move_candidates_batches_beyond_bind_limit(
 
     candidates = await detector.load_move_candidates(move_target_checksums)
 
-    assert repository.checksum_batch_sizes == [MAX_QUERY_BIND_PARAMETERS, 5]
-    assert all(size <= MAX_QUERY_BIND_PARAMETERS for size in repository.checksum_batch_sizes)
+    # Each checksum binds twice (checksum and sync_checksum), so batches are half the cap.
+    assert repository.checksum_batch_sizes == [
+        MAX_MOVE_CANDIDATE_CHECKSUMS,
+        MAX_MOVE_CANDIDATE_CHECKSUMS,
+        5,
+    ]
+    assert all(2 * size <= MAX_QUERY_BIND_PARAMETERS for size in repository.checksum_batch_sizes)
     # Every distinct checksum yields a merged candidate.
     assert {candidate.checksum for candidate in candidates} == set(move_target_checksums.values())

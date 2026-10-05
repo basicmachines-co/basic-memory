@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.indexing.change_detector import ChangeDetector
+from basic_memory.indexing.file_index_planning import IndexedChecksums
 import basic_memory.indexing.relation_persistence as relation_persistence_module
 from basic_memory.indexing.models import IndexedObservation, IndexedRelation, IndexedSection
 from basic_memory.indexing.relation_persistence import RelationGenerationPublisher
@@ -610,7 +611,7 @@ async def test_failed_relation_publication_forces_change_detection_retry(
 
     change_detector = ChangeDetector(entity_repository, session_maker)
     assert await change_detector.load_indexed_file_checksums((sample_entity.file_path,)) == {
-        sample_entity.file_path: None
+        sample_entity.file_path: IndexedChecksums(None)
     }
     async with db.scoped_session(session_maker) as session:
         publication_markers = list(
@@ -637,7 +638,7 @@ async def test_failed_relation_publication_forces_change_detection_retry(
         relations=[IndexedRelation("links_to", "Target", None)],
     )
     assert await change_detector.load_indexed_file_checksums((sample_entity.file_path,)) == {
-        sample_entity.file_path: checksum
+        sample_entity.file_path: IndexedChecksums(checksum)
     }
     async with db.scoped_session(session_maker) as session:
         refreshes = await relation_repository.list_pending_search_refreshes(
@@ -690,7 +691,7 @@ async def test_generation_zero_relation_forces_generation_publication(
 
     change_detector = ChangeDetector(entity_repository, session_maker)
     assert await change_detector.load_indexed_file_checksums((sample_entity.file_path,)) == {
-        sample_entity.file_path: None
+        sample_entity.file_path: IndexedChecksums(None)
     }
 
     publisher = RelationGenerationPublisher(
@@ -707,7 +708,7 @@ async def test_generation_zero_relation_forces_generation_publication(
     )
 
     assert await change_detector.load_indexed_file_checksums((sample_entity.file_path,)) == {
-        sample_entity.file_path: checksum
+        sample_entity.file_path: IndexedChecksums(checksum)
     }
     async with db.scoped_session(session_maker) as session:
         relations = await relation_repository.find_by_type(session, "links_to")

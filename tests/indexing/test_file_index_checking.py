@@ -15,7 +15,11 @@ from basic_memory.indexing.file_index_checking import (
     RepositoryMoveVacateSource,
     RepositoryMovedEntitySource,
 )
-from basic_memory.indexing.file_index_planning import FileIndexDecisionStatus, FileIndexTarget
+from basic_memory.indexing.file_index_planning import (
+    FileIndexDecisionStatus,
+    FileIndexTarget,
+    IndexedChecksums,
+)
 
 
 @dataclass(slots=True)
@@ -42,7 +46,7 @@ class FakeSessionMaker:
 
 @dataclass(slots=True)
 class RecordingChecksumRepository:
-    rows: list[tuple[object, object | None]]
+    rows: list[tuple[object, object | None, object | None]]
     calls: list[tuple[object, tuple[str, ...]]] = field(default_factory=list)
 
     async def get_by_file_paths(
@@ -51,7 +55,7 @@ class RecordingChecksumRepository:
         file_paths: Sequence[str],
         *,
         content_types: Mapping[str, str | None] | None = None,
-    ) -> list[tuple[object, object | None]]:
+    ) -> list[tuple[object, object | None, object | None]]:
         self.calls.append((session, tuple(file_paths)))
         return self.rows
 
@@ -66,10 +70,10 @@ class StubIndexedChecksumSource:
     async def load_indexed_file_checksums(
         self,
         file_paths: Sequence[str],
-    ) -> dict[str, str | None]:
+    ) -> dict[str, IndexedChecksums]:
         self.requested_paths.append(tuple(file_paths))
         return {
-            file_path: self.checksums_by_path[file_path]
+            file_path: IndexedChecksums(self.checksums_by_path[file_path])
             for file_path in file_paths
             if file_path in self.checksums_by_path
         }
@@ -256,8 +260,8 @@ async def test_repository_indexed_file_checksum_source_maps_repository_rows() ->
     session = object()
     repository = RecordingChecksumRepository(
         rows=[
-            ("notes/a.md", "etag-a"),
-            ("notes/b.md", None),
+            ("notes/a.md", "etag-a", None),
+            ("notes/b.md", None, None),
         ]
     )
     source = RepositoryIndexedFileChecksumSource(
@@ -268,8 +272,8 @@ async def test_repository_indexed_file_checksum_source_maps_repository_rows() ->
     checksums = await source.load_indexed_file_checksums(["notes/a.md", "notes/b.md"])
 
     assert checksums == {
-        "notes/a.md": "etag-a",
-        "notes/b.md": None,
+        "notes/a.md": IndexedChecksums("etag-a"),
+        "notes/b.md": IndexedChecksums(None),
     }
     assert repository.calls == [(session, ("notes/a.md", "notes/b.md"))]
 
