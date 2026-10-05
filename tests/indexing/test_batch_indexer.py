@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+from typing import override
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import os
@@ -15,6 +17,7 @@ from sqlalchemy import text
 
 from basic_memory import db
 from basic_memory.file_utils import remove_frontmatter
+from basic_memory.index.local_dependencies import build_local_markdown_file_indexer
 from basic_memory.indexing.batch_indexer import BatchIndexer
 from basic_memory.indexing.change_detector import ChangeDetector
 from basic_memory.indexing.change_planning import plan_file_changes
@@ -35,7 +38,9 @@ from basic_memory.repository import NoteContentRepository
 from basic_memory.repository.semantic_errors import SemanticDependenciesMissingError
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.schemas.search import SearchItemType, SearchQuery
+from basic_memory.services.file_service import FileService, StoredFile
 from basic_memory.services.exceptions import SyncFatalError
+from basic_memory.utils import FilePath
 
 
 async def _create_file(path: Path, content: str | bytes) -> None:
@@ -1730,6 +1735,70 @@ async def test_a_one_way_sync_restoring_the_original_is_recognized_as_indexed(
     await _create_file(project_config.home / path, original_content + "\nA new line.\n")
     edited_checksum = await file_service.compute_checksum(path)
     assert not indexed[path].recognizes(edited_checksum)
+
+
+class _ObjectStoreChecksumFileService(FileService):
+    """A local FileService that reports checksums the way an object store does.
+
+    Injected on purpose: S3 reports an ETag, not the SHA-256 of the bytes, and change
+    detection compares in that domain. A local filesystem cannot show the mismatch.
+    """
+
+    @override
+    async def read_stored_file(self, path: FilePath) -> StoredFile:
+        stored = await super().read_stored_file(path)
+        return StoredFile(content=stored.content, checksum=_etag(stored.content))
+
+
+def _etag(content: bytes) -> str:
+    return hashlib.md5(content).hexdigest()
+
+
+@pytest.mark.asyncio
+async def test_a_single_file_index_records_the_original_in_the_storage_checksum_domain(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    project_config,
+    markdown_processor,
+):
+    """The per-file indexer (cloud webhooks) must remember the original as storage reports it.
+
+    Recording the SHA-256 of the bytes instead meant a sync client's restored original,
+    observed by its ETag, was never recognized, and the rewrite loop went on
+    (basic-memory-cloud#2350).
+    """
+    path = "notes/synced.md"
+    original_content = b"# Synced\n\nWritten by an agent with no frontmatter.\n"
+    (project_config.home / "notes").mkdir(parents=True, exist_ok=True)
+    (project_config.home / path).write_bytes(original_content)
+    file_service = _ObjectStoreChecksumFileService(project_config.home, markdown_processor)
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+    indexer = build_local_markdown_file_indexer(
+        project_id=relation_repository.project_id,
+        file_service=file_service,
+        session_maker=search_service.session_maker,
+        entity_repository=entity_repository,
+        batch_indexer=batch_indexer,
+        search_service=search_service,
+    )
+
+    await indexer.index_file(path, source="index")
+
+    async with db.scoped_session(search_service.session_maker) as session:
+        entity = await entity_repository.get_by_file_path(session, path)
+    assert entity is not None
+    assert "permalink:" in (project_config.home / path).read_text()
+    assert entity.sync_checksum == _etag(original_content)
 
 
 @pytest.mark.asyncio

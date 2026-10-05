@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ConfigManager
-from basic_memory.file_utils import FileMetadata, ParseError, compute_checksum, remove_frontmatter
+from basic_memory.file_utils import FileMetadata, ParseError, remove_frontmatter
 from basic_memory.indexing.batch_indexer import BatchIndexer
 from basic_memory.indexing.file_batch_runner import IndexFileBatchIndexer
 from basic_memory.indexing.file_index_checking import (
@@ -407,9 +407,10 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             )
         operation = FileIndexOperation.created if existing is None else FileIndexOperation.updated
 
-        file_bytes = await self.file_service.read_file_bytes(file_path)
+        stored_file = await self.file_service.read_stored_file(file_path)
+        file_bytes = stored_file.content
         file_metadata = await self.file_service.get_file_metadata(file_path)
-        checksum = await compute_checksum(file_bytes)
+        checksum = stored_file.checksum
         input_file = IndexInputFile(
             path=file_path,
             size=file_metadata.size,
@@ -504,16 +505,19 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
         """Index the current local markdown bytes and return canonical file state."""
         logger.debug("Parsing markdown file, path: {}, new: {}", path, new)
 
+        # The checksum comes from storage with the bytes, not from hashing them: an
+        # object store reports an ETag, and change detection compares in that domain.
         try:
-            initial_markdown_bytes = await self.file_service.read_file_bytes(path)
+            stored_file = await self.file_service.read_stored_file(path)
         except FileOperationError as exc:
             if isinstance(exc.__cause__, FileNotFoundError):
                 raise exc.__cause__ from exc
             raise
 
+        initial_markdown_bytes = stored_file.content
         initial_markdown_content = initial_markdown_bytes.decode("utf-8")
         file_metadata = await self.file_service.get_file_metadata(path)
-        initial_checksum = await compute_checksum(initial_markdown_bytes)
+        initial_checksum = stored_file.checksum
 
         async with db.scoped_session(self.session_maker) as session:
             existing_entity = await self.entity_repository.get_by_file_path(session, path)
