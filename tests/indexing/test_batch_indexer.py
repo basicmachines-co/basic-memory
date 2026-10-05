@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import UTC, datetime
 import os
 from pathlib import Path
@@ -15,6 +16,7 @@ from sqlalchemy import text
 from basic_memory import db
 from basic_memory.file_utils import remove_frontmatter
 from basic_memory.indexing.batch_indexer import BatchIndexer
+from basic_memory.indexing.change_detector import ChangeDetector
 from basic_memory.indexing.change_planning import plan_file_changes
 from basic_memory.indexing.file_index_checking import RepositoryIndexedFileChecksumSource
 from basic_memory.indexing.file_index_planning import (
@@ -1728,6 +1730,55 @@ async def test_a_one_way_sync_restoring_the_original_is_recognized_as_indexed(
     await _create_file(project_config.home / path, original_content + "\nA new line.\n")
     edited_checksum = await file_service.compute_checksum(path)
     assert not indexed[path].recognizes(edited_checksum)
+
+
+@dataclass(frozen=True, slots=True)
+class _StoredChecksum:
+    checksum: str | None
+
+
+@pytest.mark.asyncio
+async def test_moving_a_restored_sync_original_is_a_move_not_a_new_note(
+    app_config,
+    entity_service,
+    entity_repository,
+    relation_repository,
+    search_service,
+    file_service,
+    project_config,
+):
+    """A restored original carries the sync checksum, which must still prove a move.
+
+    Matching only our rewrite's checksum would read the rename as a delete plus a create,
+    and the note would come back with a new identity.
+    """
+    old_path = "notes/synced.md"
+    new_path = "archive/synced.md"
+    original_content = "# Synced\n\nWritten by an agent with no frontmatter.\n"
+    await _create_file(project_config.home / old_path, original_content)
+    original_checksum = await file_service.compute_checksum(old_path)
+    batch_indexer = _make_batch_indexer(
+        app_config,
+        entity_service,
+        entity_repository,
+        relation_repository,
+        search_service,
+        file_service,
+    )
+    await batch_indexer.index_markdown_file(
+        await _load_input(file_service, old_path),
+        index_search=False,
+    )
+
+    # The sync client restored its original, which is then renamed.
+    report = await ChangeDetector(
+        entity_repository=entity_repository,
+        session_maker=search_service.session_maker,
+    ).detect_all_changes({new_path: _StoredChecksum(original_checksum)})
+
+    assert report.moved_files == {old_path: new_path}
+    assert report.new_files == []
+    assert report.deleted_files == []
 
 
 @pytest.mark.asyncio

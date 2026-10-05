@@ -694,6 +694,7 @@ async def test_repository_note_materialization_publisher_updates_current_written
             {
                 "mtime": written.file_updated_at.timestamp(),
                 "size": len(b"# A note\n"),
+                "sync_checksum": None,
             },
         )
     ]
@@ -895,6 +896,7 @@ async def test_repository_note_materialization_publisher_handles_entity_missing_
             {
                 "mtime": written.file_updated_at.timestamp(),
                 "size": len(b"# A note\n"),
+                "sync_checksum": None,
             },
         )
     ]

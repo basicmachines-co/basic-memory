@@ -64,6 +64,9 @@ class ChangeDetectionMoveCandidate(Protocol):
     @property
     def checksum(self) -> FileIndexChecksum | None: ...
 
+    @property
+    def sync_checksum(self) -> FileIndexChecksum | None: ...
+
 
 class ChangeDetectionEntityRepository(IndexedFileChecksumRepository, Protocol):
     """Repository capabilities needed by project change detection."""
@@ -134,12 +137,13 @@ class ChangeDetector:
             # Batch the IN() lookup so large projects stay under the bind limit.
             for checksum_batch in batched(checksums, MAX_QUERY_BIND_PARAMETERS):
                 candidates = await self.entity_repository.find_by_checksums(session, checksum_batch)
+                # A file the sync client restored still carries the original's
+                # checksum, so it proves a move as well as our rewrite does.
                 move_candidates.extend(
-                    FileMoveCandidate(
-                        path=str(candidate.file_path), checksum=str(candidate.checksum)
-                    )
+                    FileMoveCandidate(path=str(candidate.file_path), checksum=str(checksum))
                     for candidate in candidates
-                    if candidate.checksum
+                    for checksum in (candidate.checksum, candidate.sync_checksum)
+                    if checksum
                 )
 
         return tuple(move_candidates)

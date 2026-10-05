@@ -240,3 +240,59 @@ title: Source
     assert stale_relation_rows[0].from_id == source_entity_id
     assert watch_service.state.recent_events[0].action == "index"
     assert watch_service.state.recent_events[0].status == "success"
+
+
+@pytest.mark.asyncio
+async def test_local_event_index_moves_a_restored_sync_original(
+    app_config: BasicMemoryConfig,
+    project_repository,
+    session_maker,
+    test_project,
+    project_config,
+    entity_repository,
+) -> None:
+    """A renamed sync original keeps its note: the sync checksum proves the move.
+
+    Indexing wrote frontmatter into the file, then a sync client restored its original
+    (basic-memory-cloud#2350). Matching only our rewrite's checksum would read the rename
+    as a delete plus a create, and the note would come back with a new identity.
+    """
+    original_content = "# Synced\n\nWritten by an agent with no frontmatter.\n"
+    old_path = project_config.home / "notes" / "synced.md"
+    new_path = project_config.home / "archive" / "synced.md"
+    await create_test_file(old_path, original_content)
+
+    await run_local_project_index_for_project(
+        test_project,
+        runtime_factory=LocalProjectIndexRuntimeFactory(batch_size=10),
+        force_full=True,
+    )
+    async with db.scoped_session(session_maker) as session:
+        indexed = await entity_repository.get_by_file_path(session, "notes/synced.md")
+    assert indexed is not None
+    assert indexed.sync_checksum is not None
+
+    # The sync client restores its original, which is then renamed.
+    await create_test_file(old_path, original_content)
+    new_path.parent.mkdir(parents=True, exist_ok=True)
+    old_path.rename(new_path)
+
+    watch_service = WatchService(
+        app_config=app_config,
+        project_repository=project_repository,
+        session_maker=session_maker,
+        event_index_runtime_factory=LocalWatchEventIndexRuntimeFactory(),
+    )
+    await watch_service.handle_changes(
+        test_project,
+        {
+            (Change.deleted, str(old_path)),
+            (Change.added, str(new_path)),
+        },
+    )
+
+    async with db.scoped_session(session_maker) as session:
+        moved = await entity_repository.get_by_file_path(session, "archive/synced.md")
+    assert moved is not None
+    assert moved.id == indexed.id
+    assert moved.external_id == indexed.external_id

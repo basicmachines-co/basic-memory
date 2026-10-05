@@ -500,13 +500,14 @@ class EntityRepository(Repository[Entity]):
         if not checksums:  # pragma: no cover
             return []  # pragma: no cover
 
-        # Query: SELECT * FROM entities WHERE checksum IN (checksum1, checksum2, ...)
-        query = self.select().where(Entity.checksum.in_(checksums))  # pragma: no cover
-        # Don't load relationships for move detection - we only need file_path and checksum
-        result = await self.execute_query(
-            session, query, use_query_options=False
-        )  # pragma: no cover
-        return list(result.scalars().all())  # pragma: no cover
+        # A moved file may still hold the original a sync client restored over our
+        # frontmatter rewrite, so its sync checksum identifies the entity too.
+        query = self.select().where(
+            or_(Entity.checksum.in_(checksums), Entity.sync_checksum.in_(checksums))
+        )
+        # Don't load relationships for move detection - we only need file_path and checksums
+        result = await self.execute_query(session, query, use_query_options=False)
+        return list(result.scalars().all())
 
     async def delete_by_file_path(self, session: AsyncSession, file_path: Union[Path, str]) -> bool:
         """Delete entity with the provided file_path.

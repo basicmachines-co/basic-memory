@@ -643,6 +643,10 @@ class RepositoryNoteMaterializationPublisher:
                 {
                     "mtime": written_file.file_updated_at.timestamp(),
                     "size": len(prepared_write.markdown_content.encode("utf-8")),
+                    # The file now holds accepted content, so a sync client's original
+                    # is stale. Recognizing it after this would let a restore silently
+                    # revert the edit on storage while the index keeps it.
+                    "sync_checksum": None,
                 },
             )
             if not updated:

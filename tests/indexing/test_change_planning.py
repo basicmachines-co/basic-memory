@@ -235,8 +235,8 @@ class FakeEntityRepository:
     ) -> tuple[SimpleNamespace, ...]:
         self.loaded_move_checksums = tuple(checksums)
         return (
-            SimpleNamespace(file_path="old/moved.md", checksum="moved-checksum"),
-            SimpleNamespace(file_path="ignored.md", checksum=None),
+            SimpleNamespace(file_path="old/moved.md", checksum="moved-checksum", sync_checksum=None),
+            SimpleNamespace(file_path="ignored.md", checksum=None, sync_checksum=None),
         )
 
     async def get_all_file_paths(self, session: object) -> list[str]:
@@ -363,7 +363,7 @@ class BatchRecordingEntityRepository:
     ) -> tuple[SimpleNamespace, ...]:
         self.checksum_batch_sizes.append(len(checksums))
         return tuple(
-            SimpleNamespace(file_path=f"path-{checksum}", checksum=checksum)
+            SimpleNamespace(file_path=f"path-{checksum}", checksum=checksum, sync_checksum=None)
             for checksum in checksums
         )
 
