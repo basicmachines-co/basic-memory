@@ -1000,7 +1000,7 @@ async def find(
         page_size: Nodes per page.
         meta: Frontmatter metadata predicates, repeatable; every predicate must
             hold. One predicate per string, one predicate per key, at least one
-            predicate (omit `meta` for the directory listing):
+            predicate; omit `meta` entirely for the directory listing. Forms:
               "status=active"              equality
               "confidence>0.6"             comparison: > >= < <=
               "priority in high,critical"  any of the listed values
