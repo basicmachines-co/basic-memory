@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from alembic import context
 
+from basic_memory.alembic.migrations import assign_sequential_revision_ids
 from basic_memory.config import ConfigManager
 
 # Constraint: never apply nest_asyncio here. It replaces asyncio.run and
@@ -88,6 +89,9 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         include_object=include_object,
         render_as_batch=True,
+        # `alembic revision` (the `just migration` recipe) names each new revision by its
+        # schema version instead of a random ID; see migrations.LAST_UNNUMBERED_REVISION.
+        process_revision_directives=assign_sequential_revision_ids,
     )
 
     with context.begin_transaction():
@@ -102,6 +106,9 @@ def do_run_migrations(connection):
         include_object=include_object,
         render_as_batch=True,
         compare_type=True,
+        # `alembic revision` (the `just migration` recipe) names each new revision by its
+        # schema version instead of a random ID; see migrations.LAST_UNNUMBERED_REVISION.
+        process_revision_directives=assign_sequential_revision_ids,
     )
     with context.begin_transaction():
         context.run_migrations()

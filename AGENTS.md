@@ -288,6 +288,12 @@ Flow: MCP Tool → Typed Client → HTTP API → Router → Service → Reposito
 - Use `textwrap.dedent()` for multi-line string formatting in prompts and tools
 - MCP Prompts are used to invoke tools and format content with instructions for an LLM
 - Schema changes require Alembic migrations
+- Alembic revisions after `z9a0b1c2d3e4` are named by schema version, zero-padded to four digits
+  (`0040`, `0041`, ...). `just migration` and `alembic revision` assign the ID; do not pass `--rev-id`.
+- Two open PRs that branch from the same head both generate the same ID, and the second fails CI
+  with two heads. Fix it by renumbering your revision to the next ID (file name and `revision`)
+  and pointing its `down_revision` at the new head. Never add a merge revision once numbered
+  revisions start; `tests/test_migration_graph.py` requires a linear numbered tail.
 - SQLite is used for indexing and full text search, files are source of truth
 - Testing uses pytest with asyncio support (strict mode)
 - Unit tests (`tests/`) use mocks when necessary; integration tests (`test-int/`) use real implementations
