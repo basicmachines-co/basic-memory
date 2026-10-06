@@ -647,7 +647,10 @@ package-check-tau:
 package-check-pi:
     just --justfile integrations/pi/justfile --working-directory integrations/pi check
 
-# Generate Alembic migration with descriptive message
+# Generate Alembic migration with descriptive message.
+# The revision ID is the next schema version ("0040", "0041", ...), assigned by alembic/env.py.
+# If another PR lands the same ID first, renumber yours to the next ID and point its
+# down_revision at the new head. Never add a merge revision; the numbered tail must stay linear.
 migration message:
     cd src/basic_memory/alembic && alembic revision --autogenerate -m "{{message}}"
 

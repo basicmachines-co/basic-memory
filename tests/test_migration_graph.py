@@ -36,11 +36,16 @@ _script_directory = get_script_directory
 
 
 def test_the_migration_graph_has_one_head():
+    # Two open PRs off the same head both generate the same next ID ("0040"). Alembic
+    # then reports two heads ['0040', '0040'], so the second PR to merge fails here.
     heads = _script_directory().get_heads()
 
     assert len(heads) == 1, (
-        f"alembic has {len(heads)} heads {sorted(heads)}; `upgrade head` refuses to run "
-        "until they are joined by a merge revision (down_revision = (a, b))"
+        f"alembic has {len(heads)} heads {sorted(heads)}; `upgrade head` refuses to run. "
+        "Two branches added the same numbered revision (Alembic also warns 'Revision N is "
+        "present more than once'): renumber yours to the next ID and point its "
+        "down_revision at the new head. Do not add a merge revision; the numbered tail "
+        "must stay linear"
     )
 
 

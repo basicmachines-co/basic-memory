@@ -60,8 +60,9 @@ def next_revision_id(script: ScriptDirectory) -> str:
     heads = script.get_heads()
     if len(heads) != 1:
         raise ValueError(
-            f"alembic has {len(heads)} heads {sorted(heads)}; join them with a merge "
-            "revision before adding a new one"
+            f"alembic has {len(heads)} heads {sorted(heads)}; if two branches added the "
+            "same numbered revision, renumber yours to the next ID and point its "
+            "down_revision at the new head (no merge revisions)"
         )
     return f"{schema_version(heads[0], script) + 1:0{REVISION_ID_DIGITS}d}"
 
