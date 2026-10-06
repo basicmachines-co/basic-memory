@@ -70,7 +70,8 @@ class FakeSession:
         has_source_hash: bool = True,
         chunk_rows: list[dict[str, object]] | None = None,
         search_rows: list[dict[str, object]] | None = None,
-        fail_extension: bool = False,
+        extension_installed: bool | None = None,
+        extension_available: bool = True,
         pgvector_version: str = "0.8.0",
     ) -> None:
         self.table_exists = table_exists
@@ -78,7 +79,11 @@ class FakeSession:
         self.has_source_hash = has_source_hash
         self.chunk_rows = chunk_rows or []
         self.search_rows = search_rows or []
-        self.fail_extension = fail_extension
+        # An existing embeddings table implies the extension that defines its type.
+        self.extension_installed = (
+            table_exists if extension_installed is None else extension_installed
+        )
+        self.extension_available = extension_available
         self.pgvector_version = pgvector_version
         self.calls: list[tuple[str, dict[str, object] | None]] = []
         self.commit_count = 0
@@ -94,15 +99,18 @@ class FakeSession:
             return FakeResult(
                 rows=[
                     {
-                        "extversion": None if self.fail_extension else self.pgvector_version,
+                        "extversion": (self.pgvector_version if self.extension_installed else None),
                         "dimensions": self.dimensions if self.table_exists else None,
                         "has_source_hash": self.table_exists and self.has_source_hash,
                         "has_indexes": self.table_exists,
                     }
                 ]
             )
-        if "CREATE EXTENSION" in sql and self.fail_extension:
-            raise RuntimeError("extension unavailable")
+        if "pg_available_extensions" in sql:
+            return FakeResult(scalar=1 if self.extension_available else None)
+        if "CREATE EXTENSION" in sql:
+            assert self.extension_available, "CREATE EXTENSION on a server without pgvector"
+            self.extension_installed = True
         if "SELECT extversion" in sql:
             return FakeResult(scalar=self.pgvector_version)
         if "SELECT id, entity_id, chunk_key" in sql:
@@ -199,8 +207,8 @@ async def test_create_storage_keeps_the_schema_scoped_probe_for_partial_storage(
     assert any("USING hnsw" in sql for sql in sql_calls)
     assert not any("DROP TABLE IF EXISTS search_vector_embeddings" in sql for sql in sql_calls)
     assert not any("embedding_status = 'pending'" in sql for sql in sql_calls)
-    [probe] = [sql for sql in sql_calls if "AS has_indexes" in sql]
-    assert "current_schema()::regnamespace" in probe
+    probes = [sql for sql in sql_calls if "AS has_indexes" in sql]
+    assert probes and all("current_schema()::regnamespace" in probe for probe in probes)
 
 
 @pytest.mark.asyncio
@@ -234,7 +242,7 @@ async def test_create_storage_rebuilds_storage_without_source_generation(monkeyp
 
 @pytest.mark.asyncio
 async def test_create_storage_reports_missing_pgvector_extension(monkeypatch) -> None:
-    session = FakeSession(fail_extension=True)
+    session = FakeSession(extension_available=False)
     _install_session(monkeypatch, session)
     index = PgVectorIndex(MagicMock(), _scope())
 

@@ -223,8 +223,6 @@ class TestEnsureVectorTablesSchemaBootstrapping:
             "basic_memory.repository.postgres_search_repository.db.scoped_session",
             fake_scoped_session,
         )
-        missing_table = MagicMock()
-        missing_table.fetchone.return_value = None
         pgvector_version = MagicMock()
         pgvector_version.scalar_one.return_value = "0.8.0"
         chunks_missing = MagicMock()
@@ -236,19 +234,23 @@ class TestEnsureVectorTablesSchemaBootstrapping:
             "has_source_hash": False,
             "has_indexes": False,
         }
-        session.execute.side_effect = [
-            chunks_missing,
-            MagicMock(),
-            MagicMock(),
-            storage_missing,
-            MagicMock(),
-            pgvector_version,
-            missing_table,
-            MagicMock(),
-            MagicMock(),
-            MagicMock(),
-            MagicMock(),
-        ]
+        extension_available = MagicMock()
+        extension_available.scalar_one_or_none.return_value = 1
+
+        # A fresh database: answer each catalog read by what it asks for.
+        def respond(statement, params=None):
+            sql = str(statement)
+            if "count(*) = 2" in sql:
+                return chunks_missing
+            if "AS has_indexes" in sql:
+                return storage_missing
+            if "pg_available_extensions" in sql:
+                return extension_available
+            if "SELECT extversion" in sql:
+                return pgvector_version
+            return MagicMock()
+
+        session.execute.side_effect = respond
 
         await repo._create_vector_storage()
 
