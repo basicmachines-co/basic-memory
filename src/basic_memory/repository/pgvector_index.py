@@ -126,11 +126,11 @@ class PgVectorIndex:
                     "search needs pgvector 0.8 or later (ALTER EXTENSION vector UPDATE)."
                 )
 
-            existing_dimensions = await self._existing_dimensions(session)
+            # Judge the existing table from the schema-local catalog read above, so a
+            # same-named table elsewhere on the search_path is never rebuilt or dropped.
+            existing_dimensions = storage.dimensions
             storage_missing = existing_dimensions is None
-            source_hash_missing = (
-                existing_dimensions is not None and not await self._has_source_hash_column(session)
-            )
+            source_hash_missing = existing_dimensions is not None and not storage.has_source_hash
             dimensions_changed = (
                 existing_dimensions is not None and existing_dimensions != self.scope.dimensions
             )
@@ -227,37 +227,6 @@ class PgVectorIndex:
             has_source_hash=bool(row["has_source_hash"]),
             has_indexes=bool(row["has_indexes"]),
         )
-
-    async def _existing_dimensions(self, session: AsyncSession) -> int | None:
-        exists = await session.execute(
-            text(
-                "SELECT 1 FROM information_schema.tables "
-                "WHERE table_schema = ANY (current_schemas(false)) "
-                "AND table_name = 'search_vector_embeddings'"
-            )
-        )
-        if exists.fetchone() is None:
-            return None
-
-        result = await session.execute(
-            text(
-                "SELECT atttypmod FROM pg_attribute "
-                "WHERE attrelid = 'search_vector_embeddings'::regclass "
-                "AND attname = 'embedding'"
-            )
-        )
-        value = result.scalar_one_or_none()
-        return int(value) if value is not None else None
-
-    async def _has_source_hash_column(self, session: AsyncSession) -> bool:
-        result = await session.execute(
-            text(
-                "SELECT 1 FROM pg_attribute "
-                "WHERE attrelid = 'search_vector_embeddings'::regclass "
-                "AND attname = 'source_hash'"
-            )
-        )
-        return result.scalar_one_or_none() is not None
 
     async def upsert(self, project_id: int, records: Sequence[VectorRecord]) -> None:
         if not records:

@@ -105,12 +105,6 @@ class FakeSession:
             raise RuntimeError("extension unavailable")
         if "SELECT extversion" in sql:
             return FakeResult(scalar=self.pgvector_version)
-        if "information_schema.tables" in sql:
-            return FakeResult(fetchone=(1,) if self.table_exists else None)
-        if "attname = 'source_hash'" in sql:
-            return FakeResult(scalar=1 if self.has_source_hash else None)
-        if "SELECT atttypmod" in sql:
-            return FakeResult(scalar=self.dimensions)
         if "SELECT id, entity_id, chunk_key" in sql:
             return FakeResult(rows=self.chunk_rows)
         if "AS similarity" in sql:
@@ -205,8 +199,8 @@ async def test_create_storage_keeps_the_schema_scoped_probe_for_partial_storage(
     assert any("USING hnsw" in sql for sql in sql_calls)
     assert not any("DROP TABLE IF EXISTS search_vector_embeddings" in sql for sql in sql_calls)
     assert not any("embedding_status = 'pending'" in sql for sql in sql_calls)
-    table_probe = next(sql for sql in sql_calls if "information_schema.tables" in sql)
-    assert "table_schema = ANY (current_schemas(false))" in table_probe
+    [probe] = [sql for sql in sql_calls if "AS has_indexes" in sql]
+    assert "current_schema()::regnamespace" in probe
 
 
 @pytest.mark.asyncio

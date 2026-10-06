@@ -664,11 +664,12 @@ async def test_postgres_vector_setup_creates_tables_in_its_own_schema(engine_fac
         database_backend=DatabaseBackend.POSTGRES,
         semantic_search_enabled=True,
     )
+    # Public holds storage for a different provider (8 dimensions).
     await PostgresSearchRepository(
         session_maker,
         project_id=test_project.id,
         app_config=app_config,
-        embedding_provider=StubEmbeddingProvider(),
+        embedding_provider=StubEmbeddingProvider8d(),
     ).init_search_index()
 
     async with engine.begin() as conn:
@@ -704,6 +705,19 @@ async def test_postgres_vector_setup_creates_tables_in_its_own_schema(engine_fac
             "idx_search_vector_embeddings_project_dims",
             "idx_search_vector_embeddings_hnsw",
         } <= local
+
+        # The public table, built for other dimensions, is left alone.
+        async with db.scoped_session(session_maker) as session:
+            public_dimensions = (
+                await session.execute(
+                    text(
+                        "SELECT atttypmod FROM pg_attribute "
+                        "WHERE attrelid = 'public.search_vector_embeddings'::regclass "
+                        "AND attname = 'embedding'"
+                    )
+                )
+            ).scalar_one()
+        assert public_dimensions == 8
     finally:
         await layered_engine.dispose()
         async with engine.begin() as conn:
