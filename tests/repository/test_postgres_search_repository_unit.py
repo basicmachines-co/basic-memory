@@ -250,7 +250,7 @@ class TestEnsureVectorTablesSchemaBootstrapping:
             MagicMock(),
         ]
 
-        await repo._ensure_vector_tables()
+        await repo._create_vector_storage()
 
         executed_sql = [str(call.args[0]) for call in session.execute.await_args_list]
 

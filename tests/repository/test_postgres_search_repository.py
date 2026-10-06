@@ -609,11 +609,12 @@ async def test_postgres_semantic_vector_search_returns_ranked_entities(session_m
 async def test_postgres_vector_setup_does_not_wait_on_concurrent_writers(
     session_maker, test_project
 ):
-    """Every embedding job builds a fresh repository and runs vector setup.
+    """Vector work must not take table locks on storage that already exists.
 
-    Setup must not take table locks once storage exists: CREATE INDEX IF NOT EXISTS
-    waits for open writers, and every later writer queues behind it. Under one busy
-    tenant that convoy timed out tens of thousands of embedding jobs.
+    CREATE INDEX IF NOT EXISTS waits for open writers, and every later writer queues
+    behind it. Run on every embedding job, that convoy timed out tens of thousands of
+    jobs for one busy tenant. Runtime binding runs no DDL at all, and initializing an
+    already-initialized database (each new worker) reads the catalog instead.
     """
     await _skip_if_pgvector_unavailable(session_maker)
     app_config = BasicMemoryConfig(
@@ -640,7 +641,9 @@ async def test_postgres_vector_setup_does_not_wait_on_concurrent_writers(
             text("LOCK TABLE search_vector_chunks, search_vector_embeddings IN ROW EXCLUSIVE MODE")
         )
         try:
+            # A job binds the adapter; a newly started worker initializes the database.
             await asyncio.wait_for(fresh_repository()._ensure_vector_tables(), timeout=5)
+            await asyncio.wait_for(fresh_repository().init_search_index(), timeout=5)
         finally:
             await writer.rollback()
 
@@ -681,7 +684,7 @@ async def test_postgres_vector_setup_creates_tables_in_its_own_schema(engine_fac
             project_id=test_project.id,
             app_config=app_config,
             embedding_provider=StubEmbeddingProvider(),
-        )._ensure_vector_tables()
+        ).init_search_index()
 
         async with layered_session_maker() as session:
             local = set(
@@ -724,6 +727,7 @@ async def test_postgres_semantic_hybrid_search_combines_fts_and_vector(session_m
         app_config=app_config,
         embedding_provider=StubEmbeddingProvider(),
     )
+    await repo.init_search_index()
 
     now = datetime.now(timezone.utc)
     await repo.bulk_index_items(
@@ -1153,7 +1157,7 @@ async def test_postgres_dimension_mismatch_triggers_table_recreation(session_mak
         app_config=app_config_4d,
         embedding_provider=StubEmbeddingProvider(),
     )
-    await repo_4d._ensure_vector_tables()
+    await repo_4d.init_search_index()
 
     # Verify table exists with 4 dimensions
     async with db.scoped_session(session_maker) as session:
@@ -1185,7 +1189,7 @@ async def test_postgres_dimension_mismatch_triggers_table_recreation(session_mak
         app_config=app_config_8d,
         embedding_provider=StubEmbeddingProvider8d(),
     )
-    await repo_8d._ensure_vector_tables()
+    await repo_8d.init_search_index()
 
     # Verify table was recreated with 8 dimensions
     async with db.scoped_session(session_maker) as session:

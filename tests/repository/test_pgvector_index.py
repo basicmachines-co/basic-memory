@@ -145,14 +145,19 @@ def _sql_calls(session: FakeSession) -> list[str]:
     return [sql for sql, _params in session.calls]
 
 
+def _assert_no_ddl(session: FakeSession) -> None:
+    """Runtime vector calls must never issue DDL; storage exists before runtime."""
+    ddl = ("CREATE ", "DROP ", "ALTER ")
+    assert not [sql for sql in _sql_calls(session) if any(word in sql for word in ddl)]
+
+
 @pytest.mark.asyncio
-async def test_initialize_creates_storage_once_and_invalidates_manifest(monkeypatch) -> None:
+async def test_create_storage_creates_storage_and_invalidates_manifest(monkeypatch) -> None:
     session = FakeSession()
     _install_session(monkeypatch, session)
     index = PgVectorIndex(MagicMock(), _scope())
 
-    await index.initialize()
-    await index.initialize()
+    await index.create_storage()
 
     sql_calls = _sql_calls(session)
     assert sum("CREATE EXTENSION" in sql for sql in sql_calls) == 1
@@ -163,22 +168,23 @@ async def test_initialize_creates_storage_once_and_invalidates_manifest(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_initialize_runs_no_ddl_when_storage_is_current(monkeypatch) -> None:
+async def test_create_storage_runs_no_ddl_when_storage_is_current(monkeypatch) -> None:
     """Current storage needs only a catalog read: DDL would lock the table every job."""
     session = FakeSession(table_exists=True, dimensions=4)
     _install_session(monkeypatch, session)
     index = PgVectorIndex(MagicMock(), _scope())
 
-    await index.initialize()
+    await index.create_storage()
 
     [probe] = _sql_calls(session)
     assert "AS has_indexes" in probe
     assert session.commit_count == 0
-    assert index._initialized is True
 
 
 @pytest.mark.asyncio
-async def test_initialize_keeps_the_schema_scoped_probe_for_partial_storage(monkeypatch) -> None:
+async def test_create_storage_keeps_the_schema_scoped_probe_for_partial_storage(
+    monkeypatch,
+) -> None:
     """A table without its indexes still takes the create path, which keeps the manifest."""
     session = FakeSession(table_exists=True, dimensions=4)
     _install_session(monkeypatch, session)
@@ -193,7 +199,7 @@ async def test_initialize_keeps_the_schema_scoped_probe_for_partial_storage(monk
     monkeypatch.setattr(session, "execute", missing_indexes)
     index = PgVectorIndex(MagicMock(), _scope())
 
-    await index.initialize()
+    await index.create_storage()
 
     sql_calls = _sql_calls(session)
     assert any("USING hnsw" in sql for sql in sql_calls)
@@ -204,12 +210,14 @@ async def test_initialize_keeps_the_schema_scoped_probe_for_partial_storage(monk
 
 
 @pytest.mark.asyncio
-async def test_initialize_rebuilds_dimension_mismatch_and_invalidates_manifest(monkeypatch) -> None:
+async def test_create_storage_rebuilds_dimension_mismatch_and_invalidates_manifest(
+    monkeypatch,
+) -> None:
     session = FakeSession(table_exists=True, dimensions=8)
     _install_session(monkeypatch, session)
     index = PgVectorIndex(MagicMock(), _scope())
 
-    await index.initialize()
+    await index.create_storage()
 
     sql_calls = _sql_calls(session)
     assert any("DROP TABLE IF EXISTS search_vector_embeddings" in sql for sql in sql_calls)
@@ -217,12 +225,12 @@ async def test_initialize_rebuilds_dimension_mismatch_and_invalidates_manifest(m
 
 
 @pytest.mark.asyncio
-async def test_initialize_rebuilds_storage_without_source_generation(monkeypatch) -> None:
+async def test_create_storage_rebuilds_storage_without_source_generation(monkeypatch) -> None:
     session = FakeSession(table_exists=True, dimensions=4, has_source_hash=False)
     _install_session(monkeypatch, session)
     index = PgVectorIndex(MagicMock(), _scope())
 
-    await index.initialize()
+    await index.create_storage()
 
     sql_calls = _sql_calls(session)
     assert any("DROP TABLE IF EXISTS search_vector_embeddings" in sql for sql in sql_calls)
@@ -231,13 +239,13 @@ async def test_initialize_rebuilds_storage_without_source_generation(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_initialize_reports_missing_pgvector_extension(monkeypatch) -> None:
+async def test_create_storage_reports_missing_pgvector_extension(monkeypatch) -> None:
     session = FakeSession(fail_extension=True)
     _install_session(monkeypatch, session)
     index = PgVectorIndex(MagicMock(), _scope())
 
     with pytest.raises(SemanticDependenciesMissingError, match="pgvector extension"):
-        await index.initialize()
+        await index.create_storage()
 
 
 @pytest.mark.asyncio
@@ -262,7 +270,6 @@ async def test_upsert_resolves_stable_keys_and_writes_one_batch(monkeypatch) -> 
     )
     _install_session(monkeypatch, session)
     index = PgVectorIndex(MagicMock(), _scope())
-    index._initialized = True
 
     await index.upsert(
         PROJECT,
@@ -285,6 +292,7 @@ async def test_upsert_resolves_stable_keys_and_writes_one_batch(monkeypatch) -> 
         "source_hash_1": "hash-b",
     }
     assert session.commit_count == 1
+    _assert_no_ddl(session)
 
 
 @pytest.mark.asyncio
@@ -302,7 +310,6 @@ async def test_upsert_skips_stale_source_generation(monkeypatch) -> None:
     )
     _install_session(monkeypatch, session)
     index = PgVectorIndex(MagicMock(), _scope())
-    index._initialized = True
 
     await index.upsert(
         PROJECT, [VectorRecord(key=key, source_hash="old-hash", values=(1.0, 0.0, 0.0, 0.0))]
@@ -320,7 +327,6 @@ async def test_upsert_rejects_missing_manifest_key(monkeypatch) -> None:
     session = FakeSession()
     _install_session(monkeypatch, session)
     index = PgVectorIndex(MagicMock(), _scope())
-    index._initialized = True
 
     with pytest.raises(RuntimeError, match="manifest rows are missing"):
         await index.upsert(
@@ -334,7 +340,6 @@ async def test_delete_stable_keys_and_entity(monkeypatch) -> None:
     session = FakeSession(chunk_rows=[{"id": 103, "entity_id": 13, "chunk_key": key.chunk_key}])
     _install_session(monkeypatch, session)
     index = PgVectorIndex(MagicMock(), _scope())
-    index._initialized = True
 
     await index.delete(PROJECT, [])
     await index.delete(PROJECT, [VectorDeletion(key=key, source_hash="hash")])
@@ -355,6 +360,7 @@ async def test_delete_stable_keys_and_entity(monkeypatch) -> None:
         "embedding_identity": "stub:4",
     }
     assert session.commit_count == 3
+    _assert_no_ddl(session)
 
 
 @pytest.mark.asyncio
@@ -367,7 +373,6 @@ async def test_search_returns_normalized_stable_matches(monkeypatch) -> None:
     )
     _install_session(monkeypatch, session)
     index = PgVectorIndex(MagicMock(), _scope())
-    index._initialized = True
 
     assert await index.search([], limit=5, projects=PROJECTS) == []
     assert await index.search([1.0, 0.0, 0.0, 0.0], limit=0, projects=PROJECTS) == []
@@ -399,7 +404,6 @@ async def test_search_binds_every_project_in_scope(monkeypatch) -> None:
     session = FakeSession(search_rows=[])
     _install_session(monkeypatch, session)
     index = PgVectorIndex(MagicMock(), _scope())
-    index._initialized = True
 
     await index.search([1.0, 0.0, 0.0, 0.0], limit=5, projects=ProjectScope.of([9, 7]))
 
@@ -431,17 +435,16 @@ def test_ef_search_is_sized_to_the_window_within_the_server_bounds() -> None:
 
 
 @pytest.mark.asyncio
-async def test_initialize_requires_a_pgvector_that_can_keep_scanning(monkeypatch) -> None:
+async def test_create_storage_requires_a_pgvector_that_can_keep_scanning(monkeypatch) -> None:
     """An extension too old to fill a filtered window is a deployment error, not a quiet gap."""
     older = FakeSession(pgvector_version="0.7.4")
     _install_session(monkeypatch, older)
     index = PgVectorIndex(MagicMock(), _scope())
 
     with pytest.raises(SemanticDependenciesMissingError, match="pgvector 0.7.4 predates"):
-        await index.initialize()
+        await index.create_storage()
 
     assert not any("CREATE TABLE" in sql for sql in _sql_calls(older))
-    assert index._initialized is False
 
 
 @pytest.mark.asyncio
@@ -450,7 +453,6 @@ async def test_search_sizes_the_scan_to_the_window_it_must_fill(monkeypatch) -> 
     session = FakeSession(search_rows=[])
     _install_session(monkeypatch, session)
     index = PgVectorIndex(MagicMock(), _scope())
-    index._initialized = True
 
     await index.search([1.0, 0.0, 0.0, 0.0], limit=250, projects=PROJECTS)
 
@@ -467,7 +469,6 @@ async def test_search_keeps_scanning_until_the_window_fills(monkeypatch) -> None
     session = FakeSession(search_rows=[])
     _install_session(monkeypatch, session)
     index = PgVectorIndex(MagicMock(), _scope())
-    index._initialized = True
 
     await index.search([1.0, 0.0, 0.0, 0.0], limit=5, projects=PROJECTS)
 

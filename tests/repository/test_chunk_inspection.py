@@ -357,7 +357,7 @@ async def _insert_physical_vectors(
 ) -> None:
     """Materialize a physical vector row for every stored manifest chunk.
 
-    Callers must run ``repository._ensure_vector_tables()`` before inserting their
+    Callers must run ``repository.init_search_index()`` before inserting their
     manifest: storage creation resets ready manifest rows to pending by design.
     """
     async with db.scoped_session(session_maker) as session:
@@ -417,7 +417,7 @@ async def test_current_chunks_missing_from_manifest_mark_index_behind(
     """A manifest covering only part of the current chunks must not report fresh."""
     _skip_unless_healthy_semantic_runtime(app_config)
     search_repository = _semantic_repository(session_maker, sample_entity.project_id, app_config)
-    await search_repository._ensure_vector_tables()
+    await search_repository.init_search_index()
     rows = _search_rows(sample_entity.project_id, sample_entity.id)
     await search_repository.bulk_index_items(rows)
     # The stored rows carry the full current fingerprint, so per-chunk and fingerprint
@@ -479,7 +479,7 @@ async def test_ready_chunk_without_physical_vector_reports_orphaned(
     """A manifest-ready chunk whose physical vector row is gone cannot be served."""
     _skip_unless_healthy_semantic_runtime(app_config)
     search_repository = _semantic_repository(session_maker, sample_entity.project_id, app_config)
-    await search_repository._ensure_vector_tables()
+    await search_repository.init_search_index()
     rows = _search_rows(sample_entity.project_id, sample_entity.id)
     await search_repository.bulk_index_items(rows)
     await _insert_manifest(
@@ -528,7 +528,7 @@ async def test_postgres_physical_probe_uses_active_search_path(
         sample_entity.project_id,
         app_config,
     )
-    await search_repository._ensure_vector_tables()
+    await search_repository.init_search_index()
 
     async with db.scoped_session(session_maker) as session:
         await session.execute(text("CREATE SCHEMA inspect_chunks_empty"))
@@ -789,7 +789,7 @@ async def test_inspection_marks_wrong_configured_identity_orphaned(
     """A manifest row owned by another model is invisible to current retrieval."""
     _skip_unless_healthy_semantic_runtime(app_config)
     search_repository = _semantic_repository(session_maker, sample_entity.project_id, app_config)
-    await search_repository._ensure_vector_tables()
+    await search_repository.init_search_index()
     rows = _search_rows(sample_entity.project_id, sample_entity.id)
     await search_repository.bulk_index_items(rows)
     await _insert_manifest(

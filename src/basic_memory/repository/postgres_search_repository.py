@@ -1,6 +1,5 @@
 """PostgreSQL tsvector-based search repository implementation."""
 
-import asyncio
 import json
 from collections.abc import Sequence
 from typing import Any, override, List
@@ -92,7 +91,6 @@ class PostgresSearchRepository(SearchRepositoryBase):
         self._reranker_max_document_chars = self._app_config.reranker_max_document_chars
         self._vector_dimensions = 384
         self._vector_tables_initialized = False
-        self._vector_tables_lock = asyncio.Lock()
 
         if self._semantic_enabled and self._embedding_provider is None:
             self._embedding_provider = create_embedding_provider(self._app_config)
@@ -120,18 +118,16 @@ class PostgresSearchRepository(SearchRepositoryBase):
 
     @override
     async def init_search_index(self):
-        """Create Postgres table with tsvector column and GIN indexes.
+        """Create search storage at database initialization.
 
-        Note: FTS schema is handled by Alembic migrations. Vector tables are
-        created here at startup so missing pgvector or provider errors surface
-        immediately.
+        FTS schema is handled by Alembic migrations. Vector storage depends on the
+        embedding provider's dimensions, so it is created here, alongside migrations,
+        and never at runtime. Missing pgvector or provider errors surface at startup.
         """
         logger.info("PostgreSQL search index initialization handled by migrations")
 
-        # Fail fast: create vector tables at startup so missing pgvector
-        # or embedding provider errors surface immediately
         if self._semantic_enabled:
-            await self._ensure_vector_tables()
+            await self._create_vector_storage()
 
     @override
     async def index_item(
@@ -304,8 +300,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
             )
             return {str(chunk_key) for chunk_key in result.scalars().all()}
 
-    @override
-    async def _ensure_vector_tables(self) -> None:
+    def _bind_vector_index(self) -> None:
         self._assert_semantic_available()
         if not hasattr(self, "_semantic_vector_index"):
             assert self._embedding_provider is not None
@@ -314,43 +309,50 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 self.session_maker,
                 build_vector_index_scope(self._app_config, self._embedding_provider),
             )
-        if self._vector_tables_initialized:
-            return
 
-        logger.debug("Ensuring Postgres vector tables exist for semantic search")
+    @override
+    async def _ensure_vector_tables(self) -> None:
+        """Bind the vector adapter for runtime use. Never runs DDL.
 
-        async with self._vector_tables_lock:
-            if self._vector_tables_initialized:
-                return
+        Storage is created by ``init_search_index`` when the database is initialized.
+        Runtime runs per request and per job, where even CREATE ... IF NOT EXISTS
+        takes table locks that queue concurrent writers; a database initialized
+        without vector storage fails on its first query instead.
+        """
+        self._bind_vector_index()
+        self._vector_tables_initialized = True
 
-            async with db.scoped_session(self.session_maker) as session:
-                # Each job builds a fresh repository, so this runs on each one. CREATE
-                # INDEX IF NOT EXISTS takes a SHARE lock on the table even when the index
-                # exists, which queues concurrent chunk writes behind it. Read the catalog
-                # (no locks on our tables) and run DDL only when the migration has not.
-                # Only the schema unqualified DDL targets counts, not the whole search_path.
-                chunks_ready = (
-                    await session.execute(
-                        text(
-                            """
-                            SELECT count(*) = 2 FROM pg_class
-                            WHERE relnamespace = current_schema()::regnamespace
-                              AND relname IN (
-                                  'search_vector_chunks',
-                                  'idx_search_vector_chunks_project_entity'
-                              )
-                            """
-                        )
+    async def _create_vector_storage(self) -> None:
+        """Create the chunk and embedding tables. Database initialization only."""
+        self._bind_vector_index()
+        # Catalog reads take no locks on our tables, so an initialized database (every
+        # worker start after the first) runs no DDL. Only the schema that unqualified
+        # DDL and writes target counts, not other schemas on the search_path.
+        async with db.scoped_session(self.session_maker) as session:
+            chunks_ready = (
+                await session.execute(
+                    text(
+                        """
+                        SELECT count(*) = 2 FROM pg_class
+                        WHERE relnamespace = current_schema()::regnamespace
+                          AND relname IN (
+                              'search_vector_chunks',
+                              'idx_search_vector_chunks_project_entity'
+                          )
+                        """
                     )
-                ).scalar_one()
+                )
+            ).scalar_one()
+        if not chunks_ready:
+            await self._create_vector_chunk_tables()
 
-            if not chunks_ready:
-                await self._create_vector_chunk_tables()
-
-            await self._semantic_vector_index.initialize()
-
-            logger.debug(f"Postgres vector tables ready (dimensions={self._vector_dimensions})")
-            self._vector_tables_initialized = True
+        vector_index = self._semantic_vector_index
+        if isinstance(vector_index, PgVectorIndex):
+            await vector_index.create_storage()
+        else:
+            await vector_index.initialize()
+        logger.debug(f"Postgres vector tables ready (dimensions={self._vector_dimensions})")
+        self._vector_tables_initialized = True
 
     async def _create_vector_chunk_tables(self) -> None:
         async with db.scoped_session(self.session_maker) as session:

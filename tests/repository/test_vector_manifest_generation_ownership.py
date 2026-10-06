@@ -168,6 +168,8 @@ async def _repositories(
         vector_index_name=vector_index_name,
         vector_index=vector_index,
     )
+    # The database is initialized once, as at startup; both jobs then share it.
+    await owner.init_search_index()
     return owner, successor, vector_index
 
 
