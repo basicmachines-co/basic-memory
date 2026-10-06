@@ -59,6 +59,11 @@ async def test_refresh_entity_replaces_project_scoped_hot_search_row() -> None:
 
     await repository.refresh_entity(cast(AsyncSession, session), row)
 
+    # On Postgres the refresh first takes the entity's search projection lock,
+    # before it touches any row.
+    lock_sql, lock_params = session.executed.pop(0)
+    assert "pg_advisory_xact_lock" in lock_sql
+    assert lock_params == {"project_id": "7", "entity_id": "42"}
     assert len(session.executed) == 4
     delete_sql, delete_params = session.executed[0]
     insert_sql, insert_params = session.executed[1]

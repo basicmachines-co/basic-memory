@@ -24,6 +24,7 @@ from basic_memory.repository.search_repository import (
     SearchIndexRow,
     SearchRepository,
 )
+from basic_memory.repository.search_projection_lock import lock_entity_search_projection
 from basic_memory.repository.search_query import PreparedSearchQuery, relaxed_query_words
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.search_trace import SearchTraceCollector
@@ -634,13 +635,6 @@ class SearchService:
             f"permalink={entity.permalink} project_id={entity.project_id}"
         )
         try:
-            replacement_content = content
-            if entity.is_markdown and replacement_content is None:
-                # Trigger: synchronized and legacy notes source search text from storage.
-                # Why: a transient read failure must preserve the last valid projection.
-                # Outcome: storage errors remain visible before any search rows are deleted.
-                replacement_content = await self.file_service.read_entity_content(entity)
-
             # Trigger: every refresh replaces the entity's whole search projection.
             # Why: the delete used to commit on its own, so a timeout while writing the
             #   replacement (Postgres FTS chunks under load, #1621) left an existing note
@@ -649,6 +643,22 @@ class SearchService:
             # Outcome: delete and replacement commit together; a failure rolls back to
             #   the previous projection, or to none on a first index, and stays retryable.
             async with db.scoped_session(self.repository.session_maker) as session:
+                # Trigger: two refreshes of one entity run at once (two quick saves of
+                #   a long note, or a save and its follow-up reindex).
+                # Why: on Postgres they deadlocked on the delete or hit search_index_pkey.
+                # Outcome: refreshes of one entity take turns; see search_projection_lock.
+                await lock_entity_search_projection(
+                    session, project_id=entity.project_id, entity_id=entity.id
+                )
+                replacement_content = content
+                if entity.is_markdown and replacement_content is None:
+                    # Trigger: synchronized and legacy notes source search text from storage.
+                    # Why: a transient read failure must preserve the last valid projection.
+                    # Outcome: storage errors remain visible before any search rows are
+                    #   deleted, and the rollback keeps the previous projection.
+                    #   Read after taking the lock, so the last refresh to run indexes
+                    #   the file as it is now, not as it was when it started waiting.
+                    replacement_content = await self.file_service.read_entity_content(entity)
                 await self.repository.delete_by_entity_id(entity_id=entity.id, session=session)
                 if entity.is_markdown:
                     await self.index_entity_markdown(entity, replacement_content, session=session)

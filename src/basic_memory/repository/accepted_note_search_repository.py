@@ -15,6 +15,7 @@ from basic_memory.repository.accepted_note_vector_cleanup import (
     delete_project_index_vector_rows,
 )
 from basic_memory.repository.postgres_fts_chunks import split_postgres_fts_chunks
+from basic_memory.repository.search_projection_lock import lock_entity_search_projection
 from basic_memory.repository.script_ngrams import build_script_ngrams
 
 type SearchIndexSqlValue = str | int | datetime | None
@@ -177,6 +178,12 @@ class AcceptedNoteSearchRepository:
                 f"does not match repository project_id {self.project_id}"
             )
 
+        # Trigger: the accepted write rewrites the same rows the indexer does.
+        # Why: two rewrites of one entity at once deadlock or hit search_index_pkey.
+        # Outcome: it takes the same per-entity turn, before its delete.
+        await lock_entity_search_projection(
+            session, project_id=row.project_id, entity_id=row.entity_id
+        )
         await session.execute(
             DELETE_ACCEPTED_NOTE_SEARCH_SQL,
             {"entity_id": row.entity_id, "project_id": row.project_id},
@@ -224,6 +231,10 @@ class AcceptedNoteSearchRepository:
         entity_id: int,
     ) -> None:
         """Delete all accepted-note search rows for one entity."""
+        # Same per-entity turn as every other rewrite of this entity's rows.
+        await lock_entity_search_projection(
+            session, project_id=self.project_id, entity_id=entity_id
+        )
         await session.execute(
             DELETE_ACCEPTED_NOTE_SEARCH_SQL,
             {"entity_id": entity_id, "project_id": self.project_id},
