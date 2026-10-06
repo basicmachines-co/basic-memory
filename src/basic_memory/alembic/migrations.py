@@ -80,8 +80,24 @@ def assign_sequential_revision_ids(
     if context.script is None:
         raise RuntimeError("alembic revision context has no script directory")
 
+    rev_id = next_revision_id(context.script)
+    (head,) = context.script.get_heads()
+
     for directive in directives:
-        directive.rev_id = next_revision_id(context.script)
+        # Trigger: `alembic revision --head <older rev> --splice` (or --head base).
+        # Why: the next ID only means "one past the head" if the revision revises that
+        # head; built on anything else it forks the graph into two heads.
+        # Outcome: refuse before Alembic writes the file.
+        # The CLI leaves `head` as None when --head is omitted; ScriptDirectory.generate_revision
+        # reads None as "head", so resolve it the same way.
+        requested = directive.head or "head"
+        built_on = [rev.revision for rev in context.script.get_revisions(requested) if rev]
+        if built_on != [head]:
+            raise ValueError(
+                f"new revision builds on {built_on or 'base'}, not the current head {head!r}; "
+                "build on the head (omit --head, or pass --head head)"
+            )
+        directive.rev_id = rev_id
 
 
 def reset_database():  # pragma: no cover

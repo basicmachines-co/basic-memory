@@ -122,16 +122,36 @@ def test_next_revision_id_refuses_a_forked_graph(tmp_path):
         next_revision_id(ScriptDirectory.from_config(config))
 
 
-def test_revision_hook_assigns_the_next_version():
+# None is what the CLI passes when --head is omitted; "head" is the Python API default.
+@pytest.mark.parametrize("built_on", [None, "head", "z9a0b1c2d3e4"])
+def test_revision_hook_assigns_the_next_version(built_on):
     script = _script_directory()
     context = MigrationContext.configure(dialect_name="sqlite", opts={"script": script})
     directive = MigrationScript(
-        rev_id="abc123", upgrade_ops=UpgradeOps(), downgrade_ops=DowngradeOps()
+        rev_id="abc123", upgrade_ops=UpgradeOps(), downgrade_ops=DowngradeOps(), head=built_on
     )
 
     assign_sequential_revision_ids(context, "head", [directive])
 
     assert directive.rev_id == next_revision_id(script)
+
+
+@pytest.mark.parametrize("built_on", ["y8f9a0b1c2d3", "base"])
+def test_revision_hook_refuses_a_revision_off_the_head(built_on):
+    # `alembic revision --head y8f9a0b1c2d3 --splice` would write 0040 beside the head.
+    script = _script_directory()
+    context = MigrationContext.configure(dialect_name="sqlite", opts={"script": script})
+    directive = MigrationScript(
+        rev_id=None,
+        upgrade_ops=UpgradeOps(),
+        downgrade_ops=DowngradeOps(),
+        head=built_on,
+        splice=True,
+    )
+
+    with pytest.raises(ValueError, match="build on the head"):
+        assign_sequential_revision_ids(context, "head", [directive])
+    assert directive.rev_id is None
 
 
 def test_revision_hook_requires_a_script_directory():
