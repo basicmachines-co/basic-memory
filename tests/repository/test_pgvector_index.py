@@ -41,6 +41,10 @@ class FakeResult:
     def fetchone(self) -> object | None:
         return self._fetchone
 
+    def one(self) -> dict[str, object]:
+        assert len(self._rows) == 1
+        return self._rows[0]
+
     def scalar_one_or_none(self) -> object | None:
         return self._scalar
 
@@ -86,6 +90,17 @@ class FakeSession:
     ) -> FakeResult:
         sql = str(statement)
         self.calls.append((sql, params))
+        if "to_regclass('search_vector_embeddings')" in sql:
+            return FakeResult(
+                rows=[
+                    {
+                        "extversion": None if self.fail_extension else self.pgvector_version,
+                        "dimensions": self.dimensions if self.table_exists else None,
+                        "has_source_hash": self.table_exists and self.has_source_hash,
+                        "has_indexes": self.table_exists,
+                    }
+                ]
+            )
         if "CREATE EXTENSION" in sql and self.fail_extension:
             raise RuntimeError("extension unavailable")
         if "SELECT extversion" in sql:
@@ -148,14 +163,40 @@ async def test_initialize_creates_storage_once_and_invalidates_manifest(monkeypa
 
 
 @pytest.mark.asyncio
-async def test_initialize_preserves_manifest_when_storage_is_unchanged(monkeypatch) -> None:
+async def test_initialize_runs_no_ddl_when_storage_is_current(monkeypatch) -> None:
+    """Current storage needs only a catalog read: DDL would lock the table every job."""
     session = FakeSession(table_exists=True, dimensions=4)
     _install_session(monkeypatch, session)
     index = PgVectorIndex(MagicMock(), _scope())
 
     await index.initialize()
 
+    [probe] = _sql_calls(session)
+    assert "to_regclass('search_vector_embeddings')" in probe
+    assert session.commit_count == 0
+    assert index._initialized is True
+
+
+@pytest.mark.asyncio
+async def test_initialize_keeps_the_schema_scoped_probe_for_partial_storage(monkeypatch) -> None:
+    """A table without its indexes still takes the create path, which keeps the manifest."""
+    session = FakeSession(table_exists=True, dimensions=4)
+    _install_session(monkeypatch, session)
+    original_execute = session.execute
+
+    async def missing_indexes(statement: object, params: dict[str, object] | None = None):
+        result = await original_execute(statement, params)
+        if "to_regclass('search_vector_embeddings')" in str(statement):
+            result._rows[0]["has_indexes"] = False
+        return result
+
+    monkeypatch.setattr(session, "execute", missing_indexes)
+    index = PgVectorIndex(MagicMock(), _scope())
+
+    await index.initialize()
+
     sql_calls = _sql_calls(session)
+    assert any("USING hnsw" in sql for sql in sql_calls)
     assert not any("DROP TABLE IF EXISTS search_vector_embeddings" in sql for sql in sql_calls)
     assert not any("embedding_status = 'pending'" in sql for sql in sql_calls)
     table_probe = next(sql for sql in sql_calls if "information_schema.tables" in sql)

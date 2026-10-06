@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from loguru import logger
 from sqlalchemy import text
@@ -50,6 +51,26 @@ def hnsw_ef_search_for(limit: int) -> int:
     return min(max(limit, HNSW_EF_SEARCH_DEFAULT), HNSW_EF_SEARCH_MAX)
 
 
+@dataclass(frozen=True, slots=True)
+class PgVectorStorage:
+    """The pgvector storage a database already has, read from the catalog."""
+
+    extversion: str | None
+    dimensions: int | None
+    has_source_hash: bool
+    has_indexes: bool
+
+    def is_current_for(self, dimensions: int) -> bool:
+        """Whether initialize has nothing to create, rebuild, or report."""
+        return (
+            self.extversion is not None
+            and pgvector_supports_iterative_scan(self.extversion)
+            and self.dimensions == dimensions
+            and self.has_source_hash
+            and self.has_indexes
+        )
+
+
 class PgVectorIndex:
     """Persist and query semantic vectors in PostgreSQL with pgvector."""
 
@@ -74,6 +95,18 @@ class PgVectorIndex:
 
         async with self._initialize_lock:
             if self._initialized:
+                return
+
+            # Trigger: every job builds a fresh index, so this runs on each one.
+            # Why: CREATE INDEX IF NOT EXISTS still takes a SHARE lock on the table
+            #   before it sees the index exists. Under concurrent writers that lock
+            #   queues every embedding write behind it until queries time out.
+            # Outcome: a catalog read (no table locks) skips DDL for current storage;
+            #   only a fresh or outdated database reaches the create path below.
+            async with db.scoped_session(self._session_maker) as session:
+                storage = await self._read_storage(session)
+            if storage.is_current_for(self.scope.dimensions):
+                self._initialized = True
                 return
 
             async with db.scoped_session(self._session_maker) as session:
@@ -160,6 +193,35 @@ class PgVectorIndex:
                 await session.commit()
 
             self._initialized = True
+
+    async def _read_storage(self, session: AsyncSession) -> PgVectorStorage:
+        # to_regclass resolves names without locking; a missing relation is NULL.
+        result = await session.execute(
+            text(
+                """
+                SELECT
+                    (SELECT extversion FROM pg_extension WHERE extname = 'vector')
+                        AS extversion,
+                    (SELECT atttypmod FROM pg_attribute
+                     WHERE attrelid = to_regclass('search_vector_embeddings')
+                       AND attname = 'embedding' AND NOT attisdropped) AS dimensions,
+                    EXISTS (SELECT 1 FROM pg_attribute
+                            WHERE attrelid = to_regclass('search_vector_embeddings')
+                              AND attname = 'source_hash' AND NOT attisdropped)
+                        AS has_source_hash,
+                    to_regclass('idx_search_vector_embeddings_project_dims') IS NOT NULL
+                        AND to_regclass('idx_search_vector_embeddings_hnsw') IS NOT NULL
+                        AS has_indexes
+                """
+            )
+        )
+        row = result.mappings().one()
+        return PgVectorStorage(
+            extversion=None if row["extversion"] is None else str(row["extversion"]),
+            dimensions=None if row["dimensions"] is None else int(row["dimensions"]),
+            has_source_hash=bool(row["has_source_hash"]),
+            has_indexes=bool(row["has_indexes"]),
+        )
 
     async def _existing_dimensions(self, session: AsyncSession) -> int | None:
         exists = await session.execute(

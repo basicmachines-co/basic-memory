@@ -4,6 +4,7 @@ These tests only run in Postgres mode (testcontainers) and ensure that the
 Postgres tsvector-backed search implementation remains well covered.
 """
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -601,6 +602,49 @@ async def test_postgres_semantic_vector_search_returns_ranked_entities(session_m
     assert results
     assert results[0].permalink == "specs/authentication"
     assert all(result.type == SearchItemType.ENTITY.value for result in results)
+
+
+@pytest.mark.asyncio
+async def test_postgres_vector_setup_does_not_wait_on_concurrent_writers(
+    session_maker, test_project
+):
+    """Every embedding job builds a fresh repository and runs vector setup.
+
+    Setup must not take table locks once storage exists: CREATE INDEX IF NOT EXISTS
+    waits for open writers, and every later writer queues behind it. Under one busy
+    tenant that convoy timed out tens of thousands of embedding jobs.
+    """
+    await _skip_if_pgvector_unavailable(session_maker)
+    app_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        database_backend=DatabaseBackend.POSTGRES,
+        semantic_search_enabled=True,
+    )
+
+    def fresh_repository() -> PostgresSearchRepository:
+        return PostgresSearchRepository(
+            session_maker,
+            project_id=test_project.id,
+            app_config=app_config,
+            embedding_provider=StubEmbeddingProvider(),
+        )
+
+    await fresh_repository().init_search_index()
+
+    # Another job is mid-write on both vector tables.
+    async with session_maker() as writer:
+        await writer.execute(
+            text(
+                "LOCK TABLE search_vector_chunks, search_vector_embeddings "
+                "IN ROW EXCLUSIVE MODE"
+            )
+        )
+        try:
+            await asyncio.wait_for(fresh_repository()._ensure_vector_tables(), timeout=5)
+        finally:
+            await writer.rollback()
 
 
 @pytest.mark.asyncio
