@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
@@ -32,6 +32,13 @@ from basic_memory.index.local_watch import (
     run_local_watch_event_indexing,
 )
 from basic_memory.index.storage_events import StorageEventIndexRuntime
+from basic_memory.index.watch_reconcile import (
+    FileSignature,
+    expand_deleted_directories,
+    expand_new_directories,
+    indexed_file_paths,
+    settled_project_files,
+)
 from basic_memory.models import Project
 from basic_memory.repository import ProjectRepository
 from basic_memory.utils import generate_permalink
@@ -104,6 +111,7 @@ class WatchService:
         quiet: bool = False,
         event_index_runtime_factory: WatchEventIndexRuntimeFactory | None = None,
         constrained_project: str | None = None,
+        initial_index_pending: Callable[[], bool] | None = None,
     ) -> None:
         self.app_config = app_config
         self.project_repository = project_repository
@@ -121,11 +129,159 @@ class WatchService:
         )
         self.constrained_project = constrained_project
         self.console = Console(quiet=quiet)
+        # State for finding files the watcher missed.
+        # See _schedule_restart, expand_new_directories and reconcile_unindexed_files.
+        self.reconcile_enabled = True
+        self.reconcile_settle_seconds = 60.0
+        self._initial_index_pending = initial_index_pending or (lambda: False)
+        self._batches_in_flight = 0
+        self._last_batch_finished = 0.0
+        self._reconcile_attempted: dict[int, dict[str, FileSignature]] = {}
+        self._new_directories_seen = False
+        self._reconcile_after_restart = False
 
-    async def _schedule_restart(self, stop_event: asyncio.Event) -> None:
-        """Schedule a watch cycle restart so project config changes are observed."""
-        await asyncio.sleep(self.app_config.watch_project_reload_interval)
+    async def _schedule_restart(
+        self,
+        stop_event: asyncio.Event,
+        projects: Sequence[Project] = (),
+    ) -> None:
+        """Maintain one watch cycle: reconcile, re-check projects, restart when needed.
+
+        This used to stop the cycle on every tick, to pick up project changes, and
+        that restart was lossy twice over. Stopping discards the changes the watcher
+        has collected but not yet handed over (watchfiles clears them when it sees
+        the stop event), and the next cycle's fresh watcher never hears of files
+        that already exist; while a slow batch was being indexed, a tick dropped
+        everything written in the meantime. Nothing ever looked for what had been
+        dropped.
+
+        Now a tick restarts only when there is a reason -- the project set changed,
+        or a directory appeared that the watcher may not be watching (see
+        expand_new_directories) -- and every restart is followed, once indexing is
+        quiet, by a reconcile that indexes whatever the gap cost. A tick with no
+        reason to restart runs the reconcile on its own: the periodic safety net.
+        """
+        watched = _watched_project_identity(projects)
+        if self._reconcile_after_restart and self.reconcile_enabled:
+            await asyncio.sleep(self._quiet_seconds())
+            if await self._reconcile_when_idle(projects):
+                self._reconcile_after_restart = False
+        while not stop_event.is_set():
+            await asyncio.sleep(self.app_config.watch_project_reload_interval)
+            try:
+                current = await self._select_projects_to_watch()
+            except Exception as exc:
+                # Trigger: the project list could not be read (database unavailable).
+                # Why: carrying on would leave a stale project set watched forever.
+                # Outcome: restart the cycle, which retries the read, as upstream did.
+                logger.warning(f"Watch project reload failed, restarting watch cycle: {exc}")
+                self._restart(stop_event)
+                return
+            if self._project_set_changed(watched, current):
+                logger.info("Watched project set changed; restarting watch cycle")
+                self._restart(stop_event)
+                return
+            if self._new_directories_seen:
+                logger.info(
+                    "New directories appeared since the watcher started; restarting the "
+                    "watch cycle so that every one of them is watched"
+                )
+                self._restart(stop_event)
+                return
+            # Pick up .gitignore/.bmignore edits, which the restart used to do.
+            self._ignore_patterns_cache.clear()
+            if self.reconcile_enabled and await self._reconcile_when_idle(current):
+                self._reconcile_after_restart = False
+
+    def _restart(self, stop_event: asyncio.Event) -> None:
+        """End this watch cycle; the next one reconciles what the gap cost."""
+        self._reconcile_after_restart = True
         stop_event.set()
+
+    def _quiet_seconds(self) -> float:
+        """How long indexing must have been idle before a reconcile may run."""
+        return 3 * self.app_config.index_delay / 1000 + 5
+
+    def _project_set_changed(
+        self,
+        watched: frozenset[tuple[str, str]],
+        current: Sequence[Project],
+    ) -> bool:
+        """Return whether the projects to watch differ from the ones being watched."""
+        return _watched_project_identity(current) != watched
+
+    async def _reconcile_when_idle(self, projects: Sequence[Project]) -> bool:
+        """Run the reconcile unless indexing is busy right now. Return whether it ran.
+
+        A batch in flight, or one that just finished, can leave changes queued in
+        the watcher that it will deliver in a moment; reconciling then would index
+        them twice and report them as missed. The startup scan has the same view
+        of a cold project. The next tick tries again.
+        """
+        if (
+            self._batches_in_flight
+            or self._initial_index_pending()
+            or time.monotonic() - self._last_batch_finished < self._quiet_seconds()
+        ):
+            logger.debug("Skipping index reconcile: indexing is busy")
+            return False
+        try:
+            await self.reconcile_unindexed_files(projects)
+        except Exception as exc:
+            logger.exception(f"Index reconcile failed: {exc}")
+            self.state.record_error(str(exc))
+            await self.write_status()
+        return True
+
+    async def reconcile_unindexed_files(self, projects: Sequence[Project]) -> int:
+        """Index every settled file on disk that the index does not know. Return the count.
+
+        The safety net under the watcher. Whatever made
+        the watcher miss a file, this finds it within one reload interval instead
+        of at the next restart, and says so in the log, because a reconcile that
+        has to index something means an event was lost and that is worth knowing.
+
+        A file it already tried, which is still not in the index and has not
+        changed since, is not retried or reported again on every tick.
+        """
+        reconciled = 0
+        for project in projects:
+            if not self._project_is_configured(project):
+                continue
+            project_root = local_project_root(project)
+            on_disk = await asyncio.to_thread(
+                settled_project_files,
+                project_root,
+                ignore_patterns=self._get_ignore_patterns(project_root),
+                settle_seconds=self.reconcile_settle_seconds,
+            )
+            indexed = await indexed_file_paths(self.session_maker, project.id)
+            unindexed = {
+                path: signature for path, signature in on_disk.items() if path not in indexed
+            }
+            already_tried = self._reconcile_attempted.get(project.id, {})
+            to_index = sorted(
+                path
+                for path, signature in unindexed.items()
+                if already_tried.get(path) != signature
+            )
+            self._reconcile_attempted[project.id] = unindexed
+            if not to_index:
+                continue
+
+            logger.warning(
+                f"Index reconcile: {len(to_index)} file(s) in project {project.name} were "
+                "on disk but not in the index, so the watcher missed them; indexing now",
+                project=project.name,
+                file_count=len(to_index),
+                paths=to_index[:20],
+            )
+            await self._handle_changes_isolated(
+                project,
+                {(Change.added, str(project_root / path)) for path in to_index},
+            )
+            reconciled += len(to_index)
+        return reconciled
 
     def _get_ignore_patterns(self, project_path: Path) -> set[str]:
         """Return cached ignore patterns for one project root."""
@@ -141,6 +297,8 @@ class WatchService:
         """Run one watchfiles cycle and route batches into project-local indexing."""
         project_paths = [project.path for project in projects]
         previous_filter_roots = self._sorted_watch_filter_roots
+        # A fresh watcher walks the tree and watches all of it.
+        self._new_directories_seen = False
         self._sorted_watch_filter_roots = local_watch_filter_roots(projects)
 
         try:
@@ -222,7 +380,7 @@ class WatchService:
                     f"{[project.path for project in projects]}"
                 )
                 stop_event = asyncio.Event()
-                timer_task = asyncio.create_task(self._schedule_restart(stop_event))
+                timer_task = asyncio.create_task(self._schedule_restart(stop_event, projects))
 
                 try:
                     await self._watch_projects_cycle(projects, stop_event)
@@ -292,6 +450,7 @@ class WatchService:
              this watch cycle.
         Outcome: log + record the error and continue so other projects still index.
         """
+        self._batches_in_flight += 1  # the reconcile waits for idle
         try:
             await self.handle_changes(project, changes)
         except Exception as exc:
@@ -300,6 +459,9 @@ class WatchService:
             )
             self.state.record_error(str(exc))
             await self.write_status()
+        finally:
+            self._batches_in_flight -= 1
+            self._last_batch_finished = time.monotonic()
 
     async def handle_changes(self, project: Project, changes: set[FileChange]) -> None:
         """Normalize one project's watchfiles batch and process it through indexing."""
@@ -317,6 +479,21 @@ class WatchService:
 
         start_time = time.time()
         project_root = local_project_root(project)
+        # A new directory's files may never be reported; see expand_new_directories.
+        changes, new_directories = await asyncio.to_thread(
+            expand_new_directories,
+            changes,
+            project_root=project_root,
+            ignore_patterns=self._get_ignore_patterns(project_root),
+        )
+        if new_directories:
+            self._new_directories_seen = True
+            if any(change == Change.deleted for change, _path in changes):
+                changes = expand_deleted_directories(
+                    changes,
+                    project_root=project_root,
+                    indexed_paths=await indexed_file_paths(self.session_maker, project.id),
+                )
         request = LocalWatchEventIndexRequest.from_project_changes(
             project=project,
             changes=changes,
@@ -352,3 +529,9 @@ class WatchService:
             f"duration_ms={duration_ms}"
         )
         await self.write_status()
+
+
+def _watched_project_identity(projects: Sequence[Project]) -> frozenset[tuple[str, str]]:
+    """Name and path of each watched project: what a watch cycle depends on."""
+    # A maintenance tick restarts the cycle only when this changes.
+    return frozenset((str(project.name), str(project.path)) for project in projects)

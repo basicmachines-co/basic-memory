@@ -546,7 +546,7 @@ class BasicMemoryConfig(BaseSettings):
 
     watch_project_reload_interval: int = Field(
         default=300,
-        description="Seconds between reloading project list in watch service. Higher values reduce CPU usage by minimizing watcher restarts. Default 300s (5 min) balances efficiency with responsiveness to new projects.",
+        description="Seconds between watch service maintenance ticks. Each tick re-reads the project list; it restarts the watcher only when the projects changed or a new directory appeared, and otherwise reconciles disk against the index, indexing any file the watcher missed. Default 300s (5 min) bounds how long a missed file can stay out of the index.",
         gt=0,
     )
 

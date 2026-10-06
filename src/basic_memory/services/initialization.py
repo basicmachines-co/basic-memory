@@ -279,6 +279,8 @@ async def initialize_file_indexing(
         quiet=quiet,
         event_index_runtime_factory=event_index_runtime_factory,
         constrained_project=constrained_project,
+        # The watcher's reconcile stays out of the startup scan's way.
+        initial_index_pending=lambda: bool(_initial_index_tasks),
     )
 
     # Get active projects
