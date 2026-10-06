@@ -4,10 +4,12 @@ These tests only run in Postgres mode (testcontainers) and ensure that the
 Postgres tsvector-backed search implementation remains well covered.
 """
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
@@ -604,6 +606,125 @@ async def test_postgres_semantic_vector_search_returns_ranked_entities(session_m
 
 
 @pytest.mark.asyncio
+async def test_postgres_vector_setup_does_not_wait_on_concurrent_writers(
+    session_maker, test_project
+):
+    """Vector work must not take table locks on storage that already exists.
+
+    CREATE INDEX IF NOT EXISTS waits for open writers, and every later writer queues
+    behind it. Run on every embedding job, that convoy timed out tens of thousands of
+    jobs for one busy tenant. Runtime binding runs no DDL at all, and initializing an
+    already-initialized database (each new worker) reads the catalog instead.
+    """
+    await _skip_if_pgvector_unavailable(session_maker)
+    app_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        database_backend=DatabaseBackend.POSTGRES,
+        semantic_search_enabled=True,
+    )
+
+    def fresh_repository() -> PostgresSearchRepository:
+        return PostgresSearchRepository(
+            session_maker,
+            project_id=test_project.id,
+            app_config=app_config,
+            embedding_provider=StubEmbeddingProvider(),
+        )
+
+    await fresh_repository().init_search_index()
+
+    # Another job is mid-write on both vector tables.
+    async with session_maker() as writer:
+        await writer.execute(
+            text("LOCK TABLE search_vector_chunks, search_vector_embeddings IN ROW EXCLUSIVE MODE")
+        )
+        try:
+            # A job binds the adapter; a newly started worker initializes the database.
+            await asyncio.wait_for(fresh_repository()._ensure_vector_tables(), timeout=5)
+            await asyncio.wait_for(fresh_repository().init_search_index(), timeout=5)
+        finally:
+            await writer.rollback()
+
+
+@pytest.mark.asyncio
+async def test_postgres_vector_setup_creates_tables_in_its_own_schema(engine_factory, test_project):
+    """Tables elsewhere on the search_path must not stand in for this schema's own.
+
+    Unqualified DDL and writes target the first schema on the path, so a database whose
+    path is `tenant, public` with vector tables only in public still needs them created.
+    """
+    engine, session_maker = engine_factory
+    await _skip_if_pgvector_unavailable(session_maker)
+    app_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        database_backend=DatabaseBackend.POSTGRES,
+        semantic_search_enabled=True,
+    )
+    # Public holds storage for a different provider (8 dimensions).
+    await PostgresSearchRepository(
+        session_maker,
+        project_id=test_project.id,
+        app_config=app_config,
+        embedding_provider=StubEmbeddingProvider8d(),
+    ).init_search_index()
+
+    async with engine.begin() as conn:
+        await conn.execute(text("CREATE SCHEMA layered_tenant"))
+    layered_engine = create_async_engine(
+        engine.url,
+        connect_args={"server_settings": {"search_path": "layered_tenant, public"}},
+    )
+    try:
+        layered_session_maker = async_sessionmaker(layered_engine, expire_on_commit=False)
+        await PostgresSearchRepository(
+            layered_session_maker,
+            project_id=test_project.id,
+            app_config=app_config,
+            embedding_provider=StubEmbeddingProvider(),
+        ).init_search_index()
+
+        async with layered_session_maker() as session:
+            local = set(
+                (
+                    await session.execute(
+                        text(
+                            "SELECT relname FROM pg_class "
+                            "WHERE relnamespace = 'layered_tenant'::regnamespace"
+                        )
+                    )
+                ).scalars()
+            )
+        assert {
+            "search_vector_chunks",
+            "idx_search_vector_chunks_project_entity",
+            "search_vector_embeddings",
+            "idx_search_vector_embeddings_project_dims",
+            "idx_search_vector_embeddings_hnsw",
+        } <= local
+
+        # The public table, built for other dimensions, is left alone.
+        async with db.scoped_session(session_maker) as session:
+            public_dimensions = (
+                await session.execute(
+                    text(
+                        "SELECT atttypmod FROM pg_attribute "
+                        "WHERE attrelid = 'public.search_vector_embeddings'::regclass "
+                        "AND attname = 'embedding'"
+                    )
+                )
+            ).scalar_one()
+        assert public_dimensions == 8
+    finally:
+        await layered_engine.dispose()
+        async with engine.begin() as conn:
+            await conn.execute(text("DROP SCHEMA layered_tenant CASCADE"))
+
+
+@pytest.mark.asyncio
 async def test_postgres_semantic_hybrid_search_combines_fts_and_vector(session_maker, test_project):
     """Hybrid mode fuses FTS and vector results with score-based fusion."""
     await _skip_if_pgvector_unavailable(session_maker)
@@ -620,6 +741,7 @@ async def test_postgres_semantic_hybrid_search_combines_fts_and_vector(session_m
         app_config=app_config,
         embedding_provider=StubEmbeddingProvider(),
     )
+    await repo.init_search_index()
 
     now = datetime.now(timezone.utc)
     await repo.bulk_index_items(
@@ -1049,7 +1171,7 @@ async def test_postgres_dimension_mismatch_triggers_table_recreation(session_mak
         app_config=app_config_4d,
         embedding_provider=StubEmbeddingProvider(),
     )
-    await repo_4d._ensure_vector_tables()
+    await repo_4d.init_search_index()
 
     # Verify table exists with 4 dimensions
     async with db.scoped_session(session_maker) as session:
@@ -1081,7 +1203,7 @@ async def test_postgres_dimension_mismatch_triggers_table_recreation(session_mak
         app_config=app_config_8d,
         embedding_provider=StubEmbeddingProvider8d(),
     )
-    await repo_8d._ensure_vector_tables()
+    await repo_8d.init_search_index()
 
     # Verify table was recreated with 8 dimensions
     async with db.scoped_session(session_maker) as session:

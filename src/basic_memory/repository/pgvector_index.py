@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import asyncio
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from loguru import logger
 from sqlalchemy import text
@@ -50,6 +50,26 @@ def hnsw_ef_search_for(limit: int) -> int:
     return min(max(limit, HNSW_EF_SEARCH_DEFAULT), HNSW_EF_SEARCH_MAX)
 
 
+@dataclass(frozen=True, slots=True)
+class PgVectorStorage:
+    """The pgvector storage a database already has, read from the catalog."""
+
+    extversion: str | None
+    dimensions: int | None
+    has_source_hash: bool
+    has_indexes: bool
+
+    def is_current_for(self, dimensions: int) -> bool:
+        """Whether initialize has nothing to create, rebuild, or report."""
+        return (
+            self.extversion is not None
+            and pgvector_supports_iterative_scan(self.extversion)
+            and self.dimensions == dimensions
+            and self.has_source_hash
+            and self.has_indexes
+        )
+
+
 class PgVectorIndex:
     """Persist and query semantic vectors in PostgreSQL with pgvector."""
 
@@ -60,8 +80,6 @@ class PgVectorIndex:
     ) -> None:
         self._session_maker = session_maker
         self.scope = scope
-        self._initialized = False
-        self._initialize_lock = asyncio.Lock()
 
     @staticmethod
     def _format_vector(vector: Sequence[float]) -> str:
@@ -69,134 +87,151 @@ class PgVectorIndex:
         return f"[{values}]"
 
     async def initialize(self) -> None:
-        if self._initialized:
+        """Runtime readiness: nothing to do, because storage exists before runtime.
+
+        Vector storage is created when the database is initialized (``create_storage``,
+        called from ``PostgresSearchRepository.init_search_index``), the same moment
+        migrations run. Runtime calls never issue DDL: CREATE INDEX IF NOT EXISTS takes
+        a SHARE lock on the table even when the index exists, and run per job it queued
+        every embedding write behind it until queries timed out.
+        """
+
+    async def create_storage(self) -> None:
+        """Create or rebuild pgvector storage. Database initialization only."""
+        # A catalog read takes no locks on our tables, so a database whose storage is
+        # already current (every worker start after the first) runs no DDL at all.
+        async with db.scoped_session(self._session_maker) as session:
+            storage = await self._read_storage(session)
+        if storage.is_current_for(self.scope.dimensions):
             return
 
-        async with self._initialize_lock:
-            if self._initialized:
-                return
-
-            async with db.scoped_session(self._session_maker) as session:
-                try:
-                    await session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-                except Exception as exc:
-                    raise SemanticDependenciesMissingError(
-                        "pgvector extension is unavailable for this Postgres database."
-                    ) from exc
-                version = await session.execute(
-                    text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
+        async with db.scoped_session(self._session_maker) as session:
+            try:
+                await session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            except Exception as exc:
+                raise SemanticDependenciesMissingError(
+                    "pgvector extension is unavailable for this Postgres database."
+                ) from exc
+            version = await session.execute(
+                text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
+            )
+            extversion = str(version.scalar_one())
+            # Trigger: the installed pgvector predates iterative index scans.
+            # Why: without them a scoped query silently returns fewer rows than
+            #   the window asked for; a deployment gap should read as one.
+            # Outcome: a typed dependency error the API reports as a bad request.
+            if not pgvector_supports_iterative_scan(extversion):
+                raise SemanticDependenciesMissingError(
+                    f"pgvector {extversion} predates iterative index scans; semantic "
+                    "search needs pgvector 0.8 or later (ALTER EXTENSION vector UPDATE)."
                 )
-                extversion = str(version.scalar_one())
-                # Trigger: the installed pgvector predates iterative index scans.
-                # Why: without them a scoped query silently returns fewer rows than
-                #   the window asked for; a deployment gap should read as one.
-                # Outcome: a typed dependency error the API reports as a bad request.
-                if not pgvector_supports_iterative_scan(extversion):
-                    raise SemanticDependenciesMissingError(
-                        f"pgvector {extversion} predates iterative index scans; semantic "
-                        "search needs pgvector 0.8 or later (ALTER EXTENSION vector UPDATE)."
+
+            # Judge the existing table from the schema-local catalog read above, so a
+            # same-named table elsewhere on the search_path is never rebuilt or dropped.
+            existing_dimensions = storage.dimensions
+            storage_missing = existing_dimensions is None
+            source_hash_missing = existing_dimensions is not None and not storage.has_source_hash
+            dimensions_changed = (
+                existing_dimensions is not None and existing_dimensions != self.scope.dimensions
+            )
+            if dimensions_changed or source_hash_missing:
+                logger.warning(
+                    "Vector storage schema mismatch: table dimensions={existing}, "
+                    "provider dimensions={expected}, source_hash_missing={source_hash_missing}. "
+                    "Recreating vector storage.",
+                    existing=existing_dimensions,
+                    expected=self.scope.dimensions,
+                    source_hash_missing=source_hash_missing,
+                )
+                await session.execute(text("DROP TABLE IF EXISTS search_vector_embeddings"))
+
+            await session.execute(
+                text(f"""
+                    CREATE TABLE IF NOT EXISTS search_vector_embeddings (
+                        chunk_id BIGINT PRIMARY KEY
+                            REFERENCES search_vector_chunks(id) ON DELETE CASCADE,
+                        project_id INTEGER NOT NULL,
+                        embedding vector({self.scope.dimensions}) NOT NULL,
+                        embedding_dims INTEGER NOT NULL,
+                        source_hash TEXT NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     )
+                """)
+            )
+            await session.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS "
+                    "idx_search_vector_embeddings_project_dims "
+                    "ON search_vector_embeddings (project_id, embedding_dims)"
+                )
+            )
+            await session.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_search_vector_embeddings_hnsw "
+                    "ON search_vector_embeddings "
+                    "USING hnsw (embedding vector_cosine_ops) "
+                    "WITH (m = 16, ef_construction = 64)"
+                )
+            )
 
-                existing_dimensions = await self._existing_dimensions(session)
-                storage_missing = existing_dimensions is None
-                source_hash_missing = (
-                    existing_dimensions is not None
-                    and not await self._has_source_hash_column(session)
-                )
-                dimensions_changed = (
-                    existing_dimensions is not None and existing_dimensions != self.scope.dimensions
-                )
-                if dimensions_changed or source_hash_missing:
-                    logger.warning(
-                        "Vector storage schema mismatch: table dimensions={existing}, "
-                        "provider dimensions={expected}, source_hash_missing={source_hash_missing}. "
-                        "Recreating vector storage.",
-                        existing=existing_dimensions,
-                        expected=self.scope.dimensions,
-                        source_hash_missing=source_hash_missing,
-                    )
-                    await session.execute(text("DROP TABLE IF EXISTS search_vector_embeddings"))
-
-                await session.execute(
-                    text(f"""
-                        CREATE TABLE IF NOT EXISTS search_vector_embeddings (
-                            chunk_id BIGINT PRIMARY KEY
-                                REFERENCES search_vector_chunks(id) ON DELETE CASCADE,
-                            project_id INTEGER NOT NULL,
-                            embedding vector({self.scope.dimensions}) NOT NULL,
-                            embedding_dims INTEGER NOT NULL,
-                            source_hash TEXT NOT NULL,
-                            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                        )
-                    """)
-                )
+            # Trigger: pgvector storage was created or its fixed-width column changed.
+            # Why: SQL manifest rows can otherwise remain `ready` after their vectors
+            # disappeared, causing incremental sync to skip them forever.
+            # Outcome: the normal sync pipeline re-embeds every affected chunk.
+            if storage_missing or dimensions_changed or source_hash_missing:
                 await session.execute(
                     text(
-                        "CREATE INDEX IF NOT EXISTS "
-                        "idx_search_vector_embeddings_project_dims "
-                        "ON search_vector_embeddings (project_id, embedding_dims)"
+                        "UPDATE search_vector_chunks SET embedding_status = 'pending' "
+                        "WHERE vector_index = 'pgvector'"
                     )
                 )
-                await session.execute(
-                    text(
-                        "CREATE INDEX IF NOT EXISTS idx_search_vector_embeddings_hnsw "
-                        "ON search_vector_embeddings "
-                        "USING hnsw (embedding vector_cosine_ops) "
-                        "WITH (m = 16, ef_construction = 64)"
-                    )
+            await session.commit()
+
+    async def _read_storage(self, session: AsyncSession) -> PgVectorStorage:
+        # Catalog reads take no locks on our tables. Only objects in the schema that
+        # unqualified DDL and writes target count: a match elsewhere on the search_path
+        # (say, public under a tenant schema) must not skip creating the local tables.
+        result = await session.execute(
+            text(
+                """
+                WITH local AS (
+                    SELECT oid, relname FROM pg_class
+                    WHERE relnamespace = current_schema()::regnamespace
+                      AND relname IN (
+                          'search_vector_embeddings',
+                          'idx_search_vector_embeddings_project_dims',
+                          'idx_search_vector_embeddings_hnsw'
+                      )
+                ),
+                embeddings AS (
+                    SELECT a.attname, a.atttypmod
+                    FROM pg_attribute a JOIN local ON a.attrelid = local.oid
+                    WHERE local.relname = 'search_vector_embeddings' AND NOT a.attisdropped
                 )
-
-                # Trigger: pgvector storage was created or its fixed-width column changed.
-                # Why: SQL manifest rows can otherwise remain `ready` after their vectors
-                # disappeared, causing incremental sync to skip them forever.
-                # Outcome: the normal sync pipeline re-embeds every affected chunk.
-                if storage_missing or dimensions_changed or source_hash_missing:
-                    await session.execute(
-                        text(
-                            "UPDATE search_vector_chunks SET embedding_status = 'pending' "
-                            "WHERE vector_index = 'pgvector'"
-                        )
-                    )
-                await session.commit()
-
-            self._initialized = True
-
-    async def _existing_dimensions(self, session: AsyncSession) -> int | None:
-        exists = await session.execute(
-            text(
-                "SELECT 1 FROM information_schema.tables "
-                "WHERE table_schema = ANY (current_schemas(false)) "
-                "AND table_name = 'search_vector_embeddings'"
+                SELECT
+                    (SELECT extversion FROM pg_extension WHERE extname = 'vector')
+                        AS extversion,
+                    (SELECT atttypmod FROM embeddings WHERE attname = 'embedding')
+                        AS dimensions,
+                    EXISTS (SELECT 1 FROM embeddings WHERE attname = 'source_hash')
+                        AS has_source_hash,
+                    (SELECT count(*) FROM local WHERE relname LIKE 'idx_%') = 2
+                        AS has_indexes
+                """
             )
         )
-        if exists.fetchone() is None:
-            return None
-
-        result = await session.execute(
-            text(
-                "SELECT atttypmod FROM pg_attribute "
-                "WHERE attrelid = 'search_vector_embeddings'::regclass "
-                "AND attname = 'embedding'"
-            )
+        row = result.mappings().one()
+        return PgVectorStorage(
+            extversion=None if row["extversion"] is None else str(row["extversion"]),
+            dimensions=None if row["dimensions"] is None else int(row["dimensions"]),
+            has_source_hash=bool(row["has_source_hash"]),
+            has_indexes=bool(row["has_indexes"]),
         )
-        value = result.scalar_one_or_none()
-        return int(value) if value is not None else None
-
-    async def _has_source_hash_column(self, session: AsyncSession) -> bool:
-        result = await session.execute(
-            text(
-                "SELECT 1 FROM pg_attribute "
-                "WHERE attrelid = 'search_vector_embeddings'::regclass "
-                "AND attname = 'source_hash'"
-            )
-        )
-        return result.scalar_one_or_none() is not None
 
     async def upsert(self, project_id: int, records: Sequence[VectorRecord]) -> None:
         if not records:
             return
         validate_vector_dimensions(self.scope, records)
-        await self.initialize()
 
         async with db.scoped_session(self._session_maker) as session:
             keys = [record.key for record in records]
@@ -266,7 +301,6 @@ class PgVectorIndex:
     async def delete(self, project_id: int, records: Sequence[VectorDeletion]) -> None:
         if not records:
             return
-        await self.initialize()
         async with db.scoped_session(self._session_maker) as session:
             params: dict[str, object] = {"project_id": project_id}
             predicates: list[str] = []
@@ -306,7 +340,6 @@ class PgVectorIndex:
                 await session.commit()
 
     async def delete_entity(self, project_id: int, entity_id: int) -> None:
-        await self.initialize()
         async with db.scoped_session(self._session_maker) as session:
             await session.execute(
                 text(
@@ -320,7 +353,6 @@ class PgVectorIndex:
 
     async def delete_orphans(self, project_id: int, _live_keys: Sequence[VectorKey]) -> None:
         """Remove pgvector rows absent from one project's current ready manifest."""
-        await self.initialize()
         async with db.scoped_session(self._session_maker) as session:
             await session.execute(
                 text(
@@ -351,7 +383,6 @@ class PgVectorIndex:
         if not query or limit <= 0 or projects.is_empty:
             return []
         validate_query_dimensions(self.scope, query)
-        await self.initialize()
         params: dict[str, object] = {
             "query": self._format_vector(query),
             "dimensions": self.scope.dimensions,

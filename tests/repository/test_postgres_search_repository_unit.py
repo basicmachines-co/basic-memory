@@ -227,9 +227,20 @@ class TestEnsureVectorTablesSchemaBootstrapping:
         missing_table.fetchone.return_value = None
         pgvector_version = MagicMock()
         pgvector_version.scalar_one.return_value = "0.8.0"
+        chunks_missing = MagicMock()
+        chunks_missing.scalar_one.return_value = False
+        storage_missing = MagicMock()
+        storage_missing.mappings.return_value.one.return_value = {
+            "extversion": None,
+            "dimensions": None,
+            "has_source_hash": False,
+            "has_indexes": False,
+        }
         session.execute.side_effect = [
+            chunks_missing,
             MagicMock(),
             MagicMock(),
+            storage_missing,
             MagicMock(),
             pgvector_version,
             missing_table,
@@ -239,7 +250,7 @@ class TestEnsureVectorTablesSchemaBootstrapping:
             MagicMock(),
         ]
 
-        await repo._ensure_vector_tables()
+        await repo._create_vector_storage()
 
         executed_sql = [str(call.args[0]) for call in session.execute.await_args_list]
 
