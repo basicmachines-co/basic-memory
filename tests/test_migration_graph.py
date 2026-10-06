@@ -9,9 +9,11 @@ merged graph; the first fresh database on main failed to initialize instead
 This reads the graph the same way `run_migrations` does, so the check fails in
 CI on the second PR to merge rather than on the next user's first `bm` command.
 
-Revisions after LAST_HEX_REVISION are named by schema version ("40", "41", ...), so the
+Revisions after LAST_HEX_REVISION are named by schema version ("0040", "0041", ...), so the
 graph is also checked for a contiguous, linear numeric tail.
 """
+
+import re
 
 import pytest
 from alembic.config import Config
@@ -21,6 +23,7 @@ from alembic.script import ScriptDirectory
 
 from basic_memory.alembic.migrations import (
     LAST_HEX_REVISION,
+    REVISION_ID_DIGITS,
     assign_sequential_revision_ids,
     get_script_directory,
     next_revision_id,
@@ -61,8 +64,11 @@ def test_revisions_after_the_last_hex_one_are_sequential():
 
     previous = LAST_HEX_REVISION
     for expected, rev in enumerate(chain[hex_end + 1 :], start=schema_version(previous) + 1):
-        assert rev.revision == str(expected), (
-            f"revision {rev.revision!r} should be named {str(expected)!r}; "
+        assert re.fullmatch(r"\d{4}", rev.revision), (
+            f"revision {rev.revision!r} must be exactly four digits"
+        )
+        assert int(rev.revision) == expected, (
+            f"revision {rev.revision!r} should be named {expected:04d}; "
             "generate migrations with `just migration` so the ID is assigned"
         )
         assert rev.down_revision == previous, (
@@ -76,7 +82,7 @@ def test_schema_version_counts_applied_revisions():
     assert schema_version("3dae7c7b1564") == 1  # initial schema
 
 
-@pytest.mark.parametrize("revision", ["nope", "z9a", "999", ""])
+@pytest.mark.parametrize("revision", ["nope", "z9a", "999", "0999", ""])
 def test_schema_version_rejects_unknown_revisions(revision):
     # "z9a" is a prefix Alembic itself would resolve; a version must name one revision.
     with pytest.raises(ValueError, match="unknown alembic revision"):
@@ -87,7 +93,10 @@ def test_next_revision_id_follows_the_head():
     script = _script_directory()
     (head,) = script.get_heads()
 
-    assert next_revision_id(script) == str(schema_version(head) + 1)
+    next_id = next_revision_id(script)
+
+    assert len(next_id) == REVISION_ID_DIGITS
+    assert int(next_id) == schema_version(head) + 1
 
 
 def test_next_revision_id_refuses_a_forked_graph(tmp_path):

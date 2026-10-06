@@ -11,10 +11,12 @@ from loguru import logger
 
 # --- Sequential revision IDs ---
 # Revisions up to and including this one carry Alembic's random hex IDs. Every revision
-# after it is named by its schema version: "40" revises "z9a0b1c2d3e4", "41" revises "40".
-# A version number orders schemas at a glance (cloud tenants report which one they run),
-# where a hex ID only says "different".
+# after it is named by its schema version, zero-padded to four digits: "0040" revises
+# "z9a0b1c2d3e4", "0041" revises "0040". A version number orders schemas at a glance
+# (cloud tenants report which one they run), where a hex ID only says "different". The
+# padding keeps migration files in version order in a directory listing.
 LAST_HEX_REVISION = "z9a0b1c2d3e4"
+REVISION_ID_DIGITS = 4
 
 
 def get_alembic_config() -> Config:  # pragma: no cover
@@ -38,7 +40,7 @@ def schema_version(revision: str, script: ScriptDirectory | None = None) -> int:
     """Return the schema version a revision produces: how many revisions it applies.
 
     The count is taken from the graph, so the hex revisions get a number too
-    (z9a0b1c2d3e4 is 39). For sequential revisions it equals int(revision).
+    (z9a0b1c2d3e4 is 39). For sequential revisions it equals int(revision): "0040" is 40.
     """
     script = script or get_script_directory()
 
@@ -60,7 +62,7 @@ def next_revision_id(script: ScriptDirectory) -> str:
             f"alembic has {len(heads)} heads {sorted(heads)}; join them with a merge "
             "revision before adding a new one"
         )
-    return str(schema_version(heads[0], script) + 1)
+    return f"{schema_version(heads[0], script) + 1:0{REVISION_ID_DIGITS}d}"
 
 
 def assign_sequential_revision_ids(
