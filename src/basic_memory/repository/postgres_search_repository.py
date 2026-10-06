@@ -327,13 +327,19 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 # Each job builds a fresh repository, so this runs on each one. CREATE
                 # INDEX IF NOT EXISTS takes a SHARE lock on the table even when the index
                 # exists, which queues concurrent chunk writes behind it. Read the catalog
-                # (no table locks) and run DDL only when the migration has not.
+                # (no locks on our tables) and run DDL only when the migration has not.
+                # Only the schema unqualified DDL targets counts, not the whole search_path.
                 chunks_ready = (
                     await session.execute(
                         text(
-                            "SELECT to_regclass('search_vector_chunks') IS NOT NULL "
-                            "AND to_regclass('idx_search_vector_chunks_project_entity') "
-                            "IS NOT NULL"
+                            """
+                            SELECT count(*) = 2 FROM pg_class
+                            WHERE relnamespace = current_schema()::regnamespace
+                              AND relname IN (
+                                  'search_vector_chunks',
+                                  'idx_search_vector_chunks_project_entity'
+                              )
+                            """
                         )
                     )
                 ).scalar_one()

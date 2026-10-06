@@ -90,7 +90,7 @@ class FakeSession:
     ) -> FakeResult:
         sql = str(statement)
         self.calls.append((sql, params))
-        if "to_regclass('search_vector_embeddings')" in sql:
+        if "AS has_indexes" in sql:
             return FakeResult(
                 rows=[
                     {
@@ -172,7 +172,7 @@ async def test_initialize_runs_no_ddl_when_storage_is_current(monkeypatch) -> No
     await index.initialize()
 
     [probe] = _sql_calls(session)
-    assert "to_regclass('search_vector_embeddings')" in probe
+    assert "AS has_indexes" in probe
     assert session.commit_count == 0
     assert index._initialized is True
 
@@ -186,7 +186,7 @@ async def test_initialize_keeps_the_schema_scoped_probe_for_partial_storage(monk
 
     async def missing_indexes(statement: object, params: dict[str, object] | None = None):
         result = await original_execute(statement, params)
-        if "to_regclass('search_vector_embeddings')" in str(statement):
+        if "AS has_indexes" in str(statement):
             result._rows[0]["has_indexes"] = False
         return result
 

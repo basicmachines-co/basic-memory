@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
@@ -636,15 +637,74 @@ async def test_postgres_vector_setup_does_not_wait_on_concurrent_writers(
     # Another job is mid-write on both vector tables.
     async with session_maker() as writer:
         await writer.execute(
-            text(
-                "LOCK TABLE search_vector_chunks, search_vector_embeddings "
-                "IN ROW EXCLUSIVE MODE"
-            )
+            text("LOCK TABLE search_vector_chunks, search_vector_embeddings IN ROW EXCLUSIVE MODE")
         )
         try:
             await asyncio.wait_for(fresh_repository()._ensure_vector_tables(), timeout=5)
         finally:
             await writer.rollback()
+
+
+@pytest.mark.asyncio
+async def test_postgres_vector_setup_creates_tables_in_its_own_schema(engine_factory, test_project):
+    """Tables elsewhere on the search_path must not stand in for this schema's own.
+
+    Unqualified DDL and writes target the first schema on the path, so a database whose
+    path is `tenant, public` with vector tables only in public still needs them created.
+    """
+    engine, session_maker = engine_factory
+    await _skip_if_pgvector_unavailable(session_maker)
+    app_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        database_backend=DatabaseBackend.POSTGRES,
+        semantic_search_enabled=True,
+    )
+    await PostgresSearchRepository(
+        session_maker,
+        project_id=test_project.id,
+        app_config=app_config,
+        embedding_provider=StubEmbeddingProvider(),
+    ).init_search_index()
+
+    async with engine.begin() as conn:
+        await conn.execute(text("CREATE SCHEMA layered_tenant"))
+    layered_engine = create_async_engine(
+        engine.url,
+        connect_args={"server_settings": {"search_path": "layered_tenant, public"}},
+    )
+    try:
+        layered_session_maker = async_sessionmaker(layered_engine, expire_on_commit=False)
+        await PostgresSearchRepository(
+            layered_session_maker,
+            project_id=test_project.id,
+            app_config=app_config,
+            embedding_provider=StubEmbeddingProvider(),
+        )._ensure_vector_tables()
+
+        async with layered_session_maker() as session:
+            local = set(
+                (
+                    await session.execute(
+                        text(
+                            "SELECT relname FROM pg_class "
+                            "WHERE relnamespace = 'layered_tenant'::regnamespace"
+                        )
+                    )
+                ).scalars()
+            )
+        assert {
+            "search_vector_chunks",
+            "idx_search_vector_chunks_project_entity",
+            "search_vector_embeddings",
+            "idx_search_vector_embeddings_project_dims",
+            "idx_search_vector_embeddings_hnsw",
+        } <= local
+    finally:
+        await layered_engine.dispose()
+        async with engine.begin() as conn:
+            await conn.execute(text("DROP SCHEMA layered_tenant CASCADE"))
 
 
 @pytest.mark.asyncio

@@ -195,22 +195,34 @@ class PgVectorIndex:
             self._initialized = True
 
     async def _read_storage(self, session: AsyncSession) -> PgVectorStorage:
-        # to_regclass resolves names without locking; a missing relation is NULL.
+        # Catalog reads take no locks on our tables. Only objects in the schema that
+        # unqualified DDL and writes target count: a match elsewhere on the search_path
+        # (say, public under a tenant schema) must not skip creating the local tables.
         result = await session.execute(
             text(
                 """
+                WITH local AS (
+                    SELECT oid, relname FROM pg_class
+                    WHERE relnamespace = current_schema()::regnamespace
+                      AND relname IN (
+                          'search_vector_embeddings',
+                          'idx_search_vector_embeddings_project_dims',
+                          'idx_search_vector_embeddings_hnsw'
+                      )
+                ),
+                embeddings AS (
+                    SELECT a.attname, a.atttypmod
+                    FROM pg_attribute a JOIN local ON a.attrelid = local.oid
+                    WHERE local.relname = 'search_vector_embeddings' AND NOT a.attisdropped
+                )
                 SELECT
                     (SELECT extversion FROM pg_extension WHERE extname = 'vector')
                         AS extversion,
-                    (SELECT atttypmod FROM pg_attribute
-                     WHERE attrelid = to_regclass('search_vector_embeddings')
-                       AND attname = 'embedding' AND NOT attisdropped) AS dimensions,
-                    EXISTS (SELECT 1 FROM pg_attribute
-                            WHERE attrelid = to_regclass('search_vector_embeddings')
-                              AND attname = 'source_hash' AND NOT attisdropped)
+                    (SELECT atttypmod FROM embeddings WHERE attname = 'embedding')
+                        AS dimensions,
+                    EXISTS (SELECT 1 FROM embeddings WHERE attname = 'source_hash')
                         AS has_source_hash,
-                    to_regclass('idx_search_vector_embeddings_project_dims') IS NOT NULL
-                        AND to_regclass('idx_search_vector_embeddings_hnsw') IS NOT NULL
+                    (SELECT count(*) FROM local WHERE relname LIKE 'idx_%') = 2
                         AS has_indexes
                 """
             )
