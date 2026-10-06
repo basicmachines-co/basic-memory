@@ -5,6 +5,7 @@ Postgres tsvector-backed search implementation remains well covered.
 """
 
 import asyncio
+from uuid import uuid4
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -722,6 +723,68 @@ async def test_postgres_vector_setup_creates_tables_in_its_own_schema(engine_fac
         await layered_engine.dispose()
         async with engine.begin() as conn:
             await conn.execute(text("DROP SCHEMA layered_tenant CASCADE"))
+
+
+@pytest.mark.asyncio
+async def test_concurrent_initializations_of_a_fresh_database_all_succeed(
+    engine_factory, test_project
+):
+    """Several processes can initialize one new database at the same moment.
+
+    A cloud pre-warm and a worker touching the same new tenant both create vector
+    storage. CREATE ... IF NOT EXISTS is not safe under concurrency: in production the
+    second CREATE EXTENSION failed on pg_extension's unique index and crashed the
+    pre-warm (Logfire 2986/2987).
+    """
+    engine, session_maker = engine_factory
+    await _skip_if_pgvector_unavailable(session_maker)
+    app_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": "/tmp/basic-memory-test"},
+        default_project="test-project",
+        database_backend=DatabaseBackend.POSTGRES,
+        semantic_search_enabled=True,
+    )
+    database_name = f"vector_init_race_{uuid4().hex[:10]}"
+    admin_engine = create_async_engine(engine.url, isolation_level="AUTOCOMMIT")
+    async with admin_engine.connect() as connection:
+        await connection.execute(text(f'CREATE DATABASE "{database_name}"'))
+    process_engines = [
+        create_async_engine(engine.url.set(database=database_name)) for _ in range(8)
+    ]
+    try:
+        await asyncio.gather(
+            *(
+                PostgresSearchRepository(
+                    async_sessionmaker(process_engine, expire_on_commit=False),
+                    project_id=test_project.id,
+                    app_config=app_config,
+                    embedding_provider=StubEmbeddingProvider(),
+                ).init_search_index()
+                for process_engine in process_engines
+            )
+        )
+
+        async with process_engines[0].connect() as connection:
+            tables = set(
+                (
+                    await connection.execute(
+                        text(
+                            "SELECT relname FROM pg_class WHERE relname IN "
+                            "('search_vector_chunks', 'search_vector_embeddings')"
+                        )
+                    )
+                ).scalars()
+            )
+        assert tables == {"search_vector_chunks", "search_vector_embeddings"}
+    finally:
+        for process_engine in process_engines:
+            await process_engine.dispose()
+        async with admin_engine.connect() as connection:
+            await connection.execute(
+                text(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)')
+            )
+        await admin_engine.dispose()
 
 
 @pytest.mark.asyncio

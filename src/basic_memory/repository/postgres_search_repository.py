@@ -33,7 +33,7 @@ from basic_memory.repository.semantic_vector_index_factory import (
     build_vector_index_scope,
     resolve_semantic_vector_index_name,
 )
-from basic_memory.repository.pgvector_index import PgVectorIndex
+from basic_memory.repository.pgvector_index import PgVectorIndex, lock_vector_storage_ddl
 from basic_memory.repository.postgres_fts_chunks import split_postgres_fts_chunks
 
 
@@ -44,6 +44,27 @@ def _strip_nul_from_row(row_data: dict[str, Any]) -> dict[str, Any]:
     Primary sanitization happens in SearchService.index_entity_markdown().
     """
     return {k: v.replace("\x00", "") if isinstance(v, str) else v for k, v in row_data.items()}
+
+
+async def _vector_chunk_tables_ready(session: AsyncSession) -> bool:
+    """Whether this schema already has the chunk table and its index.
+
+    Only the schema that unqualified DDL and writes target counts, not other schemas on
+    the search_path.
+    """
+    result = await session.execute(
+        text(
+            """
+            SELECT count(*) = 2 FROM pg_class
+            WHERE relnamespace = current_schema()::regnamespace
+              AND relname IN (
+                  'search_vector_chunks',
+                  'idx_search_vector_chunks_project_entity'
+              )
+            """
+        )
+    )
+    return bool(result.scalar_one())
 
 
 class PostgresSearchRepository(SearchRepositoryBase):
@@ -326,23 +347,9 @@ class PostgresSearchRepository(SearchRepositoryBase):
         """Create the chunk and embedding tables. Database initialization only."""
         self._bind_vector_index()
         # Catalog reads take no locks on our tables, so an initialized database (every
-        # worker start after the first) runs no DDL. Only the schema that unqualified
-        # DDL and writes target counts, not other schemas on the search_path.
+        # worker start after the first) runs no DDL.
         async with db.scoped_session(self.session_maker) as session:
-            chunks_ready = (
-                await session.execute(
-                    text(
-                        """
-                        SELECT count(*) = 2 FROM pg_class
-                        WHERE relnamespace = current_schema()::regnamespace
-                          AND relname IN (
-                              'search_vector_chunks',
-                              'idx_search_vector_chunks_project_entity'
-                          )
-                        """
-                    )
-                )
-            ).scalar_one()
+            chunks_ready = await _vector_chunk_tables_ready(session)
         if not chunks_ready:
             await self._create_vector_chunk_tables()
 
@@ -356,6 +363,10 @@ class PostgresSearchRepository(SearchRepositoryBase):
 
     async def _create_vector_chunk_tables(self) -> None:
         async with db.scoped_session(self.session_maker) as session:
+            await lock_vector_storage_ddl(session)
+            # Another initialization may have created them while this one waited.
+            if await _vector_chunk_tables_ready(session):
+                return
             # --- Chunks table (dimension-independent, may already exist via migration) ---
             # Trigger: fresh Postgres projects may not have vector chunk tables yet.
             # Why: runtime can bootstrap missing tables, but schema evolution must stay

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -48,6 +49,23 @@ def pgvector_supports_iterative_scan(extversion: str) -> bool:
 def hnsw_ef_search_for(limit: int) -> int:
     """The candidate-list size that lets one HNSW scan return ``limit`` rows."""
     return min(max(limit, HNSW_EF_SEARCH_DEFAULT), HNSW_EF_SEARCH_MAX)
+
+
+# Initializations of one database can run at once: a cloud API pre-warm and a worker
+# touching the same tenant, or several workers starting together. CREATE ... IF NOT
+# EXISTS is not safe under concurrency (the loser fails on a catalog unique index), so
+# the DDL path takes this transaction lock and re-reads the catalog before creating.
+VECTOR_STORAGE_DDL_LOCK_KEY = int.from_bytes(
+    hashlib.sha256(b"basic-memory-vector-storage-ddl-v1").digest()[:4], "big"
+) % (2**31)
+
+
+async def lock_vector_storage_ddl(session: AsyncSession) -> None:
+    """Serialize vector storage DDL on this database until the transaction ends."""
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(:lock_key)"),
+        {"lock_key": VECTOR_STORAGE_DDL_LOCK_KEY},
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,12 +124,20 @@ class PgVectorIndex:
             return
 
         async with db.scoped_session(self._session_maker) as session:
-            try:
+            await lock_vector_storage_ddl(session)
+            # Another initialization may have finished while this one waited.
+            storage = await self._read_storage(session)
+            if storage.is_current_for(self.scope.dimensions):
+                return
+            if storage.extversion is None:
+                available = await session.execute(
+                    text("SELECT 1 FROM pg_available_extensions WHERE name = 'vector'")
+                )
+                if available.scalar_one_or_none() is None:
+                    raise SemanticDependenciesMissingError(
+                        "pgvector extension is unavailable for this Postgres database."
+                    )
                 await session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            except Exception as exc:
-                raise SemanticDependenciesMissingError(
-                    "pgvector extension is unavailable for this Postgres database."
-                ) from exc
             version = await session.execute(
                 text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
             )
