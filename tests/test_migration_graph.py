@@ -9,20 +9,22 @@ merged graph; the first fresh database on main failed to initialize instead
 This reads the graph the same way `run_migrations` does, so the check fails in
 CI on the second PR to merge rather than on the next user's first `bm` command.
 
-Revisions after LAST_HEX_REVISION are named by schema version ("0040", "0041", ...), so the
+Revisions after LAST_UNNUMBERED_REVISION are named by schema version ("0040", "0041", ...), so the
 graph is also checked for a contiguous, linear numeric tail.
 """
 
 import re
+from pathlib import Path
 
 import pytest
 from alembic.config import Config
+from alembic.util import asbool
 from alembic.operations.ops import DowngradeOps, MigrationScript, UpgradeOps
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 
 from basic_memory.alembic.migrations import (
-    LAST_HEX_REVISION,
+    LAST_UNNUMBERED_REVISION,
     REVISION_ID_DIGITS,
     assign_sequential_revision_ids,
     get_script_directory,
@@ -54,16 +56,16 @@ def test_every_revision_is_reachable_from_the_head():
     )
 
 
-def test_revisions_after_the_last_hex_one_are_sequential():
+def test_revisions_after_the_last_unnumbered_one_are_sequential():
     script = _script_directory()
     (head,) = script.get_heads()
 
     # walk_revisions goes head -> base; reverse it so versions count upward.
     chain = list(reversed(list(script.walk_revisions("base", head))))
-    hex_end = [rev.revision for rev in chain].index(LAST_HEX_REVISION)
+    unnumbered_end = [rev.revision for rev in chain].index(LAST_UNNUMBERED_REVISION)
 
-    previous = LAST_HEX_REVISION
-    for expected, rev in enumerate(chain[hex_end + 1 :], start=schema_version(previous) + 1):
+    previous = LAST_UNNUMBERED_REVISION
+    for expected, rev in enumerate(chain[unnumbered_end + 1 :], start=schema_version(previous) + 1):
         assert re.fullmatch(r"\d{4}", rev.revision), (
             f"revision {rev.revision!r} must be exactly four digits"
         )
@@ -78,7 +80,7 @@ def test_revisions_after_the_last_hex_one_are_sequential():
 
 
 def test_schema_version_counts_applied_revisions():
-    assert schema_version(LAST_HEX_REVISION) == 39
+    assert schema_version(LAST_UNNUMBERED_REVISION) == 39
     assert schema_version("3dae7c7b1564") == 1  # initial schema
 
 
@@ -133,3 +135,11 @@ def test_revision_hook_requires_a_script_directory():
 
     with pytest.raises(RuntimeError, match="no script directory"):
         assign_sequential_revision_ids(context, "head", [directive])
+
+
+def test_hand_written_revisions_run_the_id_hook():
+    # `alembic revision` without --autogenerate only runs env.py, and so the hook, when
+    # revision_environment is set; otherwise it writes a random ID and breaks the sequence.
+    ini = Path(get_script_directory().dir) / "alembic.ini"
+
+    assert asbool(Config(ini).get_alembic_option("revision_environment"))

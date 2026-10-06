@@ -90,7 +90,7 @@ def run_migrations_offline() -> None:
         include_object=include_object,
         render_as_batch=True,
         # `alembic revision` (the `just migration` recipe) names each new revision by its
-        # schema version instead of a random hex ID; see migrations.LAST_HEX_REVISION.
+        # schema version instead of a random ID; see migrations.LAST_UNNUMBERED_REVISION.
         process_revision_directives=assign_sequential_revision_ids,
     )
 
@@ -107,7 +107,7 @@ def do_run_migrations(connection):
         render_as_batch=True,
         compare_type=True,
         # `alembic revision` (the `just migration` recipe) names each new revision by its
-        # schema version instead of a random hex ID; see migrations.LAST_HEX_REVISION.
+        # schema version instead of a random ID; see migrations.LAST_UNNUMBERED_REVISION.
         process_revision_directives=assign_sequential_revision_ids,
     )
     with context.begin_transaction():
