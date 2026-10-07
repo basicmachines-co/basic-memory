@@ -318,7 +318,9 @@ async def seed_note_content(session_maker: SessionMaker, entity_id: int, **value
 def write_project_file(project: Project, file_path: str, content: str) -> None:
     path = Path(project.path) / file_path
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    # Bytes, not text: text mode on Windows writes \r\n, and the stored object must hash
+    # to exactly the accepted Markdown on every platform.
+    path.write_bytes(content.encode("utf-8"))
 
 
 async def materialize(session_maker: SessionMaker, project: Project, entity_id: int) -> str:
