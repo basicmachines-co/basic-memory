@@ -32,8 +32,15 @@ class _SimulatedIndexingFailure(Exception):
 @pytest.mark.asyncio
 async def test_concurrent_session_rollback_does_not_destroy_uncommitted_writes():
     """A rolled-back session in one task must not erase another task's writes."""
+    # An explicit config keeps the developer's home config from choosing the backend.
+    app_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": ProjectEntry(path=".")},
+        default_project="test-project",
+        database_backend=DatabaseBackend.SQLITE,
+    )
     async with db.engine_session_factory(
-        db_path=Path("unused.db"), db_type=db.DatabaseType.MEMORY
+        db_path=Path("unused.db"), db_type=db.DatabaseType.MEMORY, config=app_config
     ) as (engine, session_maker):
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)

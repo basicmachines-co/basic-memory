@@ -15,14 +15,23 @@ import time
 import pytest
 from sqlalchemy import event, text
 
+from basic_memory.config import BasicMemoryConfig, DatabaseBackend, ProjectEntry
 from basic_memory.db import DatabaseType, _create_sqlite_engine
 
 
 @pytest.mark.asyncio
 async def test_file_sqlite_concurrent_writes_commit_and_dispose(tmp_path: Path) -> None:
+    # An explicit config keeps the developer's home config from choosing the backend.
+    app_config = BasicMemoryConfig(
+        env="test",
+        projects={"test-project": ProjectEntry(path=str(tmp_path))},
+        default_project="test-project",
+        database_backend=DatabaseBackend.SQLITE,
+    )
     engine = _create_sqlite_engine(
-        DatabaseType.get_db_url(tmp_path / "contention.db", DatabaseType.FILESYSTEM),
+        DatabaseType.get_db_url(tmp_path / "contention.db", DatabaseType.FILESYSTEM, app_config),
         DatabaseType.FILESYSTEM,
+        app_config,
     )
     connections = 0
 

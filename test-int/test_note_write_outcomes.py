@@ -6,11 +6,14 @@ from unittest.mock import AsyncMock
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 import basic_memory.indexing.accepted_note_mutation_runner as mutation_runner
 from basic_memory.config import BasicMemoryConfig
-from basic_memory.models import Project
+from basic_memory import db
+from basic_memory.models import Entity, NoteContent, Project, RelationSearchRefresh
+from basic_memory.repository import EntityRepository
 from basic_memory.services.note_content_writes import (
     AcceptedNoteChange,
     NoteContentMutationKind,
@@ -329,3 +332,93 @@ async def test_a_note_deleted_under_the_update_lock_is_a_revision_conflict_when_
         # Without a pinned revision the missing content stays Core's backfill refusal.
         assert response.status_code == 409
         assert "Note content is not available" in response.json()["detail"]
+
+
+# --- Relation publication marker ---
+
+
+async def _publication_state(
+    session_maker: async_sessionmaker[AsyncSession],
+    project: Project,
+    file_path: str,
+) -> tuple[list[int | None], str | None, str | None]:
+    """Return the note's marker generations, its stored checksum, and the gate's view of it."""
+    async with db.scoped_session(session_maker) as session:
+        entity = await session.scalar(
+            select(Entity).where(Entity.project_id == project.id, Entity.file_path == file_path)
+        )
+        assert entity is not None
+        markers = list(
+            await session.scalars(
+                select(RelationSearchRefresh.publication_generation)
+                .where(RelationSearchRefresh.entity_id == entity.id)
+                .order_by(RelationSearchRefresh.id)
+            )
+        )
+        rows = await EntityRepository(project_id=project.id).get_by_file_paths(
+            session, [file_path]
+        )
+    return markers, entity.checksum, rows[0][1]
+
+
+async def test_published_write_leaves_no_pending_marker(
+    client: AsyncClient,
+    test_project: Project,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    """A write whose graph is published leaves nothing pending, so its checksum stays visible."""
+    _, session_maker = engine_factory
+    response = await client.post(
+        f"/v2/projects/{test_project.external_id}/knowledge/write",
+        json={"note": {"title": "Published", "directory": "notes", "content": "- [a] b"}},
+    )
+    assert response.json()["kind"] == "created"
+
+    markers, stored_checksum, gate_checksum = await _publication_state(
+        session_maker, test_project, "notes/Published.md"
+    )
+    assert all(generation is None for generation in markers)
+    assert stored_checksum is not None
+    assert gate_checksum == stored_checksum
+
+
+async def test_accepted_generation_is_pending_before_publication_starts(
+    client: AsyncClient,
+    test_project: Project,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The accept transaction owns the marker, so a publish that never starts still repairs."""
+    _, session_maker = engine_factory
+    observed: list[tuple[list[int | None], str | None, int | None]] = []
+
+    async def fail_before_publishing(
+        self: NoteContentMutationService, publication: Any
+    ) -> None:
+        markers, _, gate_checksum = await _publication_state(
+            session_maker, test_project, "notes/Unpublished.md"
+        )
+        async with db.scoped_session(session_maker) as session:
+            db_version = await session.scalar(
+                select(NoteContent.db_version).where(
+                    NoteContent.entity_id == publication.entity_id
+                )
+            )
+        observed.append((markers, gate_checksum, db_version))
+        raise OSError("graph publication unavailable")
+
+    monkeypatch.setattr(
+        NoteContentMutationService, "_publish_relation_generation", fail_before_publishing
+    )
+    response = await client.post(
+        f"/v2/projects/{test_project.external_id}/knowledge/write",
+        json={"note": {"title": "Unpublished", "directory": "notes", "content": "- [a] b"}},
+    )
+    # Graph publication is post-commit work; its failure never refuses the accepted note.
+    assert response.json()["kind"] == "created"
+
+    [(markers, gate_checksum, db_version)] = observed
+    assert db_version is not None
+    assert markers == [db_version]
+    # The pending marker masks the checksum, so change detection re-reads and republishes.
+    assert gate_checksum is None

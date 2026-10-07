@@ -198,6 +198,15 @@ class AcceptedNoteTemporalRepository(TemporalGenerationStore, Protocol):
 class AcceptedNoteRelationRepository(RelationGenerationStore, Protocol):
     """Generation-fenced relation persistence for accepted note writes."""
 
+    def record_pending_relation_publication(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: RuntimeEntityId,
+        generation: int,
+    ) -> None:
+        """Mark an accepted generation's graph as not yet published."""
+
 
 class AcceptedNoteWriteRepositories(Protocol):
     """Repository capability set needed by accepted-note DB-first writes."""
@@ -624,8 +633,21 @@ async def accepted_relation_generation_publication(
     sections: Sequence[AcceptedSectionWrite],
     relations: Sequence[AcceptedRelationWrite],
     self_relation_resolver: AcceptedNoteSelfRelationResolver,
+    repositories: AcceptedNoteWriteRepositories,
 ) -> RelationGenerationPublication:
-    """Carry the parsed graph plus ambiguity-safe self targets into publication."""
+    """Carry the parsed graph plus ambiguity-safe self targets into publication.
+
+    The pending publication marker is written here, inside the accept transaction, so an
+    accepted generation is never visible without it. Readers that must not draw graph
+    conclusions from an unpublished generation see it as pending from the moment the note
+    is accepted; the post-commit publisher converts it once the graph is written, and a
+    publication that fails leaves it pending for change detection to repair.
+    """
+    repositories.relation_repository(entity.project_id).record_pending_relation_publication(
+        session,
+        entity_id=entity.id,
+        generation=note_content.db_version,
+    )
     indexed_observations = tuple(
         IndexedObservation(
             content=observation.content,
@@ -721,6 +743,7 @@ async def persist_accepted_note_snapshot(
             sections=prepared.sections,
             relations=prepared.relations,
             self_relation_resolver=self_relation_resolver,
+            repositories=repositories,
         ),
     )
 
@@ -764,6 +787,7 @@ async def persist_accepted_note_move(
             sections=prepared.sections,
             relations=prepared.relations,
             self_relation_resolver=self_relation_resolver,
+            repositories=repositories,
         ),
     )
 

@@ -486,7 +486,11 @@ class RelationRepository(Repository[Relation]):
         entity_id: int,
         generation: int,
     ) -> RelationGenerationWriteResult:
-        """Persist retry work before publishing any relation chunk."""
+        """Persist retry work before publishing any relation chunk.
+
+        An accepted note write records this generation's marker in its own transaction,
+        so only add one when no marker for the generation is pending yet.
+        """
         current_generation = await session.scalar(
             current_relation_generation_statement(
                 project_id=self.project_id,
@@ -497,6 +501,33 @@ class RelationRepository(Repository[Relation]):
         if current_generation is None:
             return RelationGenerationWriteResult(generation_is_current=False)
 
+        marker_pending = await session.scalar(
+            select(
+                exists().where(
+                    RelationSearchRefresh.project_id == self.project_id,
+                    RelationSearchRefresh.entity_id == entity_id,
+                    RelationSearchRefresh.publication_generation == generation,
+                )
+            )
+        )
+        if not marker_pending:
+            self.record_pending_relation_publication(
+                session, entity_id=entity_id, generation=generation
+            )
+        return RelationGenerationWriteResult(generation_is_current=True)
+
+    def record_pending_relation_publication(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+        generation: int,
+    ) -> None:
+        """Mark a generation's graph as not yet published, in the caller's transaction.
+
+        While the marker is pending, change detection treats the note's checksum as
+        unknown and readers hold graph conclusions; publication cleanup converts it.
+        """
         session.add(
             RelationSearchRefresh(
                 project_id=self.project_id,
@@ -504,7 +535,6 @@ class RelationRepository(Repository[Relation]):
                 publication_generation=generation,
             )
         )
-        return RelationGenerationWriteResult(generation_is_current=True)
 
     async def cleanup_relation_generations(
         self,

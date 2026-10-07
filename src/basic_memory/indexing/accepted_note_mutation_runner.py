@@ -398,9 +398,18 @@ def attach_accepted_project_note_change(
     change: AcceptedNoteMutationChange,
     project_change: RuntimeAcceptedProjectNoteChange,
 ) -> AcceptedNoteMutationChange:
-    """Carry accepted partition evidence through existing runtime follow-up work."""
+    """Carry accepted partition evidence through existing runtime follow-up work.
+
+    The project change records what the mutation did, so it alone decides whether the
+    materialization announces a move: a PUT that renames a note and an explicit move
+    both carry the path the note left.
+    """
     materialization = (
-        replace(change.materialization, project_change=project_change)
+        replace(
+            change.materialization,
+            project_change=project_change,
+            previous_file_path=project_change.previous_file_path,
+        )
         if change.materialization is not None
         else None
     )
@@ -1285,7 +1294,6 @@ async def _run_accepted_note_move(
                 actor_user_profile_id=request.actor.user_profile_id,
                 actor_kind=request.actor.kind,
                 actor_name=request.actor.name,
-                previous_file_path=existing_file_path,
                 cleanup_after_write=persisted.previous_file_delete,
                 fallback_source=request.source,
             ),
