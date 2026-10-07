@@ -486,7 +486,11 @@ class RelationRepository(Repository[Relation]):
         entity_id: int,
         generation: int,
     ) -> RelationGenerationWriteResult:
-        """Persist retry work before publishing any relation chunk."""
+        """Persist retry work before publishing any relation chunk.
+
+        An accepted note write records this generation's marker in its own transaction,
+        so only add one when no marker for the generation is pending yet.
+        """
         current_generation = await session.scalar(
             current_relation_generation_statement(
                 project_id=self.project_id,
@@ -496,6 +500,18 @@ class RelationRepository(Repository[Relation]):
         )
         if current_generation is None:
             return RelationGenerationWriteResult(generation_is_current=False)
+
+        marker_pending = await session.scalar(
+            select(
+                exists().where(
+                    RelationSearchRefresh.project_id == self.project_id,
+                    RelationSearchRefresh.entity_id == entity_id,
+                    RelationSearchRefresh.publication_generation == generation,
+                )
+            )
+        )
+        if marker_pending:
+            return RelationGenerationWriteResult(generation_is_current=True)
 
         session.add(
             RelationSearchRefresh(

@@ -645,7 +645,9 @@ async def test_failed_relation_publication_forces_change_detection_retry(
             session,
             entity_id=sample_entity.id,
         )
-    assert [refresh.entity_id for refresh in refreshes] == [sample_entity.id, sample_entity.id]
+    # The retry reuses the pending marker instead of adding a second one, so publication
+    # leaves exactly one unit of refresh work.
+    assert [refresh.entity_id for refresh in refreshes] == [sample_entity.id]
 
 
 @pytest.mark.asyncio

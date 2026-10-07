@@ -23,7 +23,7 @@ from basic_memory.indexing.relation_persistence import (
     SectionGenerationStore,
     TemporalGenerationStore,
 )
-from basic_memory.models import Entity, NoteContent
+from basic_memory.models import Entity, NoteContent, RelationSearchRefresh
 from basic_memory.repository import (
     AcceptedNoteContentWrite,
     AcceptedObservationWrite,
@@ -625,7 +625,21 @@ async def accepted_relation_generation_publication(
     relations: Sequence[AcceptedRelationWrite],
     self_relation_resolver: AcceptedNoteSelfRelationResolver,
 ) -> RelationGenerationPublication:
-    """Carry the parsed graph plus ambiguity-safe self targets into publication."""
+    """Carry the parsed graph plus ambiguity-safe self targets into publication.
+
+    The pending publication marker is written here, inside the accept transaction, so an
+    accepted generation is never visible without it. Readers that must not draw graph
+    conclusions from an unpublished generation see it as pending from the moment the note
+    is accepted; the post-commit publisher converts it once the graph is written, and a
+    publication that fails leaves it pending for change detection to repair.
+    """
+    session.add(
+        RelationSearchRefresh(
+            project_id=entity.project_id,
+            entity_id=entity.id,
+            publication_generation=note_content.db_version,
+        )
+    )
     indexed_observations = tuple(
         IndexedObservation(
             content=observation.content,
