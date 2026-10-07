@@ -11,7 +11,6 @@ from basic_memory.services.entity_service import EntityService
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("directory_move", [False, True])
 @pytest.mark.parametrize("update_permalinks", [False, True])
 @pytest.mark.parametrize(
     ("filename", "content_type", "content"),
@@ -28,7 +27,6 @@ async def test_non_markdown_move_preserves_bytes_and_identity(
     content_type: str,
     content: bytes,
     update_permalinks: bool,
-    directory_move: bool,
 ) -> None:
     source = f"original/{filename}"
     destination = f"archive/{filename}"
@@ -50,19 +48,7 @@ async def test_non_markdown_move_preserves_bytes_and_identity(
     external_id = entity.external_id
     config = BasicMemoryConfig(update_permalinks_on_move=update_permalinks)
 
-    if directory_move:
-        result = await entity_service.move_directory(
-            "original",
-            "archive",
-            project_config,
-            config,
-            project_external_id=test_project.external_id,
-            read_cache=None,
-        )
-        assert result.failed_moves == 0, result.errors
-        assert result.moved_files == [destination]
-    else:
-        await entity_service.move_entity(source, destination, project_config, config)
+    await entity_service.move_entity(source, destination, project_config, config)
 
     assert not source_path.exists()
     assert (project_config.home / destination).read_bytes() == content

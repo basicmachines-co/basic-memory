@@ -1,7 +1,6 @@
 """Service for managing entities in the database."""
 
 from collections.abc import Callable
-from contextlib import nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional, Sequence, Tuple, Union
@@ -32,13 +31,10 @@ from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.repository.memory_time_index_repository import MemoryTimeIndexRepository
 from basic_memory.repository.note_section_repository import NoteSectionRepository
-from basic_memory.read_cache import ReadCache, invalidate_cache
 from basic_memory.runtime.note_move import normalize_note_move_destination_path
 from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.schemas.base import Permalink
 from basic_memory.schemas.response import (
-    DirectoryMoveResult,
-    DirectoryMoveError,
     DirectoryDeleteResult,
     DirectoryDeleteError,
 )
@@ -1065,119 +1061,6 @@ class EntityService(BaseService[EntityModel]):
 
             # Re-raise the original error with context
             raise ValueError(f"Move failed: {str(e)}") from e
-
-    async def move_directory(
-        self,
-        source_directory: str,
-        destination_directory: str,
-        project_config: ProjectConfig,
-        app_config: BasicMemoryConfig,
-        *,
-        project_external_id: str,
-        read_cache: ReadCache | None,
-    ) -> DirectoryMoveResult:
-        """Move all entities in a directory to a new location.
-
-        This operation moves all files within a source directory to a destination
-        directory, updating database records and search indexes. The operation
-        tracks successes and failures individually to provide detailed feedback.
-
-        Args:
-            source_directory: Source directory path relative to project root
-            destination_directory: Destination directory path relative to project root
-            project_config: Project configuration for file operations
-            app_config: App configuration for permalink update settings
-            project_external_id: Canonical project UUID used for cache invalidation
-            read_cache: Namespace-bound semantic read cache
-
-        Returns:
-            DirectoryMoveResult with counts and details of moved files
-
-        Raises:
-            ValueError: If source directory is empty or destination conflicts exist
-        """
-
-        logger.info(f"Moving directory: {source_directory} -> {destination_directory}")
-
-        # Normalize directory paths (remove trailing slashes)
-        source_directory = source_directory.strip("/")
-        destination_directory = destination_directory.strip("/")
-
-        # Find all entities in the source directory
-        async with db.scoped_session(self.session_maker) as session:
-            entities = await self.repository.find_by_directory_prefix(session, source_directory)
-
-        if not entities:
-            logger.warning(f"No entities found in directory: {source_directory}")
-            return DirectoryMoveResult(
-                total_files=0,
-                successful_moves=0,
-                failed_moves=0,
-                moved_files=[],
-                errors=[],
-            )
-
-        # Track results
-        moved_files: list[str] = []
-        errors: list[DirectoryMoveError] = []
-        successful_moves = 0
-        failed_moves = 0
-
-        # Process each entity
-        for entity in entities:
-            # Calculate new path by replacing source prefix with destination
-            old_path = entity.file_path
-            # Replace only the first occurrence of the source directory prefix
-            if old_path.startswith(f"{source_directory}/"):
-                new_path = old_path.replace(f"{source_directory}/", f"{destination_directory}/", 1)
-            else:  # pragma: no cover
-                # Entity is directly in the source directory (shouldn't happen with prefix match)
-                new_path = f"{destination_directory}/{old_path}"
-
-            # Trigger: one file move can publish filesystem or database state before returning.
-            # Why: every move publishes independently and cached reads must not retain
-            #      an earlier file's state while the remaining directory batch runs.
-            # Outcome: finish one generation bump before reporting the result or cancellation.
-            invalidation_scope = (
-                invalidate_cache(read_cache, project_external_id)
-                if read_cache is not None
-                else nullcontext()
-            )
-            move_error: Exception | None = None
-            async with invalidation_scope:
-                try:
-                    # Move the individual entity
-                    await self.move_entity(
-                        identifier=entity.file_path,
-                        destination_path=new_path,
-                        project_config=project_config,
-                        app_config=app_config,
-                    )
-                except Exception as error:  # pragma: no cover
-                    move_error = error
-
-            if move_error is not None:  # pragma: no cover
-                failed_moves += 1
-                errors.append(DirectoryMoveError(path=entity.file_path, error=str(move_error)))
-                logger.error(f"Failed to move entity {entity.file_path}: {move_error}")
-                continue
-
-            moved_files.append(new_path)
-            successful_moves += 1
-            logger.debug(f"Moved entity: {old_path} -> {new_path}")
-
-        logger.info(
-            f"Directory move complete: {successful_moves} succeeded, {failed_moves} failed "
-            f"(source={source_directory}, dest={destination_directory})"
-        )
-
-        return DirectoryMoveResult(
-            total_files=len(entities),
-            successful_moves=successful_moves,
-            failed_moves=failed_moves,
-            moved_files=moved_files,
-            errors=errors,
-        )
 
     async def delete_directory(
         self,

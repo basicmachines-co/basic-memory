@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 import basic_memory.indexing.external_file_delete_runner as external_file_delete_runner
 import basic_memory.indexing.index_file_runner as index_file_runner
 import basic_memory.services.directory_deletes as directory_deletes
+import basic_memory.services.directory_moves as directory_moves
 import basic_memory.services.entity_service as entity_service_module
 from basic_memory import db
 from basic_memory.config import ProjectConfig, BasicMemoryConfig
@@ -108,7 +109,6 @@ from basic_memory.runtime.storage import (
     RuntimeStorageEventOperation,
     RuntimeStorageEventOperationKind,
 )
-from basic_memory.schemas import Entity as EntitySchema
 from basic_memory.services.directory_deletes import DirectoryDeleteService
 from basic_memory.services.entity_service import EntityService
 from basic_memory.services.file_service import FileService
@@ -1469,7 +1469,7 @@ async def test_cancelled_committed_directory_move_finishes_real_redis_invalidati
     test_project: Project,
     redis_cache: RedisCacheHarness,
 ) -> None:
-    """Cancellation during a file-move commit cannot skip invalidation."""
+    """Cancellation during a directory's regular-file move commit cannot skip invalidation."""
     _, session_maker = engine_factory
     entity_repository = EntityRepository(project_id=test_project.id)
     entity_parser = EntityParser(project_config.home)
@@ -1496,15 +1496,25 @@ async def test_cancelled_committed_directory_move_finishes_real_redis_invalidati
         project_external_id,
         request="cancelled-committed-directory-move",
     )
-    entity = await entity_service.create_entity(
-        EntitySchema(
-            title="Cancelled Committed Directory Move",
-            directory="cancelled-move-source",
-            note_type="note",
-            content="Move must remain visible after cancellation.",
+    # Notes in a directory move as accepted note moves; regular files move their stored
+    # bytes, which is the path whose per-file invalidation this test pins.
+    source_path = "cancelled-move-source/diagram.png"
+    content = b"\x89PNG\r\n\x1a\nmove must remain visible after cancellation"
+    (project_config.home / "cancelled-move-source").mkdir(parents=True, exist_ok=True)
+    (project_config.home / source_path).write_bytes(content)
+    async with db.scoped_session(session_maker) as session:
+        entity = await entity_repository.add(
+            session,
+            Entity(
+                title="diagram.png",
+                note_type="file",
+                content_type="image/png",
+                file_path=source_path,
+                permalink=None,
+                checksum=sha256(content).hexdigest(),
+            ),
         )
-    )
-    destination_path = "cancelled-move-destination/Cancelled Committed Directory Move.md"
+    destination_path = "cancelled-move-destination/diagram.png"
     blocking_cache = BlockingInvalidationRedisReadCache(
         client=redis_cache.client,
         namespace=redis_cache.namespace,
@@ -1536,12 +1546,14 @@ async def test_cancelled_committed_directory_move_finishes_real_redis_invalidati
 
     monkeypatch.setattr(entity_service_module.db, "scoped_session", pause_after_move_commit)
     move_task = asyncio.create_task(
-        entity_service.move_directory(
-            source_directory="cancelled-move-source",
-            destination_directory="cancelled-move-destination",
-            project_config=project_config,
-            app_config=app_config.model_copy(update={"update_permalinks_on_move": False}),
+        directory_moves.move_regular_file(
+            file_path=source_path,
+            destination_path=destination_path,
             project_external_id=project_external_id,
+            entity_service=entity_service,
+            search_service=search_service,
+            project_config=project_config,
+            app_config=app_config,
             read_cache=blocking_cache,
         )
     )
