@@ -510,9 +510,24 @@ class RelationRepository(Repository[Relation]):
                 )
             )
         )
-        if marker_pending:
-            return RelationGenerationWriteResult(generation_is_current=True)
+        if not marker_pending:
+            self.record_pending_relation_publication(
+                session, entity_id=entity_id, generation=generation
+            )
+        return RelationGenerationWriteResult(generation_is_current=True)
 
+    def record_pending_relation_publication(
+        self,
+        session: AsyncSession,
+        *,
+        entity_id: int,
+        generation: int,
+    ) -> None:
+        """Mark a generation's graph as not yet published, in the caller's transaction.
+
+        While the marker is pending, change detection treats the note's checksum as
+        unknown and readers hold graph conclusions; publication cleanup converts it.
+        """
         session.add(
             RelationSearchRefresh(
                 project_id=self.project_id,
@@ -520,7 +535,6 @@ class RelationRepository(Repository[Relation]):
                 publication_generation=generation,
             )
         )
-        return RelationGenerationWriteResult(generation_is_current=True)
 
     async def cleanup_relation_generations(
         self,
