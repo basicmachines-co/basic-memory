@@ -611,7 +611,7 @@ async def test_failed_relation_publication_forces_change_detection_retry(
 
     change_detector = ChangeDetector(entity_repository, session_maker)
     assert await change_detector.load_indexed_file_checksums((sample_entity.file_path,)) == {
-        sample_entity.file_path: IndexedChecksums(None, accepted_content_checksum=checksum)
+        sample_entity.file_path: IndexedChecksums(None)
     }
     async with db.scoped_session(session_maker) as session:
         publication_markers = list(
@@ -693,7 +693,7 @@ async def test_generation_zero_relation_forces_generation_publication(
 
     change_detector = ChangeDetector(entity_repository, session_maker)
     assert await change_detector.load_indexed_file_checksums((sample_entity.file_path,)) == {
-        sample_entity.file_path: IndexedChecksums(None, accepted_content_checksum=checksum)
+        sample_entity.file_path: IndexedChecksums(None)
     }
 
     publisher = RelationGenerationPublisher(

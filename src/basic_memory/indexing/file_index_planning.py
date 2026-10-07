@@ -45,10 +45,12 @@ class IndexedChecksums:
 
         A DB-first write indexes its accepted content before the file is written, and its
         storage checksum is recorded only after the write, so the file's own storage
-        notification can arrive first. Matching the content closes that gap. An incomplete
-        row (pending graph publication) is still read, exactly as for `recognizes`.
+        notification can arrive first, including for a brand-new note whose storage
+        checksum is still unset. Matching the content closes that gap. The indexed-checksum
+        lookup withholds the accepted checksum from an incomplete row (pending graph
+        publication), which is therefore still read.
         """
-        if self.checksum is None or content_checksum is None:
+        if content_checksum is None:
             return False
         return content_checksum == self.accepted_content_checksum
 

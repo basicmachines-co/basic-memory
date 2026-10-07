@@ -448,6 +448,13 @@ class EntityRepository(Repository[Entity]):
                 (or_(*incomplete_projection), None),
                 else_=Entity.checksum,
             ).label("checksum")
+            # The same mask hides the accepted checksum, so an incomplete projection is
+            # read and repaired even when its content matches. A first write that has not
+            # recorded a storage checksum yet is not masked and can still match.
+            accepted_content_checksum = case(
+                (or_(*incomplete_projection), None),
+                else_=NoteContent.db_checksum,
+            ).label("accepted_content_checksum")
             # The sync checksum is returned as stored: an incomplete row's masked checksum
             # already forces a read, whatever the sync checksum says. The accepted content
             # checksum lets a storage echo of the accepted note be recognized by its content
@@ -457,7 +464,7 @@ class EntityRepository(Repository[Entity]):
                     Entity.file_path,
                     indexed_checksum,
                     Entity.sync_checksum,
-                    NoteContent.db_checksum.label("accepted_content_checksum"),
+                    accepted_content_checksum,
                 )
                 .outerjoin(
                     NoteContent,

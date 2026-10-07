@@ -22,13 +22,15 @@ from basic_memory.models import Entity, NoteContent, Project, RelationSearchRefr
 from basic_memory.repository import EntityRepository
 from basic_memory.services import FileService
 
-type EchoState = Literal["accepted", "publication-pending", "other-bytes"]
+type EchoState = Literal["accepted", "first-write", "publication-pending", "other-bytes"]
 
 
 @pytest.mark.parametrize(
     ("state", "expected"),
     [
         pytest.param("accepted", FileIndexDecisionStatus.current, id="accepted-content"),
+        # A brand-new note has no storage checksum until its first materialization settles.
+        pytest.param("first-write", FileIndexDecisionStatus.current, id="first-write-echo"),
         pytest.param("publication-pending", FileIndexDecisionStatus.read, id="repair-still-reads"),
         pytest.param("other-bytes", FileIndexDecisionStatus.read, id="external-change-reads"),
     ],
@@ -74,6 +76,10 @@ async def test_storage_echo_before_the_storage_checksum_is_recorded(
                     entity_id=note_content.entity_id,
                     publication_generation=note_content.db_version + 1,
                 )
+            )
+        if state == "first-write":
+            await session.execute(
+                update(Entity).where(Entity.id == note_content.entity_id).values(checksum=None)
             )
         entity_checksum = await session.scalar(
             select(Entity.checksum).where(Entity.id == note_content.entity_id)
