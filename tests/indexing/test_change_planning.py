@@ -221,7 +221,7 @@ class FakeEntityRepository:
         self,
         session: object,
         paths: tuple[str, ...],
-    ) -> list[tuple[str, str | None, str | None]]:
+    ) -> list[tuple[str, str | None, str | None, str | None]]:
         self.loaded_checksum_paths = paths
         return [
             ("unchanged.md", "same-checksum", None, None),
@@ -353,7 +353,7 @@ class BatchRecordingEntityRepository:
         self,
         session: object,
         paths: tuple[str, ...],
-    ) -> list[tuple[str, str | None, str | None]]:
+    ) -> list[tuple[str, str | None, str | None, str | None]]:
         self.path_batch_sizes.append(len(paths))
         # Echo each requested path back as an indexed row so the merged result
         # can be checked for completeness across batches.
