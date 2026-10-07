@@ -46,7 +46,7 @@ class FakeSessionMaker:
 
 @dataclass(slots=True)
 class RecordingChecksumRepository:
-    rows: list[tuple[object, object | None, object | None]]
+    rows: list[tuple[object, object | None, object | None, object | None]]
     calls: list[tuple[object, tuple[str, ...]]] = field(default_factory=list)
 
     async def get_by_file_paths(
@@ -55,7 +55,7 @@ class RecordingChecksumRepository:
         file_paths: Sequence[str],
         *,
         content_types: Mapping[str, str | None] | None = None,
-    ) -> list[tuple[object, object | None, object | None]]:
+    ) -> list[tuple[object, object | None, object | None, object | None]]:
         self.calls.append((session, tuple(file_paths)))
         return self.rows
 
