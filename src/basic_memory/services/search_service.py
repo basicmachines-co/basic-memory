@@ -668,19 +668,24 @@ class SearchService:
             )
             raise  # pragma: no cover
 
-    async def sync_entity_vectors(self, entity_id: int) -> None:
+    async def sync_entity_vectors(self, entity_id: int) -> VectorSyncBatchResult:
         """Refresh vector chunks for one entity in repositories that support semantic indexing."""
         async with db.scoped_session(self.session_maker) as session:
             entity = await self.entity_repository.find_by_id(session, entity_id)
         if entity is None:
             await self._clear_entity_vectors(entity_id)
-            return
+            # Clearing vectors embeds nothing, so the result reports zero chunks.
+            # A missing entity is not counted as skipped, matching the batch path.
+            return VectorSyncBatchResult(entities_total=1, entities_synced=0, entities_failed=0)
 
         if not entity_embeddings_enabled(entity):
             await self._clear_entity_vectors(entity_id)
-            return
+            # Opted-out entities count as skipped, matching the batch path.
+            return VectorSyncBatchResult(
+                entities_total=1, entities_synced=0, entities_failed=0, entities_skipped=1
+            )
 
-        await self.repository.sync_entity_vectors(entity_id)
+        return await self.repository.sync_entity_vectors(entity_id)
 
     async def sync_entity_vectors_batch(
         self,

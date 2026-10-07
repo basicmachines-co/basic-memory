@@ -170,7 +170,7 @@ class SearchRepository(Protocol):
         """Delete full-text rows whose backing database row no longer exists."""
         ...
 
-    async def sync_entity_vectors(self, entity_id: int) -> None:
+    async def sync_entity_vectors(self, entity_id: int) -> VectorSyncBatchResult:
         """Sync semantic vector chunks for an entity."""
         ...
 
