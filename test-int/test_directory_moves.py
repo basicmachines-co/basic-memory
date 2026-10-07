@@ -135,3 +135,43 @@ async def test_directory_move_keeps_paths_below_a_case_variant_source(
     result = response.json()
     assert result["failed_moves"] == 0, result["errors"]
     assert result["moved_files"] == ["archive/sub/Plan.md"]
+
+
+async def test_notes_and_regular_files_land_in_the_same_existing_folder(
+    client: AsyncClient,
+    test_project: Project,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
+) -> None:
+    """One casing for the whole move, so a case-variant destination never splits it."""
+    _, session_maker = engine_factory
+    base = f"/v2/projects/{test_project.external_id}/knowledge"
+    for title, directory in (("Plan", "drafts"), ("Existing", "Archive")):
+        created = await client.post(
+            f"{base}/write",
+            json={"note": {"title": title, "directory": directory, "content": title}},
+        )
+        assert created.json()["kind"] == "created", created.text
+    home = Path(test_project.path)
+    image_bytes = b"\x89PNG\r\n\x1a\ndiagram"
+    (home / "drafts/diagram.png").write_bytes(image_bytes)
+    async with db.scoped_session(session_maker) as session:
+        session.add(
+            Entity(
+                project_id=test_project.id,
+                title="diagram.png",
+                note_type="file",
+                content_type="image/png",
+                file_path="drafts/diagram.png",
+                checksum=sha256(image_bytes).hexdigest(),
+            )
+        )
+
+    response = await client.post(
+        f"{base}/move-directory",
+        json={"source_directory": "drafts", "destination_directory": "archive"},
+    )
+
+    result = response.json()
+    assert result["failed_moves"] == 0, result["errors"]
+    assert sorted(result["moved_files"]) == ["Archive/Plan.md", "Archive/diagram.png"]
+    assert (home / "Archive/diagram.png").read_bytes() == image_bytes

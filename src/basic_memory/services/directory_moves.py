@@ -28,6 +28,7 @@ from basic_memory.services.note_content_writes import (
     NoteContentMutationServiceError,
 )
 from basic_memory.services.search_service import SearchService
+from basic_memory.utils import resolve_directory_casing
 
 type MovedEntityFollowups = Callable[[int], None]
 
@@ -58,9 +59,14 @@ async def move_directory(
     reported and the rest proceed, as the endpoint has always reported partial moves.
     """
     source = source_directory.strip("/")
-    destination = destination_directory.strip("/")
     async with db.scoped_session(entity_service.session_maker) as session:
         entities = await entity_service.repository.find_by_directory_prefix(session, source)
+        # Resolve the destination's casing once, by the same rule an accepted note move
+        # applies (#1326), so notes and regular files land in the same folder.
+        destination = resolve_directory_casing(
+            destination_directory.strip("/"),
+            await entity_service.repository.get_distinct_directories(session),
+        )
 
     moved_files: list[str] = []
     errors: list[DirectoryMoveError] = []
