@@ -1259,7 +1259,6 @@ async def move_directory(
     note_content_mutation_service: NoteContentMutationServiceDep,
     note_content_materialization_provider: NoteContentMaterializationProviderDep,
     entity_service: EntityServiceV2ExternalDep,
-    project_config: ProjectConfigV2ExternalDep,
     app_config: AppConfigDep,
     search_service: SearchServiceV2ExternalDep,
     vector_sync_scheduler: EntityVectorSyncSchedulerDep,
@@ -1306,8 +1305,6 @@ async def move_directory(
             materializer=note_content_materialization_provider,
             entity_service=entity_service,
             search_service=search_service,
-            project_config=project_config,
-            app_config=app_config,
             read_cache=read_cache,
             schedule_followups=schedule_followups,
         )

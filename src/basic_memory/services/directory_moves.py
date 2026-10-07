@@ -15,7 +15,6 @@ from contextlib import nullcontext
 from typing import Protocol
 
 from basic_memory import db
-from basic_memory.config import BasicMemoryConfig, ProjectConfig
 from basic_memory.models import Entity
 from basic_memory.read_cache import ReadCache, invalidate_cache
 from basic_memory.runtime.note_content_responses import runtime_note_content_payload_as_dict
@@ -50,8 +49,6 @@ async def move_directory(
     materializer: AcceptedNoteMaterializer,
     entity_service: EntityService,
     search_service: SearchService,
-    project_config: ProjectConfig,
-    app_config: BasicMemoryConfig,
     read_cache: ReadCache | None,
     schedule_followups: MovedEntityFollowups,
 ) -> DirectoryMoveResult:
@@ -99,8 +96,6 @@ async def move_directory(
                         project_external_id=project_external_id,
                         entity_service=entity_service,
                         search_service=search_service,
-                        project_config=project_config,
-                        app_config=app_config,
                         read_cache=read_cache,
                     )
                 ).file_path
@@ -127,8 +122,6 @@ async def move_regular_file(
     project_external_id: str,
     entity_service: EntityService,
     search_service: SearchService,
-    project_config: ProjectConfig,
-    app_config: BasicMemoryConfig,
     read_cache: ReadCache | None,
 ) -> Entity:
     """Move one regular file's stored bytes and its index entry."""
@@ -143,8 +136,6 @@ async def move_regular_file(
         moved_entity = await entity_service.move_entity(
             identifier=file_path,
             destination_path=destination_path,
-            project_config=project_config,
-            app_config=app_config,
         )
         await search_service.index_entity(moved_entity)
     return moved_entity

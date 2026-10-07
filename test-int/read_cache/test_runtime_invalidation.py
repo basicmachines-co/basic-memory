@@ -1552,8 +1552,6 @@ async def test_cancelled_committed_directory_move_finishes_real_redis_invalidati
             project_external_id=project_external_id,
             entity_service=entity_service,
             search_service=search_service,
-            project_config=project_config,
-            app_config=app_config,
             read_cache=blocking_cache,
         )
     )
