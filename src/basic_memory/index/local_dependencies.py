@@ -14,7 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ConfigManager
-from basic_memory.file_utils import FileMetadata, ParseError, remove_frontmatter
+from basic_memory.file_utils import (
+    FileMetadata,
+    ParseError,
+    compute_checksum,
+    remove_frontmatter,
+)
 from basic_memory.indexing.batch_indexer import BatchIndexer
 from basic_memory.indexing.file_batch_runner import IndexFileBatchIndexer
 from basic_memory.indexing.file_index_checking import (
@@ -386,6 +391,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             title=synced.entity.title,
             permalink=synced.entity.permalink,
             checksum=synced.checksum,
+            content_checksum=await compute_checksum(synced.markdown_content),
             operation=operation,
             content_superseded=content_superseded,
         )
@@ -455,6 +461,8 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             title=entity.title,
             permalink=entity.permalink,
             checksum=indexed.checksum,
+            # A regular file carries no note provenance to validate.
+            content_checksum=None,
             operation=operation,
         )
 

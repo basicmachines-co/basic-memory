@@ -40,8 +40,13 @@ class RuntimeWrittenFileState:
     """Object state returned after storage accepts a materialized note write."""
 
     file_path: RuntimeFilePath
+    # sha256 of the accepted markdown: the note_content file lineage.
     file_checksum: RuntimeFileChecksum
     file_updated_at: datetime
+    # The checksum storage reports for the written object (an S3 ETag in cloud, the
+    # content sha256 on a local filesystem). Indexing compares this kind against
+    # entity.checksum, so the publisher records it there.
+    storage_checksum: RuntimeFileChecksum
 
 
 class RuntimeFileMetadataSource(Protocol):
@@ -118,6 +123,8 @@ async def write_prepared_note_to_content_store(
             file_path=prepared_write.file_path,
             file_checksum=actual_checksum,
             file_updated_at=file_metadata.modified_at,
+            # A local content store's storage checksum is the content sha256.
+            storage_checksum=actual_checksum,
         )
 
     # A sync client may have restored the original over indexing's frontmatter rewrite.
@@ -148,4 +155,5 @@ async def write_prepared_note_to_content_store(
         file_path=prepared_write.file_path,
         file_checksum=file_checksum,
         file_updated_at=file_metadata.modified_at,
+        storage_checksum=file_checksum,
     )

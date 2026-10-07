@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory.indexing.file_index_checking import IndexedFileChecksumRow, MoveDetectionEntity
 from basic_memory import db
+from basic_memory.file_utils import compute_checksum
 from basic_memory.indexing.note_content_reconciliation import (
     NoteContentReconciliationAnchor,
     NoteContentReconciliationResult,
@@ -265,6 +266,7 @@ class FileIndexer:
             title=synced.entity.title,
             permalink=synced.entity.permalink,
             checksum=synced.checksum,
+            content_checksum=await compute_checksum(synced.markdown_content),
             operation=operation,
             content_superseded=content_superseded,
         )

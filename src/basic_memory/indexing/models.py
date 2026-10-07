@@ -28,9 +28,8 @@ from basic_memory.runtime.jobs import RuntimeStorageFileIndexMode
 from basic_memory.runtime.note_object_metadata import (
     RuntimeNoteObjectMetadataMap,
     RuntimeNoteObjectProvenance,
-    RuntimeStorageObjectChecksumSource,
     db_version_from_object_metadata,
-    storage_object_checksum_for_index_match,
+    file_checksum_from_object_metadata,
 )
 from basic_memory.runtime.storage import (
     NoteExternalId,
@@ -41,6 +40,7 @@ from basic_memory.runtime.storage import (
     RuntimeNoteActorKind,
     RuntimeNoteActorName,
     RuntimeNoteChangeSource,
+    RuntimeNoteContentChecksum,
     StorageEtag,
     normalize_storage_etag,
 )
@@ -226,7 +226,12 @@ class FileIndexResult:
     external_id: str
     title: str
     permalink: str | None
+    # The storage checksum of the bytes indexed (an S3 ETag in cloud, the content
+    # sha256 locally); recorded as entity.checksum.
     checksum: str
+    # sha256 of the markdown indexed, comparable with a note object's bm-file-checksum;
+    # None for regular (non-note) files.
+    content_checksum: RuntimeNoteContentChecksum | None
     operation: FileIndexOperation
     # The indexed snapshot committed successfully, but a newer accepted note
     # generation won before derived relations could be published. The next
@@ -243,6 +248,7 @@ class FileIndexResult:
         title: object,
         permalink: object,
         checksum: str,
+        content_checksum: RuntimeNoteContentChecksum | None,
         operation: FileIndexOperation,
         content_superseded: bool = False,
     ) -> FileIndexResult:
@@ -271,6 +277,7 @@ class FileIndexResult:
                 file_path=file_path,
             ),
             checksum=checksum,
+            content_checksum=content_checksum,
             operation=operation,
             content_superseded=content_superseded,
         )
@@ -332,9 +339,9 @@ class IndexFileJobResult:
     # echo-vs-out-of-band by version arithmetic. None when the metadata was
     # absent or failed checksum validation.
     db_version: int | None = None
-    # True when the object carried our own bm-file-checksum metadata that no
-    # longer matches what this job indexed: a newer own-stack write landed
-    # mid-job, so this result describes superseded content (issue #1445).
+    # True when the stored object changed after this job read it: a newer write
+    # landed mid-job, so this result describes superseded content (issue #1445).
+    # That write's own storage notification indexes the newer content.
     content_superseded: bool = False
 
 
@@ -569,7 +576,10 @@ class CurrentMaterializedNoteEntity:
     external_id: str
     title: str
     permalink: str
-    checksum: RuntimeFileChecksum | None
+    # entity.checksum: the storage checksum of the indexed object.
+    storage_checksum: RuntimeFileChecksum | None
+    # note_content.file_checksum: sha256 of the markdown the index holds.
+    content_checksum: RuntimeNoteContentChecksum | None
 
     @classmethod
     def from_fields(
@@ -579,7 +589,8 @@ class CurrentMaterializedNoteEntity:
         external_id: object,
         title: object,
         permalink: object,
-        checksum: object,
+        storage_checksum: object,
+        content_checksum: object,
         file_path: str,
     ) -> CurrentMaterializedNoteEntity:
         """Validate entity fields loaded for a current materialized note.
@@ -605,7 +616,8 @@ class CurrentMaterializedNoteEntity:
                 field_name="permalink",
                 file_path=file_path,
             ),
-            checksum=str(checksum) if checksum is not None else None,
+            storage_checksum=str(storage_checksum) if storage_checksum is not None else None,
+            content_checksum=str(content_checksum) if content_checksum is not None else None,
         )
 
 
@@ -622,34 +634,24 @@ def _required_current_materialized_note_text(
 
 @dataclass(frozen=True, slots=True)
 class CurrentMaterializedNotePlan:
-    """Planned current-file result plus checksum diagnostics for adapter logging."""
+    """Planned current-file result, or a request to load the indexed entity first."""
 
     job_result: IndexFileJobResult
     requires_entity: bool = False
-    object_checksum_source: RuntimeStorageObjectChecksumSource | None = None
-    object_checksum: RuntimeFileChecksum | None = None
-    entity_checksum: RuntimeFileChecksum | None = None
-    source: RuntimeNoteChangeSource | None = None
-    checksum_matches_entity: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class IndexedFileLiveUpdatePlan:
-    """Trusted live-update metadata for one freshly indexed file."""
+    """Supersession and trusted provenance for one freshly indexed file.
 
-    object_checksum_source: RuntimeStorageObjectChecksumSource
-    object_checksum: RuntimeFileChecksum
-    indexed_checksum: RuntimeFileChecksum
-    checksum_matches_indexed_file: bool
-    content_superseded: bool = False
-    metadata_actor_user_profile_id: str | None = None
-    metadata_actor_kind: str | None = None
-    metadata_actor_name: str | None = None
-    metadata_source: RuntimeNoteChangeSource | None = None
+    Provenance fields are set only when the object's bm-file-checksum matches the
+    content this job indexed (#1589).
+    """
+
+    content_superseded: bool
     actor_user_profile_id: str | None = None
     actor_kind: str | None = None
     actor_name: str | None = None
-    # Trusted-branch only, like the actor fields (#1589).
     db_version: int | None = None
     live_update_source: RuntimeNoteChangeSource | None = None
     operation: FileIndexOperation | None = None
@@ -672,33 +674,22 @@ def plan_current_materialized_note_result(
 
     live_update_operation = file_index_operation_from_note_object_metadata(object_metadata)
     if live_update_operation is None:
-        return CurrentMaterializedNotePlan(
-            job_result=current_result,
-            source=provenance.source,
-        )
+        return CurrentMaterializedNotePlan(job_result=current_result)
 
     if entity is None:
-        return CurrentMaterializedNotePlan(
-            job_result=current_result,
-            requires_entity=True,
-            source=provenance.source,
-        )
+        return CurrentMaterializedNotePlan(job_result=current_result, requires_entity=True)
 
-    selected_checksum = storage_object_checksum_for_index_match(
-        object_checksum=object_checksum,
-        object_metadata=object_metadata,
+    # Each comparison stays within one kind of checksum. The storage checksums say the
+    # index holds this object; the content checksums say the object's provenance
+    # describes the markdown the index holds, so it can be trusted (#1589).
+    object_content_checksum = file_checksum_from_object_metadata(object_metadata)
+    provenance_describes_indexed_note = (
+        object_checksum == entity.storage_checksum
+        and object_content_checksum is not None
+        and object_content_checksum == entity.content_checksum
     )
-    checksum_matches_entity = selected_checksum.checksum == entity.checksum
-    plan = CurrentMaterializedNotePlan(
-        job_result=current_result,
-        object_checksum_source=selected_checksum.source,
-        object_checksum=selected_checksum.checksum,
-        entity_checksum=entity.checksum,
-        source=provenance.source,
-        checksum_matches_entity=checksum_matches_entity,
-    )
-    if not checksum_matches_entity:
-        return plan
+    if not provenance_describes_indexed_note:
+        return CurrentMaterializedNotePlan(job_result=current_result)
 
     return CurrentMaterializedNotePlan(
         job_result=IndexFileJobResult(
@@ -708,7 +699,7 @@ def plan_current_materialized_note_result(
             note_external_id=entity.external_id,
             title=entity.title,
             permalink=entity.permalink,
-            entity_checksum=entity.checksum,
+            entity_checksum=entity.storage_checksum,
             operation=live_update_operation,
             actor_user_profile_id=provenance.actor_user_profile_id,
             actor_kind=provenance.actor_kind,
@@ -716,11 +707,6 @@ def plan_current_materialized_note_result(
             live_update_source=provenance.source,
             db_version=provenance.db_version,
         ),
-        object_checksum_source=plan.object_checksum_source,
-        object_checksum=plan.object_checksum,
-        entity_checksum=plan.entity_checksum,
-        source=plan.source,
-        checksum_matches_entity=True,
     )
 
 
@@ -730,45 +716,25 @@ def plan_indexed_file_live_update_metadata(
     object_checksum: RuntimeFileChecksum,
     object_metadata: RuntimeNoteObjectMetadataMap | None,
 ) -> IndexedFileLiveUpdatePlan:
-    """Plan trusted actor/source metadata for a freshly indexed file."""
-    selected_checksum = storage_object_checksum_for_index_match(
-        object_checksum=object_checksum,
-        object_metadata=object_metadata,
-    )
-    provenance = RuntimeNoteObjectProvenance.from_object_metadata(object_metadata)
-    checksum_matches_indexed_file = selected_checksum.checksum == indexed_file.checksum
-    # Our own stack stamped the object with a content checksum and it no longer
-    # matches what this job indexed: a newer own-stack write landed mid-job (its
-    # webhook job is queued), so this job indexed superseded content. An etag
-    # mismatch proves nothing (etags never equal content sha256s), so external
-    # writes are unaffected.
-    content_superseded = (
-        not checksum_matches_indexed_file
-        and selected_checksum.source == RuntimeStorageObjectChecksumSource.note_file_checksum
-    )
-    plan = IndexedFileLiveUpdatePlan(
-        object_checksum_source=selected_checksum.source,
-        object_checksum=selected_checksum.checksum,
-        indexed_checksum=indexed_file.checksum,
-        checksum_matches_indexed_file=checksum_matches_indexed_file,
-        content_superseded=content_superseded,
-        metadata_actor_user_profile_id=provenance.actor_user_profile_id,
-        metadata_actor_kind=provenance.actor_kind,
-        metadata_actor_name=provenance.actor_name,
-        metadata_source=provenance.source,
-    )
-    if not checksum_matches_indexed_file:
-        return plan
+    """Plan supersession and trusted actor/source metadata for a freshly indexed file.
 
+    `object_checksum` is the storage checksum of the object as it stands after indexing,
+    the same kind as `indexed_file.checksum` on every backend.
+    """
+    # A different stored object means a newer write replaced the file after this job read
+    # it. That write's own storage notification indexes the newer content, whoever wrote it.
+    if object_checksum != indexed_file.checksum:
+        return IndexedFileLiveUpdatePlan(content_superseded=True)
+
+    # Object metadata is trusted only when its content checksum names the markdown this
+    # job indexed (#1589); a sync client can re-upload different bytes with stale metadata.
+    object_content_checksum = file_checksum_from_object_metadata(object_metadata)
+    if object_content_checksum is None or object_content_checksum != indexed_file.content_checksum:
+        return IndexedFileLiveUpdatePlan(content_superseded=False)
+
+    provenance = RuntimeNoteObjectProvenance.from_object_metadata(object_metadata)
     return IndexedFileLiveUpdatePlan(
-        object_checksum_source=plan.object_checksum_source,
-        object_checksum=plan.object_checksum,
-        indexed_checksum=plan.indexed_checksum,
-        checksum_matches_indexed_file=True,
-        metadata_actor_user_profile_id=plan.metadata_actor_user_profile_id,
-        metadata_actor_kind=plan.metadata_actor_kind,
-        metadata_actor_name=plan.metadata_actor_name,
-        metadata_source=plan.metadata_source,
+        content_superseded=False,
         actor_user_profile_id=provenance.actor_user_profile_id,
         actor_kind=provenance.actor_kind,
         actor_name=provenance.actor_name,

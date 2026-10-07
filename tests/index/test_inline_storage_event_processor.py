@@ -110,6 +110,7 @@ class RecordingFileIndexer:
             title="Note 42",
             permalink="notes/note-42",
             checksum="checksum-42",
+            content_checksum=None,
             operation=FileIndexOperation.created,
         )
 

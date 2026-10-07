@@ -30,8 +30,6 @@ from basic_memory.runtime.note_object_metadata import (
     RuntimeNoteActorOrigin,
     RuntimeNoteObjectMetadata,
     RuntimeNoteObjectProvenance,
-    RuntimeStorageObjectChecksum,
-    RuntimeStorageObjectChecksumSource,
     actor_kind_from_object_metadata,
     actor_name_from_object_metadata,
     actor_user_profile_id_from_object_metadata,
@@ -39,7 +37,6 @@ from basic_memory.runtime.note_object_metadata import (
     file_checksum_from_object_metadata,
     normalize_actor_name,
     source_from_object_metadata,
-    storage_object_checksum_for_index_match,
 )
 from basic_memory.runtime.cleanup import (
     RUNTIME_FILE_SNAPSHOT_TIMESTAMP_MATCH_EPSILON_SECONDS,
@@ -1154,21 +1151,13 @@ class TestRuntimeContracts:
             is None
         )
 
-    def test_storage_object_checksum_for_index_match_prefers_note_file_checksum(self):
-        assert storage_object_checksum_for_index_match(
-            object_checksum="etag-sum",
-            object_metadata={NOTE_OBJECT_FILE_CHECKSUM_METADATA: " file-sum "},
-        ) == RuntimeStorageObjectChecksum(
-            checksum="file-sum",
-            source=RuntimeStorageObjectChecksumSource.note_file_checksum,
+    def test_file_checksum_from_object_metadata_reads_the_content_checksum(self):
+        assert (
+            file_checksum_from_object_metadata({NOTE_OBJECT_FILE_CHECKSUM_METADATA: " file-sum "})
+            == "file-sum"
         )
-        assert storage_object_checksum_for_index_match(
-            object_checksum="etag-sum",
-            object_metadata={},
-        ) == RuntimeStorageObjectChecksum(
-            checksum="etag-sum",
-            source=RuntimeStorageObjectChecksumSource.storage_etag,
-        )
+        assert file_checksum_from_object_metadata({}) is None
+        assert file_checksum_from_object_metadata(None) is None
 
     def test_normalize_actor_name_strips_unsafe_characters_and_limits_length(self):
         assert normalize_actor_name(" Pat\t\n<script>! ") == "Pat script"
@@ -1449,6 +1438,7 @@ class TestRuntimeContracts:
             file_path="notes/a.md",
             file_checksum="new-file-sum",
             file_updated_at=file_updated_at,
+            storage_checksum="new-object-etag",
         )
 
         assert written_file.file_checksum == "new-file-sum"

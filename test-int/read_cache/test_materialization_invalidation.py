@@ -67,6 +67,7 @@ class BlockingIndexFileExecutor:
             title=self.entity.title,
             permalink=self.entity.permalink,
             checksum=checksum,
+            content_checksum=None,
             operation=FileIndexOperation.updated,
         )
 
