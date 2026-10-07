@@ -83,7 +83,17 @@ class FakeRepositoryEntity:
     external_id = "note-42"
     title = "Repository Note"
     permalink = "notes/repository-note"
-    checksum = "checksum-1"
+    checksum = "storage-native-etag"
+
+
+class FakeNoteContentSession:
+    """Answers the loader's note_content.file_checksum lookup."""
+
+    def __init__(self, content_checksum: str | None) -> None:
+        self.content_checksum = content_checksum
+
+    async def scalar(self, _statement: object) -> str | None:
+        return self.content_checksum
 
 
 class FakeEntityRepository:
@@ -169,7 +179,10 @@ def indexed_file() -> FileIndexResult:
         external_id="note-42",
         title="Test Note",
         permalink="notes/test-note",
-        checksum="checksum-1",
+        # Cloud shape: the storage checksum is the object's ETag, the content
+        # checksum is the sha256 the object's bm-file-checksum names.
+        checksum="storage-native-etag",
+        content_checksum="checksum-1",
         operation=FileIndexOperation.updated,
     )
 
@@ -187,7 +200,7 @@ async def test_repository_current_materialized_note_source_loads_entity(
         scoped_session_maker: async_sessionmaker[AsyncSession],
     ) -> AsyncIterator[AsyncSession]:
         assert scoped_session_maker is session_maker
-        session = cast(AsyncSession, object())
+        session = cast(AsyncSession, FakeNoteContentSession("checksum-1"))
         sessions.append(session)
         yield session
 
@@ -205,7 +218,8 @@ async def test_repository_current_materialized_note_source_loads_entity(
         external_id="note-42",
         title="Repository Note",
         permalink="notes/repository-note",
-        checksum="checksum-1",
+        storage_checksum="storage-native-etag",
+        content_checksum="checksum-1",
     )
     assert repository.calls == [(sessions[0], "notes/a.md", False)]
 
@@ -257,7 +271,8 @@ async def test_run_index_file_preserves_current_materialized_note_metadata() -> 
             external_id="note-42",
             title="Created through MCP",
             permalink="notes/created-through-mcp",
-            checksum="checksum-1",
+            storage_checksum="storage-native-etag",
+            content_checksum="checksum-1",
         )
     )
     file_indexer = FakeFileIndexer()
@@ -277,7 +292,7 @@ async def test_run_index_file_preserves_current_materialized_note_metadata() -> 
         note_external_id="note-42",
         title="Created through MCP",
         permalink="notes/created-through-mcp",
-        entity_checksum="checksum-1",
+        entity_checksum="storage-native-etag",
         operation=FileIndexOperation.created,
         actor_user_profile_id="33333333-3333-3333-3333-333333333333",
         live_update_source="mcp",

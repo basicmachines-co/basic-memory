@@ -307,6 +307,7 @@ def written_file() -> RuntimeWrittenFileState:
         file_path="notes/a.md",
         file_checksum="new-file-sum",
         file_updated_at=datetime(2026, 6, 18, 14, 18, tzinfo=UTC),
+        storage_checksum="new-object-etag",
     )
 
 
@@ -379,10 +380,12 @@ async def test_content_store_note_materialization_file_writer_writes_prepared_no
         content_store=content_store
     ).write_prepared_note(prepared)
 
+    # A local content store reports the content sha256 as its storage checksum.
     assert written == RuntimeWrittenFileState(
         file_path="notes/a.md",
         file_checksum="new-file-sum",
         file_updated_at=modified_at,
+        storage_checksum="new-file-sum",
     )
     assert content_store.write_calls == [
         (
@@ -694,6 +697,8 @@ async def test_repository_note_materialization_publisher_updates_current_written
             {
                 "mtime": written.file_updated_at.timestamp(),
                 "size": len(b"# A note\n"),
+                # The storage checksum of the written object, not the content sha256.
+                "checksum": "new-object-etag",
                 "sync_checksum": None,
             },
         )
@@ -896,6 +901,8 @@ async def test_repository_note_materialization_publisher_handles_entity_missing_
             {
                 "mtime": written.file_updated_at.timestamp(),
                 "size": len(b"# A note\n"),
+                # The storage checksum of the written object, not the content sha256.
+                "checksum": "new-object-etag",
                 "sync_checksum": None,
             },
         )

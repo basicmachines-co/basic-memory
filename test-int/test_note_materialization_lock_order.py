@@ -108,6 +108,7 @@ async def test_materialization_and_accepted_mutation_share_note_content_first_or
         file_path=file_path,
         file_checksum="materialized-checksum",
         file_updated_at=datetime(2026, 8, 5, 1, 1, tzinfo=UTC),
+        storage_checksum="materialized-etag",
     )
     session_lock = StartedMaterializationLock()
     publisher = RepositoryNoteMaterializationPublisher(
@@ -254,6 +255,7 @@ async def test_publish_cas_loss_never_reverts_newer_accepted_write(
         file_path=file_path,
         file_checksum="stale-materialized-checksum",
         file_updated_at=datetime(2026, 8, 5, 2, 1, tzinfo=UTC),
+        storage_checksum="stale-materialized-etag",
     )
     session_lock = StartedMaterializationLock()
     publisher = RepositoryNoteMaterializationPublisher(

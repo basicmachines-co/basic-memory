@@ -643,6 +643,11 @@ class RepositoryNoteMaterializationPublisher:
                 {
                     "mtime": written_file.file_updated_at.timestamp(),
                     "size": len(prepared_write.markdown_content.encode("utf-8")),
+                    # The accepted note was indexed when it was saved, so the stored
+                    # object now matches the index. Recording its storage checksum
+                    # lets the storage notification for this write find the file
+                    # current instead of reading and re-indexing it.
+                    "checksum": written_file.storage_checksum,
                     # The file now holds accepted content, so a sync client's original
                     # is stale. Recognizing it after this would let a restore silently
                     # revert the edit on storage while the index keeps it.

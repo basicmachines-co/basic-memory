@@ -136,6 +136,7 @@ async def test_local_file_indexer_treats_empty_markdown_basename_as_regular_file
         title=".md",
         permalink=None,
         checksum="abc123",
+        content_checksum=None,
         operation=FileIndexOperation.created,
     )
     markdown_index = AsyncMock()

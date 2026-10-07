@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Protocol, override
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from basic_memory import db
@@ -25,6 +26,7 @@ from basic_memory.indexing.models import (
     plan_current_materialized_note_result,
     plan_indexed_file_live_update_metadata,
 )
+from basic_memory.models import NoteContent
 from basic_memory.read_cache import ReadCacheInvalidator, invalidate_cache
 from basic_memory.runtime.jobs import RuntimeStorageFileIndexMode
 from basic_memory.runtime.note_object_metadata import RuntimeNoteObjectMetadataMap
@@ -125,15 +127,21 @@ class RepositoryCurrentMaterializedNoteSource:
                 file_path,
                 load_relations=False,
             )
-        if entity is None:
-            return None
+            if entity is None:
+                return None
+            # The markdown the index holds, as a content checksum: what a note object's
+            # bm-file-checksum must match before its provenance is trusted.
+            content_checksum = await session.scalar(
+                select(NoteContent.file_checksum).where(NoteContent.entity_id == entity.id)
+            )
 
         return CurrentMaterializedNoteEntity.from_fields(
             entity_id=int(entity.id),
             external_id=entity.external_id,
             title=entity.title,
             permalink=entity.permalink,
-            checksum=entity.checksum,
+            storage_checksum=entity.checksum,
+            content_checksum=content_checksum,
             file_path=file_path,
         )
 

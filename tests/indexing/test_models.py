@@ -54,7 +54,6 @@ from basic_memory.runtime.note_object_metadata import (
     NOTE_OBJECT_DB_VERSION_METADATA,
     NOTE_OBJECT_FILE_CHECKSUM_METADATA,
     NOTE_OBJECT_SOURCE_METADATA,
-    RuntimeStorageObjectChecksumSource,
 )
 from basic_memory.runtime.projects import ProjectRuntimeReference
 from basic_memory.runtime.storage import (
@@ -72,6 +71,7 @@ def test_file_index_result_is_a_frozen_success_value():
         title="A Note",
         permalink="notes/a-note",
         checksum="checksum-1",
+        content_checksum="content-1",
         operation=FileIndexOperation.created,
     )
 
@@ -89,6 +89,7 @@ def test_file_index_result_from_fields_validates_required_entity_text():
         title=" A Note ",
         permalink=" notes/a-note ",
         checksum="checksum-1",
+        content_checksum="content-1",
         operation=FileIndexOperation.created,
     )
 
@@ -99,6 +100,7 @@ def test_file_index_result_from_fields_validates_required_entity_text():
         title="A Note",
         permalink="notes/a-note",
         checksum="checksum-1",
+        content_checksum="content-1",
         operation=FileIndexOperation.created,
     )
 
@@ -110,6 +112,7 @@ def test_file_index_result_from_fields_validates_required_entity_text():
             title="",
             permalink="notes/a-note",
             checksum="checksum-1",
+            content_checksum="content-1",
             operation=FileIndexOperation.created,
         )
 
@@ -122,6 +125,7 @@ def test_file_index_result_from_fields_validates_optional_permalink_text():
         title="A Note",
         permalink=None,
         checksum="checksum-1",
+        content_checksum="content-1",
         operation=FileIndexOperation.created,
     )
 
@@ -135,6 +139,7 @@ def test_file_index_result_from_fields_validates_optional_permalink_text():
             title="A Note",
             permalink=123,
             checksum="checksum-1",
+            content_checksum="content-1",
             operation=FileIndexOperation.created,
         )
 
@@ -146,6 +151,7 @@ def test_file_index_result_from_fields_validates_optional_permalink_text():
             title="A Note",
             permalink="  ",
             checksum="checksum-1",
+            content_checksum="content-1",
             operation=FileIndexOperation.created,
         )
 
@@ -217,13 +223,11 @@ def test_index_file_job_result_from_indexed_file_uses_trusted_live_update_plan()
         title="A Note",
         permalink="notes/a-note",
         checksum="checksum-1",
+        content_checksum="content-1",
         operation=FileIndexOperation.updated,
     )
     live_update_plan = IndexedFileLiveUpdatePlan(
-        object_checksum_source=RuntimeStorageObjectChecksumSource.note_file_checksum,
-        object_checksum="checksum-1",
-        indexed_checksum="checksum-1",
-        checksum_matches_indexed_file=True,
+        content_superseded=False,
         actor_user_profile_id="33333333-3333-3333-3333-333333333333",
         actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
         actor_name="Claude Code",
@@ -691,7 +695,8 @@ def test_current_materialized_note_entity_from_fields_requires_indexed_permalink
             external_id="note-42",
             title="A Note",
             permalink=None,
-            checksum="checksum-1",
+            storage_checksum="etag-1",
+            content_checksum="content-1",
             file_path="notes/a.md",
         )
 
@@ -702,7 +707,8 @@ def test_current_materialized_note_entity_from_fields_validates_identity_text():
         external_id=" note-42 ",
         title=" A Note ",
         permalink=" notes/a-note ",
-        checksum="checksum-1",
+        storage_checksum="etag-1",
+        content_checksum="content-1",
         file_path="notes/a.md",
     )
 
@@ -711,19 +717,22 @@ def test_current_materialized_note_entity_from_fields_validates_identity_text():
         external_id="note-42",
         title="A Note",
         permalink="notes/a-note",
-        checksum="checksum-1",
+        storage_checksum="etag-1",
+        content_checksum="content-1",
     )
 
-    no_checksum = CurrentMaterializedNoteEntity.from_fields(
+    not_yet_indexed = CurrentMaterializedNoteEntity.from_fields(
         entity_id=42,
         external_id="note-42",
         title="A Note",
         permalink="notes/a-note",
-        checksum=None,
+        storage_checksum=None,
+        content_checksum=None,
         file_path="notes/a.md",
     )
 
-    assert no_checksum.checksum is None
+    assert not_yet_indexed.storage_checksum is None
+    assert not_yet_indexed.content_checksum is None
 
     with pytest.raises(RuntimeError, match="Current entity for notes/a.md is missing title"):
         CurrentMaterializedNoteEntity.from_fields(
@@ -731,34 +740,44 @@ def test_current_materialized_note_entity_from_fields_validates_identity_text():
             external_id="note-42",
             title="  ",
             permalink="notes/a-note",
-            checksum="checksum-1",
+            storage_checksum="etag-1",
+            content_checksum="content-1",
             file_path="notes/a.md",
         )
 
 
-def test_plan_current_materialized_note_result_preserves_trusted_live_update_metadata():
-    entity = CurrentMaterializedNoteEntity.from_fields(
+# Cloud shape for every planner test below: storage checksums are S3 ETags
+# ("etag-*"); bm-file-checksum and indexed content checksums are content sha256s
+# ("content-*"). The two kinds never equal each other.
+MCP_NOTE_OBJECT_METADATA = {
+    NOTE_OBJECT_FILE_CHECKSUM_METADATA: "content-1",
+    NOTE_OBJECT_ACTOR_USER_PROFILE_ID_METADATA: "33333333-3333-3333-3333-333333333333",
+    NOTE_OBJECT_ACTOR_KIND_METADATA: NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
+    NOTE_OBJECT_ACTOR_NAME_METADATA: "Claude Code",
+    NOTE_OBJECT_SOURCE_METADATA: "mcp",
+    NOTE_OBJECT_DB_VERSION_METADATA: "1",
+}
+
+
+def materialized_entity(*, storage_checksum: str, content_checksum: str | None):
+    return CurrentMaterializedNoteEntity(
         entity_id=42,
         external_id="note-42",
         title="A Note",
         permalink="notes/a-note",
-        checksum="checksum-1",
-        file_path="notes/a.md",
+        storage_checksum=storage_checksum,
+        content_checksum=content_checksum,
     )
 
+
+def test_plan_current_materialized_note_result_trusts_provenance_of_the_indexed_object():
+    """The index holds this object and its bm-file-checksum names the indexed markdown."""
     plan = plan_current_materialized_note_result(
         reason="file already indexed: notes/a.md",
         file_path="notes/a.md",
-        object_checksum="storage-native-etag",
-        object_metadata={
-            NOTE_OBJECT_FILE_CHECKSUM_METADATA: "checksum-1",
-            NOTE_OBJECT_ACTOR_USER_PROFILE_ID_METADATA: ("33333333-3333-3333-3333-333333333333"),
-            NOTE_OBJECT_ACTOR_KIND_METADATA: NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
-            NOTE_OBJECT_ACTOR_NAME_METADATA: "Claude Code",
-            NOTE_OBJECT_SOURCE_METADATA: "mcp",
-            NOTE_OBJECT_DB_VERSION_METADATA: "1",
-        },
-        entity=entity,
+        object_checksum="etag-1",
+        object_metadata=MCP_NOTE_OBJECT_METADATA,
+        entity=materialized_entity(storage_checksum="etag-1", content_checksum="content-1"),
     )
 
     assert plan == CurrentMaterializedNotePlan(
@@ -769,7 +788,7 @@ def test_plan_current_materialized_note_result_preserves_trusted_live_update_met
             note_external_id="note-42",
             title="A Note",
             permalink="notes/a-note",
-            entity_checksum="checksum-1",
+            entity_checksum="etag-1",
             operation=FileIndexOperation.created,
             actor_user_profile_id="33333333-3333-3333-3333-333333333333",
             actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
@@ -777,33 +796,31 @@ def test_plan_current_materialized_note_result_preserves_trusted_live_update_met
             live_update_source="mcp",
             db_version=1,
         ),
-        object_checksum_source=RuntimeStorageObjectChecksumSource.note_file_checksum,
-        object_checksum="checksum-1",
-        entity_checksum="checksum-1",
-        source="mcp",
-        checksum_matches_entity=True,
     )
 
 
-def test_plan_current_materialized_note_result_omits_ambiguous_metadata():
-    entity = CurrentMaterializedNoteEntity.from_fields(
-        entity_id=42,
-        external_id="note-42",
-        title="A Note",
-        permalink="notes/a-note",
-        checksum="checksum-1",
-        file_path="notes/a.md",
-    )
-
+@pytest.mark.parametrize(
+    ("storage_checksum", "content_checksum"),
+    [
+        # Stale bm-* metadata: the index holds different markdown than it names.
+        ("etag-1", "content-2"),
+        # The index holds a different object than this one.
+        ("etag-2", "content-1"),
+        # The note's markdown lineage is not recorded yet.
+        ("etag-1", None),
+    ],
+)
+def test_plan_current_materialized_note_result_withholds_untrusted_provenance(
+    storage_checksum: str, content_checksum: str | None
+):
     plan = plan_current_materialized_note_result(
         reason="file already indexed: notes/a.md",
         file_path="notes/a.md",
-        object_checksum="storage-native-etag",
-        object_metadata={
-            NOTE_OBJECT_FILE_CHECKSUM_METADATA: "checksum-1",
-            NOTE_OBJECT_SOURCE_METADATA: "mcp",
-        },
-        entity=entity,
+        object_checksum="etag-1",
+        object_metadata=MCP_NOTE_OBJECT_METADATA,
+        entity=materialized_entity(
+            storage_checksum=storage_checksum, content_checksum=content_checksum
+        ),
     )
 
     assert plan == CurrentMaterializedNotePlan(
@@ -811,7 +828,26 @@ def test_plan_current_materialized_note_result_omits_ambiguous_metadata():
             status=IndexFileJobStatus.current,
             reason="file already indexed: notes/a.md",
         ),
-        source="mcp",
+    )
+
+
+def test_plan_current_materialized_note_result_omits_ambiguous_metadata():
+    plan = plan_current_materialized_note_result(
+        reason="file already indexed: notes/a.md",
+        file_path="notes/a.md",
+        object_checksum="etag-1",
+        object_metadata={
+            NOTE_OBJECT_FILE_CHECKSUM_METADATA: "content-1",
+            NOTE_OBJECT_SOURCE_METADATA: "mcp",
+        },
+        entity=materialized_entity(storage_checksum="etag-1", content_checksum="content-1"),
+    )
+
+    assert plan == CurrentMaterializedNotePlan(
+        job_result=IndexFileJobResult(
+            status=IndexFileJobStatus.current,
+            reason="file already indexed: notes/a.md",
+        ),
     )
 
 
@@ -819,9 +855,9 @@ def test_plan_current_materialized_note_result_requests_entity_when_metadata_is_
     plan = plan_current_materialized_note_result(
         reason="file already indexed: notes/a.md",
         file_path="notes/a.md",
-        object_checksum="storage-native-etag",
+        object_checksum="etag-1",
         object_metadata={
-            NOTE_OBJECT_FILE_CHECKSUM_METADATA: "checksum-1",
+            NOTE_OBJECT_FILE_CHECKSUM_METADATA: "content-1",
             NOTE_OBJECT_SOURCE_METADATA: "mcp",
             NOTE_OBJECT_DB_VERSION_METADATA: "2",
         },
@@ -834,43 +870,36 @@ def test_plan_current_materialized_note_result_requests_entity_when_metadata_is_
             reason="file already indexed: notes/a.md",
         ),
         requires_entity=True,
-        source="mcp",
     )
 
 
-def test_plan_indexed_file_live_update_metadata_preserves_matching_metadata():
-    indexed_file = FileIndexResult(
+def indexed_note(*, checksum: str = "etag-1", content_checksum: str | None = "content-1"):
+    return FileIndexResult(
         file_path="notes/a.md",
         entity_id=42,
         external_id="note-42",
         title="A Note",
         permalink="notes/a-note",
-        checksum="checksum-1",
+        checksum=checksum,
+        content_checksum=content_checksum,
         operation=FileIndexOperation.updated,
     )
 
+
+def test_plan_indexed_file_live_update_metadata_trusts_an_app_written_note():
+    """Regression: an ETag-backed note the app wrote is not superseded (plan test D10).
+
+    Comparing bm-file-checksum (a content sha256) with the indexed ETag marked every
+    such note superseded, which dropped its embeddings and its provenance.
+    """
     plan = plan_indexed_file_live_update_metadata(
-        indexed_file=indexed_file,
-        object_checksum="storage-native-etag",
-        object_metadata={
-            NOTE_OBJECT_FILE_CHECKSUM_METADATA: "checksum-1",
-            NOTE_OBJECT_ACTOR_USER_PROFILE_ID_METADATA: ("33333333-3333-3333-3333-333333333333"),
-            NOTE_OBJECT_ACTOR_KIND_METADATA: NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
-            NOTE_OBJECT_ACTOR_NAME_METADATA: "Claude Code",
-            NOTE_OBJECT_SOURCE_METADATA: "mcp",
-            NOTE_OBJECT_DB_VERSION_METADATA: "2",
-        },
+        indexed_file=indexed_note(),
+        object_checksum="etag-1",
+        object_metadata={**MCP_NOTE_OBJECT_METADATA, NOTE_OBJECT_DB_VERSION_METADATA: "2"},
     )
 
     assert plan == IndexedFileLiveUpdatePlan(
-        object_checksum_source=RuntimeStorageObjectChecksumSource.note_file_checksum,
-        object_checksum="checksum-1",
-        indexed_checksum="checksum-1",
-        checksum_matches_indexed_file=True,
-        metadata_actor_user_profile_id="33333333-3333-3333-3333-333333333333",
-        metadata_actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
-        metadata_actor_name="Claude Code",
-        metadata_source="mcp",
+        content_superseded=False,
         actor_user_profile_id="33333333-3333-3333-3333-333333333333",
         actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
         actor_name="Claude Code",
@@ -880,73 +909,36 @@ def test_plan_indexed_file_live_update_metadata_preserves_matching_metadata():
     )
 
 
-def test_plan_indexed_file_live_update_metadata_omits_mismatched_metadata():
-    indexed_file = FileIndexResult(
-        file_path="notes/a.md",
-        entity_id=42,
-        external_id="note-42",
-        title="A Note",
-        permalink="notes/a-note",
-        checksum="checksum-1",
-        operation=FileIndexOperation.updated,
-    )
-
+def test_plan_indexed_file_live_update_metadata_supersedes_a_replaced_object():
+    """A newer write replaced the object after this job read it, whoever wrote it."""
     plan = plan_indexed_file_live_update_metadata(
-        indexed_file=indexed_file,
-        object_checksum="storage-native-etag",
-        object_metadata={
-            NOTE_OBJECT_FILE_CHECKSUM_METADATA: "checksum-2",
-            NOTE_OBJECT_ACTOR_USER_PROFILE_ID_METADATA: ("33333333-3333-3333-3333-333333333333"),
-            NOTE_OBJECT_ACTOR_KIND_METADATA: NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
-            NOTE_OBJECT_ACTOR_NAME_METADATA: "Claude Code",
-            NOTE_OBJECT_SOURCE_METADATA: "mcp",
-            NOTE_OBJECT_DB_VERSION_METADATA: "2",
-        },
+        indexed_file=indexed_note(),
+        object_checksum="etag-2",
+        object_metadata=MCP_NOTE_OBJECT_METADATA,
     )
 
-    assert plan == IndexedFileLiveUpdatePlan(
-        object_checksum_source=RuntimeStorageObjectChecksumSource.note_file_checksum,
-        object_checksum="checksum-2",
-        indexed_checksum="checksum-1",
-        checksum_matches_indexed_file=False,
-        # bm-file-checksum mismatch = a newer own-stack write landed mid-job
-        content_superseded=True,
-        metadata_actor_user_profile_id="33333333-3333-3333-3333-333333333333",
-        metadata_actor_kind=NOTE_OBJECT_ACTOR_KIND_MCP_CLIENT,
-        metadata_actor_name="Claude Code",
-        metadata_source="mcp",
-        actor_user_profile_id=None,
-        actor_kind=None,
-        actor_name=None,
-        live_update_source=None,
-        operation=None,
-    )
+    assert plan == IndexedFileLiveUpdatePlan(content_superseded=True)
 
 
-def test_plan_indexed_file_live_update_metadata_etag_mismatch_is_not_superseded():
-    indexed_file = FileIndexResult(
-        file_path="notes/a.md",
-        entity_id=42,
-        external_id="note-42",
-        title="A Note",
-        permalink="notes/a-note",
-        checksum="checksum-1",
-        operation=FileIndexOperation.updated,
-    )
-
+@pytest.mark.parametrize(
+    "object_metadata",
+    [
+        # Stale bm-* metadata re-uploaded on different bytes.
+        {**MCP_NOTE_OBJECT_METADATA, NOTE_OBJECT_FILE_CHECKSUM_METADATA: "content-2"},
+        # A file written outside the app carries no provenance.
+        {},
+    ],
+)
+def test_plan_indexed_file_live_update_metadata_withholds_untrusted_provenance(
+    object_metadata: dict[str, str],
+):
     plan = plan_indexed_file_live_update_metadata(
-        indexed_file=indexed_file,
-        object_checksum="storage-native-etag",
-        object_metadata={
-            NOTE_OBJECT_SOURCE_METADATA: "mcp",
-        },
+        indexed_file=indexed_note(),
+        object_checksum="etag-1",
+        object_metadata=object_metadata,
     )
 
-    # An etag never equals a content sha256, so an etag-source mismatch proves
-    # nothing about supersession - external writes must not suppress checksums.
-    assert plan.object_checksum_source is RuntimeStorageObjectChecksumSource.storage_etag
-    assert plan.checksum_matches_indexed_file is False
-    assert plan.content_superseded is False
+    assert plan == IndexedFileLiveUpdatePlan(content_superseded=False)
 
 
 def test_plan_index_file_note_live_update_superseded_content_omits_checksum():

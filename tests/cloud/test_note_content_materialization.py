@@ -65,6 +65,7 @@ class RecordingFileIndexer:
             title="Test note",
             permalink="notes/test",
             checksum="indexed-checksum",
+            content_checksum=None,
             operation=FileIndexOperation.updated,
         )
 

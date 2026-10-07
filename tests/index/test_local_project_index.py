@@ -2527,6 +2527,7 @@ class RecordingMarkdownFileIndexer:
             title="Note 99",
             permalink="notes/note-99",
             checksum="indexed-checksum",
+            content_checksum=None,
             operation=FileIndexOperation.updated,
         )
 

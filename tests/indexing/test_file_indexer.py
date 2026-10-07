@@ -97,6 +97,7 @@ def _file_indexer(
             title="Note",
             permalink="notes/note",
             checksum=CHECKSUM,
+            content_checksum=None,
             operation=FileIndexOperation.updated,
         )
     )
