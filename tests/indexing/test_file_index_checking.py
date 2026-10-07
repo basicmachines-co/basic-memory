@@ -260,8 +260,8 @@ async def test_repository_indexed_file_checksum_source_maps_repository_rows() ->
     session = object()
     repository = RecordingChecksumRepository(
         rows=[
-            ("notes/a.md", "etag-a", None),
-            ("notes/b.md", None, None),
+            ("notes/a.md", "etag-a", None, "sha-a"),
+            ("notes/b.md", None, None, None),
         ]
     )
     source = RepositoryIndexedFileChecksumSource(
@@ -272,7 +272,7 @@ async def test_repository_indexed_file_checksum_source_maps_repository_rows() ->
     checksums = await source.load_indexed_file_checksums(["notes/a.md", "notes/b.md"])
 
     assert checksums == {
-        "notes/a.md": IndexedChecksums("etag-a"),
+        "notes/a.md": IndexedChecksums("etag-a", accepted_content_checksum="sha-a"),
         "notes/b.md": IndexedChecksums(None),
     }
     assert repository.calls == [(session, ("notes/a.md", "notes/b.md"))]
@@ -370,7 +370,7 @@ async def test_checker_gate_uses_content_checksum_source_when_domains_differ() -
     """The gate compares the marker against a distinct content-checksum source when set (#1601).
 
     Cloud freshness keys on the S3 ETag while note content (and the marker) use a SHA-256 content
-    checksum. With move_orphan_checksum_source wired, the gate must compare the marker against the
+    checksum. With content_checksum_source wired, the gate must compare the marker against the
     content checksum, not the ETag freshness checksum — otherwise the marker never matches and the
     leftover source is wrongly retired and re-indexed as a ghost.
     """
@@ -387,7 +387,7 @@ async def test_checker_gate_uses_content_checksum_source_when_domains_differ() -
         current_checksum_source=StubCurrentChecksumSource({"koncept/note.md": "etag-freshness"}),
         moved_entity_source=moved,
         move_vacate_source=vacate,
-        move_orphan_checksum_source=content_source,
+        content_checksum_source=content_source,
     )
 
     plan = await checker.detect(
