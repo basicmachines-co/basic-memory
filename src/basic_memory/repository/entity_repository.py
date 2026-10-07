@@ -15,7 +15,7 @@ from sqlalchemy.orm import load_only, selectinload
 from sqlalchemy.orm.interfaces import LoaderOption
 from sqlalchemy.engine import Row
 
-from basic_memory.models.knowledge import Entity, Observation, Relation
+from basic_memory.models.knowledge import Entity, NoteContent, Observation, Relation
 from basic_memory.models.relation_search_refresh import RelationSearchRefresh
 from basic_memory.repository.repository import Repository
 from basic_memory.runtime.storage import (
@@ -448,10 +448,30 @@ class EntityRepository(Repository[Entity]):
                 (or_(*incomplete_projection), None),
                 else_=Entity.checksum,
             ).label("checksum")
+            # The same mask hides the accepted checksum, so an incomplete projection is
+            # read and repaired even when its content matches. A first write that has not
+            # recorded a storage checksum yet is not masked and can still match.
+            accepted_content_checksum = case(
+                (or_(*incomplete_projection), None),
+                else_=NoteContent.db_checksum,
+            ).label("accepted_content_checksum")
             # The sync checksum is returned as stored: an incomplete row's masked checksum
-            # already forces a read, whatever the sync checksum says.
-            path_query = select(Entity.file_path, indexed_checksum, Entity.sync_checksum).where(
-                Entity.file_path.in_(paths)
+            # already forces a read, whatever the sync checksum says. The accepted content
+            # checksum lets a storage echo of the accepted note be recognized by its content
+            # when its storage checksum has not been recorded yet.
+            path_query = (
+                select(
+                    Entity.file_path,
+                    indexed_checksum,
+                    Entity.sync_checksum,
+                    accepted_content_checksum,
+                )
+                .outerjoin(
+                    NoteContent,
+                    (NoteContent.entity_id == Entity.id)
+                    & (NoteContent.file_path == Entity.file_path),
+                )
+                .where(Entity.file_path.in_(paths))
             )
             queries.append(self._add_project_filter(path_query))
         query = union_all(*queries)

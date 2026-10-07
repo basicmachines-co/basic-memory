@@ -27,6 +27,8 @@ class IndexedChecksums:
 
     checksum: FileIndexChecksum | None
     sync_checksum: FileIndexChecksum | None = None
+    # The content checksum of the note's accepted Markdown, for notes written DB-first.
+    accepted_content_checksum: FileIndexChecksum | None = None
 
     def recognizes(self, storage_checksum: FileIndexChecksum | None) -> bool:
         """Whether a stored file with `storage_checksum` is already indexed.
@@ -37,6 +39,20 @@ class IndexedChecksums:
         if self.checksum is None or storage_checksum is None:
             return False
         return storage_checksum in (self.checksum, self.sync_checksum)
+
+    def holds_accepted_content(self, content_checksum: FileIndexChecksum | None) -> bool:
+        """Whether a stored file whose content hashes to `content_checksum` is the accepted note.
+
+        A DB-first write indexes its accepted content before the file is written, and its
+        storage checksum is recorded only after the write, so the file's own storage
+        notification can arrive first, including for a brand-new note whose storage
+        checksum is still unset. Matching the content closes that gap. The indexed-checksum
+        lookup withholds the accepted checksum from an incomplete row (pending graph
+        publication), which is therefore still read.
+        """
+        if content_checksum is None:
+            return False
+        return content_checksum == self.accepted_content_checksum
 
 
 @dataclass(frozen=True, slots=True)

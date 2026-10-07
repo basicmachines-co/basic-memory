@@ -18,6 +18,7 @@ from basic_memory.indexing.file_index_planning import (
     FileIndexTarget,
     IndexedChecksums,
     build_file_index_plan,
+    current_file_index_decision,
     move_orphan_file_index_decision,
     plan_file_index_target_from_current,
     plan_file_index_target_from_observed,
@@ -46,7 +47,7 @@ class CurrentFileChecksumSource(Protocol):
 
 
 class IndexedFileChecksumRow(Protocol):
-    """Tuple-like row of file path, indexed checksum and sync checksum."""
+    """Tuple-like row of file path, indexed checksum, sync checksum and accepted checksum."""
 
     def __getitem__(self, index: int, /) -> object:
         """Return a row field by positional index."""
@@ -62,7 +63,7 @@ class IndexedFileChecksumRepository(Protocol):
         *,
         content_types: Mapping[str, str | None] | None = None,
     ) -> Sequence[IndexedFileChecksumRow]:
-        """Return rows whose first three fields are file path, checksum and sync checksum."""
+        """Return rows of file path, checksum, sync checksum and accepted content checksum."""
 
 
 def indexed_checksums_by_path(
@@ -73,6 +74,7 @@ def indexed_checksums_by_path(
         str(row[0]): IndexedChecksums(
             checksum=None if row[1] is None else str(row[1]),
             sync_checksum=None if row[2] is None else str(row[2]),
+            accepted_content_checksum=None if row[3] is None else str(row[3]),
         )
         for row in rows
     }
@@ -293,14 +295,12 @@ class FileIndexChecker:
     # ghost from a legitimate byte-identical copy (which has no marker and stays a new file).
     moved_entity_source: MovedEntitySource | None = None
     move_vacate_source: MoveVacateSource | None = None
-    # The move-vacate marker stores the moved note's *content* checksum. When storage freshness
-    # keys on a different checksum domain than note content (e.g. cloud indexes by S3 ETag but
-    # note content is SHA-256), the gate must compare the marker against the current object's
-    # content checksum, not the freshness checksum, or the marker never matches and every orphan
-    # is either ignored or wrongly retired (basic-memory-cloud#1601). Left unset when the two
-    # domains coincide (local uses one SHA-256 checksum everywhere), in which case the gate falls
-    # back to the freshness `current_checksum` and behavior is unchanged.
-    move_orphan_checksum_source: CurrentFileChecksumSource | None = None
+    # The current object's *content* checksum, for checks keyed on note content: the
+    # move-vacate marker (#1601) and an accepted note's own storage echo. When storage freshness
+    # keys on a different checksum domain than note content (cloud indexes by S3 ETag, note
+    # content is SHA-256) this reads the content checksum. Left unset when the two domains
+    # coincide (local uses one SHA-256 checksum everywhere): the freshness checksum serves both.
+    content_checksum_source: CurrentFileChecksumSource | None = None
 
     async def detect(self, targets: Sequence[FileIndexTarget]) -> FileIndexPlan:
         """Return the file paths whose current storage object still needs indexing."""
@@ -382,6 +382,20 @@ class FileIndexChecker:
             indexed=indexed,
             current_checksum=current_checksum,
         )
+        # A DB-first write's own storage echo can arrive before its storage checksum is
+        # recorded. If the object holds exactly the accepted content, there is nothing to read.
+        if (
+            decision.status == FileIndexDecisionStatus.read
+            and indexed is not None
+            and indexed.accepted_content_checksum is not None
+        ):
+            content_checksum = (
+                await self.content_checksum_source.load_current_file_checksum(target.path)
+                if self.content_checksum_source is not None
+                else current_checksum
+            )
+            if indexed.holds_accepted_content(content_checksum):
+                decision = current_file_index_decision(target.path)
         return decision, current_checksum
 
     async def _apply_move_orphan_gate(
@@ -423,7 +437,7 @@ class FileIndexChecker:
             )
         )
         # The marker records the moved note's content checksum. Compare it against the object's
-        # content checksum (from move_orphan_checksum_source when the freshness domain differs),
+        # content checksum (from content_checksum_source when the freshness domain differs),
         # falling back to the freshness checksum when the two domains coincide. The moved-entity
         # checksum below stays in the freshness/entity domain, so gap-(a) keeps using current.
         gated_candidates: list[
@@ -434,8 +448,8 @@ class FileIndexChecker:
             if marker is None:
                 continue
             content_checksum = (
-                await self.move_orphan_checksum_source.load_current_file_checksum(item.target.path)
-                if self.move_orphan_checksum_source is not None
+                await self.content_checksum_source.load_current_file_checksum(item.target.path)
+                if self.content_checksum_source is not None
                 else item.current_checksum
             )
             if marker.checksum is not None and marker.checksum != content_checksum:

@@ -221,12 +221,12 @@ class FakeEntityRepository:
         self,
         session: object,
         paths: tuple[str, ...],
-    ) -> list[tuple[str, str | None, str | None]]:
+    ) -> list[tuple[str, str | None, str | None, str | None]]:
         self.loaded_checksum_paths = paths
         return [
-            ("unchanged.md", "same-checksum", None),
-            ("modified.md", "old-checksum", None),
-            ("null-checksum.md", None, None),
+            ("unchanged.md", "same-checksum", None, None),
+            ("modified.md", "old-checksum", None, None),
+            ("null-checksum.md", None, None, None),
         ]
 
     async def find_by_checksums(
@@ -353,11 +353,11 @@ class BatchRecordingEntityRepository:
         self,
         session: object,
         paths: tuple[str, ...],
-    ) -> list[tuple[str, str | None, str | None]]:
+    ) -> list[tuple[str, str | None, str | None, str | None]]:
         self.path_batch_sizes.append(len(paths))
         # Echo each requested path back as an indexed row so the merged result
         # can be checked for completeness across batches.
-        return [(path, f"checksum-{path}", None) for path in paths]
+        return [(path, f"checksum-{path}", None, None) for path in paths]
 
     async def find_by_checksums(
         self,
