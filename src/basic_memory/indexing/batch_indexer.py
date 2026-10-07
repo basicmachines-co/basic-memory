@@ -1017,7 +1017,9 @@ class BatchIndexer:
             entity_id=entity.id,
             permalink=entity.permalink,
             checksum=prepared.checksum,
-            indexed_bytes=indexed_bytes,
+            # A guarded no-op (a writer that lost a note/resource race) indexed nothing,
+            # so it bills nothing, whatever it read.
+            indexed_bytes=indexed_bytes if prepared.refresh_search else 0,
             content_type=prepared.content_type,
             markdown_content=prepared.markdown_content,
             observations=prepared.observations,

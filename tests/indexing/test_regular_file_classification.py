@@ -433,6 +433,8 @@ async def test_stale_resource_pass_preserves_newer_markdown_state(
     assert result.errors == []
     assert result.indexed[0].content_type == RUNTIME_MARKDOWN_CONTENT_TYPE
     assert result.indexed[0].checksum == "new-markdown-checksum"
+    # The stale pass published nothing, so it bills none of the bytes it read.
+    assert result.indexed[0].indexed_bytes == 0
     async with db.scoped_session(search_service.session_maker) as session:
         preserved = await entity_repository.get_by_id(session, note.id)
         note_content = await NoteContentRepository(project_id=project_id).get_by_entity_id(
