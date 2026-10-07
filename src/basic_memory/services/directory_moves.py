@@ -18,6 +18,7 @@ from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ProjectConfig
 from basic_memory.models import Entity
 from basic_memory.read_cache import ReadCache, invalidate_cache
+from basic_memory.runtime.note_content_responses import runtime_note_content_payload_as_dict
 from basic_memory.runtime.storage import runtime_content_type_is_markdown
 from basic_memory.schemas.response import DirectoryMoveError, DirectoryMoveResult
 from basic_memory.services.entity_service import EntityService
@@ -67,7 +68,11 @@ async def move_directory(
     moved_files: list[str] = []
     errors: list[DirectoryMoveError] = []
     for entity in entities:
-        destination_path = entity.file_path.replace(f"{source}/", f"{destination}/", 1)
+        # The prefix lookup can match the source in another casing (SQLite LIKE is
+        # case-insensitive), so keep the entity's own path below the matched prefix. The
+        # project root matches every entity, whose whole path moves under the destination.
+        relative_path = entity.file_path[len(source) + 1 :] if source else entity.file_path
+        destination_path = f"{destination}/{relative_path}"
 
         if runtime_content_type_is_markdown(entity):
             try:
@@ -82,24 +87,29 @@ async def move_directory(
                 errors.append(DirectoryMoveError(path=entity.file_path, error=str(error)))
                 continue
             await materializer.materialize_write_change(accepted)
+            # The accepted move can adopt an existing folder's casing, so report where the
+            # note now is rather than where it was asked to go.
+            moved_path = str(runtime_note_content_payload_as_dict(accepted.payload)["file_path"])
         else:
             try:
-                await move_regular_file(
-                    file_path=entity.file_path,
-                    destination_path=destination_path,
-                    project_external_id=project_external_id,
-                    entity_service=entity_service,
-                    search_service=search_service,
-                    project_config=project_config,
-                    app_config=app_config,
-                    read_cache=read_cache,
-                )
+                moved_path = (
+                    await move_regular_file(
+                        file_path=entity.file_path,
+                        destination_path=destination_path,
+                        project_external_id=project_external_id,
+                        entity_service=entity_service,
+                        search_service=search_service,
+                        project_config=project_config,
+                        app_config=app_config,
+                        read_cache=read_cache,
+                    )
+                ).file_path
             except (ValueError, EntityNotFoundError) as error:
                 errors.append(DirectoryMoveError(path=entity.file_path, error=str(error)))
                 continue
 
         schedule_followups(entity.id)
-        moved_files.append(destination_path)
+        moved_files.append(moved_path)
 
     return DirectoryMoveResult(
         total_files=len(entities),

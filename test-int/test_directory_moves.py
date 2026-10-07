@@ -3,6 +3,7 @@
 from hashlib import sha256
 from pathlib import Path
 
+import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
@@ -86,3 +87,51 @@ async def test_directory_move_reports_a_refused_note_and_moves_the_rest(
     assert result["moved_files"] == ["archive/Fine.md"]
     assert [error["path"] for error in result["errors"]] == ["drafts/Clash.md"]
     assert (result["successful_moves"], result["failed_moves"]) == (1, 1)
+
+
+async def test_directory_move_reports_where_each_note_landed(
+    client: AsyncClient,
+    test_project: Project,
+) -> None:
+    """A note can adopt an existing folder's casing, and the result names its real path."""
+    base = f"/v2/projects/{test_project.external_id}/knowledge"
+    for title, directory in (("Plan", "drafts"), ("Existing", "Archive")):
+        created = await client.post(
+            f"{base}/write",
+            json={"note": {"title": title, "directory": directory, "content": title}},
+        )
+        assert created.json()["kind"] == "created", created.text
+
+    response = await client.post(
+        f"{base}/move-directory",
+        json={"source_directory": "drafts", "destination_directory": "archive"},
+    )
+
+    result = response.json()
+    assert result["moved_files"] == ["Archive/Plan.md"], result
+    assert (Path(test_project.path) / "Archive/Plan.md").exists()
+
+
+async def test_directory_move_keeps_paths_below_a_case_variant_source(
+    client: AsyncClient,
+    test_project: Project,
+    db_backend: str,
+) -> None:
+    """SQLite matches the source folder in any casing; the path below it must survive."""
+    if db_backend != "sqlite":
+        pytest.skip("Postgres LIKE is case-sensitive, so a case-variant source matches nothing")
+    base = f"/v2/projects/{test_project.external_id}/knowledge"
+    created = await client.post(
+        f"{base}/write",
+        json={"note": {"title": "Plan", "directory": "Drafts/sub", "content": "Plan"}},
+    )
+    assert created.json()["kind"] == "created", created.text
+
+    response = await client.post(
+        f"{base}/move-directory",
+        json={"source_directory": "drafts", "destination_directory": "archive"},
+    )
+
+    result = response.json()
+    assert result["failed_moves"] == 0, result["errors"]
+    assert result["moved_files"] == ["archive/sub/Plan.md"]
