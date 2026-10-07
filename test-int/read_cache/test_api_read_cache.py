@@ -15,6 +15,7 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from redis.asyncio import Redis
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 import basic_memory.indexing.note_content_reconciler as note_content_reconciler
@@ -32,7 +33,7 @@ from basic_memory.indexing.note_content_read_repair_runner import (
 )
 from basic_memory.indexing.models import FileIndexResult
 from basic_memory.index.note_content_materialization import drain_pending_materializations
-from basic_memory.models import Project
+from basic_memory.models import NoteContent, Project
 from basic_memory.models.knowledge import Entity
 from basic_memory.read_cache import (
     ReadCacheInvalidator,
@@ -155,6 +156,36 @@ class DestinationObservingRedisReadCache(RedisReadCache):
         self.destination_counts.append(
             sum(destination.exists() for destination in self.destination_paths)
         )
+        return status
+
+
+class AcceptedMoveObservingRedisReadCache(RedisReadCache):
+    """Record how many notes the database has accepted at their destination per invalidation."""
+
+    def __init__(
+        self,
+        *,
+        client: Redis,
+        namespace: str,
+        prefix: str,
+        session_maker: async_sessionmaker[AsyncSession],
+        destination_paths: tuple[str, ...],
+    ) -> None:
+        super().__init__(client=client, namespace=namespace, prefix=prefix)
+        self.session_maker = session_maker
+        self.destination_paths = destination_paths
+        self.accepted_counts: list[int] = []
+
+    @override
+    async def invalidate_project(self, project_id: str) -> ReadCacheInvalidationStatus:
+        status = await super().invalidate_project(project_id)
+        async with db.scoped_session(self.session_maker) as session:
+            accepted = await session.scalar(
+                select(func.count())
+                .select_from(NoteContent)
+                .where(NoteContent.file_path.in_(self.destination_paths))
+            )
+        self.accepted_counts.append(int(accepted or 0))
         return status
 
 
@@ -1053,8 +1084,9 @@ async def test_directory_move_invalidates_after_each_committed_file_in_real_redi
     client: AsyncClient,
     test_project: Project,
     redis_cache: RedisCacheHarness,
+    engine_factory: tuple[AsyncEngine, async_sessionmaker[AsyncSession]],
 ) -> None:
-    """Each file move advances Redis before the next directory item is processed."""
+    """Each accepted note move advances Redis before the next directory item is processed."""
     project_external_id = str(test_project.external_id)
     project_url = f"/v2/projects/{project_external_id}"
     created_paths: list[str] = []
@@ -1071,13 +1103,16 @@ async def test_directory_move_invalidates_after_each_committed_file_in_real_redi
         created_paths.append(response.json()["file_path"])
 
     destination_paths = tuple(
-        Path(test_project.path) / source_path.replace("move-source/", "move-destination/", 1)
+        source_path.replace("move-source/", "move-destination/", 1)
         for source_path in created_paths
     )
-    observing_cache = DestinationObservingRedisReadCache(
+    # Reads serve accepted note content, so the generation must advance once each move's
+    # accepted state commits; the bytes reach the new path afterwards.
+    observing_cache = AcceptedMoveObservingRedisReadCache(
         client=redis_cache.client,
         namespace=redis_cache.namespace,
         prefix=redis_cache.prefix,
+        session_maker=engine_factory[1],
         destination_paths=destination_paths,
     )
     app.dependency_overrides[get_read_cache] = lambda: observing_cache
@@ -1097,8 +1132,12 @@ async def test_directory_move_invalidates_after_each_committed_file_in_real_redi
 
     assert response.status_code == 200
     assert response.json()["successful_moves"] == 2
-    assert observing_cache.destination_counts[:2] == [1, 2]
-    assert all(destination.exists() for destination in destination_paths)
+    # One accepted move can invalidate more than once (accept, then materialization), but
+    # the first note's invalidations all land before the second note is accepted.
+    counts = observing_cache.accepted_counts
+    assert (counts[0], counts[-1]) == (1, 2)
+    assert counts == sorted(counts)
+    assert all((Path(test_project.path) / path).exists() for path in destination_paths)
     generation_after = await _initialized_generation(
         redis_cache,
         project_external_id,

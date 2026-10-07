@@ -24,6 +24,7 @@ import logfire
 from basic_memory import db
 from basic_memory.services.exceptions import AmbiguousIdentifierError
 from basic_memory.services.link_resolver import normalize_link_text
+from basic_memory.services import directory_moves
 from basic_memory.services.directory_deletes import DirectoryDeleteServiceError
 from basic_memory.services.note_content_writes import NoteContentMutationServiceError
 from basic_memory.ignore_utils import (
@@ -1255,20 +1256,20 @@ async def move_directory(
     project_external_id: Annotated[
         str, Path(alias="project_id", description="Project external UUID")
     ],
+    note_content_mutation_service: NoteContentMutationServiceDep,
+    note_content_materialization_provider: NoteContentMaterializationProviderDep,
     entity_service: EntityServiceV2ExternalDep,
-    project_config: ProjectConfigV2ExternalDep,
     app_config: AppConfigDep,
     search_service: SearchServiceV2ExternalDep,
     vector_sync_scheduler: EntityVectorSyncSchedulerDep,
     relation_resolution_scheduler: RelationResolutionSchedulerDep,
-    session_maker: SessionMakerDep,
     read_cache: ReadCacheDep,
 ) -> DirectoryMoveResult:
     """Move all entities in a directory to a new location.
 
     V2 API uses project external_id in the URL path for stable references.
-    Moves all files within a source directory to a destination directory,
-    updating database records and optionally updating permalinks.
+    Each Markdown note moves as an accepted note move, exactly like the single
+    move endpoint; regular files move their stored bytes.
 
     Args:
         project_id: Project external ID from URL path
@@ -1287,51 +1288,31 @@ async def move_directory(
             f"API v2 request: move_directory source='{data.source_directory}', destination='{data.destination_directory}'"
         )
 
-        try:
-            # Move the directory using the service
-            result = await entity_service.move_directory(
-                source_directory=data.source_directory,
-                destination_directory=data.destination_directory,
-                project_config=project_config,
+        def schedule_followups(entity_id: int) -> None:
+            _schedule_post_write_followups(
+                vector_sync_scheduler=vector_sync_scheduler,
+                relation_resolution_scheduler=relation_resolution_scheduler,
                 app_config=app_config,
-                project_external_id=project_external_id,
-                read_cache=read_cache,
+                entity_id=entity_id,
+                project_id=project_id,
             )
 
-            # Reindexing can alter entity responses after the move was first
-            # invalidated. Close that fill window even after partial
-            # follow-up failure.
-            invalidation_scope = (
-                invalidate_cache(read_cache, project_external_id)
-                if read_cache is not None
-                else nullcontext()
-            )
-            async with invalidation_scope:
-                # Reindex moved entities
-                for file_path in result.moved_files:
-                    async with db.scoped_session(session_maker) as session:
-                        entity = await entity_service.link_resolver.resolve_link(
-                            file_path, session=session
-                        )
-                    if entity:
-                        await search_service.index_entity(entity)
-                        _schedule_post_write_followups(
-                            vector_sync_scheduler=vector_sync_scheduler,
-                            relation_resolution_scheduler=relation_resolution_scheduler,
-                            app_config=app_config,
-                            entity_id=entity.id,
-                            project_id=project_id,
-                        )
-
-            logger.info(
-                f"API v2 response: move_directory "
-                f"total={result.total_files}, success={result.successful_moves}, failed={result.failed_moves}"
-            )
-            return result
-
-        except Exception as e:
-            logger.error(f"Error moving directory: {e}")
-            raise HTTPException(status_code=400, detail=str(e))
+        result = await directory_moves.move_directory(
+            source_directory=data.source_directory,
+            destination_directory=data.destination_directory,
+            project_external_id=project_external_id,
+            note_mutations=note_content_mutation_service,
+            materializer=note_content_materialization_provider,
+            entity_service=entity_service,
+            search_service=search_service,
+            read_cache=read_cache,
+            schedule_followups=schedule_followups,
+        )
+        logger.info(
+            f"API v2 response: move_directory "
+            f"total={result.total_files}, success={result.successful_moves}, failed={result.failed_moves}"
+        )
+        return result
 
 
 ## Delete directory endpoint
