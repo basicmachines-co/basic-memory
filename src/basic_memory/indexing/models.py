@@ -337,6 +337,10 @@ class IndexFileJobResult:
     title: str | None = None
     permalink: str | None = None
     entity_checksum: str | None = None
+    # sha256 of the indexed markdown, the same kind of checksum an accepted write
+    # records. entity_checksum is the storage checksum, an S3 ETag in cloud, so
+    # only this one can identify a note version across writers.
+    content_checksum: RuntimeNoteContentChecksum | None = None
     operation: FileIndexOperation | None = None
     actor_user_profile_id: str | None = None
     actor_kind: str | None = None
@@ -418,7 +422,7 @@ class IndexFileNoteLiveUpdatePlan:
     note_external_id: NoteExternalId
     note_path: RuntimeFilePath
     note_version_etag: StorageEtag | None
-    content_checksum: RuntimeFileChecksum | None
+    content_checksum: RuntimeNoteContentChecksum | None
     file_checksum: StorageEtag | None
     file_size_bytes: int | None
     title: str
@@ -472,6 +476,7 @@ def index_file_job_result_from_indexed_file(
         title=indexed_file.title,
         permalink=indexed_file.permalink,
         entity_checksum=indexed_file.checksum,
+        content_checksum=indexed_file.content_checksum,
         operation=operation,
         actor_user_profile_id=(
             live_update_plan.actor_user_profile_id if live_update_plan is not None else None
@@ -552,7 +557,7 @@ def plan_index_file_note_live_update(
         # would invite the collaboration relay to reconcile open documents to
         # the stale version. The newer write's own webhook job carries the
         # current checksum.
-        content_checksum=None if result.content_superseded else result.entity_checksum,
+        content_checksum=None if result.content_superseded else result.content_checksum,
         file_checksum=normalized_etag,
         file_size_bytes=context.object_size,
         title=title,
@@ -715,6 +720,7 @@ def plan_current_materialized_note_result(
             title=entity.title,
             permalink=entity.permalink,
             entity_checksum=entity.storage_checksum,
+            content_checksum=entity.content_checksum,
             operation=live_update_operation,
             actor_user_profile_id=provenance.actor_user_profile_id,
             actor_kind=provenance.actor_kind,

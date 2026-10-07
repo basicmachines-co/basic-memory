@@ -294,6 +294,7 @@ async def test_run_index_file_preserves_current_materialized_note_metadata() -> 
         title="Created through MCP",
         permalink="notes/created-through-mcp",
         entity_checksum="storage-native-etag",
+        content_checksum="checksum-1",
         operation=FileIndexOperation.created,
         actor_user_profile_id="33333333-3333-3333-3333-333333333333",
         live_update_source="mcp",
