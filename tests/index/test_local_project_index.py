@@ -1118,6 +1118,7 @@ class RecordingBatchIndexer:
         return IndexingBatchResult(
             indexed=[
                 IndexedEntity(
+                    indexed_bytes=0,
                     path=file_path,
                     entity_id=index + 1,
                     permalink=None,
@@ -2521,6 +2522,7 @@ class RecordingMarkdownFileIndexer:
     async def index_file(self, file_path: str, *, source: str) -> FileIndexResult:
         self.indexed_paths.append(file_path)
         return FileIndexResult.from_fields(
+            indexed_bytes=0,
             file_path=file_path,
             entity_id=99,
             external_id="note-99",

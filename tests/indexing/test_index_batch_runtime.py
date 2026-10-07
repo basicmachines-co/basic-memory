@@ -181,6 +181,7 @@ async def test_index_batch_runtime_indexes_loaded_files_and_reconciles_note_cont
         result=IndexingBatchResult(
             indexed=[
                 IndexedEntity(
+                    indexed_bytes=0,
                     path="ok.md",
                     entity_id=10,
                     permalink="ok",
@@ -189,6 +190,7 @@ async def test_index_batch_runtime_indexes_loaded_files_and_reconciles_note_cont
                     markdown_content="# OK\n",
                 ),
                 IndexedEntity(
+                    indexed_bytes=0,
                     path="bad.md",
                     entity_id=20,
                     permalink="bad",
@@ -197,6 +199,7 @@ async def test_index_batch_runtime_indexes_loaded_files_and_reconciles_note_cont
                     markdown_content="# Bad\n",
                 ),
                 IndexedEntity(
+                    indexed_bytes=0,
                     path="image.png",
                     entity_id=30,
                     permalink=None,
@@ -299,6 +302,7 @@ async def test_rewrite_between_scan_and_reconcile_publishes_no_stale_relations(
         result=IndexingBatchResult(
             indexed=[
                 IndexedEntity(
+                    indexed_bytes=0,
                     path="rewritten.md",
                     entity_id=10,
                     permalink="rewritten",
@@ -352,6 +356,7 @@ def test_count_search_indexed_entities_uses_markdown_content_presence() -> None:
         count_search_indexed_entities(
             [
                 IndexedEntity(
+                    indexed_bytes=0,
                     path="note.md",
                     entity_id=1,
                     permalink="note",
@@ -359,6 +364,7 @@ def test_count_search_indexed_entities_uses_markdown_content_presence() -> None:
                     markdown_content="# Note\n",
                 ),
                 IndexedEntity(
+                    indexed_bytes=0,
                     path="image.png",
                     entity_id=2,
                     permalink=None,

@@ -174,6 +174,7 @@ def read_plan() -> FileIndexPlan:
 
 def indexed_file() -> FileIndexResult:
     return FileIndexResult(
+        indexed_bytes=0,
         file_path="notes/a.md",
         entity_id=42,
         external_id="note-42",

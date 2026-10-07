@@ -129,6 +129,7 @@ class FakeIndexer:
         return IndexingBatchResult(
             indexed=[
                 IndexedEntity(
+                    indexed_bytes=0,
                     path="notes/a.md",
                     entity_id=42,
                     permalink="notes/a",

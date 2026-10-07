@@ -184,6 +184,14 @@ class ProjectIndexCoordinatorResult:
     batch_results: tuple[IndexFileBatchJobResult, ...] = ()
     completion: ProjectIndexCompletion | None = None
 
+    @property
+    def indexed_bytes(self) -> int:
+        """Stored bytes indexed by batches this run executed inline.
+
+        Queued batches run as their own jobs and report their own bytes.
+        """
+        return sum(batch_result.indexed_bytes for batch_result in self.batch_results)
+
 
 def build_project_index_batch_job_plan(
     *,

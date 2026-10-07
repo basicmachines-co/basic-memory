@@ -147,6 +147,7 @@ async def test_reconcile_indexed_note_content_batch_reports_per_file_errors(
     reconciliation = await reconcile_indexed_note_content_batch(
         [
             IndexedEntity(
+                indexed_bytes=0,
                 path="ok.md",
                 entity_id=42,
                 permalink="ok",
@@ -154,6 +155,7 @@ async def test_reconcile_indexed_note_content_batch_reports_per_file_errors(
                 markdown_content="# OK\n",
             ),
             IndexedEntity(
+                indexed_bytes=0,
                 path="missing.md",
                 entity_id=404,
                 permalink="missing",
@@ -161,6 +163,7 @@ async def test_reconcile_indexed_note_content_batch_reports_per_file_errors(
                 markdown_content="# Missing\n",
             ),
             IndexedEntity(
+                indexed_bytes=0,
                 path="bad.md",
                 entity_id=43,
                 permalink="bad",
@@ -168,6 +171,7 @@ async def test_reconcile_indexed_note_content_batch_reports_per_file_errors(
                 markdown_content="# Bad\n",
             ),
             IndexedEntity(
+                indexed_bytes=0,
                 path="binary.png",
                 entity_id=44,
                 permalink=None,
@@ -234,6 +238,7 @@ def test_indexed_note_content_observed_at_uses_original_timestamp_when_unchanged
 
     result = indexed_note_content_observed_at(
         IndexedEntity(
+            indexed_bytes=0,
             path="ok.md",
             entity_id=42,
             permalink="ok",
@@ -258,6 +263,7 @@ def test_indexed_note_content_observed_at_uses_now_when_frontmatter_rewrites_fil
 
     result = indexed_note_content_observed_at(
         IndexedEntity(
+            indexed_bytes=0,
             path="ok.md",
             entity_id=42,
             permalink="ok",
@@ -273,6 +279,7 @@ def test_indexed_note_content_observed_at_uses_now_when_frontmatter_rewrites_fil
 def test_indexed_note_content_observed_at_handles_missing_file_info() -> None:
     result = indexed_note_content_observed_at(
         IndexedEntity(
+            indexed_bytes=0,
             path="ok.md",
             entity_id=42,
             permalink="ok",
@@ -307,6 +314,7 @@ async def test_batch_reader_skips_reconcile_when_file_removed(
     reconciliation = await reconcile_indexed_note_content_batch(
         [
             IndexedEntity(
+                indexed_bytes=0,
                 path="gone.md",
                 entity_id=42,
                 permalink="gone",
@@ -384,6 +392,7 @@ async def test_batch_reader_reconciles_fresh_content_not_scan_snapshot(
     reconciliation = await reconcile_indexed_note_content_batch(
         [
             IndexedEntity(
+                indexed_bytes=0,
                 path=sample_entity.file_path,
                 entity_id=sample_entity.id,
                 permalink=sample_entity.permalink,
@@ -462,6 +471,7 @@ async def test_batch_without_reader_reverts_to_scan_snapshot(
     reconciliation = await reconcile_indexed_note_content_batch(
         [
             IndexedEntity(
+                indexed_bytes=0,
                 path=sample_entity.file_path,
                 entity_id=sample_entity.id,
                 permalink=sample_entity.permalink,
