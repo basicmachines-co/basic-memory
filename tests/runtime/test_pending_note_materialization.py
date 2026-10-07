@@ -44,7 +44,6 @@ def test_plan_pending_note_materialization_uses_fallback_source_when_missing() -
         fallback_source="api",
         actor_kind="mcp_client",
         actor_name="Claude Code",
-        previous_file_path="notes/old.md",
         cleanup_after_write=cleanup,
     )
 
@@ -56,7 +55,6 @@ def test_plan_pending_note_materialization_uses_fallback_source_when_missing() -
         actor_kind="mcp_client",
         actor_name="Claude Code",
         source="api",
-        previous_file_path="notes/old.md",
         cleanup_after_write=cleanup,
     )
 

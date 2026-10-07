@@ -112,7 +112,6 @@ def plan_pending_note_materialization(
     actor_user_profile_id: UUID | None = None,
     actor_kind: RuntimeNoteActorKind | None = None,
     actor_name: RuntimeNoteActorName | None = None,
-    previous_file_path: RuntimeFilePath | None = None,
     cleanup_after_write: RuntimePendingNoteFileDelete | None = None,
 ) -> RuntimePendingNoteMaterialization:
     """Build the queued materialization marker from accepted note_content state."""
@@ -126,7 +125,6 @@ def plan_pending_note_materialization(
         actor_kind=actor_kind,
         actor_name=actor_name,
         source=str(source) if source else None,
-        previous_file_path=previous_file_path,
         cleanup_after_write=cleanup_after_write,
     )
 

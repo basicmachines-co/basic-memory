@@ -686,9 +686,9 @@ async def test_update_replaces_content_and_records_a_rename_as_a_move(
     assert change.payload.title == "Replacement"
     assert change.materialization is not None
     assert change.materialization.db_version == 2
-    # The PUT carries the rename on its project change; the materialization job for a
-    # PUT keeps no previous path of its own.
-    assert change.materialization.previous_file_path is None
+    # A PUT that renames is a move: its materialization announces the path the note left,
+    # the same as an explicit move, so live readers can retire the old path.
+    assert change.materialization.previous_file_path == "notes/Accepted.md"
     project_change = change.project_change
     assert project_change is not None
     assert project_change.operation is RuntimeProjectNoteOperation.moved
@@ -724,6 +724,8 @@ async def test_update_refreshes_the_source_path_after_taking_the_note_lock(
     assert project_change.operation is RuntimeProjectNoteOperation.moved
     assert project_change.previous_file_path == "archive/Accepted.md"
     assert project_change.file_path == "notes/Accepted.md"
+    assert result.change.materialization is not None
+    assert result.change.materialization.previous_file_path == "archive/Accepted.md"
     assert result.relation_publication is not None
     assert await pending_generations(session_maker, note.entity_id) == [
         1,
