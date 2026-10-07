@@ -268,6 +268,7 @@ class BatchIndexer:
             worker=lambda path: self._refresh_search_index(
                 prepared_entities[path],
                 entities_by_id[prepared_entities[path].entity_id],
+                indexed_bytes=_input_content_bytes(files[path]),
             ),
         )
         error_by_path.update(refresh_errors)
@@ -336,13 +337,18 @@ class BatchIndexer:
             )
 
             if index_search:
-                return await self._refresh_search_index(prepared_entity, entity)
+                return await self._refresh_search_index(
+                    prepared_entity,
+                    entity,
+                    indexed_bytes=_input_content_bytes(file),
+                )
 
         return IndexedEntity(
             path=prepared_entity.path,
             entity_id=entity.id,
             permalink=entity.permalink,
             checksum=prepared_entity.checksum,
+            indexed_bytes=_input_content_bytes(file),
             content_type=prepared_entity.content_type,
             markdown_content=prepared_entity.markdown_content,
             observations=prepared_entity.observations,
@@ -930,7 +936,13 @@ class BatchIndexer:
             relations=indexed.relations,
             resolve_relations=indexed.resolve_relations,
         )
-        refreshed = await self._refresh_search_index(prepared, refresh.entity)
+        # Re-rendering search for an already indexed snapshot reads no new
+        # content, so the snapshot keeps the byte count of its original read.
+        refreshed = await self._refresh_search_index(
+            prepared,
+            refresh.entity,
+            indexed_bytes=indexed.indexed_bytes,
+        )
         async with db.scoped_session(self.session_maker) as session:
             # Trigger: N+1 can be accepted after N loaded its coherent snapshot but
             # before N finishes the external search write.
@@ -986,7 +998,7 @@ class BatchIndexer:
     # --- Search refresh ---
 
     async def _refresh_search_index(
-        self, prepared: _PreparedEntity, entity: Entity
+        self, prepared: _PreparedEntity, entity: Entity, *, indexed_bytes: int
     ) -> IndexedEntity:
         if prepared.refresh_search:
             try:
@@ -1005,6 +1017,9 @@ class BatchIndexer:
             entity_id=entity.id,
             permalink=entity.permalink,
             checksum=prepared.checksum,
+            # A guarded no-op (a writer that lost a note/resource race) indexed nothing,
+            # so it bills nothing, whatever it read.
+            indexed_bytes=indexed_bytes if prepared.refresh_search else 0,
             content_type=prepared.content_type,
             markdown_content=prepared.markdown_content,
             observations=prepared.observations,
@@ -1240,3 +1255,13 @@ class BatchIndexer:
 
         await asyncio.gather(*(run(path) for path in paths))
         return results, errors
+
+
+def _input_content_bytes(file: IndexInputFile) -> int:
+    """Byte length of the loaded content the indexer parses for one input file.
+
+    Markdown input always carries content (preparation rejects it otherwise). A
+    regular file loaded without content is indexed from metadata alone, so it
+    reports 0 bytes.
+    """
+    return len(file.content) if file.content is not None else 0

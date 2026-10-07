@@ -1568,9 +1568,9 @@ class SearchRepositoryBase(ABC):
     # Shared semantic search: sync_entity_vectors orchestration
     # ------------------------------------------------------------------
 
-    async def sync_entity_vectors(self, entity_id: int) -> None:
+    async def sync_entity_vectors(self, entity_id: int) -> VectorSyncBatchResult:
         """Sync semantic chunk rows + embeddings for a single entity."""
-        await self._sync_entity_vectors_internal(
+        return await self._sync_entity_vectors_internal(
             [entity_id],
             progress_callback=None,
             continue_on_error=False,

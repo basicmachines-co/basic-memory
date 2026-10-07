@@ -64,6 +64,7 @@ def _synced_file(
 ) -> SyncedMarkdownFile:
     """Create the canonical markdown index result consumed by FileIndexer."""
     return SyncedMarkdownFile(
+        indexed_bytes=0,
         entity=entity or _entity(),
         checksum=checksum,
         markdown_content=CANONICAL_MARKDOWN,
@@ -91,6 +92,7 @@ def _file_indexer(
     markdown_indexer.publish_relation_generation = AsyncMock(return_value=True)
     markdown_indexer.index_file = AsyncMock(
         return_value=FileIndexResult(
+            indexed_bytes=0,
             file_path="notes/note.md",
             entity_id=42,
             external_id="note-42",

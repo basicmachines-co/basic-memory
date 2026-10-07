@@ -268,6 +268,7 @@ class FileIndexer:
             checksum=synced.checksum,
             content_checksum=await compute_checksum(synced.markdown_content),
             operation=operation,
+            indexed_bytes=synced.indexed_bytes,
             content_superseded=content_superseded,
         )
 

@@ -54,6 +54,7 @@ async def test_local_file_indexer_logs_brace_path_through_retry(
     entity.observations = []
     entity.relations = []
     synced_file = SyncedMarkdownFile(
+        indexed_bytes=0,
         entity=entity,
         checksum="abc123",
         markdown_content="# {AG} Plan\n",
@@ -130,6 +131,7 @@ async def test_local_file_indexer_treats_empty_markdown_basename_as_regular_file
         note_content_reconciler=cast(IndexMarkdownNoteContentReconciler, Mock()),
     )
     regular_result = FileIndexResult(
+        indexed_bytes=0,
         file_path="_phase7_import/.md",
         entity_id=42,
         external_id="resource-42",

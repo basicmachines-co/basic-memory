@@ -65,6 +65,7 @@ from basic_memory.runtime.storage import (
 
 def test_file_index_result_is_a_frozen_success_value():
     result = FileIndexResult(
+        indexed_bytes=0,
         file_path="notes/a.md",
         entity_id=42,
         external_id="note-42",
@@ -83,6 +84,7 @@ def test_file_index_result_is_a_frozen_success_value():
 
 def test_file_index_result_from_fields_validates_required_entity_text():
     result = FileIndexResult.from_fields(
+        indexed_bytes=0,
         file_path="notes/a.md",
         entity_id=42,
         external_id=" note-42 ",
@@ -94,6 +96,7 @@ def test_file_index_result_from_fields_validates_required_entity_text():
     )
 
     assert result == FileIndexResult(
+        indexed_bytes=0,
         file_path="notes/a.md",
         entity_id=42,
         external_id="note-42",
@@ -106,6 +109,7 @@ def test_file_index_result_from_fields_validates_required_entity_text():
 
     with pytest.raises(RuntimeError, match="Indexed entity for notes/a.md is missing title"):
         FileIndexResult.from_fields(
+            indexed_bytes=0,
             file_path="notes/a.md",
             entity_id=42,
             external_id="note-42",
@@ -119,6 +123,7 @@ def test_file_index_result_from_fields_validates_required_entity_text():
 
 def test_file_index_result_from_fields_validates_optional_permalink_text():
     result = FileIndexResult.from_fields(
+        indexed_bytes=0,
         file_path="notes/a.md",
         entity_id=42,
         external_id="note-42",
@@ -133,6 +138,7 @@ def test_file_index_result_from_fields_validates_optional_permalink_text():
 
     with pytest.raises(RuntimeError, match="Indexed entity for notes/a.md has invalid permalink"):
         FileIndexResult.from_fields(
+            indexed_bytes=0,
             file_path="notes/a.md",
             entity_id=42,
             external_id="note-42",
@@ -145,6 +151,7 @@ def test_file_index_result_from_fields_validates_optional_permalink_text():
 
     with pytest.raises(RuntimeError, match="Indexed entity for notes/a.md has blank permalink"):
         FileIndexResult.from_fields(
+            indexed_bytes=0,
             file_path="notes/a.md",
             entity_id=42,
             external_id="note-42",
@@ -215,8 +222,40 @@ def test_index_file_job_result_from_read_decision_fails_fast():
         index_file_job_result_from_decision(decision)
 
 
+@pytest.mark.parametrize(
+    ("indexed_superseded", "plan_superseded", "expected_bytes"),
+    [(False, False, 120), (True, False, 0), (False, True, 0)],
+)
+def test_index_file_job_result_bills_bytes_only_for_current_content(
+    indexed_superseded: bool,
+    plan_superseded: bool,
+    expected_bytes: int,
+):
+    """A superseded result describes replaced content; the newer write bills its bytes."""
+    indexed_file = FileIndexResult(
+        file_path="notes/a.md",
+        entity_id=42,
+        external_id="note-42",
+        title="A Note",
+        permalink="notes/a-note",
+        checksum="checksum-1",
+        content_checksum="content-1",
+        operation=FileIndexOperation.updated,
+        indexed_bytes=120,
+        content_superseded=indexed_superseded,
+    )
+
+    result = index_file_job_result_from_indexed_file(
+        indexed_file,
+        live_update_plan=IndexedFileLiveUpdatePlan(content_superseded=plan_superseded),
+    )
+
+    assert result.indexed_bytes == expected_bytes
+
+
 def test_index_file_job_result_from_indexed_file_uses_trusted_live_update_plan():
     indexed_file = FileIndexResult(
+        indexed_bytes=0,
         file_path="notes/a.md",
         entity_id=42,
         external_id="note-42",
@@ -588,12 +627,14 @@ def test_build_index_file_batch_job_result_preserves_order_and_embedding_targets
         },
         indexed_files=(
             IndexedEntity(
+                indexed_bytes=0,
                 path="notes/processed.md",
                 entity_id=42,
                 permalink="notes/processed",
                 checksum="checksum-processed",
             ),
             IndexedEntity(
+                indexed_bytes=0,
                 path="notes/failed.md",
                 entity_id=43,
                 permalink="notes/failed",
@@ -875,6 +916,7 @@ def test_plan_current_materialized_note_result_requests_entity_when_metadata_is_
 
 def indexed_note(*, checksum: str = "etag-1", content_checksum: str | None = "content-1"):
     return FileIndexResult(
+        indexed_bytes=0,
         file_path="notes/a.md",
         entity_id=42,
         external_id="note-42",

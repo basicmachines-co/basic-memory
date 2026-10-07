@@ -183,6 +183,9 @@ class IndexedEntity:
     entity_id: int
     permalink: str | None
     checksum: str
+    # Byte length of the stored content this pass read and parsed (the loaded
+    # input file's bytes, before any frontmatter normalization rewrite).
+    indexed_bytes: int
     content_type: str | None = None
     markdown_content: str | None = None
     observations: tuple[IndexedObservation, ...] = ()
@@ -233,6 +236,9 @@ class FileIndexResult:
     # None for regular (non-note) files.
     content_checksum: RuntimeNoteContentChecksum | None
     operation: FileIndexOperation
+    # Byte length of the stored content the indexer read and indexed. For both
+    # Markdown and regular files this is the full stored object read from storage.
+    indexed_bytes: int
     # The indexed snapshot committed successfully, but a newer accepted note
     # generation won before derived relations could be published. The next
     # coalesced write owns convergence; callers must not enqueue stale followups.
@@ -250,6 +256,7 @@ class FileIndexResult:
         checksum: str,
         content_checksum: RuntimeNoteContentChecksum | None,
         operation: FileIndexOperation,
+        indexed_bytes: int,
         content_superseded: bool = False,
     ) -> FileIndexResult:
         """Validate entity fields loaded for a completed file-index result.
@@ -279,6 +286,7 @@ class FileIndexResult:
             checksum=checksum,
             content_checksum=content_checksum,
             operation=operation,
+            indexed_bytes=indexed_bytes,
             content_superseded=content_superseded,
         )
 
@@ -343,6 +351,10 @@ class IndexFileJobResult:
     # landed mid-job, so this result describes superseded content (issue #1445).
     # That write's own storage notification indexes the newer content.
     content_superseded: bool = False
+    # Bytes of stored content this job actually indexed, for work-unit billing.
+    # Only a processed, non-superseded file reports bytes; current, missing,
+    # failed, and superseded outcomes report 0.
+    indexed_bytes: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -448,6 +460,9 @@ def index_file_job_result_from_indexed_file(
     operation = indexed_file.operation
     if live_update_plan is not None and live_update_plan.operation is not None:
         operation = live_update_plan.operation
+    content_superseded = indexed_file.content_superseded or (
+        live_update_plan.content_superseded if live_update_plan is not None else False
+    )
 
     return IndexFileJobResult(
         status=IndexFileJobStatus.processed,
@@ -467,10 +482,10 @@ def index_file_job_result_from_indexed_file(
             live_update_plan.live_update_source if live_update_plan is not None else None
         ),
         db_version=live_update_plan.db_version if live_update_plan is not None else None,
-        content_superseded=(
-            indexed_file.content_superseded
-            or (live_update_plan.content_superseded if live_update_plan is not None else False)
-        ),
+        content_superseded=content_superseded,
+        # A superseded result describes content a newer write replaced; that
+        # write's own job bills its bytes, so this one reports none.
+        indexed_bytes=0 if content_superseded else indexed_file.indexed_bytes,
     )
 
 
@@ -755,6 +770,11 @@ class IndexFileBatchJobResult:
     file_results: tuple[IndexFileJobResult, ...]
     vector_targets: tuple[EmbeddingIndexTarget, ...]
 
+    @property
+    def indexed_bytes(self) -> int:
+        """Stored bytes actually indexed across this batch's file results."""
+        return sum(result.indexed_bytes for result in self.file_results)
+
 
 def project_index_file_outcome_from_job_result(
     result: IndexFileJobResult,
@@ -828,6 +848,7 @@ def build_index_file_batch_job_result(
                     reason=f"file indexed: {file_path}",
                     entity_id=indexed.entity_id,
                     entity_checksum=indexed.checksum,
+                    indexed_bytes=indexed.indexed_bytes,
                 )
             )
         else:
@@ -860,6 +881,9 @@ class SyncedMarkdownFile:
     content_type: str
     updated_at: datetime
     size: int
+    # Byte length of the stored content this pass read and indexed; 0 when the
+    # file was found unchanged and nothing was re-indexed.
+    indexed_bytes: int
     observations: tuple[IndexedObservation, ...] = ()
     sections: tuple[IndexedSection, ...] = ()
     relations: tuple[IndexedRelation, ...] = ()

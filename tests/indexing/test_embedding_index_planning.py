@@ -26,8 +26,16 @@ class SingleVectorSync:
     def __init__(self) -> None:
         self.synced_entity_ids: list[int] = []
 
-    async def sync_entity_vectors(self, entity_id: int) -> None:
+    async def sync_entity_vectors(self, entity_id: int) -> VectorSyncBatchResult:
         self.synced_entity_ids.append(entity_id)
+        return VectorSyncBatchResult(
+            entities_total=1,
+            entities_synced=1,
+            entities_failed=0,
+            chunks_total=5,
+            chunks_skipped=2,
+            embedding_jobs_total=3,
+        )
 
 
 class BatchVectorSync:
@@ -42,6 +50,7 @@ class BatchVectorSync:
             entities_failed=0,
             entities_skipped=1,
             entities_deferred=1,
+            embedding_jobs_total=4,
         )
 
 
@@ -197,6 +206,7 @@ def test_embedding_index_batch_result_summarizes_plan_and_sync_counts() -> None:
         entities_failed=0,
         entities_skipped=1,
         entities_deferred=1,
+        embedding_jobs_total=7,
     )
 
     assert summarize_embedding_index_batch_result(plan, batch_result) == (
@@ -208,6 +218,7 @@ def test_embedding_index_batch_result_summarizes_plan_and_sync_counts() -> None:
             failed_entities=0,
             deferred_entities=1,
             reason="entity embedding batch indexed: 2 entities",
+            chunks_embedded=7,
         )
     )
     with pytest.raises(FrozenInstanceError):
@@ -223,6 +234,7 @@ def test_embedding_index_batch_result_handles_empty_batches() -> None:
         failed_entities=0,
         deferred_entities=0,
         reason="no entities",
+        chunks_embedded=0,
     )
 
 
@@ -231,10 +243,12 @@ def test_embedding_index_result_describes_one_entity_outcome() -> None:
         entity_id=42,
         status=EmbeddingIndexStatus.processed,
         reason="entity embeddings indexed: 42",
+        chunks_embedded=3,
     ) == EmbeddingIndexResult(
         entity_id=42,
         status=EmbeddingIndexStatus.processed,
         reason="entity embeddings indexed: 42",
+        chunks_embedded=3,
     )
 
 
@@ -254,6 +268,7 @@ async def test_run_embedding_index_syncs_one_entity_and_returns_result() -> None
         entity_id=42,
         status=EmbeddingIndexStatus.processed,
         reason="entity embeddings indexed: 42",
+        chunks_embedded=3,
     )
 
 
@@ -281,6 +296,7 @@ async def test_run_embedding_index_batch_dedupes_and_summarizes_vector_sync() ->
         failed_entities=0,
         deferred_entities=1,
         reason="entity embedding batch indexed: 2 entities",
+        chunks_embedded=4,
     )
 
 

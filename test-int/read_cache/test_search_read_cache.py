@@ -13,6 +13,7 @@ from basic_memory.index.local_schedulers import LocalEntityVectorSyncScheduler
 from basic_memory.models import Project
 from basic_memory.read_cache import ReadCacheKey, ReadCacheOperation
 from basic_memory.read_cache.redis import RedisReadCache
+from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 
 
 class RedisCacheHarness(Protocol):
@@ -51,7 +52,7 @@ class PartiallyFailingVectorSync:
     def __init__(self) -> None:
         self.synced_entity_ids: list[int] = []
 
-    async def sync_entity_vectors(self, entity_id: int) -> None:
+    async def sync_entity_vectors(self, entity_id: int) -> VectorSyncBatchResult:
         self.synced_entity_ids.append(entity_id)
         raise RuntimeError("vector publication failed")
 

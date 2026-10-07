@@ -204,6 +204,9 @@ class EmbeddingIndexResult:
     entity_id: int
     status: EmbeddingIndexStatus
     reason: str
+    # Chunks actually sent to the embedder. Chunks found unchanged are skipped
+    # and do not count, so an immediate re-sync reports zero.
+    chunks_embedded: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,6 +243,8 @@ class EmbeddingIndexBatchResult:
     failed_entities: int
     deferred_entities: int
     reason: str
+    # Sum of chunks actually sent to the embedder across the batch.
+    chunks_embedded: int
 
     @classmethod
     def no_entities(cls) -> "EmbeddingIndexBatchResult":
@@ -252,6 +257,7 @@ class EmbeddingIndexBatchResult:
             failed_entities=0,
             deferred_entities=0,
             reason="no entities",
+            chunks_embedded=0,
         )
 
 
@@ -334,11 +340,12 @@ async def run_embedding_index(
     vector_sync: EntityVectorSync,
 ) -> EmbeddingIndexResult:
     """Run one embedding index request through a concrete vector sync backend."""
-    await vector_sync.sync_entity_vectors(request.entity_id)
+    sync_result = await vector_sync.sync_entity_vectors(request.entity_id)
     return EmbeddingIndexResult(
         entity_id=request.entity_id,
         status=EmbeddingIndexStatus.processed,
         reason=f"entity embeddings indexed: {request.entity_id}",
+        chunks_embedded=sync_result.embedding_jobs_total,
     )
 
 
@@ -370,6 +377,7 @@ def summarize_embedding_index_batch_result(
         failed_entities=batch_result.entities_failed,
         deferred_entities=batch_result.entities_deferred,
         reason=f"entity embedding batch indexed: {plan.unique_entities} entities",
+        chunks_embedded=batch_result.embedding_jobs_total,
     )
 
 

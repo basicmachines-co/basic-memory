@@ -393,6 +393,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             checksum=synced.checksum,
             content_checksum=await compute_checksum(synced.markdown_content),
             operation=operation,
+            indexed_bytes=synced.indexed_bytes,
             content_superseded=content_superseded,
         )
 
@@ -464,6 +465,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             # A regular file carries no note provenance to validate.
             content_checksum=None,
             operation=operation,
+            indexed_bytes=indexed.indexed_bytes,
         )
 
     async def publish_relation_generation(
@@ -478,6 +480,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             entity_id=synced.entity.id,
             permalink=synced.entity.permalink,
             checksum=synced.checksum,
+            indexed_bytes=synced.indexed_bytes,
             content_type=synced.content_type,
             markdown_content=synced.markdown_content,
             observations=synced.observations,
@@ -564,6 +567,8 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
                 content_type=self.file_service.content_type(path),
                 updated_at=file_metadata.modified_at,
                 size=file_metadata.size,
+                # Unchanged bytes were not re-indexed, so this pass did no indexing work.
+                indexed_bytes=0,
                 relations=(),
                 resolve_relations=resolve_relations,
             )
@@ -614,6 +619,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             content_type=self.file_service.content_type(input_file.path),
             updated_at=file_metadata.modified_at,
             size=file_metadata.size,
+            indexed_bytes=indexed.indexed_bytes,
             observations=indexed.observations,
             sections=indexed.sections,
             relations=indexed.relations,
@@ -684,6 +690,7 @@ class LocalMarkdownFileIndexer(IndexFileExecutor):
             content_type=self.file_service.content_type(input_file.path),
             updated_at=file_metadata.modified_at,
             size=file_metadata.size,
+            indexed_bytes=indexed.indexed_bytes,
             observations=indexed.observations,
             sections=indexed.sections,
             relations=indexed.relations,

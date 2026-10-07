@@ -61,6 +61,7 @@ class BlockingIndexFileExecutor:
         if checksum is None:
             raise AssertionError("seeded materialization entity must carry a checksum")
         return FileIndexResult(
+            indexed_bytes=0,
             file_path=file_path,
             entity_id=self.entity.id,
             external_id=str(self.entity.external_id),

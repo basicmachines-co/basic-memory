@@ -14,6 +14,7 @@ from basic_memory.index.local_schedulers import (
     drain_background_tasks,
 )
 from basic_memory.read_cache import ReadCacheInvalidationStatus
+from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 
 PROJECT_EXTERNAL_ID = "00000000-0000-0000-0000-000000000013"
 
@@ -37,8 +38,9 @@ class StubSearchService:
         self.vector_synced: list[int] = []
         self.reindexed_project = False
 
-    async def sync_entity_vectors(self, entity_id: int) -> None:
+    async def sync_entity_vectors(self, entity_id: int) -> VectorSyncBatchResult:
         self.vector_synced.append(entity_id)
+        return VectorSyncBatchResult(entities_total=1, entities_synced=1, entities_failed=0)
 
     async def reindex_all(self) -> None:
         self.reindexed_project = True
@@ -78,7 +80,7 @@ async def test_entity_vector_scheduler_invalidates_after_partial_failure():
 
     class FailingSearchService(StubSearchService):
         @override
-        async def sync_entity_vectors(self, entity_id: int) -> None:
+        async def sync_entity_vectors(self, entity_id: int) -> VectorSyncBatchResult:
             self.vector_synced.append(entity_id)
             raise RuntimeError("vector publication failed")
 

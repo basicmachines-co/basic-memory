@@ -13,6 +13,10 @@ from sqlalchemy import event, text
 
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, DatabaseBackend
+from basic_memory.indexing.embedding_index_planning import (
+    EmbeddingIndexJobRequest,
+    run_embedding_index,
+)
 from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.litellm_provider import LiteLLMEmbeddingProvider
 from basic_memory.repository.prefixing_provider import PrefixingEmbeddingProvider
@@ -1836,3 +1840,34 @@ async def test_run_vector_query_caps_k_at_sqlite_vec_limit(search_repository, mo
     await index.search(query_embedding, limit=500, projects=search_repository.scope)
     assert captured_params[0]["vector_k"] == 500
     assert captured_params[0]["limit"] == 500
+
+
+@pytest.mark.asyncio
+async def test_embedding_index_reports_only_chunks_actually_embedded(search_repository):
+    """A first sync reports embedded chunks; an unchanged re-sync reports zero.
+
+    Work units bill on chunks sent to the embedder, so chunks the sync skips as
+    unchanged must not count.
+    """
+    if not isinstance(search_repository, SQLiteSearchRepository):
+        pytest.skip("sqlite-vec repository behavior is local SQLite-only.")
+
+    _enable_semantic(search_repository)
+    await search_repository.init_search_index()
+    await search_repository.index_item(
+        _entity_row(
+            project_id=search_repository.project_id,
+            row_id=121,
+            entity_id=121,
+            title="Worker Queue",
+            permalink="specs/worker-queue",
+            content_stems="async worker queue task scheduling and retries",
+        )
+    )
+    request = EmbeddingIndexJobRequest(project_id=search_repository.project_id, entity_id=121)
+
+    first = await run_embedding_index(request, vector_sync=search_repository)
+    second = await run_embedding_index(request, vector_sync=search_repository)
+
+    assert first.chunks_embedded > 0
+    assert second.chunks_embedded == 0

@@ -104,6 +104,7 @@ class RecordingFileIndexer:
     async def index_file(self, file_path: str, *, source: str) -> FileIndexResult:
         self.calls.append((file_path, source))
         return FileIndexResult(
+            indexed_bytes=0,
             file_path=file_path,
             entity_id=42,
             external_id="note-42",
