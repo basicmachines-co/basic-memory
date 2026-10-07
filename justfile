@@ -55,6 +55,11 @@ test-unit-postgres:
     set -euo pipefail
     BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -v --no-cov {{PYTEST_FLAGS}} {{PYTEST_SPLIT_FLAGS}} tests || test $? -eq 5
 
+# Re-record Postgres unit test durations so CI's pytest-split shards stay balanced.
+# Without .test_durations the shards split by test count and the slowest one sets CI time.
+test-durations-postgres:
+    BASIC_MEMORY_ENV=test BASIC_MEMORY_TEST_POSTGRES=1 uv run pytest -p pytest_mock -q --no-cov --store-durations --durations-path .test_durations tests
+
 # Run integration tests against SQLite (excludes semantic tests and on-demand benchmarks —
 # use just test-semantic / run benchmark files explicitly)
 test-int-sqlite:
