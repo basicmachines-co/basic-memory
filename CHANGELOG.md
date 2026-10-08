@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## v0.24.0 (2026-09-29)
+## v0.24.0 (2026-10-08)
 
 ### Breaking Changes
 
@@ -285,6 +285,62 @@
   accepts `metadata`, matching the core MCP tools. Thanks to @lastguru-net (#1474).
 
 ### Bug Fixes
+
+- **#1654**: A Markdown file kept in step by a one-way sync tool (rclone sync, a backup
+  script) is no longer re-indexed and rewritten forever. Indexing writes a `permalink`
+  (and `title` and `type` with `ensure_frontmatter_on_sync`) into a file that arrived
+  without them. The sync tool then copied its original back, which read as a change.
+  The entity now also records the checksum the file arrived with (a new
+  `entity.sync_checksum` column, added by a migration), and a file matching either
+  checksum counts as already indexed. Frontmatter is still written. #1655 applies the
+  same check to single-file indexing, using the checksum storage reports.
+
+- **#1667**: Moving a directory moves its notes the same way `move_note` does. The
+  directory move used the old storage-first path, which moved the file and the entity
+  row but left the note's accepted content at its old path and revision. Each note now
+  moves as an accepted note move. Regular files still move their bytes, and per-file
+  failures are reported as before (#1670).
+
+- **#1641**: A failed `delete_note` or `move_note` is reported as an MCP tool error. A
+  refusal, for example from a read-only API key, came back as an ordinary result whose
+  text said "Delete Failed" or "Move Failed", so clients read it as success.
+  `delete_note` still returns `False` for a note that does not exist.
+
+- **#1662**: A failed or refused `edit_note` is reported as an MCP tool error, as
+  `delete_note` and `move_note` now are. A refused write, such as the "modified
+  concurrently" conflict when two clients append to one note, came back as an ordinary
+  result whose text said "Edit Failed", so a client checking `isError` counted the
+  append as written and never retried it. `bm tool edit-note` prints the error and exits
+  with status 1. Thanks to @sammywachtel.
+
+- **#1663**: An unhandled API error no longer stalls the server for seconds while it is
+  logged, and logs no longer contain the values of local variables from tracebacks.
+  Loguru's `diagnose` mode called `repr()` on every frame's locals, and each ASGI frame
+  holds the whole request scope. The file, stdout and Logfire sinks still log the full
+  traceback without those values. Test mode keeps them. Thanks to @sammywachtel (#1679).
+
+- **#1643**: Project status is served over `GET /v2/projects/{id}/status`. It was a
+  POST, so a read-only API key got "This API key is read-only" on any empty search,
+  because the empty-result guidance checks project status. `POST` remains as a hidden,
+  deprecated alias for older clients. When workspace discovery fails in every
+  workspace, the error gives each workspace's reason, such as a reached spending limit.
+
+- **#1645**: An empty search no longer says a project "has never been indexed" when it
+  has indexed notes. Readiness required a completed full index pass, which a project
+  indexed note by note (every project created in Basic Memory Cloud) never records. A
+  project with files and no indexed notes still gets the "index first" guidance.
+
+- **#1656**: On Postgres, vector storage is created when the database is initialized,
+  never while serving. Each embedding job ran `CREATE INDEX IF NOT EXISTS` on first use,
+  which locks the table, so concurrent chunk and embedding writes queued behind it and
+  timed out. Initializing an already-initialized database reads the catalog and takes no
+  locks.
+
+- **#1659**: On Postgres, two processes initializing the same new database no longer
+  race on `CREATE EXTENSION vector` and fail with a unique violation. Vector storage DDL
+  takes a transaction advisory lock and rechecks the catalog inside it. Extension
+  availability is checked directly, so a real error is no longer reported as "pgvector
+  extension is unavailable".
 
 - **#1586**: `write_note` and `edit_note` report the note's real checksum instead of
   `checksum: unknown`. The typed client parsed a response model without checksum
@@ -590,6 +646,34 @@
   is treated as absent instead of failing materialization (#1383).
 
 ### Internal
+
+- **#1672**: Indexing and embedding results report the work they did. `FileIndexResult`,
+  `IndexedEntity` and `SyncedMarkdownFile` carry `indexed_bytes`, the stored bytes read
+  and parsed (zero for a file that was already current). Embedding results carry
+  `chunks_embedded`, the chunks actually sent to the embedder, and
+  `sync_entity_vectors` returns a `VectorSyncBatchResult`. How indexing and embedding
+  run is unchanged.
+
+- **#1660, #1671, #1673**: A note's storage echo is recognized instead of re-indexed.
+  Materialization records the written object's storage checksum, storage and content
+  checksums are compared only with their own kind, and an object whose content matches
+  the note's accepted content counts as current even before its storage checksum is
+  recorded. Index-file results carry the content checksum, so a live update for an
+  accepted write matches its existing activity. Locally both checksums are the same
+  sha256, so this only changes behavior where storage reports its own checksum (S3).
+
+- **#1661**: The accept transaction writes the pending relation-publication marker, so
+  an accepted note is never visible without it, and a successful publication leaves
+  exactly one unit of refresh work. A PUT that renames a note carries the previous path
+  into materialization, as an explicit move does. The accepted-note runner tests run
+  against a real database (#1668).
+
+- **#1658**: Alembic revisions after `z9a0b1c2d3e4` are named by sequential schema
+  version (`0040`, `0041`, ...). `migrations.schema_version()` reports a revision's
+  number and `migrations.next_revision_id()` assigns the next one.
+
+- **#1669**: CI balances the Postgres test shards by recorded durations and runs the
+  Windows jobs only on `main`.
 
 - **#1613**: Note object metadata keeps an origin for `agent` and `mcp_client` actors,
   not only MCP clients, so cloud can attribute API-key writes to the key's name.
