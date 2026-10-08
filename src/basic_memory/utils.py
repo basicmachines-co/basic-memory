@@ -542,9 +542,11 @@ def setup_logging(
         logger.add(sys.stderr, level=log_level, backtrace=True, diagnose=False, colorize=True)
 
     # Add Logfire sink when telemetry bootstrap enabled it for this process.
+    # logfire.loguru_handler() sets no diagnose, so loguru's default (True) would bring
+    # back the per-frame repr() cost on every process that ships logs to Logfire.
     logfire_handler = telemetry.get_logfire_handler()
     if logfire_handler is not None:
-        logger.add(**logfire_handler)
+        logger.add(**logfire_handler, diagnose=False)
 
     # Bind structured context for cloud observability
     if structured_context:
