@@ -640,8 +640,8 @@ async def find_listing(
 
 # --- find metadata predicates ---
 # find's `meta` strings translate onto the search API's metadata_filters dict —
-# the exact grammar parse_metadata_filters supports (eq, $gt/$gte/$lt/$lte, $in,
-# array-contains-all, $between), nothing more. Word ops need whitespace around
+# a subset of the grammar parse_metadata_filters supports (eq, $gt/$gte/$lt/$lte,
+# $in, array-contains-all, $between), nothing more. Word ops need whitespace around
 # them and symbol ops exclude the key character class, so exactly one regex can
 # match any given predicate. Two-char symbols sit first in the alternation so
 # ">=" never parses as ">" plus a value starting with "=".

@@ -74,7 +74,8 @@ class SearchQuery(BaseModel):
     - entity_types: Limit to search item types (entity/observation/relation)
     - categories: Limit observation results to exact category matches (e.g. "requirement")
     - after_date: Only items after date
-    - metadata_filters: Structured frontmatter filters (field -> value)
+    - metadata_filters: Structured frontmatter filters (field -> value or operator object;
+      see repository.metadata_filters.parse_metadata_filters for the grammar)
     - file_path_prefix: Limit to one directory subtree of the project
     - tags: Convenience frontmatter tag filter
     - status: Convenience frontmatter status filter

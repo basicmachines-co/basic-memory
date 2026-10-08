@@ -1,5 +1,6 @@
 """Tests for v2 search router endpoints."""
 
+import asyncio
 from datetime import datetime, timezone
 
 import pytest
@@ -438,6 +439,89 @@ async def test_search_router_accepts_a_well_formed_nested_metadata_key(
     )
 
     assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_search_router_accepts_bare_and_multi_operator_filters(
+    client: AsyncClient, v2_project_url
+):
+    """The production shapes that used to 400: a bare `gte` and a two-bound range."""
+    response = await client.post(
+        f"{v2_project_url}/search/",
+        json={"metadata_filters": {"started": {"gte": "2026-01-01", "$lt": "2026-02-01"}}},
+    )
+
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_search_router_refuses_a_bad_operator_before_running_any_query(
+    client: AsyncClient, app, v2_project_url
+):
+    """A malformed filter answers 400 without scheduling search or count.
+
+    Production regression (basic-memory#1675): both queries ran, each failed on
+    the same parse, and the count outlived its request.
+    """
+    calls: list[str] = []
+
+    class RecordingSearchService:
+        async def search(self, *args, **kwargs):
+            calls.append("search")
+            return []
+
+        async def count(self, *args, **kwargs):
+            calls.append("count")
+            return 0
+
+    app.dependency_overrides[get_search_service_v2_external] = lambda: RecordingSearchService()
+    try:
+        response = await client.post(
+            f"{v2_project_url}/search/",
+            json={"metadata_filters": {"started": {"$ne": "2026-01-01"}}},
+        )
+    finally:
+        app.dependency_overrides.pop(get_search_service_v2_external, None)
+
+    assert response.status_code == 400
+    assert "supported operators: $gt, $gte" in response.json()["detail"]
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_search_failure_cancels_the_count_before_responding(
+    client: AsyncClient, app, v2_project_url
+):
+    """When the page query fails, its count is cancelled, not left running.
+
+    asyncio.gather propagated the search error but left the count running with
+    no owner; it later raised an exception nobody retrieved. The count here
+    blocks until cancelled, so it can only have finished if the router owned it.
+    """
+    count_cancelled = False
+
+    class FailingSearchService:
+        async def search(self, *args, **kwargs):
+            raise ValueError("search failed")
+
+        async def count(self, *args, **kwargs):
+            nonlocal count_cancelled
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                count_cancelled = True
+                raise
+            return 0
+
+    app.dependency_overrides[get_search_service_v2_external] = lambda: FailingSearchService()
+    try:
+        response = await client.post(f"{v2_project_url}/search/", json={"text": "anything"})
+    finally:
+        app.dependency_overrides.pop(get_search_service_v2_external, None)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "search failed"
+    assert count_cancelled
 
 
 @pytest.mark.asyncio

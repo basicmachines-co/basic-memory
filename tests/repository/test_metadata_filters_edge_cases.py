@@ -462,3 +462,49 @@ async def test_filter_between_inclusive_boundaries(search_repository, session_ma
     result_ids = {r.id for r in results}
     assert entity_low.id in result_ids
     assert entity_high.id in result_ids
+
+
+@pytest.mark.asyncio
+async def test_range_with_two_operators_on_one_key(search_repository, session_maker):
+    """{"$gte": a, "$lt": b} ANDs both bounds on both backends."""
+    for title, started in [
+        ("Started December", "2025-12-15"),
+        ("Started January", "2026-01-15"),
+        ("Started February", "2026-02-15"),
+    ]:
+        await _index_entity_with_metadata(
+            search_repository, session_maker, title, {"started": started}
+        )
+
+    results = await search_repository.search(
+        metadata_filters={"started": {"gte": "2026-01-01", "$lt": "2026-02-01"}}
+    )
+    assert [r.title for r in results] == ["Started January"]
+
+
+@pytest.mark.asyncio
+async def test_exists_operator_splits_notes_by_carrying_a_value(search_repository, session_maker):
+    """$exists true is IS NOT NULL: an explicit null counts as not existing,
+    matching the null-equality form it negates."""
+    await _index_entity_with_metadata(search_repository, session_maker, "Owned", {"owner": "pat"})
+    await _index_entity_with_metadata(
+        search_repository, session_maker, "Null Owner", {"owner": None}
+    )
+    await _index_entity_with_metadata(search_repository, session_maker, "No Owner", {"status": "x"})
+
+    present = await search_repository.search(metadata_filters={"owner": {"$exists": True}})
+    absent = await search_repository.search(metadata_filters={"owner": {"$exists": False}})
+
+    assert [r.title for r in present] == ["Owned"]
+    assert sorted(r.title for r in absent) == ["No Owner", "Null Owner"]
+
+
+@pytest.mark.asyncio
+async def test_contains_operator_matches_like_the_bare_list(search_repository, session_maker):
+    await _index_entity_with_metadata(
+        search_repository, session_maker, "Tagged", {"tags": ["security", "oauth"]}
+    )
+    await _index_entity_with_metadata(search_repository, session_maker, "Other", {"tags": ["ui"]})
+
+    results = await search_repository.search(metadata_filters={"tags": {"contains": "security"}})
+    assert [r.title for r in results] == ["Tagged"]

@@ -51,6 +51,17 @@ _NO_SEARCH_CRITERIA_MESSAGE = (
 )
 # Alias common column/model names to their frontmatter key equivalents. Users often
 # pass "note_type" (the entity model column) when the frontmatter field is "type".
+
+METADATA_FILTERS_DESCRIPTION = (
+    "Structured frontmatter filters, {field: condition}. Nested fields use dot notation "
+    '("schema.confidence"). Conditions: a value for equality ({"status": "draft"}); null '
+    'for absent-or-null ({"owner": null}); a list for array-contains-all ({"tags": ["a", "b"]}); '
+    "or an operator object using $gt, $gte, $lt, $lte, $in (list), $between ([min, max]), "
+    '$contains (value or list), $exists (true/false), e.g. {"priority": {"$in": ["high"]}}. '
+    'Several operators on one field AND together: {"started": {"$gte": "2026-01-01", '
+    '"$lt": "2026-02-01"}}. The leading $ is optional.'
+)
+
 _METADATA_KEY_ALIASES = {"note_type": "type"}
 _VALID_SEARCH_TYPES = ("hybrid", "permalink", "semantic", "text", "title", "vector")
 
@@ -1105,6 +1116,9 @@ async def search_notes(
     metadata_filters: Annotated[
         Dict[str, Any] | None,
         BeforeValidator(coerce_dict),
+        # The schema description is what a client's model actually reads; the
+        # docstring's grammar section is often truncated or skimmed.
+        Field(description=METADATA_FILTERS_DESCRIPTION),
     ] = None,
     # strict_search_tags, not coerce_list: tags="a,b" must split into ["a", "b"] to
     # match the tag: query shorthand below and write_note's documented tags convention
@@ -1222,13 +1236,17 @@ async def search_notes(
     - `search_notes("query", project="my-project", metadata_filters={"priority": {"$in": ["high"]}})`
 
     ### Structured Metadata Filters
-    Filters are exact matches on frontmatter metadata. Supported forms:
+    Filters match frontmatter metadata. Supported forms:
     - Equality: `{"status": "in-progress"}`
     - Array contains (all): `{"tags": ["security", "oauth"]}`
     - Operators:
       - `$in`: `{"priority": {"$in": ["high", "critical"]}}`
       - `$gt`, `$gte`, `$lt`, `$lte`: `{"schema.confidence": {"$gt": 0.7}}`
       - `$between`: `{"schema.confidence": {"$between": [0.3, 0.6]}}`
+      - `$contains`: `{"tags": {"$contains": "security"}}`
+      - `$exists`: `{"owner": {"$exists": true}}` (has a non-null value)
+    - Several operators on one key AND together: `{"started": {"$gte": "2026-01-01", "$lt": "2026-02-01"}}`
+    - The `$` is optional: `{"started": {"gte": "2026-01-01"}}` works too.
     - Nested keys use dot notation (e.g., `"schema.confidence"`).
 
     ### Filter-only Searches
