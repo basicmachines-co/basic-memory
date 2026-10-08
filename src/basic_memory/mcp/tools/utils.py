@@ -906,6 +906,11 @@ async def call_query(
 async def resolve_entity_id(client: AsyncClient, project_external_id: str, identifier: str) -> str:
     """Resolve a string identifier to an entity external_id using the v2 API.
 
+    Resolution is strict: only an exact external_id, permalink, title, or path
+    matches. The resolver's fuzzy full-text fallback would turn a missing path into
+    whichever note shares a word with it, and raw reads must never return another
+    file's bytes.
+
     Args:
         client: HTTP client for API calls
         project_external_id: Project external ID (UUID)
@@ -921,7 +926,7 @@ async def resolve_entity_id(client: AsyncClient, project_external_id: str, ident
         response = await call_post(
             client,
             f"/v2/projects/{project_external_id}/knowledge/resolve",
-            json={"identifier": identifier},
+            json={"identifier": identifier, "strict": True},
         )
         data = response.json()
         return data["external_id"]

@@ -370,7 +370,9 @@ async def test_write_note_overwrite_canonical_via_mcp(mcp_server, app, test_proj
                 "directory": "overwrite-test",
                 "content": "v2",
             },
+            raise_on_error=False,
         )
+        assert blocked.is_error
         assert "# Error: Note already exists" in blocked.content[0].text
 
         result = await client.call_tool(

@@ -22,6 +22,10 @@ class ReadNoteJsonPayload(TypedDict):
     file_path: str
     content: str
     frontmatter: dict[str, Any] | None
+    # The accepted revision's checksum: pass it as write_note's expected_checksum to
+    # overwrite only the revision that was read. None for entities with no accepted
+    # Markdown (legacy or non-note entities).
+    checksum: str | None
     section: NotRequired[str | None]
     start_line: NotRequired[int]
     end_line: NotRequired[int]
@@ -134,6 +138,7 @@ async def read_note_json_by_external_id(
                 "file_path": entity.file_path,
                 "content": entity.content,
                 "frontmatter": None,
+                "checksum": entity.db_checksum,
                 "section": entity.section,
                 "start_line": entity.content_start_line,
                 "end_line": entity.content_end_line,
@@ -162,4 +167,5 @@ async def read_note_json_by_external_id(
             "file_path": entity.file_path,
             "content": content_text if include_frontmatter else body_content,
             "frontmatter": parsed_frontmatter,
+            "checksum": entity.db_checksum,
         }

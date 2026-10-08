@@ -184,6 +184,26 @@ def _compact_search_response(response: SearchResponse) -> SearchResponse:
     )
 
 
+# Uppercase AND/OR/NOT standing alone (or beside parentheses) is full-text query syntax.
+_BOOLEAN_OPERATOR = re.compile(r"(?<![^\s()])(?:AND|OR|NOT)(?![^\s()])")
+
+
+def _search_type_for(search_type: str | None, query: str | None) -> str:
+    """The search type to run: the caller's choice, else a default suited to the query.
+
+    Trigger: no explicit search_type and the query uses Boolean operators.
+    Why: the vector half of hybrid search has no notion of NOT or AND, so it adds back
+         notes the Boolean expression excludes ("coffee NOT pour" returned the note
+         about pour-over).
+    Outcome: such queries run as full-text search; others use the configured default.
+    """
+    if search_type:
+        return search_type
+    if query and _BOOLEAN_OPERATOR.search(query):
+        return "text"
+    return _default_search_type()
+
+
 def _default_search_type() -> str:
     """Pick default search mode from config, falling back to auto-detection.
 
@@ -850,7 +870,7 @@ async def _search_all_projects(
             return response.model_dump(mode="json", exclude_none=True)
         return _format_search_markdown(response, scope_label, query)
 
-    effective_search_type = search_type or _default_search_type()
+    effective_search_type = _search_type_for(search_type, query)
     search_query = _build_search_query(
         query=query,
         search_type=effective_search_type,
@@ -1584,7 +1604,7 @@ async def search_notes(
                 )
                 if is_memory_url:
                     query = resolved_query
-            effective_search_type = search_type or _default_search_type()
+            effective_search_type = _search_type_for(search_type, query)
             if is_memory_url:
                 effective_search_type = "permalink"
 

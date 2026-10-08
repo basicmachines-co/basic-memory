@@ -162,6 +162,21 @@ async def test_read_content_allows_safe_path_integration(client, test_project):
 
 
 @pytest.mark.asyncio
+async def test_read_content_missing_path_never_returns_another_file(client, test_project):
+    """A missing path is not found, even when another note shares its words."""
+    await write_note(
+        project=test_project.name,
+        title="Hand Written",
+        directory="disk",
+        content="The disk folder holds a note about nope and txt files.",
+    )
+
+    for missing in ["disk/nope.txt", "disk/nope-not-here.md", "disk/hand"]:
+        with pytest.raises(ToolError, match="Resource not found"):
+            await read_content(project=test_project.name, path=missing)
+
+
+@pytest.mark.asyncio
 async def test_read_content_workspace_memory_url_routes_with_local_config(
     monkeypatch,
     config_manager,

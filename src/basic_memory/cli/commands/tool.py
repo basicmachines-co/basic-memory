@@ -657,6 +657,8 @@ def write_note(
     bm tool write-note --title "My Note" --folder "notes" --local
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
+    from fastmcp.exceptions import ToolError
+
     from basic_memory.mcp.tools import write_note as mcp_write_note
 
     try:
@@ -695,19 +697,17 @@ def write_note(
                 )
             )
 
-        # MCP tool returns an error field on failure in JSON mode (e.g.
-        # NOTE_ALREADY_EXISTS on a blocked overwrite, NOTE_REVISION_CONFLICT on a
-        # stale --expected-checksum, SECURITY_VALIDATION_ERROR).
-        # Trigger: result carries a non-empty `error`.
-        # Why: parity with delete-note/edit-note/search-notes so exit-code-driven
-        #      scripts detect a failed/blocked write instead of seeing exit 0.
-        # Outcome: print the error to stderr and exit non-zero.
-        if isinstance(result, dict) and result.get("error"):
-            typer.echo(f"Error: {result['error']}", err=True)
-            _print_json(result)
-            raise typer.Exit(1)
-
         _print_json(result)
+    except ToolError as e:
+        # A refused write (NOTE_ALREADY_EXISTS, NOTE_REVISION_CONFLICT, NOTE_PATH_CONFLICT,
+        # SECURITY_VALIDATION_ERROR) is a tool error whose message, in JSON mode, is the
+        # structured result. Scripts keep the same contract: error on stderr, the result
+        # on stdout, exit 1.
+        payload = _tool_error_payload(e)
+        typer.echo(f"Error: {payload.get('error') or e}", err=True)
+        if payload:
+            _print_json(payload)
+        raise typer.Exit(1)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)

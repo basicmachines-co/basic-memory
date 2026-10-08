@@ -2125,6 +2125,29 @@ def test_default_search_type_falls_back_to_text_when_semantic_disabled():
         assert search_module._default_search_type() == "text"
 
 
+def test_boolean_queries_default_to_text_search():
+    """Hybrid's vector half ignores NOT/AND, so default Boolean queries run as full-text."""
+    import sys
+    from unittest.mock import MagicMock, patch
+
+    search_module = sys.modules["basic_memory.mcp.tools.search"]
+
+    mock_config = MagicMock()
+    mock_config.default_search_type = None
+    mock_config.semantic_search_enabled = True
+    mock_container = MagicMock()
+    mock_container.config = mock_config
+
+    with patch.object(search_module, "get_container", return_value=mock_container):
+        for query in ["coffee NOT pour", "pour AND clarity", "(tea OR coffee) NOT decaf"]:
+            assert search_module._search_type_for(None, query) == "text", query
+        # Lowercase words and operator-like substrings are ordinary text.
+        for query in ["coffee not pour", "ORACLE notes", "ANDROID", None]:
+            assert search_module._search_type_for(None, query) == "hybrid", query
+        # An explicit choice always wins.
+        assert search_module._search_type_for("hybrid", "coffee NOT pour") == "hybrid"
+
+
 # --- Tests for note_types/entity_types/categories comma-split fix (#930, Codex review) ---
 
 

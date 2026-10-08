@@ -317,6 +317,31 @@ async def test_sqlite_word_query_keeps_terms_in_one_search_column(search_reposit
 
 
 @pytest.mark.asyncio
+async def test_not_excludes_a_term_found_in_any_column(search_repository, search_entity):
+    """NOT applies to the whole note, not to each searched column on its own."""
+    search_row = SearchIndexRow(
+        id=search_entity.id,
+        type=SearchItemType.ENTITY.value,
+        title="Coffee Brewing",
+        content_stems="pour over gives clarity",
+        content_snippet="pour over gives clarity",
+        permalink=search_entity.permalink,
+        file_path=search_entity.file_path,
+        entity_id=search_entity.id,
+        metadata={"note_type": search_entity.note_type},
+        created_at=search_entity.created_at,
+        updated_at=search_entity.updated_at,
+        project_id=search_repository.project_id,
+    )
+    await search_repository.index_item(search_row)
+
+    assert await search_repository.search(search_text="coffee NOT pour") == []
+    assert await search_repository.count(search_text="coffee NOT pour") == 0
+    kept = await search_repository.search(search_text="coffee NOT decaf")
+    assert [row.permalink for row in kept] == [search_entity.permalink]
+
+
+@pytest.mark.asyncio
 async def test_index_item_upsert_on_duplicate_permalink(search_repository, search_entity):
     """Test that indexing the same permalink twice uses upsert instead of failing.
 

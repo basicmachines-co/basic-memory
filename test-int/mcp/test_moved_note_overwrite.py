@@ -43,7 +43,9 @@ async def test_overwrite_after_rename_refuses_without_changing_files(
                 "overwrite": True,
                 "output_format": output_format,
             },
+            raise_on_error=False,
         )
+        assert result.is_error
         assert result.content[0].type == "text"
         if output_format == "json":
             payload = json.loads(result.content[0].text)

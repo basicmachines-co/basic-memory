@@ -1,9 +1,20 @@
 """Write note tool for Basic Memory MCP server."""
 
 import dataclasses
+import json
 import textwrap
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any, Annotated, List, Union, Optional, Literal, assert_never
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Annotated,
+    List,
+    Literal,
+    NoReturn,
+    Optional,
+    Union,
+    assert_never,
+)
 
 import logfire
 from httpx import HTTPStatusError
@@ -313,13 +324,16 @@ async def write_note(
         overwrite: If True, replace existing note on conflict. If False, error on conflict.
                    If None (default), consult write_note_overwrite_default config setting.
         expected_checksum: Optional revision precondition for overwrite=True: the checksum
-                   of the note you read (from a JSON write_note or edit_note result). The
+                   of the note you read (from a JSON read_note, write_note or edit_note
+                   result). The
                    note is replaced only while it is still that revision; otherwise the
                    tool reports a revision conflict with the current checksum and changes
                    nothing. Omit it to replace the note unconditionally.
         output_format: "text" returns a markdown summary. "json" returns
-                       machine-readable metadata; on conflict it returns action: "conflict"
-                       with an error code instead of raising.
+                       machine-readable metadata. A refused write (note exists, revision
+                       conflict, moved target, disallowed directory) is a tool error; in
+                       JSON mode its message is the payload with action: "conflict" and an
+                       error code.
         context: Optional FastMCP context for performance caching.
 
     Returns:
@@ -435,16 +449,19 @@ async def write_note(
                     directory=directory,
                     project=active_project.name,
                 )
-                if output_format == "json":
-                    return {
+                _raise_write_refusal(
+                    output_format,
+                    {
                         "title": title,
                         "permalink": None,
                         "file_path": None,
                         "checksum": None,
                         "action": "created",
                         "error": "SECURITY_VALIDATION_ERROR",
-                    }
-                return f"# Error\n\nDirectory path '{directory}' is not allowed - paths must stay within project boundaries"
+                    },
+                    f"# Error\n\nDirectory path '{directory}' is not allowed - paths must stay "
+                    "within project boundaries",
+                )
 
             # Process tags using the helper function
             tag_list = parse_tags(tags)
@@ -485,46 +502,50 @@ async def write_note(
                 case NoteUpdated(entity=result):
                     action = "Updated"
                 case NoteAlreadyExists():
-                    if output_format == "json":
-                        return {
+                    _raise_write_refusal(
+                        output_format,
+                        {
                             "title": title,
                             "permalink": entity.permalink,
                             "file_path": None,
                             "checksum": None,
                             "action": "conflict",
                             "error": "NOTE_ALREADY_EXISTS",
-                        }
-                    return _format_overwrite_error(title, entity.permalink, active_project.name)
+                        },
+                        _format_overwrite_error(title, entity.permalink, active_project.name),
+                    )
                 case NoteTargetMoved() as moved:
-                    if output_format == "json":
-                        return {
+                    _raise_write_refusal(
+                        output_format,
+                        {
                             "title": moved.title,
                             "permalink": moved.permalink,
                             "file_path": moved.file_path,
                             "checksum": None,
                             "action": "conflict",
                             "error": "NOTE_PATH_CONFLICT",
-                        }
-                    return (
+                        },
                         "# Error: Note is at a different path\n\n"
                         f"The requested note is now at `{moved.file_path}`. "
                         f"Read or edit it using `{moved.external_id}`. "
-                        "Use overwrite=False to create a separate note at the requested path."
+                        "Use overwrite=False to create a separate note at the requested path.",
                     )
                 case NoteLocked(message=message):
                     raise ToolError(message)
                 case NoteRevisionConflict(db_checksum=current_checksum) as conflict:
-                    if output_format == "json":
-                        return {
+                    _raise_write_refusal(
+                        output_format,
+                        {
                             "title": title,
                             "permalink": entity.permalink,
                             "file_path": conflict.file_path if current_checksum else None,
                             "checksum": current_checksum,
                             "action": "conflict",
                             "error": "NOTE_REVISION_CONFLICT",
-                        }
-                    return _format_revision_conflict(
-                        title, conflict.file_path, current_checksum, active_project.name
+                        },
+                        _format_revision_conflict(
+                            title, conflict.file_path, current_checksum, active_project.name
+                        ),
                     )
                 case _:
                     assert_never(outcome)
@@ -656,6 +677,16 @@ async def write_note(
 
             summary_result = "\n".join(summary)
             return add_project_metadata(summary_result, active_project.name)
+
+
+def _raise_write_refusal(output_format: str, payload: dict[str, Any], text: str) -> NoReturn:
+    """Report a refused write as a tool error, keeping the guidance for the caller.
+
+    Every refusal here happens before anything is written. A returned "# Error" string
+    reads as success to MCP clients that check isError; raising makes the result an
+    error while the message still carries the same help (or the JSON payload).
+    """
+    raise ToolError(json.dumps(payload) if output_format == "json" else text)
 
 
 def _format_revision_conflict(
