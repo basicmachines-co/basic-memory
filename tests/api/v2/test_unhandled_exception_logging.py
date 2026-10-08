@@ -8,6 +8,7 @@ loop while every other request waited.
 
 from __future__ import annotations
 
+import os
 from typing import override
 
 import pytest
@@ -30,8 +31,11 @@ def production_sinks(monkeypatch, tmp_path):
     monkeypatch.setenv("BASIC_MEMORY_CONFIG_DIR", str(tmp_path))
     monkeypatch.setattr(utils.telemetry, "get_logfire_handler", lambda: None)
     utils.setup_logging(log_to_file=True, log_to_stdout=True)
+    # setup_logging writes a per-process file on Windows, where an open log cannot be
+    # renamed for rotation while another process holds it.
+    log_name = f"basic-memory-{os.getpid()}.log" if os.name == "nt" else "basic-memory.log"
     try:
-        yield tmp_path / "basic-memory.log"
+        yield tmp_path / log_name
     finally:
         monkeypatch.setenv("BASIC_MEMORY_ENV", "test")
         utils.setup_logging()
