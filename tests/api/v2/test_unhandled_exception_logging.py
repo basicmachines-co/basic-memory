@@ -71,6 +71,36 @@ def test_a_logged_traceback_does_not_repr_frame_values(production_sinks):
     assert "Traceback" in text and "RuntimeError: boom" in text
 
 
+def test_the_logfire_sink_does_not_repr_frame_values(monkeypatch):
+    """The Logfire sink is added from logfire.loguru_handler(), which sets no diagnose."""
+    shipped: list[str] = []
+    monkeypatch.setenv("BASIC_MEMORY_ENV", "dev")
+    # Same shape as logfire.loguru_handler(): a sink and a bare message format.
+    monkeypatch.setattr(
+        utils.telemetry,
+        "get_logfire_handler",
+        lambda: {"sink": shipped.append, "format": "{message}"},
+    )
+    utils.setup_logging()
+    try:
+        _CountedRepr.reprs = 0
+
+        def fails(value):
+            raise RuntimeError(f"boom {id(value)}")
+
+        held = _CountedRepr()
+        try:
+            fails(held)
+        except RuntimeError:
+            logger.exception("unhandled")
+    finally:
+        monkeypatch.setenv("BASIC_MEMORY_ENV", "test")
+        utils.setup_logging()
+
+    assert _CountedRepr.reprs == 0
+    assert any("RuntimeError: boom" in message for message in shipped)
+
+
 @pytest.mark.asyncio
 async def test_an_unhandled_request_exception_answers_fast(
     app: FastAPI, v2_project_url, production_sinks
