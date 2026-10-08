@@ -42,6 +42,7 @@ from basic_memory.indexing.accepted_note_mutation_runner import (
     run_accepted_note_move,
     run_accepted_note_update,
 )
+from basic_memory.indexing.accepted_note_write_runner import refresh_accepted_note_search_index
 from basic_memory.models import (
     AcceptedProjectNoteChange,
     Entity,
@@ -1450,7 +1451,23 @@ async def test_delete_removes_the_note_and_returns_guarded_cleanup(
     dependencies: AcceptedNoteMutationDependencies,
     test_project: Project,
 ) -> None:
-    note = await accepted_note(session_maker, dependencies, test_project)
+    created = await create(session_maker, dependencies, test_project)
+    # The accepted-note service writes the hot search row after the accept commits
+    # (#1681); do the same so the delete has search rows to remove.
+    assert created.search_row is not None
+    await refresh_accepted_note_search_index(
+        session_maker,
+        row=created.search_row,
+        repositories=dependencies.write_repositories,
+    )
+    payload = created.change.payload
+    assert isinstance(payload, RuntimeAcceptedNoteResponse)
+    note = AcceptedNote(
+        external_id=payload.external_id,
+        entity_id=payload.entity_id,
+        db_checksum=payload.db_checksum,
+        file_path=payload.file_path,
+    )
     file_checksum = await materialize(session_maker, test_project, note.entity_id)
     assert await search_row_count(session_maker, note.entity_id) > 0
 
