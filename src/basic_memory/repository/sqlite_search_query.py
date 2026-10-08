@@ -261,14 +261,25 @@ def compile_fts_filter(
                 if script_query.word_text is not None
                 else search_text.strip()
             )
-            params["text"] = prepare_search_term(word_text)
+            prepared_text = prepare_search_term(word_text)
             # content_stems is capped for Postgres index-row compatibility, while
             # SQLite stores the complete note body in its FTS5 content_snippet column.
-            match_conditions.append(
-                "(search_index.title MATCH :text OR "
-                "search_index.content_stems MATCH :text OR "
-                "search_index.content_snippet MATCH :text)"
-            )
+            # Trigger: the query excludes a term with NOT.
+            # Why: per-column MATCH predicates OR-ed together evaluate NOT inside each
+            #      column, so "coffee NOT pour" matched a note whose title has "coffee"
+            #      while its body has "pour".
+            # Outcome: one column-filtered MATCH applies the exclusion to the whole row;
+            #      other queries keep their established per-column matching.
+            if re.search(r"\bNOT\b", prepared_text):
+                params["text"] = f"{{title content_stems content_snippet}} : ({prepared_text})"
+                match_conditions.append("search_index MATCH :text")
+            else:
+                params["text"] = prepared_text
+                match_conditions.append(
+                    "(search_index.title MATCH :text OR "
+                    "search_index.content_stems MATCH :text OR "
+                    "search_index.content_snippet MATCH :text)"
+                )
 
     if query.title:
         params["title_text"] = prepare_search_term(query.title.strip(), is_prefix=False)

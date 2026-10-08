@@ -91,18 +91,20 @@ async def test_write_same_title_same_directory_collision(mcp_server, app, test_p
                 },
             )
         )
-        second = _parse(
-            await client.call_tool(
-                "write_note",
-                {
-                    "project": test_project.name,
-                    "title": "Collision Note",
-                    "directory": "collision",
-                    "content": "# Collision Note\n\nSecond body loses.",
-                    "output_format": "json",
-                },
-            )
+        # A refused write is a tool error whose message is the JSON conflict payload.
+        second_result = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Collision Note",
+                "directory": "collision",
+                "content": "# Collision Note\n\nSecond body loses.",
+                "output_format": "json",
+            },
+            raise_on_error=False,
         )
+        assert second_result.is_error
+        second = _parse(second_result)
 
         # First write creates the note; the colliding second write is blocked as
         # a conflict (overwrite disabled by default).
@@ -231,18 +233,21 @@ async def test_concurrent_same_title_collision(mcp_server, app, test_project) ->
     async with Client(mcp_server) as client:
 
         async def write_one(index: int):
-            return _parse(
-                await client.call_tool(
-                    "write_note",
-                    {
-                        "project": test_project.name,
-                        "title": "Race Note",
-                        "directory": "race",
-                        "content": f"# Race Note\n\nWriter {index} attempted this note.",
-                        "output_format": "json",
-                    },
-                )
+            # Losers of the race get a tool error carrying the JSON conflict payload.
+            result = await client.call_tool(
+                "write_note",
+                {
+                    "project": test_project.name,
+                    "title": "Race Note",
+                    "directory": "race",
+                    "content": f"# Race Note\n\nWriter {index} attempted this note.",
+                    "output_format": "json",
+                },
+                raise_on_error=False,
             )
+            payload = _parse(result)
+            assert result.is_error == (payload["action"] == "conflict"), payload
+            return payload
 
         payloads = await asyncio.gather(*(write_one(i) for i in range(write_count)))
 

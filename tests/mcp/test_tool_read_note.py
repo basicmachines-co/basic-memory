@@ -579,6 +579,7 @@ async def test_read_note_explicit_workspace_project_ignores_stale_cached_project
                 file_path="TODO.md",
                 content="---\ntitle: TODO\n---\n\n# TODO - Priorities & Tasks\n",
                 entity_metadata={"title": "TODO"},
+                db_checksum="abc123",
             )
 
     class FakeResourceClient:
@@ -1454,3 +1455,42 @@ async def test_unavailable_resolver_does_not_prove_markdown_path_missing(
 
     with pytest.raises(ToolError, match="resolver unavailable"):
         await read_note("notes/present.md", project=test_project.name, output_format="json")
+
+
+@pytest.mark.asyncio
+async def test_read_note_json_checksum_guards_an_overwrite(app, test_project):
+    """The checksum read_note returns is the revision write_note's expected_checksum checks."""
+    written = await write_note(
+        project=test_project.name,
+        title="Guarded Note",
+        directory="test",
+        content="first revision",
+        output_format="json",
+    )
+    assert isinstance(written, dict)
+
+    read = await read_note("test/guarded-note", project=test_project.name, output_format="json")
+    assert isinstance(read, dict)
+    assert read["checksum"] == written["checksum"]
+
+    replaced = await write_note(
+        project=test_project.name,
+        title="Guarded Note",
+        directory="test",
+        content="second revision",
+        overwrite=True,
+        expected_checksum=read["checksum"],
+        output_format="json",
+    )
+    assert isinstance(replaced, dict)
+    assert replaced["action"] == "updated"
+
+    with pytest.raises(ToolError, match="revision conflict"):
+        await write_note(
+            project=test_project.name,
+            title="Guarded Note",
+            directory="test",
+            content="stale third revision",
+            overwrite=True,
+            expected_checksum=read["checksum"],
+        )

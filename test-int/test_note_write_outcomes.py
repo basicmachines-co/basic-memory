@@ -355,9 +355,7 @@ async def _publication_state(
                 .order_by(RelationSearchRefresh.id)
             )
         )
-        rows = await EntityRepository(project_id=project.id).get_by_file_paths(
-            session, [file_path]
-        )
+        rows = await EntityRepository(project_id=project.id).get_by_file_paths(session, [file_path])
     return markers, entity.checksum, rows[0][1]
 
 
@@ -392,17 +390,13 @@ async def test_accepted_generation_is_pending_before_publication_starts(
     _, session_maker = engine_factory
     observed: list[tuple[list[int | None], str | None, int | None]] = []
 
-    async def fail_before_publishing(
-        self: NoteContentMutationService, publication: Any
-    ) -> None:
+    async def fail_before_publishing(self: NoteContentMutationService, publication: Any) -> None:
         markers, _, gate_checksum = await _publication_state(
             session_maker, test_project, "notes/Unpublished.md"
         )
         async with db.scoped_session(session_maker) as session:
             db_version = await session.scalar(
-                select(NoteContent.db_version).where(
-                    NoteContent.entity_id == publication.entity_id
-                )
+                select(NoteContent.db_version).where(NoteContent.entity_id == publication.entity_id)
             )
         observed.append((markers, gate_checksum, db_version))
         raise OSError("graph publication unavailable")

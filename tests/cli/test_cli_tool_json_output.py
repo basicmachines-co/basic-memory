@@ -194,7 +194,9 @@ def test_write_note_expected_checksum_passthrough(mock_mcp_write):
 @patch(
     "basic_memory.mcp.tools.write_note",
     new_callable=AsyncMock,
-    return_value={"action": "conflict", "error": "NOTE_REVISION_CONFLICT", "checksum": "b" * 64},
+    side_effect=ToolError(
+        json.dumps({"action": "conflict", "error": "NOTE_REVISION_CONFLICT", "checksum": "b" * 64})
+    ),
 )
 def test_write_note_revision_conflict_exits_nonzero(mock_mcp_write):
     """A stale --expected-checksum is a failed write for exit-code-driven scripts."""
@@ -216,7 +218,10 @@ def test_write_note_revision_conflict_exits_nonzero(mock_mcp_write):
     )
 
     assert result.exit_code == 1
-    assert "NOTE_REVISION_CONFLICT" in result.output
+    assert "Error: NOTE_REVISION_CONFLICT" in result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["error"] == "NOTE_REVISION_CONFLICT"
+    assert payload["checksum"] == "b" * 64
 
 
 @patch(
