@@ -959,8 +959,6 @@ def edit_note(
     bm tool edit-note my-note --operation replace_section --section "## Notes" --content "updated" --no-replace-subsections
     """
     # Deferred: loading the MCP tool stack at module import slows CLI startup (#886).
-    from fastmcp.exceptions import ToolError
-
     from basic_memory.mcp.tools import edit_note as mcp_edit_note
 
     try:
@@ -988,11 +986,6 @@ def edit_note(
             raise typer.Exit(1)
 
         _print_json(result)
-    except ToolError as e:
-        # A failed edit is a tool error whose message, in JSON mode, is the
-        # structured result; report it the same way as an error field.
-        typer.echo(f"Error: {_tool_error_payload(e).get('error') or e}", err=True)
-        raise typer.Exit(1)
     except ValueError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)

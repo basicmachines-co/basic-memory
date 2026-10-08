@@ -1,6 +1,5 @@
 """Tests for the edit_note MCP tool."""
 
-import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -270,17 +269,15 @@ async def test_edit_note_replace_section_opt_out_preserves_subsections(client, t
 @pytest.mark.asyncio
 async def test_edit_note_nonexistent_note_find_replace(client, test_project):
     """Test find_replace on a note that doesn't exist - should return helpful guidance."""
-    # A failed edit is a tool error (isError), and its message keeps the guidance.
-    with pytest.raises(ToolError) as exc_info:
-        await edit_note(
-            project=test_project.name,
-            identifier="nonexistent/note",
-            operation="find_replace",
-            content="replacement",
-            find_text="old text",
-        )
+    result = await edit_note(
+        project=test_project.name,
+        identifier="nonexistent/note",
+        operation="find_replace",
+        content="replacement",
+        find_text="old text",
+    )
 
-    result = str(exc_info.value)
+    assert isinstance(result, str)
     assert "# Edit Failed" in result
     assert "search_notes" in result  # Should suggest searching
     assert "append" in result  # Should suggest using append/prepend instead
@@ -289,17 +286,15 @@ async def test_edit_note_nonexistent_note_find_replace(client, test_project):
 @pytest.mark.asyncio
 async def test_edit_note_nonexistent_note_replace_section(client, test_project):
     """Test replace_section on a note that doesn't exist - should return helpful guidance."""
-    # A failed edit is a tool error (isError), and its message keeps the guidance.
-    with pytest.raises(ToolError) as exc_info:
-        await edit_note(
-            project=test_project.name,
-            identifier="nonexistent/note",
-            operation="replace_section",
-            content="new section content",
-            section="## Missing Section",
-        )
+    result = await edit_note(
+        project=test_project.name,
+        identifier="nonexistent/note",
+        operation="replace_section",
+        content="new section content",
+        section="## Missing Section",
+    )
 
-    result = str(exc_info.value)
+    assert isinstance(result, str)
     assert "# Edit Failed" in result
     assert "search_notes" in result  # Should suggest searching
 
@@ -387,16 +382,14 @@ async def test_edit_note_append_creates_json_format(client, test_project):
 @pytest.mark.asyncio
 async def test_edit_note_memory_url_unresolved_project_never_autocreates(client, test_project):
     """A failed memory URL route must not create a phantom note in the active project."""
-    # A failed edit is a tool error (isError), and its message keeps the guidance.
-    with pytest.raises(ToolError) as exc_info:
-        await edit_note(
-            project=test_project.name,
-            identifier="memory://missing-project/notes/phantom-note",
-            operation="append",
-            content="# Phantom\n\nThis must not be created.",
-        )
+    result = await edit_note(
+        project=test_project.name,
+        identifier="memory://missing-project/notes/phantom-note",
+        operation="append",
+        content="# Phantom\n\nThis must not be created.",
+    )
 
-    result = str(exc_info.value)
+    assert isinstance(result, str)
     assert "# Edit Failed - Unresolved Project Route" in result
     assert "No note was edited or created" in result
     assert f"active project `{test_project.name}`" in result
@@ -406,17 +399,15 @@ async def test_edit_note_memory_url_unresolved_project_never_autocreates(client,
 @pytest.mark.asyncio
 async def test_edit_note_memory_url_unresolved_project_json_error(client, test_project):
     """JSON mode reports an unresolved route without creating a file."""
-    # A failed edit is a tool error (isError), in JSON mode its message is the structured result.
-    with pytest.raises(ToolError) as exc_info:
-        await edit_note(
-            project=test_project.name,
-            identifier="memory://missing-project/notes/phantom-json-note",
-            operation="prepend",
-            content="# Phantom JSON",
-            output_format="json",
-        )
+    result = await edit_note(
+        project=test_project.name,
+        identifier="memory://missing-project/notes/phantom-json-note",
+        operation="prepend",
+        content="# Phantom JSON",
+        output_format="json",
+    )
 
-    result = json.loads(str(exc_info.value))
+    assert isinstance(result, dict)
     assert result["error"] == "UNRESOLVED_PROJECT_ROUTE"
     assert result["fileCreated"] is False
     assert result["projectRoute"] == "missing-project"
@@ -584,17 +575,15 @@ async def test_edit_note_replace_section_nonexistent_section(client, test_projec
     original = path.read_bytes()
 
     # Try to replace non-existent section
-    # A failed edit is a tool error (isError), and its message keeps the guidance.
-    with pytest.raises(ToolError) as exc_info:
-        await edit_note(
-            project=test_project.name,
-            identifier="docs/document",
-            operation="replace_section",
-            content="New section content here.\n",
-            section="## New Section",
-        )
+    result = await edit_note(
+        project=test_project.name,
+        identifier="docs/document",
+        operation="replace_section",
+        content="New section content here.\n",
+        section="## New Section",
+    )
 
-    result = str(exc_info.value)
+    assert isinstance(result, str)
     assert "# Edit Failed" in result
     assert "Section '## New Section' not found" in result
     assert "exact heading" in result
@@ -671,17 +660,15 @@ async def test_edit_note_find_replace_no_matches(client, test_project):
     )
 
     # Try to replace text that doesn't exist - should fail with default expected_replacements=1
-    # A failed edit is a tool error (isError), and its message keeps the guidance.
-    with pytest.raises(ToolError) as exc_info:
-        await edit_note(
-            project=test_project.name,
-            identifier="test/test-note",
-            operation="find_replace",
-            content="replacement",
-            find_text="nonexistent_text",
-        )
+    result = await edit_note(
+        project=test_project.name,
+        identifier="test/test-note",
+        operation="find_replace",
+        content="replacement",
+        find_text="nonexistent_text",
+    )
 
-    result = str(exc_info.value)
+    assert isinstance(result, str)
     assert "# Edit Failed - Text Not Found" in result
     assert "read_note" in result  # Should suggest reading the note first
     assert "Alternative approaches" in result  # Should suggest alternatives
@@ -720,18 +707,16 @@ async def test_edit_note_find_replace_wrong_count(client, test_project):
     )
 
     # Try to replace expecting 1 occurrence, but there are actually 2
-    # A failed edit is a tool error (isError), and its message keeps the guidance.
-    with pytest.raises(ToolError) as exc_info:
-        await edit_note(
-            project=test_project.name,
-            identifier="config/config-document",
-            operation="find_replace",
-            content="v0.13.0",
-            find_text="v0.12.0",
-            expected_replacements=1,  # Wrong! There are actually 2 occurrences
-        )
+    result = await edit_note(
+        project=test_project.name,
+        identifier="config/config-document",
+        operation="find_replace",
+        content="v0.13.0",
+        find_text="v0.12.0",
+        expected_replacements=1,  # Wrong! There are actually 2 occurrences
+    )
 
-    result = str(exc_info.value)
+    assert isinstance(result, str)
     assert "# Edit Failed - Wrong Replacement Count" in result
     assert "Expected 1 occurrences" in result
     assert "but found 2" in result
@@ -751,17 +736,15 @@ async def test_edit_note_replace_section_multiple_sections(client, test_project)
     )
 
     # Try to replace section when multiple exist
-    # A failed edit is a tool error (isError), and its message keeps the guidance.
-    with pytest.raises(ToolError) as exc_info:
-        await edit_note(
-            project=test_project.name,
-            identifier="docs/sample-note",
-            operation="replace_section",
-            content="New content",
-            section="## Section 1",
-        )
+    result = await edit_note(
+        project=test_project.name,
+        identifier="docs/sample-note",
+        operation="replace_section",
+        content="New content",
+        section="## Section 1",
+    )
 
-    result = str(exc_info.value)
+    assert isinstance(result, str)
     assert "# Edit Failed - Duplicate Section Headers" in result
     assert "Multiple sections found" in result
     assert "read_note" in result  # Should suggest reading the note first
@@ -780,17 +763,15 @@ async def test_edit_note_find_replace_empty_find_text(client, test_project):
     )
 
     # Try with whitespace-only find_text - this should be caught by service validation
-    # A failed edit is a tool error (isError), and its message keeps the guidance.
-    with pytest.raises(ToolError) as exc_info:
-        await edit_note(
-            project=test_project.name,
-            identifier="test/test-note",
-            operation="find_replace",
-            content="replacement",
-            find_text="   ",  # whitespace only
-        )
+    result = await edit_note(
+        project=test_project.name,
+        identifier="test/test-note",
+        operation="find_replace",
+        content="replacement",
+        find_text="   ",  # whitespace only
+    )
 
-    result = str(exc_info.value)
+    assert isinstance(result, str)
     assert "# Edit Failed" in result
     # Should contain helpful guidance about the error
 
@@ -890,17 +871,15 @@ async def test_edit_note_find_replace_rejects_fuzzy_match(client, test_project):
     )
 
     # Attempt to edit a nonexistent note — should error, not silently edit A or B
-    # A failed edit is a tool error (isError), and its message keeps the guidance.
-    with pytest.raises(ToolError) as exc_info:
-        await edit_note(
-            project=test_project.name,
-            identifier="Routing Test NONEXISTENT",
-            operation="find_replace",
-            content="replaced",
-            find_text="Content",
-        )
+    result = await edit_note(
+        project=test_project.name,
+        identifier="Routing Test NONEXISTENT",
+        operation="find_replace",
+        content="replaced",
+        find_text="Content",
+    )
 
-    result = str(exc_info.value)
+    assert isinstance(result, str)
     assert "# Edit Failed" in result
 
     # Verify neither A nor B was modified
@@ -1019,17 +998,15 @@ async def test_edit_note_insert_before_section_not_found(client, test_project):
         content="# Test\n\n## Existing\nContent here.",
     )
 
-    # A failed edit is a tool error (isError), and its message keeps the guidance.
-    with pytest.raises(ToolError) as exc_info:
-        await edit_note(
-            project=test_project.name,
-            identifier="test/test-note",
-            operation="insert_before_section",
-            content="new content",
-            section="## Nonexistent",
-        )
+    result = await edit_note(
+        project=test_project.name,
+        identifier="test/test-note",
+        operation="insert_before_section",
+        content="new content",
+        section="## Nonexistent",
+    )
 
-    result = str(exc_info.value)
+    assert isinstance(result, str)
     assert "# Edit Failed" in result
 
 
@@ -1533,16 +1510,14 @@ async def test_edit_note_refuses_ignored_on_disk_file(client, test_project):
     original_content = "# Secret\n\nGitignored content.\n"
     note_path.write_text(original_content, encoding="utf-8")
 
-    # A failed edit is a tool error (isError), and its message keeps the guidance.
-    with pytest.raises(ToolError) as exc_info:
-        await edit_note(
-            project=test_project.name,
-            identifier="private/secret",
-            operation="append",
-            content="\nShould never be written.",
-        )
+    result = await edit_note(
+        project=test_project.name,
+        identifier="private/secret",
+        operation="append",
+        content="\nShould never be written.",
+    )
 
-    result = str(exc_info.value)
+    assert isinstance(result, str)
     assert "ignore rules" in result
     assert "will not be edited" in result
     assert "Edited note" not in result
