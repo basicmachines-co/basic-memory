@@ -81,11 +81,10 @@ def test_cli_grep_context(mode: str) -> None:
     ):
         result = CliRunner().invoke(
             app,
-            ["grep", "retry", "-F", "-C", "1", "--max-matches", "1"]
-            + ([] if mode == "rich" else [mode]),
+            ["grep", "retry", "-C", "1", "--max-matches", "1"] + ([] if mode == "rich" else [mode]),
         )
     assert result.exit_code == 0, result.output
-    assert tool.call_args.kwargs["literal"] is True
+    assert tool.call_args.kwargs["semantic"] is False
     assert tool.call_args.kwargs["context_lines"] == 1
     assert tool.call_args.kwargs["max_matches"] == 1
     if mode == "--json":

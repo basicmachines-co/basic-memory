@@ -624,24 +624,24 @@ def test_grep_rich_empty(mock_grep):
 
 
 @patch("basic_memory.mcp.tools.grep", new_callable=AsyncMock, return_value=GREP_RESULT)
-def test_grep_literal_and_paging_passthrough(mock_grep):
-    """-F requests literal full-text matching instead of semantic search."""
-    result = _invoke(["grep", "needle", "-F", "--page", "2", "--page-size", "5"])
+def test_grep_semantic_and_paging_passthrough(mock_grep):
+    """--semantic requests ranking by meaning instead of keyword matching."""
+    result = _invoke(["grep", "needle", "--semantic", "--page", "2", "--page-size", "5"])
 
     assert result.exit_code == 0, result.output
     assert mock_grep.call_args.args == ("needle",)
     kwargs = mock_grep.call_args.kwargs
-    assert kwargs["literal"] is True
+    assert kwargs["semantic"] is True
     assert kwargs["page"] == 2
     assert kwargs["page_size"] == 5
 
 
 @patch("basic_memory.mcp.tools.grep", new_callable=AsyncMock, return_value=GREP_RESULT)
-def test_grep_defaults_to_semantic(mock_grep):
+def test_grep_defaults_to_keyword_matching(mock_grep):
     result = _invoke(["grep", "needle"])
 
     assert result.exit_code == 0, result.output
-    assert mock_grep.call_args.kwargs["literal"] is False
+    assert mock_grep.call_args.kwargs["semantic"] is False
 
 
 # ---------------------------------------------------------------------------

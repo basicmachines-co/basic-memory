@@ -16,7 +16,7 @@ generated: cli
 ## SYNOPSIS
 
 ```
-bm grep PATTERN [--literal] [--context-lines CONTEXT_LINES]
+bm grep PATTERN [--semantic] [--context-lines CONTEXT_LINES]
         [--max-matches MAX_MATCHES] [--page PAGE] [--page-size PAGE_SIZE]
         [--json | --plain] [--project PROJECT] [--project-id PROJECT_ID]
         [--local | --cloud]
@@ -24,13 +24,16 @@ bm grep PATTERN [--literal] [--context-lines CONTEXT_LINES]
 
 ## DESCRIPTION
 
-Searches note content, semantically when semantic search is enabled for the
-project, full-text otherwise. `-F` (`--literal`) forces literal full-text
-matching, like real grep's fixed-strings flag. Results carry title, score,
-permalink, and the matched snippet; on a TTY they render as a table, and
-`--json` (or piped output) emits the search response with pagination.
+Searches note content by full-text keyword matching, so a pattern that appears in
+no note returns no results. It is not a regex: the pattern is tokenized like any
+full-text query. `-s` (`--semantic`) ranks by meaning instead, with hybrid
+semantic plus full-text search when semantic search is enabled for the project.
+Semantic results are nearest neighbours, so they can include notes that do not
+contain the pattern. Results carry title, score, permalink, and the matched
+snippet; on a TTY they render as a table, and `--json` (or piped output) emits
+the search response with pagination.
 
-With `-F -C N`, return compact literal match windows instead. The full-text index
+With `-C N`, return compact literal match windows instead. The full-text index
 selects a page of candidate notes, then their current content is checked for
 case-insensitive literal substrings. Matching line numbers include frontmatter
 and can be passed directly to `read_note(start_line=..., end_line=...)` or
@@ -46,8 +49,8 @@ Line positions can change if the note is edited between calls.
 
 ## OPTIONS
 
-- **-F, --literal** — Literal full-text matching instead of semantic search
-- **-C, --context-lines** — Compact literal line matches with surrounding context (requires -F)
+- **-s, --semantic** — Rank by meaning instead of matching keywords
+- **-C, --context-lines** — Compact line matches with surrounding context (not with --semantic)
 - **--max-matches** (default: 10) — Matching lines per candidate in context mode
 - **--page** (default: 1) — Page number (1-indexed)
 - **--page-size** (default: 10) — Results per page
@@ -61,9 +64,9 @@ Line positions can change if the note is edited between calls.
 ## EXAMPLES
 
 ```
-bm grep -F "retry" -C 3 --max-matches 5 --plain
-bm grep "auth token rotation"
-bm grep -F "BASIC_MEMORY_FORCE_LOCAL"
+bm grep "retry" -C 3 --max-matches 5 --plain
+bm grep --semantic "auth token rotation"
+bm grep "BASIC_MEMORY_FORCE_LOCAL"
 bm grep "deploy checklist" --json | jq '.results[].permalink'
 ```
 
