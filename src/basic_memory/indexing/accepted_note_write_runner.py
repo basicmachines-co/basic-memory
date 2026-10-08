@@ -7,10 +7,12 @@ from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Any, Protocol
 
+from loguru import logger
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from basic_memory import file_utils
+from basic_memory import db, file_utils
 from basic_memory.indexing.accepted_note_search import build_accepted_note_search_row
 from basic_memory.indexing.external_file_delete_runner import (
     relation_cleanup_sources_for_deleted_entity,
@@ -32,6 +34,7 @@ from basic_memory.repository import (
 )
 from basic_memory.repository.accepted_note_search_row import AcceptedNoteSearchRow
 from basic_memory.repository.entity_repository import AcceptedPendingEntityWrite
+from basic_memory.repository.search_refresh_race import lost_search_refresh_race
 from basic_memory.runtime.note_content import (
     RuntimeAcceptedNoteChange,
     RuntimeAcceptedNoteContentWriteSource,
@@ -271,9 +274,10 @@ class AcceptedPreparedNoteMove:
 
 @dataclass(frozen=True, slots=True)
 class AcceptedPersistedNoteWrite:
-    """Accepted note_content row plus any cleanup for a superseded materialized file."""
+    """Accepted note_content row plus the derived work that runs after it commits."""
 
     note_content: NoteContent
+    search_row: AcceptedNoteSearchRow
     previous_file_delete: RuntimePendingNoteFileDelete | None = None
     relation_publication: RelationGenerationPublication | None = None
 
@@ -540,18 +544,37 @@ def accepted_note_search_row_from_entity(
 
 
 async def refresh_accepted_note_search_index(
-    session: AsyncSession,
+    session_maker: async_sessionmaker[AsyncSession],
     *,
-    entity: Entity,
-    search_content: str,
+    row: AcceptedNoteSearchRow,
     repositories: AcceptedNoteWriteRepositories,
 ) -> None:
-    """Refresh the hot accepted-note search row inside the caller's transaction."""
-    repository = repositories.search_repository(entity.project_id)
-    await repository.refresh_entity(
-        session,
-        accepted_note_search_row_from_entity(entity, search_content=search_content),
-    )
+    """Refresh the hot accepted-note search row in its own transaction, after the accept.
+
+    The row is derived state, so it is written after note_content commits rather than
+    inside the accept transaction: a refresh that fails there would roll back the
+    canonical write with it (#1681).
+    """
+    repository = repositories.search_repository(row.project_id)
+    try:
+        async with db.scoped_session(session_maker) as session:
+            await repository.refresh_entity(session, row)
+    except DBAPIError as error:
+        # Trigger: an index refresh of the same entity overlapped this one on Postgres
+        #   and won (deadlock, or search_index_pkey on the concurrent insert).
+        # Why: the rollback leaves the winner's projection, and the note's
+        #   materialization index rewrites the row from the accepted file next.
+        # Outcome: log and return. Any other database error still raises.
+        race = lost_search_refresh_race(error)
+        if race is None:
+            raise
+        logger.warning(
+            "Accepted-note search refresh lost a race with another refresh of the same "
+            "entity; leaving its row for the next refresh: entity_id={} project_id={} race={}",
+            row.entity_id,
+            row.project_id,
+            race,
+        )
 
 
 async def delete_accepted_note_search_index(
@@ -578,7 +601,7 @@ async def delete_accepted_note_vectors(
     await repository.delete_entity_vectors(session, entity_id)
 
 
-async def _persist_accepted_note_content_and_search(
+async def _persist_accepted_note_content(
     session: AsyncSession,
     *,
     entity: Entity,
@@ -593,7 +616,11 @@ async def _persist_accepted_note_content_and_search(
     source_file_checksum: RuntimeFileChecksum | None = None,
     repositories: AcceptedNoteWriteRepositories,
 ) -> AcceptedPersistedNoteWrite:
-    """Internal content/search phase shared by complete snapshots and moves."""
+    """Internal content phase shared by complete snapshots and moves.
+
+    Accepts note_content in the caller's transaction and builds the hot search row the
+    caller refreshes after that transaction commits.
+    """
     content_write = plan_accepted_note_content_write(
         project_id=entity.project_id,
         entity_id=entity.id,
@@ -612,14 +639,9 @@ async def _persist_accepted_note_content_and_search(
         updated_at=updated_at,
         repositories=repositories,
     )
-    await refresh_accepted_note_search_index(
-        session,
-        entity=entity,
-        search_content=search_content,
-        repositories=repositories,
-    )
     return AcceptedPersistedNoteWrite(
         note_content=note_content,
+        search_row=accepted_note_search_row_from_entity(entity, search_content=search_content),
         previous_file_delete=content_write.previous_file_delete,
     )
 
@@ -718,7 +740,7 @@ async def persist_accepted_note_snapshot(
     repositories: AcceptedNoteWriteRepositories,
 ) -> AcceptedPersistedNoteWrite:
     """Persist one complete accepted Markdown snapshot in the caller's transaction."""
-    persisted = await _persist_accepted_note_content_and_search(
+    persisted = await _persist_accepted_note_content(
         session,
         entity=entity,
         markdown_content=prepared.markdown_content,
@@ -734,6 +756,7 @@ async def persist_accepted_note_snapshot(
     )
     return AcceptedPersistedNoteWrite(
         note_content=persisted.note_content,
+        search_row=persisted.search_row,
         previous_file_delete=persisted.previous_file_delete,
         relation_publication=await accepted_relation_generation_publication(
             session,
@@ -762,7 +785,7 @@ async def persist_accepted_note_move(
     repositories: AcceptedNoteWriteRepositories,
 ) -> AcceptedPersistedNoteWrite:
     """Persist the explicitly narrower content/search state for an accepted move."""
-    persisted = await _persist_accepted_note_content_and_search(
+    persisted = await _persist_accepted_note_content(
         session,
         entity=entity,
         markdown_content=prepared.markdown_content,
@@ -778,6 +801,7 @@ async def persist_accepted_note_move(
     )
     return AcceptedPersistedNoteWrite(
         note_content=persisted.note_content,
+        search_row=persisted.search_row,
         previous_file_delete=persisted.previous_file_delete,
         relation_publication=await accepted_relation_generation_publication(
             session,

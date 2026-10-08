@@ -3,15 +3,23 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
+import pytest
+from asyncpg.exceptions import DeadlockDetectedError
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from basic_memory.indexing.accepted_note_write_runner import (
+    AcceptedNoteWriteRepositories,
     accepted_note_content_write_from_markdown,
     accepted_note_search_row_from_entity,
     accepted_pending_entity_write_from_prepared,
     apply_accepted_prepared_entity_fields,
+    refresh_accepted_note_search_index,
 )
 from basic_memory.models import Entity
 from basic_memory.markdown.schemas import (
@@ -25,6 +33,7 @@ from basic_memory.repository import (
     AcceptedObservationWrite,
     AcceptedRelationWrite,
 )
+from basic_memory.repository.accepted_note_search_row import AcceptedNoteSearchRow
 from basic_memory.repository.entity_repository import AcceptedPendingEntityWrite
 from basic_memory.services.note_preparation import (
     PreparedEntityFields,
@@ -194,3 +203,54 @@ def test_accepted_note_search_row_from_entity_builds_hot_search_row() -> None:
     assert row.file_path == "notes/accepted.md"
     assert row.content_snippet == "Accepted body"
     assert "core" in row.content_stems
+
+
+@dataclass
+class _FailingSearchRepository:
+    error: BaseException
+
+    async def refresh_entity(self, session: AsyncSession, row: AcceptedNoteSearchRow) -> None:
+        raise self.error
+
+
+@dataclass
+class _FailingSearchRepositories:
+    error: BaseException
+
+    def search_repository(self, project_id: int) -> _FailingSearchRepository:
+        return _FailingSearchRepository(self.error)
+
+
+def _driver_failure(driver_error: BaseException) -> IntegrityError:
+    """A DBAPI error raised from the driver's error, as the asyncpg dialect raises it."""
+    adapted = Exception(str(driver_error))
+    adapted.__cause__ = driver_error
+    return IntegrityError("INSERT INTO search_index ...", {}, adapted)
+
+
+@pytest.mark.asyncio
+async def test_accepted_search_refresh_that_lost_a_race_returns(session_maker) -> None:
+    """The hot row is derived; losing to a concurrent refresh is logged (#1681)."""
+    row = accepted_note_search_row_from_entity(_entity(), search_content="Accepted body")
+    repositories = _FailingSearchRepositories(
+        _driver_failure(DeadlockDetectedError("deadlock detected"))
+    )
+
+    await refresh_accepted_note_search_index(
+        session_maker,
+        row=row,
+        repositories=cast(AcceptedNoteWriteRepositories, repositories),
+    )
+
+
+@pytest.mark.asyncio
+async def test_accepted_search_refresh_raises_any_other_database_failure(session_maker) -> None:
+    row = accepted_note_search_row_from_entity(_entity(), search_content="Accepted body")
+    repositories = _FailingSearchRepositories(_driver_failure(ValueError("value too long")))
+
+    with pytest.raises(IntegrityError):
+        await refresh_accepted_note_search_index(
+            session_maker,
+            row=row,
+            repositories=cast(AcceptedNoteWriteRepositories, repositories),
+        )

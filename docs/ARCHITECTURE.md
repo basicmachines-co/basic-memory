@@ -184,10 +184,12 @@ local or hosted composition roots and adapters
   package; hosted code must not depend on `Local*` implementations.
 
 Accepted Markdown create, replace, and edit operations cross one public persistence boundary:
-`persist_accepted_note_snapshot`. That operation writes the entity snapshot, `NoteContent`, graph
-rows, and entity search row inside the caller's transaction. Move intentionally uses the narrower
-`persist_accepted_note_move` operation because changing a path must not replace observations or
-relations.
+`persist_accepted_note_snapshot`. That operation writes the entity snapshot and `NoteContent`
+inside the caller's transaction, and returns the derived work the caller runs after that
+transaction commits: the graph publication and the entity's search row. A derived write that fails
+there is logged and converged later; it never rolls back the accepted note. Move intentionally uses
+the narrower `persist_accepted_note_move` operation because changing a path must not replace
+observations or relations.
 
 ## MCP Tools Architecture
 
