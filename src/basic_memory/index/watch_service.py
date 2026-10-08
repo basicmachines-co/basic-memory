@@ -317,6 +317,7 @@ class WatchService:
 
         start_time = time.time()
         project_root = local_project_root(project)
+        warn_unreadable_new_directories(project, changes)
         request = LocalWatchEventIndexRequest.from_project_changes(
             project=project,
             changes=changes,
@@ -352,3 +353,34 @@ class WatchService:
             f"duration_ms={duration_ms}"
         )
         await self.write_status()
+
+
+def warn_unreadable_new_directories(project: Project, changes: set[FileChange]) -> None:
+    """Log a warning for each newly created directory in a batch that cannot be read.
+
+    Trigger: a directory reported as added cannot be listed (for example, created
+    by another user with permissions the watcher's user lacks).
+    Why: on Linux the watcher adds a watch on a new directory when it appears, and
+    when that fails the notify library discards the error. Files written into the
+    directory then produce no events and are never indexed, with nothing logged.
+    Outcome: a warning naming the directory and the command that indexes it once
+    its permissions are fixed.
+    """
+    for change, path in changes:
+        if change != Change.added:
+            continue
+        directory = Path(path)
+        try:
+            if directory.is_symlink() or not directory.is_dir():
+                continue
+            with os.scandir(directory):
+                pass
+        except OSError as exc:
+            logger.warning(
+                f"New directory cannot be read, so the file watcher cannot watch it and "
+                f"files written into it will not be indexed: {directory} ({exc.strerror}). "
+                f"Once its permissions are fixed, run `bm project index {project.name}` "
+                f"(or `bm reindex`).",
+                project=project.name,
+                path=str(directory),
+            )
