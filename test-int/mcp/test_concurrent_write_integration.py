@@ -597,9 +597,14 @@ async def test_concurrent_edit_append_reports_every_refusal(mcp_server, app, tes
     refuses an append that loses the race ("modified concurrently"); on Postgres the
     row lock usually serializes them and nothing is refused. Either way, a caller that
     trusts ``is_error`` must be able to account for every line: an append refused but
-    returned as an ordinary result would be counted as written and never retried.
+    returned as an ordinary result would be counted as written and never retried, and
+    an append written but returned as an error would be retried and written twice.
+
+    Each append also writes and indexes the file inside the request in the test
+    runtime, which costs about a second per append on Postgres. 15 appends per writer
+    keeps the test well inside the suite timeout there and still races on SQLite.
     """
-    appends_per_writer = 40
+    appends_per_writer = 15
 
     async with Client(mcp_server) as setup:
         note = _parse(

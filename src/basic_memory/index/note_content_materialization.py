@@ -701,7 +701,22 @@ class LocalNoteContentMaterializationProvider:
         if materialization is None:
             return accepted
         if self.test_mode:
-            return await self._materialize_write_now(accepted)
+            try:
+                return await self._materialize_write_now(accepted)
+            except Exception:
+                # Trigger: writing or indexing the file failed after the accept committed.
+                # Why: the write is already accepted, and the runner has marked the row
+                #      "failed" for the reconciler to retry. Production never lets this
+                #      failure reach the response, because it runs in the background.
+                #      Raising here turned an accepted write into an error response, so a
+                #      caller that retries errors wrote it twice. On Windows the atomic
+                #      replace fails whenever another request holds the file open.
+                # Outcome: same as production. Log it and report the accepted write.
+                logger.exception(
+                    "Local note materialization failed",
+                    entity_id=materialization.entity_id,
+                )
+                return accepted
         self._schedule_materialization(accepted, materialization)
         return accepted
 

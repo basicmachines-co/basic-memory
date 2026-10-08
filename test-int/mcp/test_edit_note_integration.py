@@ -10,7 +10,8 @@ from pathlib import Path
 import pytest
 from fastmcp import Client
 
-from basic_memory.file_utils import parse_frontmatter
+from basic_memory import file_utils
+from basic_memory.file_utils import FileWriteError, parse_frontmatter
 from basic_memory.repository.note_content_repository import (
     NoteContentRepository,
     NoteContentVersionConflict,
@@ -703,6 +704,65 @@ async def test_edit_note_refused_concurrent_write_is_an_error(
         else:
             assert "# Edit Failed" in text
         assert path.read_text(encoding="utf-8") == original
+
+
+@pytest.mark.asyncio
+async def test_edit_note_accepted_write_is_not_reported_as_failed_when_file_write_fails(
+    mcp_server, app, test_project, monkeypatch
+):
+    """An edit the engine accepted is reported as written, even if writing the file fails.
+
+    The accepted content commits before the markdown file is written. On Windows the
+    atomic replace fails when another request holds the file open, and the test
+    runtime writes the file inside the request, so that failure used to come back as
+    an error for an append that was already in the note. A caller that retries an
+    error would then append it twice.
+    """
+
+    async with Client(mcp_server) as client:
+        created = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "File Write Fails Note",
+                "directory": "test",
+                "content": "# File Write Fails Note\n\nOriginal body.",
+                "output_format": "json",
+            },
+        )
+        note = json.loads(created.content[0].text)
+
+        async def replace_is_refused(path, content):
+            raise FileWriteError(f"Failed to write file {path}: [WinError 5] Access is denied")
+
+        with monkeypatch.context() as patched:
+            patched.setattr(file_utils, "write_file_atomic_bytes", replace_is_refused)
+            edit_result = await client.call_tool(
+                "edit_note",
+                {
+                    "project": test_project.name,
+                    "identifier": note["permalink"],
+                    "operation": "append",
+                    "content": "\nThis append was accepted.",
+                    "output_format": "json",
+                },
+                raise_on_error=False,
+            )
+
+        assert edit_result.is_error is False, edit_result.content[0].text
+        payload = json.loads(edit_result.content[0].text)
+        assert "error" not in payload
+        assert payload["checksum"]
+
+        read_result = await client.call_tool(
+            "read_note",
+            {
+                "project": test_project.name,
+                "identifier": note["permalink"],
+                "output_format": "json",
+            },
+        )
+        assert "This append was accepted." in json.loads(read_result.content[0].text)["content"]
 
 
 @pytest.mark.asyncio
