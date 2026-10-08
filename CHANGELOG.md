@@ -4,6 +4,15 @@
 
 ### Breaking Changes
 
+- **#1683**: A refused `write_note` is an MCP tool error (`isError`), as a failed
+  `delete_note` or `move_note` is (#1641). This covers an existing note without
+  `overwrite`, a revision conflict on `expected_checksum`, a note that moved, and a
+  directory outside the project. Nothing is written in any of these cases. They used to
+  come back as ordinary results, so a client checking `isError` counted a refused write as
+  written. In JSON mode the error message is the same payload as before (`action:
+  "conflict"`, `error: "NOTE_ALREADY_EXISTS"` and so on). `bm tool write-note` is
+  unchanged: error on stderr, payload on stdout, exit status 1.
+
 - **#1600**: `bm project remove` on a cloud-routed project always deletes the project's
   cloud files; there is no longer a way to keep them. It warns that the files can be
   recovered only from a cloud snapshot (`bm cloud snapshot list`) and asks for
@@ -306,12 +315,20 @@
   text said "Delete Failed" or "Move Failed", so clients read it as success.
   `delete_note` still returns `False` for a note that does not exist.
 
-- **#1662**: A failed or refused `edit_note` is reported as an MCP tool error, as
-  `delete_note` and `move_note` now are. A refused write, such as the "modified
-  concurrently" conflict when two clients append to one note, came back as an ordinary
-  result whose text said "Edit Failed", so a client checking `isError` counted the
-  append as written and never retried it. `bm tool edit-note` prints the error and exits
-  with status 1. Thanks to @sammywachtel.
+- **#1683**: `read_content` never returns another file for a path that does not exist.
+  It resolved through the fuzzy fallback, which matched any note sharing a word with the
+  path (`disk/nope.txt` returned a note in `disk/`). It now resolves only exact paths,
+  permalinks, titles and ids, and a miss is "Resource not found".
+
+- **#1683**: `NOT` excludes a term found anywhere in the note. `coffee NOT pour` returned
+  a note whose title has "coffee" and whose body has "pour": SQLite evaluated `NOT` in each
+  column separately, and the vector half of hybrid search ignores Boolean operators. A
+  search that uses `AND`, `OR` or `NOT` without an explicit `search_type` now runs as
+  full-text.
+
+- **#1683**: `read_note` with JSON output (and `cat`) returns `checksum`, the revision
+  `write_note`'s `expected_checksum` compares, so an agent can overwrite only the
+  revision it read.
 
 - **#1663**: An unhandled API error no longer stalls the server for seconds while it is
   logged, and logs no longer contain the values of local variables from tracebacks.
