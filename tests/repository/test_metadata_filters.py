@@ -1,6 +1,7 @@
 """Tests for structured metadata filter parsing helpers."""
 
 from datetime import date
+import re
 
 import pytest
 
@@ -147,3 +148,81 @@ def test_numeric_helpers():
 def test_build_json_paths():
     assert build_sqlite_json_path(["schema", "confidence"]) == '$."schema"."confidence"'
     assert build_postgres_json_path(["schema", "confidence"]) == "{schema,confidence}"
+
+
+@pytest.mark.parametrize(
+    ("bare", "dollar"),
+    [
+        ({"started": {"gte": "2026-01-01"}}, {"started": {"$gte": "2026-01-01"}}),
+        ({"score": {"gt": 0.7}}, {"score": {"$gt": 0.7}}),
+        ({"score": {"lt": 3}}, {"score": {"$lt": 3}}),
+        ({"score": {"lte": 3}}, {"score": {"$lte": 3}}),
+        ({"status": {"in": ["a", "b"]}}, {"status": {"$in": ["a", "b"]}}),
+        ({"score": {"between": [1, 2]}}, {"score": {"$between": [1, 2]}}),
+        ({"tags": {"contains": "x"}}, {"tags": {"$contains": "x"}}),
+        ({"owner": {"exists": True}}, {"owner": {"$exists": True}}),
+    ],
+)
+def test_bare_operator_names_parse_like_their_dollar_spelling(bare, dollar):
+    """Agents write Elasticsearch-style `gte`; a dict value is always operators,
+    so the bare name can only mean the `$` operator."""
+    assert parse_metadata_filters(bare) == parse_metadata_filters(dollar)
+
+
+def test_several_operators_on_one_key_become_anded_clauses():
+    """The Mongo range spelling: one clause per operator, all on the same path."""
+    parsed = parse_metadata_filters({"started": {"$gte": "2026-01-01", "lt": "2026-02-01"}})
+    assert parsed == [
+        ParsedMetadataFilter(["started"], "gte", "2026-01-01", "text"),
+        ParsedMetadataFilter(["started"], "lt", "2026-02-01", "text"),
+    ]
+
+
+def test_contains_operator_accepts_a_scalar_or_a_list():
+    assert parse_metadata_filters({"tags": {"$contains": "a"}}) == [
+        ParsedMetadataFilter(["tags"], "contains", ["a"])
+    ]
+    assert parse_metadata_filters({"tags": {"$contains": ["a", "b"]}}) == parse_metadata_filters(
+        {"tags": ["a", "b"]}
+    )
+
+
+def test_exists_operator_maps_onto_null_clauses():
+    """$exists false is the null-equality form; true is its exact negation."""
+    assert parse_metadata_filters({"owner": {"$exists": False}}) == parse_metadata_filters(
+        {"owner": None}
+    )
+    assert parse_metadata_filters({"owner": {"$exists": True}}) == [
+        ParsedMetadataFilter(["owner"], "is_not_null", None)
+    ]
+
+
+@pytest.mark.parametrize(
+    ("filters", "message"),
+    [
+        ({"owner": {"$exists": "yes"}}, "$exists requires true or false for 'owner'"),
+        ({"tags": {"$contains": []}}, "$contains requires a value or a non-empty list"),
+        ({"tags": {"$contains": [None]}}, "null is not supported by '$contains'"),
+    ],
+)
+def test_new_operators_refuse_malformed_operands(filters, message):
+    with pytest.raises(ValueError, match=re.escape(message)):
+        parse_metadata_filters(filters)
+
+
+@pytest.mark.parametrize(
+    "filters",
+    [
+        {"status": {"$ne": "done"}},
+        {"status": {"regex": "^d"}},
+        {"status": {"$$gte": 1}},
+        {"status": {}},
+    ],
+)
+def test_unsupported_operator_errors_list_the_supported_set(filters):
+    """The refusal names every supported operator so an agent can fix its retry."""
+    with pytest.raises(ValueError) as exc_info:
+        parse_metadata_filters(filters)
+    message = str(exc_info.value)
+    assert "'status'" in message
+    assert "supported operators: $gt, $gte, $lt, $lte, $in, $between, $contains, $exists" in message

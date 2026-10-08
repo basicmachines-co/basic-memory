@@ -331,6 +331,10 @@ def compile_fts_filter(
                 conditions.append(f"{extract_expr} IS NULL")
                 continue
 
+            if filt.op == "is_not_null":
+                conditions.append(f"{extract_expr} IS NOT NULL")
+                continue
+
             if filt.op == "eq":
                 value_param = f"meta_val_{idx}"
                 params[value_param] = filt.value
