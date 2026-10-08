@@ -100,17 +100,21 @@ def test_man_install_writes_pages_to_target(tmp_path):
 
 
 def test_man_install_defaults_to_local_share_man(tmp_path, monkeypatch):
-    """Without --dir, pages land under ~/.local/share/man (HOME is isolated here)."""
+    """Without --dir, pages land under ~/.local/share/man."""
 
     def fake_run(*args, **kwargs):
         raise FileNotFoundError("manpath")
 
+    # The autouse isolated_home fixture also does this, but pytest can skip a directory's
+    # conftest when paths from several directories are interleaved on the command line.
+    # Without it this install writes into the real ~/.local/share/man, so the test owns
+    # its HOME instead of relying on the fixture.
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     monkeypatch.setattr(man_command.subprocess, "run", fake_run)
     result = runner.invoke(app, ["man", "install"])
 
     assert result.exit_code == 0, result.output
-    # The isolated_home fixture points HOME at tmp_path, so the default root
-    # resolves inside the test sandbox.
     assert (tmp_path / ".local" / "share" / "man" / "man1" / "bm.1").exists()
 
 
