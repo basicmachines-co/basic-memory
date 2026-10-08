@@ -12,6 +12,7 @@ from dateparser import parse
 from fastapi import BackgroundTasks
 from loguru import logger
 from sqlalchemy import select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 import logfire
@@ -25,6 +26,7 @@ from basic_memory.repository.search_repository import (
     SearchRepository,
 )
 from basic_memory.repository.search_query import PreparedSearchQuery, relaxed_query_words
+from basic_memory.repository.search_refresh_race import lost_search_refresh_race
 from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.search_trace import SearchTraceCollector
 from basic_memory.schemas.base import normalize_note_type
@@ -648,12 +650,34 @@ class SearchService:
             #   rather than stale.
             # Outcome: delete and replacement commit together; a failure rolls back to
             #   the previous projection, or to none on a first index, and stays retryable.
-            async with db.scoped_session(self.repository.session_maker) as session:
-                await self.repository.delete_by_entity_id(entity_id=entity.id, session=session)
-                if entity.is_markdown:
-                    await self.index_entity_markdown(entity, replacement_content, session=session)
-                else:
-                    await self.index_entity_file(entity, session=session)
+            try:
+                async with db.scoped_session(self.repository.session_maker) as session:
+                    await self.repository.delete_by_entity_id(entity_id=entity.id, session=session)
+                    if entity.is_markdown:
+                        await self.index_entity_markdown(
+                            entity, replacement_content, session=session
+                        )
+                    else:
+                        await self.index_entity_file(entity, session=session)
+            except DBAPIError as error:
+                # Trigger: another refresh of this entity overlapped this one on Postgres
+                #   and won (deadlock, or search_index_pkey on the concurrent insert).
+                # Why: search rows are derived state. The rollback leaves the winner's
+                #   whole projection in place, and failing here would fail the save,
+                #   freshen or index pass that asked for the refresh (#1681).
+                # Outcome: log and return; the next refresh, reindex or sweeper
+                #   converges the rows. Any other database error still raises.
+                race = lost_search_refresh_race(error)
+                if race is None:
+                    raise
+                logger.warning(
+                    "Search refresh lost a race with another refresh of the same entity; "
+                    "leaving its rows for the next refresh: entity_id={} project_id={} race={}",
+                    entity.id,
+                    entity.project_id,
+                    race,
+                )
+                return
 
             logger.debug(
                 f"[BackgroundTask] Completed search index for entity_id={entity.id} "
