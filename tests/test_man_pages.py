@@ -438,7 +438,7 @@ def test_render_cli_synopsis_renders_the_shell_form() -> None:
     synopsis = render_cli_synopsis("grep", grep)
 
     assert synopsis.startswith("bm grep PATTERN")
-    assert "[--literal]" in synopsis  # a boolean flag renders bare
+    assert "[--semantic]" in synopsis  # a boolean flag renders bare
     assert "[--page PAGE]" in synopsis  # a value option carries a metavar
     assert all(len(line) <= 76 for line in synopsis.splitlines())
     # Continuations align under the command name, like render_synopsis's wrap.
@@ -473,9 +473,9 @@ def test_render_options_includes_shared_and_global_flags() -> None:
 
 def test_render_options_preserves_aliases_and_boolean_pairs() -> None:
     # D3: OPTIONS keeps the CLI syntax section-3 PARAMETERS has no concept of —
-    # flag aliases (-F, --literal) and paired booleans (--x / --no-x).
+    # flag aliases (-s, --semantic) and paired booleans (--x / --no-x).
     _, grep = _cli_command(find_page(PageRef("grep", 1)))
-    assert "- **-F, --literal** — Literal full-text matching" in render_options(grep)
+    assert "- **-s, --semantic** — Rank by meaning" in render_options(grep)
 
     _, cat = _cli_command(find_page(PageRef("cat", 1)))
     assert "- **--frontmatter / --no-frontmatter** (default: --frontmatter)" in render_options(cat)

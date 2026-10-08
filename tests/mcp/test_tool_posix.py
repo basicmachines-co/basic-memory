@@ -333,7 +333,7 @@ async def test_cat_unknown_identifier_raises(client, test_project):
 
 
 @pytest.mark.asyncio
-async def test_grep_literal_finds_seeded_content(client, test_project):
+async def test_grep_keyword_finds_seeded_content(client, test_project):
     await write_note(
         title="Grep Target",
         directory="test",
@@ -341,7 +341,7 @@ async def test_grep_literal_finds_seeded_content(client, test_project):
         project=test_project.name,
     )
 
-    result = await grep("posixgrepneedle", literal=True, project=test_project.name)
+    result = await grep("posixgrepneedle", project=test_project.name)
 
     assert result["current_page"] == 1
     assert isinstance(result["total_is_exact"], bool)
@@ -351,7 +351,7 @@ async def test_grep_literal_finds_seeded_content(client, test_project):
 
 @pytest.mark.asyncio
 async def test_grep_default_mode_resolves_fts_and_finds(client, test_project, monkeypatch):
-    """With semantic search disabled the default mode falls back to full-text."""
+    """With semantic search disabled, semantic=True falls back to full-text."""
     container = SimpleNamespace(config=SimpleNamespace(semantic_search_enabled=False))
     monkeypatch.setattr(posix_tools, "get_container", lambda: container)
 
@@ -362,28 +362,32 @@ async def test_grep_default_mode_resolves_fts_and_finds(client, test_project, mo
         project=test_project.name,
     )
 
-    result = await grep("posixdefaultneedle", project=test_project.name)
+    result = await grep("posixdefaultneedle", semantic=True, project=test_project.name)
 
     titles = [row["title"] for row in result["results"]]
     assert "Grep Default Target" in titles
 
 
-def test_grep_retrieval_mode_literal_is_always_fts():
-    assert posix_tools._grep_retrieval_mode(True) is SearchRetrievalMode.FTS
+def test_grep_retrieval_mode_defaults_to_fts(monkeypatch):
+    """Keyword matching stays the default even when semantic search is enabled (#1685)."""
+    container = SimpleNamespace(config=SimpleNamespace(semantic_search_enabled=True))
+    monkeypatch.setattr(posix_tools, "get_container", lambda: container)
+
+    assert posix_tools._grep_retrieval_mode(False) is SearchRetrievalMode.FTS
 
 
 def test_grep_retrieval_mode_hybrid_when_semantic_enabled(monkeypatch):
     container = SimpleNamespace(config=SimpleNamespace(semantic_search_enabled=True))
     monkeypatch.setattr(posix_tools, "get_container", lambda: container)
 
-    assert posix_tools._grep_retrieval_mode(False) is SearchRetrievalMode.HYBRID
+    assert posix_tools._grep_retrieval_mode(True) is SearchRetrievalMode.HYBRID
 
 
 def test_grep_retrieval_mode_fts_when_semantic_disabled(monkeypatch):
     container = SimpleNamespace(config=SimpleNamespace(semantic_search_enabled=False))
     monkeypatch.setattr(posix_tools, "get_container", lambda: container)
 
-    assert posix_tools._grep_retrieval_mode(False) is SearchRetrievalMode.FTS
+    assert posix_tools._grep_retrieval_mode(True) is SearchRetrievalMode.FTS
 
 
 def test_grep_retrieval_mode_falls_back_to_config_manager(monkeypatch):
@@ -396,7 +400,7 @@ def test_grep_retrieval_mode_falls_back_to_config_manager(monkeypatch):
     manager = SimpleNamespace(config=SimpleNamespace(semantic_search_enabled=True))
     monkeypatch.setattr(posix_tools, "ConfigManager", lambda: manager)
 
-    assert posix_tools._grep_retrieval_mode(False) is SearchRetrievalMode.HYBRID
+    assert posix_tools._grep_retrieval_mode(True) is SearchRetrievalMode.HYBRID
 
 
 @pytest.mark.asyncio
@@ -2097,7 +2101,7 @@ async def test_single_project_unqualified_paths_pass_through(
     rows = await tail()
     assert {row["title"] for row in rows} >= {"Root"}
 
-    found = await grep("Root", literal=True)
+    found = await grep("Root")
     assert found["results"]
 
 

@@ -73,7 +73,7 @@ EXPECTED_TOOL_SIGNATURES: dict[str, list[str]] = {
     ],
     "grep": [
         "pattern",
-        "literal",
+        "semantic",
         "page",
         "page_size",
         "project",

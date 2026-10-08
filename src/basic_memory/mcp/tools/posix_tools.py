@@ -322,9 +322,14 @@ async def cat(
     return qualify_note_paths(payload, route)
 
 
-def _grep_retrieval_mode(literal: bool) -> SearchRetrievalMode:
-    """Pick grep's retrieval mode: literal full-text on request, semantic when available."""
-    if literal:
+def _grep_retrieval_mode(semantic: bool) -> SearchRetrievalMode:
+    """Pick grep's retrieval mode: keyword full-text by default, hybrid on request.
+
+    Keyword matching is the default because nearest-neighbour ranking always returns
+    something, so a grep for a term that appears nowhere would list unrelated notes
+    instead of nothing (#1685).
+    """
+    if not semantic:
         return SearchRetrievalMode.FTS
     try:
         config = get_container().config
@@ -337,12 +342,12 @@ def _grep_retrieval_mode(literal: bool) -> SearchRetrievalMode:
 @mcp.tool(
     title="Grep",
     description=(
-        "Search note content in one project and return ranked matching notes. Not a regex: "
-        "by default `pattern` is matched with hybrid semantic plus full-text search when "
-        "semantic search is enabled, otherwise full-text only. `literal=True` forces "
-        "full-text matching; add `context_lines` to get case-insensitive matching lines "
-        "with surrounding context and line numbers. Requires 'project' when several "
-        "projects are addressable."
+        "Search note content in one project and return matching notes. Not a regex: "
+        "`pattern` is matched as full-text keywords by default, and a pattern found in no "
+        "note returns no results. `semantic=True` ranks by meaning instead (hybrid "
+        "semantic plus full-text, when semantic search is enabled). Add `context_lines` "
+        "to get case-insensitive matching lines with surrounding context and line "
+        "numbers. Requires 'project' when several projects are addressable."
     ),
     tags={POSIX_TOOLS_TAG, "search"},
     annotations={
@@ -354,7 +359,7 @@ def _grep_retrieval_mode(literal: bool) -> SearchRetrievalMode:
 )
 async def grep(
     pattern: str,
-    literal: bool = False,
+    semantic: bool = False,
     page: int = 1,
     page_size: int = 10,
     project: Optional[str] = None,
@@ -363,16 +368,16 @@ async def grep(
     context_lines: int | None = None,
     max_matches: int = 10,
 ) -> dict[str, Any]:
-    """Search note content, semantically by default.
+    """Search note content by full-text keywords, or by meaning with semantic=True.
 
     Args:
         pattern: Text to search for.
-        literal: Use full-text keyword matching instead of the default semantic/hybrid
-            retrieval. Required for context_lines.
+        semantic: Rank by meaning with hybrid semantic plus full-text retrieval instead
+            of the default keyword matching. Cannot be combined with context_lines.
         page: Page number (1-indexed).
         page_size: Results per page (maximum 100 in line-scanning mode).
         context_lines: Return compact literal match windows with 0-10 surrounding lines
-            (requires literal=True). Case-insensitive substrings, coordinates including
+            (not with semantic=True). Case-insensitive substrings, coordinates including
             frontmatter, overlapping windows merged. Scans current content of this
             indexed candidate page; pagination/totals count candidates, not exact matches.
         max_matches: Maximum matching lines to show per candidate in line mode (1-100,
@@ -393,8 +398,8 @@ async def grep(
     if page_size < 1:
         raise ValueError(f"page_size must be >= 1, got {page_size}")
     if context_lines is not None:
-        if not literal:
-            raise ValueError("grep: context_lines requires literal=True")
+        if semantic:
+            raise ValueError("grep: context_lines cannot be combined with semantic=True")
         if not 0 <= context_lines <= 10:
             raise ValueError("grep: context_lines must be between 0 and 10")
         if "\n" in pattern or "\r" in pattern:
@@ -415,7 +420,7 @@ async def grep(
 
     query = SearchQuery(
         text=pattern,
-        retrieval_mode=_grep_retrieval_mode(literal),
+        retrieval_mode=_grep_retrieval_mode(semantic),
         entity_types=[SearchItemType.ENTITY],
     )
     async with get_project_client(route.project, context=context, project_id=route.project_id) as (

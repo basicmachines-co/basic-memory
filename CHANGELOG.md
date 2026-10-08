@@ -185,9 +185,9 @@
   **This ships an Alembic migration** adding the `note_section` table.
 
 - **#1501**: `read_note` accepts `start_line` / `end_line` and returns numbered lines
-  with the next range to read, and `grep(literal=True, context_lines=N)` returns merged
+  with the next range to read, and `grep(context_lines=N)` returns merged
   match windows instead of whole notes, with `max_matches` bounding the lines per note.
-  The CLI equivalents are `bm grep -F "retry" -C 3` and `bm tool read-note NAME
+  The CLI equivalents are `bm grep "retry" -C 3` and `bm tool read-note NAME
   --start-line 120 --end-line 180`.
 
 - **#686**: `search_notes(compact=True)` and `build_context(compact=True)` return
@@ -329,6 +329,12 @@
 - **#1683**: `read_note` with JSON output (and `cat`) returns `checksum`, the revision
   `write_note`'s `expected_checksum` compares, so an agent can overwrite only the
   revision it read.
+
+- **#1685**: `grep` matches keywords by default, so a pattern found in no note returns
+  no results. It ranked by meaning whenever semantic search was on, and nearest-neighbour
+  ranking always returns something: `grep("Ethio.ia")` listed unrelated notes. Pass
+  `semantic=True` (`bm grep --semantic`) to rank by meaning. This replaces the `literal`
+  parameter and the `-F` flag, and `context_lines` (`-C`) no longer needs either.
 
 - **#1663**: An unhandled API error no longer stalls the server for seconds while it is
   logged, and logs no longer contain the values of local variables from tracebacks.

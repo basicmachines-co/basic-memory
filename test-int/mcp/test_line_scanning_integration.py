@@ -28,7 +28,6 @@ async def test_grep_to_read_lines_over_mcp(mcp_server, app, test_project, config
                 "grep",
                 {
                     "pattern": "retry",
-                    "literal": True,
                     "context_lines": 1,
                     "project": test_project.name,
                 },
