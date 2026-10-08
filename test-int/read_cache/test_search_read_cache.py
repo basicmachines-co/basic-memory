@@ -79,7 +79,7 @@ async def test_post_and_query_share_canonical_real_redis_entry(
             "text": "canonical cache",
             "metadata_filters": {
                 "status": "open",
-                "nested": {"z": 2, "a": 1},
+                "score": {"$lt": 9, "$gt": 1},
             },
         },
     )
@@ -89,7 +89,7 @@ async def test_post_and_query_share_canonical_real_redis_entry(
         params=pagination,
         json={
             "metadata_filters": {
-                "nested": {"a": 1, "z": 2},
+                "score": {"$gt": 1, "$lt": 9},
                 "status": "open",
             },
             "text": "canonical cache",
@@ -119,7 +119,7 @@ async def test_post_and_query_share_canonical_real_redis_entry(
             "text": "canonical cache",
             "metadata_filters": {
                 "status": "open",
-                "nested": {"z": 2, "a": 1},
+                "score": {"$lt": 9, "$gt": 1},
             },
         },
     )
