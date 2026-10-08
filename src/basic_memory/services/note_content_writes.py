@@ -37,6 +37,9 @@ from basic_memory.indexing.accepted_note_mutation_runner import (
     run_accepted_note_move,
     run_accepted_note_update,
 )
+from basic_memory.indexing.accepted_note_write_runner import (
+    refresh_accepted_note_search_index,
+)
 from basic_memory.indexing.relation_persistence import (
     RelationGenerationPublication,
     RelationGenerationPublisher,
@@ -254,7 +257,25 @@ class NoteContentMutationService:
         self,
         result: AcceptedNoteMutationResult,
     ) -> AcceptedNoteChange:
-        """Run post-commit graph publication and expose the accepted response."""
+        """Run post-commit derived work and expose the accepted response."""
+        if result.search_row is not None:
+            try:
+                await refresh_accepted_note_search_index(
+                    self.session_maker,
+                    row=result.search_row,
+                    repositories=self.mutation_dependencies.write_repositories,
+                )
+            except Exception:
+                # Trigger: the hot search refresh fails after accepted content committed.
+                # Why: the row is derived state, rewritten by the note's materialization
+                #   index; failing the response would report a committed write as failed
+                #   and strand that materialization (#1681).
+                # Outcome: preserve the accepted change and log the repairable failure.
+                logger.exception(
+                    "Search refresh failed after accepted note commit; continuing "
+                    "materialization: entity_id={}",
+                    result.search_row.entity_id,
+                )
         try:
             await self._publish_relation_generation(result.relation_publication)
         except Exception:

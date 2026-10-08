@@ -34,6 +34,7 @@ from basic_memory.indexing.relation_persistence import RelationGenerationPublica
 from basic_memory.models import Entity, NoteContent, Project
 from basic_memory.markdown.note_lock import LOCKED_NOTE_MESSAGE, note_is_locked
 from basic_memory.repository import NoteContentVersionConflict
+from basic_memory.repository.accepted_note_search_row import AcceptedNoteSearchRow
 from basic_memory.repository.note_file_vacate_repository import NoteFileVacateRepository
 from basic_memory.services.exceptions import EntityAlreadyExistsError
 from basic_memory.services.note_authorship import NoteAuthor, NoteAuthorship
@@ -345,9 +346,10 @@ class AcceptedNoteMutationDependencies:
 
 @dataclass(frozen=True, slots=True)
 class AcceptedNoteMutationResult:
-    """Accepted response plus relation work that must run after commit."""
+    """Accepted response plus the derived work that must run after commit."""
 
     change: AcceptedNoteMutationChange
+    search_row: AcceptedNoteSearchRow | None = None
     relation_publication: RelationGenerationPublication | None = None
 
 
@@ -800,6 +802,7 @@ async def _run_accepted_note_create(
             ),
             project_change,
         ),
+        search_row=persisted.search_row,
         relation_publication=persisted.relation_publication,
     )
 
@@ -1072,6 +1075,7 @@ async def _run_accepted_note_update(
             ),
             project_change,
         ),
+        search_row=persisted.search_row,
         relation_publication=persisted.relation_publication,
     )
 
@@ -1154,6 +1158,7 @@ async def _run_accepted_note_edit(
             ),
             project_change,
         ),
+        search_row=persisted.search_row,
         relation_publication=persisted.relation_publication,
     )
 
@@ -1299,6 +1304,7 @@ async def _run_accepted_note_move(
             ),
             project_change,
         ),
+        search_row=persisted.search_row,
         relation_publication=persisted.relation_publication,
     )
 
