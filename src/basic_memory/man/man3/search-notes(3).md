@@ -51,8 +51,13 @@ boolean operators, phrases, and prefix patterns), `title`, `permalink`, and
 `note_types` (frontmatter `type:`), `entity_types` (entity vs observation
 rows), `categories` (observation categories, paired with
 `entity_types=["observation"]`), `tags`, `status`, `after_date`, and
-`metadata_filters` — equality matches against arbitrary frontmatter fields,
-which is how the manual implements apropos (see [[Manpage]]).
+`metadata_filters` — conditions on arbitrary frontmatter fields, which is how
+the manual implements apropos (see [[Manpage]]). A condition is a value
+(equality), `null` (absent or null), a list (array contains all), or an
+operator object: `$gt`, `$gte`, `$lt`, `$lte`, `$in`, `$between`, `$contains`,
+`$exists`. Several operators on one field AND together, so a range is
+`{"started": {"$gte": "2026-01-01", "$lt": "2026-02-01"}}`; the leading `$` is
+optional.
 
 **Valid time** (`valid_at`, `valid_overlaps`, `time_kind`) queries what a note
 *says was true*, not when it was last edited. Observations can carry a
@@ -98,7 +103,7 @@ It is not a hard token budget: titles and metadata can still be large.
 - **entity_types** (array | null, optional, default: None) — Knowledge-graph item types to return: "entity" (whole notes), "observation", "relation". Defaults to entity, or to observation when categories or a valid-time filter is given. Not the frontmatter `type` (use note_types for that). Accepts a list, a comma-separated string, or a JSON-array string.
 - **categories** (array | null, optional, default: None) — Observation categories to match exactly (e.g. ["requirement"]). Implies observation results unless entity_types is set. Accepts a list, a comma-separated string, or a JSON-array string.
 - **after_date** (string | null, optional, default: None) — Optional date filter for recent content (e.g., "1 week", "2d", "2024-01-01")
-- **metadata_filters** (object | null, optional, default: None) — Optional structured frontmatter filters (e.g., {"status": "in-progress"}). Integer values match integer YAML fields ({"section": 3} works). A None value is an is-null match: notes where the key is absent or explicitly null. None inside $in/$between/a contains list/a comparison is refused — those compare against the value, and a comparison with null is never true.
+- **metadata_filters** (object | null, optional, default: None) — Structured frontmatter filters, {field: condition}. Nested fields use dot notation ("schema.confidence"). Conditions: a value for equality ({"status": "draft"}); null for absent-or-null ({"owner": null}); a list for array-contains-all ({"tags": ["a", "b"]}); or an operator object using $gt, $gte, $lt, $lte, $in (list), $between ([min, max]), $contains (value or list), $exists (true/false), e.g. {"priority": {"$in": ["high"]}}. Several operators on one field AND together: {"started": {"$gte": "2026-01-01", "$lt": "2026-02-01"}}. The leading $ is optional.
 - **tags** (array | null, optional, default: None) — Optional tag filter (frontmatter tags); shorthand for metadata_filters["tags"]. Accepts a list (["a", "b"]) or a comma-separated string ("a,b"), matching the write_note tags convention and the tag: query shorthand.
 - **status** (string | null, optional, default: None) — Optional status filter (frontmatter status); shorthand for metadata_filters["status"]
 - **min_similarity** (number | null, optional, default: None) — Optional float to override the global semantic_min_similarity threshold for this query. E.g., 0.0 to see all vector results, or 0.8 for high precision. Only applies to vector and hybrid search types.
