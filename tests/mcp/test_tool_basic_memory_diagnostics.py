@@ -569,21 +569,25 @@ def test_diagnostics_reports_env_overrides_by_field_name(monkeypatch, tmp_path):
 
 
 def test_diagnostics_matches_config_manager_env_precedence(monkeypatch, tmp_path):
-    """The section reports what ConfigManager applies, not every env var spelled."""
+    """The section reports what ConfigManager applies, keyed by current field."""
     config_file = tmp_path / "config.json"
     config_file.write_text(json.dumps({"semantic_min_similarity": 0.3}))
-    # ConfigManager only lets the exact upper-case name beat a file value.
+    # pydantic-settings matches env names case-insensitively, with or without
+    # a file value for the field.
     monkeypatch.setenv("basic_memory_semantic_min_similarity", "0.49")
+    monkeypatch.setenv("basic_memory_default_search_type", "vector")
     # Legacy sync env names still drive their renamed field when the file
     # does not spell the new name.
     monkeypatch.setenv("BASIC_MEMORY_SYNC_DELAY", "2500")
 
     overrides, section = _environment_section(basic_memory_diagnostics())
 
-    assert "semantic_min_similarity" not in overrides
-    assert "basic_memory_semantic_min_similarity" in section
+    assert overrides["semantic_min_similarity"] == "0.49"
+    assert overrides["default_search_type"] == "vector"
     assert overrides["index_delay"] == "2500"
-    assert "BASIC_MEMORY_SYNC_DELAY" not in section.split("```", 2)[2]
+    names_only = section.split("```", 2)[2]
+    assert "semantic_min_similarity" not in names_only
+    assert "BASIC_MEMORY_SYNC_DELAY" not in names_only
 
 
 def test_diagnostics_redacts_secret_env_overrides(monkeypatch):

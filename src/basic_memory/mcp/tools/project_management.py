@@ -36,14 +36,15 @@ from basic_memory.utils import generate_permalink
 # --- Helpers for dual-fetch + merge ---
 
 
-def _sync_support_metadata(workspace_type: str | None) -> dict[str, object]:
-    """Return structured local sync support fields for project listings."""
-    sync_supported = workspace_type is None or workspace_type == "personal"
-    return {
-        "sync_supported": sync_supported,
-        "sync_reason": None if sync_supported else f"{workspace_type} workspace",
-        "local_usage": "sync-supported" if sync_supported else "cloud-only",
-    }
+# Push/pull works on every workspace type (rclone on Personal, WebDAV on Team), so
+# every project supports local sync. The keys stay for clients that read them and
+# match `bm project list --json`; only the deprecated mirror commands were
+# Personal-only (#1596).
+SYNC_SUPPORT_METADATA: dict[str, object] = {
+    "sync_supported": True,
+    "sync_reason": None,
+    "local_usage": "sync-supported",
+}
 
 
 def _merge_projects(
@@ -137,7 +138,7 @@ def _merge_projects(
                 "workspace_tenant_id": ws_tenant_id,
                 "workspace_slug": cloud_workspace_slug if cloud_proj else None,
                 "workspace_is_default": cloud_workspace_is_default if cloud_proj else False,
-                **_sync_support_metadata(ws_type),
+                **SYNC_SUPPORT_METADATA,
                 "qualified_name": (
                     f"{cloud_workspace_slug}/{permalink}"
                     if cloud_proj and cloud_workspace_slug
@@ -272,7 +273,7 @@ def _merge_workspace_projects(
                 "workspace_tenant_id": entry.workspace.tenant_id,
                 "workspace_slug": entry.workspace.slug,
                 "workspace_is_default": entry.workspace.is_default,
-                **_sync_support_metadata(entry.workspace.workspace_type),
+                **SYNC_SUPPORT_METADATA,
                 "qualified_name": entry.qualified_name,
             }
         )
@@ -298,7 +299,7 @@ def _merge_workspace_projects(
                     "workspace_tenant_id": None,
                     "workspace_slug": None,
                     "workspace_is_default": False,
-                    **_sync_support_metadata(None),
+                    **SYNC_SUPPORT_METADATA,
                     "qualified_name": None,
                 }
             )
@@ -330,10 +331,7 @@ def _format_project_list_text(merged: list[dict[str, Any]]) -> str:
         source = project["source"]
         external_id = project.get("external_id", "")
         id_suffix = f" [{external_id}]" if external_id else ""
-        usage_suffix = ""
-        if project.get("sync_supported") is False:
-            usage_suffix = " - cloud-only (local sync unsupported)"
-        result += f"- {label} ({source}){id_suffix}{usage_suffix}\n"
+        result += f"- {label} ({source}){id_suffix}\n"
 
     result += "\n" + "─" * 40 + "\n"
     result += (

@@ -91,7 +91,8 @@
   run, still work on Personal workspaces, and on Team workspaces exit with that notice
   instead of a "Personal only" error. `bm project list` no longer shows Team projects
   with a local sync path as `cloud-only`: `sync_supported` is now true for every
-  workspace. Help examples no longer pass `--workspace Personal`.
+  workspace, and `list_memory_projects` reports the same. Help examples no longer pass
+  `--workspace Personal`.
 
 ### Features
 
@@ -344,7 +345,10 @@
 - **#1595**: `basic_memory_diagnostics` lists the `BASIC_MEMORY_*` environment
   variables that override `config.json`, redacted the same way as the file dump. It
   used to print only the file, which can disagree with what the server is using. Other
-  `BASIC_MEMORY_*` variables are listed by name only.
+  `BASIC_MEMORY_*` variables are listed by name only. Env names now match config fields
+  in any letter case, as pydantic-settings reads them: a lowercase
+  `basic_memory_log_level` used to lose to the file value, or, when the file lacked the
+  key, take effect and then get written into `config.json`.
 
 - **#1593**: The CLI's list of commands that skip startup initialization no longer
   names `sync` and `watch`, which are not commands. A test now keeps the list to

@@ -69,6 +69,29 @@ def test_project_add_keeps_file_values_under_env_override(
     assert "cli_output_style" not in written
 
 
+def test_lowercase_env_name_wins_and_is_not_persisted(
+    file_manager: ConfigManager, config_home: Path, monkeypatch
+):
+    """pydantic-settings matches env names case-insensitively, so precedence must too.
+
+    A lowercase name used to lose to the file value, and when the file lacked
+    the key it took effect but was then written into config.json.
+    """
+    monkeypatch.setenv("basic_memory_log_level", "DEBUG")
+    monkeypatch.setenv("basic_memory_cli_output_style", "plain")
+    _reset_config_cache()
+
+    loaded = file_manager.load_config()
+    assert loaded.log_level == "DEBUG"
+    assert loaded.cli_output_style == "plain"
+
+    file_manager.add_project("leak", str(config_home / "leak"))
+
+    written = _read_file(file_manager)
+    assert written["log_level"] == "INFO"
+    assert "cli_output_style" not in written
+
+
 def test_project_root_env_does_not_stick_after_unset(
     file_manager: ConfigManager, config_home: Path, monkeypatch
 ):
