@@ -604,3 +604,13 @@ def test_embedding_status_still_emits_the_deprecated_semantic_field():
     assert EmbeddingStatus().model_dump()["semantic_search_enabled"] is True
     keyword_only = EmbeddingStatus(vector_runtime_available=False).model_dump(mode="json")
     assert keyword_only["semantic_search_enabled"] is False
+
+
+def test_embedding_status_reads_the_legacy_field_from_older_servers():
+    """A server released before the flag was removed sends only semantic_search_enabled."""
+    legacy = EmbeddingStatus.model_validate({"semantic_search_enabled": False})
+    assert legacy.vector_runtime_available is False
+    current = EmbeddingStatus.model_validate(
+        {"semantic_search_enabled": True, "vector_runtime_available": False}
+    )
+    assert current.vector_runtime_available is False

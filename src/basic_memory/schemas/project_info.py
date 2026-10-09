@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, computed_field
+from pydantic import BaseModel, Field, computed_field, model_validator
 
 from basic_memory.utils import generate_permalink
 
@@ -103,6 +103,18 @@ class EmbeddingStatus(BaseModel):
     # Derived
     reindex_recommended: bool = False
     reindex_reason: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _read_legacy_semantic_field(cls, data: Any) -> Any:
+        """Servers released before the flag was removed send only semantic_search_enabled."""
+        if (
+            isinstance(data, dict)
+            and "vector_runtime_available" not in data
+            and "semantic_search_enabled" in data
+        ):
+            return {**data, "vector_runtime_available": data["semantic_search_enabled"]}
+        return data
 
     @computed_field
     @property
