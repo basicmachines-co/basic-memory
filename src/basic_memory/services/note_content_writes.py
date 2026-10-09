@@ -23,6 +23,7 @@ from basic_memory.indexing.accepted_note_mutation_runner import (
     AcceptedNoteMutationActor,
     AcceptedNoteMutationChange,
     AcceptedNoteMutationDependencies,
+    AcceptedNoteMutationRejectKind,
     AcceptedNoteMutationRejected,
     AcceptedNoteMutationRejection,
     AcceptedNoteMutationResult,
@@ -701,12 +702,24 @@ class NoteContentMutationService:
             ):
                 async with accepted_note_transaction(self.session_maker) as session:
                     if base_checksum is not None:
-                        _, _, current_note_content = await load_existing_markdown_note_content(
-                            session,
-                            project_external_id=project_external_id,
-                            entity_external_id=entity_external_id,
-                            dependencies=self.mutation_dependencies,
-                        )
+                        try:
+                            _, _, current_note_content = await load_existing_markdown_note_content(
+                                session,
+                                project_external_id=project_external_id,
+                                entity_external_id=entity_external_id,
+                                dependencies=self.mutation_dependencies,
+                            )
+                        except AcceptedNoteMutationRejected as error:
+                            # Trigger: the guarded note was deleted after the caller
+                            #   resolved it (the entity row is gone).
+                            # Why: a guarded edit must answer a deleted note the same
+                            #   way whether the delete landed before resolution or
+                            #   after it; a bare 404 here would be race-dependent.
+                            # Outcome: the base-checksum conflict with no current
+                            #   checksum, which callers read as "the note is gone".
+                            if error.rejection.kind is AcceptedNoteMutationRejectKind.not_found:
+                                reject_stale_base_checksum(current_db_checksum=None)
+                            raise
                         if current_note_content.db_checksum != base_checksum:
                             reject_stale_base_checksum(
                                 current_db_checksum=current_note_content.db_checksum

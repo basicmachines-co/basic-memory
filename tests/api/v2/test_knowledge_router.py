@@ -932,6 +932,55 @@ async def test_update_entity_with_base_checksum_after_delete_returns_409_gone(
 
 
 @pytest.mark.asyncio
+async def test_edit_entity_with_base_checksum_after_delete_returns_409_gone(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url,
+    session_maker,
+):
+    """A guarded PATCH that loses a race with delete reports the gone-note conflict.
+
+    The MCP tool resolves the note before it patches. A delete landing between
+    the two must give the same structured conflict as a delete that landed
+    before resolution, not a plain 404 the tool cannot classify.
+    """
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "Raced Note", "directory": "test", "content": "To be deleted"},
+    )
+    assert response.status_code == 202
+    created_entity = EntityResponseV2.model_validate(response.json())
+
+    note_content = await _get_note_content(session_maker, test_project.id, created_entity.id)
+    assert note_content is not None
+    synced_checksum = note_content.db_checksum
+
+    response = await client.delete(
+        f"{v2_project_url}/knowledge/entities/{created_entity.external_id}"
+    )
+    assert response.status_code == 202
+
+    edit_data = {"operation": "append", "content": "Late append"}
+    response = await client.patch(
+        f"{v2_project_url}/knowledge/entities/{created_entity.external_id}",
+        json=edit_data,
+        headers={NOTE_CONTENT_BASE_CHECKSUM_HEADER: synced_checksum},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "message": "Note changed since your last sync",
+        "db_checksum": None,
+    }
+
+    # Unguarded, the same PATCH keeps its ordinary not-found answer.
+    response = await client.patch(
+        f"{v2_project_url}/knowledge/entities/{created_entity.external_id}",
+        json=edit_data,
+    )
+    assert response.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_put_entity_with_fast_param_returns_indexed_accepted_content(
     client: AsyncClient, v2_project_url, entity_repository, session_maker
 ):
