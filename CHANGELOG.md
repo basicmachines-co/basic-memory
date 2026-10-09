@@ -96,6 +96,18 @@
 
 ### Features
 
+- **#1552**: `edit_note` can edit only the revision you read. Pass `expected_checksum`
+  (the full `checksum` from a JSON `read_note`, `write_note` or `edit_note` result) and
+  the edit applies only while the note is still that revision. Otherwise nothing is
+  written and the tool error is a revision conflict carrying the current checksum (JSON
+  `error: "NOTE_REVISION_CONFLICT"`, `currentChecksum`). A guarded `append` or `prepend`
+  on a missing note is a conflict, not an auto-create. The v2 `PATCH` entity route
+  accepts the same `x-bm-cloud-note-base-checksum` header the `PUT` route does.
+
+- **#1552**: `read_note(include_content=False)` returns only a note's title, permalink,
+  file path, full checksum and `updated_at`, without the body. Use it to refresh a stale
+  `expected_checksum` without reading the whole note.
+
 - **#1642**: `write_note` can overwrite only the revision you read. Pass
   `expected_checksum` with `overwrite=True` (CLI: `--overwrite --expected-checksum`)
   and the note is replaced only while it is still that revision. Otherwise nothing
@@ -353,6 +365,16 @@
 - **#1593**: The CLI's list of commands that skip startup initialization no longer
   names `sync` and `watch`, which are not commands. A test now keeps the list to
   registered commands. Thanks to @FBISiri.
+
+- **#1651**: A document import's ingestion-run note no longer says "exact storage
+  materialization is pending", which read as a live status long after processing
+  finished. New run notes say what they record and link the original file and its
+  extracted-text note. Existing run notes keep their old text.
+
+- **#1653**: The `write_note` documentation now says what `overwrite=True` does to
+  frontmatter: the body is replaced, keys the write sets replace the old values, and
+  keys only the existing note has are kept. Existing frontmatter that cannot be parsed
+  is discarded. Behavior is unchanged.
 
 - `bm tool edit-note --help` lists all six edit operations and documents `--section` for
   `replace_section`, `insert_before_section` and `insert_after_section`. Thanks to

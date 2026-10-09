@@ -323,6 +323,12 @@ async def write_note(
                   beyond title/type/tags. Nested dicts are supported. Not available from the CLI.
         overwrite: If True, replace existing note on conflict. If False, error on conflict.
                    If None (default), consult write_note_overwrite_default config setting.
+                   Overwrite replaces the body but merges frontmatter: keys the existing
+                   note has and this write does not set (custom fields) are kept, while
+                   keys this write sets (title, type, tags, metadata, or frontmatter in
+                   content) replace the old values. Existing frontmatter that cannot be
+                   parsed is discarded rather than merged. To remove a key, rewrite it
+                   with edit_note or edit the file.
         expected_checksum: Optional revision precondition for overwrite=True: the checksum
                    of the note you read (from a JSON read_note, write_note or edit_note
                    result). The

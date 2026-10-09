@@ -4,6 +4,8 @@ Integration tests for read_note MCP tool.
 Tests the full flow: MCP client -> MCP server -> FastAPI -> database
 """
 
+import json
+
 import pytest
 from fastmcp import Client
 
@@ -168,3 +170,79 @@ async def test_read_note_project_id_takes_precedence_over_name(mcp_server, app, 
         result_text = read_result.content[0].text
         assert "# Precedence Note" in result_text
         assert "project_id wins." in result_text
+
+
+@pytest.mark.asyncio
+async def test_read_note_include_content_false_returns_metadata_and_checksum(
+    mcp_server, app, test_project
+):
+    """A metadata-only read returns the full checksum edit_note accepts, without the body."""
+    async with Client(mcp_server) as client:
+        created = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Head Read",
+                "directory": "test",
+                "content": "A body the caller does not want to pay for.",
+                "output_format": "json",
+            },
+        )
+        checksum = json.loads(created.content[0].text)["checksum"]
+
+        head_json = await client.call_tool(
+            "read_note",
+            {
+                "project": test_project.name,
+                "identifier": "Head Read",
+                "include_content": False,
+                "output_format": "json",
+            },
+        )
+        metadata = json.loads(head_json.content[0].text)
+        assert metadata["title"] == "Head Read"
+        assert metadata["file_path"] == "test/Head Read.md"
+        assert metadata["checksum"] == checksum
+        assert metadata["updated_at"]
+        assert "content" not in metadata
+
+        head_text = await client.call_tool(
+            "read_note",
+            {
+                "project": test_project.name,
+                "identifier": "test/head-read",
+                "include_content": False,
+            },
+        )
+        text = head_text.content[0].text
+        assert text.startswith("# Note metadata")
+        assert f"checksum: {checksum}" in text
+        assert "A body the caller" not in text
+
+        # The checksum from the metadata read is accepted as edit_note's precondition.
+        edited = await client.call_tool(
+            "edit_note",
+            {
+                "project": test_project.name,
+                "identifier": "test/head-read",
+                "operation": "append",
+                "content": "\nMore.",
+                "expected_checksum": metadata["checksum"],
+            },
+        )
+        assert "# Edited note (append)" in edited.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_read_note_include_content_false_rejects_line_ranges(mcp_server, app, test_project):
+    async with Client(mcp_server) as client:
+        with pytest.raises(Exception, match="include_content=False cannot be combined"):
+            await client.call_tool(
+                "read_note",
+                {
+                    "project": test_project.name,
+                    "identifier": "anything",
+                    "include_content": False,
+                    "start_line": 1,
+                },
+            )

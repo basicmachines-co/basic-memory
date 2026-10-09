@@ -9,7 +9,11 @@ import pytest
 from fastmcp.exceptions import ToolError
 
 from basic_memory.mcp.clients import KnowledgeClient
-from basic_memory.mcp.tools.edit_note import _resolve_after_disk_recovery, edit_note
+from basic_memory.mcp.tools.edit_note import (
+    _resolve_after_disk_recovery,
+    _revision_conflict_detail,
+    edit_note,
+)
 from basic_memory.mcp.tools.read_note import read_note
 from basic_memory.mcp.tools.write_note import write_note
 from basic_memory.schemas.v2.entity import EntityResolveResponse
@@ -1753,8 +1757,8 @@ async def test_edit_note_reports_the_accepted_db_checksum(
     db_checksum = "b" * 64  # a real, already-persisted SHA-256 hex digest
     real_patch_entity = KnowledgeClient.patch_entity
 
-    async def fake_patch_entity(self, entity_id, patch_data):
-        result = await real_patch_entity(self, entity_id, patch_data)
+    async def fake_patch_entity(self, entity_id, patch_data, *, base_checksum=None):
+        result = await real_patch_entity(self, entity_id, patch_data, base_checksum=base_checksum)
         return result.model_copy(
             update={"file_checksum": file_checksum, "db_checksum": db_checksum}
         )
@@ -1784,7 +1788,7 @@ async def test_edit_note_reports_unknown_outcome_when_no_response_arrives(
         content="# Unknown Outcome\n\nBody.",
     )
 
-    async def dropped_connection(self, entity_id, patch_data):
+    async def dropped_connection(self, entity_id, patch_data, *, base_checksum=None):
         try:
             raise httpx.ReadError("connection dropped")
         except httpx.ReadError as error:
@@ -1829,7 +1833,7 @@ async def test_edit_note_reports_a_4xx_as_a_refusal_not_an_unknown_outcome(
         content="# Refused Edit\n\nBody.",
     )
 
-    async def conflict(self, entity_id, patch_data):
+    async def conflict(self, entity_id, patch_data, *, base_checksum=None):
         request = httpx.Request("PATCH", "http://test/entities")
         response = httpx.Response(409, request=request)
         try:
@@ -1849,3 +1853,54 @@ async def test_edit_note_reports_a_4xx_as_a_refusal_not_an_unknown_outcome(
         )
     payload = json.loads(str(refusal.value))
     assert payload["error"] == "Note was modified concurrently"
+
+    # Trigger: the caller sent expected_checksum, but the 409 is not the structured
+    #   base-checksum conflict (no {"db_checksum": ...} detail).
+    # Outcome: it keeps the ordinary refusal instead of claiming a revision conflict.
+    with pytest.raises(ToolError) as guarded_refusal:
+        await edit_note(
+            project=test_project.name,
+            identifier="notes/refused-edit",
+            operation="append",
+            content="\nAppended.",
+            expected_checksum="a" * 64,
+            output_format="json",
+        )
+    assert json.loads(str(guarded_refusal.value))["error"] == "Note was modified concurrently"
+
+
+def test_revision_conflict_detail_only_matches_the_structured_checksum_409():
+    """Only a 409 carrying the {"db_checksum": ...} detail is a revision conflict."""
+    request = httpx.Request("PATCH", "http://test/entities")
+
+    def tool_error_from(response: httpx.Response) -> ToolError:
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as error:
+            try:
+                raise ToolError("refused") from error
+            except ToolError as tool_error:
+                return tool_error
+        raise AssertionError("expected an HTTP error status")  # pragma: no cover
+
+    structured = tool_error_from(
+        httpx.Response(
+            409,
+            request=request,
+            json={"detail": {"message": "Note changed since your last sync", "db_checksum": "b"}},
+        )
+    )
+    assert _revision_conflict_detail(structured) == {
+        "message": "Note changed since your last sync",
+        "db_checksum": "b",
+    }
+
+    plain_conflict = tool_error_from(
+        httpx.Response(409, request=request, json={"detail": "ambiguous identifier"})
+    )
+    assert _revision_conflict_detail(plain_conflict) is None
+
+    not_found = tool_error_from(httpx.Response(404, request=request, json={"detail": "gone"}))
+    assert _revision_conflict_detail(not_found) is None
+
+    assert _revision_conflict_detail(ToolError("no HTTP cause")) is None

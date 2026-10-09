@@ -122,6 +122,7 @@ async def test_read_note_emits_root_operation_and_project_context(
             "page_size": 10,
             "output_format": "json",
             "include_frontmatter": True,
+            "include_content": True,
         },
     )
     span_names = [name for name, _ in spans]
@@ -231,6 +232,7 @@ async def test_edit_note_emits_root_operation_and_project_context(
             "expected_replacements": 1,
             "replace_subsections": True,
             "has_metadata": False,
+            "has_expected_checksum": False,
         },
     )
     span_names = [name for name, _ in spans]

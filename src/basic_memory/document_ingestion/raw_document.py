@@ -422,7 +422,14 @@ def build_raw_ingestion_run_markdown(
                 raw=raw_revision,
             ),
         ),
-        body="Raw extraction accepted; exact storage materialization is pending.\n",
+        # The body is permanent, user-facing text: it is written once per raw revision
+        # and never updated, so it describes what the note is rather than a status
+        # that would go stale (#1651). The wikilinks give readers one-click navigation
+        # between the original file and its extracted text.
+        body=(
+            f"This note records the text extraction of [[{artifacts.source.file_path}]]. "
+            f"The extracted text is in [[{artifacts.document_file_path}]].\n"
+        ),
     )
     return assemble_document_ingestion_run_markdown(run)
 

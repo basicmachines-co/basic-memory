@@ -12,6 +12,7 @@ from httpx import HTTPStatusError, Request, Response
 
 from basic_memory import db
 from basic_memory.mcp.tools import write_note, read_note
+from basic_memory.mcp.tools.read_note import format_note_metadata
 from basic_memory.mcp.tools.read_note import _parse_opening_frontmatter
 from tests.mcp.conftest import ContextState, ctx
 from typing import override
@@ -1536,3 +1537,18 @@ async def test_line_scan_past_end_reports_document_length(
                 end_line=510,
                 output_format=output_format,
             )
+
+
+def test_format_note_metadata_prints_the_full_checksum_and_marks_missing_values():
+    """The text metadata read never truncates the checksum, and says when it has none."""
+    checksum = "c" * 64
+    text = format_note_metadata(
+        {"title": "T", "permalink": None, "file_path": "t.md", "checksum": checksum}
+    )
+    assert text.splitlines() == [
+        "# Note metadata",
+        "title: T",
+        "permalink: unknown",
+        "file_path: t.md",
+        f"checksum: {checksum}",
+    ]

@@ -12,6 +12,7 @@ import logfire
 # call_* helpers live in basic_memory.mcp.tools.utils; importing that at module
 # level executes the whole tools package (fastmcp + mcp SDK) during CLI startup,
 # so each method defers the import to call time instead (#886).
+from basic_memory.runtime.note_content_responses import NOTE_CONTENT_BASE_CHECKSUM_HEADER
 from basic_memory.schemas.response import (
     EntityResponse,
     DeleteEntitiesResponse,
@@ -230,12 +231,16 @@ class KnowledgeClient:
         self,
         entity_id: str,
         patch_data: dict[str, Any],
+        *,
+        base_checksum: str | None = None,
     ) -> EntityResponseV2:
         """Partially update an entity.
 
         Args:
             entity_id: Entity external_id (UUID)
             patch_data: Partial entity data to update
+            base_checksum: Optional accepted-revision checksum; when it no longer
+                matches, the server refuses the edit with a structured 409
 
         Returns:
             EntityResponseV2 with updated entity details. See create_entity
@@ -255,6 +260,11 @@ class KnowledgeClient:
                 self.http_client,
                 f"{self._base_path}/entities/{entity_id}",
                 json=patch_data,
+                headers=(
+                    {NOTE_CONTENT_BASE_CHECKSUM_HEADER: base_checksum}
+                    if base_checksum is not None
+                    else None
+                ),
                 client_name="knowledge",
                 operation="patch_entity",
                 path_template="/v2/projects/{project_id}/knowledge/entities/{entity_id}",
