@@ -366,6 +366,12 @@
   filter no longer leaves its count query running after the request returns: search and
   count run in one task group, so a failure cancels the other (#1675).
 
+- **#1657**: A full-text query that mixes a punctuated word with other words finds notes
+  that contain all of them. `IT-644 cacheability` returned nothing: one punctuated word
+  made SQLite quote the whole query as a single exact phrase, which only matches when the
+  words are adjacent. Now only the punctuated word is quoted, and every word must match in
+  any order: `"IT-644"* AND cacheability*`. Thanks to @dougvann.
+
 - **#1663**: An unhandled API error no longer stalls the server for seconds while it is
   logged, and logs no longer contain the values of local variables from tracebacks.
   Loguru's `diagnose` mode called `repr()` on every frame's locals, and each ASGI frame
