@@ -1,7 +1,7 @@
 """Search tools for Basic Memory MCP server."""
 
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from textwrap import dedent
 from typing import Annotated, List, Optional, Dict, Any, Literal, cast
@@ -13,7 +13,7 @@ from loguru import logger
 from fastmcp import Context
 from pydantic import AliasChoices, BeforeValidator, Field
 
-from basic_memory.config import ConfigManager
+from basic_memory.config import ConfigManager, ProjectMode
 from basic_memory.utils import (
     build_canonical_permalink,
     coerce_dict,
@@ -189,7 +189,9 @@ def _compact_search_response(response: SearchResponse) -> SearchResponse:
 _BOOLEAN_OPERATOR = re.compile(r"(?<![^\s()])(?:AND|OR|NOT)(?![^\s()])")
 
 
-def _search_type_for(search_type: str | None, query: str | None) -> str:
+def _search_type_for(
+    search_type: str | None, query: str | None, project_names: Sequence[str]
+) -> str:
     """The search type to run: the caller's choice, else a default suited to the query.
 
     Trigger: no explicit search_type and the query uses Boolean operators.
@@ -202,13 +204,13 @@ def _search_type_for(search_type: str | None, query: str | None) -> str:
         return search_type
     if query and _BOOLEAN_OPERATOR.search(query):
         return "text"
-    return _default_search_type()
+    return _default_search_type(project_names)
 
 
-def _default_search_type() -> str:
-    """Pick default search mode from config, falling back to auto-detection.
+def _default_search_type(project_names: Sequence[str]) -> str:
+    """Pick default search mode from config, falling back to what the target can run.
 
-    Priority: config default_search_type > auto-detect (hybrid if semantic enabled, else text).
+    Priority: config default_search_type > hybrid where vector search can run > text.
     """
     try:
         config = get_container().config
@@ -220,7 +222,12 @@ def _default_search_type() -> str:
 
     # A host that cannot load sqlite-vec runs keyword-only (#711); defaulting to
     # hybrid there would turn every plain search into a semantic-unavailable error.
-    return "hybrid" if semantic_runtime_available(config) else "text"
+    # Projects routed to Cloud search on Cloud's Postgres, which always has vectors,
+    # so the local runtime does not limit them.
+    routed_to_cloud = bool(project_names) and all(
+        config.get_project_mode(name) == ProjectMode.CLOUD for name in project_names
+    )
+    return "hybrid" if routed_to_cloud or semantic_runtime_available(config) else "text"
 
 
 def _is_service_unavailable_error(error: BaseException) -> bool:
@@ -875,7 +882,7 @@ async def _search_all_projects(
             return response.model_dump(mode="json", exclude_none=True)
         return _format_search_markdown(response, scope_label, query)
 
-    effective_search_type = _search_type_for(search_type, query)
+    effective_search_type = _search_type_for(search_type, query, [ref.name for ref in project_refs])
     search_query = _build_search_query(
         query=query,
         search_type=effective_search_type,
@@ -1609,7 +1616,7 @@ async def search_notes(
                 )
                 if is_memory_url:
                     query = resolved_query
-            effective_search_type = _search_type_for(search_type, query)
+            effective_search_type = _search_type_for(search_type, query, [active_project.name])
             if is_memory_url:
                 effective_search_type = "permalink"
 

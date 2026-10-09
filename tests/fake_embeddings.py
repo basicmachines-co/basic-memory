@@ -12,6 +12,7 @@ import math
 
 import pytest
 
+from basic_memory.repository import semantic_runtime
 from basic_memory.repository.fastembed_provider import FastEmbedEmbeddingProvider
 
 
@@ -37,10 +38,16 @@ async def _embed_documents(self: FastEmbedEmbeddingProvider, texts: list[str]) -
 
 
 def use_fake_embeddings(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Swap FastEmbed's embed methods unless the test asks for the real model."""
+    """Swap FastEmbed's embed methods unless the test asks for the real model.
+
+    Ordinary tests also model a host that can run vector search, so the sqlite-vec
+    capability probe answers yes regardless of whether this Python can load
+    extensions. Tests for the keyword-only fallback (#711) inject the opposite.
+    """
     if request.node.get_closest_marker("semantic") or request.node.get_closest_marker(
         "real_embedder"
     ):
         return
+    monkeypatch.setattr(semantic_runtime, "sqlite_vector_runtime_available", lambda: True)
     monkeypatch.setattr(FastEmbedEmbeddingProvider, "embed_query", _embed_query)
     monkeypatch.setattr(FastEmbedEmbeddingProvider, "embed_documents", _embed_documents)

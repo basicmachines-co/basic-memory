@@ -4,7 +4,7 @@ import inspect
 
 import pytest
 
-from basic_memory.config import DatabaseBackend
+from basic_memory.config import DatabaseBackend, ProjectMode
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -1044,6 +1044,9 @@ async def test_search_notes_defaults_to_hybrid_when_semantic_enabled(monkeypatch
         default_search_type: str | None = None
         database_backend: DatabaseBackend = DatabaseBackend.SQLITE
 
+        def get_project_mode(self, project_name: str) -> ProjectMode:
+            return ProjectMode.LOCAL
+
     @dataclass
     class StubContainer:
         config: StubConfig | None = None
@@ -1104,6 +1107,9 @@ async def test_search_notes_explicit_text_stays_fts_when_semantic_enabled(monkey
     class StubConfig:
         default_search_type: str | None = None
         database_backend: DatabaseBackend = DatabaseBackend.SQLITE
+
+        def get_project_mode(self, project_name: str) -> ProjectMode:
+            return ProjectMode.LOCAL
 
     @dataclass
     class StubContainer:
@@ -1175,7 +1181,11 @@ async def test_search_notes_defaults_to_hybrid_when_container_not_initialized(mo
                 "config": type(
                     "Cfg",
                     (),
-                    {"default_search_type": None, "database_backend": DatabaseBackend.SQLITE},
+                    {
+                        "default_search_type": None,
+                        "database_backend": DatabaseBackend.SQLITE,
+                        "get_project_mode": lambda self, name: ProjectMode.LOCAL,
+                    },
                 )()
             },
         )(),
@@ -1965,7 +1975,7 @@ def test_default_search_type_uses_config_value():
     mock_container.config = mock_config
 
     with patch.object(search_module, "get_container", return_value=mock_container):
-        assert search_module._default_search_type() == "vector"
+        assert search_module._default_search_type(["main"]) == "vector"
 
 
 def test_default_search_type_falls_back_to_hybrid():
@@ -1984,7 +1994,7 @@ def test_default_search_type_falls_back_to_hybrid():
         patch.object(search_module, "get_container", return_value=mock_container),
         patch.object(search_module, "semantic_runtime_available", return_value=True),
     ):
-        assert search_module._default_search_type() == "hybrid"
+        assert search_module._default_search_type(["main"]) == "hybrid"
 
 
 def test_default_search_type_is_text_when_the_vector_runtime_cannot_load():
@@ -2005,7 +2015,29 @@ def test_default_search_type_is_text_when_the_vector_runtime_cannot_load():
         # Injected: this host can load sqlite-vec, so the fallback is simulated.
         patch.object(search_module, "semantic_runtime_available", return_value=False),
     ):
-        assert search_module._default_search_type() == "text"
+        assert search_module._default_search_type(["main"]) == "text"
+
+
+def test_default_search_type_is_hybrid_for_cloud_projects_on_a_keyword_only_host():
+    """Cloud-routed projects search on Cloud's Postgres, so a local host that cannot
+    load sqlite-vec must not downgrade them to text."""
+    import sys
+    from unittest.mock import MagicMock, patch
+
+    search_module = sys.modules["basic_memory.mcp.tools.search"]
+
+    mock_config = MagicMock()
+    mock_config.default_search_type = None
+    mock_config.get_project_mode.return_value = ProjectMode.CLOUD
+    mock_container = MagicMock()
+    mock_container.config = mock_config
+
+    with (
+        patch.object(search_module, "get_container", return_value=mock_container),
+        # Injected: the local host cannot load sqlite-vec.
+        patch.object(search_module, "semantic_runtime_available", return_value=False),
+    ):
+        assert search_module._default_search_type(["cloud-notes"]) == "hybrid"
 
 
 def test_boolean_queries_default_to_text_search():
@@ -2022,12 +2054,12 @@ def test_boolean_queries_default_to_text_search():
 
     with patch.object(search_module, "get_container", return_value=mock_container):
         for query in ["coffee NOT pour", "pour AND clarity", "(tea OR coffee) NOT decaf"]:
-            assert search_module._search_type_for(None, query) == "text", query
+            assert search_module._search_type_for(None, query, ["main"]) == "text", query
         # Lowercase words and operator-like substrings are ordinary text.
         for query in ["coffee not pour", "ORACLE notes", "ANDROID", None]:
-            assert search_module._search_type_for(None, query) == "hybrid", query
+            assert search_module._search_type_for(None, query, ["main"]) == "hybrid", query
         # An explicit choice always wins.
-        assert search_module._search_type_for("hybrid", "coffee NOT pour") == "hybrid"
+        assert search_module._search_type_for("hybrid", "coffee NOT pour", ["main"]) == "hybrid"
 
 
 # --- Tests for note_types/entity_types/categories comma-split fix (#930, Codex review) ---
