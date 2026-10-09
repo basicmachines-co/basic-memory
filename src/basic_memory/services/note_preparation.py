@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
@@ -641,12 +640,6 @@ def insert_relative_to_section(
     return "\n".join([*lines[: index + 1], *insert_lines, *after])
 
 
-# CommonMark setext underline: up to three spaces of indent, then a run of `=` (H1) or
-# a run of `-` (H2), then optional trailing whitespace, ending the line by any of the
-# terminators markdown-it accepts (`\r\n`, lone `\r`, `\n`) or the end of the text.
-_SETEXT_UNDERLINE_LINE = re.compile(r" {0,3}(?:=+|-+)[ \t]*(?:\r\n|\r|\n|$)")
-
-
 def _joins_into_setext_heading(body_before: str, text_after: str) -> bool:
     """Return whether joining the texts on one newline would create a setext heading.
 
@@ -661,13 +654,11 @@ def _joins_into_setext_heading(body_before: str, text_after: str) -> bool:
     callers decide that, because only they know whether their text is a whole note or a
     fragment inside a body.
     """
-    if not _SETEXT_UNDERLINE_LINE.match(text_after):
-        return False
-    # Whether the line above is paragraph text depends on block context no single line
-    # shows: `2. item` after a paragraph is lazy continuation, not a list, and a line
-    # inside an open fence or HTML block is not a paragraph at all (a blank line there
-    # would rewrite code or close the block). Parsing the joined body lets markdown-it
-    # decide. The prefilter above keeps this parse off the common append path.
+    # Whether a join creates a setext heading depends on block context no line pattern
+    # captures: `2. item` after a paragraph is lazy continuation, a line inside an open
+    # fence or HTML block is not a paragraph, and `> ---` or an indented `---` can
+    # underline a paragraph inside a quote or list item. So markdown-it parses the
+    # joined body and decides; the edited note is parsed in full right after anyway.
     before = body_before.removesuffix("\n")
     underline_line = len(document_lines(before + "\n"))
     return setext_heading_underlined_at(before + "\n" + text_after, underline_line)

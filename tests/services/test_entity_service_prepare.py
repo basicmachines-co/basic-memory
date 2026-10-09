@@ -1037,3 +1037,35 @@ def test_prepend_fragment_with_frontmatter_like_block_keeps_html_block_open() ->
     result = apply_edit_operation(current_content, "prepend", fragment)
 
     assert remove_frontmatter(result) == fragment + "\n---\n\nOriginal body"
+
+
+def test_append_quoted_underline_after_quoted_paragraph_keeps_paragraph() -> None:
+    result = apply_edit_operation("> paragraph", "append", "> ---")
+
+    assert result == "> paragraph\n\n> ---"
+    assert _setext_heading_texts(result) == []
+
+
+def test_append_list_indented_underline_after_list_paragraph_keeps_paragraph() -> None:
+    # The indented `---` sits inside the list item, where it would underline `para`.
+    result = apply_edit_operation("- item\n\n  para", "append", "  ---")
+
+    assert result == "- item\n\n  para\n\n  ---"
+    assert _setext_heading_texts(result) == []
+
+
+@pytest.mark.parametrize(
+    ("current_content", "appended"),
+    [
+        ("## Observations\n- [fact] first", "- [fact] second"),
+        ("## Observations\n- [fact] first\n", "- [idea] second #tag"),
+        ("## Relations\n- relates_to [[First]]", "- relates_to [[Second]]"),
+        ("1. one", "2. two"),
+    ],
+)
+def test_append_list_items_and_observations_join_on_single_newline(
+    current_content: str, appended: str
+) -> None:
+    result = apply_edit_operation(current_content, "append", appended)
+
+    assert result == current_content.removesuffix("\n") + "\n" + appended
