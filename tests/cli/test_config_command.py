@@ -210,6 +210,26 @@ def test_config_set_default_project_accepts_known_project(runner, write_config):
     assert json.loads(config_file.read_text())["default_project"] == "research"
 
 
+def test_config_set_default_project_stores_the_canonical_key_for_a_display_name(
+    runner, write_config
+):
+    """ "My Test Project" names the project keyed `my-test-project`, as `bm project default` does."""
+    config_file = write_config(
+        _base_config(
+            projects={
+                "main": {"path": "/tmp/main", "mode": "local"},
+                "my-test-project": {"path": "/tmp/my-test-project", "mode": "local"},
+            }
+        )
+    )
+
+    result = runner.invoke(app, ["config", "set", "default_project", "My Test Project"])
+
+    assert result.exit_code == 0, result.output
+    assert "default_project = my-test-project" in result.output
+    assert json.loads(config_file.read_text())["default_project"] == "my-test-project"
+
+
 def test_config_set_rejects_structured_field(runner, write_config):
     write_config(_base_config())
 

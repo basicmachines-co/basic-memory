@@ -210,15 +210,21 @@ def config_set(
     config_manager = ConfigManager()
     config = config_manager.load_config()
 
-    # Trigger: default_project names a project that is not in config.projects
+    # Trigger: the setting is default_project
     # Why: the model's load-time validator replaces an unknown default with the
     #      first project so stale config files still load. An explicit `set` must
-    #      not get that silent substitution (#1635).
-    # Outcome: exit nonzero with the list of known projects; config.json is untouched
-    if key == "default_project" and value not in config.projects:
-        console.print(f"[red]Error: '{value}' is not a configured project.[/red]")
-        console.print(f"[dim]Known projects: {', '.join(sorted(config.projects))}[/dim]")
-        raise typer.Exit(1)
+    #      not get that silent substitution (#1635). A display name such as
+    #      "My Project" names the same project as its key `my-project`, as in
+    #      `bm project default`.
+    # Outcome: the value is stored as the canonical config key, or the command
+    #          exits nonzero with the known projects and config.json is untouched
+    if key == "default_project":
+        project_key, _ = config_manager.get_project(value)
+        if project_key is None:
+            console.print(f"[red]Error: '{value}' is not a configured project.[/red]")
+            console.print(f"[dim]Known projects: {', '.join(sorted(config.projects))}[/dim]")
+            raise typer.Exit(1)
+        value = project_key
 
     # Validate the whole config with the candidate applied, so `value` is coerced and
     # constrained by the same rules that guard a hand-edited config.json.
