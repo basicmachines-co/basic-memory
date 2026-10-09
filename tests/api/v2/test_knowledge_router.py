@@ -7,12 +7,13 @@ import uuid
 
 import pytest
 from httpx import AsyncClient
-from sqlalchemy import update
+from sqlalchemy import delete, update
 
 from basic_memory import db
 from basic_memory.api.v2.routers.knowledge_router import _canonical_file_path
 from basic_memory.file_utils import parse_frontmatter
 from basic_memory.ignore_utils import get_bmignore_path
+from basic_memory.indexing import accepted_note_mutation_runner
 from basic_memory.index.local_project import (
     LocalProjectIndexRuntimeFactory,
     run_local_project_index_for_project,
@@ -1047,6 +1048,93 @@ async def test_guarded_write_that_loses_the_compare_and_set_reports_the_winner(
         "message": "Note changed since your last sync",
         "db_checksum": "winner-checksum",
     }
+
+
+def _vanish_note_content_before_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Delete the NoteContent row after the entity load, before the content load.
+
+    On Postgres a delete can commit between the runner's entity read and its
+    NoteContent read. Removing the row inside the writer's transaction at that
+    point reproduces what the second read sees.
+    """
+    lock = accepted_note_mutation_runner.lock_accepted_note_content_for_entity_mutation
+
+    async def vanish_then_lock(session, *, project_id, entity_id):
+        await session.execute(delete(NoteContent).where(NoteContent.entity_id == entity_id))
+        return await lock(session, project_id=project_id, entity_id=entity_id)
+
+    monkeypatch.setattr(
+        accepted_note_mutation_runner,
+        "lock_accepted_note_content_for_entity_mutation",
+        vanish_then_lock,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method", ["patch", "put"])
+async def test_guarded_write_whose_note_content_vanishes_reports_the_note_gone(
+    client: AsyncClient,
+    test_project: Project,
+    v2_project_url,
+    session_maker,
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+):
+    """Missing state at any loader stage is the gone-note conflict for a guarded write."""
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "Vanishing Content", "directory": "test", "content": "Original"},
+    )
+    assert response.status_code == 202
+    created_entity = EntityResponseV2.model_validate(response.json())
+    note_content = await _get_note_content(session_maker, test_project.id, created_entity.id)
+    assert note_content is not None
+
+    _vanish_note_content_before_lock(monkeypatch)
+    url = f"{v2_project_url}/knowledge/entities/{created_entity.external_id}"
+    headers = {NOTE_CONTENT_BASE_CHECKSUM_HEADER: note_content.db_checksum}
+    if method == "patch":
+        response = await client.patch(
+            url, json={"operation": "append", "content": "Late"}, headers=headers
+        )
+    else:
+        response = await client.put(
+            url,
+            json={"title": "Vanishing Content", "directory": "test", "content": "Late"},
+            headers=headers,
+        )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "message": "Note changed since your last sync",
+        "db_checksum": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_unguarded_edit_whose_note_content_vanishes_keeps_the_plain_409(
+    client: AsyncClient,
+    v2_project_url,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Without a base checksum the backfill-gap refusal is unchanged."""
+    response = await client.post(
+        f"{v2_project_url}/knowledge/entities",
+        json={"title": "Vanishing Unguarded", "directory": "test", "content": "Original"},
+    )
+    assert response.status_code == 202
+    created_entity = EntityResponseV2.model_validate(response.json())
+
+    _vanish_note_content_before_lock(monkeypatch)
+    response = await client.patch(
+        f"{v2_project_url}/knowledge/entities/{created_entity.external_id}",
+        json={"operation": "append", "content": "Late"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "Note content is not available for this note yet. Retry after backfill."
+    )
 
 
 @pytest.mark.asyncio
