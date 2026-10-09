@@ -217,7 +217,7 @@ class ConfigManager:
 
         config = self.load_config()
         config.default_project = project_name
-        self.save_config(config)
+        self.save_config(config, persist_env_keys={"default_project"})
 
     def get_project(self, name: str) -> Tuple[str, str] | Tuple[None, None]:
         """Look up a project by display name or permalink."""
