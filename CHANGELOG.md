@@ -23,6 +23,15 @@
   #1662, which was reverted when its concurrency test found appends reported as refused
   that had landed; #1688 fixed that cause first. Thanks to @sammywachtel.
 
+- **#1696**: Semantic search is always on, and the `semantic_search_enabled` setting is
+  removed. FastEmbed and sqlite-vec are core dependencies, so the setting only mattered
+  for installs that turned it off by hand; those installs now download the embedding model
+  and build vectors. Old `config.json` files and `BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED`
+  are ignored rather than rejected. `bm reindex --embeddings` no longer refuses, and
+  `EmbeddingStatus` drops its `semantic_search_enabled` field. Where sqlite-vec cannot
+  load (python.org Python on macOS), search still falls back to keyword-only, and a
+  vector or hybrid query says semantic search is unavailable and points at the log.
+
 - **#1697**: `basic-memory mcp --transport streamable-http|sse` binds to `127.0.0.1` by
   default instead of `0.0.0.0`, so the unauthenticated HTTP server is no longer reachable
   from the network unless you ask for it. A non-loopback `--host` prints a warning. On a
