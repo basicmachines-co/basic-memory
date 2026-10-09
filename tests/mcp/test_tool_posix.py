@@ -157,6 +157,40 @@ async def test_cat_end_line_clamped_to_total(client, test_project):
 
 
 @pytest.mark.asyncio
+async def test_cat_start_line_past_end_is_an_error(client, test_project):
+    """Both slicing paths reject a range that starts after the last line (#1634)."""
+    await write_note(
+        title="Cat Past End Note",
+        directory="test",
+        content="alpha\nbravo",
+        project=test_project.name,
+    )
+    body = await cat("Cat Past End Note", project=test_project.name, include_frontmatter=False)
+    body_lines = len(body["content"].splitlines())
+    full = await cat("Cat Past End Note", project=test_project.name)
+    full_lines = len(full["content"].splitlines())
+
+    # Plain line ranges slice the payload client-side.
+    with pytest.raises(
+        ValueError,
+        match=f"cat: start_line 500 is past the end of the document \\({body_lines} lines\\)",
+    ):
+        await cat(
+            "Cat Past End Note",
+            project=test_project.name,
+            include_frontmatter=False,
+            start_line=500,
+        )
+
+    # max_tokens sends the range to the server-side slicer.
+    with pytest.raises(
+        ToolError,
+        match=f"start_line 500 is past the end of the document \\({full_lines} lines\\)",
+    ):
+        await cat("Cat Past End Note", project=test_project.name, start_line=500, max_tokens=50)
+
+
+@pytest.mark.asyncio
 async def test_cat_section_returns_exact_span(client, test_project):
     await write_note(
         title="Cat Section Note",

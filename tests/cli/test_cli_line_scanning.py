@@ -4,6 +4,7 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from fastmcp.exceptions import ToolError
 from typer.testing import CliRunner
 
 from basic_memory.cli.main import app
@@ -45,6 +46,18 @@ def test_cli_read_lines(mode: str) -> None:
     else:
         assert "4: retry [safe]" in result.stdout
         assert "start_line=6" in result.stdout
+
+
+def test_cli_read_lines_past_end_reports_error() -> None:
+    """The CLI surfaces the past-end message and exits non-zero (#1634)."""
+    message = "start_line 500 is past the end of the document (17 lines)"
+    tool = AsyncMock(side_effect=ToolError(message))
+    with patch("basic_memory.mcp.tools.read_note", tool):
+        result = CliRunner().invoke(
+            app, ["tool", "read-note", "runbook", "--start-line", "500", "--plain"]
+        )
+    assert result.exit_code == 1
+    assert message in result.output
 
 
 @pytest.mark.parametrize("mode", ["--plain", "--json", "rich"])

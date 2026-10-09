@@ -19,6 +19,7 @@ from basic_memory.db import scoped_session
 from basic_memory.index.local_schedulers import drain_background_tasks
 from basic_memory.mcp.client_info import MCPClientInfoMiddleware
 from basic_memory.mcp.container import McpContainer, set_container
+from basic_memory.mcp.empty_results import EmptyListResultMiddleware
 from basic_memory.read_cache import ReadCache, ReadCacheUnavailable
 from basic_memory.read_cache.lifecycle import open_redis_read_cache
 from basic_memory.repository import ProjectRepository
@@ -251,7 +252,8 @@ BASIC_MEMORY_INSTRUCTIONS = (
     'addressable projects; `ls(path="research/notes")` and '
     '`cat(identifier="research/notes/topic.md")` route into the research project. '
     "Use returned project-qualified paths for follow-up reads. With multiple projects, "
-    "qualify paths or pass `project` (also required for `grep` and `tail`); an explicit "
+    "qualify paths or pass `project` (also required for `grep` and `tail`, and for `find` "
+    "without a project-qualified path); an explicit "
     "project must agree with any path prefix. `cat` supports bounded line, section, and "
     "token-budget reads; `find` can return selected metadata fields. "
     "Set `enable_posix_tools=false` to hide the POSIX tools.\n\n"
@@ -273,3 +275,4 @@ mcp = FastMCP(
     lifespan=lifespan,
 )
 mcp.add_middleware(MCPClientInfoMiddleware())
+mcp.add_middleware(EmptyListResultMiddleware())

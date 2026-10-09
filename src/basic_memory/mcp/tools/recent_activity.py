@@ -28,7 +28,10 @@ from basic_memory.schemas.search import SearchItemType
 
 @mcp.tool(
     title="Recent Activity",
-    description="""Get recent activity for a project or across all projects.
+    description="""Get recent activity for one project.
+
+    With no project, this uses the session's active project, then the default
+    project. It lists activity across all projects only when neither resolves.
 
     Timeframe supports natural language formats like:
     - "2 days ago"
@@ -74,7 +77,7 @@ async def recent_activity(
     output_format: Literal["text", "json"] = "text",
     context: Context | None = None,
 ) -> str | list[dict[str, Any]]:
-    """Get recent activity for a specific project or across all projects.
+    """Get recent activity for one project.
 
     Project Resolution:
     The server resolves projects in this order:
@@ -88,8 +91,8 @@ async def recent_activity(
 
     Project Discovery (when project is unknown):
     1. Call list_memory_projects() to see available projects
-    2. Or use this tool without project parameter to see cross-project activity
-    3. Ask the user which project to focus on
+    2. Ask the user which project to focus on
+    3. Pass that project to this tool
     4. Remember their choice for the conversation
 
     Args:
@@ -127,7 +130,7 @@ async def recent_activity(
         project is resolved, returns detailed activity for that project.
 
     Examples:
-        # Cross-project discovery mode
+        # The active or default project; every project only when neither is set
         recent_activity()
         recent_activity(timeframe="yesterday")
 

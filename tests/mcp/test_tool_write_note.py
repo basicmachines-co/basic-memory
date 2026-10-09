@@ -12,7 +12,7 @@ from basic_memory import db
 from basic_memory import config as config_module
 from basic_memory.mcp import clients as clients_module
 from basic_memory.mcp.clients import KnowledgeClient
-from basic_memory.mcp.tools import write_note, read_note, delete_note
+from basic_memory.mcp.tools import delete_note, move_note, read_note, write_note
 from basic_memory.mcp.tools.write_note import (
     SIMILAR_NOTES_LIMIT,
     SIMILAR_NOTES_PROBE_CHARS,
@@ -1526,6 +1526,75 @@ class TestWriteNoteOverwriteGuard:
         assert result["action"] == "conflict"
         assert result["title"] == "JSON Guard"
         assert result["permalink"] is not None
+
+    @pytest.mark.asyncio
+    async def test_write_note_conflict_after_move_names_the_note_at_the_path(
+        self, app, test_project
+    ):
+        """After a move, the conflict names the note at the path, not the moved one (#1634)."""
+        await write_note(
+            project=test_project.name, title="Mover", directory="dirA", content="original"
+        )
+        await move_note(
+            "dirA/Mover.md", destination_path="dirB/Mover.md", project=test_project.name
+        )
+        # The moved note keeps the path's original permalink, so this one is suffixed.
+        replacement = await write_note(
+            project=test_project.name,
+            title="Mover",
+            directory="dirA",
+            content="replacement",
+            output_format="json",
+        )
+        assert isinstance(replacement, dict)
+        assert replacement["file_path"] == "dirA/Mover.md"
+
+        with pytest.raises(ToolError) as json_refusal:
+            await write_note(
+                project=test_project.name,
+                title="Mover",
+                directory="dirA",
+                content="refused",
+                output_format="json",
+            )
+        conflict = json.loads(str(json_refusal.value))
+        assert conflict["error"] == "NOTE_ALREADY_EXISTS"
+        assert conflict["permalink"] == replacement["permalink"]
+        assert conflict["file_path"] == "dirA/Mover.md"
+        named = await read_note(
+            conflict["external_id"], project=test_project.name, output_format="json"
+        )
+        assert isinstance(named, dict)
+        assert named["file_path"] == "dirA/Mover.md"
+
+        with pytest.raises(ToolError) as text_refusal:
+            await write_note(
+                project=test_project.name, title="Mover", directory="dirA", content="refused"
+            )
+        assert f'edit_note("{replacement["permalink"]}"' in str(text_refusal.value)
+
+    @pytest.mark.asyncio
+    async def test_write_note_conflict_qualifies_the_permalink_in_a_workspace(
+        self, app, test_project
+    ):
+        with workspace_permalink_context(workspace_slug="team-paul", workspace_type="organization"):
+            created = await write_note(
+                project=test_project.name,
+                title="Team Guard",
+                directory="team",
+                content="original",
+                output_format="json",
+            )
+            assert isinstance(created, dict)
+            with pytest.raises(ToolError) as refusal:
+                await write_note(
+                    project=test_project.name,
+                    title="Team Guard",
+                    directory="team",
+                    content="refused",
+                    output_format="json",
+                )
+        assert json.loads(str(refusal.value))["permalink"] == created["permalink"]
 
     @pytest.mark.asyncio
     async def test_write_note_config_overwrite_default_true(

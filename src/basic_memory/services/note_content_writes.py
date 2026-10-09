@@ -423,14 +423,18 @@ class NoteContentMutationService:
                     load_relations=False,
                 )
                 if existing is not None:
-                    if not overwrite:
-                        return AlreadyExists(data.file_path)
-                    target = NoteLocation(
+                    existing_note = NoteLocation(
                         str(existing.external_id),
                         existing.title,
                         existing.file_path,
                         existing.permalink,
                     )
+                    # The refusal names the note at the path. A permalink derived from
+                    # the request can belong to a different note, such as one moved
+                    # away from this path that kept its permalink (#1634).
+                    if not overwrite:
+                        return AlreadyExists(data.file_path, existing_note)
+                    target = existing_note
                 elif overwrite:
                     # A supplied frontmatter permalink is the identity preparation
                     # would use. Check it before generated path aliases to avoid
@@ -496,7 +500,24 @@ class NoteContentMutationService:
                 case 423, _:
                     return Locked(str(error.detail))
                 case 409, _ if target is None:
-                    return AlreadyExists(data.file_path)
+                    # A concurrent create claimed the path after the lookup above.
+                    # Name the note that won it, so the refusal never falls back to
+                    # an identifier derived from the request (#1634).
+                    async with self.session_maker() as session:
+                        winner = await entity_repository.get_by_file_path(
+                            session, data.file_path, load_relations=False
+                        )
+                    return AlreadyExists(
+                        data.file_path,
+                        NoteLocation(
+                            str(winner.external_id),
+                            winner.title,
+                            winner.file_path,
+                            winner.permalink,
+                        )
+                        if winner is not None
+                        else None,
+                    )
                 # update_note reports a moved base revision in the stable
                 # base-checksum wire shape (issue #1445); it is an expected outcome.
                 case 409, {

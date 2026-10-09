@@ -95,3 +95,42 @@ async def test_markdown_self_link_is_resolved_when_written(
         assert len(edges) == 1
         assert edges[0].to_name == "./Self.md"
         assert edges[0].to_id == source.id
+
+
+@pytest.mark.asyncio
+async def test_markdown_links_past_the_project_root_are_not_relations(
+    mcp_server, app, test_project, engine_factory
+):
+    """Links that climb out of the project are dropped on write and on move (#1634)."""
+    async with Client(mcp_server) as client:
+        written = await client.call_tool(
+            "write_note",
+            {
+                "title": "Climber",
+                "directory": "links/sub",
+                "content": "[outside](../../../../outside.md) and [inside](../../Inside.md)",
+                "project": test_project.name,
+            },
+        )
+        assert not written.is_error
+
+        _, session_maker = engine_factory
+        relations = RelationRepository(project_id=test_project.id)
+        async with db.scoped_session(session_maker) as session:
+            edges = await relations.find_by_type(session, "links_to")
+        assert [edge.to_name for edge in edges] == ["../../Inside.md"]
+
+        # From the project root, ../../Inside.md climbs out too, so the move drops it.
+        moved = await client.call_tool(
+            "move_note",
+            {
+                "identifier": "links/sub/Climber.md",
+                "destination_path": "Climber.md",
+                "project": test_project.name,
+            },
+        )
+        assert not moved.is_error
+
+    async with db.scoped_session(session_maker) as session:
+        edges = await relations.find_by_type(session, "links_to")
+    assert edges == []

@@ -119,8 +119,13 @@ async def write_note(
                         return NoteUpdated(entity=entity)
                     case _:
                         assert_never(outcome)
-            case AlreadyExists(file_path=file_path):
-                return NoteAlreadyExists(file_path=file_path)
+            case AlreadyExists(file_path=file_path, note=existing):
+                # existing is None only when no note can be named at the path.
+                return NoteAlreadyExists(
+                    file_path=file_path,
+                    external_id=existing.external_id if existing else None,
+                    permalink=existing.permalink if existing else None,
+                )
             case TargetMoved(note=note):
                 return NoteTargetMoved(**asdict(note))
             case Locked(message=message):

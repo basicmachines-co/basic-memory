@@ -1494,3 +1494,45 @@ async def test_read_note_json_checksum_guards_an_overwrite(app, test_project):
             overwrite=True,
             expected_checksum=read["checksum"],
         )
+
+
+# --- Line ranges past the end of the document (#1634) ---
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("output_format", ["text", "json"])
+async def test_line_scan_past_end_reports_document_length(
+    app, test_project, entity_repository, session_maker, output_format
+):
+    """A start_line past the last line raises a clear error instead of 'Lines 500-N'."""
+    await write_note(
+        project=test_project.name,
+        title="Short Lines",
+        directory="notes",
+        content="one\ntwo",
+    )
+    full = await read_note(
+        "notes/Short Lines.md",
+        project=test_project.name,
+        include_frontmatter=True,
+        output_format="json",
+    )
+    assert isinstance(full, dict)
+    total = len(full["content"].splitlines())
+    async with db.scoped_session(session_maker) as session:
+        stored = await entity_repository.get_by_file_path(session, "notes/Short Lines.md")
+    assert stored is not None
+
+    # The path resolves first; the exact UUID takes the direct-read branch.
+    for identifier in ("notes/Short Lines.md", stored.external_id):
+        with pytest.raises(
+            ToolError,
+            match=f"start_line 500 is past the end of the document \\({total} lines\\)",
+        ):
+            await read_note(
+                identifier,
+                project=test_project.name,
+                start_line=500,
+                end_line=510,
+                output_format=output_format,
+            )

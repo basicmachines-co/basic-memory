@@ -36,7 +36,12 @@ async def test_write_outcomes_preserve_identity_and_content(
     original = path.read_bytes()
 
     exists = await client.post(endpoint, json={"note": {**note, "content": "Refused"}})
-    assert exists.json() == {"kind": "already_exists", "file_path": "notes/Typed Write.md"}
+    assert exists.json() == {
+        "kind": "already_exists",
+        "file_path": "notes/Typed Write.md",
+        "external_id": entity_id,
+        "permalink": created.json()["entity"]["permalink"],
+    }
     assert path.read_bytes() == original
 
     updated = await client.post(
@@ -108,6 +113,56 @@ async def test_write_preserves_runtime_operation_overrides(
     assert response.status_code == 429
     assert response.json() == {"detail": "Runtime write limit"}
     override.assert_awaited_once()
+
+
+async def test_already_exists_from_a_create_race_names_only_the_path(
+    client: AsyncClient,
+    test_project: Project,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A create that loses the path to a concurrent writer cannot name the winner."""
+    endpoint = f"/v2/projects/{test_project.external_id}/knowledge/write"
+    lost_race = AsyncMock(side_effect=NoteContentMutationServiceError(409, "Note exists"))
+    monkeypatch.setattr(NoteContentMutationService, "create_note", lost_race)
+
+    response = await client.post(
+        endpoint, json={"note": {"title": "Raced", "directory": "notes", "content": "x"}}
+    )
+
+    assert response.json() == {
+        "kind": "already_exists",
+        "file_path": "notes/Raced.md",
+        "external_id": None,
+        "permalink": None,
+    }
+
+
+async def test_already_exists_from_a_create_race_names_the_winner(
+    client: AsyncClient,
+    test_project: Project,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A create that loses the path names the note that won it (#1634)."""
+    endpoint = f"/v2/projects/{test_project.external_id}/knowledge/write"
+    original_create = NoteContentMutationService.create_note
+
+    async def win_then_refuse(self: NoteContentMutationService, **kwargs: Any) -> Any:
+        # The concurrent writer lands first; this create then finds the path taken.
+        await original_create(self, **kwargs)
+        raise NoteContentMutationServiceError(409, "Note exists")
+
+    monkeypatch.setattr(NoteContentMutationService, "create_note", win_then_refuse)
+
+    response = await client.post(
+        endpoint, json={"note": {"title": "Raced", "directory": "notes", "content": "x"}}
+    )
+
+    body = response.json()
+    assert body["kind"] == "already_exists"
+    assert body["file_path"] == "notes/Raced.md"
+    assert body["external_id"] is not None
+    assert body["permalink"] is not None
+    assert body["permalink"].endswith("notes/raced")
 
 
 @pytest.mark.parametrize("overwrite", [False, True])

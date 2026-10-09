@@ -255,6 +255,17 @@ class LineRange:
     end: int | None
 
 
+def line_range_past_end(start_line: int, total_lines: int) -> str | None:
+    """Return the error for a range that starts after the document's last line.
+
+    Line 1 of an empty document stays readable: reading from the top is always valid,
+    and it returns empty content rather than an error.
+    """
+    if start_line <= max(total_lines, 1):
+        return None
+    return f"start_line {start_line} is past the end of the document ({total_lines} lines)"
+
+
 def parse_line_range(value: str) -> LineRange | None:
     """Parse ``"N-M"``, ``"N-"`` (to end), or ``"N"``; return None when malformed."""
     first, dash, last = (part.strip() for part in value.strip().partition("-"))
@@ -295,7 +306,7 @@ class NoteSlice:
 
 @dataclass(frozen=True, slots=True)
 class NoteSliceError:
-    """A section lookup failure: unknown, ambiguous, or out-of-range selector."""
+    """A slice failure: an unknown, ambiguous, or out-of-range section, or a past-end range."""
 
     message: str
 
@@ -461,6 +472,12 @@ def slice_note_content(
         start_line = frontmatter_lines + matched.start_line
         end_line = frontmatter_lines + matched.end_line
     elif lines is not None:
+        # Trigger: the range starts after the last line.
+        # Why: clamping only the end produced an inverted "Lines 500-17" range.
+        # Outcome: the read fails with a message naming the document length.
+        past_end = line_range_past_end(lines.start, total_lines)
+        if past_end is not None:
+            return NoteSliceError(past_end)
         start_line = lines.start
         end_line = min(lines.end, total_lines) if lines.end is not None else total_lines
     else:
