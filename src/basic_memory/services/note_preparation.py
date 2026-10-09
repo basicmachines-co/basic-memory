@@ -35,6 +35,7 @@ from basic_memory.markdown.path_links import (
     is_path_target,
     resolve_project_path,
 )
+from basic_memory.markdown.sections import document_lines, setext_heading_underlined_at
 from basic_memory.markdown.utils import schema_to_markdown
 from basic_memory.models import Entity
 from basic_memory.repository import (
@@ -643,32 +644,29 @@ def insert_relative_to_section(
 # CommonMark setext underline: up to three spaces of indent, then a run of `=` (H1) or
 # a run of `-` (H2), then optional trailing whitespace.
 _SETEXT_UNDERLINE = re.compile(r" {0,3}(?:=+|-+)[ \t]*")
-# Lines that open a block quote or a list item. A setext underline cannot claim these
-# as heading text, so they need no separating blank line.
-_QUOTE_OR_LIST_ITEM = re.compile(r" {0,3}(?:>|[-+*](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$))")
 
 
 def _joins_into_setext_heading(text_before: str, text_after: str) -> bool:
     """Return whether joining the texts on one newline would create a setext heading.
 
-    A setext underline turns the paragraph line directly above it into an H1 or H2, and a
+    A setext underline turns the paragraph text directly above it into an H1 or H2, and a
     blank line is the only thing that stops it. So appending `---` (meant as a thematic
     break) right after a paragraph silently rewrites that paragraph into a heading, and
     the section parser then sees a heading nobody wrote (#1585). Every other join stays a
     single newline: a blank line between list items would turn a tight list into a loose
     one, and ATX headings, list items and quotes can already interrupt a paragraph.
     """
-    last_line_before = text_before.removesuffix("\n").rsplit("\n", 1)[-1]
     first_line_after = text_after.split("\n", 1)[0]
     if not _SETEXT_UNDERLINE.fullmatch(first_line_after):
         return False
-    is_paragraph_line = (
-        bool(last_line_before.strip())
-        and _markdown_heading_level(last_line_before) is None
-        and _fence_marker(last_line_before) is None
-        and _QUOTE_OR_LIST_ITEM.match(last_line_before) is None
-    )
-    return is_paragraph_line
+    # Whether the line above is paragraph text depends on block context no single line
+    # shows: `2. item` after a paragraph is lazy continuation, not a list, and a line
+    # inside an open fence or HTML block is not a paragraph at all (a blank line there
+    # would rewrite code or close the block). Parsing the joined text lets markdown-it
+    # decide. The prefilter above keeps this parse off the common append path.
+    before = text_before.removesuffix("\n")
+    underline_line = len(document_lines(before + "\n"))
+    return setext_heading_underlined_at(before + "\n" + text_after, underline_line)
 
 
 def _edit_join_separator(text_before: str, text_after: str) -> str:

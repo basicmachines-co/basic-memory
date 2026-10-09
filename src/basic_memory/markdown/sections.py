@@ -62,6 +62,21 @@ def document_lines(text: str) -> list[str]:
     return lines[:-1] if _ends_with_terminator(text) else lines
 
 
+def setext_heading_underlined_at(text: str, underline_line: int) -> bool:
+    """Return whether a setext heading in ``text`` has its underline on ``underline_line``.
+
+    ``underline_line`` is 0-indexed and counted by markdown-it's line rule. A setext
+    heading token's map ends on the line after its underline.
+    """
+    return any(
+        token.type == "heading_open"
+        and token.markup in ("=", "-")
+        and token.map is not None
+        and token.map[1] == underline_line + 1
+        for token in _md.parse(text)
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class MarkdownSection:
     """One heading-bounded span of a note body, addressed by its heading path.
