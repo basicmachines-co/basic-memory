@@ -855,6 +855,9 @@ class TestSearchTermPreparation:
         # A word with no letters or digits has no tokens; as an empty phrase it would
         # make the whole AND match nothing.
         assert prepare("Note & Symbols") == "Note* AND Symbols*"
+        # A caller's trailing wildcard is kept once, never doubled into "cache**".
+        assert prepare("IT-644 cache*") == '"IT-644"* AND cache*'
+        assert prepare("IT-6* cacheability") == '"IT-6"* AND cacheability*'
 
     @pytest.mark.asyncio
     async def test_punctuated_word_matches_when_the_words_are_not_adjacent(
@@ -881,9 +884,9 @@ class TestSearchTermPreparation:
             )
         )
 
-        results = await search_repository.search(search_text="IT-644 cacheability")
-
-        assert search_entity.id in [result.id for result in results]
+        for query in ("IT-644 cacheability", "IT-644 cache*"):
+            results = await search_repository.search(search_text=query)
+            assert search_entity.id in [result.id for result in results], query
 
     @pytest.mark.asyncio
     async def test_search_with_special_characters_returns_results(self, search_repository):

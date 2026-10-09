@@ -80,8 +80,14 @@ def _is_caller_quoted(term: str) -> bool:
 
 def _prepare_query_word(word: str, is_prefix: bool) -> str:
     """Prepare one word of a multi-word query as an FTS5 term or phrase."""
+    # A caller's own trailing wildcard ("cache*") is the prefix marker; it is re-added
+    # once below, after any quoting, so it never becomes "cache**".
+    caller_wildcard = word.endswith("*") and not _is_caller_quoted(word)
+    if caller_wildcard:
+        word = word.rstrip("*")
     # A file path matches exactly; a prefix wildcard would also match "x.md.bak".
-    star = "*" if is_prefix and not ("/" in word and word.endswith(".md")) else ""
+    is_file_path = "/" in word and word.endswith(".md")
+    star = "*" if (is_prefix or caller_wildcard) and not is_file_path else ""
     if _is_caller_quoted(word):
         return f"{word}{star}"
     if any(c in _WORD_QUOTING_CHARS for c in word):
