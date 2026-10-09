@@ -171,8 +171,11 @@ def prepare_single_term(term: str, is_prefix: bool = True) -> str:
 
     term = term.strip()
 
-    # An existing wildcard pattern converts to the tsquery prefix operator.
-    if "*" in term:
+    # A wildcard on a single token converts to the tsquery prefix operator. A
+    # multi-word query handles each word's wildcard below: converting the whole
+    # string would leave words without a "&" between them ("foo cache:*"), which
+    # to_tsquery rejects, so the search silently returned nothing.
+    if "*" in term and not any(c.isspace() for c in term):
         return term.replace("*", ":*")
 
     cleaned_term = term
@@ -184,11 +187,18 @@ def prepare_single_term(term: str, is_prefix: bool = True) -> str:
         # produce clean lexemes (parity with SQLite FTS5 prep). The tsquery tokenizer
         # ignores this punctuation anyway; leaving it only risks syntax errors.
         words = [w.strip("?!.,;") for w in cleaned_term.split()]
-        words = [w for w in words if w]
-        if not words:
+        # A trailing "*" asks for a prefix match on that word; a "*" anywhere else is
+        # not tsquery syntax and is dropped.
+        prepared_words = []
+        for word in words:
+            wildcard = word.endswith("*")
+            word = word.replace("*", "")
+            if not word:
+                continue
+            prepared_words.append(f"{word}:*" if is_prefix or wildcard else word)
+        if not prepared_words:
             # Only special characters remained; emit a term that cannot error.
             return "NOSPECIALCHARS:*"
-        prepared_words = [f"{word}:*" for word in words] if is_prefix else words
         return " & ".join(prepared_words)
 
     # Single word: strip edge punctuation and guard the now-empty case so a bare
