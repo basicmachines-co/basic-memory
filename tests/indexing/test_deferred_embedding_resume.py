@@ -71,7 +71,6 @@ async def _semantic_repository(
     app_config: BasicMemoryConfig,
 ) -> SearchRepositoryBase:
     """Build the backend's search repository with semantic search on a stub provider."""
-    app_config.semantic_search_enabled = True
     if app_config.database_backend == DatabaseBackend.POSTGRES:
         async with db.scoped_session(session_maker) as session:
             try:

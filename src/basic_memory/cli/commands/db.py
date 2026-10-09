@@ -311,12 +311,10 @@ async def index_project_and_report_readiness(project: str) -> None:
     already-indexed project only redoes what changed.
     """
     app_config = ConfigManager().config
-    # Semantic search off is a supported configuration, not a failure, so the
-    # embedding pass is skipped without the warning an explicit reindex prints.
     await _reindex(
         app_config,
         search=True,
-        embeddings=app_config.semantic_search_enabled,
+        embeddings=True,
         full=False,
         project=project,
     )

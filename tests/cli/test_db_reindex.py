@@ -883,17 +883,14 @@ def test_reindex_embedding_success_reports_index_and_model_and_exits_zero(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("semantic_search_enabled", [True, False])
-async def test_project_add_indexing_runs_the_reindex_pass_then_reports_readiness(
-    monkeypatch, semantic_search_enabled: bool
-):
+async def test_project_add_indexing_runs_the_reindex_pass_then_reports_readiness(monkeypatch):
     """`project add` reuses the reindex pass, so its embedding phase shows the progress bar.
 
     The old path made one foreground API request that embedded inline and printed
-    nothing until it returned. Embeddings follow the config here, without the
-    "Semantic search is not enabled" warning an explicit reindex prints.
+    nothing until it returned. Semantic search is always on (#1696), so the add
+    always runs the embedding pass.
     """
-    app_config = _stub_app_config(semantic_search_enabled=semantic_search_enabled)
+    app_config = _stub_app_config()
     monkeypatch.setattr(db_cmd, "ConfigManager", lambda: SimpleNamespace(config=app_config))
     steps: list[tuple[str, object]] = []
 
@@ -914,7 +911,7 @@ async def test_project_add_indexing_runs_the_reindex_pass_then_reports_readiness
             "reindex",
             {
                 "search": True,
-                "embeddings": semantic_search_enabled,
+                "embeddings": True,
                 "full": False,
                 "project": "research",
             },
