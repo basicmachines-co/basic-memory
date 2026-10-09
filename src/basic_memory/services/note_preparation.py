@@ -664,7 +664,15 @@ def _joins_into_setext_heading(text_before: str, text_after: str) -> bool:
     # inside an open fence or HTML block is not a paragraph at all (a blank line there
     # would rewrite code or close the block). Parsing the joined text lets markdown-it
     # decide. The prefilter above keeps this parse off the common append path.
-    before = text_before.removesuffix("\n")
+    # Valid frontmatter is YAML, not Markdown, and EntityParser drops it before parsing
+    # the body; a literal block scalar in it (`meta: |` then a fence line) must not read
+    # as an open code block.
+    body_before = (
+        remove_frontmatter(text_before, strip=False)
+        if has_frontmatter(text_before)
+        else text_before
+    )
+    before = body_before.removesuffix("\n")
     underline_line = len(document_lines(before + "\n"))
     return setext_heading_underlined_at(before + "\n" + text_after, underline_line)
 
