@@ -116,7 +116,7 @@ def set_default_workspace(
     config_manager = ConfigManager()
     config = config_manager.config
     config.default_workspace = selected.tenant_id
-    config_manager.save_config(config)
+    config_manager.save_config(config, persist_env_keys={"default_workspace"})
 
     console.print(
         f"[green]Default workspace set to '{selected.name}' ({selected.tenant_id})[/green]"

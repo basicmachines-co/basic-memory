@@ -7,7 +7,7 @@ import os
 import shutil
 import threading
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import AbstractSet, Any, Dict, Mapping, Optional, Tuple
 
 from loguru import logger
 
@@ -110,12 +110,10 @@ class ConfigManager:
                                 break
 
                 merged_data = file_data.copy()
-                for field_name in BasicMemoryConfig.model_fields:
-                    env_var_name = f"BASIC_MEMORY_{field_name.upper()}"
-                    if env_var_name in os.environ:
-                        # BaseSettings only applies env precedence when the field
-                        # is absent from constructor data.
-                        merged_data.pop(field_name, None)
+                for field_name in env_overridden_fields(file_data):
+                    # BaseSettings only applies env precedence when the field
+                    # is absent from constructor data.
+                    merged_data.pop(field_name, None)
 
                 _CONFIG_CACHE = BasicMemoryConfig(**merged_data)
 
@@ -154,16 +152,27 @@ class ConfigManager:
         self.save_config(config)
         return config
 
-    def save_config(self, config: BasicMemoryConfig) -> Exception | None:
+    def save_config(
+        self,
+        config: BasicMemoryConfig,
+        *,
+        persist_env_keys: AbstractSet[str] = frozenset(),
+    ) -> Exception | None:
         """Save configuration to file and invalidate the process cache.
 
         Returns the error the write swallowed, or None on success; see
         `save_basic_memory_config` for why it is a return rather than a raise.
         The cache is cleared either way, so a later read re-reads the file
         instead of serving a value that was never persisted.
+
+        `persist_env_keys` names settings the caller is explicitly writing even
+        though an environment variable overrides them; see
+        `save_basic_memory_config`.
         """
         global _CONFIG_CACHE, _CONFIG_MTIME, _CONFIG_SIZE
-        write_error = save_basic_memory_config(self.config_file, config)
+        write_error = save_basic_memory_config(
+            self.config_file, config, persist_env_keys=persist_env_keys
+        )
         _CONFIG_CACHE = None
         _CONFIG_MTIME = None
         _CONFIG_SIZE = None
@@ -255,8 +264,79 @@ def has_cloud_credentials(config: BasicMemoryConfig) -> bool:
     return auth.load_tokens() is not None
 
 
-def save_basic_memory_config(file_path: Path, config: BasicMemoryConfig) -> Exception | None:
+def env_overridden_fields(file_data: Mapping[str, Any]) -> frozenset[str]:
+    """Return the config fields whose effective value comes from the environment.
+
+    This is the one place that decides env-over-file precedence: `load_config`
+    drops these fields from the file data so the env value wins, and
+    `save_basic_memory_config` keeps their env values out of the file.
+
+    A field is env-sourced when `BASIC_MEMORY_<FIELD>` is set. A field renamed
+    from a legacy sync key is also env-sourced when its legacy env var is set
+    and the file does not spell the new name, because that is exactly when
+    `migrate_legacy_sync_fields` lets the legacy env var win.
+    """
+    env_prefix = str(BasicMemoryConfig.model_config["env_prefix"])
+    direct = {
+        field_name
+        for field_name in BasicMemoryConfig.model_fields
+        if f"{env_prefix}{field_name.upper()}" in os.environ
+    }
+    legacy = {
+        new_field
+        for new_field, legacy_key in BasicMemoryConfig._LEGACY_SYNC_FIELDS.items()
+        if f"{env_prefix}{legacy_key.upper()}" in os.environ and new_field not in file_data
+    }
+    return frozenset(direct | legacy)
+
+
+def _file_config_dict(
+    file_path: Path,
+    config: BasicMemoryConfig,
+    persist_env_keys: AbstractSet[str],
+) -> dict[str, Any]:
+    """Build the JSON that belongs in config.json: file values plus this change.
+
+    The in-memory config holds env overrides merged over the file. Writing it
+    as-is would make a one-off `BASIC_MEMORY_LOG_LEVEL=DEBUG bm project add ...`
+    permanent (#1631), and a stray `BASIC_MEMORY_PROJECT_ROOT` would keep
+    refusing slash project names after the variable is unset (#1598). So every
+    env-sourced field gets back the value the file had on disk, or is left out
+    when the file never had it.
+    """
+    config_dict = config.model_dump(mode="json")
+    file_data: dict[str, Any] = (
+        json.loads(file_path.read_text(encoding="utf-8")) if file_path.exists() else {}
+    )
+
+    # Trigger: `bm config set KEY` (or another command that writes one named
+    #          setting) while BASIC_MEMORY_KEY is set.
+    # Why: the user asked for that value in the file; the env var still wins at
+    #      load time, and the command warns about it.
+    # Outcome: only the named keys keep their in-memory value.
+    for field_name in env_overridden_fields(file_data) - persist_env_keys:
+        legacy_key = BasicMemoryConfig._LEGACY_SYNC_FIELDS.get(field_name)
+        if field_name in file_data:
+            config_dict[field_name] = file_data[field_name]
+        elif legacy_key is not None and legacy_key in file_data:
+            # The dump never carries legacy key names, so the file's legacy
+            # value moves to the new name instead of being dropped.
+            config_dict[field_name] = file_data[legacy_key]
+        else:
+            config_dict.pop(field_name, None)
+    return config_dict
+
+
+def save_basic_memory_config(
+    file_path: Path,
+    config: BasicMemoryConfig,
+    *,
+    persist_env_keys: AbstractSet[str] = frozenset(),
+) -> Exception | None:
     """Atomically save configuration so concurrent readers see complete JSON.
+
+    Env-overridden settings keep their on-disk value; only the fields named in
+    `persist_env_keys` are written from `config` despite an env override.
 
     Returns the error it swallowed, or None when the write landed.
 
@@ -271,7 +351,7 @@ def save_basic_memory_config(file_path: Path, config: BasicMemoryConfig) -> Exce
     try:
         file_path.parent.mkdir(parents=True, exist_ok=True)
         _secure_config_dir(file_path.parent)
-        config_dict = config.model_dump(mode="json")
+        config_dict = _file_config_dict(file_path, config, persist_env_keys)
         temp_path = file_path.parent / f"{file_path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
         try:
             temp_path.write_text(json.dumps(config_dict, indent=2))
