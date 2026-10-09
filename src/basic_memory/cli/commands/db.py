@@ -17,8 +17,9 @@ from rich.markup import escape
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 
 from basic_memory.cli.app import app
-from basic_memory.cli.commands.command_utils import run_with_cleanup
+from basic_memory.cli.commands.command_utils import report_project_readiness, run_with_cleanup
 from basic_memory.config import ConfigManager, ProjectMode
+from basic_memory.utils import generate_permalink
 
 console = Console()
 REINDEX_ERROR_SUMMARY_MAX_LENGTH = 240
@@ -304,6 +305,33 @@ def run_reindex_command(
     )
 
 
+async def index_project_and_report_readiness(project: str) -> None:
+    """Index a just-added project the way `bm project index` does, then report readiness.
+
+    `bm project add` used to index through the API in one foreground request,
+    which embeds inline and prints nothing until it returns: a 1000-note project
+    sat silent for two minutes between "added successfully" and the final count
+    (#1635). `_reindex` runs the search pass and then the embedding pass under the
+    progress bar `bm reindex` shows, so the add reports progress and leaves the
+    project in the state its own remedy, `bm project index`, would.
+
+    It is incremental (`full=False`) for the same reason the remedy is: change
+    detection sees every file of a never-indexed project as new, and an adopted,
+    already-indexed project only redoes what changed.
+    """
+    app_config = ConfigManager().config
+    # Semantic search off is a supported configuration, not a failure, so the
+    # embedding pass is skipped without the warning an explicit reindex prints.
+    await _reindex(
+        app_config,
+        search=True,
+        embeddings=app_config.semantic_search_enabled,
+        full=False,
+        project=project,
+    )
+    await report_project_readiness(project)
+
+
 @app.command()
 def reindex(
     embeddings: bool = typer.Option(
@@ -377,7 +405,14 @@ async def _reindex(
             projects = await project_repository.get_active_projects(session)
 
         if project:
-            projects = [p for p in projects if p.name == project]
+            # Trigger: the caller names the project as typed, e.g. `new_default`.
+            # Why: config reconciliation above stores normalized names
+            #      (`new-default`), so exact name equality can miss the project
+            #      the caller just registered; the API resolves by permalink too.
+            # Outcome: `bm project add new_default` and `bm project index
+            #          new_default` index the project they name.
+            project_permalink = generate_permalink(project)
+            projects = [p for p in projects if p.permalink == project_permalink]
             if not projects:
                 # Check if it's a cloud-only project — those can't be reindexed locally
                 project_mode = app_config.get_project_mode(project)

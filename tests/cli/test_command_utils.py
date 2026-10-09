@@ -1,5 +1,13 @@
 """Tests for CLI command utilities."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
+import pytest
+
+import basic_memory.cli.commands.command_utils as command_utils
 import basic_memory.index.note_content_materialization as note_content_materialization
 import basic_memory.db as db
 import basic_memory.index.local_schedulers as local_schedulers
@@ -38,3 +46,49 @@ def test_run_with_cleanup_drains_pending_work_before_db_shutdown(monkeypatch):
 
     assert result == 42
     assert calls == ["work", "drain-materializations", "drain-background", "shutdown"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response,expected",
+    [
+        ({"message": "Indexing started in background"}, "Indexing started in background"),
+        (
+            {"total_files": 3, "enqueued_files": 2, "enqueued_batches": 1, "deleted_files": 0},
+            "Indexed 2/3 files (batches: 1, deleted orphans: 0)",
+        ),
+    ],
+)
+async def test_run_project_index_reports_background_and_foreground_responses(
+    monkeypatch, response: dict[str, object], expected: str
+):
+    """`bm project add` no longer calls this; cloud project indexing still does."""
+    printed: list[str] = []
+
+    @asynccontextmanager
+    async def fake_get_client(project_name: str | None = None) -> AsyncIterator[object]:
+        yield object()
+
+    class FakeProjectClient:
+        def __init__(self, client: object) -> None:
+            pass
+
+        async def index(self, external_id: str, **kwargs: bool) -> dict[str, object]:
+            assert external_id == "project-ext"
+            return response
+
+    monkeypatch.setattr(command_utils, "get_client", fake_get_client)
+    monkeypatch.setattr(
+        command_utils,
+        "get_active_project",
+        AsyncMock(return_value=SimpleNamespace(external_id="project-ext")),
+    )
+    monkeypatch.setattr(command_utils, "ProjectClient", FakeProjectClient)
+    monkeypatch.setattr(
+        command_utils.console, "print", lambda message="", *a, **k: printed.append(str(message))
+    )
+
+    await command_utils.run_project_index("research")
+
+    [line] = printed
+    assert expected in line.replace("[green]", "").replace("[/green]", "")
