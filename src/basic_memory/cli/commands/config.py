@@ -222,7 +222,9 @@ def config_set(
         raise typer.Exit(1)
 
     setattr(config, key, getattr(validated, key))
-    config_manager.save_config(config)
+    # The named key is written even when its env var overrides it; every other
+    # env-overridden setting keeps its on-disk value (#1631).
+    config_manager.save_config(config, persist_env_keys={key})
 
     console.print(f"[green]{key} = {_render_value(key, getattr(config, key))}[/green]")
 
@@ -246,6 +248,6 @@ def config_unset(
 
     default_value = BasicMemoryConfig.model_fields[key].get_default(call_default_factory=True)
     setattr(config, key, default_value)
-    config_manager.save_config(config)
+    config_manager.save_config(config, persist_env_keys={key})
 
     console.print(f"[green]{key} reverted to default: {_render_value(key, default_value)}[/green]")

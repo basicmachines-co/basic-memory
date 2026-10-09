@@ -339,7 +339,7 @@ def api_key_save(
     config_manager = ConfigManager()
     config = config_manager.load_config()
     config.cloud_api_key = api_key
-    config_manager.save_config(config)
+    config_manager.save_config(config, persist_env_keys={"cloud_api_key"})
 
     console.print("[green]API key saved[/green]")
     console.print("[dim]Projects set to cloud mode will use this key for authentication[/dim]")
@@ -379,7 +379,7 @@ def api_key_create(
         config_manager = ConfigManager()
         config = config_manager.load_config()
         config.cloud_api_key = api_key
-        config_manager.save_config(config)
+        config_manager.save_config(config, persist_env_keys={"cloud_api_key"})
 
         console.print(f"[green]API key '{name}' created and saved[/green]")
         console.print("[dim]Projects set to cloud mode will use this key for authentication[/dim]")

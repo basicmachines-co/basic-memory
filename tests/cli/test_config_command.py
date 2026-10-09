@@ -447,3 +447,34 @@ def test_config_set_warns_when_env_var_overrides(runner, write_config, monkeypat
 
     assert result.exit_code == 0, result.output
     assert "BASIC_MEMORY_CLI_OUTPUT_STYLE is set" in result.output
+
+    # The named key is written even though the env var overrides it.
+    written = json.loads((Path.home() / ".basic-memory" / "config.json").read_text())
+    assert written["cli_output_style"] == "rich"
+
+
+def test_config_set_keeps_other_env_overrides_out_of_the_file(runner, write_config, monkeypatch):
+    """Setting one key must not persist a different key's env override (#1631)."""
+    config_file = write_config(_base_config(log_level="INFO"))
+    monkeypatch.setenv("BASIC_MEMORY_LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("BASIC_MEMORY_CLI_OUTPUT_STYLE", "plain")
+
+    result = runner.invoke(app, ["config", "set", "kebab_filenames", "true"])
+
+    assert result.exit_code == 0, result.output
+    written = json.loads(config_file.read_text())
+    assert written["kebab_filenames"] is True
+    assert written["log_level"] == "INFO"
+    assert "cli_output_style" not in written
+
+
+def test_config_unset_writes_the_default_for_an_env_overridden_key(
+    runner, write_config, monkeypatch
+):
+    config_file = write_config(_base_config(cli_output_style="plain"))
+    monkeypatch.setenv("BASIC_MEMORY_CLI_OUTPUT_STYLE", "plain")
+
+    result = runner.invoke(app, ["config", "unset", "cli_output_style"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(config_file.read_text())["cli_output_style"] == "rich"
