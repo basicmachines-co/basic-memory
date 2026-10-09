@@ -522,7 +522,6 @@ def _semantic_search_repository(
 ) -> BackendSearchRepository:
     config = app_config.model_copy(
         update={
-            "semantic_search_enabled": True,
             "semantic_min_similarity": 0.0,
             **config_updates,
         }
@@ -986,7 +985,6 @@ def test_create_search_repository_injects_reranker_for_both_backends(
         projects={"test-project": "/tmp/test"},
         default_project="test-project",
         database_backend=backend,
-        semantic_search_enabled=True,
     )
     monkeypatch.setattr(
         search_repository_module,
@@ -1033,13 +1031,11 @@ def test_create_search_repository_injects_reranker_for_both_backends(
         ),
     ],
 )
-@pytest.mark.parametrize("semantic_search_enabled", [False, True])
-def test_repository_self_resolves_reranker_only_when_semantic_search_is_enabled(
+def test_repository_self_resolves_reranker(
     monkeypatch,
     repository_type,
     repository_module,
     backend,
-    semantic_search_enabled,
 ):
     reranker = _FakeReranker({})
     resolver = MagicMock(return_value=reranker)
@@ -1049,7 +1045,6 @@ def test_repository_self_resolves_reranker_only_when_semantic_search_is_enabled(
         projects={"test-project": "/tmp/test"},
         default_project="test-project",
         database_backend=backend,
-        semantic_search_enabled=semantic_search_enabled,
     )
 
     repository = repository_type(
@@ -1060,9 +1055,5 @@ def test_repository_self_resolves_reranker_only_when_semantic_search_is_enabled(
         vector_index=MagicMock(),
     )
 
-    if semantic_search_enabled:
-        resolver.assert_called_once_with(config)
-        assert repository._rerank_provider is reranker
-    else:
-        resolver.assert_not_called()
-        assert repository._rerank_provider is None
+    resolver.assert_called_once_with(config)
+    assert repository._rerank_provider is reranker

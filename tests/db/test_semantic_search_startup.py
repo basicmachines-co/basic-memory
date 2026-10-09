@@ -19,7 +19,6 @@ async def test_migrations_initialize_search_through_repository_factory(
         env="test",
         database_backend=DatabaseBackend.POSTGRES,
         database_url="postgresql+asyncpg://test:test@localhost/test",
-        semantic_search_enabled=True,
         semantic_vector_index="milvus",
     )
     session_maker = object()

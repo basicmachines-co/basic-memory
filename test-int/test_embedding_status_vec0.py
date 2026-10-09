@@ -11,13 +11,12 @@ the ready manifest and its matching vector without a false unavailable result.
 
 import os
 import sqlite3
-from unittest.mock import patch
 
 import pytest
 from sqlalchemy import text
 
 from basic_memory import db
-from basic_memory.config import BasicMemoryConfig, ConfigManager, DatabaseBackend
+from basic_memory.config import BasicMemoryConfig, DatabaseBackend
 from basic_memory.repository.entity_repository import EntityRepository
 from basic_memory.repository.project_repository import ProjectRepository
 from basic_memory.repository.semantic_vector_index import VectorKey, VectorRecord
@@ -71,7 +70,6 @@ async def test_embedding_status_reads_real_vec0_table(engine_factory, test_proje
     app_config = BasicMemoryConfig(
         env="test",
         database_backend=DatabaseBackend.SQLITE,
-        semantic_search_enabled=True,
     )
     search_repo = SQLiteSearchRepository(
         session_maker,
@@ -182,21 +180,8 @@ async def test_embedding_status_reads_real_vec0_table(engine_factory, test_proje
     project_repository = ProjectRepository()
     project_service = ProjectService(project_repository, session_maker)
 
-    # Test fixtures run with semantic search disabled; the status call reads the global
-    # ConfigManager, so patch it to report semantic enabled for this regression path.
-    def _config_manager_semantic_enabled() -> ConfigManager:
-        cm = ConfigManager()
-        cm.config.semantic_search_enabled = True
-        return cm
+    status = await project_service.get_embedding_status(project_id)
 
-    with patch.object(
-        type(project_service),
-        "config_manager",
-        new_callable=lambda: property(lambda self: _config_manager_semantic_enabled()),
-    ):
-        status = await project_service.get_embedding_status(project_id)
-
-    assert status.semantic_search_enabled is True
     # Status reloads sqlite-vec on this fresh connection and verifies the physical row.
     assert status.vector_tables_exist is True
     assert status.reindex_recommended is False

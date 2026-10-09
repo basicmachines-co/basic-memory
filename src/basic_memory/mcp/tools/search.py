@@ -217,7 +217,7 @@ def _default_search_type() -> str:
     if config.default_search_type:
         return config.default_search_type
 
-    return "hybrid" if config.semantic_search_enabled else "text"
+    return "hybrid"
 
 
 def _is_service_unavailable_error(error: BaseException) -> bool:
@@ -251,15 +251,17 @@ def _format_search_error_response(
     """Format helpful error responses for search failures that guide users to successful searches."""
 
     # Semantic config/dependency errors
-    if "semantic search is disabled" in error_message.lower():
+    if "semantic search is unavailable" in error_message.lower():
         return dedent(f"""
-            # Search Failed - Semantic Search Disabled
+            # Search Failed - Semantic Search Unavailable
 
-            You requested `{search_type}` search for query '{query}', but semantic search is disabled.
+            You requested `{search_type}` search for query '{query}', but the vector search
+            runtime failed to load when Basic Memory started, so search is keyword-only.
 
-            ## How to enable
-            1. Set `BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true`
-            2. Restart the Basic Memory server/process
+            ## How to fix
+            1. Check the Basic Memory startup log for the cause (usually sqlite-vec could
+               not load under this Python build)
+            2. Reinstall under a Python with SQLite extension support, then restart
 
             ## Alternative now
             - Run FTS search instead:

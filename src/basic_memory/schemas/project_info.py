@@ -83,7 +83,6 @@ class EmbeddingStatus(BaseModel):
     """Embedding/vector index status for a project."""
 
     # Config
-    semantic_search_enabled: bool
     embedding_provider: Optional[str] = None
     embedding_model: Optional[str] = None
     embedding_dimensions: Optional[int] = None

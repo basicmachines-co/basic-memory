@@ -21,9 +21,12 @@ from typing import Any
 
 import pytest
 
+from basic_memory.config import default_fastembed_cache_dir
 from basic_memory.schemas.project_readiness import ProjectIndexPhase, ProjectIndexStageName
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
+# Resolved from the real profile before any test swaps HOME.
+SHARED_FASTEMBED_CACHE = default_fastembed_cache_dir()
 
 NOTE_BODY = """---
 title: {title}
@@ -58,12 +61,10 @@ def _pristine_env(home: Path) -> dict[str, str]:
         # describe the message rather than the runner's window.
         COLUMNS="240",
         LINES="60",
-        # fastembed is a core dependency, so semantic search is on by default and
-        # an index pass would download an embedding model onto the runner. These
-        # tests are about index-on-add and the readiness phases, not embeddings;
-        # the embeddings stage settles at 0/0 with this off, and the stage's own
-        # counting is covered in tests/services/test_project_readiness.py.
-        BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED="false",
+        # Semantic search is always on, so indexing embeds with the real model.
+        # The pristine HOME would otherwise put the model cache inside the temp
+        # profile and download it again for every test; share the real one.
+        FASTEMBED_CACHE_PATH=SHARED_FASTEMBED_CACHE,
     )
     return env
 

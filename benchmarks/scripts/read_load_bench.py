@@ -423,7 +423,6 @@ def isolated_env(
     env = {key: value for key, value in os.environ.items() if not key.startswith("BASIC_MEMORY_")}
     env["BASIC_MEMORY_AUTO_UPDATE"] = "false"
     env["BASIC_MEMORY_CONFIG_DIR"] = str(config_dir)
-    env["BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED"] = "false"
     env["BASIC_MEMORY_LOG_LEVEL"] = "WARNING"
     env["LOGFIRE_IGNORE_NO_CONFIG"] = "1"
     if redis_url is not None:
@@ -810,7 +809,6 @@ async def run(args: argparse.Namespace) -> int:
                         "metadata": {
                             "backend": args.backend,
                             "redis_read_cache_enabled": redis_url is not None,
-                            "semantic_search_enabled": False,
                             "warm_direct_permalink_reads": True,
                             "corpus_notes": expected_notes,
                             "notes_per_size": args.notes_per_size,

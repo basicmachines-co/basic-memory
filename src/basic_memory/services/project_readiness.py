@@ -270,12 +270,7 @@ class ProjectReadinessService:
         polled status route must not pay. ``bm project info`` verifies it, via
         ``ProjectService.get_embedding_status``, and recommends a rebuild.
 
-        With semantic search off there is no embedding work to wait for, so the
-        stage reports zero of zero and settles immediately rather than parking
-        the whole project in PENDING forever.
         """
-        if not self.app_config.semantic_search_enabled:
-            return 0, 0
 
         # The opt-out policy reads a JSON metadata field, so the rows are loaded
         # and filtered in Python. Restating it as SQL would be a second copy of a

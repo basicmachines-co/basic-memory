@@ -88,7 +88,6 @@ def _project_info(project_name: str = "demo") -> ProjectInfoResponse:
             timestamp=datetime(2026, 4, 9, 12, 0, 0),
         ),
         embedding_status=EmbeddingStatus(
-            semantic_search_enabled=True,
             embedding_provider="fastembed",
             embedding_model="bge-small-en-v1.5",
             total_indexed_entities=10,

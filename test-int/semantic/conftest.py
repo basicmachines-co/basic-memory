@@ -11,6 +11,7 @@ import os
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import pytest
 import pytest_asyncio
@@ -31,6 +32,7 @@ from basic_memory.db import DatabaseType, engine_session_factory
 from basic_memory.markdown import EntityParser
 from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.models.base import Base
+from basic_memory.repository.search_repository_base import SearchRepositoryBase
 from basic_memory.models.search import (
     CREATE_POSTGRES_SEARCH_INDEX_FTS,
     CREATE_POSTGRES_SEARCH_INDEX_FTS_CHUNKS_INDEX,
@@ -279,7 +281,6 @@ async def create_search_service(
             projects={"bench-project": str(tmp_path)},
             default_project="bench-project",
             database_backend=combo.backend,
-            semantic_search_enabled=combo.provider_name is not None,
             semantic_min_similarity=BENCHMARK_MIN_SIMILARITY,
             reranker_enabled=reranker_enabled,
         )
@@ -320,6 +321,11 @@ async def create_search_service(
             repo._vector_dimensions = embedding_provider.dimensions
             repo._vector_tables_initialized = False
         search_repo = repo
+
+    if combo.provider_name is None:
+        # The keyword-only baseline runs in the state SQLite falls back to when
+        # sqlite-vec cannot load: semantic retrieval off for this repository.
+        cast(SearchRepositoryBase, search_repo)._semantic_enabled = False
 
     entity_repo = EntityRepository(project_id=project.id)
     entity_parser = EntityParser(tmp_path)

@@ -975,8 +975,7 @@ async def test_put_entity_with_fast_param_returns_indexed_accepted_content(
 async def test_create_with_fast_param_does_not_schedule_reindex_task(
     client: AsyncClient, v2_project_url, vector_sync_scheduler_spy, app_config
 ):
-    """Legacy fast=true should not resurrect the removed reindex note-write path."""
-    app_config.semantic_search_enabled = False
+    """Legacy fast=true schedules only the normal vector sync, not the removed reindex path."""
     start_count = len(vector_sync_scheduler_spy)
     response = await client.post(
         f"{v2_project_url}/knowledge/entities",
@@ -988,15 +987,14 @@ async def test_create_with_fast_param_does_not_schedule_reindex_task(
         params={"fast": True},
     )
     assert response.status_code == 202
-    assert len(vector_sync_scheduler_spy) == start_count
+    assert len(vector_sync_scheduler_spy) == start_count + 1
 
 
 @pytest.mark.asyncio
-async def test_create_schedules_vector_sync_when_semantic_enabled(
+async def test_create_schedules_vector_sync(
     client: AsyncClient, v2_project_url, vector_sync_scheduler_spy, app_config
 ):
-    """Create should schedule vector sync when semantic mode is enabled."""
-    app_config.semantic_search_enabled = True
+    """Create should schedule vector sync."""
     start_count = len(vector_sync_scheduler_spy)
 
     response = await client.post(
@@ -1017,16 +1015,14 @@ async def test_create_schedules_vector_sync_when_semantic_enabled(
 
 
 @pytest.mark.asyncio
-async def test_create_schedules_relation_resolution_regardless_of_semantic(
+async def test_create_schedules_relation_resolution(
     client: AsyncClient, v2_project_url, relation_resolution_scheduler_spy, app_config
 ):
-    """Create should schedule forward-reference resolution even when semantic is off.
+    """Create should schedule forward-reference resolution.
 
     Regression for #1015: creating a note must back-resolve inbound forward
-    references that name it, matching the watcher's relation repair. Unlike
-    vector sync, this is not gated on semantic search.
+    references that name it, matching the watcher's relation repair.
     """
-    app_config.semantic_search_enabled = False
     start_count = len(relation_resolution_scheduler_spy)
 
     response = await client.post(
@@ -1042,31 +1038,9 @@ async def test_create_schedules_relation_resolution_regardless_of_semantic(
 
     # Relation resolution is scheduled by the eager router follow-up AND again by
     # the materializer once the deferred index lands (so a pass runs after the new
-    # rows exist); the scheduler coalesces/re-arms them. The #1015 regression is
-    # that it runs at all when semantic search is off.
+    # rows exist); the scheduler coalesces/re-arms them.
     assert len(relation_resolution_scheduler_spy) >= start_count + 1
     assert relation_resolution_scheduler_spy[-1]["project_id"] is not None
-
-
-@pytest.mark.asyncio
-async def test_create_skips_vector_sync_when_semantic_disabled(
-    client: AsyncClient, v2_project_url, vector_sync_scheduler_spy, app_config
-):
-    """Create should not schedule vector sync when semantic mode is disabled."""
-    app_config.semantic_search_enabled = False
-    start_count = len(vector_sync_scheduler_spy)
-
-    response = await client.post(
-        f"{v2_project_url}/knowledge/entities",
-        json={
-            "title": "NonFastNoSemanticEntity",
-            "directory": "test",
-            "content": "Content for non-fast without semantic scheduling",
-        },
-        params={"fast": False},
-    )
-    assert response.status_code == 202
-    assert len(vector_sync_scheduler_spy) == start_count
 
 
 @pytest.mark.asyncio
@@ -1854,7 +1828,6 @@ async def test_index_file_syncs_vectors_when_semantic_enabled(
     the service-level vector batch (like test_search_service.py::test_reindex_vectors
     stubs the repository batch) to exercise the wiring without the embedding stack.
     """
-    app_config.semantic_search_enabled = True
 
     synced_batches: list[list[int]] = []
 
@@ -1884,43 +1857,6 @@ async def test_index_file_syncs_vectors_when_semantic_enabled(
     entity = EntityResponseV2.model_validate(response.json())
 
     assert synced_batches == [[entity.id]]
-
-
-@pytest.mark.asyncio
-async def test_index_file_skips_vector_sync_when_semantic_disabled(
-    client: AsyncClient,
-    v2_project_url,
-    test_project: Project,
-    app_config,
-    monkeypatch: pytest.MonkeyPatch,
-):
-    """index-file does not touch the vector pipeline when semantic search is disabled."""
-    assert app_config.semantic_search_enabled is False
-
-    synced_batches: list[list[int]] = []
-
-    async def stub_sync_entity_vectors_batch(
-        self, entity_ids: list[int], progress_callback=None
-    ) -> VectorSyncBatchResult:
-        synced_batches.append(list(entity_ids))
-        return VectorSyncBatchResult(
-            entities_total=len(entity_ids),
-            entities_synced=len(entity_ids),
-            entities_failed=0,
-        )
-
-    monkeypatch.setattr(SearchService, "sync_entity_vectors_batch", stub_sync_entity_vectors_batch)
-
-    note_path = Path(test_project.path) / "incoming" / "plain-note.md"
-    note_path.parent.mkdir(parents=True, exist_ok=True)
-    note_path.write_text("# Plain Note\n\nNo vectors needed.\n", encoding="utf-8")
-
-    response = await client.post(
-        f"{v2_project_url}/knowledge/index-file",
-        json={"file_path": "incoming/plain-note.md"},
-    )
-    assert response.status_code == 200
-    assert synced_batches == []
 
 
 @pytest.mark.asyncio

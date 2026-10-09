@@ -1199,12 +1199,6 @@ class ProjectService:
         Reports config, counts, and whether a reindex is recommended.
         """
         config = self.config_manager.config
-        semantic_enabled = config.semantic_search_enabled
-
-        # When semantic search is disabled, return minimal status
-        if not semantic_enabled:
-            return EmbeddingStatus(semantic_search_enabled=False)
-
         provider = config.semantic_embedding_provider
         model = config.semantic_embedding_model
         dimensions = config.semantic_embedding_dimensions
@@ -1279,7 +1273,6 @@ class ProjectService:
                     )
 
                 return EmbeddingStatus(
-                    semantic_search_enabled=True,
                     embedding_provider=provider,
                     embedding_model=model,
                     embedding_dimensions=dimensions,
@@ -1397,7 +1390,6 @@ class ProjectService:
                     if is_postgres or "no such module: vec0" not in str(exc).lower():
                         raise
                     return EmbeddingStatus(
-                        semantic_search_enabled=True,
                         embedding_provider=provider,
                         embedding_model=model,
                         embedding_dimensions=dimensions,
@@ -1454,7 +1446,6 @@ class ProjectService:
                 )
 
             return EmbeddingStatus(
-                semantic_search_enabled=True,
                 embedding_provider=provider,
                 embedding_model=model,
                 embedding_dimensions=dimensions,

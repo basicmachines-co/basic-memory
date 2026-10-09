@@ -530,7 +530,6 @@ def _repository(
 ) -> tuple[BackendRepository, _TraceVectorIndex]:
     config = app_config.model_copy(
         update={
-            "semantic_search_enabled": True,
             "semantic_min_similarity": 0.0,
             "semantic_vector_k": 10,
         }

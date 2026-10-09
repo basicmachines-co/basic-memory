@@ -90,7 +90,6 @@ def isolate_basic_memory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setenv("BASIC_MEMORY_NO_PROMOS", "1")
     monkeypatch.setenv("BASIC_MEMORY_AUTO_UPDATE", "false")
     monkeypatch.setenv("BASIC_MEMORY_LOGFIRE_ENABLED", "false")
-    monkeypatch.setenv("BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED", "false")
     monkeypatch.setenv("BASIC_MEMORY_FORCE_LOCAL", "true")
 
 

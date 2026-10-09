@@ -156,12 +156,6 @@ def test_distinct_litellm_timeout_does_not_collide():
     assert fast_timeout is not slow_timeout
 
 
-def test_reranker_enabled_requires_semantic_search():
-    """Config rejects reranking without semantic search rather than silently no-op'ing."""
-    with pytest.raises(ValidationError, match="requires semantic_search_enabled"):
-        _config(reranker_enabled=True, semantic_search_enabled=False)
-
-
 @pytest.mark.parametrize("timeout", [0, -1.0])
 def test_reranker_timeout_must_be_positive(timeout):
     with pytest.raises(ValidationError, match="reranker_timeout"):

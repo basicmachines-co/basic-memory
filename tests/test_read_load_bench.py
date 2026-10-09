@@ -223,7 +223,6 @@ def test_isolated_env_removes_all_inherited_basic_memory_settings(
         "BASIC_MEMORY_LOG_LEVEL",
         "BASIC_MEMORY_REDIS_MAX_CONNECTIONS",
         "BASIC_MEMORY_REDIS_URL",
-        "BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED",
     }
 
 

@@ -275,8 +275,6 @@ Cloud extends local-first — still plain Markdown, still yours. [Start a free t
 
 **Jiti cache issues** — `rm -rf /tmp/jiti/ "$TMPDIR/jiti/"` then restart the gateway.
 
-**Disable semantic search** — Set `BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=false` to fall back to full-text only.
-
 ## More
 
 - [Memory + Task Flow](./MEMORY_TASK_FLOW.md) — practical runbook

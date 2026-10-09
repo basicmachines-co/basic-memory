@@ -38,10 +38,9 @@ def _vector_stats(
     }
 
 
-def _stub_app_config(*, semantic_search_enabled: bool = True) -> SimpleNamespace:
+def _stub_app_config() -> SimpleNamespace:
     """Build the minimal config surface the CLI reindex path expects."""
     return SimpleNamespace(
-        semantic_search_enabled=semantic_search_enabled,
         database_path=Path("/tmp/basic-memory.db"),
         get_project_mode=lambda project_name: None,
         # app_callback reads this to decide whether to install the uvloop policy.

@@ -117,6 +117,7 @@ markers = [
     "windows: Windows-specific tests (deselect with '-m \"not windows\"')",
     "smoke: Fast end-to-end smoke tests for MCP flows",
     "semantic: Tests requiring semantic dependencies (fastembed, sqlite-vec, openai)",
+    "real_embedder: Tests that exercise the real FastEmbed provider instead of the test embedder",
     "live: Tests that call external provider APIs and require explicit opt-in",
 ]
 

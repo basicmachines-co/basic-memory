@@ -23,7 +23,6 @@ def _enable_semantic(app_config: BasicMemoryConfig, config_manager: ConfigManage
     """Persist semantic search so the watcher's search service embeds for real."""
     pytest.importorskip("sqlite_vec")
     pytest.importorskip("fastembed")
-    app_config.semantic_search_enabled = True
     config_manager.save_config(app_config)
     # The watcher resolves config through ConfigManager().config; clear the cache
     # so the persisted semantic flag is observed on the next read.
@@ -57,9 +56,7 @@ async def test_local_watcher_embeds_indexed_file(
         app_config=app_config,
         project_repository=project_repository,
         session_maker=session_maker,
-        event_index_runtime_factory=LocalWatchEventIndexRuntimeFactory(
-            index_embeddings=app_config.semantic_search_enabled,
-        ),
+        event_index_runtime_factory=LocalWatchEventIndexRuntimeFactory(),
     )
 
     await watch_service.handle_changes(test_project, {(Change.added, str(note_path))})

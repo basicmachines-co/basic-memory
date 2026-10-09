@@ -107,10 +107,9 @@ async def write_note(
                     runtime_note_content_payload_as_dict(accepted.payload)
                 )
                 # Runtime-injected schedulers preserve local and Cloud publication behavior.
-                if app_config.semantic_search_enabled:
-                    vector_sync_scheduler.schedule_entity_vector_sync(
-                        entity_id=entity.id, project_id=project_id
-                    )
+                vector_sync_scheduler.schedule_entity_vector_sync(
+                    entity_id=entity.id, project_id=project_id
+                )
                 relation_resolution_scheduler.schedule_relation_resolution(project_id=project_id)
                 match outcome:
                     case Created():

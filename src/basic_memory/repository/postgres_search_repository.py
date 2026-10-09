@@ -96,7 +96,7 @@ class PostgresSearchRepository(SearchRepositoryBase):
         super().__init__(session_maker, project_id)
         self._fts = PostgresFts(session_maker)
         self._app_config = app_config or ConfigManager().config
-        self._semantic_enabled = self._app_config.semantic_search_enabled
+        self._semantic_enabled = True
         self._semantic_vector_k = self._app_config.semantic_vector_k
         self._semantic_min_similarity = self._app_config.semantic_min_similarity
         self._semantic_embedding_sync_batch_size = (
@@ -113,10 +113,10 @@ class PostgresSearchRepository(SearchRepositoryBase):
         self._vector_dimensions = 384
         self._vector_tables_initialized = False
 
-        if self._semantic_enabled and self._embedding_provider is None:
+        if self._embedding_provider is None:
             self._embedding_provider = create_embedding_provider(self._app_config)
         # create_rerank_provider returns None unless reranking is enabled.
-        if self._semantic_enabled and self._rerank_provider is None:
+        if self._rerank_provider is None:
             self._rerank_provider = create_rerank_provider(self._app_config)
         if self._embedding_provider is not None:
             self._vector_dimensions = self._embedding_provider.dimensions

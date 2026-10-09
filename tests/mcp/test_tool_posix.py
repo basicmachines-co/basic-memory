@@ -11,7 +11,6 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from textwrap import dedent
-from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
@@ -349,57 +348,12 @@ async def test_grep_keyword_finds_seeded_content(client, test_project):
     assert "Grep Target" in titles
 
 
-@pytest.mark.asyncio
-async def test_grep_default_mode_resolves_fts_and_finds(client, test_project, monkeypatch):
-    """With semantic search disabled, semantic=True falls back to full-text."""
-    container = SimpleNamespace(config=SimpleNamespace(semantic_search_enabled=False))
-    monkeypatch.setattr(posix_tools, "get_container", lambda: container)
-
-    await write_note(
-        title="Grep Default Target",
-        directory="test",
-        content="# Grep Default Target\n\nThe posixdefaultneedle hides here.",
-        project=test_project.name,
-    )
-
-    result = await grep("posixdefaultneedle", semantic=True, project=test_project.name)
-
-    titles = [row["title"] for row in result["results"]]
-    assert "Grep Default Target" in titles
-
-
-def test_grep_retrieval_mode_defaults_to_fts(monkeypatch):
-    """Keyword matching stays the default even when semantic search is enabled (#1685)."""
-    container = SimpleNamespace(config=SimpleNamespace(semantic_search_enabled=True))
-    monkeypatch.setattr(posix_tools, "get_container", lambda: container)
-
+def test_grep_retrieval_mode_defaults_to_fts():
+    """Keyword matching stays the default even though semantic search is on (#1685)."""
     assert posix_tools._grep_retrieval_mode(False) is SearchRetrievalMode.FTS
 
 
-def test_grep_retrieval_mode_hybrid_when_semantic_enabled(monkeypatch):
-    container = SimpleNamespace(config=SimpleNamespace(semantic_search_enabled=True))
-    monkeypatch.setattr(posix_tools, "get_container", lambda: container)
-
-    assert posix_tools._grep_retrieval_mode(True) is SearchRetrievalMode.HYBRID
-
-
-def test_grep_retrieval_mode_fts_when_semantic_disabled(monkeypatch):
-    container = SimpleNamespace(config=SimpleNamespace(semantic_search_enabled=False))
-    monkeypatch.setattr(posix_tools, "get_container", lambda: container)
-
-    assert posix_tools._grep_retrieval_mode(True) is SearchRetrievalMode.FTS
-
-
-def test_grep_retrieval_mode_falls_back_to_config_manager(monkeypatch):
-    """CLI paths call tools before the MCP container exists."""
-
-    def raise_uninitialized():
-        raise RuntimeError("MCP container not initialized")
-
-    monkeypatch.setattr(posix_tools, "get_container", raise_uninitialized)
-    manager = SimpleNamespace(config=SimpleNamespace(semantic_search_enabled=True))
-    monkeypatch.setattr(posix_tools, "ConfigManager", lambda: manager)
-
+def test_grep_retrieval_mode_hybrid_on_request():
     assert posix_tools._grep_retrieval_mode(True) is SearchRetrievalMode.HYBRID
 
 

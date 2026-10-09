@@ -85,7 +85,6 @@ async def test_real_fastembed_reranker_scores_and_hybrid_search(
         projects={"bench-project": str(tmp_path)},
         default_project="bench-project",
         database_backend=DatabaseBackend.SQLITE,
-        semantic_search_enabled=True,
         reranker_enabled=True,
     )
     provider = create_rerank_provider(config)

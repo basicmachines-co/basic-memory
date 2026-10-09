@@ -334,7 +334,7 @@ runtime-core-pytest *args:
 
 # Focused PR #1002 Codex feedback regressions.
 pr-1002-feedback-test:
-    BASIC_MEMORY_ENV=test BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true LOGFIRE_IGNORE_NO_CONFIG=1 uv run pytest -p pytest_mock -q --no-cov \
+    BASIC_MEMORY_ENV=test LOGFIRE_IGNORE_NO_CONFIG=1 uv run pytest -p pytest_mock -q --no-cov \
         tests/runtime/test_deleted_note_response.py \
         tests/repository/test_accepted_note_search_repository.py \
         tests/indexing/test_project_index_workflow.py \
@@ -571,7 +571,6 @@ telemetry-smoke:
     export BASIC_MEMORY_CONFIG_DIR="$TMP_CONFIG"
     export BASIC_MEMORY_NO_PROMOS=1
     export BASIC_MEMORY_LOG_LEVEL="${BASIC_MEMORY_LOG_LEVEL:-INFO}"
-    export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED="${BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED:-false}"
     export BASIC_MEMORY_LOGFIRE_ENABLED="${BASIC_MEMORY_LOGFIRE_ENABLED:-true}"
     export BASIC_MEMORY_LOGFIRE_ENVIRONMENT="${BASIC_MEMORY_LOGFIRE_ENVIRONMENT:-telemetry-smoke}"
     if [[ -z "${BASIC_MEMORY_LOGFIRE_SEND_TO_LOGFIRE:-}" ]]; then
@@ -586,7 +585,6 @@ telemetry-smoke:
     echo "  logfire_enabled=$BASIC_MEMORY_LOGFIRE_ENABLED"
     echo "  send_to_logfire=$BASIC_MEMORY_LOGFIRE_SEND_TO_LOGFIRE"
     echo "  log_level=$BASIC_MEMORY_LOG_LEVEL"
-    echo "  semantic_search_enabled=$BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED"
     echo "  logfire_environment=$BASIC_MEMORY_LOGFIRE_ENVIRONMENT"
     echo "  project_path=$TMP_PROJECT"
     ./.venv/bin/python -m basic_memory.cli.main project add telemetry-smoke "$TMP_PROJECT" --default --local

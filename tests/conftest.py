@@ -9,6 +9,8 @@ from typing import AsyncGenerator
 
 import pytest
 import pytest_asyncio
+
+from tests.fake_embeddings import use_fake_embeddings
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import text
@@ -61,6 +63,12 @@ from basic_memory.services.search_service import SearchService
 # By default, tests run against SQLite.
 # Set BASIC_MEMORY_TEST_POSTGRES=1 to run against Postgres (uses testcontainers).
 # This allows running sqlite/postgres tests in parallel in CI.
+
+
+@pytest.fixture(autouse=True)
+def _fake_embeddings(request, monkeypatch):
+    """Use the deterministic test embedder; see tests/fake_embeddings.py."""
+    use_fake_embeddings(request, monkeypatch)
 
 
 @pytest.fixture(scope="session")
@@ -303,13 +311,6 @@ def app_config(config_home, db_backend, postgres_container, monkeypatch) -> Basi
         update_permalinks_on_move=True,
         database_backend=backend,
         database_url=database_url,
-        # Trigger: semantic_search_enabled defaults to True whenever fastembed/sqlite-vec
-        #          are importable, which they are in dev and CI environments.
-        # Why: with it on, every test that syncs pays the ONNX embedding stack (~5-7s per
-        #      sync) — embeddings are covered by the dedicated semantic suites, which
-        #      configure semantic_search_enabled explicitly themselves.
-        # Outcome: non-semantic tests skip embedding work entirely.
-        semantic_search_enabled=False,
     )
 
     return app_config

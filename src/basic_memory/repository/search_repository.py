@@ -31,7 +31,6 @@ from basic_memory.repository.search_scope import ProjectScope
 from basic_memory.repository.search_trace import SearchTraceCollector
 from basic_memory.repository.semantic_vector_index_factory import (
     create_semantic_vector_index,
-    resolve_semantic_vector_index_name,
     semantic_embedding_identity,
 )
 from basic_memory.repository.sqlite_search_query import SQLiteFts
@@ -244,21 +243,16 @@ def create_search_repository(
     # the ~2.3GB ONNX model and leaking memory in onnxruntime's CPU arena.
     # Outcome: resolve the cached singleton here once and inject it, so the provider
     # is the single source of truth across all callers of this factory.
-    embedding_provider = None
-    vector_index_name = resolve_semantic_vector_index_name(config, database_backend)
-    vector_index = None
-    rerank_provider = None
-    if config.semantic_search_enabled:
-        embedding_provider = create_embedding_provider(config)
-        vector_index_name, vector_index = create_semantic_vector_index(
-            session_maker=session_maker,
-            app_config=config,
-            database_backend=database_backend,
-            embedding_provider=embedding_provider,
-        )
-        # Returns None unless reranking is enabled; resolve the cached singleton
-        # here so both backends share one process-wide reranker model.
-        rerank_provider = create_rerank_provider(config)
+    embedding_provider = create_embedding_provider(config)
+    vector_index_name, vector_index = create_semantic_vector_index(
+        session_maker=session_maker,
+        app_config=config,
+        database_backend=database_backend,
+        embedding_provider=embedding_provider,
+    )
+    # Returns None unless reranking is enabled; resolve the cached singleton
+    # here so both backends share one process-wide reranker model.
+    rerank_provider = create_rerank_provider(config)
 
     if database_backend == DatabaseBackend.POSTGRES:  # pragma: no cover
         return PostgresSearchRepository(  # pragma: no cover
@@ -292,9 +286,7 @@ def create_search_reader(
 
     Resolves the same shared embedding provider, vector adapter, and reranker that
     ``create_search_repository`` hands a project repository, so a scoped search runs
-    the pipeline a project's own route runs, over a wider scope. Whether semantic
-    retrieval is available is decided here, once, from configuration; a semantic
-    query against a reader built without it fails as a disabled feature.
+    the pipeline a project's own route runs, over a wider scope.
     """
     backend = database_backend or app_config.database_backend
     fts: FtsBackend = (
@@ -302,9 +294,6 @@ def create_search_reader(
         if backend == DatabaseBackend.POSTGRES
         else SQLiteFts(session_maker)
     )
-    if not app_config.semantic_search_enabled:
-        return SearchReader(scope, fts)
-
     embedding_provider = create_embedding_provider(app_config)
     vector_index_name, vector_index = create_semantic_vector_index(
         session_maker=session_maker,

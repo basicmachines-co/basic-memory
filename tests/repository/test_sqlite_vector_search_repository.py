@@ -38,6 +38,7 @@ from basic_memory.repository.semantic_vector_sync import (
 )
 from basic_memory.repository.sqlite_search_repository import SQLiteSearchRepository
 from basic_memory.repository import sqlite_vec_index as sqlite_vec_index_module
+from basic_memory.repository.semantic_vector_index_factory import build_vector_index_scope
 from basic_memory.repository.sqlite_vec_index import SQLITE_VEC_MAX_K, SQLiteVecIndex
 from basic_memory.schemas.search import SearchItemType, SearchRetrievalMode
 
@@ -226,6 +227,12 @@ def _enable_semantic(
     provider = embedding_provider or StubEmbeddingProvider()
     search_repository._embedding_provider = provider
     search_repository._vector_dimensions = provider.dimensions
+    # The repository built its vector index for the default provider; rebuild it for
+    # this provider's dimensions.
+    search_repository._semantic_vector_index = SQLiteVecIndex(
+        search_repository.session_maker,
+        build_vector_index_scope(search_repository._app_config, provider),
+    )
     search_repository._vector_tables_initialized = False
 
 
@@ -237,7 +244,6 @@ def _make_sqlite_repo_for_unit_tests() -> SQLiteSearchRepository:
         projects={"test-project": "/tmp/test"},
         default_project="test-project",
         database_backend=DatabaseBackend.SQLITE,
-        semantic_search_enabled=True,
         semantic_embedding_sync_batch_size=8,
     )
     repo = SQLiteSearchRepository(

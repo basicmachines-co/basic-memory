@@ -52,7 +52,6 @@ from basic_memory.deps import (
     DirectoryDeleteServiceDep,
     ProjectRepositoryDep,
     ProjectConfigV2ExternalDep,
-    AppConfigDep,
     EntityRepositoryV2ExternalDep,
     RelationRepositoryV2ExternalDep,
     ProjectExternalIdPathDep,
@@ -135,7 +134,6 @@ def _schedule_post_write_followups(
     *,
     vector_sync_scheduler,
     relation_resolution_scheduler,
-    app_config,
     entity_id: int,
     project_id: int,
 ) -> None:
@@ -154,11 +152,10 @@ def _schedule_post_write_followups(
     here, cloud needs a matching override or it will run the local in-process
     work on the cloud API server. See basic_memory_cloud api/deps/cloud_overrides.
     """
-    if app_config.semantic_search_enabled:
-        vector_sync_scheduler.schedule_entity_vector_sync(
-            entity_id=entity_id,
-            project_id=project_id,
-        )
+    vector_sync_scheduler.schedule_entity_vector_sync(
+        entity_id=entity_id,
+        project_id=project_id,
+    )
     relation_resolution_scheduler.schedule_relation_resolution(project_id=project_id)
 
 
@@ -585,7 +582,6 @@ async def index_file(
     entity_repository: EntityRepositoryV2ExternalDep,
     project_config: ProjectConfigV2ExternalDep,
     search_service: SearchServiceV2ExternalDep,
-    app_config: AppConfigDep,
     session_maker: SessionMakerDep,
     read_cache: ReadCacheDep,
 ) -> EntityResponseV2:
@@ -705,14 +701,13 @@ async def index_file(
                 detail=f"Indexed entity not found after indexing: '{data.file_path}'",
             )
 
-        # Trigger: semantic search is enabled and the entity index was just refreshed
+        # Trigger: the entity index was just refreshed
         # Why: project indexing refreshes embedding vectors after changed files are
         #      indexed; without the single-entity equivalent, a note recovered via
         #      index-file stays missing or stale in semantic search until later work
         # Outcome: vectors refresh synchronously before the response returns,
         #          mirroring project indexing instead of the out-of-band scheduler
-        if app_config.semantic_search_enabled:
-            await search_service.sync_entity_vectors_batch([entity.id])
+        await search_service.sync_entity_vectors_batch([entity.id])
 
         result = EntityResponseV2.model_validate(entity)
         logger.debug(
@@ -926,7 +921,6 @@ async def create_entity(
     note_content_materialization_provider: NoteContentMaterializationProviderDep,
     vector_sync_scheduler: EntityVectorSyncSchedulerDep,
     relation_resolution_scheduler: RelationResolutionSchedulerDep,
-    app_config: AppConfigDep,
 ) -> EntityResponseV2:
     """Create a new entity.
 
@@ -961,7 +955,6 @@ async def create_entity(
         _schedule_post_write_followups(
             vector_sync_scheduler=vector_sync_scheduler,
             relation_resolution_scheduler=relation_resolution_scheduler,
-            app_config=app_config,
             entity_id=result.id,
             project_id=project_id,
         )
@@ -991,7 +984,6 @@ async def update_entity_by_id(
     note_content_materialization_provider: NoteContentMaterializationProviderDep,
     vector_sync_scheduler: EntityVectorSyncSchedulerDep,
     relation_resolution_scheduler: RelationResolutionSchedulerDep,
-    app_config: AppConfigDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
     base_checksum: Annotated[
         str | None,
@@ -1042,7 +1034,6 @@ async def update_entity_by_id(
         _schedule_post_write_followups(
             vector_sync_scheduler=vector_sync_scheduler,
             relation_resolution_scheduler=relation_resolution_scheduler,
-            app_config=app_config,
             entity_id=result.id,
             project_id=project_id,
         )
@@ -1068,7 +1059,6 @@ async def edit_entity_by_id(
     note_content_materialization_provider: NoteContentMaterializationProviderDep,
     vector_sync_scheduler: EntityVectorSyncSchedulerDep,
     relation_resolution_scheduler: RelationResolutionSchedulerDep,
-    app_config: AppConfigDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
 ) -> EntityResponseV2:
     """Edit an existing entity by external ID using operations like append, prepend, etc.
@@ -1111,7 +1101,6 @@ async def edit_entity_by_id(
         _schedule_post_write_followups(
             vector_sync_scheduler=vector_sync_scheduler,
             relation_resolution_scheduler=relation_resolution_scheduler,
-            app_config=app_config,
             entity_id=result.id,
             project_id=project_id,
         )
@@ -1192,7 +1181,6 @@ async def move_entity(
     ],
     note_content_mutation_service: NoteContentMutationServiceDep,
     note_content_materialization_provider: NoteContentMaterializationProviderDep,
-    app_config: AppConfigDep,
     vector_sync_scheduler: EntityVectorSyncSchedulerDep,
     relation_resolution_scheduler: RelationResolutionSchedulerDep,
     entity_id: str = Path(..., description="Entity external ID (UUID)"),
@@ -1236,7 +1224,6 @@ async def move_entity(
         _schedule_post_write_followups(
             vector_sync_scheduler=vector_sync_scheduler,
             relation_resolution_scheduler=relation_resolution_scheduler,
-            app_config=app_config,
             entity_id=result.id,
             project_id=project_id,
         )
@@ -1259,7 +1246,6 @@ async def move_directory(
     note_content_mutation_service: NoteContentMutationServiceDep,
     note_content_materialization_provider: NoteContentMaterializationProviderDep,
     entity_service: EntityServiceV2ExternalDep,
-    app_config: AppConfigDep,
     search_service: SearchServiceV2ExternalDep,
     vector_sync_scheduler: EntityVectorSyncSchedulerDep,
     relation_resolution_scheduler: RelationResolutionSchedulerDep,
@@ -1292,7 +1278,6 @@ async def move_directory(
             _schedule_post_write_followups(
                 vector_sync_scheduler=vector_sync_scheduler,
                 relation_resolution_scheduler=relation_resolution_scheduler,
-                app_config=app_config,
                 entity_id=entity_id,
                 project_id=project_id,
             )

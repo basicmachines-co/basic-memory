@@ -22,7 +22,6 @@ The default LiteLLM model is OpenAI `text-embedding-3-small` through the LiteLLM
 model string `openai/text-embedding-3-small`.
 
 ```bash
-export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER=litellm
 export OPENAI_API_KEY=sk-...
 
@@ -41,7 +40,6 @@ All options can be set in config or as environment variables.
 
 | Config Field | Env Var | Default | Notes |
 |---|---|---|---|
-| `semantic_search_enabled` | `BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED` | Auto | Set to `true` to force vector/hybrid support on. |
 | `semantic_embedding_provider` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER` | `fastembed` | Set to `litellm` for the LiteLLM provider. |
 | `semantic_embedding_model` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL` | `bge-small-en-v1.5` | With `litellm`, the default is remapped to `openai/text-embedding-3-small`. |
 | `semantic_embedding_api_base` | `BASIC_MEMORY_SEMANTIC_EMBEDDING_API_BASE` | Unset | Optional custom endpoint for the LiteLLM provider, including local or self-hosted OpenAI-compatible servers. |
@@ -95,7 +93,6 @@ available somewhere other than the provider's default endpoint. Include the API
 version prefix expected by the server, commonly `/v1`:
 
 ```bash
-export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER=litellm
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL=openai/local-embedding-model
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_API_BASE=http://127.0.0.1:8080/v1
@@ -189,7 +186,6 @@ covered by Basic Memory's live validation harness.
 
 ```bash
 export OPENAI_API_KEY=sk-...
-export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER=litellm
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL=openai/text-embedding-3-small
 ```
@@ -198,7 +194,6 @@ export BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL=openai/text-embedding-3-small
 
 ```bash
 export COHERE_API_KEY=...
-export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER=litellm
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL=cohere/embed-english-v3.0
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_DIMENSIONS=1024
@@ -214,7 +209,6 @@ export AZURE_API_KEY=...
 export AZURE_API_BASE=https://<resource-name>.openai.azure.com
 export AZURE_API_VERSION=2024-02-01
 
-export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER=litellm
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL=azure/<deployment-name>
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_DIMENSIONS=1536
@@ -235,7 +229,6 @@ export NVIDIA_NIM_API_KEY=...
 # Optional when using a custom or self-hosted NIM endpoint:
 export NVIDIA_NIM_API_BASE=https://integrate.api.nvidia.com/v1
 
-export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=true
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_PROVIDER=litellm
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_MODEL=nvidia_nim/nvidia/embed-qa-4
 export BASIC_MEMORY_SEMANTIC_EMBEDDING_DIMENSIONS=1024
