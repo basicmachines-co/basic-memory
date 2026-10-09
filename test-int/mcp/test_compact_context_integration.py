@@ -39,9 +39,14 @@ async def test_compact_context_preserves_graph_navigation(mcp_server, app, test_
         for field in ("generated_at", "timeframe"):
             full["metadata"].pop(field, None)
             compact["metadata"].pop(field, None)
+        # Compact skips loading entity observations on the server (#1571), so it
+        # carries no observation list and counts none. Everything else in the
+        # graph -- primary results, relations, related notes, paging -- matches.
+        full["metadata"]["total_observations"] = 0
         for result in full["results"]:
+            del result["observations"]
             result["primary_result"].pop("content", None)
-            for item in [*result["observations"], *result["related_results"]]:
+            for item in result["related_results"]:
                 item.pop("content", None)
                 if item["type"] == "observation":
                     item["permalink"] = item["file_path"]
@@ -55,11 +60,14 @@ async def test_compact_context_preserves_graph_navigation(mcp_server, app, test_
             "read_note", {"identifier": selected["external_id"], "project": test_project.name}
         )
         assert body in read.content[0].text
-        observation = compact["results"][0]["observations"][0]
-        observed_note = await client.call_tool(
-            "read_note", {"identifier": observation["permalink"], "project": test_project.name}
+        # Related notes stay navigable from compact output.
+        related_entity = next(
+            row for row in compact["results"][0]["related_results"] if row["type"] == "entity"
         )
-        assert body in observed_note.content[0].text
+        related_note = await client.call_tool(
+            "read_note", {"identifier": related_entity["permalink"], "project": test_project.name}
+        )
+        assert "Target body" in related_note.content[0].text
         text_result = await client.call_tool(
             "build_context", {**arguments, "compact": True, "output_format": "text"}
         )
