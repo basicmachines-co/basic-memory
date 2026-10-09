@@ -1034,7 +1034,12 @@ async def test_pull_leaves_content_written_into_the_destination_during_the_downl
         client_cm_factory=_client_factory(handler),
     )
 
-    assert observed == [[]]  # nothing staged at the destination before the bytes existed
+    # Nothing holds the destination name before the bytes exist. The download
+    # streams into a hidden staging file beside it, which no editor opens.
+    [names] = observed
+    assert "raced.md" not in names
+    assert all(name.startswith(".raced.md.") and name.endswith(".part") for name in names)
+    assert sorted(p.name for p in root.iterdir()) == ["raced.md"]
     assert (root / "raced.md").read_text() == "editor content"
 
 

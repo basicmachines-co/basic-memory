@@ -29,10 +29,12 @@ nobody compared.
 import asyncio
 import hashlib
 import os
+import shutil
 import tempfile
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
+from datetime import datetime
 from functools import partial
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -48,7 +50,6 @@ from basic_memory.cli.commands.cloud.transfer import (
     strategy_overwrites_dest,
 )
 from basic_memory.cli.commands.cloud.webdav import (
-    DownloadedFile,
     RemoteFile,
     WebdavError,
     download_file,
@@ -514,13 +515,11 @@ async def _pull_file(
     if not transfer.create_only:
         _refuse_symlink(target, transfer.dest_rel)
 
-    downloaded = await download_file(client, project, transfer.source_rel)
-
     target.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = _write_temp_file(target, downloaded)
+    temp_path = await _download_to_temp_file(client, project, transfer.source_rel, target)
     try:
         if transfer.create_only:
-            return _publish_new(temp_path, target, downloaded)
+            return _publish_new(temp_path, target)
         # An explicit keep-cloud is an instruction to replace what is there.
         os.replace(temp_path, target)
         return True
@@ -530,19 +529,25 @@ async def _pull_file(
         temp_path.unlink(missing_ok=True)
 
 
-def _write_temp_file(target: Path, downloaded: DownloadedFile) -> Path:
-    """Stage the downloaded bytes beside the destination, fully written."""
+async def _download_to_temp_file(
+    client: httpx.AsyncClient, project: str, source_rel: str, target: Path
+) -> Path:
+    """Stage the download beside the destination, fully written.
+
+    The body streams straight into the temp file, so a large attachment never
+    sits in memory whole while other transfers run beside it.
+    """
     handle, temp_name = tempfile.mkstemp(
         dir=target.parent, prefix=f".{target.name}.", suffix=".part"
     )
     temp_path = Path(temp_name)
     try:
         with os.fdopen(handle, "wb") as stream:
-            stream.write(downloaded.content)
+            modified = await download_file(client, project, source_rel, stream)
         # The timestamp is set here, before publication, because it lives on the
         # inode — a hardlinked publish shares it, and there is no window in which
         # the published note carries the wrong mtime.
-        _apply_modified(temp_path, downloaded)
+        _apply_modified(temp_path, modified)
     except BaseException:
         temp_path.unlink(missing_ok=True)
         raise
@@ -550,7 +555,7 @@ def _write_temp_file(target: Path, downloaded: DownloadedFile) -> Path:
     return temp_path
 
 
-def _publish_new(temp_path: Path, target: Path, downloaded: DownloadedFile) -> bool:
+def _publish_new(temp_path: Path, target: Path) -> bool:
     """Claim a name that nothing else holds, atomically.
 
     ``os.link`` is the atomic no-replace publish: it fails outright when the
@@ -573,37 +578,40 @@ def _publish_new(temp_path: Path, target: Path, downloaded: DownloadedFile) -> b
         # can catch the new file mid-write. No unlinked filesystem can do
         # better, and a real failure (no space, no permission) still surfaces
         # from the create below rather than being swallowed here.
-        return _publish_new_without_link(target, downloaded)
+        return _publish_new_without_link(temp_path, target)
 
 
-def _publish_new_without_link(target: Path, downloaded: DownloadedFile) -> bool:
-    """Claim the name with an exclusive create, then write through it."""
+def _publish_new_without_link(temp_path: Path, target: Path) -> bool:
+    """Claim the name with an exclusive create, then copy the staged bytes into it."""
     try:
         handle = os.open(target, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
     except FileExistsError:
         return False
 
     try:
-        with os.fdopen(handle, "wb") as stream:
-            stream.write(downloaded.content)
+        with os.fdopen(handle, "wb") as stream, temp_path.open("rb") as staged:
+            shutil.copyfileobj(staged, stream)
     except BaseException:
         # Never leave a note behind that holds none of the content.
         target.unlink(missing_ok=True)
         raise
 
-    _apply_modified(target, downloaded)
+    # The staged copy already carries the cloud's timestamp; carry only that
+    # across, not the temp file's owner-only permission bits.
+    staged_stat = temp_path.stat()
+    os.utime(target, ns=(staged_stat.st_atime_ns, staged_stat.st_mtime_ns))
     return True
 
 
-def _apply_modified(path: Path, downloaded: DownloadedFile) -> None:
+def _apply_modified(path: Path, modified: datetime | None) -> None:
     """Carry the cloud's timestamp onto the local copy, the way rclone does.
 
     Without it every pulled file would look freshly modified, and the
     last-modified fallback in ``_compare`` could never report a match.
     """
-    if downloaded.modified is None:
+    if modified is None:
         return
-    stamp = downloaded.modified.timestamp()
+    stamp = modified.timestamp()
     os.utime(path, (stamp, stamp))
 
 
@@ -620,13 +628,11 @@ async def _push_file(
     """
     source = _safe_local_path(local_root, transfer.source_rel)
     _refuse_symlink(source, transfer.source_rel)
-    stat = source.stat()
     return await upload_file(
         client,
         project,
         transfer.dest_rel,
-        content=source.read_bytes(),
-        mtime=int(stat.st_mtime),
+        source=source,
         create_only=transfer.create_only,
     )
 
