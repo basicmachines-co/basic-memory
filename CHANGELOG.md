@@ -779,6 +779,15 @@
   crash-loops (#1374). A file deleted between the existence probe and the checksum read
   is treated as absent instead of failing materialization (#1383).
 
+- **#1714**: Wiki projector pages are no longer embedded. A page counts as
+  projector-owned while its current accepted revision came from the projector
+  (`note_content.last_source`), not by file name. Vector sync deletes such a page's
+  vectors, embeds nothing, and reports it as skipped. Full-text rows and relations
+  are unchanged, so generated `index.md` links still feed the graph. A hand-written
+  `index.md` is embedded as before, and a generated page someone edits is embedded on
+  its next sync. In Cloud, the embedding jobs queued for projector writes become cheap
+  deletes.
+
 ### Internal
 
 - **#1672**: Indexing and embedding results report the work they did. `FileIndexResult`,
