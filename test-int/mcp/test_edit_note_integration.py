@@ -12,6 +12,7 @@ from fastmcp import Client
 
 from basic_memory import file_utils
 from basic_memory.file_utils import FileWriteError, parse_frontmatter
+from basic_memory.mcp.clients import KnowledgeClient
 from basic_memory.repository.note_content_repository import (
     NoteContentRepository,
     NoteContentVersionConflict,
@@ -1410,3 +1411,65 @@ async def test_edit_note_expected_checksum_never_auto_creates(mcp_server, app, t
             },
         )
         assert json.loads(missing.content[0].text)["error"] == "NOTE_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_edit_note_expected_checksum_never_recovers_a_deleted_note_from_disk(
+    mcp_server, app, test_project, monkeypatch
+):
+    """A guarded miss must not index a file that outlived its note's delete.
+
+    The delete commits before its file cleanup runs. Disk recovery would index
+    that stale file under the caller's own checksum, the precondition would
+    accept it, and the edit would resurrect the deleted note.
+    """
+    index_calls: list[str] = []
+    index_file = KnowledgeClient.index_file
+
+    async def record_index_file(self, file_path):
+        index_calls.append(file_path)
+        return await index_file(self, file_path)
+
+    monkeypatch.setattr(KnowledgeClient, "index_file", record_index_file)
+
+    async with Client(mcp_server) as client:
+        created = await client.call_tool(
+            "write_note",
+            {
+                "project": test_project.name,
+                "title": "Deleted Then Edited",
+                "directory": "test",
+                "content": "# Deleted Then Edited\n\nOriginal body.",
+                "output_format": "json",
+            },
+        )
+        note = json.loads(created.content[0].text)
+        path = Path(test_project.path) / note["file_path"]
+        stale_bytes = path.read_bytes()
+
+        await client.call_tool(
+            "delete_note",
+            {"project": test_project.name, "identifier": note["permalink"]},
+        )
+        # The file cleanup has not run yet: the deleted note's bytes are still on disk.
+        path.write_bytes(stale_bytes)
+
+        result = await client.call_tool(
+            "edit_note",
+            {
+                "project": test_project.name,
+                "identifier": note["file_path"],
+                "operation": "append",
+                "content": "\nResurrected?",
+                "expected_checksum": note["checksum"],
+                "output_format": "json",
+            },
+            raise_on_error=False,
+        )
+
+    assert result.is_error is True
+    payload = json.loads(result.content[0].text)
+    assert payload["error"] == "NOTE_REVISION_CONFLICT"
+    assert payload["currentChecksum"] is None
+    assert index_calls == []
+    assert path.read_bytes() == stale_bytes
