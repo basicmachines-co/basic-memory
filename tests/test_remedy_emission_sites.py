@@ -57,6 +57,11 @@ JUSTIFIED_SITES: dict[tuple[str, str], str] = {
         "inside `bm cloud bisync-reset`, which calls _require_personal_workspace itself; "
         "the hints repeat that command's own invocation"
     ),
+    ("index/watch_service.py", "warn_unreadable_new_directories"): (
+        "names `bm project index` only when local_index_available, which handle_changes "
+        "sets from the project's mode; a cloud project's watched copy gets a permissions "
+        "hint instead"
+    ),
     ("cli/commands/cloud/project_sync.py", "setup_project_sync"): (
         "the Personal-only mirror is offered as an aside after the Team-safe pull/push "
         "next steps, and labelled as such"
