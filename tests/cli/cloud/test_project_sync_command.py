@@ -915,12 +915,14 @@ def test_cloud_prune_names_the_bmignore_in_the_config_dir(monkeypatch, config_ma
     """The scan message names the real ignore file, not a hardcoded ~/.basic-memory (#1635)."""
     module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
     _stub_prune_env(monkeypatch, module, matches=[])
-    monkeypatch.setattr(module, "get_bmignore_path", lambda: Path("/cfg/.bmignore"))
+    bmignore = Path("/cfg/.bmignore")
+    monkeypatch.setattr(module, "get_bmignore_path", lambda: bmignore)
 
     result = runner.invoke(app, ["cloud", "prune", "--name", "research", "--dry-run"])
 
     assert result.exit_code == 0, result.output
-    assert "matching /cfg/.bmignore" in " ".join(result.output.split())
+    # str(Path) so the expectation matches the platform's separators (Windows CI).
+    assert f"matching {bmignore}" in " ".join(result.output.split())
 
 
 def test_cloud_prune_help_points_at_the_config_dir():

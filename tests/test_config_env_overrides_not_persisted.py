@@ -38,7 +38,7 @@ def file_manager(config_home: Path) -> ConfigManager:
                 "projects": {"main": {"path": str(config_home / "main"), "mode": "local"}},
                 "default_project": "main",
                 "log_level": "INFO",
-                "semantic_search_enabled": False,
+                "format_on_save": False,
             }
         ),
         encoding="utf-8",
@@ -50,21 +50,21 @@ def test_project_add_keeps_file_values_under_env_override(
     file_manager: ConfigManager, config_home: Path, monkeypatch
 ):
     monkeypatch.setenv("BASIC_MEMORY_LOG_LEVEL", "DEBUG")
-    monkeypatch.setenv("BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED", "true")
+    monkeypatch.setenv("BASIC_MEMORY_FORMAT_ON_SAVE", "true")
     monkeypatch.setenv("BASIC_MEMORY_CLI_OUTPUT_STYLE", "plain")
     _reset_config_cache()
 
     # The env values are in effect for this process.
     loaded = file_manager.load_config()
     assert loaded.log_level == "DEBUG"
-    assert loaded.semantic_search_enabled is True
+    assert loaded.format_on_save is True
 
     file_manager.add_project("leak", str(config_home / "leak"))
 
     written = _read_file(file_manager)
     assert "leak" in written["projects"]
     assert written["log_level"] == "INFO"
-    assert written["semantic_search_enabled"] is False
+    assert written["format_on_save"] is False
     # The file never had this key, so the env value must not appear either.
     assert "cli_output_style" not in written
 
@@ -101,7 +101,7 @@ def test_first_run_save_does_not_persist_env_values(config_home: Path, monkeypat
 
 def test_explicit_key_is_persisted_despite_env_override(file_manager: ConfigManager, monkeypatch):
     monkeypatch.setenv("BASIC_MEMORY_LOG_LEVEL", "DEBUG")
-    monkeypatch.setenv("BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED", "true")
+    monkeypatch.setenv("BASIC_MEMORY_FORMAT_ON_SAVE", "true")
     _reset_config_cache()
 
     config = file_manager.load_config()
@@ -110,7 +110,7 @@ def test_explicit_key_is_persisted_despite_env_override(file_manager: ConfigMana
 
     written = _read_file(file_manager)
     assert written["log_level"] == "WARNING"
-    assert written["semantic_search_enabled"] is False
+    assert written["format_on_save"] is False
 
 
 def test_legacy_sync_env_keeps_the_file_legacy_value(config_home: Path, monkeypatch):
