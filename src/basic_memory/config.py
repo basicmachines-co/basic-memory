@@ -270,24 +270,44 @@ def env_overridden_fields(file_data: Mapping[str, Any]) -> frozenset[str]:
     This is the one place that decides env-over-file precedence: `load_config`
     drops these fields from the file data so the env value wins, and
     `save_basic_memory_config` keeps their env values out of the file.
+    """
+    return frozenset(env_override_sources(file_data))
 
-    A field is env-sourced when `BASIC_MEMORY_<FIELD>` is set. A field renamed
-    from a legacy sync key is also env-sourced when its legacy env var is set
-    and the file does not spell the new name, because that is exactly when
-    `migrate_legacy_sync_fields` lets the legacy env var win.
+
+def env_override_sources(file_data: Mapping[str, Any]) -> dict[str, str]:
+    """Map each env-sourced config field to the environment variable that sets it.
+
+    A field is env-sourced when `BASIC_MEMORY_<FIELD>` is set in any letter
+    case: pydantic-settings matches env names case-insensitively, so a
+    lowercase name must win over the file just as it wins over the default.
+    When several spellings are set, the exact upper-case name is reported.
+
+    A field renamed from a legacy sync key is also env-sourced when its legacy
+    env var is set and the file does not spell the new name, because that is
+    exactly when `migrate_legacy_sync_fields` lets the legacy env var win. That
+    migration reads the exact upper-case legacy name, so this does too.
     """
     env_prefix = str(BasicMemoryConfig.model_config["env_prefix"])
-    direct = {
-        field_name
-        for field_name in BasicMemoryConfig.model_fields
-        if f"{env_prefix}{field_name.upper()}" in os.environ
-    }
-    legacy = {
-        new_field
-        for new_field, legacy_key in BasicMemoryConfig._LEGACY_SYNC_FIELDS.items()
-        if f"{env_prefix}{legacy_key.upper()}" in os.environ and new_field not in file_data
-    }
-    return frozenset(direct | legacy)
+    env_names_by_upper: dict[str, str] = {}
+    for env_name in os.environ:
+        env_names_by_upper.setdefault(env_name.upper(), env_name)
+
+    sources: dict[str, str] = {}
+    for field_name in BasicMemoryConfig.model_fields:
+        expected = f"{env_prefix}{field_name.upper()}"
+        if expected in os.environ:
+            sources[field_name] = expected
+        elif expected in env_names_by_upper:
+            sources[field_name] = env_names_by_upper[expected]
+    for new_field, legacy_key in BasicMemoryConfig._LEGACY_SYNC_FIELDS.items():
+        legacy_env_name = f"{env_prefix}{legacy_key.upper()}"
+        if (
+            new_field not in sources
+            and new_field not in file_data
+            and legacy_env_name in os.environ
+        ):
+            sources[new_field] = legacy_env_name
+    return sources
 
 
 def _file_config_dict(

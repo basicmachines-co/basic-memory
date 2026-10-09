@@ -914,9 +914,9 @@ async def test_list_memory_projects_factory_mode(app, test_project):
     assert "Workspace: Personal (personal default)" in result
     assert "Workspace: Team Paul (team-paul)" in result
     assert "- personal-main (cloud) [personal-project-uuid]" in result
-    assert (
-        "- team-specs (cloud) [team-project-uuid] - cloud-only (local sync unsupported)" in result
-    )
+    # Team projects sync with push/pull, so they are not labelled cloud-only (#1596).
+    assert "- team-specs (cloud) [team-project-uuid]\n" in result
+    assert "cloud-only" not in result
 
 
 @pytest.mark.asyncio
@@ -975,9 +975,9 @@ async def test_list_memory_projects_factory_mode_json_includes_workspace(app, te
     assert proj["workspace_slug"] == "my-org"
     assert proj["workspace_is_default"] is False
     assert proj["qualified_name"] == "my-org/cloud-proj"
-    assert proj["sync_supported"] is False
-    assert proj["sync_reason"] == "organization workspace"
-    assert proj["local_usage"] == "cloud-only"
+    assert proj["sync_supported"] is True
+    assert proj["sync_reason"] is None
+    assert proj["local_usage"] == "sync-supported"
 
 
 @pytest.mark.asyncio
@@ -1139,13 +1139,13 @@ def test_merge_projects_overlap():
     assert merged[0]["workspace_name"] == "Acme Corp"
     assert merged[0]["workspace_type"] == "organization"
     assert merged[0]["workspace_tenant_id"] == "org-456"
-    assert merged[0]["sync_supported"] is False
-    assert merged[0]["sync_reason"] == "organization workspace"
-    assert merged[0]["local_usage"] == "cloud-only"
+    assert merged[0]["sync_supported"] is True
+    assert merged[0]["sync_reason"] is None
+    assert merged[0]["local_usage"] == "sync-supported"
 
 
 def test_merge_workspace_projects_attaches_local_state_to_one_duplicate_workspace(tmp_path):
-    """A same-name team workspace project should stay cloud-only (#848)."""
+    """A same-name team workspace project gets no local state (#848)."""
     local_path = str(tmp_path / "main")
     local_main = _make_project("main", local_path, is_default=True)
     local_list = _make_list([local_main], default="main")
@@ -1193,9 +1193,9 @@ def test_merge_workspace_projects_attaches_local_state_to_one_duplicate_workspac
     assert team_project["source"] == "cloud"
     assert team_project["local_path"] is None
     assert team_project["path"] == "/cloud/team-main"
-    assert team_project["sync_supported"] is False
-    assert team_project["sync_reason"] == "organization workspace"
-    assert team_project["local_usage"] == "cloud-only"
+    assert team_project["sync_supported"] is True
+    assert team_project["sync_reason"] is None
+    assert team_project["local_usage"] == "sync-supported"
 
 
 def test_merge_workspace_projects_uses_configured_workspace_for_local_state(tmp_path):

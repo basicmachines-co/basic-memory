@@ -9,7 +9,7 @@ import basic_memory
 from basic_memory.config import (
     CONFIG_FILE_NAME,
     BasicMemoryConfig,
-    env_overridden_fields,
+    env_override_sources,
     resolve_data_dir,
 )
 from basic_memory.mcp.server import mcp
@@ -124,25 +124,21 @@ def _environment_overrides(
 ) -> tuple[dict[str, object], list[str]]:
     """Split BASIC_MEMORY_* env vars into effective config overrides and other names.
 
-    `env_overridden_fields` is the rule ConfigManager uses to let env win over
+    `env_override_sources` is the rule ConfigManager uses to let env win over
     the file, so this reports exactly the overrides the server applies,
-    including legacy sync env names mapped to their current field.
+    including lowercase spellings and legacy sync env names mapped to their
+    current field.
 
     Overrides are keyed by config field name so they go through the same
     redaction as the file dump; redact_config matches field names, not env var
     names. A secret field is still reported as overridden, with its value hidden.
     """
     prefix = str(BasicMemoryConfig.model_config["env_prefix"])
-    overrides: dict[str, object] = {}
-    used_env_names: set[str] = set()
-    for field_name in env_overridden_fields(file_data):
-        env_name = f"{prefix}{field_name.upper()}"
-        if env_name not in os.environ:
-            # Only a legacy sync env var put this field in the override set.
-            legacy_key = BasicMemoryConfig._LEGACY_SYNC_FIELDS[field_name]
-            env_name = f"{prefix}{legacy_key.upper()}"
-        overrides[field_name] = os.environ[env_name]
-        used_env_names.add(env_name)
+    sources = env_override_sources(file_data)
+    overrides: dict[str, object] = {
+        field_name: os.environ[env_name] for field_name, env_name in sources.items()
+    }
+    used_env_names = set(sources.values())
 
     # Everything else (API keys, test switches, routing flags, env names the
     # loader does not apply) is listed by name only: values could be secrets.
