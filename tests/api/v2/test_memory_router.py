@@ -367,3 +367,36 @@ async def test_v2_memory_endpoints_use_project_id_not_name(
 
     # FastAPI path validation should reject non-integer project_id
     assert response.status_code in [404, 422]
+
+
+@pytest.mark.asyncio
+async def test_get_memory_context_skips_observations_when_asked(
+    client: AsyncClient,
+    test_graph,
+    v2_project_url: str,
+):
+    """include_observations=false returns the same graph without observation lists (#1571)."""
+    full = await client.get(f"{v2_project_url}/memory/test/root")
+    shape_only = await client.get(
+        f"{v2_project_url}/memory/test/root",
+        params={"include_observations": False},
+    )
+
+    assert full.status_code == 200
+    assert shape_only.status_code == 200
+    full_data = full.json()
+    shape_data = shape_only.json()
+
+    # Default keeps observations; the opt-out loads none.
+    assert len(full_data["results"][0]["observations"]) == 2
+    # The count also covers related entities' observations.
+    assert full_data["metadata"]["total_observations"] > 0
+    assert shape_data["results"][0]["observations"] == []
+    assert shape_data["metadata"]["total_observations"] == 0
+
+    # Primary and related selection is unchanged.
+    assert (
+        shape_data["results"][0]["primary_result"]["permalink"]
+        == full_data["results"][0]["primary_result"]["permalink"]
+    )
+    assert shape_data["results"][0]["related_results"] == full_data["results"][0]["related_results"]

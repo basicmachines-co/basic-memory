@@ -226,6 +226,36 @@ async def test_build_context_text_format(client, test_graph, test_project):
 
 
 @pytest.mark.asyncio
+async def test_build_context_compact_skips_observations(client, test_graph, test_project):
+    """Compact asks the server not to load observations and lists none (#1571)."""
+    full = await build_context(project=test_project.name, url="memory://test/root")
+    compact = await build_context(project=test_project.name, url="memory://test/root", compact=True)
+
+    assert isinstance(full, dict)
+    assert isinstance(compact, dict)
+
+    # Non-compact output is unchanged: observations with their content.
+    assert [obs["content"] for obs in full["results"][0]["observations"]] == [
+        "Root note 1",
+        "Root tech note",
+    ]
+    assert full["metadata"]["total_observations"] > 0
+
+    # The server counted no observations, so the tool sent include_observations=False,
+    # and compact JSON drops the list entirely.
+    assert compact["metadata"]["total_observations"] == 0
+    assert "observations" not in compact["results"][0]
+    assert "content" not in compact["results"][0]["primary_result"]
+    assert (
+        compact["results"][0]["primary_result"]["permalink"]
+        == full["results"][0]["primary_result"]["permalink"]
+    )
+    assert len(compact["results"][0]["related_results"]) == len(
+        full["results"][0]["related_results"]
+    )
+
+
+@pytest.mark.asyncio
 async def test_build_context_markdown_pattern(client, test_graph, test_project):
     """Test markdown format with pattern matching (multiple results)."""
     result = await build_context(

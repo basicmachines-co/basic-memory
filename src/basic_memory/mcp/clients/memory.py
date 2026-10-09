@@ -53,6 +53,7 @@ class MemoryClient:
         page: int = 1,
         page_size: int = DEFAULT_CONTEXT_PAGE_SIZE,
         max_related: int = DEFAULT_CONTEXT_RELATED_RESULTS,
+        include_observations: bool = True,
     ) -> GraphContext:
         """Build context from a memory path.
 
@@ -63,6 +64,8 @@ class MemoryClient:
             page: Page number (1-indexed)
             page_size: Primary results per page
             max_related: Maximum total related items across the page
+            include_observations: Ask the server to load entity observations;
+                False skips that query for graph-shape discovery
 
         Returns:
             GraphContext with hierarchical results
@@ -77,6 +80,7 @@ class MemoryClient:
             "page": page,
             "page_size": page_size,
             "max_related": max_related,
+            "include_observations": include_observations,
         }
         if timeframe:
             params["timeframe"] = timeframe
