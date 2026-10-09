@@ -2,9 +2,11 @@
 
 import importlib
 import re
+from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 import typer
 from typer.testing import CliRunner
@@ -768,6 +770,57 @@ def test_cloud_pull_on_team_workspace_reports_a_webdav_failure(monkeypatch, conf
     assert "Pull error: HTTP 403 - Forbidden" in output
     # The old failure pointed at a command the member could never run.
     assert "bm cloud setup" not in output
+
+
+def test_cloud_pull_on_team_workspace_refuses_a_cloud_without_recursive_listing(
+    monkeypatch, config_manager, tmp_path
+):
+    """A cloud that answers one level deep stops the pull with a clear reason (#1604).
+
+    The CLI sends one `Depth: infinity` PROPFIND. Walking directories itself
+    instead would hide that the service is older than this client.
+    """
+    module = importlib.import_module("basic_memory.cli.commands.cloud.project_sync")
+    transfer_module = importlib.import_module("basic_memory.cli.commands.cloud.webdav_transfer")
+    recorder: dict[str, Any] = {}
+    _stub_webdav_transfer_env(monkeypatch, module, plan=TransferPlan(), recorder=recorder)
+    # Run the real diff against a cloud that ignores the Depth header.
+    monkeypatch.setattr(module, "webdav_project_diff", transfer_module.webdav_project_diff)
+    local_root = tmp_path / "research"
+    local_root.mkdir()
+    monkeypatch.setattr(module, "_require_local_sync_path", lambda _name, _config: local_root)
+
+    one_level = """<?xml version="1.0" encoding="utf-8"?>
+<D:multistatus xmlns:D="DAV:">
+<D:response><D:href>/webdav/research/</D:href><D:propstat><D:prop>
+    <D:resourcetype><D:collection/></D:resourcetype>
+</D:prop></D:propstat></D:response>
+<D:response><D:href>/webdav/research/notes/</D:href><D:propstat><D:prop>
+    <D:resourcetype><D:collection/></D:resourcetype><D:displayname>notes</D:displayname>
+</D:prop></D:propstat></D:response>
+</D:multistatus>"""
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(207, text=one_level)
+
+    @asynccontextmanager
+    async def _client(**_kwargs):
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(handler), base_url="https://cloud.example.test"
+        ) as client:
+            yield client
+
+    monkeypatch.setattr(transfer_module, "get_cloud_control_plane_client", _client)
+
+    result = runner.invoke(app, ["cloud", "pull", "--name", "research"])
+
+    assert result.exit_code == 1, result.output
+    output = _plain(result.output)
+    assert "does not yet support the recursive listing" in output
+    assert [request.headers["Depth"] for request in requests] == ["infinity"]
+    assert "args" not in recorder  # nothing transferred
 
 
 def test_cloud_pull_on_team_workspace_reports_a_missing_project(monkeypatch, config_manager):

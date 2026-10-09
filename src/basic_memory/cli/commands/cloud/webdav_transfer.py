@@ -26,12 +26,13 @@ when the service reports no entity tag we can treat as a content hash. See
 nobody compared.
 """
 
+import asyncio
 import hashlib
 import os
 import tempfile
 from collections.abc import Callable
 from contextlib import AbstractAsyncContextManager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path, PurePosixPath
 from typing import Literal
@@ -70,6 +71,13 @@ ClientFactory = Callable[[], AbstractAsyncContextManager[httpx.AsyncClient]]
 MODIFY_WINDOW_SECONDS = 1.0
 
 _HASH_CHUNK_BYTES = 1024 * 1024
+
+# How many files move at once. Each transfer is one request that spends most of
+# its time waiting on the network, so running a few together divides the wall
+# time (#1604). The bound keeps a large project from opening hundreds of
+# connections at once, and keeps a rate-limit window from turning into a burst of
+# simultaneous 429 retries.
+TRANSFER_CONCURRENCY = 8
 
 # Whether two copies of a path hold the same bytes. "unknown" means the question
 # could not be answered at all — never a silent "same".
@@ -205,21 +213,89 @@ async def webdav_project_transfer(
         else:
             appeared = []
 
-        transferred = 0
-        for transfer in transfers:
+        outcome = await _run_transfers(
+            client, project, local_root, direction, transfers, verbose=verbose
+        )
+
+    console.print(f"[dim]Transferred {outcome.transferred} file(s).[/dim]")
+    _report_appeared(appeared + outcome.refused)
+
+
+# --- Running transfers concurrently ---
+
+
+@dataclass
+class _TransferOutcome:
+    """What a batch of transfers did, accumulated as the workers finish files."""
+
+    transferred: int = 0
+    # Create-only transfers the destination refused because the path now exists.
+    refused: list[str] = field(default_factory=list)
+
+
+async def _run_transfers(
+    client: httpx.AsyncClient,
+    project: str,
+    local_root: Path,
+    direction: TransferDirection,
+    transfers: list[_Transfer],
+    *,
+    verbose: bool,
+) -> _TransferOutcome:
+    """Move every file with at most ``TRANSFER_CONCURRENCY`` in flight.
+
+    A fixed set of workers draws from one shared queue, so the number of tasks
+    stays bounded however many files the plan holds. The workers run in a task
+    group: the first failure cancels the rest, and nothing keeps running after
+    this function returns or raises. Each file still lands atomically (a staged
+    rename on pull, a single PUT on push), so a cancelled transfer leaves nothing
+    half-written, and a re-run compares what did arrive as unchanged.
+
+    Raises:
+        WebdavError: Naming every transfer that failed, and how many files were
+            transferred before the batch stopped.
+        OSError: If a local file could not be read or written.
+    """
+    outcome = _TransferOutcome()
+    # Workers share one iterator. Advancing it never awaits, so each transfer is
+    # handed to exactly one worker.
+    queue = iter(transfers)
+
+    async def worker() -> None:
+        for transfer in queue:
             if verbose:
                 console.print(f"  {transfer.describe()}")
             if direction == "pull":
                 written = await _pull_file(client, project, local_root, transfer)
             else:
                 written = await _push_file(client, project, local_root, transfer)
-            if not written:
-                appeared.append(transfer.dest_rel)
-                continue
-            transferred += 1
+            if written:
+                outcome.transferred += 1
+            else:
+                outcome.refused.append(transfer.dest_rel)
 
-    console.print(f"[dim]Transferred {transferred} file(s).[/dim]")
-    _report_appeared(appeared)
+    try:
+        async with asyncio.TaskGroup() as group:
+            for _ in range(min(TRANSFER_CONCURRENCY, len(transfers))):
+                group.create_task(worker())
+    except ExceptionGroup as group_error:
+        # Trigger: one or more workers failed, and the task group cancelled the rest.
+        # Why: callers handle WebdavError and OSError, not an ExceptionGroup, and a
+        # group prints as a nested traceback rather than a message.
+        # Outcome: an unexpected failure (a local disk error, say) propagates as
+        # itself, chained to the group so the traceback still shows every cause.
+        # Otherwise one WebdavError names each failed transfer.
+        failures = group_error.exceptions
+        unexpected = [failure for failure in failures if not isinstance(failure, WebdavError)]
+        if unexpected:
+            raise unexpected[0] from group_error
+        reasons = "; ".join(str(failure) for failure in failures)
+        raise WebdavError(
+            f"Transfer stopped after {outcome.transferred} file(s): {reasons}"
+        ) from group_error
+
+    outcome.refused.sort()
+    return outcome
 
 
 # --- Planning ---
