@@ -8,6 +8,7 @@ from typing import Protocol, Self
 
 from basic_memory.indexing.change_planning import ChangeReport
 from basic_memory.indexing.embedding_index_planning import (
+    DeferredEmbeddingTargetSource,
     EmbeddingBatchVectorSync,
     EmbeddingIndexBatchJobRequest,
     run_embedding_index_batch,
@@ -263,6 +264,7 @@ async def run_project_index_coordinator(
     fanout_failure_recorder: ProjectIndexFanoutFailureRecorder | None,
     batch_size: int,
     embedding_vector_sync: EmbeddingBatchVectorSync | None = None,
+    deferred_embedding_targets: DeferredEmbeddingTargetSource | None = None,
 ) -> ProjectIndexCoordinatorResult:
     """Run the storage-neutral project-index coordinator fan-out."""
     if not request.search:
@@ -335,6 +337,7 @@ async def run_project_index_coordinator(
         request=request,
         batch_results=batch_results,
         embedding_vector_sync=embedding_vector_sync,
+        deferred_embedding_targets=deferred_embedding_targets,
     )
 
     return ProjectIndexCoordinatorResult(
@@ -356,13 +359,30 @@ async def sync_project_index_vector_targets(
     request: RuntimeProjectIndexJobRequest,
     batch_results: Sequence[IndexFileBatchJobResult],
     embedding_vector_sync: EmbeddingBatchVectorSync | None,
+    deferred_embedding_targets: DeferredEmbeddingTargetSource | None = None,
 ) -> None:
-    """Refresh vectors produced by inline project-index batch execution."""
+    """Refresh vectors produced by inline project-index batch execution.
+
+    Entities a previous pass left unfinished ride along with this pass's
+    changed files, so an oversized note keeps advancing one shard per pass
+    until it is fully embedded and its marker clears.
+    """
     if not request.embeddings or embedding_vector_sync is None:
         return
 
-    vector_targets = tuple(
-        target for batch_result in batch_results for target in batch_result.vector_targets
+    # Trigger: the runtime can list entities whose last vector sync deferred shards.
+    # Why: an unchanged note produces no file-index target, so without this its
+    # remaining shards wait for an edit or a manual `bm reindex` (#1605).
+    # Outcome: those entities join the batch; the planner dedupes any entity that
+    # is also a changed-file target, and completion clears the marker.
+    deferred_targets = (
+        await deferred_embedding_targets.list_deferred_embedding_targets()
+        if deferred_embedding_targets is not None
+        else ()
+    )
+    vector_targets = (
+        *(target for batch_result in batch_results for target in batch_result.vector_targets),
+        *deferred_targets,
     )
     if not vector_targets:
         return
