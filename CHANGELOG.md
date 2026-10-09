@@ -344,6 +344,13 @@
   than inside it, so a failed refresh can no longer roll back the note. Thanks to
   @sammywachtel.
 
+- **#1676**: `search_notes` accepts the metadata filter shapes agents actually write.
+  Bare operator names (`gte`, `in`) work as aliases for `$gte` and `$in`, one field can
+  take several operators (`{"$gte": a, "$lte": b}`), and `$contains` (array contains) and
+  `$exists` are new. An unknown operator's error now lists the valid ones. A rejected
+  filter no longer leaves its count query running after the request returns: search and
+  count run in one task group, so a failure cancels the other (#1675).
+
 - **#1663**: An unhandled API error no longer stalls the server for seconds while it is
   logged, and logs no longer contain the values of local variables from tracebacks.
   Loguru's `diagnose` mode called `repr()` on every frame's locals, and each ASGI frame
