@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
@@ -639,15 +640,56 @@ def insert_relative_to_section(
     return "\n".join([*lines[: index + 1], *insert_lines, *after])
 
 
+# CommonMark setext underline: up to three spaces of indent, then a run of `=` (H1) or
+# a run of `-` (H2), then optional trailing whitespace.
+_SETEXT_UNDERLINE = re.compile(r" {0,3}(?:=+|-+)[ \t]*")
+# Lines that open a block quote or a list item. A setext underline cannot claim these
+# as heading text, so they need no separating blank line.
+_QUOTE_OR_LIST_ITEM = re.compile(r" {0,3}(?:>|[-+*](?:[ \t]|$)|\d{1,9}[.)](?:[ \t]|$))")
+
+
+def _joins_into_setext_heading(text_before: str, text_after: str) -> bool:
+    """Return whether joining the texts on one newline would create a setext heading.
+
+    A setext underline turns the paragraph line directly above it into an H1 or H2, and a
+    blank line is the only thing that stops it. So appending `---` (meant as a thematic
+    break) right after a paragraph silently rewrites that paragraph into a heading, and
+    the section parser then sees a heading nobody wrote (#1585). Every other join stays a
+    single newline: a blank line between list items would turn a tight list into a loose
+    one, and ATX headings, list items and quotes can already interrupt a paragraph.
+    """
+    last_line_before = text_before.removesuffix("\n").rsplit("\n", 1)[-1]
+    first_line_after = text_after.split("\n", 1)[0]
+    if not _SETEXT_UNDERLINE.fullmatch(first_line_after):
+        return False
+    is_paragraph_line = (
+        bool(last_line_before.strip())
+        and _markdown_heading_level(last_line_before) is None
+        and _fence_marker(last_line_before) is None
+        and _QUOTE_OR_LIST_ITEM.match(last_line_before) is None
+    )
+    return is_paragraph_line
+
+
+def _edit_join_separator(text_before: str, text_after: str) -> str:
+    """Newlines that join an edit's text to its neighbor without changing either one."""
+    line_break = "\n" if text_before and not text_before.endswith("\n") else ""
+    # Trigger: a paragraph line would sit directly above a setext underline.
+    # Why: a single newline would promote that paragraph to a heading.
+    # Outcome: a blank line keeps the paragraph a paragraph and the underline a break.
+    if _joins_into_setext_heading(text_before, text_after):
+        return line_break + "\n"
+    return line_break
+
+
 def _prepend_after_frontmatter(current_content: str, content: str) -> str:
     if has_frontmatter(current_content):
         frontmatter_data = parse_frontmatter(current_content)
         body_content = remove_frontmatter(current_content)
-        new_body = content + ("\n" if content and not content.endswith("\n") else "")
-        new_body += body_content
+        new_body = content + _edit_join_separator(content, body_content) + body_content
         yaml_frontmatter = yaml.dump(frontmatter_data, sort_keys=False, allow_unicode=True)
         return f"---\n{yaml_frontmatter}---\n\n{new_body.strip()}"
-    return content + ("\n" if content and not content.endswith("\n") else "") + current_content
+    return content + _edit_join_separator(content, current_content) + current_content
 
 
 def apply_edit_operation(
@@ -660,11 +702,7 @@ def apply_edit_operation(
     replace_subsections: bool = True,
 ) -> str:
     if operation == "append":
-        return (
-            current_content
-            + ("\n" if current_content and not current_content.endswith("\n") else "")
-            + content
-        )
+        return current_content + _edit_join_separator(current_content, content) + content
     if operation == "prepend":
         return _prepend_after_frontmatter(current_content, content)
     if operation == "find_replace":
