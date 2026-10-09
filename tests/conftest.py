@@ -40,7 +40,10 @@ from basic_memory.markdown.markdown_processor import MarkdownProcessor
 from basic_memory.models import Base
 from basic_memory.models.knowledge import Entity
 from basic_memory.models.project import Project
+from basic_memory.repository.embedding_provider_factory import create_embedding_provider
 from basic_memory.repository.entity_repository import EntityRepository
+from basic_memory.repository.pgvector_index import PgVectorIndex
+from basic_memory.repository.semantic_vector_index_factory import build_vector_index_scope
 from basic_memory.repository.note_content_repository import NoteContentRepository
 from basic_memory.repository.observation_repository import ObservationRepository
 from basic_memory.repository.project_repository import ProjectRepository
@@ -401,6 +404,14 @@ async def engine_factory(
             expire_on_commit=False,
             autoflush=False,
         )
+
+        # Semantic search is always on, and production creates pgvector storage at
+        # database initialization. The reset above drops it, so recreate it here for
+        # the configured provider's dimensions, as initialization would.
+        await PgVectorIndex(
+            session_maker,
+            build_vector_index_scope(app_config, create_embedding_provider(app_config)),
+        ).create_storage()
 
         # Important: wire the engine/session into the global db module state.
         # Some codepaths (e.g. app initialization / MCP lifespan) call db.get_or_create_db(),
