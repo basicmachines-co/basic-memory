@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import text
 
 from basic_memory import db
+from basic_memory.config import DatabaseBackend
 from basic_memory.repository import EntityRepository
 from basic_memory.runtime.vector_sync import VectorSyncBatchResult
 from basic_memory.repository.semantic_errors import (
@@ -506,3 +507,153 @@ async def test_semantic_vector_sync_batch_cleans_up_unknown_ids(search_service, 
     )
     assert result.vector_index == "sqlite-vec"
     assert result.embedding_model == "FastEmbedEmbeddingProvider:test-model"
+
+
+class _RecordingEmbeddingProvider:
+    """Deterministic embedder that records every text it is asked to embed."""
+
+    model_name = "recording"
+    dimensions = 4
+
+    def __init__(self) -> None:
+        self.embedded_texts: list[str] = []
+
+    async def embed_query(self, text: str) -> list[float]:
+        return [0.0, 0.0, 0.0, 1.0]
+
+    async def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        self.embedded_texts.extend(texts)
+        return [[0.0, 0.0, 0.0, 1.0] for _ in texts]
+
+    def runtime_log_attrs(self) -> dict[str, object]:
+        return {}
+
+
+@pytest.mark.asyncio
+async def test_note_update_does_not_reembed_unchanged_observations_or_relations(
+    search_service, entity_service, app_config, session_maker, test_project
+):
+    """Editing one line of a note re-embeds only that line's chunk.
+
+    Updating a note deletes and recreates its observations and relations, so their
+    search rows get new ids. Unchanged text must keep its embedding anyway: an agent
+    appending to a large ledger note otherwise pays to re-embed every observation and
+    relation on every edit (production tenant 0fffb994, about 86 chunks per edit).
+    Runs on both backends; Postgres is what Cloud uses and never reuses row ids.
+    """
+    from basic_memory.repository.postgres_search_repository import PostgresSearchRepository
+    from basic_memory.schemas import Entity as EntitySchema
+    from basic_memory.services.search_service import SearchService
+
+    provider = _RecordingEmbeddingProvider()
+    semantic_config = app_config.model_copy(update={"semantic_search_enabled": True})
+    if app_config.database_backend == DatabaseBackend.POSTGRES:
+        async with db.scoped_session(session_maker) as session:
+            try:
+                await session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+                await session.commit()
+            except Exception:
+                pytest.skip("pgvector extension is unavailable in this Postgres test environment.")
+        repository = PostgresSearchRepository(
+            session_maker,
+            project_id=test_project.id,
+            app_config=semantic_config,
+            embedding_provider=provider,
+        )
+    else:
+        try:
+            import sqlite_vec  # noqa: F401
+        except ImportError:
+            pytest.skip("sqlite-vec dependency is required for vector sync tests.")
+        repository = SQLiteSearchRepository(
+            session_maker,
+            project_id=test_project.id,
+            app_config=semantic_config,
+            embedding_provider=provider,
+        )
+    semantic_service = SearchService(
+        repository,
+        search_service.entity_repository,
+        search_service.file_service,
+        session_maker=session_maker,
+    )
+    await semantic_service.init_search_index()
+
+    def note_content(status_line: str) -> str:
+        return (
+            f"{status_line}\n\n"
+            "## Observations\n"
+            "- [decision] Ledger notes stay in plain Markdown\n"
+            "- [finding] Agents append to ledgers many times a day\n"
+            "- [risk] Large notes amplify indexing cost\n\n"
+            "## Relations\n"
+            "- relates_to [[Indexing Pipeline]]\n"
+            "- depends_on [[Embedding Provider]]\n"
+        )
+
+    entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Ledger",
+            directory="ledgers",
+            note_type="note",
+            content=note_content("Status: drafting the first entry."),
+        )
+    )
+    await semantic_service.index_entity(entity)
+    first_sync = await repository.sync_entity_vectors_batch([entity.id])
+    assert first_sync.embedding_jobs_total > 0
+    assert any("Large notes amplify indexing cost" in text for text in provider.embedded_texts)
+    assert any("Indexing Pipeline" in text for text in provider.embedded_texts)
+
+    # Another note written in between takes the next observation ids, as in any real
+    # workspace. Without it SQLite reuses the deleted ids on rewrite and hides the bug;
+    # Postgres sequences never reuse ids.
+    other, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Other Note",
+            directory="ledgers",
+            note_type="note",
+            content="## Observations\n- [fact] Written between ledger edits\n",
+        )
+    )
+    await semantic_service.index_entity(other)
+
+    # Change only the status line; every observation and relation is unchanged.
+    provider.embedded_texts.clear()
+    entity, _ = await entity_service.create_or_update_entity(
+        EntitySchema(
+            title="Ledger",
+            directory="ledgers",
+            note_type="note",
+            content=note_content("Status: second entry appended."),
+        )
+    )
+    await semantic_service.index_entity(entity)
+    second_sync = await repository.sync_entity_vectors_batch([entity.id])
+
+    unchanged_texts = [
+        "Ledger notes stay in plain Markdown",
+        "Agents append to ledgers many times a day",
+        "Large notes amplify indexing cost",
+        "Indexing Pipeline",
+        "Embedding Provider",
+    ]
+    reembedded = [
+        text
+        for text in provider.embedded_texts
+        if any(unchanged in text for unchanged in unchanged_texts)
+        and "second entry appended" not in text
+    ]
+    assert reembedded == []
+    assert any("second entry appended" in text for text in provider.embedded_texts)
+    assert second_sync.chunks_skipped > 0
+
+    # The reused chunks now point at the recreated search rows, so a vector search for
+    # unchanged text still resolves to the note.
+    results = await semantic_service.search(
+        SearchQuery(
+            text="Large notes amplify indexing cost",
+            retrieval_mode=SearchRetrievalMode.VECTOR,
+        )
+    )
+    assert any(result.entity_id == entity.id for result in results)

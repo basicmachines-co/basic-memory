@@ -211,6 +211,8 @@ async def test_vector_match_hydration_batches_large_adapter_results() -> None:
                 "entity_id": value,
                 "chunk_key": params[f"chunk_key_{index}"],
                 "chunk_text": f"chunk {value}",
+                "source_type": "entity",
+                "source_row_id": value,
             }
             for index in range((len(params) - 3) // 2)
             if (value := params[f"entity_id_{index}"]) is not None
@@ -244,8 +246,20 @@ async def test_external_vector_query_overfetches_past_stale_adapter_hits(
     adapter: Any = SimpleNamespace(search=AsyncMock(side_effect=[matches(2), matches(4)]))
     semantic = _semantic_search(index_name="milvus", adapter=adapter)
     live_rows = [
-        HydratedChunk(entity_id=2, chunk_key="entity:2:0", chunk_text="two", similarity=0.9),
-        HydratedChunk(entity_id=3, chunk_key="entity:3:0", chunk_text="three", similarity=0.8),
+        HydratedChunk(
+            entity_id=2,
+            chunk_key="entity:2:0",
+            source_key=("entity", 2),
+            chunk_text="two",
+            similarity=0.9,
+        ),
+        HydratedChunk(
+            entity_id=3,
+            chunk_key="entity:3:0",
+            source_key=("entity", 3),
+            chunk_text="three",
+            similarity=0.8,
+        ),
     ]
     hydrate = AsyncMock(side_effect=[[], live_rows])
     monkeypatch.setattr(semantic, "_hydrate_vector_matches", hydrate)

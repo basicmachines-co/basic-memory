@@ -441,12 +441,16 @@ class PostgresSearchRepository(SearchRepositoryBase):
             upsert_params[f"chunk_key_{index}"] = record["chunk_key"]
             upsert_params[f"chunk_text_{index}"] = record["chunk_text"]
             upsert_params[f"source_hash_{index}"] = record["source_hash"]
+            upsert_params[f"source_type_{index}"] = record["source_type"]
+            upsert_params[f"source_row_id_{index}"] = record["source_row_id"]
+            upsert_params[f"chunk_index_{index}"] = record["chunk_index"]
             upsert_params[f"entity_fingerprint_{index}"] = entity_fingerprint
             upsert_params[f"embedding_model_{index}"] = embedding_model
             upsert_values.append(
                 "("
                 ":entity_id, :project_id, "
                 f":chunk_key_{index}, :chunk_text_{index}, :source_hash_{index}, "
+                f":source_type_{index}, :source_row_id_{index}, :chunk_index_{index}, "
                 f":entity_fingerprint_{index}, :embedding_model_{index}, "
                 ":vector_index, 'pending', NOW()"
                 ")"
@@ -460,6 +464,9 @@ class PostgresSearchRepository(SearchRepositoryBase):
                     chunk_key,
                     chunk_text,
                     source_hash,
+                    source_type,
+                    source_row_id,
+                    chunk_index,
                     entity_fingerprint,
                     embedding_model,
                     vector_index,
@@ -469,6 +476,9 @@ class PostgresSearchRepository(SearchRepositoryBase):
                 ON CONFLICT (project_id, entity_id, chunk_key) DO UPDATE SET
                     chunk_text = EXCLUDED.chunk_text,
                     source_hash = EXCLUDED.source_hash,
+                    source_type = EXCLUDED.source_type,
+                    source_row_id = EXCLUDED.source_row_id,
+                    chunk_index = EXCLUDED.chunk_index,
                     entity_fingerprint = EXCLUDED.entity_fingerprint,
                     embedding_model = EXCLUDED.embedding_model,
                     vector_index = EXCLUDED.vector_index,

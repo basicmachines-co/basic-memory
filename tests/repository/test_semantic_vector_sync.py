@@ -338,6 +338,9 @@ def test_vector_shard_planning_and_logging_edges(monkeypatch) -> None:
             "chunk_key": f"chunk-{index:03d}",
             "chunk_text": "text",
             "source_hash": "hash",
+            "source_type": "entity",
+            "source_row_id": 1,
+            "chunk_index": index,
         }
         for index in range(semantic_vector_sync.OVERSIZED_ENTITY_VECTOR_SHARD_SIZE + 1)
     ]
@@ -543,6 +546,9 @@ async def test_prefetched_prepare_handles_empty_chunks_and_stale_rows(monkeypatc
         "chunk_key": "new",
         "chunk_text": "text",
         "source_hash": "source-hash",
+        "source_type": "entity",
+        "source_row_id": 1,
+        "chunk_index": 0,
     }
     stale_row = semantic_vector_sync.VectorChunkState(
         id=7,
@@ -551,6 +557,8 @@ async def test_prefetched_prepare_handles_empty_chunks_and_stale_rows(monkeypatc
         entity_fingerprint="old-fingerprint",
         embedding_model="model",
         has_embedding=True,
+        source_row_id=1,
+        chunk_index=0,
     )
     monkeypatch.setattr(repository, "_build_chunk_records", Mock(return_value=[record]))
     monkeypatch.setattr(
@@ -603,6 +611,9 @@ async def test_prefetched_prepare_returns_unchanged_entity_without_write(monkeyp
         "chunk_key": "existing",
         "chunk_text": "text",
         "source_hash": "source-hash",
+        "source_type": "entity",
+        "source_row_id": 1,
+        "chunk_index": 0,
     }
     existing_row = semantic_vector_sync.VectorChunkState(
         id=7,
@@ -611,6 +622,8 @@ async def test_prefetched_prepare_returns_unchanged_entity_without_write(monkeyp
         entity_fingerprint="fingerprint",
         embedding_model="model",
         has_embedding=True,
+        source_row_id=1,
+        chunk_index=0,
     )
     monkeypatch.setattr(repository, "_build_chunk_records", Mock(return_value=[record]))
     monkeypatch.setattr(

@@ -18,6 +18,7 @@ def _make_descending_vector_rows(count: int) -> list[HydratedChunk]:
         HydratedChunk(
             entity_id=index,
             chunk_key=f"entity:{index}:0",
+            source_key=("entity", index),
             chunk_text=f"chunk text {index}",
             similarity=0.95 - (index * 0.01),
         )

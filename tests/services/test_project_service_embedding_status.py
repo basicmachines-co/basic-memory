@@ -583,9 +583,9 @@ async def _insert_manifest_chunk(
         project_service,
         text(
             "INSERT INTO search_vector_chunks "
-            "(entity_id, project_id, chunk_key, chunk_text, source_hash, "
+            "(entity_id, project_id, chunk_key, source_type, source_row_id, chunk_index, chunk_text, source_hash, "
             "entity_fingerprint, embedding_model, vector_index, embedding_status) "
-            "VALUES (:entity_id, :project_id, :chunk_key, 'test text', 'hash', "
+            "VALUES (:entity_id, :project_id, :chunk_key, 'entity', :entity_id, 0, 'test text', 'hash', "
             "'fingerprint', :embedding_identity, :vector_index, :embedding_status) "
             "RETURNING id"
         ),

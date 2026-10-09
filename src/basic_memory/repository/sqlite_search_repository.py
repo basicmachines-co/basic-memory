@@ -13,10 +13,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from basic_memory import db
 from basic_memory.config import BasicMemoryConfig, ConfigManager
 from basic_memory.models.search import (
+    CHUNK_LOCATION_COLUMNS,
     CREATE_SEARCH_INDEX,
     CREATE_SQLITE_SEARCH_VECTOR_CHUNKS,
     CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_PROJECT_ENTITY,
     CREATE_SQLITE_SEARCH_VECTOR_CHUNKS_UNIQUE,
+    SQLITE_CHUNK_LOCATION_UPGRADE,
 )
 from basic_memory.repository.embedding_provider import EmbeddingProvider
 from basic_memory.repository.embedding_provider_factory import create_embedding_provider
@@ -287,12 +289,25 @@ class SQLiteSearchRepository(SearchRepositoryBase):
                 "chunk_key",
                 "chunk_text",
                 "source_hash",
+                "source_type",
+                "source_row_id",
+                "chunk_index",
                 "entity_fingerprint",
                 "embedding_model",
                 "vector_index",
                 "embedding_status",
                 "updated_at",
             }
+            # Trigger: the chunk table predates the location columns.
+            # Why: chunk keys used to embed the search row id, which changes on every
+            # note rewrite. Moving the location into columns and re-keying by content
+            # keeps every existing embedding; a rebuild would re-embed the whole database.
+            # Outcome: rows are re-keyed in place and their vectors stay attached by rowid.
+            if set(chunks_columns) == expected_columns - CHUNK_LOCATION_COLUMNS:
+                for statement in SQLITE_CHUNK_LOCATION_UPGRADE:
+                    await session.execute(text(statement))
+                chunks_columns = list(expected_columns)
+
             schema_mismatch = bool(chunks_columns) and set(chunks_columns) != expected_columns
             if schema_mismatch:
                 # Trigger: older SQLite installs are missing newly required chunk metadata columns.

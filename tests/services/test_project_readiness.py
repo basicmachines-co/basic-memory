@@ -388,9 +388,9 @@ async def _insert_chunk(
         await session.execute(
             text(
                 "INSERT INTO search_vector_chunks "
-                "(entity_id, project_id, chunk_key, chunk_text, source_hash, "
+                "(entity_id, project_id, chunk_key, source_type, source_row_id, chunk_index, chunk_text, source_hash, "
                 " entity_fingerprint, embedding_model, vector_index, embedding_status) "
-                "VALUES (:entity_id, :project_id, 'k', 't', 'h', 'f', "
+                "VALUES (:entity_id, :project_id, 'k', 'entity', :entity_id, 0, 't', 'h', 'f', "
                 " :embedding_model, :vector_index, :embedding_status)"
             ),
             {

@@ -35,7 +35,6 @@ from basic_memory.repository.search_trace import (
     BelowThreshold,
     FilteredOut,
     HydrationDropKey,
-    HydrationDropped,
     MissingSearchRow,
     SearchTraceCollector,
     build_fts_page_stage,
@@ -89,12 +88,6 @@ def current_vector_manifest_predicate(scope: ProjectScope, params: dict[str, Any
         "AND embedding_model = :embedding_model "
         "AND embedding_status = 'ready'"
     )
-
-
-def parse_chunk_key(chunk_key: str) -> SearchIndexKey:
-    """Parse a chunk key like ``observation:5:0`` into ``(type, search_index_id)``."""
-    parts = chunk_key.split(":")
-    return parts[0], int(parts[1])
 
 
 def vector_eligible(query: PreparedSearchQuery) -> bool:
@@ -180,6 +173,9 @@ class HydratedChunk:
     chunk_key: str
     chunk_text: str
     similarity: float
+    # The search_index row this chunk was cut from, read from the manifest's location
+    # columns. Several chunks of one row collapse into one candidate on this key.
+    source_key: SearchIndexKey
 
 
 @dataclass(frozen=True, slots=True)
@@ -499,7 +495,7 @@ class SemanticSearch:
         if not matches:
             return []
 
-        chunks_by_key: dict[VectorKey, str] = {}
+        chunks_by_key: dict[VectorKey, tuple[str, SearchIndexKey]] = {}
         for batch_start in range(0, len(matches), VECTOR_HYDRATION_BATCH_SIZE):
             batch = matches[batch_start : batch_start + VECTOR_HYDRATION_BATCH_SIZE]
             params: dict[str, Any] = {
@@ -520,7 +516,8 @@ class SemanticSearch:
             # batches while retaining the adapter's original ranking in the final list.
             result = await session.execute(
                 text(
-                    "SELECT entity_id, chunk_key, chunk_text FROM search_vector_chunks "
+                    "SELECT entity_id, chunk_key, chunk_text, source_type, source_row_id "
+                    "FROM search_vector_chunks "
                     "WHERE " + manifest_predicate + " "
                     "AND (" + " OR ".join(predicates) + ")"
                 ),
@@ -531,7 +528,10 @@ class SemanticSearch:
                     VectorKey(
                         entity_id=int(row["entity_id"]),
                         chunk_key=str(row["chunk_key"]),
-                    ): str(row["chunk_text"])
+                    ): (
+                        str(row["chunk_text"]),
+                        (str(row["source_type"]), int(row["source_row_id"])),
+                    )
                     for row in result.mappings().all()
                 }
             )
@@ -539,8 +539,9 @@ class SemanticSearch:
             HydratedChunk(
                 entity_id=match.key.entity_id,
                 chunk_key=match.key.chunk_key,
-                chunk_text=chunks_by_key[match.key],
+                chunk_text=chunks_by_key[match.key][0],
                 similarity=match.similarity,
+                source_key=chunks_by_key[match.key][1],
             )
             for match in matches
             if match.key in chunks_by_key
@@ -559,34 +560,15 @@ class SemanticSearch:
             ]
             drops = await classify_hydration_drops(session, self.scope, dropped_keys)
             chunk_matches: dict[SearchIndexKey, list[tuple[str, float, int | None]]] = {}
-            malformed_drops: list[HydrationDropped] = []
             for chunk in hydrated:
-                try:
-                    key = parse_chunk_key(chunk.chunk_key)
-                except (ValueError, IndexError):
-                    # A hydrated chunk with an unparseable key silently vanishes from
-                    # retrieval; the trace must name it or the stage counts lie.
-                    malformed_drops.append(
-                        HydrationDropped(
-                            entity_id=chunk.entity_id,
-                            chunk_key=chunk.chunk_key,
-                            similarity=chunk.similarity,
-                            reason="malformed_key",
-                            stored_model=None,
-                            stored_index=None,
-                        )
-                    )
-                    continue
-                chunk_matches.setdefault(key, []).append(
+                chunk_matches.setdefault(chunk.source_key, []).append(
                     (chunk.chunk_key, chunk.similarity, chunk.entity_id)
                 )
             trace.vector = build_vector_stage(
                 previous=trace.vector,
                 adapter_match_count=len(matches),
-                # Malformed keys are dropped, not served — counting them as output
-                # would contradict the malformed_key rejection listed alongside.
-                hydrated_count=len(hydrated) - len(malformed_drops),
-                drops=(*drops, *malformed_drops),
+                hydrated_count=len(hydrated),
+                drops=drops,
                 chunk_matches=chunk_matches,
             )
         return hydrated
@@ -932,18 +914,13 @@ class SemanticSearch:
     ) -> CandidateWindow:
         """Turn ranked chunks into the search rows above threshold that the filters admit."""
         # Build per-search_index_row similarity scores from chunk-level results.
-        # Each chunk_key encodes the search_index row type and id; keep both as the
-        # key because different row types can share the same numeric id (#982).
-        # Track the best similarity per row (for ranking) and all chunks (for context).
+        # Keep the row type in the key because different row types can share the same
+        # numeric id (#982). Track the best similarity per row (for ranking) and all
+        # chunks (for context).
         similarity_by_key: dict[SearchIndexKey, float] = {}
         chunks_by_key: dict[SearchIndexKey, list[WindowChunk]] = {}
         for position, chunk in enumerate(chunks):
-            try:
-                si_key = parse_chunk_key(chunk.chunk_key)
-            except (ValueError, IndexError):
-                # A chunk without a parseable key names no search row to rank. It
-                # still holds its position, as it does in every larger window.
-                continue
+            si_key = chunk.source_key
             current = similarity_by_key.get(si_key)
             if current is None or chunk.similarity > current:
                 similarity_by_key[si_key] = chunk.similarity
