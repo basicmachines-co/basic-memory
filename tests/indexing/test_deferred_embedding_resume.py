@@ -91,6 +91,10 @@ async def _semantic_repository(
             embedding_provider=StubEmbeddingProvider(),
         )
     await repository.init_search_index()
+    # Some Python builds import sqlite_vec but cannot load SQLite extensions;
+    # init then falls back to keyword-only search instead of raising (#711).
+    if not repository._semantic_enabled:
+        pytest.skip("SQLite extension loading is unavailable; semantic search fell back.")
     return repository
 
 
