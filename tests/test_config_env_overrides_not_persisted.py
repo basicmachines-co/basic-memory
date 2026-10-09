@@ -139,3 +139,19 @@ def test_legacy_sync_env_keeps_the_file_legacy_value(config_home: Path, monkeypa
     manager.save_config(config)
 
     assert _read_file(manager)["index_changes"] is False
+
+
+def test_set_default_project_persists_default_under_env_override(
+    file_manager: ConfigManager, config_home: Path, monkeypatch
+):
+    """Choosing a default project names `default_project`, so it is written."""
+    file_manager.add_project("other", str(config_home / "other"))
+    monkeypatch.setenv("BASIC_MEMORY_DEFAULT_PROJECT", "main")
+    monkeypatch.setenv("BASIC_MEMORY_LOG_LEVEL", "DEBUG")
+    _reset_config_cache()
+
+    file_manager.set_default_project("other")
+
+    written = _read_file(file_manager)
+    assert written["default_project"] == "other"
+    assert written["log_level"] == "INFO"

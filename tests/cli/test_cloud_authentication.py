@@ -282,7 +282,8 @@ class TestLogoutCommand:
         class FakeConfigManager:
             config = config_instance
 
-            def save_config(self, cfg):
+            def save_config(self, cfg, *, persist_env_keys=frozenset()):
+                assert persist_env_keys == {"default_workspace"}
                 saved.append(cfg)
 
         class FakeAuth:

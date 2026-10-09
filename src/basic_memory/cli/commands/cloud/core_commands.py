@@ -150,7 +150,7 @@ def logout():
     #      `bm cloud workspace set-default` or per-project --workspace.
     if config.default_workspace is not None:
         config.default_workspace = None
-        config_manager.save_config(config)
+        config_manager.save_config(config, persist_env_keys={"default_workspace"})
 
     console.print("[dim]API key (if configured) remains available for cloud project routing.[/dim]")
 
@@ -306,7 +306,7 @@ def promo(enabled: bool = typer.Option(True, "--on/--off", help="Enable or disab
     config_manager = ConfigManager()
     config = config_manager.load_config()
     config.cloud_promo_opt_out = not enabled
-    config_manager.save_config(config)
+    config_manager.save_config(config, persist_env_keys={"cloud_promo_opt_out"})
 
     if enabled:
         console.print("[green]Cloud promo messages enabled[/green]")
