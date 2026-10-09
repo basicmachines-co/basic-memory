@@ -642,8 +642,9 @@ def insert_relative_to_section(
 
 
 # CommonMark setext underline: up to three spaces of indent, then a run of `=` (H1) or
-# a run of `-` (H2), then optional trailing whitespace.
-_SETEXT_UNDERLINE = re.compile(r" {0,3}(?:=+|-+)[ \t]*")
+# a run of `-` (H2), then optional trailing whitespace, ending the line by any of the
+# terminators markdown-it accepts (`\r\n`, lone `\r`, `\n`) or the end of the text.
+_SETEXT_UNDERLINE_LINE = re.compile(r" {0,3}(?:=+|-+)[ \t]*(?:\r\n|\r|\n|$)")
 
 
 def _joins_into_setext_heading(text_before: str, text_after: str) -> bool:
@@ -656,8 +657,7 @@ def _joins_into_setext_heading(text_before: str, text_after: str) -> bool:
     single newline: a blank line between list items would turn a tight list into a loose
     one, and ATX headings, list items and quotes can already interrupt a paragraph.
     """
-    first_line_after = text_after.split("\n", 1)[0]
-    if not _SETEXT_UNDERLINE.fullmatch(first_line_after):
+    if not _SETEXT_UNDERLINE_LINE.match(text_after):
         return False
     # Whether the line above is paragraph text depends on block context no single line
     # shows: `2. item` after a paragraph is lazy continuation, not a list, and a line

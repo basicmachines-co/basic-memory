@@ -1000,3 +1000,12 @@ def test_append_inside_open_block_keeps_single_newline(current_content: str) -> 
     result = apply_edit_operation(current_content, "append", "---")
 
     assert result == current_content + "\n---"
+
+
+@pytest.mark.parametrize("underline", ["---\r\n", "---\rmore", "===\r\nmore"])
+def test_append_cr_terminated_underline_after_paragraph_keeps_paragraph(underline: str) -> None:
+    # markdown-it treats `\r\n` and a lone `\r` as line ends, so these still underline.
+    result = apply_edit_operation("paragraph", "append", underline)
+
+    assert result == "paragraph\n\n" + underline
+    assert _setext_heading_texts(result) == []
