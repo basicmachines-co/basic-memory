@@ -332,6 +332,10 @@
 
 ### Bug Fixes
 
+- `bm tool edit-note --help` lists all six edit operations and documents `--section` for
+  `replace_section`, `insert_before_section` and `insert_after_section`. Thanks to
+  @xhkzdepartedream (#1708).
+
 - **#1654**: A Markdown file kept in step by a one-way sync tool (rclone sync, a backup
   script) is no longer re-indexed and rewritten forever. Indexing writes a `permalink`
   (and `title` and `type` with `ensure_frontmatter_on_sync`) into a file that arrived
